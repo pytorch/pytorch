@@ -2,7 +2,7 @@ import inspect
 from collections import defaultdict
 from functools import wraps
 from itertools import chain
-from typing import Callable, Dict, Sequence, Union
+from typing import Callable, Dict, Optional, Sequence, Union
 
 import torch
 import torch.library
@@ -139,6 +139,13 @@ def register_decomposition(aten_op, registry=None, *, type="post_autograd"):
 def get_decompositions(
     aten_ops: Sequence[Union[OpOverload, OpOverloadPacket]],
     type: str = "post_autograd",
+    *,
+    # Whether or not to include any existing CompositeImplicitAutograd decomps from C++.
+    # If there is both a python and C++ decomp, the python one gets precedence.
+    # Note that this flag only really matters for pre_dispatch tracing. When performing normal
+    # tracing of ATen operations, CompositeImplicitAutograd ops are always decomposed
+    # by the dispatcher.
+    include_cpp_decomps: bool = False,
 ) -> Dict[OpOverload, Callable]:
     """
     Retrieve a dictionary of decompositions corresponding to the list of
@@ -153,6 +160,11 @@ def get_decompositions(
     """
     assert type in {"post_autograd", "pre_autograd", "meta"}
 
+    def maybe_get_composite_implicit_autograd_cpp_kernel(
+        overload: OpOverloadPacket,
+    ) -> Optional[Callable]:
+        return None
+
     registry = global_decomposition_table[type]
     packets_to_overloads = defaultdict(list)
     for opo in registry:
@@ -164,6 +176,28 @@ def get_decompositions(
                 decompositions[op_overload] = registry[op_overload]
         elif isinstance(op, OpOverload) and op in registry:
             decompositions[op] = registry[op]
+
+        if include_cpp_decomps:
+            overloads = []
+            if isinstance(op, OpOverload):
+                overloads.append(op)
+            elif isinstance(op, OpOverloadPacket):
+                for name in op._overload_names:
+                    overload = getattr(op, name)
+                    overloads.append(overload)
+            for overload in overloads:
+                # Maybe use a cpp decomp if one exists, and we haven't already found a python decomp
+                if torch._C._dispatch_has_kernel_for_dispatch_key(
+                    overload.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+                ):
+                    if overload not in decompositions:
+                        # Our synthetic cpp decomp: uses OpOverload.decompose to call
+                        # a CompositeImplicitAutograd kernel, if it exists.
+                        def cpp_decomp(*args, **kwargs):
+                            return overload.decompose(*args, **kwargs)
+
+                        decompositions[overload] = cpp_decomp
+
     return decompositions
 
 
@@ -181,7 +215,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
     aten = torch.ops.aten
     return get_decompositions(
         [
-            aten._adaptive_avg_pool2d_backward,
             aten.addcdiv,
             aten.addcdiv_,
             aten.addcmul,
@@ -211,6 +244,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.elu_backward,
             aten._embedding_bag,
             aten.embedding_dense_backward,
+            aten.empty_like,
             aten._euclidean_dist.default,
             aten.expand_as,
             aten.eye,
@@ -219,7 +253,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.frac,
             aten.frac_,
             aten._fused_moving_avg_obs_fq_helper,
-            aten.gelu,
             aten.gelu_,
             aten.gelu_backward,
             aten.glu_backward,
@@ -232,7 +265,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.hardswish,
             aten.hardswish_,
             aten.hardswish_backward,
-            aten.hardtanh,
             aten.hardtanh_,
             aten.hardtanh_backward,
             aten.heaviside,
@@ -246,11 +278,9 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.index_copy_,
             aten.index_fill,
             aten.index_fill_,
-            aten.index_select,
             aten.isneginf,
             aten.isposinf,
             aten.l1_loss,
-            aten.leaky_relu,
             aten.leaky_relu_,
             aten.leaky_relu_backward,
             aten.lerp,
@@ -263,18 +293,17 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.logit_backward,
             aten.log_sigmoid_backward,
             aten.log_sigmoid_forward,
-            aten._log_softmax,
             aten._log_softmax_backward_data,
             aten.logspace,
             aten.logsumexp.default,
             aten.masked_fill,
             aten.masked_fill_,
-            aten.max_pool2d_with_indices_backward,
             aten.mish,
             aten.mish_,
             aten.mse_loss,
             aten.mse_loss_backward,
             aten.multi_margin_loss,
+            aten.multilabel_margin_loss_forward,
             aten.mv,
             aten.mvlgamma,
             aten.mvlgamma_,
@@ -282,15 +311,9 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.nan_to_num,
             aten.nan_to_num_,
             aten.narrow,
-            aten.native_batch_norm,
             aten.native_batch_norm_backward,
-            aten._native_batch_norm_legit,
-            aten._native_batch_norm_legit_functional,
-            aten._native_batch_norm_legit_no_training,
             aten.native_dropout_backward,
-            aten.native_group_norm,
             aten.native_group_norm_backward,
-            aten.native_layer_norm,
             aten.native_layer_norm_backward,
             aten.new_empty,
             aten.new_full,
@@ -326,7 +349,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.smooth_l1_loss_backward,
             aten.soft_margin_loss,
             aten.soft_margin_loss_backward,
-            aten._softmax,
             aten._softmax_backward_data,
             aten.softplus,
             aten.softplus_backward,
@@ -347,11 +369,9 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.tril_,
             aten.triu,
             aten.triu_,
-            aten.unfold,
             aten.unfold_backward,
             aten.unfold_copy,
             aten.upsample_bilinear2d,
-            aten.upsample_bilinear2d.vec,
             aten.upsample_nearest2d_backward,
             aten.xlogy,
             aten.xlogy_,

@@ -182,6 +182,7 @@ if RUN_CPU:
         BaseTest("test_mm_views"),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_randint"),
+        BaseTest("test_randn_with_dtype_and_device"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_repeat_interleave", "", test_cpu_repro.CPUReproTests()),
@@ -202,6 +203,7 @@ if RUN_CPU:
         BaseTest("test_tensor2"),  # constant input
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
         BaseTest("test_view_as_complex"),
+        BaseTest("test_view_as_real"),
     ]:
         make_test_case(
             item.name,
