@@ -323,8 +323,8 @@ def _tensor_str(self, indent):
     if self.dtype in [
         torch.float16,
         torch.bfloat16,
-        # torch.float8_e5m2,
-        # torch.float8_e4m3fn,
+        torch.float8_e5m2,
+        torch.float8_e4m3fn,
     ]:
         self = self.float()
 
