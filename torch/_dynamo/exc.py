@@ -159,7 +159,7 @@ class KeyErrorMsg:
         return self.__str__()
 
 
-def augment_exc_message(exc, msg="\n"):
+def augment_exc_message(exc, msg="\n", export=False):
     import traceback
 
     if (
@@ -191,7 +191,7 @@ def augment_exc_message(exc, msg="\n"):
                 "this script to find the smallest traced graph which reproduces this error.\n"
             )
 
-    if not config.suppress_errors:
+    if not config.suppress_errors and not export:
         msg += (
             "\n\n"
             "You can suppress this exception and fall back to eager by setting:\n"
