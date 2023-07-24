@@ -121,7 +121,7 @@ def find_classes(root_dir):
                 r = root.split('/')
                 lr = len(r)
                 retour.append((f, r[lr - 2] + "/" + r[lr - 1], root))
-    print("== Found %d items " % len(retour))
+    print(f"== Found {len(retour)} items ")
     return retour
 
 
@@ -130,7 +130,7 @@ def index_classes(items):
     for i in items:
         if i[1] not in idx:
             idx[i[1]] = len(idx)
-    print("== Found %d classes" % len(idx))
+    print(f"== Found {len(idx)} classes")
     return idx
 
 
@@ -271,15 +271,15 @@ class OmniglotNShot:
 
             # [b, setsz, 1, 84, 84]
             x_spts = np.array(x_spts).astype(np.float32).reshape(self.batchsz, setsz, 1, self.resize, self.resize)
-            y_spts = np.array(y_spts).astype(np.int).reshape(self.batchsz, setsz)
+            y_spts = np.array(y_spts).astype(int).reshape(self.batchsz, setsz)
             # [b, qrysz, 1, 84, 84]
             x_qrys = np.array(x_qrys).astype(np.float32).reshape(self.batchsz, querysz, 1, self.resize, self.resize)
-            y_qrys = np.array(y_qrys).astype(np.int).reshape(self.batchsz, querysz)
+            y_qrys = np.array(y_qrys).astype(int).reshape(self.batchsz, querysz)
 
-            x_spts, y_spts, x_qrys, y_qrys = [
+            x_spts, y_spts, x_qrys, y_qrys = (
                 torch.from_numpy(z).to(self.device) for z in
                 [x_spts, y_spts, x_qrys, y_qrys]
-            ]
+            )
 
             data_cache.append([x_spts, y_spts, x_qrys, y_qrys])
 

@@ -41,7 +41,6 @@
 
 static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  THPStorage_assertNotNull(self);
   return py::cast(THPStorage_Unpack(self).sym_nbytes()).release().ptr();
   END_HANDLE_TH_ERRORS
 }
@@ -59,7 +58,6 @@ static PyObject* THPStorage_copy_(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  THPStorage_assertNotNull(self);
 
   at::Storage self_ = torch::createStorage(self);
 
@@ -84,14 +82,12 @@ static PyObject* THPStorage_copy_(
 
 static PyObject* THPStorage_elementSize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  THPStorage_assertNotNull(_self);
   return THPUtils_packInt64(sizeof(uint8_t));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPStorage_new(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  THPStorage_assertNotNull(self);
   c10::Allocator* allocator = THPStorage_Unpack(self).allocator();
   auto new_storage = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
@@ -100,13 +96,12 @@ static PyObject* THPStorage_new(PyObject* self, PyObject* noargs) {
       /*resizable=*/true);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  return THPStorage_Wrap(std::move(new_storage));
+  return THPStorage_New(std::move(new_storage));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
   HANDLE_TH_ERRORS
-  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   THPUtils_assert(
       THPUtils_checkLong(number_arg),
@@ -130,7 +125,7 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
 #endif
   } else if (device_type == at::kMeta) {
     at::native::resize_bytes_meta(storage.unsafeGetStorageImpl(), newsize);
-  } else if (device_type == at::kPrivateUse1) {
+  } else if (device_type == at::kXPU || device_type == at::kPrivateUse1) {
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
         !c10::overflows<int64_t>(size_bytes_i),
@@ -171,7 +166,6 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
 
 static PyObject* THPStorage_fill_(PyObject* self, PyObject* number_arg) {
   HANDLE_TH_ERRORS
-  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   THPUtils_assert(
       THPByteUtils_checkReal(number_arg),
@@ -219,15 +213,18 @@ static PyObject* THPStorage_fromBuffer(
   auto dtype = reinterpret_cast<THPDtype*>(dtype_obj);
   scalar_type = dtype->scalar_type;
 
+  const bool is_endian_independent = (scalar_type == at::kByte) ||
+      (scalar_type == at::kChar) || (scalar_type == at::kFloat8_e5m2) ||
+      (scalar_type == at::kFloat8_e4m3fn);
+
   TORCH_CHECK(
-      (scalar_type == at::kByte) || (scalar_type == at::kChar) ||
-          (byte_order_str != nullptr),
+      is_endian_independent || (byte_order_str != nullptr),
       "function missing required argument 'byte_order' (pos 2)");
   size_t element_size = c10::elementSize(scalar_type);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool do_byte_swap;
-  if (scalar_type != at::kByte && scalar_type != at::kChar) {
+  if (!is_endian_independent) {
     if (strcmp(byte_order_str, "native") == 0) {
       do_byte_swap = false;
     } else if (strcmp(byte_order_str, "big") == 0) {
@@ -298,7 +295,7 @@ static PyObject* THPStorage_fromBuffer(
       c10::GetDefaultCPUAllocator(),
       /*resizable=*/true);
 
-  if (scalar_type == at::kByte || scalar_type == at::kChar) {
+  if (is_endian_independent) {
     memcpy(storage->mutable_data(), src + offset, count);
   } else if (scalar_type == at::kBool) {
     // Because of ASAN checks, that are failing whenever
@@ -368,7 +365,7 @@ static PyObject* THPStorage_fromBuffer(
   }
 
   PyBuffer_Release(&buffer);
-  return THPStorage_Wrap(storage);
+  return (PyObject*)THPStorage_New(storage);
   END_HANDLE_TH_ERRORS
 }
 
@@ -408,16 +405,12 @@ static PyObject* THPStorage_fromFile(
     storage->set_nbytes(actual_nbytes);
   }
 
-  return THPStorage_NewWithStorage(
-      THPStorageClass,
-      std::move(storage),
-      c10::impl::PyInterpreterStatus::TAGGED_BY_US);
+  return (PyObject*)THPStorage_New(std::move(storage));
   END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   PyObject* file = PyTuple_GetItem(args, 0);
   bool is_real_file = PyTuple_GetItem(args, 1) == Py_True;
@@ -463,13 +456,12 @@ PyObject* THPStorage_newWithFile(PyObject* _unused, PyObject* args) {
   auto storage = THPStorage_readFileRaw<int>(fd, {}, element_size);
   if (!storage.defined())
     return nullptr;
-  return THPStorage_Wrap(std::move(storage));
+  return THPStorage_New(std::move(storage));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   PyObject* file = PyTuple_GET_ITEM(args, 0);
   PyObject* offset = PyTuple_GET_ITEM(args, 1);
@@ -551,12 +543,6 @@ PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_fix_weakref(PyObject* self, PyObject* noargs) {
-  const auto& storage = THPStorage_Unpack(self);
-  Py_DECREF(THPStorage_Wrap(storage));
-  Py_RETURN_NONE;
-}
-
 PyObject* THPStorage_byteswap(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   THPUtils_assert(PyTuple_GET_SIZE(args) == 1, "tuple of 1 item expected");
@@ -628,7 +614,6 @@ static PyMethodDef THPStorage_methods[] = {
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_set_cdata", THPStorage__setCdata, METH_O, nullptr},
-    {"_fix_weakref", THPStorage_fix_weakref, METH_NOARGS, nullptr},
     {"_byteswap", THPStorage_byteswap, METH_VARARGS, nullptr},
     {nullptr}};
 

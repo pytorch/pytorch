@@ -144,7 +144,7 @@ def increment_version(tensor):
     """
     torch._C._increment_version(tensor)
 
-class saved_tensors_hooks():
+class saved_tensors_hooks:
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
 
     Use this context-manager to define how intermediary results of an operation
@@ -258,16 +258,17 @@ class save_on_cpu(saved_tensors_hooks):
         >>> # all intermediary tensors are released (deleted) after the call to backward
 
     """
-    def __init__(self, pin_memory=False):
+    def __init__(self, pin_memory=False, device_type="cuda"):
+        device_module = getattr(torch, device_type, torch.cuda)
+
         def pack_to_cpu(tensor):
             if not pin_memory:
                 return (tensor.device, tensor.cpu())
-
             packed = torch.empty(
                 tensor.size(),
                 dtype=tensor.dtype,
                 layout=tensor.layout,
-                pin_memory=(torch.cuda.is_available() and not tensor.is_sparse))
+                pin_memory=(device_module.is_available() and not tensor.is_sparse))
             packed.copy_(tensor)
             return (tensor.device, packed)
 
@@ -366,6 +367,7 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
             return t.grad_fn
 
     grad_fns = list(map(get_grad_fn, tensors))
+    len_tensors = len(tensors)
 
     def get_inner_hook(idx):
         def inner_hook(grad: torch.Tensor):
@@ -373,7 +375,7 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
             id = torch._C._current_graph_task_id()
             assert id != -1, "expected this hook to be called inside a backward call"
             count[id] = count.get(id, 0)
-            buffer[id] = buffer.get(id, [None] * len(tensors))
+            buffer[id] = buffer.get(id, [None] * len_tensors)
 
             if count[id] == 0:
                 # On the first call, compute the actual nb_calls and buffer
@@ -432,7 +434,7 @@ def _get_tid(t) -> Tuple[int, int, int]:
 def _get_sid(t) -> Tuple[int, int]:
     return (t.data_ptr(), t._version)
 
-class _Handle():
+class _Handle:
     pass
 
 class _swap_with_cloned(saved_tensors_hooks):
@@ -507,7 +509,7 @@ class _CloneArgBeforeMutateMode(TorchDispatchMode):
         rs = func(*args, **kwargs)
         return rs
 
-class _AllowMutationOnSavedContext():
+class _AllowMutationOnSavedContext:
     def __init__(self):
         self.cloned: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self.original: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()

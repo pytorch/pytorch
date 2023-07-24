@@ -51,7 +51,10 @@ C10_DEFINE_bool(
 namespace at {
 namespace native {
 
-void repeat_out(at::Tensor& result, const Tensor& self, IntArrayRef repeats) {
+static void repeat_out(
+    at::Tensor& result,
+    const Tensor& self,
+    IntArrayRef repeats) {
   TORCH_CHECK(
       repeats.size() >= static_cast<size_t>(self.dim()),
       "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
@@ -115,7 +118,7 @@ at::Tensor& reshape_copy_out(
   return out;
 }
 
-at::Tensor& flatten_copy_out(
+static at::Tensor& flatten_copy_out(
     at::Tensor& out,
     const at::Tensor& self,
     int64_t start_dim,
@@ -253,7 +256,7 @@ at::Tensor& to_copy_out(
   return out;
 }
 
-Tensor& linear_out(
+static Tensor& linear_out(
     Tensor& output,
     const Tensor& input,
     const Tensor& weight,
@@ -275,7 +278,7 @@ Tensor& linear_out(
   return output;
 }
 
-Tensor& c2_argmin_out(
+static Tensor& c2_argmin_out(
     Tensor& output,
     const Tensor& input,
     const int64_t dim,
@@ -364,7 +367,7 @@ Tensor& c2_argmin_out(
   return output;
 }
 
-at::Tensor& dequantize_copy_out(Tensor& out, const Tensor& self) {
+static at::Tensor& dequantize_copy_out(Tensor& out, const Tensor& self) {
   if (C10_UNLIKELY(!self.is_quantized())) {
     // fallback to dequantize_cpu equivalent case: make sure out is at::kFloat
     DCHECK(out.scalar_type() == kFloat);
@@ -385,7 +388,7 @@ bool opIsRegistered(const c10::Symbol& op_name) {
   return SROperatorRegistry()->Has(name);
 }
 
-bool disableUnsafeMathOp(const char* op_name) {
+static bool disableUnsafeMathOp(const char* op_name) {
   if (FLAGS_static_runtime_enable_fast_math) {
     return false;
   }
@@ -428,7 +431,7 @@ bool canReuseInputsOutputs(
 // returns true if the producers of the inputs
 // to this operations are out of place.
 // This means the IValues will not change run to run
-bool inputsCanRunOutOfPlace(
+static bool inputsCanRunOutOfPlace(
     Node* n,
     const c10::FastMap<Node*, bool>& node_has_out_variant) {
   for (auto* input : n->inputs()) {
@@ -877,7 +880,7 @@ void varStackOut(ProcessedNode& pnode, int64_t dim) {
 } // namespace
 
 // Split out into a function to appease MSVC's pre-processor
-SROperator aten_stack(Node* n) {
+static SROperator aten_stack(Node* n) {
   if (!n->matches(torch::schema(
           "aten::stack(Tensor[] tensors, int dim=0) -> Tensor"))) {
     LogAndDumpSchema(n);

@@ -7,6 +7,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/cub.cuh>
+#include <c10/cuda/CUDADeviceAssertion.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -68,9 +69,10 @@ __global__ static void post_sum_div_kernel(
     const index_t* lengths_data,
     const int64_t segment_count,
     bool is_initial_set,
-    scalar_t initial) {
+    scalar_t initial,
+    TORCH_DSA_KERNEL_ARGS) {
   CUDA_KERNEL_LOOP(index, segment_count) {
-    CUDA_KERNEL_ASSERT(lengths_data[index] >= 0);
+    CUDA_KERNEL_ASSERT2(lengths_data[index] >= 0);
     if (lengths_data[index] == 0) {
       if (is_initial_set) {
         output_data[index] = initial;
@@ -100,7 +102,8 @@ __global__ void segment_reduce_forward_kernel(
     const int64_t data_size_axis,
     const int64_t output_stride_axis,
     const int64_t output_size_axis,
-    const int64_t lengths_cumsum_stride_axis) {
+    const int64_t lengths_cumsum_stride_axis,
+    TORCH_DSA_KERNEL_ARGS) {
   int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= (outer_offset * segment_count * inner_offset)) {
     return;
@@ -138,7 +141,7 @@ __global__ void segment_reduce_forward_kernel(
 
   // ===== step3: finalize reduction
   int64_t lengths_idx = outer_idx * lengths_stride_axis * segment_count + dim_idx;
-  CUDA_KERNEL_ASSERT(lengths_data[lengths_idx] >= 0);
+  CUDA_KERNEL_ASSERT2(lengths_data[lengths_idx] >= 0);
   if (lengths_data[lengths_idx] == 0 && !is_initial_set &&
       reduction == ReductionType::MEAN) {
     initial_value = static_cast<scalar_t>(NAN);
@@ -466,11 +469,12 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
               }
 
               if (output_shape.size() > 1) {
-                segment_reduce_forward_kernel<scalar_t>
-                    <<<num_blocks,
+                TORCH_DSA_KERNEL_LAUNCH(
+                       segment_reduce_forward_kernel<scalar_t>,
+                       num_blocks,
                        threads_per_block,
                        0,
-                       at::cuda::getCurrentCUDAStream()>>>(
+                       at::cuda::getCurrentCUDAStream(),
                         reduction,
                         output_data_ptr,
                         data_data_ptr,
@@ -488,7 +492,6 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
                         output_size_axis,
                         offsets_stride_axis
                       );
-                C10_CUDA_KERNEL_LAUNCH_CHECK();
               } else {
                 if (reduction == ReductionType::MAX) {
                   CustomMax max_op{};
@@ -515,17 +518,17 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
                       initial_value,
                       at::cuda::getCurrentCUDAStream());
 
-                  post_sum_div_kernel<scalar_t>
-                      <<<num_blocks,
+                  TORCH_DSA_KERNEL_LAUNCH(
+                         post_sum_div_kernel<scalar_t>,
+                         num_blocks,
                          threads_per_block,
                          0,
-                         at::cuda::getCurrentCUDAStream()>>>(
+                         at::cuda::getCurrentCUDAStream(),
                           output_data_ptr,
                           lengths_data_ptr,
                           segment_count,
                           initial.has_value(),
                           initial_value);
-                  C10_CUDA_KERNEL_LAUNCH_CHECK();
                 } else if (reduction == ReductionType::MIN) {
                   CustomMin min_op{};
                   CUB_WRAPPER(
