@@ -1156,7 +1156,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         same_values = min_val.item() == max_val.item()
         is_uninitialized = min_val == float("inf") and max_val == float("-inf")
         if is_uninitialized or same_values:
-            min_val, max_val = x_min ,x_max
+            min_val, max_val = x_min, x_max
             self.min_val.resize_(min_val.shape)
             self.min_val.copy_(min_val)
             self.max_val.resize_(max_val.shape)
@@ -1168,7 +1168,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
                 x, self.bins, min=min_val, max=max_val, out=self.histogram  # type: ignore[arg-type]
             )
         else:
-            new_min, new_max = x_min ,x_max
+            new_min, new_max = x_min, x_max
             combined_min = torch.min(new_min, min_val)
             combined_max = torch.max(new_max, max_val)
             # combine the existing histogram and new histogram into 1 histogram

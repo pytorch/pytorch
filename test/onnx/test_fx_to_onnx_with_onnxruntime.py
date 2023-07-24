@@ -36,6 +36,8 @@ except RuntimeError:
     HAS_TORCHVISION = False
 skip_if_no_torchvision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
+ONNX_OPSET_VERSION_TO_TEST = 18
+
 
 def _parameterized_class_attrs_and_values():
     input_values = []
@@ -73,7 +75,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def setUp(self):
         super().setUp()
-        self.opset_version = 18
+        self.opset_version = ONNX_OPSET_VERSION_TO_TEST
         self.ort_version = onnxruntime.__version__
 
     @pytorch_test_common.skip_min_ort_version(
@@ -840,6 +842,43 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_pytorch_only_extra_kwargs,
         )
 
+
+def _parameterized_class_attrs_and_values_with_fake_options():
+    input_values = []
+    input_values.extend(
+        itertools.product((True, False), (True, False), (True, False), (True, False))
+    )
+    return {
+        "attrs": [
+            "op_level_debug",
+            "dynamic_shapes",
+            "load_checkpoint_during_init",
+            "export_within_fake_mode",
+        ],
+        "input_values": input_values,
+    }
+
+
+@parameterized.parameterized_class(
+    **_parameterized_class_attrs_and_values_with_fake_options(),
+    class_name_func=_parameterize_class_name,
+)
+class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
+    """ONNX export test for specific Fake Tensor scenarios
+
+    TODO: Should we merge this with  `TestFxToOnnxWithOnnxRuntime`? Considerably increases export time
+    """
+
+    op_level_debug: bool
+    dynamic_shapes: bool
+    load_checkpoint_during_init: bool
+    export_within_fake_mode: bool
+
+    def setUp(self):
+        super().setUp()
+        self.opset_version = ONNX_OPSET_VERSION_TO_TEST
+        self.ort_version = onnxruntime.__version__
+
     @_beartype.beartype
     def _test_fake_tensor_mode_exporter(
         self,
@@ -848,6 +887,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         create_args: Callable,
         create_kwargs: Callable,
         load_checkpoint_during_init: bool,
+        export_within_fake_mode: bool,
     ):
         """Test helper for FakeTensorMode-enabled exporter.
 
@@ -858,6 +898,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_kwargs: A function that creates keyword inputs for ther model.
             load_checkpoint_during_init: Whether to load a checkpoint during model initialization.
                 (after or during model creation, but before exporting starts)
+            export_within_fake_mode: Whether to call torch.onnx._dynamo_export within torch._subclasses.FakeTensorMode
 
         This test contains several steps.
 
@@ -889,16 +930,26 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 if load_checkpoint_during_init:
                     fake_model.load_state_dict(torch.load(tmp_checkpoint_file.name))
 
-            # Export the model with fake inputs and parameters
-            export_options = torch.onnx.ExportOptions(
-                opset_version=self.opset_version,
-                dynamic_shapes=self.dynamic_shapes,
-                op_level_debug=self.op_level_debug,
-                fake_context=fake_context,
-            )
-            export_output = torch.onnx.dynamo_export(
-                fake_model, *fake_args, **fake_kwargs, export_options=export_options
-            )
+                # Export the model with fake inputs and parameters
+                export_options = torch.onnx.ExportOptions(
+                    opset_version=self.opset_version,
+                    dynamic_shapes=self.dynamic_shapes,
+                    op_level_debug=self.op_level_debug,
+                    fake_context=fake_context,
+                )
+
+                if export_within_fake_mode:
+                    export_output = torch.onnx.dynamo_export(
+                        fake_model,
+                        *fake_args,
+                        **fake_kwargs,
+                        export_options=export_options,
+                    )
+
+            if not export_within_fake_mode:
+                export_output = torch.onnx.dynamo_export(
+                    fake_model, *fake_args, **fake_kwargs, export_options=export_options
+                )
 
             with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
                 export_output.save(
@@ -949,14 +1000,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         def create_kwargs():
             return {}
 
-        for load_checkpoint_during_init in (True, False):
-            self._test_fake_tensor_mode_exporter(
-                "simple",
-                create_model,
-                create_args,
-                create_kwargs,
-                load_checkpoint_during_init=load_checkpoint_during_init,
-            )
+        self._test_fake_tensor_mode_exporter(
+            "simple",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+        )
 
     @pytorch_test_common.skip_op_level_debug_test(
         "https://github.com/pytorch/pytorch/issues/105490"
@@ -977,14 +1028,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         def create_kwargs():
             return {"return_dict": False}
 
-        for load_checkpoint_during_init in (True, False):
-            self._test_fake_tensor_mode_exporter(
-                "tiny_gpt2",
-                create_model,
-                create_args,
-                create_kwargs,
-                load_checkpoint_during_init=load_checkpoint_during_init,
-            )
+        self._test_fake_tensor_mode_exporter(
+            "tiny_gpt2",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+        )
 
     @pytorch_test_common.skip_op_level_debug_test(
         "https://github.com/pytorch/pytorch/issues/105490"
@@ -1017,14 +1068,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         def create_kwargs():
             return {}
 
-        for load_checkpoint_during_init in (True, False):
-            self._test_fake_tensor_mode_exporter(
-                "toy_mlp1",
-                create_model,
-                create_args,
-                create_kwargs,
-                load_checkpoint_during_init=load_checkpoint_during_init,
-            )
+        self._test_fake_tensor_mode_exporter(
+            "toy_mlp1",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+        )
 
 
 if __name__ == "__main__":
