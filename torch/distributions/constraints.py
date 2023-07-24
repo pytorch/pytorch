@@ -215,8 +215,7 @@ class _IndependentConstraint(Constraint):
         return result
 
     def __repr__(self):
-        return "{}({}, {})".format(self.__class__.__name__[1:], repr(self.base_constraint),
-                                   self.reinterpreted_batch_ndims)
+        return f"{self.__class__.__name__[1:]}({repr(self.base_constraint)}, {self.reinterpreted_batch_ndims})"
 
 
 class _Boolean(Constraint):
