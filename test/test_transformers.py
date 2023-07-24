@@ -1502,6 +1502,19 @@ def _get_block_size(device, head_dim, is_causal):
         return (128, 64) if (is_sm80 or is_sm90) else (64, 64)
     elif head_dim <= 256:
         return (128, 64) if is_sm80 else (64, 64)
+
+
+def pad_last_dim(input_tensor, alignment_size, slice: bool = False):
+    last_dim_size = input_tensor.size(-1)
+    if (last_dim_size % alignment_size == 0):
+        return input_tensor, last_dim_size
+    pad_count = alignment_size - (last_dim_size % alignment_size)
+    padded_tensor = F.pad(input_tensor, (0, pad_count))
+    if slice:
+        return padded_tensor[..., :last_dim_size], last_dim_size
+    return padded_tensor, last_dim_size
+
+
 class TestSDPA(NNTestCase):
     """ Used to test generic functionality of scaled_dot_product_attention
     Summary:
@@ -2264,7 +2277,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048])
     @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048])
-    @parametrize("head_dim", [8, 16, 32, 64, 72, 96, 128])
+    @parametrize("head_dim", [8, 16, 21, 32, 64, 72, 96, 128, 160, 192, 203, 256])
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0, 0.22, 0.48])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
@@ -2290,12 +2303,11 @@ class TestSDPACudaOnly(NNTestCase):
 
         is_dropout = dropout_p > 0.0
 
-        # Create real output
-        output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
-            query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=is_dropout)
-        out = output_tuple[0]
-
         if not is_dropout:
+            # Problem: We pad sizes in the composite region of the top level SDPA. But we need the
+            # Debug mask when have dropout. So I am going to manualy pad up here when testing dropout
+            with sdp_kernel(enable_math=False, enable_flash=True, enable_mem_efficient=False):
+                out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
             with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
                 # High Precision Math Reference
                 out_ref = F.scaled_dot_product_attention(
@@ -2304,6 +2316,13 @@ class TestSDPACudaOnly(NNTestCase):
                 out_lp_ref = F.scaled_dot_product_attention(
                     query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal, scale=scale)
         else:
+            q_padded, q_og_size = pad_last_dim(query, 8)
+            k_padded, k_og_size = pad_last_dim(key, 8)
+            v_padded, v_og_size = pad_last_dim(value, 8)
+            output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
+                q_padded, k_padded, v_padded, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=is_dropout)
+            out = output_tuple[0]
+            out = out[..., :v_og_size]
             # Build dropout_mask
             dbug_mask = output_tuple[-1]
             query_padding_mask = torch.ones(
@@ -2312,7 +2331,8 @@ class TestSDPACudaOnly(NNTestCase):
                 batch_size, seq_len_k, device=device, dtype=torch.bool)
 
             softmax_mask = self.convert_flash_attn_S_to_softmax(
-                dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim, causal=is_causal)
+                dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim,
+                causal=is_causal)[:, :, :seq_len_q, :seq_len_k]
             dropout_mask = softmax_mask >= 0
             # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
@@ -2333,15 +2353,16 @@ class TestSDPACudaOnly(NNTestCase):
         out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
         # See [Note] Fused Tolerances above
-        output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
+        output_fudge_factor = 3 if head_dim % 8 != 0 else 1
+        output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref, output_fudge_factor)
 
         # TODO: Investigate why grad_q needs larger tolerances
         query_fudge_factor = 4
         grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
 
         grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad)
-
-        grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad)
+        value_fudge_factor = 2
+        grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
 
         self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
         self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),

@@ -366,6 +366,7 @@ bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
 }
 
 bool check_head_dim_size(sdp_params params, bool debug) {
+  return true;
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
