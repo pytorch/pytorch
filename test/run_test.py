@@ -737,9 +737,7 @@ def test_distributed(test_module, test_directory, options):
                 init_str = "with {} init_method"
                 with_init = init_str.format("file" if with_init_file else "env")
                 print_to_stderr(
-                    "Running distributed tests for the {} backend {}".format(
-                        backend, with_init
-                    )
+                    f"Running distributed tests for the {backend} backend {with_init}"
                 )
             old_environ = dict(os.environ)
             os.environ["TEMP_DIR"] = tmp_dir
