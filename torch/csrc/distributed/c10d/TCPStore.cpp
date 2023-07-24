@@ -30,24 +30,6 @@
 namespace c10d {
 namespace detail {
 namespace {
-enum class QueryType : uint8_t {
-  SET,
-  COMPARE_SET,
-  GET,
-  ADD,
-  CHECK,
-  WAIT,
-  GETNUMKEYS,
-  DELETE_KEY,
-  APPEND,
-  MULTI_GET,
-  MULTI_SET,
-  CANCEL_WAIT,
-};
-
-enum class CheckResponseType : uint8_t { READY, NOT_READY };
-
-enum class WaitResponseType : uint8_t { STOP_WAITING, WAIT_CANCELED };
 
 // Separate thread that is only launched on master
 class TCPStoreMasterDaemon : public BackgroundThread {
