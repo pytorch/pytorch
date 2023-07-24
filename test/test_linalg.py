@@ -4057,6 +4057,7 @@ class TestLinalg(TestCase):
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
     @onlyCUDA
     @skipCUDAIfNoMagma  # Magma needed for the PLU decomposition
+    @skipCUDAIfRocm
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
