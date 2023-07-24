@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import List, Tuple, TYPE_CHECKING, Union
 
 # Prevent circular import
@@ -14,7 +16,7 @@ generated_cpp_vec_kernel_count = 0
 num_bytes_accessed = 0
 nodes_num_elem: List[
     Tuple[
-        Union["NopKernelSchedulerNode", "SchedulerNode", "ExternKernelSchedulerNode"],
+        Union[NopKernelSchedulerNode, SchedulerNode, ExternKernelSchedulerNode],
         int,
     ]
 ] = []
