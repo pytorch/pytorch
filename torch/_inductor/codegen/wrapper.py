@@ -626,7 +626,7 @@ class WrapperCodeGen(CodeGen):
                     self.wrapper_call.splice(
                         f"""
                         if (cuda_stream{index} == nullptr){{
-                            cudaStreamCreate(&cuda_stream{index},cudaStreamNonBlocking);
+                            cudaStreamCreateWithFlags(&cuda_stream{index},cudaStreamNonBlocking);
                         }}
                         at::cuda::CUDAStream stream{index} = at::cuda::getStreamFromExternal(cuda_stream{index}, 0);
                         """
