@@ -66,7 +66,7 @@ def _get_device_module(device="cuda"):
     return device_module
 
 
-class DefaultDeviceType(object):
+class DefaultDeviceType:
     r"""
     A class that manages the default device type for checkpointing.
     If no non-CPU tensors are present, the default device type will
