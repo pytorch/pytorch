@@ -306,16 +306,8 @@ not_implemented_re = re.compile(
                 "not implemented for compiled autograd",
                 "has no attribute '_compiled_autograd_key'",
                 # make_fx() tracing errors:
-                "data dependent operator:",
-                "argument of type: <class 'torch._C.Generator'>",
-                "NYI: aten._nested_tensor_from_tensor_list.default"
-                "Cannot access storage of SparseCsrTensorImpl",
-                "argument of type: <class 'torch.storage.UntypedStorage'>",
                 "Cannot access storage of BatchedTensorImpl",
-                "Creating a new Tensor subclass FakeTensor but the raw Tensor object is already",
-                "tensor has a non-zero number of elements, but its data is not allocated yet",
-                # need to investigate:
-                "Comparing",
+                "data dependent operator:",
             ],
         )
     )
