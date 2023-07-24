@@ -107,7 +107,6 @@ class ConstantVariable(VariableTracker):
             )
 
         if isinstance(self.value, str) and name in str.__dict__.keys():
-            assert not kwargs
             method = getattr(self.value, name)
             return ConstantVariable(method(*const_args, **const_kwargs), **options)
         elif has_arith_binop(int) or has_arith_binop(float):

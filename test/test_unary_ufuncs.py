@@ -162,9 +162,7 @@ class TestUnaryUfuncs(TestCase):
                         )
                     else:
                         self.fail(
-                            "Expected dtype {} but got {}!".format(
-                                expected.dtype, actual.dtype
-                            )
+                            f"Expected dtype {expected.dtype} but got {actual.dtype}!"
                         )
 
             self.assertEqual(

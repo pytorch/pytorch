@@ -462,7 +462,7 @@ class parametrize(_TestParametrizer):
             return value.formatted_name
         else:
             # Include name and value separated by underscore.
-            return '{}_{}'.format(name, str(value).replace('.', '_'))
+            return f"{name}_{str(value).replace('.', '_')}"
 
     def _default_subtest_name(self, values):
         return '_'.join([self._formatted_str_repr(a, v) for a, v in zip(self.arg_names, values)])

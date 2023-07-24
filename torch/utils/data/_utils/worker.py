@@ -83,7 +83,7 @@ class WorkerInfo:
         items = []
         for k in self.__keys:
             items.append(f'{k}={getattr(self, k)}')
-        return '{}({})'.format(self.__class__.__name__, ', '.join(items))
+        return f"{self.__class__.__name__}({', '.join(items)})"
 
 
 def get_worker_info() -> Optional[WorkerInfo]:

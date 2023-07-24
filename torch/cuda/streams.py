@@ -108,8 +108,7 @@ class Stream(torch._C._CudaStreamBase):
         return hash((self.cuda_stream, self.device))
 
     def __repr__(self):
-        return ('<torch.cuda.Stream device={} cuda_stream={:#x}>'
-                .format(self.device, self.cuda_stream))
+        return (f'<torch.cuda.Stream device={self.device} cuda_stream={self.cuda_stream:#x}>')
 
 
 class ExternalStream(Stream):
