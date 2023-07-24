@@ -303,6 +303,10 @@ CI_SKIP_OPTIMIZER = {
     "PegasusForConditionalGeneration",  # OOM
 }
 
+CI_SKIP_DYNAMIC_BATCH_ONLY = {
+    "sam",
+}
+
 
 def model_specified_by_path(path_and_class_str):
     return ":" in path_and_class_str
@@ -2983,6 +2987,7 @@ def run(runner, args, original_dir=None):
             # https://github.com/pytorch/pytorch/issues/96724
             "Wav2Vec2ForCTC",
             "Wav2Vec2ForPreTraining",
+            "sam",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
@@ -3317,7 +3322,11 @@ def run(runner, args, original_dir=None):
                         marked = True
                         break
 
-            if args.dynamic_batch_only and batch_size > 1:
+            if (
+                args.dynamic_batch_only
+                and batch_size > 1
+                and model_name not in CI_SKIP_DYNAMIC_BATCH_ONLY
+            ):
                 tree_map_only(torch.Tensor, detect_and_mark_batch, example_inputs)
                 assert marked, f"nothing in example_inputs had a dim with {batch_size}"
 

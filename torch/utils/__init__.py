@@ -2,13 +2,12 @@ import os.path as _osp
 import torch
 
 from .throughput_benchmark import ThroughputBenchmark
+from ._crash_handler import enable_minidumps, disable_minidumps, enable_minidumps_on_exceptions
 from .cpp_backtrace import get_cpp_backtrace
 from .backend_registration import rename_privateuse1_backend, generate_methods_for_privateuse1_backend
 
+# Set the module for a given object for nicer printing
 def set_module(obj, mod):
-    """
-    Set the module attribute on a python object for a given object for nicer printing
-    """
     if not isinstance(mod, str):
         raise TypeError("The mod argument should be a string")
     obj.__module__ = mod
