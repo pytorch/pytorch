@@ -3,6 +3,7 @@ from typing import Any, Callable, List, no_type_check
 import torch
 import torch.distributed as dist
 from torch.autograd import Variable
+from torch.distributed.utils import _DeviceModule
 from torch._utils import _get_device_module
 from functools import partial
 from dataclasses import dataclass
@@ -40,7 +41,7 @@ class _OptimizerHookState:
 class _OptimInBackwardHookState:
     optim_stream: torch.Stream
     wait_for_optim_stream_enqueued: bool
-    device_module: Any = torch.cuda
+    device_module: _DeviceModule = torch.cuda  # type: ignore[assignment]
 
 @no_type_check
 def _apply_optim_in_backward_hook(

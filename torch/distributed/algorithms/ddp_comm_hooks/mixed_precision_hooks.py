@@ -4,7 +4,7 @@ from torch.autograd import Variable
 
 from dataclasses import dataclass
 from typing import Any, no_type_check
-from torch.distributed.utils import _free_storage
+from torch.distributed.utils import _free_storage, _DeviceModule
 
 @dataclass
 class _AllreduceUpcastHookState:
@@ -16,7 +16,7 @@ class _AllreduceUpcastHookState:
     ddp_weakref: Any
     upcast_stream: torch.Stream
     wait_for_stream_enqueued: bool = False
-    device_module: Any = torch.cuda
+    device_module: _DeviceModule = torch.cuda  # type: ignore[assignment]
 
 @no_type_check
 def _reducer_allreduce_and_upcast_hook(

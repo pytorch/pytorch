@@ -1,10 +1,11 @@
 import dataclasses
 import traceback
-from typing import Any, Callable, Container, Dict, List, Optional, OrderedDict, Tuple, TypeVar, overload
+from contextlib import AbstractContextManager
+from typing import Any, Callable, Container, Dict, List, Optional, OrderedDict, Tuple, TypeVar, overload, Protocol
 
 import torch
 import torch.distributed as dist
-from torch import nn
+from torch import nn, Stream
 from torch.nn.parallel._functions import _get_stream
 from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.nn.utils.rnn import PackedSequence
@@ -330,3 +331,11 @@ def _replace_by_prefix(
         new_key = new_prefix + key[len(old_prefix) :]
         state_dict[new_key] = state_dict[key]
         del state_dict[key]
+
+
+class _DeviceModule(Protocol):
+    def stream(self, Stream) -> AbstractContextManager:
+        ...
+
+    def current_stream(self) -> Stream:
+        ...
