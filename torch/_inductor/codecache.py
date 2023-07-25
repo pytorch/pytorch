@@ -710,9 +710,13 @@ def get_include_and_linking_paths(
         else:
             # internal remote execution is able to find omp, but not gomp
             libs += ["omp"]
+
         macros = vec_isa.build_macro()
         if macros:
             macros = f"-D{macros}"
+        if aot_mode and config.aot_inductor.abi_compatible:
+            macros += " -DAOT_INDUCTOR_ABI_COMPATIBLE"
+
         if cuda:
             if config.is_fbcode():
                 libs += ["cuda"]

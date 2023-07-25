@@ -10,6 +10,10 @@
 
 #include <torch/csrc/inductor/aot_inductor_tensor.h>
 
+#ifndef AOT_INDUCTOR_ABI_COMPATIBLE
+#include <ATen/Tensor.h>
+#endif
+
 #define AOT_VECTOR_SIZE_CHECK(vec, expected_size)                 \
   {                                                               \
     auto actual_size = vec.size();                                \
@@ -19,16 +23,6 @@
     msg += std::to_string(actual_size);                           \
     AOT_INDUCTOR_CHECK(actual_size == expected_size, msg.c_str()) \
   }
-
-#define CUDA_DRIVER_CHECK(EXPR)                       \
-  do {                                                \
-    CUresult __err = EXPR;                            \
-    if (__err != CUDA_SUCCESS) {                      \
-      std::string msg = "CUDA driver error: ";        \
-      msg += std::to_string(static_cast<int>(__err)); \
-      AOT_INDUCTOR_CHECK(false, msg.c_str())          \
-    }                                                 \
-  } while (0);
 
 #define CUDA_ERROR_CHECK(EXPR)                 \
   do {                                         \
@@ -69,10 +63,17 @@ class AOTInductorModelBase {
   // Currently, we assume that constants are passed as a part of the inputs.
   // Passes such as constant-folding may affect how we handle constants.
   // We will revisit it once all the relevant pieces are ready.
+#ifdef AOT_INDUCTOR_ABI_COMPATIBLE
   void run(
       std::vector<AotInductorTensor>& inputs,
       std::vector<AotInductorTensor>& outputs,
       cudaStream_t stream) {
+#else
+  void run(
+      const std::vector<at::Tensor>& inputs,
+      std::vector<at::Tensor>& outputs,
+      cudaStream_t stream) {
+#endif
     AOT_VECTOR_SIZE_CHECK(inputs, num_inputs());
     AOT_VECTOR_SIZE_CHECK(outputs, num_outputs());
 
@@ -188,10 +189,17 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
  public:
   AOTInductorModel();
 
+#ifdef AOT_INDUCTOR_ABI_COMPATIBLE
   void run_impl(
       std::vector<AotInductorTensor>& args,
       std::vector<AotInductorTensor>& outputs,
       cudaStream_t stream);
+#else
+  void run_impl(
+      const std::vector<at::Tensor>& args,
+      std::vector<at::Tensor>& outputs,
+      cudaStream_t stream);
+#endif
 
   static std::unique_ptr<AOTInductorModel> Create() {
     return std::make_unique<AOTInductorModel>();

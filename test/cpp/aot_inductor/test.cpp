@@ -34,10 +34,10 @@ TEST(AotInductorTest, BasicTest) {
   std::vector<AotInductorTensor> inputs;
   for (const auto& pair : net.named_parameters()) {
     auto tensor = pair.value();
-    inputs.push_back(aten_tensor_to_aot_tensor(&tensor, true));
+    inputs.push_back(convert_input_output_to_aot_tensor(&tensor));
   }
-  inputs.push_back(aten_tensor_to_aot_tensor(&x, true));
-  inputs.push_back(aten_tensor_to_aot_tensor(&y, true));
+  inputs.push_back(convert_input_output_to_aot_tensor(&x));
+  inputs.push_back(convert_input_output_to_aot_tensor(&y));
 
   AOTInductorModelContainerHandle container_handle;
   AOT_INDUCTOR_ERROR_CHECK(
@@ -50,7 +50,7 @@ TEST(AotInductorTest, BasicTest) {
   torch::Tensor output_tensor =
       at::zeros(array_size, at::dtype(at::kFloat).device(at::kCUDA));
   std::vector<AotInductorTensor> outputs;
-  outputs.push_back(aten_tensor_to_aot_tensor(&output_tensor, true));
+  outputs.push_back(convert_input_output_to_aot_tensor(&output_tensor));
 
   const auto& cuda_stream = at::cuda::getCurrentCUDAStream(0 /*device_index*/);
   const auto stream_id = cuda_stream.stream();

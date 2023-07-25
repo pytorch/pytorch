@@ -820,8 +820,7 @@ def _add_kl_info():
     rows = ["KL divergence is currently implemented for the following distribution pairs:"]
     for p, q in sorted(_KL_REGISTRY,
                        key=lambda p_q: (p_q[0].__name__, p_q[1].__name__)):
-        rows.append("* :class:`~torch.distributions.{}` and :class:`~torch.distributions.{}`"
-                    .format(p.__name__, q.__name__))
+        rows.append(f"* :class:`~torch.distributions.{p.__name__}` and :class:`~torch.distributions.{q.__name__}`")
     kl_info = '\n\t'.join(rows)
     if kl_divergence.__doc__:
         kl_divergence.__doc__ += kl_info  # type: ignore[operator]

@@ -1,6 +1,7 @@
 #ifndef __AOT_INDUCTOR_TENSOR__
 #define __AOT_INDUCTOR_TENSOR__
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <memory>
 
@@ -69,15 +70,14 @@ AOT_INDUCTOR_EXPORT void aot_inductor_initialize();
 
 AOT_INDUCTOR_EXPORT void aot_inductor_destroy();
 
-AOT_INDUCTOR_EXPORT void aot_inductor_tensor_free(AotInductorTensor aot_tensor);
+AOT_INDUCTOR_EXPORT void aot_inductor_free(AotInductorTensor aot_tensor);
+
+AOT_INDUCTOR_EXPORT void* aot_inductor_data_ptr(AotInductorTensor aot_tensor);
 
 AOT_INDUCTOR_EXPORT AotInductorTensor
-aten_tensor_to_aot_tensor(void* aten_tensor, char keep_live);
+convert_input_output_to_aot_tensor(void* aten_tensor);
 
-AOT_INDUCTOR_EXPORT void aot_tensor_to_aten_tensor(
-    AotInductorTensor aot_tensor,
-    void* aten_tensor);
-
+// aten operators
 AOT_INDUCTOR_EXPORT AotInductorTensor aot_inductor_empty_strided(
     int64_t ndim,
     int64_t* sizes_ptr,
@@ -99,6 +99,27 @@ AOT_INDUCTOR_EXPORT AotInductorTensor aot_inductor_addmm_out(
     AotInductorTensor mat2,
     float beta,
     float alpha);
+
+AOT_INDUCTOR_EXPORT AotInductorTensor aot_inductor__addmm_activation(
+    AotInductorTensor self,
+    AotInductorTensor mat1,
+    AotInductorTensor mat2,
+    float beta,
+    float alpha,
+    bool use_gelu);
+
+AOT_INDUCTOR_EXPORT AotInductorTensor aot_inductor_bmm_out(
+    AotInductorTensor out,
+    AotInductorTensor self,
+    AotInductorTensor mat2);
+
+AOT_INDUCTOR_EXPORT AotInductorTensor
+aot_inductor_copy_(AotInductorTensor src, AotInductorTensor dst);
+
+AOT_INDUCTOR_EXPORT AotInductorTensor aot_inductor_mm_out(
+    AotInductorTensor out,
+    AotInductorTensor self,
+    AotInductorTensor mat2);
 
 #ifdef __cplusplus
 }

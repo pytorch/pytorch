@@ -51,6 +51,9 @@ split_cat_fx_passes = True
 # enable pattern match with group fusion (using fbgemm)
 group_fusion = False
 
+# enable pattern match with batch fusion (using torch op)
+batch_fusion = False
+
 # enable reordering pass
 reordering = True
 
@@ -374,7 +377,7 @@ class aot_inductor:
     output_path = ""
 
     # Generate C calls to avoid ABI compatibility issues
-    abi_compatible = True  # will use is_fbcode()
+    abi_compatible = is_fbcode()
 
 
 # create a directory containing lots of debug information

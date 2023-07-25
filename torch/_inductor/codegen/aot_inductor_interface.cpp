@@ -51,11 +51,12 @@ AOTInductorError AOTInductorModelContainerRun(
     AOTInductorTensorHandle outputs_handle,
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle) {
-  aot_inductor_initialize();
-
   auto* container =
       reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
           container_handle);
+
+#ifdef AOT_INDUCTOR_ABI_COMPATIBLE
+  aot_inductor_initialize();
 
   auto inputs = reinterpret_cast<AotInductorTensor*>(inputs_handle);
   std::vector<AotInductorTensor> input_tensors(inputs, inputs+num_inputs);
@@ -68,6 +69,25 @@ AOTInductorError AOTInductorModelContainerRun(
       { container->run(input_tensors, output_tensors, stream);})
 
   aot_inductor_destroy();
+#else
+  const auto* inputs = reinterpret_cast<const at::Tensor*>(inputs_handle);
+  std::vector<at::Tensor> input_tensors;
+  input_tensors.reserve(num_inputs);
+  for (size_t i = 0; i < num_inputs; i++) {
+    input_tensors.push_back(inputs[i]);
+  }
+
+  auto* outputs = reinterpret_cast<at::Tensor*>(outputs_handle);
+  std::vector<at::Tensor> output_tensors;
+  output_tensors.reserve(num_outputs);
+  for (size_t i = 0; i < num_outputs; i++) {
+    output_tensors.push_back(outputs[i]);
+  }
+
+  auto stream = reinterpret_cast<cudaStream_t>(stream_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { container->run(input_tensors, output_tensors, stream); })
+#endif
 }
 
 AOTInductorError AOTInductorModelContainerGetNumInputs(

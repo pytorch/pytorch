@@ -53,10 +53,17 @@ class AOTInductorModelContainer {
     }
   }
 
+#ifdef AOT_INDUCTOR_ABI_COMPATIBLE
   void run(
       std::vector<AotInductorTensor>& inputs,
       std::vector<AotInductorTensor>& outputs,
       cudaStream_t stream) {
+#else
+  void run(
+      const std::vector<at::Tensor>& inputs,
+      std::vector<at::Tensor>& outputs,
+      cudaStream_t stream) {
+#endif
     auto* model = get_available_model();
     try {
       AOT_VECTOR_SIZE_CHECK(inputs, num_inputs());
