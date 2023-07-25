@@ -13,16 +13,14 @@ from torch.distributed._composable import fully_shard, replicate
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp._shard_utils import (
-    _all_gather_sharded_tensor,
-    _gather_state_dict,
-)
+from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.distributed.state_dict import (
     _init_optim_state,
     distributed_load_state_dict,
     distributed_state_dict,
+    DistributedStateDictOptions,
     PG,
 )
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -68,10 +66,8 @@ class TestStateDict(FSDPTest):
         return 2
 
     def _compare_tensor(self, orig_tensor, dist_tensor):
-        if isinstance(dist_tensor, ShardedTensor):
-            dist_tensor = _all_gather_sharded_tensor(dist_tensor)
-        elif isinstance(dist_tensor, DTensor):
-            raise NotImplementedError
+        if isinstance(dist_tensor, (DTensor, ShardedTensor)):
+            dist_tensor = _gather_state_dict({"mykey": dist_tensor}).pop("mykey")
         self.assertTrue(isinstance(dist_tensor, torch.Tensor))
         self.assertTrue(torch.allclose(orig_tensor, dist_tensor))
 
@@ -144,8 +140,14 @@ class TestStateDict(FSDPTest):
         dist_osd[PG] = old_dist_osd_pg
 
     def _test_save_load(
-        self, init_model_optim: Callable, test_frozen: bool = False
+        self,
+        init_model_optim: Callable,
+        test_frozen: bool = False,
+        use_dtensor: bool = False,
     ) -> None:
+        options = DistributedStateDictOptions(
+            no_return_frozen_parameters=test_frozen, use_dtensor=use_dtensor
+        )
         # Initialize original model and distributed model.
         orig_model, orig_optim, dist_model, dist_optim = init_model_optim()
 
@@ -163,7 +165,9 @@ class TestStateDict(FSDPTest):
         orig_osd = orig_optim.state_dict()
         if not isinstance(dist_optim, list):
             dist_optim = [dist_optim]
-        dist_msd, dist_osd = distributed_state_dict(dist_model, dist_optim)
+        dist_msd, dist_osd = distributed_state_dict(
+            dist_model, dist_optim, options=options
+        )
         self._verify_state_dict(
             orig_model, orig_optim, orig_msd, orig_osd, dist_msd, dist_osd, test_frozen
         )
@@ -176,7 +180,12 @@ class TestStateDict(FSDPTest):
         # Then finally we can call load_state_dict().
         if not isinstance(dist_optim, list):
             dist_optim = [dist_optim]
-        curr_dist_msd, curr_dist_osd = distributed_state_dict(dist_model, dist_optim)
+        curr_dist_msd, curr_dist_osd = distributed_state_dict(
+            dist_model, dist_optim, options=options
+        )
+        if test_frozen:
+            # We won't be able to load the partial state_dict back.
+            return
         # Since we already have the state_dict saved before, no need to call DCP.
         # We can directly load them back. This asser is to ensure that optimizer
         # state storage are initialized.
@@ -186,10 +195,13 @@ class TestStateDict(FSDPTest):
             dist_optim,
             model_state_dict=dist_msd,
             optim_state_dict=dist_osd,
+            options=options,
         )
 
         # Check if the new state_dict are the same
-        dist_msd, dist_osd = distributed_state_dict(dist_model, dist_optim)
+        dist_msd, dist_osd = distributed_state_dict(
+            dist_model, dist_optim, options=options
+        )
         self._verify_state_dict(
             orig_model, orig_optim, orig_msd, orig_osd, dist_msd, dist_osd, test_frozen
         )
@@ -248,6 +260,7 @@ class TestStateDict(FSDPTest):
         use_composable: bool,
         optim_in_backward: bool = False,
         test_frozen: bool = False,
+        use_dtensor: bool = False,
     ) -> None:
         def init_model_optim():
             orig_model = CompositeParamModel(device=torch.device("cuda"))
@@ -281,7 +294,7 @@ class TestStateDict(FSDPTest):
                 dist_optim = torch.optim.Adam(dist_model.parameters(), lr=1e-3)
             return orig_model, orig_optim, dist_model, dist_optim
 
-        self._test_save_load(init_model_optim, test_frozen)
+        self._test_save_load(init_model_optim, test_frozen, use_dtensor)
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_ddp(self) -> None:
@@ -293,6 +306,10 @@ class TestStateDict(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_frozen_parameters(self) -> None:
         self._test_fsdp_ddp(use_composable=False, test_frozen=True)
+
+    @skip_if_lt_x_gpu(2)
+    def test_use_dtensor(self) -> None:
+        self._test_fsdp_ddp(use_composable=False, use_dtensor=True)
 
     @skip_if_lt_x_gpu(2)
     def test_apply_optimizer_in_backward(self) -> None:

@@ -1,29 +1,40 @@
+import contextlib
 import functools
 from dataclasses import asdict, dataclass, field
 from itertools import chain
-from typing import Any, Dict, Iterable, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.nn as nn
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType
-from torch.distributed.fsdp._common_utils import FSDP_WRAPPED_MODULE
+from torch.distributed._tensor import DTensor
+from torch.distributed.fsdp import (
+    FullOptimStateDictConfig,
+    FullStateDictConfig,
+    FullyShardedDataParallel as FSDP,
+    ShardedOptimStateDictConfig,
+    ShardedStateDictConfig,
+    StateDictType,
+)
+from torch.distributed.fsdp._common_utils import (
+    _get_module_fsdp_state_if_fully_sharded_module,
+    FSDP_WRAPPED_MODULE,
+)
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
 FLAT_PARAM = "_flat_param"
 PG = "param_groups"
+FQNS_T = Set[str]
 
 
 @dataclass
 class DistributedStateDictOptions:
+    use_dtensor: bool = False
     # The default should be sharded_state_dict
     fsdp_state_dict_type: StateDictType = StateDictType.SHARDED_STATE_DICT
     save_to_cpu: bool = True
     # Do not save parameters that requires_grad is False.
     no_return_frozen_parameters: bool = False
-
-
-FQNS_T = Set[str]
 
 
 @dataclass
@@ -33,6 +44,8 @@ class StateDictInfo(DistributedStateDictOptions):
     ] = field(default_factory=dict)
     handle_model: bool = True
     handle_optim: bool = True
+    fsdp_context: Callable = contextlib.nullcontext
+    fsdp_modules: List[nn.Module] = field(default_factory=list)
 
 
 def _get_fqns(model: nn.Module, name: str, skip_ddp_prefix: bool = True) -> FQNS_T:
@@ -89,7 +102,9 @@ def _verify_options(
     """
     Verify the model and options passed by the user and generates StateDictInfo.
     """
-    # Initialize StateDictInfo
+    if options is None:
+        options = DistributedStateDictOptions()
+
     fqn_param_mapping: Dict[
         Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
     ] = {}
@@ -98,11 +113,42 @@ def _verify_options(
         fqn_param_mapping[param] = fqns
         for fqn in fqns:
             fqn_param_mapping[fqn] = param
+        if isinstance(param, DTensor) and not options.use_dtensor:
+            # TODO: better way to detect TP.
+            raise RuntimeError("TP is used by use_dtensor is set to False")
 
-    if options is not None:
-        info = StateDictInfo(**asdict(options), fqn_param_mapping=fqn_param_mapping)
+    fsdp_modules = FSDP.fsdp_modules(model)
+    if fsdp_modules:
+        # FSDP API only work if at least one FSDP instance exists.
+        if options.fsdp_state_dict_type == StateDictType.FULL_STATE_DICT:
+            state_dict_config = FullStateDictConfig()
+            optim_state_dict_config = FullOptimStateDictConfig()
+        elif options.fsdp_state_dict_type == StateDictType.SHARDED_STATE_DICT:
+            state_dict_config = ShardedStateDictConfig(use_dtensor=options.use_dtensor)
+            optim_state_dict_config = ShardedOptimStateDictConfig(
+                use_dtensor=options.use_dtensor
+            )
+        else:
+            raise RuntimeError(
+                "distributed_state_dict currently support only FSDP "
+                "FULL_STATE_DICT and SHARDED_STATE_DICT"
+            )
+        fsdp_context = functools.partial(
+            FSDP.state_dict_type,
+            module=model,
+            state_dict_type=options.fsdp_state_dict_type,
+            state_dict_config=state_dict_config,
+            optim_state_dict_config=optim_state_dict_config,
+        )
     else:
-        info = StateDictInfo(fqn_param_mapping=fqn_param_mapping)
+        fsdp_context = contextlib.nullcontext
+
+    info = StateDictInfo(
+        **asdict(options),
+        fqn_param_mapping=fqn_param_mapping,
+        fsdp_context=fsdp_context,
+        fsdp_modules=fsdp_modules,
+    )
 
     if model_only and optim_only:
         raise RuntimeError(
@@ -115,12 +161,6 @@ def _verify_options(
 
     info.handle_model = model_only or not optim_only
     info.handle_optim = optim_only or (not model_only and not optims)
-
-    # TODO: verify the model setting
-    # Traverse the model and if FSDP/fully_shard exist, then the root FSDP module
-    # must be in the model too.
-
-    # TODO: verify options
     return info
 
 
@@ -129,10 +169,17 @@ def _verify_state_dict(
     optim_state_dict: Dict[str, Any],
     info: StateDictInfo,
 ) -> None:
-    """
-    Verify if the model_state_dict and optim_state_dict are valid. This API
-    should give the users an explicit error message to debug or report.
-    """
+
+    # FSDP root must exist otherwise FSDP state_dict will be incorrect.
+    has_fsdp_root = False
+    for module in info.fsdp_modules:
+        fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
+        has_fsdp_root = has_fsdp_root or fsdp_state._is_root
+    if info.fsdp_modules and not has_fsdp_root:
+        raise RuntimeError("The model has FSDP modules but no FSDP root module exists.")
+
+    # Verify if the model_state_dict and optim_state_dict are valid. This API
+    # should give the users an explicit error message to debug or report.
     if info.handle_model and not model_state_dict:
         raise RuntimeError(
             "The option indicates that model state_dict is required to save "
@@ -154,12 +201,7 @@ def _verify_state_dict(
 
 
 def _get_model_state_dict(model: nn.Module, info: StateDictInfo) -> Dict[str, Any]:
-    fsdp_modules = FSDP.fsdp_modules(model)
-    if fsdp_modules:
-        # FSDP API only work if at least one FSDP instance exists.
-        with FSDP.state_dict_type(model, info.fsdp_state_dict_type):
-            state_dict = model.state_dict()
-    else:
+    with info.fsdp_context():
         state_dict = model.state_dict()
 
     for key in list(state_dict.keys()):
@@ -212,11 +254,7 @@ def _load_model_state_dict(
             if fqn != fqn_with_ddp_prefix:
                 state_dict[fqn_with_ddp_prefix] = state_dict.pop(fqn)
 
-    fsdp_modules = FSDP.fsdp_modules(model)
-    if fsdp_modules:
-        with FSDP.state_dict_type(model, info.fsdp_state_dict_type):
-            return model.load_state_dict(state_dict)
-    else:
+    with info.fsdp_context():
         return model.load_state_dict(state_dict)
 
 
@@ -243,12 +281,11 @@ def _get_optim_state_dict(
     info: StateDictInfo,
 ) -> Dict[str, Any]:
     optim_state_dict = {"state": {}, PG: []}
-    fsdp_modules = FSDP.fsdp_modules(model)
     for optim in optims:
         _init_optim_state(optim)
         osd = optim.state_dict()
-        if fsdp_modules:
-            with FSDP.state_dict_type(model, info.fsdp_state_dict_type):
+        if info.fsdp_modules:
+            with info.fsdp_context():
                 osd = FSDP.optim_state_dict(model, optim, osd)
         else:
             params = list(chain.from_iterable(g["params"] for g in optim.param_groups))
@@ -323,11 +360,10 @@ def _load_optim_state_dict(
     state_dict: Dict[str, Any],
     info: StateDictInfo,
 ) -> None:
-    fsdp_modules = FSDP.fsdp_modules(model)
     for optim in optims:
         optim_state_dict = _split_optim_state_dict(model, optim, state_dict, info)
-        if fsdp_modules:
-            with FSDP.state_dict_type(model, info.fsdp_state_dict_type):
+        if info.fsdp_modules:
+            with info.fsdp_context():
                 optim_state_dict = FSDP.optim_state_dict_to_load(
                     model, optim, optim_state_dict
                 )
