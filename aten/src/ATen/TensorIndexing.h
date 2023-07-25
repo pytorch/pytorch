@@ -127,6 +127,7 @@ struct TORCH_API TensorIndex final {
   // Case 3: (Sym) Integer value
   TensorIndex(SymInt integer)
       : integer_(std::move(integer)), type_(TensorIndexType::SymInt) {}
+  TensorIndex(int64_t integer) : TensorIndex(SymInt(integer)) {}
   TensorIndex(int integer) : TensorIndex(SymInt(integer)) {}
 
   // Case 4: Boolean value
