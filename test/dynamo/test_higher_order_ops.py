@@ -1527,6 +1527,13 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         self._test_wrap_simple(fn, (torch.randn(10, 10),), 4, expected_opcount=1)
 
+    def test_fn_with_kwargs_in_torch_ops(self):
+        def fn(x):
+            return wrap(lambda z: torch.cos(input=z), x)
+
+        x = torch.randn(3)
+        self._test_wrap_simple(fn, (x,), 2, expected_opcount=1)
+
     def test_hooks(self):
         class ToyModel(torch.nn.Module):
             def __init__(self):
@@ -1561,6 +1568,8 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertTrue(activations.keys() == forward_handles.keys())
 
+
+class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def _grad_compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
         backend = EagerAndRecordGraphs()
         actual = fn(*inputs)

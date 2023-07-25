@@ -46,7 +46,7 @@ unary_ops = [
     torch.lgamma,
 ]
 
-print("{:20s} {:>10s} {:>10s} {:>10s}".format("op", "eager", "nnc", "speedup"))
+print(f"{'op':20s} {'eager':>10s} {'nnc':>10s} {'speedup':>10s}")
 
 for op in unary_ops:
     x = torch.rand((1024, 1024))
@@ -69,7 +69,7 @@ for op in unary_ops:
 
 def test_batch_norm():
     op = F.batch_norm
-    print("{:20s} {:20s} {:>10s} {:>10s} {:>10s}".format("op", "shape", "eager", "nnc", "speedup"))
+    print(f"{'op':20s} {'shape':20s} {'eager':>10s} {'nnc':>10s} {'speedup':>10s}")
     batch_norm_shapes = [
         [1, 64, 112, 112],
         [1, 256, 14, 14],
@@ -83,8 +83,8 @@ def test_batch_norm():
         [5, 512, 7, 7]]
     for n, c, h, w in batch_norm_shapes:
         x = torch.rand((n, c, h, w))
-        y = torch.rand((c))
-        z = torch.rand((c))
+        y = torch.rand(c)
+        z = torch.rand(c)
         traced = torch.jit.trace(lambda x, y, z: op(x, y, z), (x, y, z))
 
         # Warmup.
