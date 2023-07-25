@@ -564,7 +564,7 @@ Calls to TracingContext.get() while not under a `with tracing()` context will re
 
 @contextmanager
 def tracing(context: TracingContext):
-    old_context = getattr(_TLS, 'tracing_context', None)
+    old_context = getattr(_TLS, "tracing_context", None)
     _TLS.tracing_context = context
     try:
         yield context
