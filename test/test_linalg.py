@@ -3992,19 +3992,15 @@ class TestLinalg(TestCase):
                 size_b = size_b[1:]
 
             if well_conditioned:
-                X = make_randn(*size_a)
-                X = X + X.mH
-                U = torch.linalg.svd(X)[0]
+                make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+                make_well_conditioned_arg = partial(make_fullrank, device=device, dtype=dtype)
+                PLU = torch.linalg.lu(make_well_conditioned_arg(*size_a))
                 if uni:
-                    # A = L from cholesky(U @ U.mH),
-                    # and this matrix will be unidiagonal and have condition number 1.
-                    A = torch.linalg.cholesky(U @ U.mH)
+                    # A = L from PLU
+                    A = PLU[1].transpose(-2, -1).contiguous()
                 else:
-                    # A = L from cholesky(U @ S @ U.mH),
-                    # where S = rand(*size_a) + 1,
-                    # so A has condition number at most sqrt(2).
-                    S = make_rand(*size_s[:-1]) + 1
-                    A = torch.linalg.cholesky((U * S.unsqueeze(-2)) @ U.mH)
+                    # A = U from PLU
+                    A = PLU[2].contiguous()
             else:
                 A = make_arg(size_a)
                 A.triu_()
