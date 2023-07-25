@@ -38,7 +38,7 @@ ProfilerConfig::ProfilerConfig(
     bool with_modules,
     ExperimentalConfig experimental_config)
     : state{state},
-      experimental_config{experimental_config},
+      experimental_config{std::move(experimental_config)},
       report_input_shapes{report_input_shapes},
       profile_memory{profile_memory},
       with_stack{with_stack},
