@@ -27,7 +27,7 @@ from torch._prims_common import (
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
 from torch.utils._pytree import tree_flatten
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import CeilDiv, FloorDiv, Mod, ModularIndexing
 from .._dynamo.utils import import_submodule
 
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -1888,8 +1888,12 @@ def select_scatter(x, src, dim: int, index: int):
     assert x.get_dtype() == src.get_dtype()
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
-    if index < 0:
-        index = index + x.get_size()[dim]
+    if isinstance(index, int):
+        if index < 0:
+            index = index + x.get_size()[dim]
+    else:
+        assert isinstance(index, sympy.Symbol)
+        index = Mod(index + x.get_size()[dim], x.get_size()[dim])
     V.graph.sizevars.guard_leq(0, index)
     V.graph.sizevars.guard_lt(index, x.get_size()[dim])
     src = expand(unsqueeze(src, dim), x.get_size())
