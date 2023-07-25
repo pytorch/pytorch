@@ -1444,6 +1444,7 @@ class TestSDPAFailureModes(NNTestCase):
                     q, k, v, None, 0.0, False))
 
     @onlyCUDA
+    @unittest.skip("mem efficient flash attention might already be supported on sm90 and this test is out of date")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM90Device, "Does not support fused SDPA or pre-SM90 hardware")
     def test_mem_efficient_fail_sm90(self, device):
         dtype = torch.float16
