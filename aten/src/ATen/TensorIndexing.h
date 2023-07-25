@@ -484,16 +484,6 @@ static inline Tensor handleDimInMultiDimIndexing(
           outIndices,
           dim_ptr);
       return result;
-    } else if (
-        at::isIntegralType(scalar_type, /*includeBool=*/false) &&
-        tensor.device() == at::kCPU && !at::isTensorSubclassLike(tensor)) {
-      return impl::applySelect(
-          result,
-          *dim_ptr,
-          tensor.item<int64_t>(),
-          real_dim,
-          original_tensor_device,
-          prev_dim_result_sizes);
     }
     impl::recordTensorIndex(tensor, outIndices, dim_ptr);
     return result;
