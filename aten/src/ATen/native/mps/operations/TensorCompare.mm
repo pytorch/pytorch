@@ -23,8 +23,10 @@ struct CachedGraph : public MPSCachedGraph {
   MPSGraphTensor *minTensor = nil, *maxTensor = nil;
 };
 
-void clamp_mps_graph(CachedGraph* cachedGraph, const Tensor& input_tensor,
-                          const Tensor& min_tensor, const Tensor& max_tensor) {
+void clamp_mps_graph(CachedGraph* cachedGraph,
+                     const Tensor& input_tensor,
+                     const Tensor& min_tensor,
+                     const Tensor& max_tensor) {
   auto input_dtype = input_tensor.scalar_type();
   auto min_dtype = input_dtype;
   auto max_dtype = input_dtype;
@@ -52,9 +54,9 @@ void clamp_mps_graph(CachedGraph* cachedGraph, const Tensor& input_tensor,
                                            maxValueTensor:maxTensor
                                                      name:nil];
   } else if (cachedGraph->maxTensor) {
-  cachedGraph->outputTensor = [mpsGraph minimumWithPrimaryTensor:cachedGraph->inputTensor
-                                                 secondaryTensor:maxTensor
-                                                            name:nil];
+    cachedGraph->outputTensor = [mpsGraph minimumWithPrimaryTensor:cachedGraph->inputTensor
+                                                   secondaryTensor:maxTensor
+                                                              name:nil];
   } else if (cachedGraph->minTensor) {
     cachedGraph->outputTensor = [mpsGraph maximumWithPrimaryTensor:cachedGraph->inputTensor
                                                    secondaryTensor:minTensor
