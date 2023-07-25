@@ -19,6 +19,7 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path
+from ..dependencies import MemoryDep, StarDep
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..triton_heuristics import AutotuneHint
@@ -1898,14 +1899,16 @@ class TritonKernel(Kernel):
                 sizes.append("1")
         return f"[{', '.join(sizes)}]"
 
-    def call_kernel(self, name: str):
-        wrapper = V.graph.wrapper_code
+    def get_call_args(self):
         _, call_args, _ = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
-        grid = []
+
+        return call_args
+
+    def add_numel_to_call_args_and_grid(self, call_args, grid):
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
@@ -1918,6 +1921,11 @@ class TritonKernel(Kernel):
             if tree.prefix != "r":
                 grid.append(expr)
 
+    def call_kernel(self, name: str):
+        wrapper = V.graph.wrapper_code
+        call_args = self.get_call_args()
+        grid = []
+        self.add_numel_to_call_args_and_grid(call_args, grid)
         wrapper.generate_kernel_call(
             name,
             call_args,
@@ -2253,6 +2261,12 @@ class TritonScheduling:
 
         return tiled_groups, reduction_hint_val, mutations, index_dtype
 
+    def codegen_comment(self, node_schedule):
+        wrapper = V.graph.wrapper_code
+        origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
+        if origins:
+            wrapper.writeline(origins)
+
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
         tiled_groups, reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
             node_schedule, numel, reduction_numel
@@ -2274,6 +2288,7 @@ class TritonScheduling:
 
         src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule)
+        self.codegen_comment(node_schedule)
         kernel.kernel_name = kernel_name
 
         if kernel.persistent_reduction and config.triton.multi_kernel:
@@ -2372,7 +2387,8 @@ class TritonScheduling:
             compile_wrapper.writeline("''')")
 
             metadata_comment = f"# kernel path: {kernel_path}"
-            metadata_comment += "\n" + get_kernel_metadata(node_schedule)
+            origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
+            metadata_comment += "\n" + origins + "\n" + detailed_origins
             wrapper.define_kernel(
                 kernel_name, compile_wrapper.getvalue(), metadata_comment
             )
@@ -2394,7 +2410,9 @@ class TritonScheduling:
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         src_code = render()
-        kernel_name = self.define_kernel(src_code, [template_node, *epilogue_nodes])
+        node_schedule = [template_node, *epilogue_nodes]
+        kernel_name = self.define_kernel(src_code, node_schedule)
+        self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
         self.scheduler.free_buffers()
 
@@ -2433,6 +2451,7 @@ class TritonScheduling:
 
             src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, [foreach_node])
+            self.codegen_comment([foreach_node])
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
         self.scheduler.free_buffers()
@@ -2447,10 +2466,19 @@ class TritonScheduling:
         rw = node.pointwise_read_writes()
         assert len(rw.range_vars) == len(ranges)
 
+        # isinstance(dep, MemoryDep): this filters out StarDeps. StarDeps refer to reads
+        # that need to access the entire tensor; they don't contribute read indexing
+        # information (and practically, they don't have dep.index so they can't be used
+        # for stride_hints below
+        dep_sources = [rw.reads, rw.writes]
+        assert all(
+            isinstance(dep, (MemoryDep, StarDep))
+            for dep in itertools.chain(*dep_sources)
+        )
         deps = [
             dep
-            for dep in itertools.chain(rw.reads, rw.writes)
-            if dep.name not in V.graph.removed_buffers
+            for dep in itertools.chain(*dep_sources)
+            if dep.name not in V.graph.removed_buffers and isinstance(dep, MemoryDep)
         ]
         write_names = {dep.name for dep in rw.writes}
 

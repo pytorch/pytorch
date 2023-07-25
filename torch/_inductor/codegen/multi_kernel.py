@@ -1,40 +1,29 @@
-import builtins
-
-import sympy
-
 from ..codecache import PyCodeCache, TritonFuture
 from ..utils import do_bench
 from ..virtualized import V
 
 
-# TODO rename
-def get_kernel_call_args(kernel):
-    return kernel.args.python_argdefs()[0]  # TODO
-    _, call_args, _ = kernel.args.python_argdefs()
-    # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
-    for i in range(len(call_args)):
-        if V.graph.is_unspec_arg(call_args[i]):
-            call_args[i] = call_args[i] + ".item()"
-    return call_args
+def get_kernel_argdefs(kernel):
+    arg_defs, _, _ = kernel.args.python_argdefs()
+    return arg_defs
 
 
-def get_all_kernel_call_args(kernels):
-    call_args_list = [get_kernel_call_args(kernel) for kernel in kernels]
-    all_call_args = {}  # use a dict rather than set to maintain insertion order
-    for call_args in call_args_list:
-        all_call_args.update({arg: None for arg in call_args})
+def get_all_kernel_argdefs(kernels):
+    argdefs_list = [get_kernel_argdefs(kernel) for kernel in kernels]
+    all_argdefs = {}  # use a dict rather than set to maintain insertion order
+    for argdefs in argdefs_list:
+        all_argdefs.update({arg: None for arg in argdefs})
 
-    return list(all_call_args.keys())
+    return list(all_argdefs.keys())
 
 
-def get_extra_arg_names(kernel):
-    extra_arg_names = []
+def get_numel_argdefs(kernel):
+    numel_argdefs = []
     for tree in kernel.range_trees:
         if tree.prefix != "r" or kernel.inside_reduction:
-            extra_arg_names.append(f"{tree.prefix}numel")
+            numel_argdefs.append(f"{tree.prefix}numel")
 
-    # extra_arg_names.extend(["grid", "stream"])
-    return extra_arg_names
+    return numel_argdefs
 
 
 class MultiKernelState:
@@ -63,16 +52,16 @@ class MultiKernelState:
         self.subkernel_to_kernel_name[kernel_names] = multi_kernel_name
 
         wrapper = V.graph.wrapper_code
-        all_call_args = get_all_kernel_call_args(kernels)
-        src_code = f"""
-def run(multi_kernel, {', '.join(get_all_kernel_call_args(kernels))}, {', '.join(get_extra_arg_names(kernels[0]))}, grid, stream):
-    def call0():
         # TODO: clone the args if doing the benchmarking
-        multi_kernel.kernels[0].run({', '.join(get_kernel_call_args(kernels[0]))}, {', '.join(get_extra_arg_names(kernels[0]))}, grid=grid, stream=stream)
+        # TODO: handle arbitrary number of subkernels
+        src_code = f"""
+def run(multi_kernel_call, {', '.join(get_all_kernel_argdefs(kernels))}, {', '.join(get_numel_argdefs(kernels[0]))}, grid, stream):
+    def call0():
+        multi_kernel_call.kernels[0].run({', '.join(get_kernel_argdefs(kernels[0]))}, {', '.join(get_numel_argdefs(kernels[0]))}, grid=grid, stream=stream)
     def call1():
-        multi_kernel.kernels[1].run({', '.join(get_kernel_call_args(kernels[1]))}, {', '.join(get_extra_arg_names(kernels[1]))}, grid=grid, stream=stream)
-    multi_kernel.run_with_argless_kernels([call0, call1])
-        """
+        multi_kernel_call.kernels[1].run({', '.join(get_kernel_argdefs(kernels[1]))}, {', '.join(get_numel_argdefs(kernels[1]))}, grid=grid, stream=stream)
+    multi_kernel_call.run_with_argless_kernels([call0, call1])
+        """  # noqa: B950 line too long
         wrapper.header.splice(
             f"""
         {multi_kernel_name} = MultiKernelCall([
@@ -99,7 +88,7 @@ class MultiKernel:
     Assume we do codegen for a MultiKernel encapsulating kernel1 and kernel2.
     The generated definition for the multi-kernel will looks like:
     ```
-    multi_kernel_kernel1 = MultiKernelCall([kernel1, kernel2])
+    multi_kernel_kernel1 = MultiKernelCall([kernel1, kernel2], multi_kernel_definition_code)
     ```
     """
 
@@ -111,39 +100,21 @@ class MultiKernel:
             kernels
         )
 
-    def get_call_args(self, kernel):
-        _, call_args, _ = kernel.args.python_argdefs()
-        # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
-        for i in range(len(call_args)):
-            if V.graph.is_unspec_arg(call_args[i]):
-                call_args[i] = call_args[i] + ".item()"
-        return call_args
-
     def call_kernel(self):
         """
         Collect the union of arguments from all subkernels as the arguments
         for the multi-kernel.
         """
-        # TODO: should use arg name rather than call arg?
-        call_args_list = [self.get_call_args(kernel) for kernel in self.kernels]
+        call_args_list = [kernel.get_call_args() for kernel in self.kernels]
         all_call_args = {}  # use a dict rather than set to maintain insertion order
         for call_args in call_args_list:
             all_call_args.update({arg: None for arg in call_args})
 
         all_call_args = list(all_call_args.keys())
-
-        # TODO dedup the code with TritonKernel class
         grid = []
-        for tree in self.kernels[0].range_trees:
-            if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
-                expr = tree.numel
-            else:
-                expr = V.graph.wrapper_code.generate_numel_expr(name, tree)
 
-            if tree.prefix != "r" or self.kernels[0].inside_reduction:
-                all_call_args.append(expr)
-            if tree.prefix != "r":
-                grid.append(expr)
+        # numels for all subkernels should be the same. Use kernels[0] here
+        self.kernels[0].add_numel_to_call_args_and_grid(all_call_args, grid)
 
         V.graph.wrapper_code.generate_kernel_call(
             self.kernel_name,
@@ -183,28 +154,14 @@ class MultiKernelCall:
 
         return self._kernels
 
-    def bench(self, kernel, *args, **kwargs):
-        def kernel_call():
-            cloned_args = kernel.clone_args(*args)
-            kernel.run(*cloned_args, **kwargs)
-
-        return do_bench(kernel_call, rep=40, fast_flush=True)
-
     def run(self, *args, **kwargs):
         self._run(self, *args, **kwargs)
 
     def run_with_argless_kernels(self, kernel_calls):
         if self.picked_kernel is None:
             timings = [
-                do_bench(kernel_call, rep=40, fast_flush=True) for kernel_call in kernel_calls 
+                do_bench(kernel_call, rep=40, fast_flush=True)
+                for kernel_call in kernel_calls
             ]
             self.picked_kernel = timings.index(min(timings))
         kernel_calls[self.picked_kernel]()
-
-    def old_run(self, *args, **kwargs):
-        if self.picked_kernel is None:
-            timings = {
-                kernel: self.bench(kernel, *args, **kwargs) for kernel in self.kernels
-            }
-            self.picked_kernel = builtins.min(timings, key=timings.get)
-        self.picked_kernel.run(*args, **kwargs)
