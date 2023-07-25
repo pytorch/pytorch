@@ -44,7 +44,12 @@ from .gen_inplace_or_view_type import VIEW_FUNCTIONS
 
 FUNCTION_DECLARATION = CodeTemplate(
     """\
+#ifdef _WIN32
+struct ${op} : public ${superclass} {
+  TORCH_API ${op}() = default;
+#else
 struct TORCH_API ${op} : public ${superclass} {
+#endif
   using ${superclass}::${superclass};
   variable_list apply(variable_list&& grads) override;
   std::string name() const override { return "${op}"; }
@@ -53,10 +58,8 @@ struct TORCH_API ${op} : public ${superclass} {
     ${release_variables}
   }
   ${will_release_variables}
-#ifdef TORCH_COMPILED_AUTOGRAD
   void compiled_args(CompiledNodeArgs& args) override;
   variable_list apply_with_saved(const variable_list& inputs, SwapSavedVariables& saved) override;
-#endif
   ${saved_variables}
   ${saved_list_sizes}
 };
@@ -83,7 +86,6 @@ variable_list ${op}::apply(variable_list&& grads) {
   ${body}
   return grad_inputs;
 }
-#ifdef TORCH_COMPILED_AUTOGRAD
 void ${op}::compiled_args(CompiledNodeArgs& args) {
     ${compiled_args}
 }
@@ -93,7 +95,6 @@ variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVaria
     ${apply_with_saved_after}
     return result;
 }
-#endif
 """
 )
 

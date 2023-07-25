@@ -56,7 +56,6 @@ auto Identity::apply(variable_list&& grads) -> variable_list {
   return std::move(grads);
 }
 
-#ifdef TORCH_COMPILED_AUTOGRAD
 void GraphRoot::compiled_args(CompiledNodeArgs& args) {
   args.collect(outputs);
 }
@@ -68,7 +67,6 @@ variable_list GraphRoot::apply_with_saved(
   saved.after(outputs);
   return result;
 }
-#endif
 
 } // namespace autograd
 } // namespace torch
