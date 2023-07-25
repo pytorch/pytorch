@@ -1,10 +1,9 @@
 from functools import reduce
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Optional, Union
 
 import torch
-import torch.nn.functional as F
 
-from torch.ao.pruning._experimental.pruner import BaseStructuredSparsifier
+from .base_structured_sparsifier import BaseStructuredSparsifier
 
 __all__ = ["FPGMSparsifier"]
 
@@ -16,9 +15,7 @@ class FPGMSparsifier(BaseStructuredSparsifier):
 
     This sparsifier is controlled by three variables:
     1. `sparsity_level` defines the number of filters (rows) that are zeroed-out.
-    2. `dim` defines the dimension of the tensor to prune. Default: 0 (filter pruning).
-    Currently, only `dim=0` is supported.
-    3. `dist` defines the distance measurement type. Default: 2 (L2 distance).
+    2. `dist` defines the distance measurement type. Default: 3 (L2 distance).
     Available options are: [1, 2, (custom callable distance function)].
     
     Note::
@@ -30,16 +27,10 @@ class FPGMSparsifier(BaseStructuredSparsifier):
     """
     def __init__(self,
                  sparsity_level: float = 0.5,
-                 dim: Optional[int] = 0,
                  dist: Optional[Union[Callable, int]] = None):
         defaults = {
             "sparsity_level": sparsity_level,
-            "dim": dim,
         }
-
-        # TODO: support other dimensions
-        if dim != 0:
-            raise NotImplementedError("Only dim=0 (filter pruning) is currently supported.")
 
         if dist is None:
             dist = 2
@@ -54,22 +45,15 @@ class FPGMSparsifier(BaseStructuredSparsifier):
             raise NotImplementedError(f"Distance function \"{self.dist}\" is not yet implemented.")
         super().__init__(defaults=defaults)
 
-    def _compute_distance(self, t, dim):
+    def _compute_distance(self, t):
         r"""Compute distance across all entries in tensor `t` along all dimension
         except for the one identified by dim.
         Args:
             t (torch.Tensor): tensor representing the parameter to prune
-            dim (int): dim identifying the filters to prune
         Returns:
-            distance (torch.Tensor): distance computed across all dimensions except
-                for `dim`. By construction, `distance.shape = t.shape[dim]`.
+            distance (torch.Tensor): distance computed across filtters
         """
-        # dims = all axes, except for the one identified by `dim`
-        dims = list(range(t.dim()))
-        # convert negative indexing
-        if dim < 0:
-            dim = dims[dim]
-        dims.remove(dim)
+        dim = 0 # prune filter (row)
 
         size = t.size(dim)
         slc = [slice(None)] * t.dim()
@@ -86,32 +70,19 @@ class FPGMSparsifier(BaseStructuredSparsifier):
 
         return distance
 
-    def update_mask(self, module, tensor_name, sparsity_level, dim, **kwargs):
+    def update_mask(self, module, tensor_name, sparsity_level, **kwargs):
         tensor_weight = getattr(module, tensor_name)
-
-        # check pruning dimension
-        if dim < 0:
-            raise ValueError(
-                "Dimension to prune must be non-negative."
-            )
-        elif dim >= tensor_weight.dim():
-            raise ValueError(f"Invalide pruning dimension: {dim}.")
-
         mask = getattr(module.parametrizations, tensor_name)[0].mask
-        if mask.shape != tensor_weight.shape[dim]:      # initialize mask with correct dimension
-            mask.data = torch.ones(tensor_weight.shape[dim]).bool()
 
         if sparsity_level <= 0:
             mask.data = torch.ones_like(mask).bool()
         elif sparsity_level >= 1.0:
             mask.data = torch.zeros_like(mask).bool()
         else:
-            distance = self._compute_distance(tensor_weight, dim)
+            distance = self._compute_distance(tensor_weight)
 
-            tensor_size = tensor_weight.shape[dim]
+            tensor_size = tensor_weight.shape[0]    # prune filter (row)
             nparams_toprune = round(sparsity_level * tensor_size)
-            if nparams_toprune == 0:
-                Warning("Number of parameters to prune is 0. Skipping.")
-                return 
+            nparams_toprune = min(max(nparams_toprune, 0), tensor_size) # clamp to [0, tensor_size]
             topk = torch.topk(distance, k=nparams_toprune, largest=False)
-            mask.data[topk.indices] = False
+            mask[topk.indices] = False
