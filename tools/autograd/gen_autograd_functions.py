@@ -589,6 +589,18 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             or type == BaseCType(iTensorListRefT)
             or type == VectorCType(BaseCType(tensorT))
         ):
+            # note(crcrpar): [nuanced return type of out-of-place foreach functions]
+            # When an out-of-place foreach function whose return signature is `Tensor[]`
+            # spells out its backward definitions in `derivatives.yaml`, and some of them depend on
+            # `result`, `result`'s type is interpreted and treated as `std::vector<Tensor>`.
+            # An out-of-place foreach whose backwards rely on their output doesn't suffer from this
+            # difference if the definitions are codegen'ed.
+            # This special case is needed for `_foreach_pow.List` and `_foreach_pow.ScalarAndTensor`
+            # as of https://github.com/pytorch/pytorch/pull/105504.
+            if type == VectorCType(BaseCType(tensorT)):
+                assert (
+                    info.func.func.name.name.base.startswith("_foreach") and is_output
+                )
             saved_variables.append(f"std::vector<SavedVariable> {name}_;")
             saved_variables.append(f"bool {name}_released_ = false;")
             # Just clear() is sufficient, we don't need to loop and clear each variable.

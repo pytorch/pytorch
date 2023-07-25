@@ -1461,6 +1461,9 @@ def emit_body(
                 or type == BaseCType(iTensorListRefT)
                 or type == VectorCType(BaseCType(tensorT))
             ):
+                # See Note [nuanced return type of out-of-place foreach functions]
+                if type == VectorCType(BaseCType(tensorT)):
+                    assert is_foreach and is_output
                 expr = f"make_saved_variable_list({name}, {str(is_foreach and is_output).lower()})"
                 name += "_"
             elif type == BaseCType(intArrayRefT):
