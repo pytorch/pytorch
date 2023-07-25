@@ -4,6 +4,7 @@ import dataclasses
 import enum
 import functools
 import logging
+import threading
 import traceback
 import unittest.mock
 import weakref
@@ -440,7 +441,7 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.dynamo_guards = state.dynamo_guards
 
 
-_CURRENT_TRACING_CONTEXT = None
+_TLS = threading.local()
 
 """
 TracingContext is the source of truth for all currently accumulated information
@@ -471,7 +472,7 @@ class TracingContext:
 
     @staticmethod
     def get() -> Optional["TracingContext"]:
-        return _CURRENT_TRACING_CONTEXT
+        return getattr(_TLS, "tracing_context", None)
 
     def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
@@ -563,13 +564,12 @@ Calls to TracingContext.get() while not under a `with tracing()` context will re
 
 @contextmanager
 def tracing(context: TracingContext):
-    global _CURRENT_TRACING_CONTEXT
-    old_context = _CURRENT_TRACING_CONTEXT
-    _CURRENT_TRACING_CONTEXT = context
+    old_context = getattr(_TLS, "tracing_context", None)
+    _TLS.tracing_context = context
     try:
-        yield _CURRENT_TRACING_CONTEXT
+        yield context
     finally:
-        _CURRENT_TRACING_CONTEXT = old_context
+        _TLS.tracing_context = old_context
 
 
 # Subclasses can be found in torch/_dynamo/source.py
