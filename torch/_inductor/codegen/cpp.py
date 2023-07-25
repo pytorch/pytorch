@@ -278,7 +278,7 @@ def parallel_num_threads():
     return threads
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def stride_at(var: sympy.Symbol, index: sympy.Expr):
     replacement = {var: var + 1}
     new_index = sympy_subs(index, replacement)

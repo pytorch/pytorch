@@ -620,7 +620,7 @@ def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str
     Get the open PRs in the stack that are below this PR.  Throws error if any of the PRs are out of sync.
     """
     assert pr.is_ghstack_pr()
-    entire_stack: List[Tuple["GitHubPR", str]] = []
+    entire_stack: List[Tuple[GitHubPR, str]] = []
     # For ghstack, cherry-pick commits based from origin
     orig_ref = f"{repo.remote}/{re.sub(r'/head$', '/orig', pr.head_ref())}"
     rev_list = repo.revlist(f"{pr.default_branch()}..{orig_ref}")
@@ -1628,10 +1628,8 @@ def validate_revert(
         allowed_reverters.append("CONTRIBUTOR")
     if author_association not in allowed_reverters:
         raise PostCommentError(
-            (
-                f"Will not revert as @{author_login} is not one of "
-                f"[{', '.join(allowed_reverters)}], but instead is {author_association}."
-            )
+            f"Will not revert as @{author_login} is not one of "
+            f"[{', '.join(allowed_reverters)}], but instead is {author_association}."
         )
     skip_internal_checks = can_skip_internal_checks(pr, comment_id)
 

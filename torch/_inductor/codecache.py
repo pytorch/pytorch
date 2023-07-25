@@ -168,7 +168,7 @@ class CacheBase:
     def get_local_cache(self):
         if not self.local_cache_path.is_file():
             return {}
-        with open(self.local_cache_path, "r") as local_cache_fp:
+        with open(self.local_cache_path) as local_cache_fp:
             local_cache = json.load(local_cache_fp)
         return local_cache["cache"]
 
@@ -211,7 +211,7 @@ class PersistentCache(CacheBase):
     def get_global_cache(self):
         if self.global_cache_path is None or not self.global_cache_path.is_file():
             return {}
-        with open(self.global_cache_path, "r") as global_cache_fp:
+        with open(self.global_cache_path) as global_cache_fp:
             global_cache = json.load(global_cache_fp)
         return global_cache["cache"]
 
@@ -271,7 +271,10 @@ class PersistentCache(CacheBase):
                 self.update_local_cache(local_cache)
 
                 if use_global_cache():
-                    log_vals(timings)
+                    timings_to_log = {
+                        choice.hash_key(): timings[choice] for choice in choices
+                    }
+                    log_vals(timings_to_log)
         elif use_global_cache():
             # only check global cache, not local one
             check_cache(self.get_global_cache(), callback=log_stats)
@@ -287,7 +290,7 @@ def get_lock_dir():
     return lock_dir
 
 
-def code_hash(code, extra=""):
+def code_hash(code, extra: str = ""):
     hashing_str = code
     if extra != "":
         hashing_str = hashing_str + "||" + extra
@@ -299,13 +302,19 @@ def code_hash(code, extra=""):
     )
 
 
-def get_path(basename: str, extension: str):
-    subdir = os.path.join(cache_dir(), basename[1:3])
+def get_path(basename: str, extension: str, specified_dir: str = ""):
+    if specified_dir:
+        if os.path.isabs(specified_dir):
+            subdir = specified_dir
+        else:
+            subdir = os.path.join(cache_dir(), specified_dir)
+    else:
+        subdir = os.path.join(cache_dir(), basename[1:3])
     path = os.path.join(subdir, f"{basename}.{extension}")
     return basename, subdir, path
 
 
-def get_hash(content: Union[str, bytes], extra="", hash_type="code"):
+def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code"):
     assert hash_type in ["code", "cubin"], "Hash type not supported"
     if hash_type == "code":
         return code_hash(content, extra)
@@ -314,10 +323,14 @@ def get_hash(content: Union[str, bytes], extra="", hash_type="code"):
 
 
 def write(
-    content: Union[str, bytes], extension: str, extra="", hash_type: str = "code"
+    content: Union[str, bytes],
+    extension: str,
+    extra: str = "",
+    hash_type: str = "code",
+    specified_dir: str = "",
 ):
     key: str = get_hash(content, extra, hash_type)
-    basename, subdir, path = get_path(key, extension)
+    basename, subdir, path = get_path(key, extension, specified_dir)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     if not os.path.exists(path):
@@ -526,15 +539,14 @@ cdll.LoadLibrary("__lib_path__")
             try:
                 # Check build result
                 compile_file(input_path, output_path, build_cmd)
-                # TODO: get vectorization working in fbcode.
-                # For now, this always fails, so we fall back to generating non-vectorized cpu code.
                 subprocess.check_call(
                     [
-                        "python",
+                        sys.executable,
                         "-c",
                         VecISA._avx_py_load.replace("__lib_path__", output_path),
                     ],
                     stderr=subprocess.DEVNULL,
+                    env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
                 )
             except Exception as e:
                 return False
@@ -663,7 +675,8 @@ def use_custom_generated_macros():
 
 def use_fb_internal_macros():
     if config.is_fbcode():
-        return "-D C10_USE_GLOG -D C10_USE_MINIMAL_GLOG"
+        openmp_lib = build_paths.openmp_lib()
+        return f"-Wp,-fopenmp {openmp_lib} -D C10_USE_GLOG -D C10_USE_MINIMAL_GLOG"
     else:
         return ""
 
@@ -699,7 +712,18 @@ def get_include_and_linking_paths(
             libs += ["omp"]
         macros = vec_isa.build_macro()
         if macros:
-            macros = f"-D{macros}"
+            if config.is_fbcode() and vec_isa != invalid_vec_isa:
+                cap = str(vec_isa).upper()
+                macros = " ".join(
+                    [
+                        vec_isa.build_arch_flags(),
+                        f"-D CPU_CAPABILITY={cap}",
+                        f"-D CPU_CAPABILITY_{cap}",
+                        f"-D HAVE_{cap}_CPU_DEFINITION",
+                    ]
+                )
+            else:
+                macros = f"-D{macros}"
         if cuda:
             if config.is_fbcode():
                 libs += ["cuda"]
@@ -716,6 +740,11 @@ def get_include_and_linking_paths(
             # GNU OpenMP generally is not available on MacOS
             # There is either Intel OpenMP(for x86) or LLVM OpenMP (for both x86 and arm64)
             libs = ["omp"]
+            if os.getenv("OMP_PREFIX") is not None:
+                # Support OpenMP on MacOS
+                ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))
+                lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))
+
             if os.getenv("CONDA_PREFIX") is not None:
                 # On MacOS OpenMP is not available via the system install
                 # But on conda can be provided using https://anaconda.org/anaconda/llvm-openmp
@@ -791,7 +820,12 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key, params, cubin):
-        _, path = write(cubin, "cubin", hash_type="cubin")
+        _, path = write(
+            cubin,
+            "cubin",
+            hash_type="cubin",
+            specified_dir=config.aot_inductor_output_path,
+        )
         params["cubin_path"] = path
         cls.cache[key] = params
 
@@ -813,20 +847,20 @@ class AotCodeCache:
                 "i", "o", vec_isa=picked_vec_isa, cuda=cuda, aot_mode=graph.aot_mode
             )
         )
-        key, input_path = write(source_code, "cpp", extra=cpp_command)
+        key, input_path = write(
+            source_code,
+            "cpp",
+            extra=cpp_command,
+            specified_dir=config.aot_inductor_output_path,
+        )
         if key not in cls.cache:
             from filelock import FileLock
 
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                # Place the generated .so into a sub-folder with the full hex-hash to avoid
-                # any name collision.
-                output_so_dir = os.path.splitext(input_path)[0]
-                if not os.path.exists(output_so_dir):
-                    os.makedirs(output_so_dir, exist_ok=False)
-                so_name = f"{config.dll_name}.so"
-                output_so = os.path.join(output_so_dir, so_name)
+                output_so = os.path.splitext(input_path)[0] + ".so"
+
                 if not os.path.exists(output_so):
                     cmd = cpp_compile_command(
                         input=input_path,
@@ -858,7 +892,7 @@ class AotCodeCache:
 # - valid_vec_isa_list()
 # - VecISA.__bool__() <-- takes out a lock
 # - compile_file() <-- imports cpp_prefix_path from cpp, which causes us to try to take out the same lock.
-@functools.lru_cache()
+@functools.lru_cache
 def cpp_prefix_path():
     path = Path(__file__).parent / "codegen/cpp_prefix.h"
     with path.open() as f:

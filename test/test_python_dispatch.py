@@ -63,8 +63,8 @@ class TestPythonRegistration(TestCase):
 
         self.assertTrue(torch.neg(x).is_neg())
 
-        # RuntimeError: impl("aten::neg", raise NotImplementedError()
-        # Explicitly provided namespace (aten) in operator name does not match raise NotImplementedError()
+        # RuntimeError: impl("aten::neg", ...)
+        # Explicitly provided namespace (aten) in operator name does not match ...
         with self.assertRaisesRegex(RuntimeError, "operator name does not match namespace"):
             my_lib3 = Library("foo", "DEF")
             my_lib3.define("neg(Tensor self) -> Tensor")
@@ -418,7 +418,7 @@ class TestPythonRegistration(TestCase):
 
         out = getattr(torch.ops, self.test_ns).sqsum.default(s0, s1)
         out_val = shape_env.evaluate_expr(out.node.expr)
-        self.assertEquals(out_val, 13)
+        self.assertEqual(out_val, 13)
 
     def test_register_functional_op_error_cases(self):
         lib = Library(self.test_ns, "FRAGMENT")

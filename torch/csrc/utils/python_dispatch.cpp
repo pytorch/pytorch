@@ -102,10 +102,6 @@ struct EnableHermeticPyObject {
   bool old_python_snapshot_;
 };
 
-at::TensorBase foo(const at::TensorBase& x) {
-  return x;
-}
-
 class PythonKernelHolder : public c10::OperatorKernel {
   c10::SafePyObject func_;
   c10::DispatchKey dispatch_key_;
@@ -625,11 +621,6 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def("_dispatch_is_alias_key", c10::isAliasDispatchKey);
-
-  m.def("_undefined", []() {
-    auto tensor = at::Tensor();
-    foo(tensor);
-  });
 
   m.def("_dispatch_keyset_to_string", [](c10::DispatchKeySet keyset) {
     return c10::toString(keyset);

@@ -1,12 +1,13 @@
+import inspect
+
 from torch._custom_op.impl import (
-    _find_custom_op,
     _custom_op_with_schema,
+    _find_custom_op,
     get_ctx,
+    infer_schema,
     parse_namespace,
     validate_namespace,
-    infer_schema,
 )
-import inspect
 
 __all__ = [
     "custom_op",
@@ -113,7 +114,7 @@ def custom_op(qualname, func_or_schema=None):
         inner(func)
 
 
-def impl(qualname, *, device_types=('cpu', 'cuda'), func=None):
+def impl(qualname, *, device_types=("cpu", "cuda"), func=None):
     r"""Register an implementation for a device type for this custom op.
 
     If the op is passed multiple Tensor inputs with different device
@@ -165,6 +166,7 @@ def impl(qualname, *, device_types=('cpu', 'cuda'), func=None):
         >>> torch.ops.mylibrary.numpy_sin(x)  # calls numpy_sin_impl_cuda
 
     """
+
     def inner(func):
         custom_op = _find_custom_op(qualname)
         custom_op.impl(device_types, _stacklevel=3)(func)
@@ -245,6 +247,7 @@ def impl_abstract(qualname, *, func=None):
         >>>     return torch.tensor(res, device=x.device)
 
     """
+
     def inner(func):
         custom_op = _find_custom_op(qualname)
         custom_op.impl_abstract(_stacklevel=3)(func)
@@ -260,6 +263,7 @@ def impl_save_for_backward(qualname, *, func=None):
 
     Please see :func:`impl_backward` for more details.
     """
+
     def inner(func):
         custom_op = _find_custom_op(qualname)
         custom_op.impl_save_for_backward(_stacklevel=3)(func)
@@ -315,6 +319,7 @@ def impl_backward(qualname, output_differentiability=None, *, func=None):
     if func is None:
         return inner
     return inner(func)
+
 
 def _destroy(qualname):
     """De-registers a custom op. For testing purposes only"""

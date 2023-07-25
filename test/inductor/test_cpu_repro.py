@@ -93,7 +93,7 @@ class CPUReproTests(TestCase):
     def test_conv2d_bn_mixed_dtype(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     3,
                     16,
@@ -507,6 +507,23 @@ class CPUReproTests(TestCase):
                 256,
             ),
         )
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_to_uint8_rounding_method(self):
+        def fn(x):
+            return x.to(torch.uint8)
+
+        numerical_testsuit = [4.4, 4.5, 4.6, 5.5]
+        for numerical_number in numerical_testsuit:
+            x = torch.ones(17) * numerical_number
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x,))
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -1873,15 +1890,6 @@ class CPUReproTests(TestCase):
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         self.assertTrue(same(fn(x), opt_fn(x)))
         assert metrics.generated_cpp_vec_kernel_count == 2
-
-    def test_invalid_index_of_empty_tensor(self):
-        def fn(a):
-            b = a[[0]]
-            return b
-
-        a = torch.tensor([])
-        with self.assertRaises(RuntimeError):
-            torch.compile(fn)(a)
 
     def test_ir_node_str(self):
         @torch.compile
