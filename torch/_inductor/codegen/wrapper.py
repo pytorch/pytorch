@@ -183,6 +183,7 @@ class MemoryPlanningLine:
 @dataclasses.dataclass
 class AllocateLine(MemoryPlanningLine):
     node: ir.Buffer
+    can_reuse: bool = True
 
     def plan(self, state: MemoryPlanningState):
         if self.node.get_name() in V.graph.removed_buffers:
@@ -190,7 +191,7 @@ class AllocateLine(MemoryPlanningLine):
 
         # try to reuse a recently freed buffer
         key = buffer_reuse_key(self.node)
-        if config.allow_buffer_reuse and key in state:
+        if config.allow_buffer_reuse and key in state and self.can_reuse:
             free_line = state.pop(key)
             free_line.is_reused = True
             return ReuseLine(self.wrapper, free_line.node, self.node)
@@ -786,8 +787,17 @@ class WrapperCodeGen(CodeGen):
             )
         )
 
+    def use_preallocated_ouput(self, buffer):
+        # outputs are passed-in in the AOT mode
+        return (
+            V.graph.aot_mode
+            and buffer
+            and buffer.get_name() in set(V.graph.get_output_names())
+        )
+
     def codegen_allocation(self, buffer):
         name = buffer.get_name()
+
         if name in V.graph.removed_buffers or name in self.allocated:
             return
         self.allocated.add(name)
@@ -810,7 +820,13 @@ class WrapperCodeGen(CodeGen):
             self.codegen_deferred_allocation(name, layout)
             return
 
-        self.writeline(AllocateLine(self, buffer))
+        self.writeline(
+            AllocateLine(
+                self,
+                buffer,
+                not self.use_preallocated_ouput(buffer),
+            )
+        )
 
     def codegen_free(self, buffer):
         name = buffer.get_name()
@@ -831,15 +847,17 @@ class WrapperCodeGen(CodeGen):
 
         self.writeline(FreeIfNotReusedLine(self, buffer))
 
-    def can_reuse(self, buffer):
-        name = buffer.get_name()
+    def can_reuse(self, input_buffer, output_buffer=None):
+        name = input_buffer.get_name()
         if (
             name in V.graph.removed_buffers
             or name in V.graph.graph_inputs
             or name in V.graph.constants
             or name in self.freed
+            or self.use_preallocated_ouput(output_buffer)
         ):
             return False
+
         return True
 
     def did_reuse(self, buffer, reused_buffer):
@@ -879,6 +897,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.call_func_name = "inductor_entry_cpp"
         self.cuda = False
         self.supports_intermediate_hooks = False
+        self.outputs_need_copy = set()
 
         from .cpp import cexpr
 
@@ -1058,10 +1077,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
         # Output tensors are allocated by the AOT runtime.
         if V.graph.aot_mode:
             for idx, output in enumerate(V.graph.graph_outputs):
-                if output.get_name() in self.reuses:
-                    # buffer was reused, so we need to explicitly copy it to the output tensor
+                if isinstance(output, ir.ReinterpretView) or (
+                    hasattr(output, "get_name")
+                    and output.get_name() in self.outputs_need_copy
+                ):
+                    output_as_strided = output.codegen_reference()
                     self.wrapper_call.writeline(
-                        f"outputs[{idx}].copy_({output.get_name()});"
+                        f"outputs[{idx}].copy_({output_as_strided});"
                     )
             self.wrapper_call.writeline("\n}")
         else:
@@ -1199,33 +1221,38 @@ class CppWrapperCodeGen(WrapperCodeGen):
         cpp_device = self.codegen_device(device)
         return f"at::TensorOptions({cpp_device}).dtype({DTYPE_TO_ATEN[dtype]}))"
 
-    def codegen_allocation(self, buffer):
+    def make_buffer_allocation(self, buffer):
         name = buffer.get_name()
         # outputs are passed-in in the AOT mode
-        if V.graph.aot_mode and name in set(V.graph.get_output_names()):
+        if self.use_preallocated_ouput(buffer):
             output_idx = None
+            output_buffer = None
             for idx, output in enumerate(V.graph.graph_outputs):
                 if hasattr(output, "get_name") and name == output.get_name():
                     output_idx = idx
+                    output_buffer = output
                     break
 
-            assert output_idx is not None, "Unkown output index"
-            self.writeline(f"auto {name} = outputs[{output_idx}];")
-            return
+            assert (
+                output_idx is not None and output_buffer is not None
+            ), "Unknown output index"
+            if V.graph.sizevars.statically_known_leq(
+                buffer.get_numel(), output_buffer.get_numel()
+            ):
+                return f"auto {name} = outputs[{output_idx}];"
+            else:
+                self.outputs_need_copy.add(name)
 
-        super().codegen_allocation(buffer)
-
-    def make_buffer_allocation(self, buffer):
         # TODO: map layout here.
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
         return (
-            f"{self.declare}{buffer.get_name()} = {self.namespace}empty_strided("
+            f"{self.declare}{name} = {self.namespace}empty_strided("
             f"{self.codegen_shape_tuple(shape)}, "
             f"{self.codegen_shape_tuple(stride)}, "
-            f"{self.codegen_tensor_option(device, dtype)}{self.ending}"
+            f"{self.codegen_tensor_option(device, dtype)};"
         )
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(

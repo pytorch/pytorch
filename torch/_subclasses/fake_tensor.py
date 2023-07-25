@@ -23,7 +23,11 @@ from torch._prims_common import (
 )
 from torch._subclasses.meta_utils import MetaConverter
 from torch._utils import render_call
-from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
+from torch.fx.experimental.symbolic_shapes import (
+    DimConstraint,
+    DimDynamic,
+    free_symbols,
+)
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
@@ -515,7 +519,15 @@ def nonzero(fake_mode, func, arg):
         # disjoint with what can actually occur.  But this is fine:
         # remember, the hypothesis is that if your later code works
         # with N >= 2, it will work with N = 1 and N = 0.
-        constrain_range(nnz, min=2, max=sys.maxsize - 1)
+        maxval = sys.maxsize - 1
+        if not free_symbols(arg.numel()):
+            # Don't upgrade the range if numel is less than two, since we then
+            # have an empty range which makes things go explodey.  We also
+            # don't allow for 2 because that would specialize the unbacked
+            # SymInt to 2, which is also likely to be buggy.
+            if arg.numel() >= 2:
+                maxval = arg.numel()
+        constrain_range(nnz, min=2, max=maxval)
 
         arg._nonzero_memo = nnz
         arg._nonzero_memo_vc = arg._version
