@@ -209,6 +209,8 @@ class GraphLowering(torch.fx.Interpreter):
         ] = (
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
+        # Used if lowering encounters cases where cudagraphs are not supported
+        self.disable_cudagraphs = False
 
     @staticmethod
     def decide_layout_opt(gm) -> bool:

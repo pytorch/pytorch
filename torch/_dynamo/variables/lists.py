@@ -14,7 +14,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import make_dupe_guard
 from ..source import GetItemSource
-from ..utils import check_constant_args, guard_if_dyn, namedtuple_fields
+from ..utils import check_constant_args, get_fake_value, guard_if_dyn, namedtuple_fields
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
@@ -95,8 +95,18 @@ class BaseListVariable(VariableTracker):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
+            from .tensor import TensorVariable
+
             assert not kwargs and len(args) == 1
-            return self.getitem_const(args[0])
+            if isinstance(args[0], TensorVariable):
+                value = get_fake_value(args[0].as_proxy().node, tx)
+                if value.constant is not None and value.constant.numel() == 1:
+                    value = variables.ConstantVariable(value.constant.item())
+                else:
+                    unimplemented("__getitem__ with non-constant tensor")
+            else:
+                value = args[0]
+            return self.getitem_const(value)
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
