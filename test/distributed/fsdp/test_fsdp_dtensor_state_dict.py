@@ -172,6 +172,23 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
             self.assertEqual(v1, v2)
 
 
+class TestFSDPDeviceMeshInit(DTensorTestBase):
+    def init_mesh(self) -> DeviceMesh:
+        mesh_tensor = torch.arange(self.world_size).view(2, -1)
+        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+
+        return device_mesh
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_dtensor_sharded_optim_state_dict(self):
+        device_mesh = self.init_mesh()
+        model = FSDP(TestDummyModel().cuda(), _device_mesh=device_mesh)
+        optim = torch.optim.Adam(model.parameters(), lr=0.1)
+        model(model.get_input()).sum().backward()
+        optim.step()
+
+
 instantiate_parametrized_tests(TestDtensorShardedModelStateDict)
 if __name__ == "__main__":
     run_tests()
