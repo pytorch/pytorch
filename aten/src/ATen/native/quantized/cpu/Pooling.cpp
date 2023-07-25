@@ -16,6 +16,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/empty.h>
 #include <ATen/ops/_empty_affine_quantized.h>
 #include <ATen/ops/quantized_max_pool1d.h>
 #include <ATen/ops/quantized_max_pool1d_native.h>
