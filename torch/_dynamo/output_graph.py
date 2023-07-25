@@ -919,7 +919,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         )
 
         compiled_fn = self.call_user_compiler(gm)
-        # breakpoint()
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
