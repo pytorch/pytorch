@@ -2142,6 +2142,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return cg.get_instructions()
 
     def RETURN_VALUE(self, inst):
+        # breakpoint()
         if self.output.count_calls() == 0 and not self.export:
             raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
@@ -2288,6 +2289,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if tracer.f_globals is parent.f_globals:
             # Merge symbolic_globals back if parent and child are in the same namespace
             parent.symbolic_globals.update(tracer.symbolic_globals)
+
+        if getattr(func.fn, "_inline_success_disable", False):
+            # TODO(voz): This is incomplete. We need an inverse operation to un-disable
+            # once compile finishes, for future compilations.
+            func.fn._inline_success_disable(func.fn)
 
         log.debug("DONE INLINING %s", code)
 

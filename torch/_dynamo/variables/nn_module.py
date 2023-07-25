@@ -128,6 +128,7 @@ class NNModuleVariable(VariableTracker):
         return getattr(mod, "training", False)
 
     def convert_to_unspecialized(self, tx):
+        # breakpoint()
         """Restart analysis treating this module as an UnspecializedNNModuleVariable"""
         mod = tx.output.get_submodule(self.module_key)
         GenerationTracker.tag(mod)

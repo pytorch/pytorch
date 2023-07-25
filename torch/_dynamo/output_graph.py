@@ -919,6 +919,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         )
 
         compiled_fn = self.call_user_compiler(gm)
+        # breakpoint()
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
@@ -944,6 +945,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+        breakpoint()
         tot = 0
         placeholders = []
         for node in gm.graph.nodes:

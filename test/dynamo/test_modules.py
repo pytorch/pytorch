@@ -1909,12 +1909,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         loss_bwd = loss.backward()
 
         self.assertEqual(eager_loss_bwd, loss_bwd)
-        # Why 2? Its a little odd. This feels like a bug, but maybe is not?
-        # There are no graph breaks.
-        # The first graph is the full model, with hooks inlined.
-        # The second is just the hook, compiled alone, potentially due to how we are hooking into the
-        # interpreter? unclear, needs debugging. Do not land like this.
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_dunder_call_explicitly(self):
         # hooks should be triggered if explicit calling `__call__`
@@ -2074,33 +2069,21 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
 
 
-import torch.distributed as dist
-from torch.testing._internal.distributed.fake_pg import FakeStore
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase
+    DTensorTestBase,
+    with_comms,
 )
+
 
 class TestDTensorCompile(DTensorTestBase):
     def setUp(self):
         super().setUp()
-        fake_store = FakeStore()
-        dist.init_process_group(
-            "fake", store=fake_store, rank=0, world_size=self.world_size
-        )
-
-    def tearDown(self):
-        super().tearDown()
-        dist.destroy_process_group()
-
-    @property
-    def device_type(self) -> str:
-        return "cuda" if torch.cuda.is_available() else "cpu"
 
     @property
     def world_size(self) -> int:
         return 2
 
+    @with_comms
     def test_dtensor_fullgraph(self):
         class SimpleMLP(torch.nn.Module):
             def __init__(self, device):

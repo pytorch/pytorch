@@ -1603,7 +1603,7 @@ state_dict_hook_names = [
 all_hook_names = forward_hook_names + backward_hook_names + state_dict_hook_names
 
 
-def nnmodule_has_hooks(
+def nn_module_get_all_hooks(
     mod,
     check_forward_hooks=False,
     check_backward_hooks=False,
@@ -1625,7 +1625,40 @@ def nnmodule_has_hooks(
         hook_dicts_to_check.extend(backward_hook_names)
     if check_state_dict_hooks:
         hook_dicts_to_check.extend(state_dict_hook_names)
-    return any(len(getattr(mod, x)) > 0 for x in hook_dicts_to_check if hasattr(mod, x))
+
+    all_hooks = []
+    for hook_dict_name in hook_dicts_to_check:
+        hooks = getattr(mod, hook_dict_name, [])
+        for hook_name in hooks:
+            hook = hooks[hook_name]
+
+            def inline_disable(self):
+                hook = torch._dynamo.decorators.disable(self)
+                getattr(mod, hook_dict_name)[hook_name] = hook
+
+            hook._inline_success_disable = inline_disable
+
+            all_hooks.append(hook)
+
+    return all_hooks
+
+
+def nnmodule_has_hooks(
+    mod,
+    check_forward_hooks=False,
+    check_backward_hooks=False,
+    check_state_dict_hooks=False,
+):
+    """
+    Helper function to check if a module has any hooks attached to it.
+    """
+    hooks = nn_module_get_all_hooks(
+        mod,
+        check_forward_hooks=check_forward_hooks,
+        check_backward_hooks=check_backward_hooks,
+        check_state_dict_hooks=check_state_dict_hooks,
+    )
+    return bool(hooks)
 
 
 def to_numpy_helper(value):
