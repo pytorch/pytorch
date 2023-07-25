@@ -101,13 +101,8 @@ class BinaryFoldingTemplate(TestCase):
             torch.manual_seed(1234)
             inp = torch.rand(inps).to(self.device)
             out_eager = mod_eager(inp)
-            scripted_mod = torch.jit.trace(mod_eager, (inp,))
-            scripted_mod = torch.jit.freeze(scripted_mod)
-            scripted_out = scripted_mod(inp)
-            scripted_out = scripted_mod(inp)
             out_optimized = out_optimized(inp)
-            self.assertEqual(scripted_out, out_eager, atol=2e-04, rtol=1e-5)
-            self.assertEqual(out_optimized, out_eager, atol=2e-04, rtol=1e-5)
+            self.assertEqual(out_optimized, out_eager)
             if expect_success:
                 self.assertTrue(n_binary_ops == 0)
             else:
@@ -158,7 +153,7 @@ class BinaryFoldingTemplate(TestCase):
                 nn.Conv2d,
                 pytorch_op,
                 False,
-                add_tensor=torch.rand(1).to(torch.int).to(self.device),
+                add_tensor=torch.tensor([2]).to(torch.int).to(self.device),
                 expect_success=False,
             )
 
