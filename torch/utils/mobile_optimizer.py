@@ -54,8 +54,7 @@ def optimize_for_mobile(
             non_exist_methods.append(method)
     if non_exist_methods:
         raise AttributeError(
-            'The following methods to preserve do not exist in script_module: {}'
-            .format(', '.join(non_exist_methods)))
+            f"The following methods to preserve do not exist in script_module: {', '.join(non_exist_methods)}")
 
     backend = backend.lower()
     if backend == 'cpu':

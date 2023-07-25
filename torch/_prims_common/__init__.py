@@ -143,17 +143,13 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
         same_strides, idx = check_significant_strides(a, b)
         if not same_strides:
             msg = (
-                "Stride mismatch! Strides are {} and {} (mismatched at {})!".format(
-                    a.stride(), b.stride(), idx
-                )
+                f"Stride mismatch! Strides are {a.stride()} and {b.stride()} (mismatched at {idx})!"
             )
             raise RuntimeError(msg)
 
         if a.storage_offset() != b.storage_offset():
             msg = (
-                "Storage offset mismatch! Storage offsets are {} and {}!".format(
-                    a.storage_offset(), b.storage_offset()
-                )
+                f"Storage offset mismatch! Storage offsets are {a.storage_offset()} and {b.storage_offset()}!"
             )
             raise RuntimeError(msg)
 
@@ -584,9 +580,7 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
 
     if _idx < 0 or _idx >= rank:
         # Same error message as in aten/src/ATen/WrapDimUtils.h:49
-        msg = "Dimension out of range (expected to be in range of [{}, {}], but got {})".format(
-            -rank, rank - 1, idx
-        )
+        msg = f"Dimension out of range (expected to be in range of [{-rank}, {rank - 1}], but got {idx})"
         raise IndexError(msg)
 
     return _idx
@@ -710,9 +704,7 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
                 shape = arg.shape
 
             if not is_same_shape(shape, arg.shape):
-                msg = "Shape {} is not the expected shape {}!".format(
-                    arg.shape, shape
-                )
+                msg = f"Shape {arg.shape} is not the expected shape {shape}!"
                 raise RuntimeError(msg)
         else:
             msg = (
@@ -1340,9 +1332,7 @@ def elementwise_dtypes(
     for x in args:
         if not isinstance(x, (Number, TensorLike, sympy.Symbol)):
             msg = (
-                "Unexpected type {} when computing elementwise type promotion!".format(
-                    str(type(x))
-                )
+                f"Unexpected type {str(type(x))} when computing elementwise type promotion!"
             )
             raise ValueError(msg)
 
