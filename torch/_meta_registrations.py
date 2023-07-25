@@ -2878,6 +2878,10 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     return x1.new_empty(output_shape)
 
 
+# NB: This meta function accepts non-meta arguments!  When this behavior
+# was originally introduced this was accidental, but it is now load bearing
+# as people are using this so that they can conveniently test code involving
+# embeddings (feeding CPU tensor inputs with meta device EmbeddingBag module)
 @register_meta(aten._embedding_bag.default)
 def meta_embedding_bag(
     weight,
