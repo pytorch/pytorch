@@ -1328,6 +1328,17 @@ class TestIndexing(TestCase):
                                     r"Expected tensor to have .* but got tensor with .* torch.take_along_dim()"):
             torch.take_along_dim(t.cpu(), indices, dim=0)
 
+    @onlyCUDA
+    def test_cuda_broadcast_index_use_deterministic_algorithms(self, device):
+        torch.use_deterministic_algorithms(True)
+        tensor_a = torch.rand(100, 4).cpu()
+        tensor_b = tensor_a.to(device=device)
+        idx = torch.tensor([0, 1])
+        tensor_a[idx, :] = 1.0
+        tensor_b[idx, :] = 1.0
+        self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+        torch.use_deterministic_algorithms(False)
+
 # The tests below are from NumPy test_indexing.py with some modifications to
 # make them compatible with PyTorch. It's licensed under the BDS license below:
 #
