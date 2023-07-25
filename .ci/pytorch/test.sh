@@ -58,11 +58,15 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   export VALGRIND=OFF
 fi
 
-if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]]; then
+if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]] || [[ "${CONTINUE_THROUGH_ERROR}" == "1" ]]; then
   # When rerunning disable tests, do not generate core dumps as it could consume
   # the runner disk space when crashed tests are run multiple times. Running out
   # of space is a nasty issue because there is no space left to even download the
   # GHA to clean up the disk
+  #
+  # We also want to turn off core dump when CONTINUE_THROUGH_ERROR is set as there
+  # is a small risk of having multiple core files generated. Arguably, they are not
+  # that useful in this case anyway and the test will still continue
   ulimit -c 0
 
   # Note that by piping the core dump to a script set in /proc/sys/kernel/core_pattern
@@ -264,6 +268,7 @@ test_dynamo_shard() {
       test_package \
       test_legacy_vmap \
       test_custom_op_testing \
+      test_content_store \
       export/test_db \
       functorch/test_dims \
       functorch/test_aotdispatch \
@@ -348,6 +353,8 @@ test_perf_for_dashboard() {
       local target_flag=("--${target}")
       if [[ "$target" == "performance" ]]; then
         target_flag+=( --cold-start-latency)
+      elif [[ "$target" == "accuracy" ]]; then
+        target_flag+=( --no-translation-validation)
       fi
 
       if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
@@ -363,13 +370,23 @@ test_perf_for_dashboard() {
       if [[ "$DASHBOARD_TAG" == *dynamic-true* ]]; then
         python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
-            --dynamic-batch-only --disable-cudagraphs "$@" \
+            --dynamic-batch-only "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]] && [[ "$mode" == "inference" ]]; then
         python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --cpp-wrapper "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *freezing_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
+        python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
+            --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *aotinductor-true* ]] && [[ "$mode" == "inference" ]]; then
+        python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --export-aot-inductor --disable-cudagraphs "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_aot_inductor_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *maxautotune-true* ]]; then
         TORCHINDUCTOR_MAX_AUTOTUNE=1 python "benchmarks/dynamo/$suite.py" \
