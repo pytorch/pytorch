@@ -8,6 +8,8 @@ from ..select_algorithm import (
     ExternKernelChoice,
     TritonTemplate,
 )
+from torch._inductor.fx_passes.post_grad import register_lowering_pattern
+from ..pattern_matcher import CallFunction, KeywordArg
 from ..utils import use_triton_template
 from .mm_common import (
     addmm_epilogue,
@@ -62,7 +64,11 @@ mm_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k, other=0.)
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
+
+        if B_PROLOGUE_CAST_TYPE is not None:
+            b = b.to(B_PROLOGUE_CAST_TYPE)
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
+
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
 
@@ -189,3 +195,30 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     return autotune_select_algorithm(
         "addmm", choices, [inp_expanded, mat1, mat2], layout
     )
+
+
+prologue_cast_mm_pattern = CallFunction(
+    aten.mm,
+    KeywordArg("mat1"),
+    CallFunction(
+        torch.ops.prims.convert_element_type.default,
+        KeywordArg("mat2"),
+        KeywordArg("mat2_dtype"),
+    ),
+)
+
+@register_lowering_pattern(prologue_cast_mm_pattern)
+def tuned_a16w8_mm(*args, **kwargs):
+    mat1, mat2, mat2_dtype = kwargs["mat1"], kwargs["mat2"], kwargs["mat2_dtype"]
+    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
+    # options to tune from
+    choices = []
+    b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
+    for config in mm_configs(m, n, k):
+        mm_template.maybe_append_choice(
+            choices,
+            (mat1, mat2),
+            layout,
+            **mm_options(config, k, layout, b_prologue_cast_type),
+        )
+    return autotune_select_algorithm("a16w8_mm", choices, [mat1, mat2], layout)

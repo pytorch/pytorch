@@ -60,6 +60,10 @@ mm_configs = functools.partial(
         (32, 32, 128, 2, 4),
         (64, 64, 16, 2, 4),
         (32, 32, 16, 1, 2),
+        (128, 256, 64, 3, 8),
+        (64, 256, 32, 4, 4),
+        (128, 32, 32, 4, 4),
+        (32, 64, 32, 5, 2),
     ),
 )
 
@@ -98,7 +102,7 @@ def acc_type(dtype):
     return f"tl.{dtype}".replace("torch.", "")
 
 
-def mm_options(config, sym_k, layout):
+def mm_options(config, sym_k, layout, b_prologue_cast_type=None):
     """
     Common options to matmul triton templates.
     """
@@ -112,6 +116,7 @@ def mm_options(config, sym_k, layout):
         EVEN_K=even_k_symbolic,
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
         ACC_TYPE=acc_type(layout.dtype),
+        B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
         **config.kwargs,
