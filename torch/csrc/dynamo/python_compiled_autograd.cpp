@@ -471,6 +471,10 @@ variable_list compiled_autograd(
   if (accumulate_grad) {
     TORCH_INTERNAL_ASSERT(outputs.size() == cache->output_grad_targets.size());
     for (const auto i : c10::irange(outputs.size())) {
+      // Here we set the `var.grad = ...` for each call to
+      // `saved.assign_mutable_grad(var, ...)`.  For the case on inplace grad
+      // accumuation there will be an `add_` op in the graph and no return
+      // value.
       compiler_call.tensor_args.inputs[cache->output_grad_targets[i]]
           .mutable_grad() = outputs[i];
     }
