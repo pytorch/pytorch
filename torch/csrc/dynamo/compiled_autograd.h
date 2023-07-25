@@ -110,7 +110,8 @@ struct TensorArg {
 
 struct TensorArgs {
   // Manages a collection of TensorArgs and mappings from Tensors/SavedVariables
-  // to them
+  // to them.  This also allows us to unpack SavedVariable exactly once and
+  // store the unpacked Tensor.
 
   TensorArg& lookup(const at::Tensor& tensor, bool create = false) {
     if (!tensor.defined()) {
@@ -151,6 +152,8 @@ struct TensorArgs {
 
  private:
   std::unordered_map<const c10::TensorImpl*, TensorArg> _args;
+  // Every TensorArg from this is actually owned by _args (or _undefined) and
+  // that's why we have an un-owned pointer here.
   std::unordered_map<const SavedVariable*, TensorArg*> _saved_variables;
   TensorArg _undefined;
   uint32_t _next_id = 1; // id=0 used by _undefined
