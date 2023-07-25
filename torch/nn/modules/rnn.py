@@ -72,6 +72,11 @@ class RNNBase(Module):
                           "recurrent layer, so non-zero dropout expects "
                           "num_layers greater than 1, but got dropout={} and "
                           "num_layers={}".format(dropout, num_layers))
+
+        if not isinstance(hidden_size, int):
+            raise TypeError(f"hidden_size should be of type int, got: {type(hidden_size).__name__}")
+        if hidden_size <= 0:
+            raise ValueError("hidden_size must be greater than zero")
         if proj_size < 0:
             raise ValueError("proj_size should be a positive integer or zero to disable projections")
         if proj_size >= hidden_size:
@@ -453,7 +458,7 @@ class RNN(RNNBase):
         elif self.nonlinearity == 'relu':
             mode = 'RNN_RELU'
         else:
-            raise ValueError("Unknown nonlinearity '{}'".format(self.nonlinearity))
+            raise ValueError(f"Unknown nonlinearity '{self.nonlinearity}'")
         super().__init__(mode, *args, **kwargs)
 
     @overload
@@ -489,7 +494,7 @@ class RNN(RNNBase):
         else:
             batch_sizes = None
             if input.dim() not in (2, 3):
-                raise ValueError("RNN: Expected input to be 2D or 3D, got {}D tensor instead".format(input.dim()))
+                raise ValueError(f"RNN: Expected input to be 2D or 3D, got {input.dim()}D tensor instead")
             is_batched = input.dim() == 3
             batch_dim = 0 if self.batch_first else 1
             if not is_batched:
@@ -798,7 +803,7 @@ class LSTM(RNNBase):
                 hx = self.permute_hidden(hx, sorted_indices)
         else:
             if input.dim() not in (2, 3):
-                raise ValueError("LSTM: Expected input to be 2D or 3D, got {}D instead".format(input.dim()))
+                raise ValueError(f"LSTM: Expected input to be 2D or 3D, got {input.dim()}D instead")
             is_batched = input.dim() == 3
             batch_dim = 0 if self.batch_first else 1
             if not is_batched:
@@ -1017,7 +1022,7 @@ class GRU(RNNBase):
         else:
             batch_sizes = None
             if input.dim() not in (2, 3):
-                raise ValueError("GRU: Expected input to be 2D or 3D, got {}D instead".format(input.dim()))
+                raise ValueError(f"GRU: Expected input to be 2D or 3D, got {input.dim()}D instead")
             is_batched = input.dim() == 3
             batch_dim = 0 if self.batch_first else 1
             if not is_batched:
@@ -1174,7 +1179,7 @@ class RNNCell(RNNCellBase):
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
         if input.dim() not in (1, 2):
-            raise ValueError("RNNCell: Expected input to be 1D or 2D, got {}D instead".format(input.dim()))
+            raise ValueError(f"RNNCell: Expected input to be 1D or 2D, got {input.dim()}D instead")
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -1199,7 +1204,7 @@ class RNNCell(RNNCellBase):
         else:
             ret = input  # TODO: remove when jit supports exception flow
             raise RuntimeError(
-                "Unknown nonlinearity: {}".format(self.nonlinearity))
+                f"Unknown nonlinearity: {self.nonlinearity}")
 
         if not is_batched:
             ret = ret.squeeze(0)
@@ -1274,7 +1279,7 @@ class LSTMCell(RNNCellBase):
 
     def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
         if input.dim() not in (1, 2):
-            raise ValueError("LSTMCell: Expected input to be 1D or 2D, got {}D instead".format(input.dim()))
+            raise ValueError(f"LSTMCell: Expected input to be 1D or 2D, got {input.dim()}D instead")
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -1365,7 +1370,7 @@ class GRUCell(RNNCellBase):
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
         if input.dim() not in (1, 2):
-            raise ValueError("GRUCell: Expected input to be 1D or 2D, got {}D instead".format(input.dim()))
+            raise ValueError(f"GRUCell: Expected input to be 1D or 2D, got {input.dim()}D instead")
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)

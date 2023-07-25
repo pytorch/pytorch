@@ -147,10 +147,22 @@ class EnterCudaDeviceContextManagerLine:
     def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
         if V.graph.cpp_wrapper:
             code.writeline("\n")
-            if self.first_time:
-                code.writeline(f"at::cuda::CUDAGuard device_guard({self.device_idx});")
+            if V.graph.aot_mode:
+                # In AOT mode, we have a stream provided as a param. A stream is
+                # associated with a device, so it doesn't make sense for the device
+                # to change.
+                assert self.first_time
+                # CUDAStreamGuard sets the stream and the device.
+                code.writeline(
+                    f"at::cuda::CUDAStreamGuard stream_guard("
+                    F"at::cuda::getStreamFromExternal(stream, {self.device_idx}));"
+                )
             else:
-                code.writeline(f"device_guard.set_index({self.device_idx});")
+                if self.first_time:
+                    code.writeline(f"at::cuda::CUDAGuard device_guard({self.device_idx});")
+                else:
+                    code.writeline(f"device_guard.set_index({self.device_idx});")
+                code.writeline(f"stream = at::cuda::getCurrentCUDAStream({self.device_idx});")
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
@@ -668,7 +680,7 @@ class WrapperCodeGen(CodeGen):
         with output.indent():
             output.writelines(
                 [
-                    "from torch._inductor.utils import compiled_module_main",
+                    "from torch._inductor.wrapper_benchmark import compiled_module_main",
                     f"compiled_module_main('{get_benchmark_name()}', benchmark_compiled_module)",
                 ]
             )
@@ -891,8 +903,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def write_header(self):
         if V.graph.aot_mode:
             with open(
-                os.path.join(os.path.dirname(__file__), "aot_inductor_interface.cpp"),
-                "r",
+                os.path.join(os.path.dirname(__file__), "aot_inductor_interface.cpp")
             ) as f:
                 self.header.splice(f.read())
         else:
@@ -985,17 +996,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 torch::List<c10::optional<at::Scalar>> optional_list;
                 """
             )
-
-            dev_idx = V.graph.scheduler.current_device.index
-            if V.graph.aot_mode:
+            if not V.graph.aot_mode:
                 self.wrapper_call.splice(
-                    f"at::cuda::CUDAStreamGuard stream_guard(at::cuda::getStreamFromExternal(stream, {dev_idx}));"
+                    """
+                    cudaStream_t stream;
+                    """
                 )
-            else:
-                self.wrapper_call.splice(
-                    f"auto stream = at::cuda::getCurrentCUDAStream({dev_idx});"
-                )
-
 
     def codegen_model_constructor(self):
         """
@@ -1069,6 +1075,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def generate_return(self, output_refs):
         # Output tensors are allocated by the AOT runtime.
         if V.graph.aot_mode:
+            for idx, output in enumerate(V.graph.graph_outputs):
+                if output.get_name() in self.reuses:
+                    # buffer was reused, so we need to explicitly copy it to the output tensor
+                    self.wrapper_call.writeline(
+                        f"outputs[{idx}].copy_({output.get_name()});"
+                    )
             self.wrapper_call.writeline("\n}")
         else:
             self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
@@ -1205,31 +1217,34 @@ class CppWrapperCodeGen(WrapperCodeGen):
         cpp_device = self.codegen_device(device)
         return f"at::TensorOptions({cpp_device}).dtype({DTYPE_TO_ATEN[dtype]}))"
 
+    def codegen_allocation(self, buffer):
+        name = buffer.get_name()
+        # outputs are passed-in in the AOT mode
+        if V.graph.aot_mode and name in set(V.graph.get_output_names()):
+            output_idx = None
+            for idx, output in enumerate(V.graph.graph_outputs):
+                if hasattr(output, "get_name") and name == output.get_name():
+                    output_idx = idx
+                    break
+
+            assert output_idx is not None, "Unkown output index"
+            self.writeline(f"auto {name} = outputs[{output_idx}];")
+            return
+
+        super().codegen_allocation(buffer)
+
     def make_buffer_allocation(self, buffer):
-        output_idx = None
-        for idx, output in enumerate(V.graph.graph_outputs):
-            if isinstance(output, (ir.NoneAsConstantBuffer, ir.ShapeAsConstantBuffer)):
-                continue
-            if buffer == output.data:
-                output_idx = idx
-                break
-        if output_idx is not None and V.graph.aot_mode:
-            # In aot_mode, output buffers are managed by the AOT runtime.
-            return (
-                f"at::Tensor {buffer.get_name()} = outputs[{output_idx}]{self.ending}"
-            )
-        else:
-            # TODO: map layout here.
-            device = buffer.get_device()
-            dtype = buffer.get_dtype()
-            shape = tuple(buffer.get_size())
-            stride = tuple(buffer.get_stride())
-            return (
-                f"{self.declare}{buffer.get_name()} = {self.namespace}empty_strided("
-                f"{self.codegen_shape_tuple(shape)}, "
-                f"{self.codegen_shape_tuple(stride)}, "
-                f"{self.codegen_tensor_option(device, dtype)}{self.ending}"
-            )
+        # TODO: map layout here.
+        device = buffer.get_device()
+        dtype = buffer.get_dtype()
+        shape = tuple(buffer.get_size())
+        stride = tuple(buffer.get_stride())
+        return (
+            f"{self.declare}{buffer.get_name()} = {self.namespace}empty_strided("
+            f"{self.codegen_shape_tuple(shape)}, "
+            f"{self.codegen_shape_tuple(stride)}, "
+            f"{self.codegen_tensor_option(device, dtype)}{self.ending}"
+        )
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,

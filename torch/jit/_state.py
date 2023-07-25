@@ -34,7 +34,7 @@ class EnabledProxy:
         elif value == "0v":
             print(false_message)
             return False
-        raise ValueError("Unknown setting of {}. Try using 0 or 1.".format(name))
+        raise ValueError(f"Unknown setting of {name}. Try using 0 or 1.")
 
     def __bool__(self):
         return self.enabled

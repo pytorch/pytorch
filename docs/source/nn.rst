@@ -22,7 +22,6 @@ These are the basic building blocks for graphs:
     :nosignatures:
     :template: classtemplate.rst
 
-    ~parameter.Buffer
     ~parameter.Parameter
     ~parameter.UninitializedParameter
     ~parameter.UninitializedBuffer

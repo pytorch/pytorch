@@ -5,7 +5,7 @@ import functools
 import weakref
 
 import torch
-from ..parameter import Parameter, Buffer
+from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
 from torch import Tensor, device, dtype
@@ -536,7 +536,7 @@ class Module:
         elif name == '':
             raise KeyError("buffer name can't be empty string \"\"")
         elif hasattr(self, name) and name not in self._buffers:
-            raise KeyError("attribute '{}' already exists".format(name))
+            raise KeyError(f"attribute '{name}' already exists")
         elif tensor is not None and not isinstance(tensor, torch.Tensor):
             raise TypeError("cannot assign '{}' object to buffer '{}' "
                             "(torch Tensor or None required)"
@@ -577,7 +577,7 @@ class Module:
         elif name == '':
             raise KeyError("parameter name can't be empty string \"\"")
         elif hasattr(self, name) and name not in self._parameters:
-            raise KeyError("attribute '{}' already exists".format(name))
+            raise KeyError(f"attribute '{name}' already exists")
 
         if param is None:
             self._parameters[name] = None
@@ -615,9 +615,9 @@ class Module:
             raise TypeError("module name should be a string. Got {}".format(
                 torch.typename(name)))
         elif hasattr(self, name) and name not in self._modules:
-            raise KeyError("attribute '{}' already exists".format(name))
+            raise KeyError(f"attribute '{name}' already exists")
         elif '.' in name:
-            raise KeyError("module name can't contain \".\", got: {}".format(name))
+            raise KeyError(f"module name can't contain \".\", got: {name}")
         elif name == '':
             raise KeyError("module name can't be empty string \"\"")
         for hook in _global_module_registration_hooks.values():
@@ -1599,7 +1599,7 @@ class Module:
                 var = result
                 while not isinstance(var, torch.Tensor):
                     if isinstance(var, dict):
-                        var = next((v for v in var.values() if isinstance(v, torch.Tensor)))
+                        var = next(v for v in var.values() if isinstance(v, torch.Tensor))
                     else:
                         var = var[0]
                 grad_fn = var.grad_fn
@@ -1745,16 +1745,16 @@ class Module:
                 modules[name] = value
             else:
                 buffers = self.__dict__.get('_buffers')
-                if isinstance(value, Buffer) or buffers is not None and name in buffers:
+                if buffers is not None and name in buffers:
                     if value is not None and not isinstance(value, torch.Tensor):
                         raise TypeError("cannot assign '{}' as buffer '{}' "
-                                        "(torch.nn.Buffer, torch.Tensor or None expected)"
+                                        "(torch.Tensor or None expected)"
                                         .format(torch.typename(value), name))
-                    if isinstance(value, Buffer):
-                        persistent = value.persistent
-                    else:
-                        persistent = name not in self._non_persistent_buffers_set
-                    self.register_buffer(name, value, persistent)
+                    for hook in _global_buffer_registration_hooks.values():
+                        output = hook(self, name, value)
+                        if output is not None:
+                            value = output
+                    buffers[name] = value
                 else:
                     super().__setattr__(name, value)
 
@@ -2098,7 +2098,7 @@ class Module:
             ``RuntimeError``.
         """
         if not isinstance(state_dict, Mapping):
-            raise TypeError("Expected state_dict to be dict-like, got {}.".format(type(state_dict)))
+            raise TypeError(f"Expected state_dict to be dict-like, got {type(state_dict)}.")
 
         missing_keys: List[str] = []
         unexpected_keys: List[str] = []
@@ -2140,11 +2140,11 @@ class Module:
             if len(unexpected_keys) > 0:
                 error_msgs.insert(
                     0, 'Unexpected key(s) in state_dict: {}. '.format(
-                        ', '.join('"{}"'.format(k) for k in unexpected_keys)))
+                        ', '.join(f'"{k}"' for k in unexpected_keys)))
             if len(missing_keys) > 0:
                 error_msgs.insert(
                     0, 'Missing key(s) in state_dict: {}. '.format(
-                        ', '.join('"{}"'.format(k) for k in missing_keys)))
+                        ', '.join(f'"{k}"' for k in missing_keys)))
 
         if len(error_msgs) > 0:
             raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
