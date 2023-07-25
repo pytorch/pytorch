@@ -160,7 +160,7 @@ Adagrad.__doc__ = r"""Implements Adagrad algorithm.
 
     For further details regarding the algorithm we refer to `Adaptive Subgradient Methods for Online Learning
     and Stochastic Optimization`_.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -169,14 +169,14 @@ Adagrad.__doc__ = r"""Implements Adagrad algorithm.
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-10)
-        {foreach}
-        {maximize}
-        {differentiable}
+        {_foreach_doc}
+        {_maximize_doc}
+        {_differentiable_doc}
 
     .. _Adaptive Subgradient Methods for Online Learning and Stochastic
         Optimization: http://jmlr.org/papers/v12/duchi11a.html
 
-    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
+    """
 
 
 def adagrad(
