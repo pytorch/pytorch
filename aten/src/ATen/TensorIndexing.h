@@ -485,7 +485,7 @@ static inline Tensor handleDimInMultiDimIndexing(
           dim_ptr);
       return result;
     }
-    impl::recordTensorIndex(tensor, outIndices, dim_ptr);
+    impl::recordTensorIndex(tensor.to(at::kLong), outIndices, dim_ptr);
     return result;
   } else {
     TORCH_INTERNAL_ASSERT(false, "Invalid TensorIndex type");
