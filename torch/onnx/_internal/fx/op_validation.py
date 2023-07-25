@@ -184,7 +184,16 @@ def validate_op_between_ort_torch(
 
 @_beartype.beartype
 def _convert_symint_to_int_in_shape(shape: torch.Size) -> torch.Size:
-    """Convert SymInt to int in shape"""
+    """Convert SymInt to int in shape
+
+    Args:
+        shape (torch.Size): The shape of a tensor
+    Raises:
+        ValueError: When SymInt is found in shape
+    Returns:
+        torch.Size: The shape of a tensor with SymInt converted to int
+
+    """
     list_int_shape = []
     for dim in shape:
         if isinstance(dim, torch.SymInt):
@@ -192,8 +201,8 @@ def _convert_symint_to_int_in_shape(shape: torch.Size) -> torch.Size:
                 list_int_shape.append(symbolic_shapes.hint_int(dim))
             else:
                 raise ValueError(
-                    f"Unexpected SymInt found in shape. SymInt: {dim}; "
-                    f"shape: {shape}; type(shape): {type(shape)}."
+                    f"An unbacked SymInt found in shape. SymInt: {dim}; "
+                    f"torch.Size: {shape}. There is no hint for SymInt."
                 )
         else:
             list_int_shape.append(dim)
@@ -240,13 +249,12 @@ def _fx_args_to_torch_args(
     wrapped_args: List[fx_type_utils.Argument] = []
     for arg in fx_args:
         if isinstance(arg, torch.fx.Node):
-            fake_tensor = arg.meta.get("val", None)
+            fake_tensor = arg.meta.get("val")
             if fake_tensor is None and arg.op == "get_attr":
                 fake_tensor = getattr(fx_graph_module, arg.target)  # type: ignore[operator]
-            # NOTE(titaiwang): The arg type here should align to the type handled in
-            # shape.inference.FakeTensorPropGetStaticShapes. Currently, we are aware
-            # of FakeTensor/Tensor/SymInt/SymFloat/Symbool/int/float/bool could be in
-            # arg.meta["static_shape"].
+            # NOTE: Currently, we are aware of
+            # FakeTensor/Tensor/SymInt/SymFloat/Symbool/int/float/bool could be in
+            # arg.meta["val"]/get_attr.
             if isinstance(fake_tensor, torch.Tensor):
                 real_tensor = generate_random_tensors(
                     fake_tensor.shape, fake_tensor.dtype
