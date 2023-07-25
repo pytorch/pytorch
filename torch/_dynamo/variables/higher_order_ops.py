@@ -772,7 +772,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         prev_side_effects = tx.output.side_effects.clone()
 
-        body_r, body_graph, body_lifted_freevars = speculate_subgraph(
+        _, body_graph, body_lifted_freevars = speculate_subgraph(
             tx,
             fn,
             unbatched_input_args,
@@ -819,7 +819,6 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             pytree.tree_map(lambda x: x.value, updated_in_dims.items)
         )
         gm = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
-        # Doesn't work well with dynamic shapes.
         example_value = torch._functorch.vmap.vmap_impl(
             gm,
             actual_in_dims,

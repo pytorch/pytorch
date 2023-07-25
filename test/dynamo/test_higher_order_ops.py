@@ -2196,10 +2196,6 @@ class GraphModule(torch.nn.Module):
         self.assertExpectedInline(actual, expected)
 
     def test_vmap_free_tensor(self):
-        # Dynamic shapes produce a slightly different graph.
-        if check_dynamic_shape_capture():
-            return
-
         y = torch.randn(3, 3)
 
         def fn(x):
@@ -2207,6 +2203,10 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3, 3)
         wrapped_gm = self._compile_check(fn, (x,))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
 
         expected = """\
 class GraphModule(torch.nn.Module):
@@ -2319,10 +2319,6 @@ class GraphModule(torch.nn.Module):
         self.assertExpectedInline(actual, expected)
 
     def test_vmap_over_vmap_captured(self):
-        # Dynamic shapes produce a slightly different graph.
-        if check_dynamic_shape_capture():
-            return
-
         x = torch.ones(2, 3)
         y = torch.ones(5, 3)
 
@@ -2330,6 +2326,10 @@ class GraphModule(torch.nn.Module):
             return torch.func.vmap(torch.func.vmap(lambda y: x * y))(y)
 
         wrapped_gm = self._compile_check(fn, (x,))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
 
         expected = """\
 class GraphModule(torch.nn.Module):
