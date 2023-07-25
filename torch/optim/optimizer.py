@@ -401,29 +401,34 @@ class Optimizer:
             specific to the optimizer, such as learning rate and weight decay,
             as well as a List of parameter ids of the parameters in the group.
 
-        As an example, a returned state dict might look something like:
-        {
-            'state': {
-                0: {'momentum_buffer': tensor(...), ...},
-                1: {'momentum_buffer': tensor(...), ...},
-                2: {'momentum_buffer': tensor(...), ...},
-                3: {'momentum_buffer': tensor(...), ...}
-            },
-            'param_groups': [
-                {
-                    'lr': 0.01,
-                    'weight_decay': 0,
-                    ...
-                    'params': [0, 1]
+        A returned state dict might look something like:
+
+        Example::
+
+            >>> optimizer.state_dict()
+            {
+                'state': {
+                    0: {'momentum_buffer': tensor(...), ...},
+                    1: {'momentum_buffer': tensor(...), ...},
+                    2: {'momentum_buffer': tensor(...), ...},
+                    3: {'momentum_buffer': tensor(...), ...}
                 },
-                {
-                    'lr': 0.001,
-                    'weight_decay': 0.5,
-                    ...
-                    'params': [2, 3]
-                }
-            ]
-        }
+                'param_groups': [
+                    {
+                        'lr': 0.01,
+                        'weight_decay': 0,
+                        ...
+                        'params': [0, 1]
+                    },
+                    {
+                        'lr': 0.001,
+                        'weight_decay': 0.5,
+                        ...
+                        'params': [2, 3]
+                    }
+                ]
+            }
+
         """
         # Save order indices instead of Tensors
         param_mappings = {}
