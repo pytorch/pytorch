@@ -32,7 +32,6 @@ from torch._C._distributed_c10d import (
     get_debug_level,
     Work
 )
-from torch.autograd.profiler import record_function
 from .constants import default_pg_timeout
 from .c10d_logger import _exception_logger, _time_logger
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
@@ -181,6 +180,13 @@ class Backend:
         MPI : ["cpu"],
     }
 
+    backend_type_map: Dict[str, ProcessGroup.BackendType] = {
+        UNDEFINED: ProcessGroup.BackendType.UNDEFINED,
+        GLOO : ProcessGroup.BackendType.GLOO,
+        NCCL: ProcessGroup.BackendType.NCCL,
+        UCC: ProcessGroup.BackendType.UCC,
+    }
+
     def __new__(cls, name: str):
         if not isinstance(name, str):
             raise ValueError(f"Backend name must be a string, but got: {name}")
@@ -228,6 +234,7 @@ class Backend:
 
         setattr(Backend, name.upper(), name.lower())
         Backend.backend_list.append(name.lower())
+        Backend.backend_type_map[name.lower()] = ProcessGroup.BackendType.CUSTOM
 
         # Update device capability matrix in Backend class
         if devices is None:
@@ -505,6 +512,27 @@ class _World:
     @property
     def pg_default_device(self) -> Dict[ProcessGroup, torch.device]:
         return self._pg_default_device
+
+    @property
+    def pg_config_info(self) -> List[Dict[str, Union[int, str]]]:
+        """
+        Returns a list of dict with process groups and backends with their unique IDs
+        and configurations (types and ranks).
+        """
+        config_info = []
+        for pg, backend in self.pg_map.items():
+            # backend is a tuple with the first element being the backend type ("nccl", etc.)
+            backend_type = Backend.backend_type_map[backend[0]]
+            config_info.append(
+                {
+                    "pg_id": pg._id(),
+                    "backend_id": pg._backend_id(backend_type),
+                    "backend_config": self.pg_backend_config[pg],
+                    "ranks": self.pg_group_ranks[pg],
+                }
+            )
+        return config_info
+
 
 _world = _World()
 """Holds the singleton instance of ``_World`` used by c10. Experimental extension point to override it"""
@@ -3888,18 +3916,17 @@ def _new_group_with_tag(
 
     group_name = _process_group_name(ranks, use_hashed_name=use_local_synchronization)
 
-    with record_function(f"## process_group:init with ranks: {ranks}"):
-        pg, pg_store = _new_process_group_helper(
-            group_world_size,
-            group_rank,
-            ranks,
-            backend,
-            default_store,
-            group_name=group_name,
-            pg_options=pg_options,
-            timeout=timeout,
-            pg_tag=pg_tag
-        )
+    pg, pg_store = _new_process_group_helper(
+        group_world_size,
+        group_rank,
+        ranks,
+        backend,
+        default_store,
+        group_name=group_name,
+        pg_options=pg_options,
+        timeout=timeout,
+        pg_tag=pg_tag
+    )
 
     # Create the global rank to group rank mapping
     _world.pg_group_ranks[pg] = {
