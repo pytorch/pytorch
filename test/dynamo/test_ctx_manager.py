@@ -796,6 +796,56 @@ class GraphModule(torch.nn.Module):
 """
         self.assertExpectedInline(actual, expected)
 
+    def test_disable_saved_tensors_hooks_prev_disabled_nested(self):
+        def fn(z):
+            @torch.autograd.graph.disable_saved_tensors_hooks("This is not supported")
+            def f(x, y):
+                @torch.autograd.graph.disable_saved_tensors_hooks(
+                    "This is not supported inner"
+                )
+                def inner_fn(x, y):
+                    return x + y
+
+                return inner_fn(x, y) + x
+
+            x, y = torch.ones(
+                1,
+            ), torch.zeros(
+                1,
+            )
+            return f(x, y)
+
+        eager = EagerAndRecordGraphs()
+        with torch.autograd.graph.disable_saved_tensors_hooks(
+            "Previously disabled message"
+        ):
+            torch.compile(fn, backend=eager, fullgraph=True)(torch.randn(()))
+
+        graph = eager.graphs[0]
+        actual = normalize_gm(graph.print_readable(False))
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self):
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+
+        ones = torch.ones(1)
+
+        zeros = torch.zeros(1)
+
+        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported inner')
+
+        add = ones + zeros;  zeros = None
+
+        _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+
+        add_1 = add + ones;  add = ones = None
+
+        _saved_tensors_hooks_disable_3 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message')
+        return (add_1,)
+"""
+        self.assertExpectedInline(actual, expected)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
