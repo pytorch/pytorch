@@ -39,25 +39,6 @@ constexpr int cusolver_gesvdj_max_sweeps = 400;
 namespace at {
 namespace native {
 
-// Some cuBLAS and cuSOLVER batched routines require input to be a device array of pointers to device individual matrices
-// 'input' must be a contiguous tensor
-template <typename scalar_t>
-static Tensor get_device_pointers(const Tensor& input) {
-  auto input_data = input.const_data_ptr<scalar_t>();
-  int64_t input_mat_stride = matrixStride(input);
-
-  // cublas/cusolver interface requires 'int'
-  int batch_size = cuda_int_cast(batchCount(input), "batch_size");
-
-  // if batch_size==0, then start=0 and end=0
-  // if input_mat_stride==0, then step=sizeof(scalar_t)
-  return at::arange(
-      /*start=*/reinterpret_cast<int64_t>(input_data),
-      /*end=*/reinterpret_cast<int64_t>(input_data + batch_size * input_mat_stride),
-      /*step=*/static_cast<int64_t>(std::max<int64_t>(input_mat_stride, 1) * sizeof(scalar_t)),
-      input.options().dtype(at::kLong));
-}
-
 void geqrf_batched_cublas(const Tensor& input, const Tensor& tau);
 void triangular_solve_cublas(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular);
 void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular);
