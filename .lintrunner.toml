@@ -888,6 +888,7 @@ init_command = [
 code = 'UFMT'
 include_patterns = [
     '**/*.py',
+    '**/*.pyi',
 ]
 command = [
     'python3',
@@ -901,7 +902,9 @@ exclude_patterns = [
     # We don't care too much about files in this directory, don't enforce
     # formatting on them
     'caffe2/**/*.py',
+    'caffe2/**/*.pyi',
     'third_party/**/*.py',
+    'third_party/**/*.pyi',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
     '.ci/pytorch/create_test_cert.py',
@@ -3083,6 +3086,6 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.0.277',
+    'ruff==0.0.280',
 ]
 is_formatter = true
