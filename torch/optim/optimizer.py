@@ -128,7 +128,10 @@ def _default_to_fused_or_foreach(params: List[torch.Tensor],
 _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
             is used. If unspecified by the user (so foreach is None), we will try to use
             foreach over the for-loop implementation on CUDA, since it is usually
-            significantly more performant. (default: None)"""
+            significantly more performant. Note that the foreach implementation uses
+            ~ sizeof(params) more peak memory than the for-loop version due to the intermediates
+            being a tensorlist vs just one tensor. If memory is prohibitive, batch fewer
+            parameters through the optimizer at a time or switch this flag to False (default: None)"""
 
 _fused_doc = r"""fused (bool, optional): whether the fused implementation (CUDA only) is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
@@ -279,10 +282,10 @@ class Optimizer:
         format_string = self.__class__.__name__ + ' ('
         for i, group in enumerate(self.param_groups):
             format_string += '\n'
-            format_string += 'Parameter Group {0}\n'.format(i)
+            format_string += f'Parameter Group {i}\n'
             for key in sorted(group.keys()):
                 if key != 'params':
-                    format_string += '    {0}: {1}\n'.format(key, group[key])
+                    format_string += f'    {key}: {group[key]}\n'
         format_string += ')'
         return format_string
 
@@ -336,8 +339,8 @@ class Optimizer:
 
         @functools.wraps(func)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> R:
-            self = cast(Optimizer, args[0])
-            profile_name = "Optimizer.step#{}.step".format(self.__class__.__name__)
+            self, *_ = args
+            profile_name = f"Optimizer.step#{self.__class__.__name__}.step"
             with torch.autograd.profiler.record_function(profile_name):
                 # call optimizer step pre hooks
                 for pre_hook in chain(_global_optimizer_pre_hooks.values(), self._optimizer_step_pre_hooks.values()):
@@ -377,7 +380,7 @@ class Optimizer:
             return _group_tensors_by_device_and_dtype(tensorlistlist, with_indices)
 
     def _patch_step_function(self) -> None:
-        self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
+        self._zero_grad_profile_name = f"Optimizer.zero_grad#{self.__class__.__name__}.zero_grad"
         hooked = getattr(self.__class__.step, "hooked", None)
         if not hooked:
             self.__class__.step = self.profile_hook_step(self.__class__.step)  # type: ignore[assignment]
@@ -471,6 +474,7 @@ class Optimizer:
         # UNLESS fused or capturable, see note [special device hosting for step]
         fused = False
         capturable = False
+        assert param_groups is not None
         for pg in param_groups:
             if param_id in pg["params"]:
                 fused = pg["fused"] if "fused" in pg else False
@@ -512,8 +516,8 @@ class Optimizer:
                              "that doesn't match the size of optimizer's group")
 
         # Update the state
-        id_map = dict(zip(chain.from_iterable((g['params'] for g in saved_groups)),
-                      chain.from_iterable((g['params'] for g in groups))))
+        id_map = dict(zip(chain.from_iterable(g['params'] for g in saved_groups),
+                      chain.from_iterable(g['params'] for g in groups)))
 
         def _cast(param, value, param_id=None, param_groups=None, key=None):
             r"""Make a deep copy of value, casting all tensors to device of param."""
@@ -529,7 +533,7 @@ class Optimizer:
         # Copy state assigned to params (and cast tensors to appropriate types).
         # State that is not assigned to params is copied as is (needed for
         # backward compatibility).
-        state: DefaultDict[torch.Tensor, Any] = defaultdict(dict)
+        state: DefaultDict[torch.Tensor, Dict[Any, Any]] = defaultdict(dict)
         for k, v in state_dict['state'].items():
             if k in id_map:
                 param = id_map[k]

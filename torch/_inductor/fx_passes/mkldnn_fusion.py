@@ -17,57 +17,52 @@ from .post_grad import register_lowering_pattern
 if torch._C._has_mkldnn:
     aten = torch.ops.aten
     mkldnn = torch.ops.mkldnn
-    _conv_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg())
-    _linear_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg())
-    _conv_transpose_args = (
-        Arg(),
-        Arg(),
-        Arg(),
-        Arg(),
-        Arg(),
-        Arg(),
-        Arg(),
-        Arg(),
-        Arg(),
-        Arg(),
-        Arg(),
-    )
-    _computation_user_1 = [
-        CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=1),
-        CallFunction(mkldnn._linear_pointwise.default, *_linear_args, _users=1),
-        CallFunction(
+    prims = torch.ops.prims
+
+    _conv_args = [Arg() for _ in range(10)]
+    _linear_args = [Arg() for _ in range(6)]
+    _conv_transpose_args = [Arg() for _ in range(11)]
+
+    def _conv_call(users=1):
+        return CallFunction(
+            mkldnn._convolution_pointwise.default, *_conv_args, _users=users
+        )
+
+    def _linear_call(users=1):
+        return CallFunction(
+            mkldnn._linear_pointwise.default, *_linear_args, _users=users
+        )
+
+    def _conv_transpose_call(users=1):
+        return CallFunction(
             mkldnn._convolution_transpose_pointwise.default,
             *_conv_transpose_args,
+            _users=users,
+        )
+
+    def _to_float(input_call, users=1):
+        return CallFunction(
+            prims.convert_element_type.default,
+            input_call,
+            KeywordArg("to_float"),
+            _users=users,
+        )
+
+    def _to_bf16(input_call):
+        return CallFunction(
+            prims.convert_element_type.default,
+            input_call,
+            KeywordArg("to_bf16"),
             _users=1,
-        ),
-    ]
-    _computation_user_2 = [
-        CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=2),
-        CallFunction(mkldnn._linear_pointwise.default, *_linear_args, _users=2),
-        CallFunction(
-            mkldnn._convolution_transpose_pointwise.default,
-            *_conv_transpose_args,
-            _users=2,
-        ),
-    ]
-    _computation_user_3 = [
-        CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=3),
-        CallFunction(mkldnn._linear_pointwise.default, *_linear_args, _users=3),
-        CallFunction(
-            mkldnn._convolution_transpose_pointwise.default,
-            *_conv_transpose_args,
-            _users=3,
-        ),
-    ]
-    _computation_user_4 = [
-        CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=4),
-        CallFunction(mkldnn._linear_pointwise.default, *_linear_args, _users=4),
-        CallFunction(
-            mkldnn._convolution_transpose_pointwise.default,
-            *_conv_transpose_args,
-            _users=4,
-        ),
-    ]
+        )
+
+    def _unary_fusion_pattern(unary_fusion, call_fn, users, is_bf16):
+        # only insert to_dtype if is_bf16 is True
+        computation_call = (
+            _to_float(call_fn(), users=users) if is_bf16 else call_fn(users=users)
+        )
+        out = unary_fusion(computation_call)
+        return _to_bf16(out) if is_bf16 else out
 
     def _gelu_fusion_1(computation_call):
         return CallFunction(
@@ -187,11 +182,38 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _register_unary_fusion_lowering(pattern, unary_attr, computation_op):
+    def _is_valid_computation_unary_fusion(computation_op, is_bf16=False):
+        def fn(match):
+            matched = _is_single_computation_op(computation_op)(match)
+            computation_node = filter_nodes(match.nodes, computation_op)[0]
+            if is_bf16:
+                conversion_dtype_nodes = filter_nodes(
+                    match.nodes, prims.convert_element_type.default
+                )
+                if len(conversion_dtype_nodes) != 2:
+                    return False
+                # fusion pattern is always in the form of computation_op + to_float32 + unary_op + to_bfloat16
+                if computation_node == conversion_dtype_nodes[0].args[0]:
+                    to_float = conversion_dtype_nodes[0].args[1]
+                    to_bf16 = conversion_dtype_nodes[1].args[1]
+                else:
+                    to_float = conversion_dtype_nodes[1].args[1]
+                    to_bf16 = conversion_dtype_nodes[0].args[1]
+                matched = (
+                    matched and to_float == torch.float and to_bf16 == torch.bfloat16
+                )
+            return matched
+
+        return fn
+
+    def _register_unary_fusion_lowering(
+        pattern, unary_attr, computation_op, is_bf16=False
+    ):
         @register_lowering_pattern(
-            pattern, extra_check=_is_single_computation_op(computation_op)
+            pattern,
+            extra_check=_is_valid_computation_unary_fusion(computation_op, is_bf16),
         )
-        def fn(match, *args):
+        def fn(match, *args, **kwargs):
             computation_args = list(args)[:-3] + [
                 unary_attr.op_name,
                 unary_attr.scalars_attr,
@@ -201,7 +223,7 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _register_leaky_relu_fusion_lowering(pattern, computation_op):
+    def _register_leaky_relu_fusion_lowering(pattern, computation_op, is_bf16=False):
         @register_lowering_pattern(
             pattern, extra_check=_is_single_computation_op(computation_op)
         )
@@ -211,6 +233,10 @@ if torch._C._has_mkldnn:
                 matched = False
             else:  # inp is a Number
                 matched = True
+            if is_bf16:
+                dtype1 = kwargs.get("to_float")
+                dtype2 = kwargs.get("to_bf16")
+                matched = matched and dtype1 == torch.float and dtype2 == torch.bfloat16
             computation_args = list(args)
             if matched:
                 computation_args = computation_args[:-3] + [
@@ -221,16 +247,23 @@ if torch._C._has_mkldnn:
                 return L[computation_op](*computation_args)
             else:
                 # computation_args += ["none", [], ""]
-                computation_out = L[computation_op](*computation_args)
-                return L[aten.where](
-                    L[aten.gt](computation_out, 0),
-                    computation_out,
-                    L[aten.mul](computation_out, negative_slope),
+                out = L[computation_op](*computation_args)
+                if is_bf16:
+                    out = L[prims.convert_element_type.default](out, dtype=torch.float)
+                out = L[aten.where](
+                    L[aten.gt](out, 0),
+                    out,
+                    L[aten.mul](out, negative_slope),
                 )
+                if is_bf16:
+                    out = L[prims.convert_element_type.default](
+                        out, dtype=torch.bfloat16
+                    )
+                return out
 
         return fn
 
-    def _register_hardtanh_fusion_lowering(pattern, computation_op):
+    def _register_hardtanh_fusion_lowering(pattern, computation_op, is_bf16=False):
         @register_lowering_pattern(
             pattern, extra_check=_is_single_computation_op(computation_op)
         )
@@ -243,6 +276,10 @@ if torch._C._has_mkldnn:
                 matched = False
             else:  # inp is a Number
                 matched = min_value <= max_value
+            if is_bf16:
+                dtype1 = kwargs.get("to_float")
+                dtype2 = kwargs.get("to_bf16")
+                matched = matched and dtype1 == torch.float and dtype2 == torch.bfloat16
             computation_args = list(args)
             if matched:
                 computation_args = computation_args[:-3] + [
@@ -252,10 +289,15 @@ if torch._C._has_mkldnn:
                 ]
                 return L[computation_op](*computation_args)
             else:
-                conv_out = L[computation_op](*computation_args)
-                return L[aten.clamp_max](
-                    L[aten.clamp_min](conv_out, min_value), max_value
-                )
+                out = L[computation_op](*computation_args)
+                if is_bf16:
+                    out = L[prims.convert_element_type.default](out, dtype=torch.float)
+                out = L[aten.clamp_max](L[aten.clamp_min](out, min_value), max_value)
+                if is_bf16:
+                    out = L[prims.convert_element_type.default](
+                        out, dtype=torch.bfloat16
+                    )
+                return out
 
         return fn
 
@@ -413,54 +455,86 @@ if torch._C._has_mkldnn:
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
 
     def _register_unary_fusion():
-        replacement_unary_fusion_patterns = {
-            UnaryAttr("gelu", algorithm_attr="tanh"): [
-                _gelu_fusion_2(u) for u in _computation_user_4
-            ],
-            UnaryAttr("gelu", algorithm_attr="none"): [
-                _gelu_fusion_1(u) for u in _computation_user_2
-            ],
-            UnaryAttr("hardswish"): [_hardswish_fusion(u) for u in _computation_user_2],
-            UnaryAttr("hardsigmoid"): [
-                _hardsigmoid_fusion(u) for u in _computation_user_1
-            ],
-            UnaryAttr("swish"): [_silu_fusion(u) for u in _computation_user_2],
-            UnaryAttr("relu"): [
-                _combined_fusion(u, aten.relu) for u in _computation_user_1
-            ],
-            UnaryAttr("sigmoid"): [
-                _combined_fusion(u, aten.sigmoid) for u in _computation_user_1
-            ],
-            UnaryAttr("tanh"): [
-                _combined_fusion(u, aten.tanh) for u in _computation_user_1
-            ],
-        }
-        for unary_attr, patterns in replacement_unary_fusion_patterns.items():
-            _register_unary_fusion_lowering(patterns[0], unary_attr, computation_ops[0])
-            _register_unary_fusion_lowering(patterns[1], unary_attr, computation_ops[1])
-            _register_unary_fusion_lowering(patterns[2], unary_attr, computation_ops[2])
+        computation_call_fns = [_conv_call, _linear_call, _conv_transpose_call]
 
-        _leaky_relu_patterns = [
-            _leaky_relu_fusion(user) for user in _computation_user_3
-        ]
-        _hardtanh_patterns = [_hardtanh_fusion(user) for user in _computation_user_1]
-        for pattern, computation_op in zip(_leaky_relu_patterns, computation_ops):
-            _register_leaky_relu_fusion_lowering(pattern, computation_op)
-        for pattern, computation_op in zip(_hardtanh_patterns, computation_ops):
-            _register_hardtanh_fusion_lowering(pattern, computation_op)
+        def _unary_fusion_patterns(is_bf16):
+            replacement_unary_fusion_patterns = {
+                UnaryAttr("gelu", algorithm_attr="tanh"): [
+                    _unary_fusion_pattern(_gelu_fusion_2, call_fn, 4, is_bf16)
+                    for call_fn in computation_call_fns
+                ],
+                UnaryAttr("gelu", algorithm_attr="none"): [
+                    _unary_fusion_pattern(_gelu_fusion_1, call_fn, 2, is_bf16)
+                    for call_fn in computation_call_fns
+                ],
+                UnaryAttr("hardswish"): [
+                    _unary_fusion_pattern(_hardswish_fusion, call_fn, 2, is_bf16)
+                    for call_fn in computation_call_fns
+                ],
+                UnaryAttr("hardsigmoid"): [
+                    _unary_fusion_pattern(_hardsigmoid_fusion, call_fn, 1, is_bf16)
+                    for call_fn in computation_call_fns
+                ],
+                UnaryAttr("swish"): [
+                    _unary_fusion_pattern(_silu_fusion, call_fn, 2, is_bf16)
+                    for call_fn in computation_call_fns
+                ],
+            }
+            if not is_bf16:
+                call_user1 = [call_fn(users=1) for call_fn in computation_call_fns]
+                replacement_unary_fusion_patterns.update(
+                    {
+                        UnaryAttr("relu"): [
+                            _combined_fusion(u, aten.relu) for u in call_user1
+                        ],
+                        UnaryAttr("sigmoid"): [
+                            _combined_fusion(u, aten.sigmoid) for u in call_user1
+                        ],
+                        UnaryAttr("tanh"): [
+                            _combined_fusion(u, aten.tanh) for u in call_user1
+                        ],
+                    }
+                )
+
+            return replacement_unary_fusion_patterns
+
+        for is_bf16 in [True, False]:
+            replace_patterns = _unary_fusion_patterns(is_bf16)
+            for unary_attr, patterns in replace_patterns.items():
+                _register_unary_fusion_lowering(
+                    patterns[0], unary_attr, computation_ops[0], is_bf16
+                )
+                _register_unary_fusion_lowering(
+                    patterns[1], unary_attr, computation_ops[1], is_bf16
+                )
+                _register_unary_fusion_lowering(
+                    patterns[2], unary_attr, computation_ops[2], is_bf16
+                )
+            _leaky_relu_patterns = [
+                _unary_fusion_pattern(_leaky_relu_fusion, call_fn, 3, is_bf16)
+                for call_fn in computation_call_fns
+            ]
+            for pattern, computation_op in zip(_leaky_relu_patterns, computation_ops):
+                _register_leaky_relu_fusion_lowering(pattern, computation_op, is_bf16)
+            hardtanh_patterns = [
+                _unary_fusion_pattern(_hardtanh_fusion, call_fn, 1, is_bf16)
+                for call_fn in computation_call_fns
+            ]
+            for pattern, computation_op in zip(hardtanh_patterns, computation_ops):
+                _register_hardtanh_fusion_lowering(pattern, computation_op, is_bf16)
 
     def _register_inplace_fusion():
         binary_ops = [aten.add, ops.add]
         inplace_fusion_op = mkldnn._convolution_pointwise_.binary
         outplace_fusion_op = mkldnn._convolution_pointwise.binary
-        computation_call = _computation_user_1[0]
-        computation_op = computation_ops[0]
+        conv_call = _conv_call(users=1)
+        conv_op = computation_ops[0]
         for binary_op in binary_ops:
-            binary_v1 = _binary_fusion_v1(computation_call, binary_op)
+            binary_v1 = _binary_fusion_v1(conv_call, binary_op)
             binary_unary_v1 = _combined_fusion(binary_v1, aten.relu)
             _register_binary_unary_maybe_inplace_fusion_lowering(
                 binary_unary_v1,
-                computation_op,
+                conv_op,
                 binary_op,
                 inplace_fusion_op,
                 outplace_fusion_op,
@@ -469,17 +543,17 @@ if torch._C._has_mkldnn:
             )
             _register_binary_unary_maybe_inplace_fusion_lowering(
                 binary_v1,
-                computation_op,
+                conv_op,
                 binary_op,
                 inplace_fusion_op,
                 outplace_fusion_op,
                 other_index=0,
             )
-            binary_v2 = _binary_fusion_v2(computation_call, binary_op)
+            binary_v2 = _binary_fusion_v2(conv_call, binary_op)
             binary_unary_v2 = _combined_fusion(binary_v2, aten.relu)
             _register_binary_unary_maybe_inplace_fusion_lowering(
                 binary_unary_v2,
-                computation_op,
+                conv_op,
                 binary_op,
                 inplace_fusion_op,
                 outplace_fusion_op,
@@ -488,7 +562,7 @@ if torch._C._has_mkldnn:
             )
             _register_binary_unary_maybe_inplace_fusion_lowering(
                 binary_v2,
-                computation_op,
+                conv_op,
                 binary_op,
                 inplace_fusion_op,
                 outplace_fusion_op,
@@ -501,8 +575,9 @@ if torch._C._has_mkldnn:
             mkldnn._convolution_pointwise.binary,
             mkldnn._linear_pointwise.binary,
         ]
+        _computation_user_1 = [_conv_call(users=1), _linear_call(users=1)]
         for computation_call, computation_op, fusion_op in zip(
-            _computation_user_1[:-1], computation_ops[:-1], fusion_ops
+            _computation_user_1, computation_ops[:-1], fusion_ops
         ):
             for binary_op in binary_ops:
                 pattern = _binary_fusion_v2(computation_call, binary_op)
@@ -519,8 +594,9 @@ if torch._C._has_mkldnn:
     def _register_binary_unary_fusion():
         binary_ops = [aten.add, ops.add, aten.sub, ops.sub]
         fusion_ops = [mkldnn._convolution_pointwise.binary]
+        _computation_user_1 = [_conv_call(users=1)]
         for computation_call, computation_op, fusion_op in zip(
-            _computation_user_1[:-1], computation_ops[:-1], fusion_ops
+            _computation_user_1, computation_ops[:-1], fusion_ops
         ):
             for binary_op in binary_ops:
                 pattern_v1 = _combined_fusion(
@@ -620,8 +696,7 @@ if torch._C._has_mkldnn:
         if input_meta_value is None or weight_meta_value is None:
             return False
         input_size = input_meta_value.shape
-        # TODO: support dynamic input size.
-        if free_symbols(input_size) or conv_node.args[1].op != "get_attr":
+        if conv_node.args[1].op != "get_attr":
             return False
         for meta_value in [input_meta_value, weight_meta_value]:
             if (
@@ -638,6 +713,9 @@ if torch._C._has_mkldnn:
                 return False
         is_transposed = conv_node.args[-3]
         if is_transposed:
+            # TODO: Support dynamic shape case for MKLDNN conv transpose.
+            if free_symbols(input_size):
+                return False
             groups = conv_node.args[-1]
             in_channels = weight_meta_value.size(0)
             # doesn't support group_depthwise_conv_transpose.
@@ -694,9 +772,6 @@ if torch._C._has_mkldnn:
         ):
             if not mkldnn._is_mkldnn_bf16_supported():
                 return False
-            if free_symbols(batch_size):
-                # TODO: support symbolic input size for bfloat16 path
-                return False
         return True
 
     _aten_conv_args = (
@@ -730,11 +805,17 @@ if torch._C._has_mkldnn:
                     constant_args.insert(1, args[-2])  # output_padding
                     packed_weight_op = mkldnn._reorder_convolution_transpose_weight
                     packed_conv_op = mkldnn._convolution_transpose_pointwise.default
-
-                packed_weight_inputs = (args[1],) + tuple(constant_args) + (input_size,)
-                packed_weight_node = graph.create_node(
-                    "call_function", packed_weight_op, args=packed_weight_inputs
-                )
+                if not free_symbols(input_size):
+                    packed_weight_inputs = (
+                        (args[1],) + tuple(constant_args) + (input_size,)
+                    )
+                    packed_weight_node = graph.create_node(
+                        "call_function", packed_weight_op, args=packed_weight_inputs
+                    )
+                else:
+                    assert not is_transposed
+                    # For dynamic shape case, we need to pack weight in runtime.
+                    packed_weight_node = args[1]
                 packed_conv_inputs = (
                     (args[0], packed_weight_node, args[2])
                     + tuple(constant_args)
@@ -767,15 +848,20 @@ if torch._C._has_mkldnn:
                 )
                 is_bf16_weight = weight.meta.get("val").dtype == torch.bfloat16
                 batch_size = input.meta.get("val").shape[0]
-                packed_weight_inputs = (transpose_weight_node, batch_size)
-                packed_weight_op = (
-                    mkldnn._reorder_linear_weight
-                    if is_bf16_weight
-                    else torch.ops.mkl._mkl_reorder_linear_weight
-                )
-                packed_weight_node = graph.create_node(
-                    "call_function", packed_weight_op, args=packed_weight_inputs
-                )
+                if not free_symbols(batch_size):
+                    packed_weight_inputs = (transpose_weight_node, batch_size)
+                    packed_weight_op = (
+                        mkldnn._reorder_linear_weight
+                        if is_bf16_weight
+                        else torch.ops.mkl._mkl_reorder_linear_weight
+                    )
+                    packed_weight_node = graph.create_node(
+                        "call_function", packed_weight_op, args=packed_weight_inputs
+                    )
+                else:
+                    assert is_bf16_weight
+                    # For dynamic shape case, we need to pack weight in runtime.
+                    packed_weight_node = transpose_weight_node
                 packed_linear_inputs = (input, packed_weight_node)
                 if is_bf16_weight:
                     packed_linear_inputs += (bias, "none", [], "")
@@ -806,12 +892,6 @@ if torch._C._has_mkldnn:
         """
         if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
             return gm
-        for node in gm.graph.nodes:
-            if node.target == "to_mkldnn" and len(node.args[0].users) > 1:
-                for user_node in list(node.args[0].users.keys()):
-                    if user_node.target == "to_mkldnn" and user_node != node:
-                        user_node.replace_all_uses_with(node)
-                        gm.graph.erase_node(user_node)
         packed_weight_ops = [
             torch._C._nn.mkldnn_reorder_conv2d_weight,
             mkldnn._reorder_convolution_transpose_weight,
