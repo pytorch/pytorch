@@ -312,7 +312,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ):
             raise UserError(
                 UserErrorType.DYNAMIC_CONTROL_FLOW,
-                "Expected a list of tensors but got {actual_args}".format(
+                "Expected a list of tensors but got {actual_args}".format(  # noqa: UP032
                     actual_args=[
                         str(operand.python_type())
                         if isinstance(operand, VariableTracker)

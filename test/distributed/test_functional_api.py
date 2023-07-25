@@ -225,21 +225,33 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         super().setUp()
         self._spawn_threads()
 
-    def test_all_reduce_eager(self):
-        tensor = torch.ones([4])
-        mesh = dt.DeviceMesh("cpu", torch.arange(4))
+    @parametrize("device", ["cpu", "cuda"])
+    def test_all_reduce_eager(self, device):
+        if device == "cuda":
+            if torch.cuda.device_count() < self.world_size:
+                self.skipTest("Not enough CUDA devices")
+            torch.cuda.set_device(dist.get_rank())
+
+        tensor = torch.ones([4], device=device)
+        mesh = dt.DeviceMesh(device, torch.arange(4))
 
         res = ft_c.all_reduce(tensor, "sum", mesh)
         self.assertEqual(res, torch.tensor([4, 4, 4, 4], dtype=torch.float))
 
-        mesh = dt.DeviceMesh("cpu", torch.arange(4).view(2, 2))
+        mesh = dt.DeviceMesh(device, torch.arange(4).view(2, 2))
         res2 = ft_c.all_reduce(tensor, "sum", (mesh, 1))
         self.assertEqual(res2, torch.tensor([2, 2, 2, 2], dtype=torch.float))
 
-    def test_all_reduce_coalesced_eager(self):
-        t0 = torch.ones([4], device="cpu")
-        t1 = torch.ones([6], device="cpu") + 2
-        mesh = dt.DeviceMesh("cpu", torch.arange(4))
+    @parametrize("device", ["cpu", "cuda"])
+    def test_all_reduce_coalesced_eager(self, device):
+        if device == "cuda":
+            if torch.cuda.device_count() < self.world_size:
+                self.skipTest("Not enough CUDA devices")
+            torch.cuda.set_device(dist.get_rank())
+
+        t0 = torch.ones([4], device=device)
+        t1 = torch.ones([6], device=device) + 2
+        mesh = dt.DeviceMesh(device, torch.arange(4))
 
         res = ft_c.all_reduce_coalesced([t0, t1], "sum", mesh)
         self.assertEqual(res[0], t0 * 4)

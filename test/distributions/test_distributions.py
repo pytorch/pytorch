@@ -44,7 +44,7 @@ torch.set_default_dtype(torch.double)
 
 from torch import inf, nan
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests,
+    (TestCase, run_tests, set_rng_seed, load_tests,
      gradcheck, skipIfTorchDynamo)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad
@@ -1898,8 +1898,8 @@ class TestDistributions(DistributionsTestCase):
         self._check_sampler_sampler(
             MixtureSameFamily(Categorical(probs=probs), Normal(loc, scale)),
             ScipyMixtureNormal(probs.numpy(), loc.numpy(), scale.numpy()),
-            '''MixtureSameFamily(Categorical(probs={}),
-            Normal(loc={}, scale={}))'''.format(probs, loc, scale))
+            f'''MixtureSameFamily(Categorical(probs={probs}),
+            Normal(loc={loc}, scale={scale}))''')
 
     def test_normal(self):
         loc = torch.randn(5, 5, requires_grad=True)
@@ -5003,7 +5003,6 @@ class TestValidation(DistributionsTestCase):
                         fail_string.format(Dist.__name__, i + 1, len(params))
                     ) from e
 
-    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_invalid(self):
         for Dist, params in BAD_EXAMPLES:
             for i, param in enumerate(params):
