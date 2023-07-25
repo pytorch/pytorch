@@ -19,7 +19,7 @@ if 'cpu' in test_name:
 elif 'gpu' in test_name:
     backend = 'gpu'
 
-data_file_path = '../{}_runtime.json'.format(backend)
+data_file_path = f'../{backend}_runtime.json'
 
 with open(data_file_path) as data_file:
     data = json.load(data_file)
@@ -59,17 +59,17 @@ z_value = (sample_mean - mean) / sigma
 print("z-value: ", z_value)
 
 if z_value >= 3:
-    raise Exception('''\n
+    raise Exception(f'''\n
 z-value >= 3, there is high chance of perf regression.\n
 To reproduce this regression, run
-`cd .ci/pytorch/perf_test/ && bash {}.sh` on your local machine
+`cd .ci/pytorch/perf_test/ && bash {test_name}.sh` on your local machine
 and compare the runtime before/after your code change.
-'''.format(test_name))
+''')
 else:
     print("z-value < 3, no perf regression detected.")
     if args.update:
         print("We will use these numbers as new baseline.")
-        new_data_file_path = '../new_{}_runtime.json'.format(backend)
+        new_data_file_path = f'../new_{backend}_runtime.json'
         with open(new_data_file_path) as new_data_file:
             new_data = json.load(new_data_file)
         new_data[test_name] = {}

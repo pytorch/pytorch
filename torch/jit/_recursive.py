@@ -112,13 +112,13 @@ def _get_valid_constant(attr, v, owner_type):
     elif isinstance(v, (tuple, list)):
         return tuple(_get_valid_constant(attr, x, owner_type) for x in v)
     constants = ", ".join(torch.typename(typ) for typ in _constant_types)
-    raise TypeError(textwrap.dedent("""
-        '{}' object in attribute '{}.{}' is not a valid constant.
+    raise TypeError(textwrap.dedent(f"""
+        '{torch.typename(type(v))}' object in attribute '{owner_type}.{attr}' is not a valid constant.
         Valid constants are:
         1. a nn.ModuleList
-        2. a value of type {{{}}}
+        2. a value of type {{{constants}}}
         3. a list or tuple of (2)
-        """.format(torch.typename(type(v)), owner_type, attr, constants)))
+        """))
 
 
 class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
@@ -196,7 +196,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                 inferred = True
         except RuntimeError as re:
             raise RuntimeError(
-                "Error inferring type for {name}: {item}: {re}".format(name=name, item=item, re=re)
+                f"Error inferring type for {name}: {item}: {re}"
             ) from re
 
         return attr_type, inferred
@@ -510,7 +510,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     def init_fn(script_module):
         # Initialize the ScriptModule:
         # 1. Copy the attributes/parameters/buffers from the original `nn_module` to the new ScriptModule.
-        for name, (attr_type, is_param) in concrete_type.get_attributes().items():
+        for name in concrete_type.get_attributes().keys():
             orig_value = getattr(nn_module, name)
             orig_value = orig_value.value if isinstance(orig_value, torch.jit.Attribute) else orig_value
             cpp_module.setattr(name, orig_value)
@@ -519,7 +519,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         #    recursively scripting them.
         for name, sub_concrete_type in concrete_type.get_modules():
             orig_value = getattr(nn_module, name)
-            assert isinstance(orig_value, Module), "Expected Module but got {}".format(type(orig_value))
+            assert isinstance(orig_value, Module), f"Expected Module but got {type(orig_value)}"
             module_type = sub_concrete_type.jit_type
             if isinstance(module_type, torch._C.InterfaceType):
                 # use the interface inference rule to compile the module
@@ -572,12 +572,12 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     # Special handling so methods like __len__ work in script methods on classes derived from containers
     if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)) and \
             '__len__' not in cpp_module._method_names():
-        script_module.define("def __len__(self):\n   return {}\n".format(len(nn_module)))
+        script_module.define(f"def __len__(self):\n   return {len(nn_module)}\n")
     if isinstance(nn_module, torch.nn.ModuleDict) and \
             '__contains__' not in cpp_module._method_names():
         if len(nn_module.keys()):
             keys = repr(list(nn_module.keys()))
-            script_module.define("def __contains__(self, key: str):\n   return key in {}\n".format(keys))
+            script_module.define(f"def __contains__(self, key: str):\n   return key in {keys}\n")
         else:
             script_module.define("def __contains__(self, key: str):\n   return False\n")
 
@@ -687,7 +687,7 @@ def _check_no_signature(func):
     signature = torch.jit.annotations.get_signature(func, None, fake_range(), inspect.ismethod(func))
     if signature is None:
         qual_name = _jit_internal._qualified_name(func)
-        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))
+        raise RuntimeError(f"Must explicitly add type annotations to overloaded functions: {qual_name}")
 
 def make_stubs_for_overloads(overload_info):
     overload_stubs = []
@@ -704,8 +704,7 @@ def make_stubs_for_overloads(overload_info):
 def check_module_initialized(mod):
     assert isinstance(mod, torch.nn.Module)
     if not hasattr(mod, '_parameters'):
-        raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
-                           .format(torch.typename(type(mod))))
+        raise RuntimeError(f"'{torch.typename(type(mod))}' has not been initialized, did you forget to call 'super()'?")
 
     # This is to avoid importing torch.distributed.nn
     if not hasattr(mod, 'remote_parameters'):

@@ -40,7 +40,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     For an original tensor of size (m, k) we expect the first m * k // 2 elements to be the kept elements
     The rest of the tensor is metadata.
 
-    This subclass also overrides __torch_dispatch__ to use _structured_sparse_linear for faster matrix multiplications
+    This subclass also overrides __torch_dispatch__ to use _sparse_semi_structured_linear for faster matrix multiplications
     via sparse CUTLASS kernels. In the future we will also call into cuSPARSELt kernels for more performance gains.
     """
 
@@ -136,28 +136,22 @@ class SparseSemiStructuredTensor(torch.Tensor):
             # check device
             if not original_tensor.is_cuda:
                 raise RuntimeError(
-                    (
-                        f"Error original_tensor.device= {original_tensor.device} is not supported! "
-                        "Only CUDA tensors are currently supported."
-                    )
+                    f"Error original_tensor.device= {original_tensor.device} is not supported! "
+                    "Only CUDA tensors are currently supported."
                 )
 
             # check dim
             if original_tensor.dim() != 2:
                 raise RuntimeError(
-                    (
-                        f"Error original_tensor.dim = {original_tensor.dim()} is not supported! "
-                        "Only 2d tensors are currently supported."
-                    )
+                    f"Error original_tensor.dim = {original_tensor.dim()} is not supported! "
+                    "Only 2d tensors are currently supported."
                 )
 
             # check dtype
             if original_tensor.dtype not in _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG:
                 raise RuntimeError(
-                    (
-                        f"Error original_tensor.dtype {original_tensor.dtype} is not a supported dtype! "
-                        "dtype must be one of: {_DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG}"
-                    )
+                    f"Error original_tensor.dtype {original_tensor.dtype} is not a supported dtype! "
+                    "dtype must be one of: {_DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG}"
                 )
 
             # check shape
@@ -167,10 +161,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
             if m < min_rows or m % min_rows or n < min_cols or n % min_cols:
                 # TODO in the future we can add in padding to support dimensions that aren't perfect multiples
                 raise RuntimeError(
-                    (
-                        f"Error original_tensor.shape {original_tensor.shape} is not supported! "
-                        "Both dimensions must be larger or equal than and a multiple of ({min_rows}, {min_cols})"
-                    )
+                    f"Error original_tensor.shape {original_tensor.shape} is not supported! "
+                    "Both dimensions must be larger or equal than and a multiple of ({min_rows}, {min_cols})"
                 )
 
             # This code calculates the size of the compressed tensor.
@@ -219,7 +211,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs) -> Any:
-        """Overload __torch_dispatch__ to use torch._structured_sparse_linear.
+        """Overload __torch_dispatch__ to use torch._sparse_semi_structured_linear.
 
         `torch.structured_sparse_linear` uses accelerated sparse CUTLASS kernels.
         In the future we plan to also add in support for cuSPARSELt kernels.
@@ -270,7 +262,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
             # F.linear(x) = addmm(bias, input, weight.t()) = b + xW' = (b + xW')''
             #        = (W''x' + b')' = (Wx' + b')' = addmm(bias.T, weight, input).T
             if isinstance(input_B, cls) and input_B.transposed:
-                result, _ = torch._structured_sparse_linear(
+                result = torch._sparse_semi_structured_linear(
                     input_A, input_B.values(), input_B.indices(), bias=bias
                 )
                 return result
@@ -280,13 +272,13 @@ class SparseSemiStructuredTensor(torch.Tensor):
             input_A, input_B = args
 
             if isinstance(input_A, cls) and not input_A.transposed:
-                transposed_result, _ = torch._structured_sparse_linear(
+                transposed_result = torch._sparse_semi_structured_linear(
                     input_B.t(), input_A.values(), input_A.indices()
                 )
                 return transposed_result.t()
 
             elif isinstance(input_B, cls) and input_B.transposed:
-                result, _ = torch._structured_sparse_linear(
+                result = torch._sparse_semi_structured_linear(
                     input_A, input_B.values(), input_B.indices()
                 )
                 return result
@@ -297,7 +289,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         if func is torch.ops.aten.linear.default:
             input_tensor, weight, bias = args
             if isinstance(weight, cls):
-                result, _ = torch._structured_sparse_linear(
+                result = torch._sparse_semi_structured_linear(
                     input_tensor, weight.values(), weight.indices(), bias=bias
                 )
                 return result

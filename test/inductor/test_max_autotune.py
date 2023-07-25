@@ -134,7 +134,8 @@ class TestDoBench(TestCase):
         ):
             torch.compile(mm_plus_mm)(a, b, c, d)
 
-    def test_max_autotune_regular_mm(self):
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_regular_mm(self, dynamic: bool):
         """
         Make sure autotuning mm in sub processes work without crashes.
         """
@@ -147,9 +148,10 @@ class TestDoBench(TestCase):
         b = torch.randn(10, 100).cuda()
 
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
-            torch.compile(mm)(a, b)
+            torch.compile(mm, dynamic=dynamic)(a, b)
 
-    def test_max_autotune_addmm(self):
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_addmm(self, dynamic):
         """
         Make sure autotuning addmm in sub processes work without crashes.
         """
@@ -161,7 +163,49 @@ class TestDoBench(TestCase):
         a = torch.randn(100, 10).cuda()
         b = torch.randn(10, 100).cuda()
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
-            torch.compile(addmm)(x, a, b)
+            torch.compile(addmm, dynamic=dynamic)(x, a, b)
+
+    def test_triton_template_with_epilogues_and_dynamic_shape(self):
+        def fn(
+            x: torch.Tensor, w: torch.Tensor, bias: torch.Tensor, mul: torch.Tensor
+        ) -> torch.Tensor:
+            return (
+                torch.nn.functional.relu(
+                    torch.matmul(torch.transpose(x, 0, 1), torch.transpose(w, 0, 1))
+                    + bias
+                )
+                * mul
+            )
+
+        M0 = 5
+        M1 = 8
+        K = 4
+        N = 3
+        w = torch.rand(N, K).cuda().half()
+        b = torch.rand(N).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": "Triton",
+            }
+        ):
+            compiled_fn = torch.compile(
+                fn, fullgraph=True, dynamic=True, mode="max-autotune-no-cudagraphs"
+            )
+
+            x0 = torch.rand(K, M0).cuda().half()
+            mul0 = torch.rand(M0, N).cuda().half()
+            y0 = compiled_fn(x0, w, b, mul0)
+            y0_expected = fn(x0, w, b, mul0)
+            torch.testing.assert_close(y0, y0_expected)
+
+            x1 = torch.rand(K, M1).cuda().half()
+            mul1 = torch.rand(M1, N).cuda().half()
+            y1 = compiled_fn(x1, w, b, mul1)
+            y1_expected = fn(x1, w, b, mul1)
+            torch.testing.assert_close(y1, y1_expected)
 
 
 if __name__ == "__main__":
