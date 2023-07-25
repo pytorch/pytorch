@@ -254,7 +254,7 @@ class CustomOp:
         return result
 
     def impl(
-        self, device_types: typing.Union[str, typing.Iterable[str]]
+        self, device_types: typing.Union[str, typing.Iterable[str]], _stacklevel=2,
     ) -> typing.Callable:
         r"""Register an implementation for a device type for this CustomOp object.
 
@@ -300,7 +300,7 @@ class CustomOp:
 
         def inner(f):
             for device_type in set(device_types):
-                self._register_impl(device_type, f)
+                self._register_impl(device_type, f, stacklevel=_stacklevel)
                 dispatch_key = SUPPORTED_DEVICE_TYPE_TO_KEY[device_type]
                 library.impl(self._lib, self._opname, dispatch_key)(f)
             return f
@@ -317,7 +317,7 @@ class CustomOp:
 
         return inner
 
-    def impl_abstract(self) -> typing.Callable:
+    def impl_abstract(self, _stacklevel=2) -> typing.Callable:
         r"""Register an abstract implementation for this operator.
 
         An "abstract implementation" specifies the behavior of this operator on
@@ -387,7 +387,7 @@ class CustomOp:
 
         def inner(f):
             frame = inspect.stack()[1]
-            self._register_impl("abstract", f)
+            self._register_impl("abstract", f, stacklevel=_stacklevel)
             location = self._get_impl("abstract").location
 
             qualname = self._qualname
@@ -431,18 +431,18 @@ class CustomOp:
             self._get_impl("backward").func)
         self._register_impl("autograd", kernel)
 
-    def impl_save_for_backward(self):
+    def impl_save_for_backward(self, _stacklevel=2):
         r"""Register a function that tells us what to save for backward.
 
         Please see impl_backward for more details.
         """
         def inner(f):
-            self._register_impl("save_for_backward", f)
+            self._register_impl("save_for_backward", f, stacklevel=_stacklevel)
             if self._has_impl("backward"):
                 self._register_autograd_kernel()
         return inner
 
-    def impl_backward(self, output_differentiability=None):
+    def impl_backward(self, output_differentiability=None, _stacklevel=2):
         r"""Registers a backward formula.
 
         In order for the CustomOp to work with autograd, you need to register
@@ -493,7 +493,7 @@ class CustomOp:
                 yell()
 
         def inner(f):
-            self._register_impl("backward", f)
+            self._register_impl("backward", f, stacklevel=_stacklevel)
             self._output_differentiability = output_differentiability
             if self._has_impl("save_for_backward"):
                 self._register_autograd_kernel()
@@ -887,3 +887,37 @@ def report_error_callback(custom_op: typing.Any, key: str) -> None:
         f"issue or if you're feeling adventurous, use the low-level "
         f"torch.library API"
     )
+
+
+def get_op(qualname):
+    ns, name = qualname.split("::")
+    return getattr(getattr(torch.ops, ns), name)
+
+
+def _find_custom_op(qualname):
+    if qualname in global_registry:
+        return global_registry[qualname]
+    raise RuntimeError(
+        f"Could not find custom op \"{qualname}\". Did you register it via "
+        f"the torch._custom_ops API?")
+
+
+def _custom_op_with_schema(qualname, schema):
+    ns, name = qualname.split("::")
+    schema_str = f"{name}{schema}"
+    function_schema = FunctionSchema.parse(schema_str)
+    validate_schema(function_schema)
+
+    lib = library.Library(ns, "FRAGMENT")
+    lib.define(schema_str)
+    ophandle = find_ophandle_or_throw(ns, function_schema.name)
+    result = CustomOp(lib, ns, function_schema, function_schema.name, ophandle, _private_access=True)
+
+    library.impl(lib, result._opname, "Autograd")(
+        autograd_kernel_indirection(weakref.proxy(result))
+    )
+
+    torch._C._dispatch_set_report_error_callback(
+        ophandle, functools.partial(report_error_callback, weakref.proxy(result))
+    )
+    return get_op(qualname)
