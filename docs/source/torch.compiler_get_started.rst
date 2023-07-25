@@ -14,8 +14,8 @@ understanding of how you can use ``torch.compile`` in your own programs.
 
 .. note::
    To run this script, you need to have at least one GPU on your machine.
-   If you do not have a GPU, you can remove the ``cuda()`` code from the
-   code and it will run on CPU.
+   If you do not have a GPU, you can remove the ``cuda()`` code in the
+   snippet below and it will run on CPU.
 
 .. code:: python
 
@@ -30,7 +30,7 @@ understanding of how you can use ``torch.compile`` in your own programs.
 
 A more famous pointwise operator you might want to use would
 be something like ``torch.relu()``. Pointwise ops in eager mode are
-suboptimal because each one would need to read a tensor from
+suboptimal because each one would need to read a tensor from the
 memory, make some changes, and then write back those changes. The single
 most important optimization that inductor performs is fusion. In the
 example above we can turn 2 reads and 2 writes into 1 read and 1 write which
@@ -43,12 +43,12 @@ support for CUDA graphs.
 CUDA graphs help eliminate the overhead from launching individual
 kernels from a Python program which is especially relevant for newer GPUs.
 
-TorchDynamo supports many different backends but TorchInductor specifically works
+TorchDynamo supports many different backends, but TorchInductor specifically works
 by generating `Triton <https://github.com/openai/triton>`__ kernels. Let's save
-our example above into a file called ``example.py`` We can inspect the code
-generated Triton kernels by running ``TORCH_COMPILE_DEBUG=1 python example.py``
+our example above into a file called ``example.py``. We can inspect the code
+generated Triton kernels by running ``TORCH_COMPILE_DEBUG=1 python example.py``.
 As the script executes, you should see ``DEBUG`` messages printed to the
-terminal. Closer to the end of the log, you should see a path to to a folder
+terminal. Closer to the end of the log, you should see a path to a folder
 that contains ``torchinductor_<your_username>``. In that folder, you can find
 the ``output_code.py`` file that contains the generated kernel code similar to
 the following:
@@ -69,16 +69,16 @@ the following:
        tmp3 = tmp1 + tmp2
        tl.store(out_ptr0 + (x0), tmp3, xmask)
 
-.. note:: The above is an extract and depending on your hardware, you will
-   see different code generated.
+.. note:: The above code snippet is an example. Depending on your hardware,
+   you might see different code generated.
 
 And you can verify that fusing the ``cos`` and ``sin`` did actually occur
 because the ``cos`` and ``sin`` operations occur within a single Triton kernel
 and the temporary variables are held in registers with very fast access.
 
-You can read up a lot more on Triton’s performance
-`here <https://openai.com/blog/triton/>`__ but the key is it’s in Python
-so you can easily understand it even if you have not written all that
+Read more on Triton’s performance
+`here <https://openai.com/blog/triton/>`__. Because the code is written
+in Python, it's fairly easy to understand even if you have not written all that
 many CUDA kernels.
 
 Next, let’s try a real model like resnet50 from the PyTorch

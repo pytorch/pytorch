@@ -10,22 +10,22 @@ this namespace is ``torch.compile``.
 ``torch.compile`` is a PyTorch function introduced in PyTorch 2.x that aims to
 solve the problem of accurate graph capturing in PyTorch and ultimately enable
 software engineers to run their PyTorch programs faster. ``torch.compile`` is
-written in PyThon and it marks the transition of PyTorch from C++ to PyThon.
+written in Python and it marks the transition of PyTorch from C++ to Python.
 
 ``torch.compile`` leverages the following underlying technologies:
 
-* TorchDynamo (``torch._dynamo``) is an internal API that uses a CPython
+* **TorchDynamo (``torch._dynamo``)** is an internal API that uses a CPython
   feature called the Frame Evaluation API to safely capture PyTorch graphs.
   Methods that are available externally for PyTorch users are surfaced
   through the ``torch.compiler`` namespace.
 
-* TorchInductor is the default ``torch.compile`` deep learning compiler
+* **TorchInductor** is the default ``torch.compile`` deep learning compiler
   that generates fast code for multiple accelerators and backends. You
   need to use a backend compiler to make speedups through ``torch.compile``
   possible. For NVIDIA and AMD GPUs, it leverages OpenAI Triton as the key
   building block.
 
-* AOTAutograd captures not only the user-level code, but also backpropagation,
+* **AOT Autograd** captures not only the user-level code, but also backpropagation,
   which results in capturing the backwards pass "ahead-of-time". This enables
   acceleration of both forwards and backwards pass using TorchInductor.
 
@@ -33,7 +33,7 @@ written in PyThon and it marks the transition of PyTorch from C++ to PyThon.
    might be used interchangeably in this documentation.
 
 As mentioned above, to run your workflows faster, ``torch.compile`` through
-TorchDynamo requires a backend that converts the captured graphs into fast
+TorchDynamo requires a backend that converts the captured graphs into a fast
 machine code. Different backends can result in various optimization gains.
 The default backend is called TorchInductor, also known as *inductor*,
 TorchDynamo has a list of supported backends developed by our partners,
@@ -42,7 +42,9 @@ with its optional dependencies.
 
 Some of the most commonly used backends include:
 
-.. list-table:: Training & inference backends
+**Training & inference backends**
+
+.. list-table::
    :widths: 50 50
    :header-rows: 1
 
@@ -51,13 +53,15 @@ Some of the most commonly used backends include:
    * - ``torch.compile(m, backend="inductor")``
      - Uses the TorchInductor backend. `Read more <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747>`__
    * - ``torch.compile(m, backend="aot_ts_nvfuser")``
-     - nvFuser with AotAutograd/TorchScript. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
+     - nvFuser with AOT Autograd/TorchScript. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
    * - ``torch.compile(m, backend="nvprims_nvfuser")``
-     - `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
+     - Tracing with nvFuser and its primitives. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
    * - ``torch.compile(m, backend="cudagraphs")``
-     - CUDA graphs with AotAutograd. `Read more <https://github.com/pytorch/torchdynamo/pull/757>`__
+     - CUDA graphs with AOT Autograd. `Read more <https://github.com/pytorch/torchdynamo/pull/757>`__
 
-.. list-table:: Inference-only backends
+**Inference-only backends**
+
+.. list-table:: 
    :widths: 50 50
    :header-rows: 1
 
