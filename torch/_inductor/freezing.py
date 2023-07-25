@@ -216,6 +216,7 @@ def freeze(
     )
 
     constant_fold(aot_autograd_gm)
+
     fuse_conv_bn(aot_autograd_gm)
     # now, decomp batch norm if we were unable to fuse it
     aot_autograd_gm = decompose_unfused_batchnorms(
