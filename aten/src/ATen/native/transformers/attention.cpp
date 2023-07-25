@@ -13,6 +13,7 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <utility>
 #include <c10/util/typeid.h>
+#include <c10/core/SymInt.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Exception.h>
@@ -618,17 +619,17 @@ at::Tensor preprocess_mask(
 // So instead we pad the head_dimensions to be a multiple of 8 in the composite
 // region
 template <int alignment_size, bool slice>
-std::tuple<at::Tensor, c10::SymInt> pad_last_dim(const at::Tensor& attn_bias) {
+at::Tensor pad_last_dim(const at::Tensor& attn_bias) {
   auto last_dim_size = attn_bias.sym_size(-1);
   if (last_dim_size % alignment_size == 0) {
-    return {attn_bias, last_dim_size};
+    return attn_bias;
   }
   auto pad_count = alignment_size - (last_dim_size % alignment_size);
   auto padded_bias = at::pad_symint(attn_bias, {c10::SymInt(0), pad_count});
   if (slice) {
-    return {padded_bias.slice_symint(-1, 0, last_dim_size), last_dim_size};
+    return padded_bias.slice_symint(-1, 0, last_dim_size);
   }
-  return {padded_bias, last_dim_size};
+  return padded_bias;
 }
 
 } // namespace
@@ -679,15 +680,15 @@ Tensor scaled_dot_product_attention(
   c10::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
   switch (backend) {
     case sdp::SDPBackend::flash_attention: {
-      auto [query_padded, q_og_size] = pad_last_dim<8, false>(query_);
-      auto [key_padded, k_og_size] = pad_last_dim<8, false>(key);
-      auto [value_padded, v_og_size] = pad_last_dim<8, false>(value);
+      c10::SymInt og_size = query_.sym_size(-1);
+      Tensor query_padded = pad_last_dim<8, false>(query_);
+      Tensor key_padded = pad_last_dim<8, false>(key);
+      Tensor value_padded = pad_last_dim<8, false>(value);
       // We need to calculate the scale based off the OG head dim size
       auto og_scale = sdp::calculate_scale(query_, scale);
-      // For Flash, all the head sizes need to bre the same but still
       auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
           query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.as_float_unchecked());
-      return std::get<0>(out_lse_softmax).slice_symint(-1, 0, v_og_size);
+      return std::get<0>(out_lse_softmax).slice_symint(-1, 0, og_size);
     }
     case sdp::SDPBackend::efficient_attention: {
       bool compute_logsumexp =
