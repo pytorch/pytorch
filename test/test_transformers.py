@@ -1969,7 +1969,8 @@ class TestSDPA(NNTestCase):
             rand_uniform = torch._fill_mem_eff_dropout_mask_(mask, p, seed, offset)
             mask = (rand_uniform > p).to(torch.float32)
             return mask
-
+        if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
+            unittest.skip("Reference implementation OOM")
         seed = 42
         scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
@@ -2069,7 +2070,8 @@ class TestSDPA(NNTestCase):
             rand_uniform = torch._fill_mem_eff_dropout_mask_(mask, p, seed, offset)
             mask = (rand_uniform > p).to(torch.float32)
             return mask
-
+        if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
+            unittest.skip("Reference implementation OOM")
         seed = 42
         scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
