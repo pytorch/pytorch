@@ -581,6 +581,16 @@ def index_tensor(fake_mode, func, *args, **kwargs):
         return out.to(out_device)
 
 
+# Can take mixed meta/non-meta arguments; the meta registration
+# will roughly do the right thing even when given real devices
+@register_op_impl(aten._embedding_bag.default)
+def embedding_bag(fake_mode, func, *args, **kwargs):
+    from torch._meta_registrations import meta_embedding_bag
+
+    with fake_mode:
+        return meta_embedding_bag(*args, **kwargs)
+
+
 # takes in multiple-devices, dont default to default device handling
 @register_op_impl(aten.index_put.default)
 @register_op_impl(aten._unsafe_index_put.default)
