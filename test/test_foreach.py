@@ -7,6 +7,7 @@ import re
 import torch
 import unittest
 import itertools
+import weakref
 
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
@@ -912,6 +913,43 @@ class TestForeach(TestCase):
         out1.backward(torch.ones_like(out1))
         self.assertIsNotNone(sample.input[0].grad)
         self.assertIsNone(sample.input[1].grad)
+
+    @ops(
+        filter(
+            lambda op: op.backward_requires_result,
+            foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+        ),
+        dtypes=(torch.float32,),
+    )
+    def test_lifetime_of_grad_fn_with_result(self, device, dtype, op):
+
+        def get_ref():
+            func = self._get_funcs(op)[0]
+            for sample in op.sample_inputs(device, dtype, requires_grad=True, num_input_tensors=[1]):
+                for key in ("is_fastpath", "disable_fastpath"):
+                    if key in sample.kwargs:
+                        del sample.kwargs[key]
+                if op.name == "_foreach_pow":
+                    if not isinstance(sample.args[0], Number):
+                        continue
+                    print(f"{(sample.args[0], sample.input)}")
+                    out = func((sample.args[0], sample.input), is_cuda=False, is_fastpath=False, **sample.kwargs)
+                else:
+                    out = func((sample.input, *sample.args), is_cuda=False, is_fastpath=False, **sample.kwargs)
+
+                class Foo:
+                    pass
+
+                foo = Foo()
+                meta_dict = out[0].grad_fn.metadata
+                meta_dict[0] = foo
+                ref = weakref.ref(foo)
+                return out, ref
+
+        out, ref = get_ref()
+        self.assertIsNotNone(ref())
+        del out
+        self.assertIsNone(ref())
 
     @ops(
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,

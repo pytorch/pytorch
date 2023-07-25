@@ -8559,6 +8559,7 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        backward_requires_result=True,
     ),
     ForeachFuncInfo(
         'acos',
@@ -8613,12 +8614,14 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        backward_requires_result=True,
     ),
     ForeachFuncInfo(
         'tanh',
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        backward_requires_result=True,
     ),
     ForeachFuncInfo(
         'sin',
@@ -8649,6 +8652,7 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        backward_requires_result=True,
     ),
 
     ForeachFuncInfo(
@@ -8685,6 +8689,7 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        backward_requires_result=True,
     ),
 
     ForeachFuncInfo(
@@ -8730,6 +8735,7 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        backward_requires_result=True,
     ),
 
     ForeachFuncInfo(
@@ -8739,6 +8745,7 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        backward_requires_result=True,
     ),
 
     ForeachFuncInfo(
@@ -8864,6 +8871,7 @@ foreach_binary_op_db: List[OpInfo] = [
                          "TestForeach", "test_binary_op"),
         ),
         supports_forward_ad=True,
+        backward_requires_result=True,
     ),
 ]
 
