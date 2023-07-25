@@ -10,10 +10,7 @@ import torch
 import torch.nn as nn
 from torch.distributed._composable import checkpoint
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class MemoryDelta(ContextDecorator):
@@ -184,7 +181,6 @@ class TestCheckpoint(TestCase):
             self.assertEqual(p1.grad, p2.grad)
 
     def test_raise_in_forward(self):
-
         class MyModel(torch.nn.Module):
             def __init__(self, raise_in_recomp):
                 super().__init__()
@@ -211,10 +207,7 @@ class TestCheckpoint(TestCase):
         with self.assertRaises(RuntimeError):
             out.backward()
 
-        self.assertEqual(
-            None,
-            checkpoint.state(m)._ac_generator
-        )
+        self.assertEqual(None, checkpoint.state(m)._ac_generator)
 
         m = MyModel(raise_in_recomp=False)
         checkpoint(m)
@@ -223,10 +216,7 @@ class TestCheckpoint(TestCase):
         with self.assertRaises(RuntimeError):
             m(inp)
 
-        self.assertEqual(
-            None,
-            checkpoint.state(m)._ac_generator
-        )
+        self.assertEqual(None, checkpoint.state(m)._ac_generator)
 
 
 if __name__ == "__main__":
