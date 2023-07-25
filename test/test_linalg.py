@@ -3991,9 +3991,9 @@ class TestLinalg(TestCase):
                 size_b = size_b[1:]
 
             if well_conditioned:
-                # Make triangular matrices with condition number equals 1.
-                U, _, Vh = torch.linalg.svd(make_randn(*size_a), full_matrices=False)
-                PLU = torch.linalg.lu(U @ Vh)
+                make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+                make_A = partial(make_fullrank, device=device, dtype=dtype)
+                PLU = torch.linalg.lu(make_A(make_randn(*size_a)))
                 if uni:
                     # A = L from PLU
                     A = PLU[1].transpose(-2, -1).contiguous()
