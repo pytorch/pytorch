@@ -640,7 +640,11 @@ def detect_fake_mode(inputs: Any = None):
         for m, desc2, i2 in fake_modes[1:]:
             assert (
                 fake_mode is m
-            ), f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}"
+            ), (
+                f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
+                f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
+                f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
+            )
         return fake_mode
     else:
         return None

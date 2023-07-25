@@ -6,6 +6,7 @@ import os
 import weakref
 from dataclasses import dataclass
 from functools import partial
+import traceback
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
 from weakref import ReferenceType
 
@@ -1178,6 +1179,8 @@ class FakeTensorMode(TorchDispatchMode):
         self.enter_stack: List[bool] = []
 
         self.shape_env = shape_env
+
+        self.stack = ''.join(traceback.format_stack())
 
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
