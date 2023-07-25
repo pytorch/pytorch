@@ -2362,6 +2362,78 @@ class GraphModule(torch.nn.Module):
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(actual, expected)
 
+    def test_vmap_multiple_outputs(self):
+        x = torch.ones(2, 4, 3)
+
+        def fn(x):
+            return torch.vmap(lambda x: (x.sum(0), x.sum(1)))(x)
+
+        wrapped_gm = self._compile_check(fn, (x,))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
+
+        select = l_x_.select(0, 0)
+        vmap_body_0 = self.vmap_body_0
+        vmap_proxy = torch.func.vmap(vmap_body_0, (0,), 0, 'error');  vmap_body_0 = None
+        call = vmap_proxy.__call__(l_x_);  vmap_proxy = l_x_ = None
+        getitem = call[0]
+        getitem_1 = call[1];  call = None
+        return (getitem, getitem_1)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, select):
+            sum_1 = select.sum(0)
+            sum_2 = select.sum(1);  select = None
+            return (sum_1, sum_2)
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_vmap_multiple_outputs_diff_dims(self):
+        x = torch.ones(2, 4, 3)
+
+        def fn(x):
+            return torch.vmap(lambda x: (x.sum(0), x.sum(1)), out_dims=(1, 0))(x)
+
+        wrapped_gm = self._compile_check(fn, (x,))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
+
+        select = l_x_.select(0, 0)
+        vmap_body_0 = self.vmap_body_0
+        vmap_proxy = torch.func.vmap(vmap_body_0, (0,), (1, 0), 'error');  vmap_body_0 = None
+        call = vmap_proxy.__call__(l_x_);  vmap_proxy = l_x_ = None
+        getitem = call[0]
+        getitem_1 = call[1];  call = None
+        return (getitem, getitem_1)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, select):
+            sum_1 = select.sum(0)
+            sum_2 = select.sum(1);  select = None
+            return (sum_1, sum_2)
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
     def test_vmap_kwargs(self):
         counters.clear()
         x = torch.ones(2, 3)
@@ -2376,6 +2448,28 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(
             dict(counters["graph_break"]),
             {"NYI - torch.func.vmap: kwargs arguments are currently unsupported.": 2},
+        )
+        self.assertEqual(actual, expected)
+
+    def test_vmap_pytree_inputs(self):
+        counters.clear()
+        x = torch.ones(2, 3)
+        y = torch.randn(2, 3)
+
+        def vmap_fn(inps):
+            x = inps["x"]
+            y = inps["y"]
+            return x + y
+
+        def fn(x, y):
+            return torch.func.vmap(vmap_fn)({"x": x, "y": y})
+
+        actual = fn(x, y)
+        expected = torch.compile(fn, backend="aot_eager", fullgraph=False)(x, y)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"HigherOrderOperator with body that accepts non-Tensors as input": 2},
         )
         self.assertEqual(actual, expected)
 

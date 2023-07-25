@@ -139,8 +139,18 @@ def speculate_subgraph(
             autograd_ctx = (
                 dynamo_enable_grad(tx) if enable_grad else contextlib.nullcontext()
             )
+
+            prev_side_effects = tx.output.side_effects.clone()
+
             with autograd_ctx:
                 output = f.call_function(tx, args, sub_kwargs)
+
+            # Captured variables are tracked in side-effects
+            # and they show up in output graph incorrectly.
+            # It is ok to undo this side-effect tracking
+            # as speculate_subgraph will allow only
+            # pure functions.
+            tx.output.side_effects = prev_side_effects
 
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
@@ -746,7 +756,6 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "NYI - torch.func.vmap: kwargs arguments are currently unsupported."
             )
 
-        # chunk_size is a keyword only args which is currently not supported.
         if chunk_size.value is not None:
             unimplemented(
                 "NYI - torch.func.vmap is not implemented when chunk_size is passed"
@@ -770,12 +779,10 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             else:
                 unbatched_input_args.append(arg)
 
-        prev_side_effects = tx.output.side_effects.clone()
-
         _, body_graph, body_lifted_freevars = speculate_subgraph(
             tx,
             fn,
-            unbatched_input_args,
+            torch.utils._pytree.tree_unflatten(unbatched_input_args, arg_spec),
             {},
             graph_checkpoint,
             checkpoint,
@@ -789,14 +796,8 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         body_node = make_attr(tx, body_name)
 
-        # Captured variables are tracked in side-effects
-        # and they show up in output graph incorrectly.
-        # So, undo side_effects capture.
-        tx.output.side_effects = prev_side_effects
-
         # body_lifted_variable should not be treated as batched.
         # So here we update `in_dims` to reflect that.
-
         # NOTE: updated_in_dims is flat list, it is ok for now
         #       as speculate_subgraph does not supports functions with non-Tensor args.
         #       (so we graph-break above)
@@ -812,22 +813,6 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_node,
             *(arg.as_proxy() for arg in (updated_in_dims, out_dims, randomness)),
         )
-        batched_fn_args = tuple(
-            arg.as_proxy().node.meta["example_value"] for arg in batch_input_args
-        ) + tuple(arg.node.meta["example_value"] for arg in body_lifted_freevars)
-        actual_in_dims = tuple(
-            pytree.tree_map(lambda x: x.value, updated_in_dims.items)
-        )
-        gm = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
-        example_value = torch._functorch.vmap.vmap_impl(
-            gm,
-            actual_in_dims,
-            out_dims.value,
-            randomness.value,
-            chunk_size.value,
-            *batched_fn_args,
-        )
-
         # vmap_proxy corresponds to `vmap_proxy = vmap(fn, *vmap_args, **vmap_kwargs)`
         vmap_proxy = tx.output.create_proxy(
             "call_function",
@@ -837,12 +822,29 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             name="vmap_proxy",
         )
 
-        batched_fn_args = tuple(arg.as_proxy() for arg in batch_input_args) + tuple(
-            body_lifted_freevars
+        proxy_batched_fn_args = tuple(
+            arg.as_proxy() for arg in batch_input_args
+        ) + tuple(body_lifted_freevars)
+
+        # We compute the example_value by actually calling
+        # `vmap` with FakeTensors.
+        fake_batched_fn_args = tuple(
+            arg.as_proxy().node.meta["example_value"] for arg in batch_input_args
+        ) + tuple(arg.node.meta["example_value"] for arg in body_lifted_freevars)
+        actual_in_dims = tuple(
+            pytree.tree_map(lambda x: x.value, updated_in_dims.items)
+        )
+        example_value = torch._functorch.vmap.vmap_impl(
+            torch.fx.GraphModule(tx.output.nn_modules, body_graph),
+            actual_in_dims,
+            out_dims.value,
+            randomness.value,
+            chunk_size.value,
+            *fake_batched_fn_args,
         )
 
         # proxy corresponds to `call = vmap_proxy(*batched_fn_args, **batched_fn_kwargs)`
-        proxy = vmap_proxy(*batched_fn_args)
+        proxy = vmap_proxy(*proxy_batched_fn_args)
         return wrap_fx_proxy(
             tx=tx,
             proxy=proxy,
