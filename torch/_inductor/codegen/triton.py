@@ -168,9 +168,9 @@ class TritonOverrides(OpOverrides):
         triton_val = triton_constant(type_(value))
         triton_type = triton_compute_type(dtype)
 
-        if triton_type == "tl.float32":
-            # Float constants are always f32 in triton
-            return triton_val
+        # if triton_type == "tl.float32":
+        #     # Float constants are always f32 in triton
+        #     return triton_val
 
         # NOTE: We use a tensor here in order to get the expected type.
         # Otherwise, e.g. float64 constants would be trunctated to float32.

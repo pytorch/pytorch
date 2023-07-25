@@ -1824,6 +1824,7 @@ class FixedLayout(Layout):
     ):
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)
+        # breakpoint()
         super().__init__(
             device,
             dtype,
@@ -3383,7 +3384,6 @@ class FallbackKernel(ExternKernelAlloc):
         context = (
             V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()
         )
-        breakpoint()
         with context:
             (
                 example_output,

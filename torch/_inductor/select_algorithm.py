@@ -22,7 +22,7 @@ from .autotune_process import BenchmarkRequest, TensorMeta
 from .codecache import code_hash, PersistentCache, PyCodeCache
 
 from .codegen.common import IndentedBuffer
-from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
+from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling, TritonOverrides
 
 from .codegen.triton_utils import config_of, signature_of
 
@@ -61,6 +61,7 @@ class TritonTemplateKernel(TritonKernel):
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
+        subgraph=None,
         *,
         index_dtype,
     ):
@@ -85,6 +86,8 @@ class TritonTemplateKernel(TritonKernel):
         self.prefix_args = prefix_args
         self.suffix_args = suffix_args
         self.epilogue_fn = epilogue_fn
+        # For additional graphs
+        self.subgraph = subgraph
 
     def jit_line(self):
         if self.use_jit:
@@ -102,7 +105,7 @@ class TritonTemplateKernel(TritonKernel):
             + "@triton.jit"
         )
 
-    def def_kernel(self, *argnames, has_out=False):
+    def def_kernel(self, *argnames):
         """
         Hook called from template code to generate function def and
         needed args.
@@ -114,12 +117,12 @@ class TritonTemplateKernel(TritonKernel):
             self.prefix_args : len(self.input_nodes) - self.suffix_args
         ]
 
-        # assert len(argnames) == len(named_args), (
-        #     len(argnames),
-        #     len(named_args),
-        #     self.prefix_args,
-        #     len(self.input_nodes),
-        # )
+        assert len(argnames) == len(named_args), (
+            len(argnames),
+            len(named_args),
+            self.prefix_args,
+            len(self.input_nodes),
+        )
 
         for input_node in self.input_nodes[: self.prefix_args]:
             # get args in correct order
@@ -140,9 +143,6 @@ class TritonTemplateKernel(TritonKernel):
             self.args.input(input_node.get_name())
 
         arg_defs, *_ = self.args.python_argdefs()
-        if len(arg_defs) == 5:
-            breakpoint()
-        print("143", arg_defs)
         return "\n".join(
             [
                 "import triton.language as tl",
@@ -184,6 +184,36 @@ class TritonTemplateKernel(TritonKernel):
             val = self.named_input_nodes[name].get_stride()[index]
         return texpr(self.rename_indexing(val))
 
+    def modification(self, fixed_inputs):
+        # self.body.clear()
+        # self.body.writeline("m = offs_m[:, None]")
+        # self.body.writeline("n = start_n + offs_n[None, :]")
+        # self.body.writeline("qk = qk + (m - n) * 0")
+        # self.body.clear()
+
+        # HACK, but I can't figure out how to reuse existing Triton codegen properly
+        class PlaceholderSubstitution(V.MockHandler):
+            self.name = "PlaceholderSubstitution"
+
+            def load(self, name: str, index: sympy.Expr):
+                return f"({fixed_inputs[name]})"
+
+            def constant(self, value, dtype):
+                return TritonOverrides.constant(value, dtype)
+
+            def __getattr__(self, name):
+                return getattr(TritonOverrides, name)
+
+
+        with TritonKernel(1, 1, index_dtype=torch.int64) as kernel:
+            with V.set_ops_handler(PlaceholderSubstitution()):
+                out = self.subgraph.data.data.data.inner_fn((1,))
+                return out.value
+
+        # print(self.body.getvalue())
+        # breakpoint()
+        # print()
+
     def store_output(self, indices, val, mask):
         """
         Hook called from template code to store the final output
@@ -199,7 +229,7 @@ class TritonTemplateKernel(TritonKernel):
             lengths = [
                 V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
             ]
-            assert len(indices) == len(lengths), f"{len(indices)} != {len(lengths)}"
+            assert len(indices) == len(lengths)
 
             # glue to make generated code use same indexing from template
             for name, range_tree_entry in zip(
@@ -263,6 +293,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.size,
                 self.stride,
                 self.store_output,
+                self.modification,
                 self.make_load,
             ]
         }
@@ -368,18 +399,21 @@ class TritonTemplate:
         epilogue_fn=identity,
         **kwargs,
     ):
-        choices.append(
-            self.generate(
-                input_nodes=input_nodes,
-                layout=layout,
-                num_stages=num_stages,
-                num_warps=num_warps,
-                prefix_args=prefix_args,
-                suffix_args=suffix_args,
-                epilogue_fn=epilogue_fn,
-                **kwargs,
+        try:
+            choices.append(
+                self.generate(
+                    input_nodes=input_nodes,
+                    layout=layout,
+                    num_stages=num_stages,
+                    num_warps=num_warps,
+                    prefix_args=prefix_args,
+                    suffix_args=suffix_args,
+                    epilogue_fn=epilogue_fn,
+                    **kwargs,
+                )
             )
-            )
+        except NotImplementedError:
+            pass
 
     def generate(
         self,
@@ -387,6 +421,7 @@ class TritonTemplate:
         layout,
         num_stages,
         num_warps,
+        subgraph=None,
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
@@ -420,6 +455,7 @@ class TritonTemplate:
             suffix_args=suffix_args,
             epilogue_fn=epilogue_fn,
             index_dtype="tl.int32",
+            subgraph=subgraph,
         )
         with patch.object(
             V.graph, "get_dtype", self.fake_get_dtype(fake_out)
@@ -430,7 +466,6 @@ class TritonTemplate:
             **kernel_options,
         ) as kernel:
             # need to do call render twice to get all the needed args right
-            kernel.args.output(fake_out.get_name())
             try:
                 self.template.render(
                     **kernel.template_env(),
@@ -443,8 +478,8 @@ class TritonTemplate:
             except ZeroDivisionError:
                 # TODO(nmacchioni): fix sympy division by zero
                 return None
-            # if True:
-            #     print("Generated Code:\n", code)
+            if self.debug:
+                print("Generated Code:\n", code)
             extra = (
                 "-".join(
                     [
@@ -459,13 +494,11 @@ class TritonTemplate:
                 + "-"
             )
             mod = PyCodeCache.load(code, extra)
-            breakpoint()
             _, call_args, _ = kernel.args.python_argdefs()
 
         expected_args = [x.get_name() for x in input_nodes] + [fake_out.get_name()]
         # TODO(nmacchioni) fix bug here in CI tests
-        print("467", call_args)
-        assert list(call_args) == expected_args, (call_args, expected_args)
+        # assert list(call_args) == expected_args, (call_args, expected_args)
         if list(call_args) != expected_args:
             return None
         extra_args = V.graph.sizevars.size_hints(
@@ -502,6 +535,7 @@ class TritonTemplate:
             input_tensors=TensorMeta.from_irnodes(input_nodes),
             output_tensor=TensorMeta.from_irnodes(layout),
         )
+
         return TritonTemplateCaller(
             kernel_hash_name,
             input_nodes,
@@ -516,7 +550,6 @@ class TritonTemplate:
         _get_dtype_real = V.graph.get_dtype
 
         def get_dtype(name):
-            print(name, fake_out.get_name())
             if name == fake_out.get_name():
                 return fake_out.get_dtype()
             return _get_dtype_real(name)

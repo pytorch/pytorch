@@ -570,14 +570,15 @@ class GraphLowering(torch.fx.Interpreter):
                         )
                     )
             # env = create_placeholder(name) for name in ["score", "b_1", "h_1", "m_1", "n_1"]]
-            scalar_inps = ["score_1", "b_1", "h_1", "m_1", "n_1"]
+            scalar_inps = ["score", "b", "h", "m", "n"]
             env = {}
+            cnt = 0
             for node in args[3].graph.nodes:
                 if node.op == "placeholder":
-                    if node.target in scalar_inps:
-                        env[node] = create_placeholder(node.target)
-                    else:
+                    if cnt >= len(scalar_inps):
                         assert False, "NYI"
+                    env[node] = create_placeholder(scalar_inps[cnt])
+                    cnt+= 1
                 elif node.op == "call_function":
                     from torch.utils._pytree import tree_map
                     env[node] = lowerings[node.target](*tree_map(lambda x: env[x] if x in env else x, node.args))
@@ -596,11 +597,12 @@ class GraphLowering(torch.fx.Interpreter):
                         choices,
                         (args[0], args[1], args[2]),
                         layout,
+                        subgraph = output_buffer,
                         num_stages=2,
                         num_warps=8,
-                        BLOCK_M=128,
+                        BLOCK_M=64,
                         BLOCK_N=128,
-                        BLOCK_DMODEL=128,
+                        BLOCK_DMODEL=args[0].get_size()[-1],
                     )
                     return autotune_select_algorithm("sdpa", choices, [args[0], args[1], args[2]], layout)
             return lowerings[torch.ops.aten.scaled_dot_product_attention.default](args[0], args[1], args[2])
@@ -639,6 +641,7 @@ class GraphLowering(torch.fx.Interpreter):
         raise AssertionError()
 
     def output(self, target, args, kwargs):
+        # breakpoint()
         result = super().output(target, args, kwargs)
         assert isinstance(result, (tuple, list)), type(result)
         assert all(
@@ -686,9 +689,11 @@ class GraphLowering(torch.fx.Interpreter):
         )
 
     def finalize(self):
-        breakpoint()
+        # breakpoint()
         for buf in self.buffers:
             buf.decide_layout()
+        # breakpoint()
+        # print()
 
     def run_node(self, n: torch.fx.Node):
         origins = {n}

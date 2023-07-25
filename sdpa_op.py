@@ -1,6 +1,7 @@
 import torch
 from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic
+from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
 import torch.nn.functional as F
 import torch.fx as fx
 from torch._ops import HigherOrderOperator
@@ -21,11 +22,24 @@ from torch._inductor.compile_fx import compile_fx_inner
 
 sdpa = HigherOrderOperator("sdpa")
 
+def math_attention(q, k, v, score_mod):
+    scores = q @ k.transpose(-2, -1)
+
+    from functorch.dim import dims
+    b, h, m, n = dims()
+
+    scores = scores[b, h, m, n]
+    scores = score_mod(scores, b, h, m, n)
+    scores = scores.order(b, h, m, n)
+
+    scores = scores.softmax(dim=-1)
+    return scores @ v
+
 @sdpa.py_impl(DispatchKey.CompositeExplicitAutograd)
 def sdpa_dense(q, k, v, score_mod):
-    out = F.scaled_dot_product_attention(q, k, v)
-    print(out.shape)
-    return out
+    return math_attention(q, k, v, score_mod).contiguous()
+    # out = F.scaled_dot_product_attention(q, k, v, scale=1).contiguous()
+    # return out
 
 @sdpa.py_impl(DispatchKey.Autograd)
 def sdpa_autograd(*args, **kwargs):
@@ -57,6 +71,15 @@ def sdpa_proxy_torch_dispatch_mode(q, k, v, score_mod):
         else:
             return sdpa(q, k, v, score_mod)
 
+@sdpa.py_impl(DispatchKey.Functionalize)
+def sdpa_functionalize(q, k, v, score_mod):
+    reapply_views = torch._C._functionalization_reapply_views_tls()
+
+    q, k, v = _unwrap_all_tensors_from_functional((q, k, v), reapply_views=reapply_views)
+    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
+        out = sdpa(q, k, v, score_mod)
+        return _wrap_all_tensors_to_functional(out, level=0)
+
 @sdpa.py_impl(FakeTensorMode)
 def sdpa_fake_tensor_mode(*args, **kwargs):
     return sdpa_dense(*args, **kwargs)
@@ -68,25 +91,86 @@ sdpa.fallthrough(DispatchKey.BackendSelect)
 sdpa.fallthrough(DispatchKey.AutocastCPU)
 sdpa.fallthrough(DispatchKey.AutocastCPU)
 
-Z = 1
-H = 4
-N_CTX = 512
+def bench(f, name=None, iters=100, warmup=5, display=True, profile=False):
+    import time
+    from triton.testing import do_bench
+
+    for _ in range(warmup):
+        f()
+    if profile:
+        with torch.profiler.profile() as prof:
+            f()
+        prof.export_chrome_trace(f"{name if name is not None else 'trace'}.json")
+
+    us_per_iter = do_bench(lambda: f())*1000
+
+    if name is None:
+        res = us_per_iter
+    else:
+        res= f"{name}: {us_per_iter:.3f}us"
+
+    if display:
+        print(res)
+    return res
+
+import torch
+
+Z = 4
+H = 8
+N_CTX = 2048
 D_HEAD = 64
 dtype = torch.float16
+torch.manual_seed(0)
 q = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
 k = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
 v = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
 
-# @torch.compile
-def foo(q, k, v):
-    return (sdpa(q, k, v, lambda score, b, h, m, n: score + (m - n)),)
+def identity(score, b, h, m, n):
+    return score * 0 # hack
 
-# foo(q, k, v)
+def causal_mask(score, b, h, m, n):
+    return torch.where(m <= n, score, float("-inf"))
+
+def rel_bias(score, b, h, m, n):
+    bias = (m - n)
+    return score + bias
+
+def compose(*fs):
+    def new_func(score, b, h, m, n):
+        for f in fs:
+            score = f(score, b, h, m, n)
+        return score
+    return new_func
+
+def alibi_bias(score, b, h, m, n):
+    bias = (m - n) * h
+    return score + bias
+
+def create_attention(score_mod):
+    def foo(q, k, v):
+        return sdpa(q, k, v, score_mod)
+    return foo
+
+score_mods = {
+    "nop": identity,
+    "causal": causal_mask,
+    "rel": rel_bias,
+    "alibi": alibi_bias,
+    "rel + causal": compose(rel_bias, causal_mask),
+    "alibi + causal": compose(alibi_bias, causal_mask),
+    }
+
+for name, score_mod in score_mods.items():
+    print(name)
+    foo = create_attention(score_mod)
+    compiled = torch.compile(foo)
+
+    ref_out = foo(q.to(torch.float64), k.to(torch.float64), v.to(torch.float64))
+    compiled_out = compiled(q, k, v)
+    torch.testing.assert_close(ref_out.to(dtype=torch.float16), compiled_out, atol=1e-1, rtol=0)
+    bench(lambda: foo(q, k, v), "eager")
+    bench(lambda: compiled(q, k, v), "compiled")
+
+
+# bench(lambda: foo(q, k, v))
 # exit(0)
-fake_mode = FakeTensorMode()
-with fake_mode:
-    q_, k_, v_ = [fake_mode.from_tensor(t) for t in (q, k, v)]
-    out_graph = make_fx(foo)(q_, k_, v_)
-    out_graph.print_readable()
-    out_graph = compile_fx_inner(out_graph, (q_, k_, v_))
-breakpoint()

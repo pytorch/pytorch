@@ -80,12 +80,13 @@ mm_template = TritonTemplate(
 def sdpa_grid(S, H, M, D, meta):
     import triton
     return (triton.cdiv(M, meta["BLOCK_M"]), S*H, 1)
+    # return (1, 1, 1)
 
 sdpa_template = TritonTemplate(
     name="sdpa",
     grid=sdpa_grid,
     source=r"""
-{{def_kernel("Q", "K", "V", has_out=True)}}
+{{def_kernel("Q", "K", "V")}}
     stride_qz = {{stride("Q", 0)}}
     stride_qh = {{stride("Q", 1)}}
     stride_qm = {{stride("Q", 2)}}
@@ -98,10 +99,7 @@ sdpa_template = TritonTemplate(
     stride_vh = {{stride("V", 1)}}
     stride_vk = {{stride("V", 2)}}
     stride_vn = {{stride("V", 3)}}
-    stride_oz = {{stride(None, 0)}}
-    stride_oh = {{stride(None, 1)}}
-    stride_om = {{stride(None, 2)}}
-    stride_on = {{stride(None, 3)}}
+
     Z = {{size("Q", 0)}}
     H = {{size("Q", 1)}}
     N_CTX = {{size("Q", 2)}}
@@ -133,14 +131,14 @@ sdpa_template = TritonTemplate(
         block_shape=(BLOCK_N, BLOCK_DMODEL),
         order=(1, 0)
     )
-    O_block_ptr = tl.make_block_ptr(
-        base=out_ptr0 + qvk_offset,
-        shape=(N_CTX, BLOCK_DMODEL),
-        strides=(stride_om, stride_on),
-        offsets=(start_m * BLOCK_M, 0),
-        block_shape=(BLOCK_M, BLOCK_DMODEL),
-        order=(1, 0)
-    )
+    # O_block_ptr = tl.make_block_ptr(
+    #     base=out_ptr1 + qvk_offset,
+    #     shape=(N_CTX, BLOCK_DMODEL),
+    #     strides=(stride_om, stride_on),
+    #     offsets=(start_m * BLOCK_M, 0),
+    #     block_shape=(BLOCK_M, BLOCK_DMODEL),
+    #     order=(1, 0)
+    # )
     # initialize offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
@@ -168,7 +166,7 @@ sdpa_template = TritonTemplate(
         k = tl.load(K_block_ptr)
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         qk += tl.dot(q, k)
-        # qk = attention_modification_triton(qk, offs_m[:, None], (start_n + offs_n[None, :]), off_hz)
+        qk = {{modification({"score": "qk", "b": "off_hz // H", "h": "off_hz % H", "m": "offs_m[:, None]", "n": "start_n + offs_n[None, :]"})}}
         # qk = tl.where(offs_m[:, None] >= (start_n + offs_n[None, :]), qk, float("-inf"))
         # -- compute m_ij, p, l_ij
         sm_scale = 1
@@ -207,7 +205,12 @@ sdpa_template = TritonTemplate(
     # tl.store(l_ptrs, l_i)
     # tl.store(m_ptrs, m_i)
     # write back O
-    tl.store(O_block_ptr, acc.to(tl.float16))
+    idx_z = tl.program_id(1) // H
+    idx_h = tl.program_id(1) % H
+    idx_m = offs_m[:, None]
+    idx_d = tl.arange(0, BLOCK_DMODEL)[None, :]
+    mask = (idx_m != -1) & (idx_d != -1)
+    {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "acc", "mask")}}
  """
 )
 
