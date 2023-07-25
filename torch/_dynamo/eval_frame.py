@@ -969,6 +969,8 @@ def export(
         specialize_int=True,
         assume_static_by_default=assume_static_by_default,
         automatic_dynamic_shapes=False,
+        capture_dynamic_output_shape_ops=True,
+        capture_scalar_outputs=True,
     ), torch._guards.export_fake_mode(fake_mode):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
