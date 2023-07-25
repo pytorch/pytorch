@@ -198,8 +198,7 @@ class OrderedDictWrapper:
     def __setitem__(self, k, v):
         if k not in self:
             raise RuntimeError(
-                "Can't add a new parameter after ScriptModule construction."
-                " Tried to add '{}".format(k)
+                f"Can't add a new parameter after ScriptModule construction. Tried to add '{k}"
             )
         self._c.setattr(k, v)
 
@@ -282,7 +281,7 @@ class ScriptMeta(type):
             # We leave built-in ScriptModule types alone, since this metaclass
             # is only for compiling user classes that inherit from
             # ScriptModule.
-            return super(ScriptMeta, cls).__init__(name, bases, attrs)
+            return super().__init__(name, bases, attrs)
 
         original_init = getattr(cls, "__init__", lambda self: None)
 
@@ -317,7 +316,7 @@ class ScriptMeta(type):
                     delattr(self, name)
 
         cls.__init__ = init_then_script  # type: ignore[misc]
-        super(ScriptMeta, cls).__init__(name, bases, attrs)
+        super().__init__(name, bases, attrs)
 
 
 class _CachedForward:
@@ -736,7 +735,7 @@ if _enabled:
             return self._c.get_debug_state()
 
         def extra_repr(self):
-            return "original_name={}".format(self.original_name)
+            return f"original_name={self.original_name}"
 
         def graph_for(self, *args, **kwargs):
             return self.forward.graph_for(self, *args, **kwargs)  # type: ignore[attr-defined]
@@ -798,9 +797,7 @@ if _enabled:
                 # TODO: we don't have _concrete_type set after load(), and in general we lose constant information.
                 # We should encode constants as class type attributes (or something) so it persists across save/load.
                 raise AttributeError(
-                    "Cannot mutate TorchScript constant value: '{}'. Value: '{}'".format(
-                        attr, value
-                    )
+                    f"Cannot mutate TorchScript constant value: '{attr}'. Value: '{value}'"
                 )
             else:
                 # We allow setting Python attributes on the ScriptModule, for
@@ -1296,9 +1293,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         # an instance instead of a Module
         if issubclass(obj, torch.nn.Module):
             raise RuntimeError(
-                "Type '{}' cannot be compiled since it inherits"
-                " from nn.Module,"
-                " pass an instance instead".format(obj)
+                f"Type '{obj}' cannot be compiled since it inherits from nn.Module, pass an instance instead"
             )
 
         # Enums are automatically usable in TorchScript, explicitly scripting

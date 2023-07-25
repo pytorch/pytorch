@@ -1565,7 +1565,7 @@ def forward(self, tangents_1):
         f = aot_function(f, compiler)
         f(torch.randn(5))
         out.sum().backward()
-        self.assertEqual(count, [(['0_forward'], 4), (['1_inference'], 4), (['0_backward'], 8)])
+        self.assertExpectedInline(str(count), """[(['0_forward'], 4), (['1_inference'], 4), (['0_backward'], 8)]""")
 
     def test_dupe_arg(self):
         def f(x, y):
@@ -1805,8 +1805,8 @@ def forward(self, tangents_1):
         device = "cuda"
         input_dtype = torch.float16
         param_dtype = torch.float32
-        weight, bias = [torch.ones(64, device=device, dtype=param_dtype, requires_grad=True) for _ in range(2)]
-        running_mean, running_var = [torch.ones(64, device=device, dtype=param_dtype) for _ in range(2)]
+        weight, bias = (torch.ones(64, device=device, dtype=param_dtype, requires_grad=True) for _ in range(2))
+        running_mean, running_var = (torch.ones(64, device=device, dtype=param_dtype) for _ in range(2))
 
         def bn(x):
             return torch.ops.aten.cudnn_batch_norm(

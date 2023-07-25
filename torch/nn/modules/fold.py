@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from .module import Module
 from .. import functional as F
 
