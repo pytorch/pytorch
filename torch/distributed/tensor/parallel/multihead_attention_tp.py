@@ -114,10 +114,6 @@ class TensorParallelMultiheadAttention(torch.nn.Module):
         query: Union[torch.Tensor, DT],
         key: Union[torch.Tensor, DT],
         value: Union[torch.Tensor, DT],
-        key_padding_mask: Optional[torch.Tensor] = None,
-        need_weights: bool = True,
-        attn_mask: Optional[torch.Tensor] = None,
-        average_attn_weights: bool = True,
     ) -> Union[torch.Tensor, DT]:
         b, sq, h = query.shape
         sk = key.size(1)
