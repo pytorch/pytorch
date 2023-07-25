@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/utils/memory.h>
 
 #include <ATen/DeviceGuard.h>
@@ -75,6 +76,28 @@ inline bool should_run_in_cpu_ready_queue(c10::DeviceType device) {
     return false;
   }
 }
+
+std::atomic<Engine::compiled_autograd_fn> the_compiled_autograd = nullptr;
+#define COMPILED_AUTOGRAD_POISON \
+  reinterpret_cast<Engine::compiled_autograd_fn>(1)
+std::atomic<int32_t> num_threads_in_backwards;
+struct CompiledAutogradThreadingDebugCheck {
+  CompiledAutogradThreadingDebugCheck() : incremented(true) {
+    num_threads_in_backwards++;
+  }
+  ~CompiledAutogradThreadingDebugCheck() {
+    release();
+  }
+  void release() {
+    if (std::exchange(incremented, false)) {
+      num_threads_in_backwards--;
+    }
+  }
+
+ private:
+  bool incremented;
+};
+
 } // namespace
 
 // Threads spawned by the engine are assigned a 'worker_device' specifying
@@ -1153,6 +1176,11 @@ auto Engine::execute(
         "your parameters to None after use to break the cycle and avoid the leak.");
   }
 
+  // Allows us to assert no other threads are in backwards
+  CompiledAutogradThreadingDebugCheck _thread_check;
+  auto compiled_autograd = the_compiled_autograd.load();
+  TORCH_INTERNAL_ASSERT(compiled_autograd != COMPILED_AUTOGRAD_POISON);
+
   // accumulate_grad is true if and only if the frontend call was to
   // grad(), not backward(). grad() returns the sum of the gradients
   // w.r.t. the inputs and thus needs the inputs to be present.
@@ -1181,7 +1209,7 @@ auto Engine::execute(
       /* graph_roots */ std::move(temp_roots));
 
   // If we receive a single root, skip creating extra root node
-  bool skip_dummy_node = root_edges.size() == 1;
+  bool skip_dummy_node = root_edges.size() == 1 && compiled_autograd == nullptr;
   auto graph_root = skip_dummy_node
       ? root_edges.at(0).function
       : std::make_shared<GraphRoot>(root_edges, inputs);
@@ -1193,6 +1221,16 @@ auto Engine::execute(
   if (!outputs.empty()) {
     graph_task->init_to_execute(
         *graph_root, outputs, accumulate_grad, min_topo_nr);
+  }
+
+  if (compiled_autograd != nullptr) {
+    // see [Note: Compiled Autograd]
+    TORCH_CHECK(!keep_graph, "compiled_autograd does not support keep_graph");
+    TORCH_CHECK(
+        !create_graph, "compiled_autograd does not support create_graph");
+    _thread_check.release();
+    return (*compiled_autograd)(
+        graph_root, *graph_task, accumulate_grad, outputs);
   }
 
   // Queue the root
@@ -1325,6 +1363,14 @@ void set_default_engine_stub(EngineStub stub) {
 
 Engine& Engine::get_default_engine() {
   return engine_stub.load()();
+}
+
+void Engine::set_compiled_autograd(Engine::compiled_autograd_fn fn) {
+  auto prior = the_compiled_autograd.exchange(COMPILED_AUTOGRAD_POISON);
+  TORCH_CHECK(
+      num_threads_in_backwards.load() == 0 && prior != COMPILED_AUTOGRAD_POISON,
+      "compiled_autograd.enable() requires no threads in backwards()");
+  the_compiled_autograd.store(fn);
 }
 
 void Engine::queue_callback(std::function<void()> callback) {
