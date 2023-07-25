@@ -6416,6 +6416,65 @@ def ___make_guard_fn():
         # assert no recompile
         self.assertEqual(counter.frame_count, 6)
 
+    def test_tolist_scalar(self):
+        def fn(x):
+            new_list = []
+            for i in x.tolist():
+                new_list.append(i * 4)
+            return new_list
+
+        x = torch.tensor([3])
+        eager = fn(x)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter, nopython=True)(fn)(x)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_tolist_1d(self):
+        def fn(x):
+            new_list = []
+            for i in x.tolist():
+                new_list.append(i * 4)
+            return new_list
+
+        x = torch.tensor([2, 1])
+        eager = fn(x)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter, nopython=True)(fn)(x)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_tolist_kd(self):
+        def fn(x):
+            new_list = []
+            for i in x.tolist():
+                new_list.append(i * 4)
+            return new_list
+
+        x = torch.tensor([[[2, 1], [2, 1], [2, 1]], [[2, 1], [2, 1], [2, 1]]])
+        eager = fn(x)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter, nopython=True)(fn)(x)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_tolist_float(self):
+        def fn(x):
+            new_list = []
+            for i in x.tolist():
+                new_list.append(i * 4)
+            return new_list
+
+        x = torch.tensor(
+            [[[2.0, 1.0], [2.0, 1.0], [2.0, 1.0]], [[2.0, 1.0], [2.0, 1.0], [2.0, 1.0]]]
+        )
+        eager = fn(x)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(fn)(x)
+        self.assertEqual(eager, compiled)
+        # Nothing to compile here
+        self.assertEqual(counter.frame_count, 0)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):

@@ -498,7 +498,43 @@ class TensorVariable(VariableTracker):
                 example_value=None,
                 **options,
             )
-        elif name in ("tolist", "backward", "data_ptr"):
+        elif name == "tolist":
+            if free_symbols(self.size):
+                unimplemented(f"Tensor.{name}")
+            else:
+                from .builder import SourcelessBuilder
+
+                def tolist(tensor, sub_proxy):
+                    def wrap(i, sub_proxy):
+                        return SymNodeVariable.create(
+                            tx,
+                            sub_proxy.item(),
+                            sym_num=tx.output.shape_env.create_unbacked_symint(),
+                        )
+
+                    if tensor.dtype not in [
+                        torch.int8,
+                        torch.int16,
+                        torch.int32,
+                        torch.int64,
+                    ]:
+                        unimplemented(
+                            "Input tensor for tolist must be an integer tensor"
+                        )
+
+                    if tensor.dim() == 1:
+                        return [wrap(val, sub_proxy[i]) for i, val in enumerate(tensor)]
+                    else:
+                        return [
+                            tolist(sub_tensor, sub_proxy=sub_proxy[i])
+                            for i, sub_tensor in enumerate(tensor)
+                        ]
+
+                out = tolist(
+                    self.as_proxy().node.meta["example_value"], self.as_proxy()
+                )
+                return SourcelessBuilder()(tx, out).add_options(options)
+        elif name in ("backward", "data_ptr"):
             unimplemented(f"Tensor.{name}")
         elif name == "item" and not config.capture_scalar_outputs:
             unimplemented(f"Tensor.{name}")
