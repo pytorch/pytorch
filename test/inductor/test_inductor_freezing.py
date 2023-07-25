@@ -12,13 +12,13 @@ import weakref
 import torch
 
 import torch._dynamo as torchdynamo
-import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
+import torch.ao.quantization.pt2e.quantizer.x86_inductor_quantizer as xiq
 from torch import nn
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.utils import override_lowering, run_and_get_code
-from torch.ao.quantization._pt2e.quantizer import X86InductorQuantizer
-from torch.ao.quantization._quantize_pt2e import convert_pt2e, prepare_pt2e_quantizer
+from torch.ao.quantization.pt2e.quantizer import X86InductorQuantizer
+from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
@@ -33,7 +33,6 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
 
@@ -329,6 +328,42 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertEqual(eager, compiled)
         self.assertTrue(weight_ref() is None)
 
+    def test_conv_with_as_strided(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.kv = torch.nn.Conv2d(
+                    256, 384, kernel_size=(1, 1), stride=(1, 1), bias=False
+                )
+
+            def forward(self, x):
+                convolution = self.kv(x)
+                constant_pad_nd = torch.ops.aten.constant_pad_nd.default(
+                    convolution, [2, 2, 2, 2], 0.0
+                )
+                # as_strided inputs are depend on input's size and stide.
+                as_strided = torch.ops.aten.as_strided.default(
+                    constant_pad_nd, [8, 384, 2, 20, 12], [153600, 400, 160, 1, 20]
+                )
+                as_strided_1 = torch.ops.aten.as_strided.default(
+                    as_strided, [8, 384, 2, 2, 12, 12], [153600, 400, 160, 8, 20, 1]
+                )
+                clone = torch.ops.aten.clone.default(
+                    as_strided_1, memory_format=torch.contiguous_format
+                )
+                return clone
+
+        mod = Model().to(self.device).eval()
+
+        @torch.compile()
+        def foo(mod, inp):
+            return mod(inp)
+
+        with torch.no_grad():
+            x = torch.randn(8, 256, 16, 16).to(self.device)
+            mod_eager = mod(x)
+            self.assertEqual(foo(mod, x), mod_eager)
+
     def test_conv_layout_convert_with_view(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -336,8 +371,10 @@ class OptimizeForInferenceTemplate(TestCase):
                 self.conv = nn.Conv2d(
                     3, 128, kernel_size=3, padding=1, stride=1, bias=False
                 )
+                self.bn = nn.BatchNorm2d(3)
 
             def forward(self, x):
+                x = self.bn(x)
                 x = self.conv(x)
                 return torch.flatten(x, 1)
 
@@ -518,7 +555,7 @@ class OptimizeForInferenceQuantizationPT2E(TestCase):
             # int8_weight -> dequant_per_channel -> convolution
             self.assertTrue(torch._inductor.config.freezing)
 
-            prepare_model = prepare_pt2e_quantizer(export_model, quantizer)
+            prepare_model = prepare_pt2e(export_model, quantizer)
             prepare_model(*example_inputs)
 
             convert_model = convert_pt2e(prepare_model)
@@ -534,5 +571,5 @@ class OptimizeForInferenceQuantizationPT2E(TestCase):
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
+    if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")

@@ -997,7 +997,7 @@ class TestTracer(JitTestCase):
         traced_model.to('cpu')
         cpu_out = traced_model(x.float())
         self.assertEqual(cpu_out, cuda_out)
-        traced_model.double()
+        traced_model.to(torch.get_default_dtype())
 
         # state_dict + load_state_dict
         state = {k: v.clone() for k, v in traced_model.state_dict().items()}
@@ -2383,7 +2383,7 @@ class TestMixTracingScripting(JitTestCase):
 
             def forward(self, feature_map: Dict[str, List[Tensor]]) -> Tensor:
                 output = []
-                for i, j in feature_map.items():
+                for j in feature_map.values():
                     output.append(self.linear(j[0]))
 
                 return torch.stack(output)
