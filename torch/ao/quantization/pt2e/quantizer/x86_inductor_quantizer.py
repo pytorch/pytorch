@@ -44,14 +44,11 @@ __all__ = [
 
 @dataclass
 class _X86InductorQuantizationAnnotation(QuantizationAnnotation):
-    # _is_output_of_fusion_pattern:
+    # _is_output_of_quantized_pattern:
     #  * Node as output node of a fusion pattern.
-    _is_output_of_fusion_pattern: bool = False
-    # _is_quantized_single_node:
-    #  * Node doesn't belong to any fusion pattern.
-    #  * Node among the quantizable_ops_pt2e set.
-    #  * Node has fake quant inserted at all of the inputs.
-    _is_quantized_single_node: bool = False
+    #  * The fusion pattern supports int8 data type.
+    #  * The fusion pattern has inputs annotated to insert observer.
+    _is_output_of_quantized_pattern: bool = False
 
 # Ops support int8 data type and excludes ops like conv, linear.
 quantizable_ops_pt2e: Set = {
@@ -104,8 +101,7 @@ def _is_quantized_op_pt2e(node: torch.fx.Node):
     quantization_annotation = node.meta.get("quantization_annotation", None)
     assert isinstance(quantization_annotation, _X86InductorQuantizationAnnotation)
     return True if (
-        quantization_annotation._is_output_of_fusion_pattern
-        or quantization_annotation._is_quantized_single_node
+        quantization_annotation._is_output_of_quantized_pattern
     ) else False
 
 
@@ -257,7 +253,7 @@ class X86InductorQuantizer(Quantizer):
                 # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
                 output_qspec=get_output_act_qspec(quantization_config),
                 _annotated=True,
-                _is_output_of_fusion_pattern=True,
+                _is_output_of_quantized_pattern=True,
             )
         else:
             conv_node.meta["quantization_annotation"] = _X86InductorQuantizationAnnotation(
@@ -320,7 +316,7 @@ class X86InductorQuantizer(Quantizer):
         Step 1: Apply quantization recipe for fusion patterns of conv/linear to enable int8 data type actively.
         Step 2: Propagate quantization annotation for patterns besides conv/linear. Go through the pattern in model
         from start to the end. If a pattern supports computation with int8 data type and inputs connected to
-        quantized patterns, annotate it as quantized pattern.
+        quantized patterns, annotate its inputs as quantized pattern.
         Step 3: Since in step 2, we only annotate the inputs of quantized pattern. For some quantized patterns,
         such as maxpool2d, which only supports output with int8 data type when the input is with int8 data type,
         we need to annotate the output of this pattern.
@@ -336,7 +332,7 @@ class X86InductorQuantizer(Quantizer):
         # Recipe refer to https://github.com/intel/intel-extension-for-pytorch/blob/
         # 90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_recipe.py#L538
         for node in model.graph.nodes:
-            self._annotate_quantizable_single_op(node, config)
+            self._annotation_propagation_quantizable_pattern(node, config)
 
         # Step3: For quantizable ops, such as maxpool2d, we need to quantize its output if it is quantized
         # in inputs. So, we can fuse dq-operator-q into a quantized op.
@@ -389,7 +385,7 @@ class X86InductorQuantizer(Quantizer):
                 # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
                 output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
-                _is_output_of_fusion_pattern=True,
+                _is_output_of_quantized_pattern=True,
             )
 
     def _annotate_conv2d_binary(
@@ -424,7 +420,7 @@ class X86InductorQuantizer(Quantizer):
                 # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
                 output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
-                _is_output_of_fusion_pattern=True,
+                _is_output_of_quantized_pattern=True,
             )
 
     def _annotate_conv2d_unary(
@@ -447,7 +443,7 @@ class X86InductorQuantizer(Quantizer):
                 # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
                 output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
-                _is_output_of_fusion_pattern=True,
+                _is_output_of_quantized_pattern=True,
             )
 
     def _annotate_conv2d(
@@ -494,17 +490,15 @@ class X86InductorQuantizer(Quantizer):
             input_qspec_map=input_qspec_map,
             _annotated=True,
         )
-        # Since single maxpool2d decomposed into torch.ops.aten.max_pool2d_with_indices.default - operator.getitem
-        # We annotate it as a fusion pattern.
         getitem_node.meta["quantization_annotation"] = _X86InductorQuantizationAnnotation(
             _annotated=True,
-            _is_output_of_fusion_pattern=True,
+            _is_output_of_quantized_pattern=True,
         )
 
-    def _annotate_quantizable_single_op(
+    def _annotation_propagation_quantizable_pattern(
         self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
-        # For single op connects to input node of quantized node, insert fake quant between them.
+        # Propagate annotation to quantizable patterns.
         if (
             (node.target in quantizable_ops_pt2e)
             and (not _is_any_annotated([node]))
@@ -554,7 +548,7 @@ class X86InductorQuantizer(Quantizer):
                 )
                 if (
                     getitem_quantization_annotation
-                    and getitem_quantization_annotation._is_output_of_fusion_pattern
+                    and getitem_quantization_annotation._is_output_of_quantized_pattern
                 ):
                     # Annotate the output_qspec of getitem_node
                     input_act = maxpool_node.args[0]
