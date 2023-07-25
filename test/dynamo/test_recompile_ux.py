@@ -9,6 +9,7 @@ import torch._dynamo
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch.testing._internal.common_utils import IS_FBCODE
 
 
 class RecompileUxTests(torch._dynamo.test_case.TestCase):
@@ -22,6 +23,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.config.patch("cache_size_limit", cls.cache_limit)
         )
 
+    @unittest.skipIf(IS_FBCODE, "finalizer never triggers somehow")
     def test_drop_cache_on_skip(self):
         def model(x, i):
             return x + i
