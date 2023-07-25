@@ -182,6 +182,7 @@ class TestDeserialize(TestCase):
 
         serialized_struct, state_dict = serialize(ep, opset_version={"aten": 0})
         deserialized_ep = deserialize(serialized_struct, state_dict, expected_opset_version={"aten": 0})
+        deserialized_ep.graph.eliminate_dead_code()
 
         orig_outputs = ep(*inputs)
         loaded_outputs = deserialized_ep(*inputs)
