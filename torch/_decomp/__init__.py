@@ -179,7 +179,7 @@ def get_decompositions(
                 overloads.append(overload)
         for overload in overloads:
             # Maybe use a cpp decomp if one exists, and we haven't already found a python decomp
-            if torch._C._dispatch_has_kernel_for_dispatch_key(
+            if torch._C._dispatch_has_kernel(overload.name()) and torch._C._dispatch_has_kernel_for_dispatch_key(
                 overload.name(), torch._C.DispatchKey.CompositeImplicitAutograd
             ):
                 if overload not in decompositions:

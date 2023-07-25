@@ -16,7 +16,11 @@ import torch._functorch.config as functorch_config
 
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
+from torch._dynamo import (
+    compiled_autograd,
+    logging as dynamo_logging,
+    utils as dynamo_utils,
+)
 from torch._dynamo.utils import detect_fake_mode
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph
@@ -1053,7 +1057,9 @@ def compile_fx(
     tracing_context = (
         torch._guards.TracingContext.get() or torch._guards.TracingContext(fake_mode)
     )
-    with V.set_fake_mode(fake_mode), torch._guards.tracing(tracing_context):
+    with V.set_fake_mode(fake_mode), torch._guards.tracing(
+        tracing_context
+    ), compiled_autograd.disable():
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
