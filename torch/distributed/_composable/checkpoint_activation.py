@@ -69,12 +69,7 @@ def checkpoint(module: nn.Module) -> nn.Module:
             checkpoint.state(
                 module
             )._ac_generator = _checkpoint_without_reentrant_generator(
-                module,
-                True,
-                context_fns,
-                _DEFAULT_DETERMINISM_MODE,
-                False,
-                *inputs
+                module, True, context_fns, _DEFAULT_DETERMINISM_MODE, False, *inputs
             )
             next(checkpoint.state(module)._ac_generator)
 
@@ -92,7 +87,6 @@ def checkpoint(module: nn.Module) -> nn.Module:
         #  Ensure that we no longer hold on to the generator. always_call=True helps ensure we
         # clear this even in the case of exception in fwd pass.
         checkpoint.state(module)._ac_generator = None
-
 
     checkpoint.state(module).enable_hook = True
     module.register_forward_pre_hook(forward_pre_hook)
