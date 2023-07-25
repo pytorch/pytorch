@@ -281,10 +281,10 @@ class StateDictConfig:
 
     Attributes:
         offload_to_cpu (bool): If ``True``, then FSDP will offload the state
-            dict values to CPU.
+            dict values to CPU. (Default: ``False``)
         use_dtensor (bool): If ``True``, then FSDP will save the state dict
             values as ``DTensor``, and if ``False``, then FSDP will save them
-            as ``ShardedTensor``. 
+            as ``ShardedTensor``. (Default: ``False``)
     """
 
     offload_to_cpu: bool = False
@@ -295,13 +295,12 @@ class StateDictConfig:
 class FullStateDictConfig(StateDictConfig):
     """
     ``FullStateDictConfig`` is a config class meant to be used with
-    ``StateDictType.FULL_STATE_DICT``. Currently, it accepts two parameters,
-    ``offload_to_cpu`` and ``rank0_only`` which can be configured to offload
-    the full ``state_dict`` to CPU and to materialize the ``state_dict`` on
-    rank 0 only. When used, it is recommended to enable both of these flags
-    together to optimize memory savings when taking checkpoints. Note that
-    this config class is meant for user via the :func:`state_dict_type`
-    context manager as follows:
+    ``StateDictType.FULL_STATE_DICT``. We recommend enabling both
+    ``offload_to_cpu=True`` and ``rank0_only=True`` when saving full state
+    dicts to save GPU memory and CPU memory, respectively. This config class
+    is meant to be used via the :func:`state_dict_type` context manager as
+    follows:
+
         >>> # xdoctest: +SKIP("undefined variables")
         >>> fsdp = FSDP(model, auto_wrap_policy=...)
         >>> cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
@@ -318,6 +317,7 @@ class FullStateDictConfig(StateDictConfig):
         >>> # communicates loaded checkpoint states from rank 0 to rest of the world.
         >>> fsdp = FSDP(model, device_id=torch.cuda.current_device(), auto_wrap_policy=..., sync_module_states=True)
         >>> # After this point, all ranks have FSDP model with loaded checkpoint.
+
     """
 
     rank0_only: bool = False
