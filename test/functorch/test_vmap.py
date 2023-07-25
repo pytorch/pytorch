@@ -4453,8 +4453,6 @@ class TestRandomness(TestCase):
     @parametrize('randomness', ['same', 'different', 'error'])
     @parametrize('use_generator', [True, False])
     def test_randperm(self, device, randomness, use_generator):
-        if TEST_WITH_TORCHDYNAMO and torch.device(device).type == 'cuda' and not use_generator:
-            raise unittest.SkipTest("fails with DYNAMO")
         # needs a special case because randperm doesn't take a batch size
         B0 = 4
         seed = 1234567
@@ -4477,11 +4475,19 @@ class TestRandomness(TestCase):
         if randomness == 'different':
             for i in range(B0):
                 expected = torch.randperm(10, **kwargs)
-                self.assertEqual(vmap_result[i], expected)
+                # RNG differs between eager and via dynamo trace on CUDA
+                if (TEST_WITH_TORCHDYNAMO and torch.device(device).type == 'cuda'):
+                    self._assert_all_slices_unique(vmap_result)
+                else:
+                    self.assertEqual(vmap_result[i], expected)
         else:
             expected = torch.randperm(10, **kwargs)
-            for i in range(B0):
-                self.assertEqual(vmap_result[i], expected)
+            # RNG differs between eager and via dynamo trace on CUDA
+            if (TEST_WITH_TORCHDYNAMO and torch.device(device).type == 'cuda'):
+                self._assert_all_slices_equal(vmap_result)
+            else:
+                for i in range(B0):
+                    self.assertEqual(vmap_result[i], expected)
 
     @parametrize('randomness', ['error', 'same', 'different'])
     @parametrize('batched_input', ["first", "last", "none"])
@@ -4589,9 +4595,6 @@ class TestRandomness(TestCase):
     @parametrize('randomness', ['error', 'same', 'different'])
     @parametrize('batched_input', ["first", "last", "none"])
     def test_feature_alpha_dropout(self, device, randomness, batched_input):
-        if TEST_WITH_TORCHDYNAMO and randomness == 'different' and batched_input == 'none' and torch.device(device).type == 'cuda':
-            raise unittest.SkipTest("fails with dynamo")
-
         def op(t, ignored):
             return torch.nn.functional.feature_alpha_dropout(torch.ones_like(t), training=True)
 
@@ -4630,8 +4633,6 @@ class TestRandomness(TestCase):
     @parametrize('randomness', ['error', 'same', 'different'])
     @parametrize('batched_input', ["first", "last", "none"])
     def test_like_functions(self, device, randomness, batched_input):
-        if TEST_WITH_TORCHDYNAMO and randomness in ["same", "different"] and torch.device(device).type == 'cuda':
-            raise unittest.SkipTest("fails with DYNAMO")
         seed = 1234567
         supported_ops = [
             lambda t, _: torch.randint_like(t, 20),
@@ -4664,7 +4665,9 @@ class TestRandomness(TestCase):
                 expected = op(passed, 0)
 
                 self._assert_all_slices_unique(vmap_result)
-                self.assertEqual(expected, vmap_result)
+                # RNG differs between eager and via dynamo trace on CUDA
+                if not (TEST_WITH_TORCHDYNAMO and torch.device(device).type == 'cuda'):
+                    self.assertEqual(expected, vmap_result)
                 return
 
             assert randomness == 'same'
@@ -4672,8 +4675,10 @@ class TestRandomness(TestCase):
                 passed = passed[0]
             expected = op(passed, 0)
             self._assert_all_slices_equal(vmap_result)
-            for i in range(B0):
-                self.assertEqual(expected, vmap_result[i])
+            # RNG differs between eager and via dynamo trace on CUDA
+            if not (TEST_WITH_TORCHDYNAMO and torch.device(device).type == 'cuda'):
+                for i in range(B0):
+                    self.assertEqual(expected, vmap_result[i])
 
     @parametrize('use_generator', [True, False])
     @parametrize('randomness', ['error', 'same', 'different'])
