@@ -1360,6 +1360,28 @@ def forward(self, a_1):
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(15))
         self.assertExpectedInline(show_guards(tensor), """L['a'].size()[0] < 20""")
 
+    def test_guard_upperbound_range_refinement_multivariate(self):
+        def f(a):
+            assert a.shape[0] > 5 and a.shape[0] > 12
+            assert a.shape[1] > 5 and a.shape[1] > a.shape[0]
+            return a.cos()
+        tensor = make_fx(f, tracing_mode="symbolic")(torch.randn((15, 20)))
+        self.assertExpectedInline(show_guards(tensor), """\
+L['a'].size()[1] > L['a'].size()[0]
+L['a'].size()[0] > 12""")
+
+    def test_guard_lowerbound_range_refinement_multivariate(self):
+        def f(a):
+            assert a.shape[0] < 20 and a.shape[0] < 30
+            assert a.shape[1] < 30 and a.shape[1] < a.shape[0]
+            return a.cos()
+        tensor = make_fx(f, tracing_mode="symbolic")(torch.randn((15, 5)))
+        self.assertExpectedInline(
+            show_guards(tensor),
+            """\
+L['a'].size()[1] < L['a'].size()[0]
+L['a'].size()[0] < 20""")
+
     def test_sym_storage_offset(self):
         def f(x, y):
             return x + y
@@ -1557,7 +1579,6 @@ symbolic_tensor_failures = {
     xfail('repeat_interleave', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
-    xfail('roll', ''),  # Tensors of type TensorImpl do not have numel
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
     xfail('special.airy_ai', ''),  # aten.special_airy_ai.default - couldn't find symbolic meta function/decomposition
     xfail('special.bessel_y0', ''),  # aten.special_bessel_y0.default - couldn't find symbolic meta function/decomposition

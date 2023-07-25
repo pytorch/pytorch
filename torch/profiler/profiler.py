@@ -266,7 +266,10 @@ class _KinetoProfile:
         elif path.endswith('.gz'):
             fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
             fp.close()
-            self.mem_tl.export_memory_timeline(fp.name, device)
+            if path.endswith('raw.json.gz'):
+                self.mem_tl.export_memory_timeline_raw(fp.name, device)
+            else:
+                self.mem_tl.export_memory_timeline(fp.name, device)
             with open(fp.name) as fin:
                 with gzip.open(path, 'wt') as fout:
                     fout.writelines(fin)
