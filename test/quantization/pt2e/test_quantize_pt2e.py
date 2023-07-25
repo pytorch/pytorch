@@ -293,7 +293,9 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
 
         if check_save_load:
             if example_inputs_for_load is None:
-                assert isinstance(example_inputs, tuple) and len(example_inputs) == 1 and isinstance(example_inputs[0], torch.Tensor)
+                assert isinstance(example_inputs, tuple) and \
+                    len(example_inputs) == 1 and \
+                    isinstance(example_inputs[0], torch.Tensor)
                 example_inputs_for_load = (example_inputs[0] * 2,)
 
             with TemporaryFileName() as fname, torchdynamo.config.patch(dynamic_shapes=export_with_dynamic_shape):
