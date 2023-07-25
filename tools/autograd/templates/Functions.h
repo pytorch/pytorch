@@ -29,7 +29,7 @@ inline std::vector<Tensor> unpack_list(at::ArrayRef<SavedVariable> xs, std::shar
   // NB: we must explicitly do the conversion in the lambda, otherwise template
   // deduction will give a Tensor of Variable which is not convertible
   return fmap(xs, [&saved_for](const SavedVariable& x) {
-    return static_cast<Tensor>(x.unpack(std::move(saved_for)));
+    return static_cast<Tensor>(x.unpack(saved_for));
   });
 }
 
@@ -37,7 +37,7 @@ inline c10::List<c10::optional<Tensor>> unpack_opt_list(at::ArrayRef<SavedVariab
   torch::List<c10::optional<Tensor>> result;
   result.reserve(xs.size());
   for (const SavedVariable& v : xs) {
-    auto var = v.unpack(std::move(saved_for));
+    auto var = v.unpack(saved_for);
     result.push_back(var.defined() ? c10::optional<Tensor>(var) : c10::nullopt);
   }
   return result;
