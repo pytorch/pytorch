@@ -4003,7 +4003,7 @@ class TestLinalg(TestCase):
                     # A = L from cholesky(U @ S @ U.mH),
                     # where S = rand(*size_a) + 1,
                     # so A has condition number at most sqrt(2).
-                    S = make_rand(b, n) + 1
+                    S = make_rand(*size_s[:-1]) + 1
                     A = torch.linalg.cholesky((U * S.unsqueeze(-2)) @ U.mH)
             else:
                 A = make_arg(size_a)
