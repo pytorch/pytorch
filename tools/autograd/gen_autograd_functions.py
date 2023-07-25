@@ -35,6 +35,7 @@ from torchgen.api.types import (
     TENSOR_LIST_LIKE_CTYPES,
     tensorListT,
     tensorT,
+    VectorCType,
 )
 from torchgen.code_template import CodeTemplate
 from torchgen.model import Argument, FunctionSchema
@@ -583,7 +584,11 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             )
             should_append_raw_getsetdef = True
             visit_name = f"{name}_"
-        elif type == BaseCType(tensorListT) or type == BaseCType(iTensorListRefT):
+        elif (
+            type == BaseCType(tensorListT)
+            or type == BaseCType(iTensorListRefT)
+            or type == VectorCType(BaseCType(tensorT))
+        ):
             saved_variables.append(f"std::vector<SavedVariable> {name}_;")
             saved_variables.append(f"bool {name}_released_ = false;")
             # Just clear() is sufficient, we don't need to loop and clear each variable.
