@@ -224,10 +224,8 @@ class Optimizer:
             options (used when a parameter group doesn't specify them).
     """
 
-    OptimizerPreHook: TypeAlias = Callable[
-        [Self, Args, Kwargs], Optional[Tuple[Args, Kwargs]]  # type: ignore[valid-type]
-    ]
-    OptimizerPostHook: TypeAlias = Callable[[Self, Args, Kwargs], None]  # type: ignore[valid-type]
+    OptimizerPreHook: TypeAlias = Callable[[Self, Args, Kwargs], Optional[Tuple[Args, Kwargs]]]  # type: ignore[misc]
+    OptimizerPostHook: TypeAlias = Callable[[Self, Args, Kwargs], None]  # type: ignore[misc]
 
     _optimizer_step_pre_hooks: Dict[int, OptimizerPreHook]
     _optimizer_step_post_hooks: Dict[int, OptimizerPostHook]
@@ -340,6 +338,7 @@ class Optimizer:
         @functools.wraps(func)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> R:
             self, *_ = args
+            self = cast(Optimizer, self)
             profile_name = f"Optimizer.step#{self.__class__.__name__}.step"
             with torch.autograd.profiler.record_function(profile_name):
                 # call optimizer step pre hooks
