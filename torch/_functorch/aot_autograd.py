@@ -21,6 +21,7 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code, preserve_rng_state
 from torch._guards import detect_fake_mode, tracing
 from torch._prims_common import CUDARngStateHelper
@@ -35,6 +36,7 @@ from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompo
 from . import config
 from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs, Source
+from torchgen.utils import dataclass_repr
 
 log = logging.getLogger(__name__)
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
@@ -577,6 +579,9 @@ class ViewAndMutationMeta:
         else:
             return slice(0, 0)  # empty slice
 
+    def __str__(self):
+        return dataclass_repr(self)
+
     def __eq__(self, other):
         if not isinstance(other, ViewAndMutationMeta):
             return NotImplemented
@@ -710,7 +715,8 @@ def _get_hints(exprs):
 def run_functionalized_fw_and_collect_metadata(
     f,
     *,
-    keep_input_mutations: bool
+    keep_input_mutations: bool,
+    aot_config: 'AOTConfig',
 ) -> ViewAndMutationMeta:
     memo = {}
 
@@ -944,6 +950,7 @@ def run_functionalized_fw_and_collect_metadata(
             keep_input_mutations=keep_input_mutations,
             traced_tangents=traced_tangents,
         )
+        log.debug("ViewAndMutationMeta for %s:\n%s", aot_config.aot_id, metadata)
         return metadata
 
     return inner
@@ -2197,6 +2204,7 @@ fw_metadata={str(fw_metadata)}
         ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
             wrapped_flat_fn,
             keep_input_mutations=fw_metadata.keep_input_mutations,
+            aot_config=aot_config,
         )(*deduped_flat_args)
         assert ref_fw_metadata == updated_fw_metadata, \
             f'ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(updated_fw_metadata)}'
@@ -2337,6 +2345,7 @@ fw_metadata={str(fw_metadata)}
         ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
             wrapped_flat_fn,
             keep_input_mutations=fw_metadata.keep_input_mutations,
+            aot_config=aot_config,
         )(*flat_args_with_synthetic_bases)
         assert ref_fw_metadata == fw_metadata_updated, (
             f'ref_metadata={pprint.pformat(partial_asdict(ref_fw_metadata))}, '
@@ -2874,6 +2883,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         num_symints_saved_for_bw = _num_symints_saved_for_bw
 
         @staticmethod
+        def _compiled_autograd_key(ctx):
+            return (aot_config.aot_id, *ctx.symints)
+
+        @staticmethod
         def forward(ctx, *deduped_flat_tensor_args):
             args = deduped_flat_tensor_args
             if CompiledFunction.metadata.is_rng_op_functionalized:
@@ -3061,6 +3074,16 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             del contiguous_args
 
             def call_compiled_backward():
+                if ctx._is_compiled_autograd_tracing():
+                    # For compiled autograd, run raw FX graph so that it can be inlined into the larger graph
+                    symints = ctx._get_compiled_autograd_symints()
+                    assert len(symints) == len(ctx.symints)
+                    all_args[:len(symints)] = symints
+                    context = torch._C._DisableAutocast if disable_amp else nullcontext
+                    with context():
+                        out = normalize_as_list(bw_module(*all_args))
+                    out = functionalized_rng_runtime_epilogue(CompiledFunction.metadata, out)
+                    return tuple(out)
                 ctx.maybe_clear_saved_tensors()
                 if CompiledFunction.compiled_bw is None:
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
@@ -3091,6 +3114,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     @staticmethod
                     def backward(ctx, *args):
                         raise RuntimeError("torch.compile with aot_autograd does not currently support double backward")
+
+                CompiledFunctionBackward._compiled_autograd_key = CompiledFunction._compiled_autograd_key
+
                 # Pass args even though they're unused, so that the graph is built
                 out = CompiledFunctionBackward.apply(*all_args)
             else:
@@ -3244,6 +3270,7 @@ def create_aot_dispatcher_function(
                 fw_metadata = run_functionalized_fw_and_collect_metadata(
                     flat_fn,
                     keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
+                    aot_config=aot_config,
                 )(*fake_flat_args)
 
         if aot_config.is_export:
@@ -3752,11 +3779,12 @@ def aot_module_simplified(
         no_tangents=False,
     )
 
-    compiled_fn = create_aot_dispatcher_function(
-        functional_call,
-        full_args,
-        aot_config,
-    )
+    with compiled_autograd.disable():
+        compiled_fn = create_aot_dispatcher_function(
+            functional_call,
+            full_args,
+            aot_config,
+        )
 
     # TODO: There is something deeply wrong here; compiled_fn running with
     # the boxed calling convention, but aot_module_simplified somehow
