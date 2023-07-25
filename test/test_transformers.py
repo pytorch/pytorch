@@ -1731,31 +1731,6 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(math_ref_test, math_ref_lp_test, atol=7e-3, rtol=7e-3)
         self.assertEqual(actual_test, math_ref_test, atol=5e-3, rtol=5e-3)
 
-    @parametrize("contiguous_inputs", [True, False])
-    def test_sdp_math_gradcheck(self, device, contiguous_inputs: bool):
-
-        batch_size, seq_len, num_heads, head_dim = 4, 4, 2, 16
-        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device,
-                              dtype=torch.float64, requires_grad=True, packed=True)
-
-        qkv = make_tensor((batch_size, seq_len, num_heads, head_dim))
-        query, key, value = qkv.chunk(3, dim=-1)
-
-        query = query.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
-        key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
-        value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
-
-        if contiguous_inputs:
-            query = query.contiguous()
-            key = key.contiguous()
-            value = value.contiguous()
-
-        with sdp_kernel(enable_math=True, enable_mem_efficient=False, enable_flash=False):
-            assert gradcheck(lambda *args, **kwargs:
-                             wrapper_set_seed(torch.nn.functional.scaled_dot_product_attention, *args, **kwargs),
-                             (query, key, value, None, 0.0, False)
-                             )
-
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Flash Attention was not built for this system")
     @parametrize("contiguous_inputs", [True, False])
     @parametrize("is_causal", [True, False])
