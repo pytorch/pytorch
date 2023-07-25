@@ -69,10 +69,10 @@ class TestSerialize(TestCase):
         )
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
-        node = serialized.graph_module.graph.nodes[-7]
-        self.assertEqual(node.target, "torch.ops.aten.var_mean.correction")
+        node = serialized.graph_module.graph.nodes[-1]
+        self.assertEqual(node.target, "torch.ops.aten.native_layer_norm.default")
         # aten::native_layer_norm returns 3 tensnors
-        self.assertEqual(len(node.outputs), 2)
+        self.assertEqual(len(node.outputs), 3)
 
         # check the names are unique
         seen = set()
@@ -177,9 +177,12 @@ class TestDeserialize(TestCase):
         """Export a graph, serialize it, deserialize it, and compare the results."""
         # TODO(angelayi): test better with some sort of wrapper
         constraints = [] if constraints is None else constraints
-        ep = export(fn, inputs, constraints)
+        ep = export(fn, inputs, {}, constraints)
+        ep.graph.eliminate_dead_code()
+
         serialized_struct, state_dict = serialize(ep, opset_version={"aten": 0})
         deserialized_ep = deserialize(serialized_struct, state_dict, expected_opset_version={"aten": 0})
+        deserialized_ep.graph.eliminate_dead_code()
 
         orig_outputs = ep(*inputs)
         loaded_outputs = deserialized_ep(*inputs)
@@ -234,14 +237,14 @@ class TestDeserialize(TestCase):
                     node2.meta.get("stack_trace", None),
                 )
 
-            # Check "nn_module_stack" metadata
-            self.assertEqual(
-                node1.meta.get("nn_module_stack", None),
-                node2.meta.get("nn_module_stack", None),
-            )
+            if node1.op != "get_attr" and node1.op != "placeholder":
+                # Check "nn_module_stack" metadata
+                self.assertEqual(
+                    node1.meta.get("nn_module_stack", None),
+                    node2.meta.get("nn_module_stack", None),
+                )
 
-            # Check "source_fn" metadata
-            if node1.op != "get_attr":
+                # Check "source_fn" metadata
                 self.assertEqual(
                     node1.meta.get("source_fn", None),
                     node2.meta.get("source_fn", None),
@@ -361,7 +364,7 @@ class TestDeserialize(TestCase):
     @parametrize(
         "name,case",
         get_filtered_export_db_tests(),
-        name_fn=lambda name, case: "case_{}".format(name),
+        name_fn=lambda name, case: f"case_{name}",
     )
     def test_exportdb_supported(self, name: str, case: ExportCase) -> None:
         model = case.model

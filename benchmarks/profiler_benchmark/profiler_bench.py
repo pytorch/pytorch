@@ -46,8 +46,7 @@ if __name__ == '__main__':
         print("No CUDA available")
         sys.exit()
 
-    print("Payload: {}, {} iterations; timer min. runtime = {}\n".format(
-        args.workload, args.internal_iter, args.timer_min_run_time))
+    print(f"Payload: {args.workload}, {args.internal_iter} iterations; timer min. runtime = {args.timer_min_run_time}\n")
     INTERNAL_ITER = args.internal_iter
 
     for profiling_enabled in [False, True]:
