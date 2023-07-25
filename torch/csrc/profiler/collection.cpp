@@ -216,11 +216,20 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
 
         case Tag::TensorListBegin: {
           std::vector<TensorMetadata> arg;
+          bool found_undefined = false;
           while (*(++tag_it) != Tag::TERMINATOR) {
+            if (*tag_it == Tag::UndefinedTensor) {
+              found_undefined = true;
+              continue;
+            }
             TORCH_INTERNAL_ASSERT(*tag_it == Tag::Tensor, (int)(*tag_it));
             arg.emplace_back(decode_tensor());
           }
-          push_value(Tag::TensorListBegin, std::move(arg));
+          if (found_undefined) {
+            push_value(*tag_it, c10::nullopt);
+          } else {
+            push_value(Tag::TensorListBegin, std::move(arg));
+          }
         } break;
 
         case Tag::ScalarList:
