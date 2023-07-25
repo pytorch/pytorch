@@ -1,14 +1,14 @@
 This directory contains files from CUTLASS 3.1 source tree, modified
-for the purpose of `_structured_sparse_linear()` implementation.  This
-method implements linear operator with weight matrix $W$, bias vector
-$b$, and input tensor $x$ as arguments:
+for the purpose of `_sparse_semi_structured_linear()` implementation.
+This method implements linear operator with weight matrix $W$, bias
+vector $b$, and input tensor $x$ as arguments:
 
 $$y=xW^{T}+b$$
 
 where the matrix $W$ is a structured sparse matrix.  Since CUTLASS
 support sparse GEMM operation only when the first operand is in
 structured sparse format, the operation above is actually implemented
-in `_structured_sparse_linear()` as follows:
+in `_sparse_semi_structured_linear()` as follows:
 
 $$y=(Wx^{T}+b^{T})^{T}$$
 

@@ -2996,6 +2996,32 @@ def forward(self, x):
     return pytree.tree_unflatten([slice_tensor, slice_tensor_3, slice_tensor_6, slice_tensor_9], self._out_spec)""",
         )
 
+    def test_capture_symbolic_tracing_simple_within_fake_mode(self):
+        from torch._dynamo.output_graph import config
+        from torch._subclasses import fake_tensor
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        def f(x):
+            y = torch.randn(3)
+            return x + x * y
+
+        with fake_tensor.FakeTensorMode(
+            shape_env=ShapeEnv(
+                allow_scalar_outputs=config.capture_scalar_outputs,
+                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+                frame_id=0,
+            ),
+        ):
+            x = torch.randn(3)
+
+            for aten_graph in [True, False]:
+                gm, _ = torch._dynamo.export(f, x, aten_graph=aten_graph)
+                self.assertTrue(
+                    isinstance(gm, torch.fx.GraphModule),
+                    msg="test_capture_symbolic_tracing_simple_within_fake_mode_aten_graph_"
+                    + str(aten_graph),
+                )
+
     def test_capture_symbolic_tracing(self) -> None:
         from torch._dynamo.output_graph import config
         from torch._subclasses import fake_tensor
@@ -3037,6 +3063,46 @@ def forward(self, x):
                 isinstance(graph_module, torch.fx.GraphModule),
                 msg="test_capture_symbolic_tracing_aten_graph_" + str(aten_graph),
             )
+
+    def test_capture_symbolic_tracing_within_fake_mode(self):
+        from torch._dynamo.output_graph import config
+        from torch._subclasses import fake_tensor
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+                self.linear2 = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                out = self.linear(x)
+                out = self.linear2(out)
+                return out
+
+        # User-instantiated FakeTensorMode
+        fake_mode = fake_tensor.FakeTensorMode(
+            allow_non_fake_inputs=False,
+            allow_fallback_kernels=True,
+            shape_env=ShapeEnv(
+                allow_scalar_outputs=config.capture_scalar_outputs,
+                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+                frame_id=0,
+            ),
+        )
+        # Fakefy input+model before exporting it
+        with fake_mode:
+            x = torch.rand(5, 2, 2)
+            model = Model()
+
+            # Export the model with fake inputs and parameters
+            for aten_graph in [True, False]:
+                graph_module, _ = torch._dynamo.export(model, x, aten_graph=aten_graph)
+                self.assertTrue(
+                    isinstance(graph_module, torch.fx.GraphModule),
+                    msg="test_capture_symbolic_tracing_within_fake_mode_aten_graph_"
+                    + str(aten_graph),
+                )
 
     def test_cond_op_param_buffer_lifted(self):
         class A(torch.nn.Module):

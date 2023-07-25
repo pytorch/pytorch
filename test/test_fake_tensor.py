@@ -851,7 +851,7 @@ class FakeTensorConverterTest(TestCase):
         self.assertEqual(out.device.type, "cpu")
 
     def test_multiple_modes(self):
-        t = torch.rand(([4]))
+        t = torch.rand([4])
         t2 = torch.rand([4])
         with FakeTensorMode() as m:
             with FakeTensorMode() as m2:
