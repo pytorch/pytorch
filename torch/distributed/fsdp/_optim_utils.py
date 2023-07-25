@@ -29,7 +29,7 @@ from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _get_module_fsdp_state_if_fully_sharded_module,
     _get_param_to_fqns,
-    _module_handles,
+    _module_handle,
     _named_parameters_with_duplicates,
     clean_tensor_name,
 )
@@ -436,7 +436,7 @@ def _flatten_optim_state_dict(
     unflat_osd_state = unflat_osd["state"]
     all_state_keys = set(unflat_osd_state.keys())
 
-    for fqns in param_to_fqns.values():
+    for param, fqns in param_to_fqns.items():
         fqn = fqns[0]
         if fqn not in unflat_osd_state:
             continue
@@ -446,7 +446,7 @@ def _flatten_optim_state_dict(
             for fqn in fqns:
                 if not unflat_osd_state[fqn]:
                     continue
-                for state_name, param_state in unflat_osd_state[fqn].items():
+                for state_name in unflat_osd_state[fqn].keys():
                     unflat_osd_state[fqn][state_name] = _broadcast_state(
                         fsdp_state, unflat_osd_state[fqn][state_name], group=group
                     )
@@ -476,16 +476,14 @@ def _flatten_optim_state_dict(
                     len(fqns) == 1
                 ), f"use_orig_params is True but there are multiple FQNs, {fqns}."
                 if optim is not None:  # NamedOptimizer or KeyedOptimizer case.
-                    flat_osd_state[key] = copy.deepcopy(
-                        tree_map_only(
-                            torch.Tensor,
-                            # Keep the step state on CPU.
-                            lambda t: t.cpu()
-                            if t.dim() == 0
-                            else torch.zeros(0, device=t.device, dtype=t.dtype),
-                            unflat_osd_state[fqn],
+                    state = optim.state.get(param, None)  # type: ignore[call-overload]
+                    if state is not None:
+                        flat_osd_state[key] = copy.deepcopy(state)
+                    else:
+                        warnings.warn(
+                            f"optim_state[{key}] is not on rank{fsdp_state.rank}."
                         )
-                    )
+
             else:
                 raise RuntimeError(
                     f"The state of {key} is empty. This should happen when "
@@ -1434,13 +1432,9 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         if fsdp_state is None:
             return
         _lazy_init(fsdp_state, module)
-        handles = _module_handles(fsdp_state, module)
-        assert (
-            len(handles) < 2
-        ), f"Assumes at most 1 FlatParamHandle but got {len(handles)} handles"
-        if not handles:
+        handle = _module_handle(fsdp_state, module)
+        if not handle:
             return
-        handle = handles[0]
         flat_param = handle.flat_param
         fsdp_param_info = FSDPParamInfo(fsdp_state, handle, {})
         # NOTE: `idx` indexes into the data structures *without* padding

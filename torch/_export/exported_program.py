@@ -45,8 +45,8 @@ LeafValue = Union[
 # Information to maintain user calling/returning specs
 @dataclasses.dataclass
 class CallSpec:
-    in_spec: pytree.TreeSpec
-    out_spec: pytree.TreeSpec
+    in_spec: Optional[pytree.TreeSpec]
+    out_spec: Optional[pytree.TreeSpec]
 
 
 # Extra information for joint graphs
@@ -108,12 +108,13 @@ class ExportedProgram:
         self.range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
         self.equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
 
-    def __call__(self, *args: Any) -> Any:
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
         if self.call_spec.in_spec is not None:
             try:
-                args = fx_pytree.tree_flatten_spec(args, self.call_spec.in_spec)  # type: ignore[assignment]
+                user_args = combine_args_kwargs(args, kwargs)
+                args = fx_pytree.tree_flatten_spec(user_args, self.call_spec.in_spec)  # type: ignore[assignment]
             except Exception:
-                _, received_spec = pytree.tree_flatten(args)
+                _, received_spec = pytree.tree_flatten(user_args)
                 raise error.InternalError(
                     "Trying to flatten user inputs with exported input tree spec: \n"
                     f"{self.call_spec.in_spec}\n"
@@ -154,7 +155,7 @@ class ExportedProgram:
                 )
             finally:
                 ix = 0
-                for _, buffer in self.graph_signature.buffers_to_mutate.items():
+                for buffer in self.graph_signature.buffers_to_mutate.values():
                     self.state_dict[buffer] = mutated_buffers[ix]
                     ix += 1
         return res
@@ -168,6 +169,22 @@ class ExportedProgram:
             f"Symbol to range: {self.range_constraints}\n"
         )
         return string
+
+    def __deepcopy__(
+        self, memo: Optional[Dict[int, Any]] = None
+    ) -> "ExportedProgram":
+        gm = copy.deepcopy(self.graph_module, memo)
+        new_ep = ExportedProgram(
+            gm,
+            gm.graph,
+            copy.deepcopy(self.graph_signature, memo),
+            copy.deepcopy(self.call_spec, memo),
+            copy.deepcopy(self.state_dict, memo),
+            copy.deepcopy(self.range_constraints, memo),
+            copy.deepcopy(self.equality_constraints, memo),
+        )
+        return new_ep
+
 
     @property
     def graph(self):
@@ -245,7 +262,7 @@ def _fixup_graph_signature(
 ) -> ExportedProgram:
     def _get_output_node_names(gm: torch.fx.GraphModule) -> List[FQN]:
         output_node = next(n for n in gm.graph.nodes if n.op == "output")
-        return [str(arg) for arg in output_node.args[0]]
+        return [str(arg) for arg in output_node.args[0]]  # type: ignore[misc]
 
     # Update output names since after adding run time assertions, the names of
     # outputs could change.
@@ -263,9 +280,9 @@ def _fixup_graph_signature(
     gs = old_ep.graph_signature
     # Need to update graph signature fields related to output since after adding
     # runtime assertions, the output names could change.
-    new_user_outputs = [outputs_map[u] for u in gs.user_outputs]
+    new_user_outputs = [outputs_map[u] for u in gs.user_outputs]  # type: ignore[index]
     new_buffers_to_mutate = {
-        outputs_map[u]: b for u, b in gs.buffers_to_mutate.items()
+        outputs_map[u]: b for u, b in gs.buffers_to_mutate.items()  # type: ignore[index]
     }
 
     return _update_graph_signature(
@@ -380,3 +397,6 @@ def _process_constraints(
         range_constraints[symbol] = RangeConstraint(min_val, max_val)
 
     return range_constraints, equality_constraints
+
+def combine_args_kwargs(args, kwargs):
+    return (args, kwargs) if kwargs else args
