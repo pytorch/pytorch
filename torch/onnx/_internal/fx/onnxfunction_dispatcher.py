@@ -164,20 +164,22 @@ class OnnxFunctionDispatcher:
         """
         # TODO(justinchuby): Cache the OnnxSchemaChecker  so we don't need to run the init logic everytime
         overload_match_ranking: Dict[registration.SymbolicFunction, int] = {}
+        diagnostic = diagnostic_context.inflight_diagnostic()
 
         # Iterate the overloaded functions in reverse order to prioritize the custom ones
         # over the default ones, and find the perfect match.
         for symbolic_function in reversed(default_and_custom_functions):
             function_opschema = _OnnxSchemaChecker(symbolic_function.onnx_function)
 
-            if function_opschema.perfect_match_inputs(onnx_args, onnx_kwargs):
+            if function_opschema.perfect_match_inputs(
+                diagnostic, onnx_args, onnx_kwargs
+            ):
                 # If the perfect match is found, return the function
                 return symbolic_function.onnx_function
             # Record the match score for the nearest match if it's not the perfect match
             overload_match_ranking[symbolic_function] = function_opschema.match_score
 
         # NOTE: If the perfect match is not found, find the nearest match
-        diagnostic = diagnostic_context.inflight_diagnostic()
         diagnostic.with_additional_message(
             "### Exact match is not found!\n"
             "Cannot find a perfect match of symbolic overload, "
@@ -405,7 +407,10 @@ class _OnnxSchemaChecker:
 
     """
 
-    def __init__(self, onnxfunction: "onnxscript.OnnxFunction"):
+    def __init__(
+        self,
+        onnxfunction: Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction],
+    ):
         """Initialize the OnnxSchemaChecker .
 
         Args:
@@ -434,6 +439,7 @@ class _OnnxSchemaChecker:
     @_beartype.beartype
     def perfect_match_inputs(
         self,
+        diagnostic: diagnostics.Diagnostic,
         args: Sequence[
             Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
         ],
@@ -446,6 +452,7 @@ class _OnnxSchemaChecker:
         OpSchema.
 
         Args:
+            diagnostic: The diagnostic to use for logging detailed info.
             args: The input arguments organized in PyTorch inputs way.
             kwargs: The input keyword arguments organized in PyTorch inputs way.
 
@@ -470,7 +477,17 @@ class _OnnxSchemaChecker:
         # The matching system relax the match while we fix them in the future.
         self._record_matching_score(function_inputs, function_attributes)
 
+        diagnostic.with_additional_message("### Checking perfect match...\n")
+        diagnostic.with_additional_message(
+            f"{diagnostics.format_argument(self.onnxfunction)}"
+        )
+        diagnostic.with_additional_message(f"match score: {self.match_score}\n")
+
         if len(function_inputs) != len(self.op_schema.inputs):
+            diagnostic.with_additional_message(
+                f"#### Failed: input number mismatch! \n"
+                f"Actual {len(function_inputs)} vs expected {len(self.op_schema.inputs)}\n"
+            )
             return False
         for schema_input, torch_input in zip(self.op_schema.inputs, function_inputs):
             torch_input_compatible_types = _find_onnx_data_type(torch_input)
@@ -479,17 +496,32 @@ class _OnnxSchemaChecker:
                 # If torch_input_compatible_types isn't in allowed_types
                 # of this input defined in the OpSchema, we know the function
                 # and the input are not compatible
+                diagnostic.with_additional_message(
+                    f"#### Failed: input type mismatch! \n"
+                    f"Actual {torch_input_compatible_types} vs\n"
+                    f"expected {allowed_types}\n"
+                )
                 return False
         # Check attributes keys are the same
         if set(function_attributes) != set(self.attributes):
             # If the attributes of the OpSchema and the attributes don't match,
             # we know the function and the input are not compatible
+            diagnostic.with_additional_message(
+                f"#### Failed: attribute mismatch! \n"
+                f"Actual {set(function_attributes)} vs\n"
+                f"expected {set(self.attributes)}\n"
+            )
             return False
         # Check attribute dtypes
         for attribute_name, attribute in function_attributes.items():
             if not self._match_onnx_attribute_type(attribute_name, attribute):
                 # If the attribute type of the OpSchema and the attribute type don't match,
                 # we know the function and the input are not compatible
+                diagnostic.with_additional_message(
+                    f"#### Failed: attribute '{attribute_name}' type mismatch! \n"
+                    f"Actual {type(attribute)} vs\n"
+                    f"expected {self.attributes[attribute_name].type}\n"
+                )
                 return False
         return True
 
