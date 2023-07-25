@@ -78,13 +78,6 @@ variable_list AccumulateGrad::apply_with_saved(
   at::Tensor grad_copy = variable.grad();
   saved.before(variable_copy);
   saved.before(grad_copy);
-
-  // TODO(jansel): accumulateGrad() below will only do the `+=`-style
-  // update when GradMode is disabled.  GradMode seems to get disabled
-  // in eager mode, but somewhere else in the stack.  Need to figure
-  // out where that happens, doing it here is wrong.
-  at::NoGradGuard guard;
-
   accumulateGrad(
       variable_copy,
       grad_copy,
