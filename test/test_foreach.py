@@ -921,7 +921,7 @@ class TestForeach(TestCase):
         ),
         dtypes=(torch.float32,),
     )
-    def test_lifetime_of_grad_fn_with_result(self, device, dtype, op):
+    def test_lifetime_of_grad_fn_when_result_is_saved(self, device, dtype, op):
 
         def get_ref(func, sample):
             class Foo:
