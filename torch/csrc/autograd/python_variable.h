@@ -2,6 +2,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <memory>
 
 #include <ATen/core/function_schema.h>
@@ -99,7 +100,7 @@ inline torch::autograd::variable_list THPVariable_UnpackList(
   result.reserve(result_len);
   for (const auto i : c10::irange(result_len)) {
     PyObject* item = PyList_GET_ITEM(pyresult, i);
-    if (item != Py_None) {
+    if (!Py_IsNone(item)) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(THPVariable_Check(item));
       result.emplace_back(THPVariable_Unpack(item));
     } else {

@@ -389,7 +389,7 @@ struct StealOrDefault {
 
 void ThreadLocalSubqueue::TorchOpStorage::materialize(
     std::vector<std::shared_ptr<Result>>& out,
-    const std::function<time_t(approx_time_t)> time_converter,
+    const std::function<time_t(approx_time_t)>& time_converter,
     const uint64_t tid,
     const kineto::DeviceAndResource& kineto_info) {
   // Plumb Autograd info to the top level annotation.
