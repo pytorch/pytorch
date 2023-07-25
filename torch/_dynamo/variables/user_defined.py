@@ -106,7 +106,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
-        from .builder import variable_builder_no_source
+        from .builder import SourcelessBuilder
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
@@ -137,9 +137,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         field_var = kwargs[field_name]
                     else:
                         assert field_name in field_defaults
-                        field_var = variable_builder_no_source(
-                            field_defaults[field_name]
-                        )
+                        field_var = SourcelessBuilder()(
+                            tx, field_defaults[field_name]
+                        ).add_options(options)
                     var_tracker_kwargs[field_name] = field_var
 
             for name, value in var_tracker_kwargs.items():
