@@ -30,7 +30,7 @@ from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater, TEST_CUDNN
 from torch.testing._internal.common_device_type import _has_sufficient_memory
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
@@ -581,6 +581,17 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(17),))
 
+    def test_angle(self):
+        def fn(a, b, c):
+            return torch.angle(a), torch.angle(b), torch.angle(c)
+
+        complex_input = torch.tensor(
+            [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1, float("nan")]
+        )
+        real_input = torch.tensor([-1.0, 0.0, 1.0, float("nan")])
+        interger_real_input = torch.tensor([-1, 0, 1])
+        self.common(fn, (complex_input, real_input, interger_real_input))
+
     def test_sgn(self):
         def fn(a):
             return torch.sgn(a), torch.sgn(a + 1) - 1
@@ -975,6 +986,16 @@ class CommonTemplate:
             return a.clamp(min=b, max=c)
 
         self.common(fn, (torch.randint(4, (4,)),))
+
+    def test_dist(self):
+        def fn(a, b):
+            return (
+                torch.dist(a, b),
+                torch.dist(a, b, p=1.2),
+                torch.dist(a.to(torch.bfloat16), b.to(torch.bfloat16)),
+            )
+
+        self.common(fn, (torch.randn(4, 4), torch.randn(4, 4)))
 
     def test_arange1(self):
         def fn(x):
@@ -2014,6 +2035,19 @@ class CommonTemplate:
         with self.assertRaisesRegex(RuntimeError, ""):
             fn(torch.randn(1, 5))
 
+    def test_softshrink_backward(self):
+        grad_output = torch.randn(1)
+        lambd = 0.5
+
+        def fn(a, grad_output, lambd):
+            a = a.cos()
+            return torch.ops.aten.softshrink_backward(grad_output, a, lambd)
+
+        self.common(
+            fn,
+            (torch.randn(10), grad_output, lambd),
+        )
+
     def test_inductor_assert(self):
         @torch._dynamo.optimize("inductor", dynamic=True)
         def fn(a):
@@ -2653,6 +2687,7 @@ class CommonTemplate:
     def test_repeat(self):
         def fn(x):
             return (
+                x.repeat(0, 1, 1, 1),
                 x.repeat(2, 2, 3, 1),
                 x.repeat(8, 1, 1, 1),
                 x.repeat(2, 1, 1, 1, 1, 1),
@@ -3645,6 +3680,7 @@ class CommonTemplate:
                 ),
             )
 
+    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfRocm
     def test_cudnn_rnn(self):
         if self.device == "cpu":
@@ -6193,7 +6229,9 @@ class CommonTemplate:
         class Repro(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self._tensor_constant0 = nn.Buffer(torch.randn([], dtype=torch.float32))
+                self.register_buffer(
+                    "_tensor_constant0", torch.randn([], dtype=torch.float32)
+                )
 
             def forward(self, arg0_1, arg1_1):
                 convert_element_type = torch.ops.prims.convert_element_type.default(
@@ -6554,14 +6592,15 @@ class CommonTemplate:
 
         # The first two values should be the same, attention output
         # and logsumexp since dropout is not being set
-        def fn(q, k, v, compute_log_sumexp):
+        def fn(q, k, v, attn_bias, compute_log_sumexp):
             return aten._scaled_dot_product_efficient_attention(
-                q, k, v, compute_log_sumexp
+                q, k, v, attn_bias, compute_log_sumexp
             )[:2]
 
         self.common(
             fn,
             (
+                torch.randn(4, 4, 36, 36),
                 torch.randn(4, 4, 36, 36),
                 torch.randn(4, 4, 36, 36),
                 torch.randn(4, 4, 36, 36),
