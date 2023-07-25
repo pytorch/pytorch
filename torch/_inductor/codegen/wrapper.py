@@ -155,14 +155,18 @@ class EnterCudaDeviceContextManagerLine:
                 # CUDAStreamGuard sets the stream and the device.
                 code.writeline(
                     f"at::cuda::CUDAStreamGuard stream_guard("
-                    F"at::cuda::getStreamFromExternal(stream, {self.device_idx}));"
+                    f"at::cuda::getStreamFromExternal(stream, {self.device_idx}));"
                 )
             else:
                 if self.first_time:
-                    code.writeline(f"at::cuda::CUDAGuard device_guard({self.device_idx});")
+                    code.writeline(
+                        f"at::cuda::CUDAGuard device_guard({self.device_idx});"
+                    )
                 else:
                     code.writeline(f"device_guard.set_index({self.device_idx});")
-                code.writeline(f"stream = at::cuda::getCurrentCUDAStream({self.device_idx});")
+                code.writeline(
+                    f"stream = at::cuda::getCurrentCUDAStream({self.device_idx});"
+                )
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
