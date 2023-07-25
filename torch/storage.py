@@ -114,7 +114,7 @@ class _StorageBase:
 
     def __reduce__(self):
         b = io.BytesIO()
-        torch.save(self, b, _use_new_zipfile_serialization=False)
+        torch.save(self, b)
         return (_load_from_bytes, (b.getvalue(),))
 
     def __sizeof__(self):
@@ -901,7 +901,7 @@ class TypedStorage:
 
     def __reduce__(self):
         b = io.BytesIO()
-        torch.save(self, b, _use_new_zipfile_serialization=False)
+        torch.save(self, b)
         return (_load_from_bytes, (b.getvalue(),))
 
     def data_ptr(self):
