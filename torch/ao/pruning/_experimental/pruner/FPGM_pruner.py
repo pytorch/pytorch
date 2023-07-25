@@ -5,10 +5,10 @@ import torch
 
 from .base_structured_sparsifier import BaseStructuredSparsifier
 
-__all__ = ["FPGMSparsifier"]
+__all__ = ["FPGMPruner"]
 
-class FPGMSparsifier(BaseStructuredSparsifier):
-    r"""Filter Pruning via Geometric Median (FPGM) Structured Sparsifier
+class FPGMPruner(BaseStructuredSparsifier):
+    r"""Filter Pruning via Geometric Median (FPGM) Structured Pruner
     This sparsifier prune fliter (row) in a tensor according to distances among filters according to 
     "Filter Pruning via Geometric Median for Deep Convolutional Neural Networks Acceleration"
     https://arxiv.org/abs/1811.00250.

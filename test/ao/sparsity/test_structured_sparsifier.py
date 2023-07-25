@@ -10,7 +10,7 @@ from torch.ao.pruning._experimental.pruner import (
     LSTMSaliencyPruner,
     BaseStructuredSparsifier,
     FakeStructuredSparsity,
-    FPGMSparsifier
+    FPGMPruner
 )
 from torch.nn.utils import parametrize
 
@@ -918,7 +918,7 @@ class TestBaseStructuredSparsifier(TestCase):
         # linear columns correctly.
         assert out_expected.shape == out_pruned.shape
 
-class TestFPGMSparsifier(TestCase):
+class TestFPGMPruner(TestCase):
     """
     Test case for the implementation of paper:
     "Filter Pruning via Geometric Median for Deep Convolutional Neural Networks Acceleration"
@@ -951,8 +951,8 @@ class TestFPGMSparsifier(TestCase):
 
     def test_compute_distance(self, device="cpu"):
         """Test the distance computation function"""
-        model = TestFPGMSparsifier.SimpleConvFPGM().to(device)
-        pruner = FPGMSparsifier(0.3)
+        model = TestFPGMPruner.SimpleConvFPGM().to(device)
+        pruner = FPGMPruner(0.3)
         dist_conv1 = pruner._compute_distance(model.conv2d1.weight)
 
         # compute the distance matrix using torch.cdist
@@ -977,9 +977,9 @@ class TestFPGMSparsifier(TestCase):
     def _test_update_mask_on_single_layer(self, expected_conv1, device):
         """Test that pruning is conducted based on the pair-wise distance measurement instead of absolute norm value"""
         # test pruning with one layer of conv2d
-        model = TestFPGMSparsifier.SimpleConvFPGM().to(device)
+        model = TestFPGMPruner.SimpleConvFPGM().to(device)
         x = torch.ones((1, 1, 32, 32), device=device)
-        pruner = FPGMSparsifier(0.3)
+        pruner = FPGMPruner(0.3)
         config = [{"tensor_fqn": "conv2d1.weight"}]
         pruner.prepare(model, config)
         pruner.enable_mask_update = True
@@ -1000,9 +1000,9 @@ class TestFPGMSparsifier(TestCase):
 
     def _test_update_mask_on_multiple_layer(self, expected_conv1, expected_conv2, device):
         # the second setting
-        model = TestFPGMSparsifier.SimpleConvFPGM().to(device)
+        model = TestFPGMPruner.SimpleConvFPGM().to(device)
         x = torch.ones((1, 1, 32, 32), device=device)
-        pruner = FPGMSparsifier(0.3)
+        pruner = FPGMPruner(0.3)
         config = [
             {"tensor_fqn": "conv2d1.weight"},
             {"tensor_fqn": "conv2d2.weight", "sparsity_level": 0.5}
