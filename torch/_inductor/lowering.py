@@ -85,13 +85,14 @@ add_needs_realized_inputs(
         aten.convolution,
         aten.convolution_backward,
         aten.max_pool2d_with_indices,
-        aten.max_pool2d_with_indices_backward,
         aten.mm,
         aten.upsample_nearest2d,
         aten.upsample_bicubic2d,
         aten._int_mm,
     ]
 )
+
+add_layout_constraint(aten.max_pool2d_with_indices_backward, require_dense)
 
 # TODO(jansel): ezyang says we won't need this in the future, try removing it
 # based on https://github.com/pytorch/pytorch/blob/9e3eb329df8f701/c10/core/ScalarType.h#L28
@@ -3227,7 +3228,13 @@ def max_pool2d_with_indices_impl(
                 if not return_indices_offset:
                     index = increment_to_index(h_incr, w_incr, bh, bw, w, stride, padding)
                 else:
-                    index = ops.index_expr(h_incr * kernel_size[1] + w_incr, torch.int8)
+                    index = ops.bitwise_or(
+                        ops.bitwise_left_shift(ops.index_expr(h_incr, torch.int8), ops.constant(4, torch.int8)),
+                        ops.index_expr(w_incr, torch.int8),
+                    )
+                    # index = ops.index_expr(h_incr, torch.int8)
+                    # index = ops.index_expr(h_incr * kernel_size[1] + w_incr, torch.int8)
+                    # index = ops.bitwise_and(ops.bitwise_left_shift(h_incr, ops.constant(4, torch.int8)), w_incr)
                 if maxindex is None:
                     maxindex = index
                 else:
@@ -3291,6 +3298,7 @@ def max_pool2d_with_indices_backward_impl(
     # we will read this many times, so make sure it is computed
     grad_output.realize_hint()
     x.realize_hint()
+    indices.realize_hint()
     try:
         gO_stride = grad_output.get_stride()
     except AttributeError:
@@ -3352,11 +3360,11 @@ def max_pool2d_with_indices_backward_impl(
 
     window_size = h_window_size * w_window_size
 
-    if window_size > 25:
-        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
-        return fallback_max_pool2d_with_indices_backward(
-            grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
-        )
+    # if window_size > 25:
+    #     # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
+    #     return fallback_max_pool2d_with_indices_backward(
+    #         grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
+    #     )
 
     indices_size = indices.get_size()
 
@@ -3402,8 +3410,16 @@ def max_pool2d_with_indices_backward_impl(
                     index_actual = indices_loader(grad_index)
                 else:
                     index_offsets = indices_loader(grad_index)
-                    h_incr = index_offsets // kernel_size[1]
-                    w_incr = index_offsets - (h_incr * kernel_size[1])
+
+                    h_incr = ops.bitwise_right_shift(index_offsets, ops.constant(4, torch.int8))
+                    w_incr = ops.bitwise_and(index_offsets, ops.constant(15, torch.int8))
+                    # num1 = encoded_num >> 4
+                    # # AND encoded_num with 0b1111 (15 in decimal) to get num2
+                    # num2 = encoded_num &
+                    # h_incr = index_offsets // kernel_size[1]
+                    # w_incr = index_offsets - (h_incr * kernel_size[1])
+                    # h_incr = index_offsets # ops.constant(0, torch.int32)
+                    # w_incr = index_offsets # ops.constant(0, torch.int32)
                     ind_height, ind_width = indices.get_size()[-2:]
                     bh = grad_index[-2]
                     bw = grad_index[-1]
@@ -3440,7 +3456,7 @@ def max_pool2d_with_indices_backward_impl(
         inner_fn=fn,
         ranges=new_size,
     )
-    out.realize_hint()
+    # out.realize_hint()
     return out
 
 

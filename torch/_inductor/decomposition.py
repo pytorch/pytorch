@@ -370,23 +370,24 @@ def _foreach_lerp_scalar(start_tensors, end_tensors, weight):
         ),
     )
 
+import os
+if not os.environ.get("DISABLE_LOW", "0") == "1":
+    @aten.max_pool2d_with_indices.default.py_impl(DispatchKey.Autograd)
+    @register_decomposition(aten.max_pool2d_with_indices.default)
+    def max_pool2d_with_indices(x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False):
+        if not x.requires_grad:
+            return NotImplemented
 
-@aten.max_pool2d_with_indices.default.py_impl(DispatchKey.Autograd)
-@register_decomposition(aten.max_pool2d_with_indices.default)
-def max_pool2d_with_indices(x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False):
-    if not x.requires_grad:
-        return NotImplemented
+        dilation = dilation if dilation != 1 else [1, 1]
+        if torch._inductor.lowering.should_fallback_max_pool2d_with_indices(kernel_size, dilation):
+            return NotImplemented
 
-    dilation = dilation if dilation != 1 else [1, 1]
-    if torch._inductor.lowering.should_fallback_max_pool2d_with_indices(kernel_size, dilation):
-        return NotImplemented
+        kernel_size = pad_listlike(kernel_size, 2)
+        window_size = kernel_size[0] * kernel_size[1]
+        if window_size > torch.iinfo(torch.int8).max:
+            return NotImplemented
 
-    kernel_size = pad_listlike(kernel_size, 2)
-    window_size = kernel_size[0] * kernel_size[1]
-    if window_size > torch.iinfo(torch.int8).max:
-        return NotImplemented
-
-    return torch.ops.prims._low_memory_maxpool2d_with_indices(x, kernel_size, stride, padding, dilation, ceil_mode)
+        return torch.ops.prims._low_memory_maxpool2d_with_indices(x, kernel_size, stride, padding, dilation, ceil_mode)
 
 
 @functools.lru_cache(None)

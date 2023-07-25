@@ -2379,10 +2379,20 @@ class CommonTemplate:
         def fn(x):
             return aten.max_pool2d_with_indices(x, [3, 3], [2, 2])
 
-        self.common(
-            fn,
-            (torch.randn(2, 4, 16, 16),),
-        )
+        fn_opt = torch.compile(fn)
+        inp = torch.randn(1, 1, 6, 6, device="cuda", requires_grad=True)
+        inp.detach().flatten().copy_(torch.arange(0., 36.))
+        inp2 = inp.detach().clone().requires_grad_(True)
+
+        outs = fn_opt(inp)
+        outs_2 = fn(inp2)
+
+        outs[0].sum().backward()
+        outs_2[0].sum().backward()
+
+        # breakpoint()
+        breakpoint()
+        self.assertEqual(inp.grad, inp2.grad)
 
     def test_max_pool2d2(self):
         def fn(x):
