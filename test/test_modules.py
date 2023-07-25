@@ -742,8 +742,9 @@ class TestModule(TestCase):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False, training=training)
-        module_inputs_meta = module_info.module_inputs_func(module_info, device='meta', dtype=dtype,
-                                                            requires_grad=False, training=training)
+        with torch.device('meta'):
+            module_inputs_meta = module_info.module_inputs_func(module_info, device=None, dtype=dtype,
+                                                                requires_grad=False, training=training)
 
         for module_input, module_input_meta in zip(module_inputs, module_inputs_meta):
             c_args, c_kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs

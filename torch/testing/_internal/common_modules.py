@@ -1628,6 +1628,7 @@ def module_inputs_torch_nn_LogSigmoid(module_info, device, dtype, requires_grad,
 
 def module_inputs_torch_nn_TransformerEncoder(module_info, device, dtype, requires_grad, training, **kwargs):
     # Reuse the TransformerEncoderLayer samples since the forward args are nearly the same.
+    samples = []
     for layer_module_input in module_inputs_torch_nn_TransformerEncoderLayer(
             None, device, dtype, requires_grad, training):
         # Construct a TransformerEncoderLayer object to pass to TransformerEncoder.
@@ -1643,11 +1644,12 @@ def module_inputs_torch_nn_TransformerEncoder(module_info, device, dtype, requir
         if 'src_mask' in forward_input.kwargs:
             forward_input.kwargs['mask'] = forward_input.kwargs['src_mask']
             del forward_input.kwargs['src_mask']
-        yield ModuleInput(
+        samples.append(ModuleInput(
             constructor_input=FunctionInput(encoder_layer, num_layers),
             forward_input=forward_input,
             desc=layer_module_input.desc
-        )
+        ))
+    return samples
 
 def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
