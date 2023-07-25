@@ -40,14 +40,14 @@ namespace autograd {
 struct Edge;
 struct FunctionPostHook;
 struct FunctionPreHook;
-class CompiledNodeArgs;
-class SwapSavedVariables;
 
 using tensor_list = std::vector<at::Tensor>;
 using variable_list = std::vector<Variable>;
 using edge_list = std::vector<Edge>;
 using saved_variable_list = std::vector<SavedVariable>;
 using IndexRange = std::pair<size_t, size_t>;
+using torch::dynamo::autograd::CompiledNodeArgs;
+using torch::dynamo::autograd::SwapSavedVariables;
 
 // Custom deleter to prevent stack overflows.
 TORCH_API void deleteNode(Node* function);
@@ -578,7 +578,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   // Used by compiled autograd to call apply() with different saved tensors
   // Implementations should call saved.before() on all attrs, then apply(), then
-  // saved.after() on all attrs.
+  // saved.after() on all attrs in the same order.
   virtual variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) {

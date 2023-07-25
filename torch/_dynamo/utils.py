@@ -1609,6 +1609,7 @@ def nn_module_get_all_hooks(
     check_backward_hooks=False,
     check_state_dict_hooks=False,
 ):
+    reset_code = torch._C._dynamo.eval_frame.reset_code
     """
     Sometimes its useful to differentiate between types of hooks such as forward/backward/pre
     hooks executed during module.__call__, and state_dict hooks which are executed separately.
@@ -1632,11 +1633,13 @@ def nn_module_get_all_hooks(
         for hook_name in hooks:
             hook = hooks[hook_name]
 
-            def inline_disable(self):
-                hook = torch._dynamo.decorators.disable(self)
-                getattr(mod, hook_dict_name)[hook_name] = hook
+            if not hasattr(hook, "_inline_success_disable"):
 
-            hook._inline_success_disable = inline_disable
+                def inline_disable(self):
+                    hook = torch._dynamo.decorators.disable(self)
+                    getattr(mod, hook_dict_name)[hook_name] = hook
+
+                hook._inline_success_disable = inline_disable
 
             all_hooks.append(hook)
 
