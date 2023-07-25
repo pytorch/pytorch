@@ -3916,9 +3916,7 @@ class TestQuantizeFx(QuantizationTestCase):
             elif arg_node.op == "call_module":
                 self.assertTrue(
                     not _is_activation_post_process(getattr(model, arg_node.target)),
-                    "Arg: {} of node: {} is observed but is not a float tensor".format(
-                        arg_node, node
-                    ),
+                    f"Arg: {arg_node} of node: {node} is observed but is not a float tensor",
                 )
 
         for node in model.graph.nodes:
