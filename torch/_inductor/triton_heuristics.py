@@ -128,6 +128,7 @@ class CachingAutotuner(KernelInterface):
         size_hints=None,
     ):
         super().__init__()
+        assert len(configs) > 0, "Non-empty TritonConfig list required for compiling"
         self.fn = fn
         self.meta = meta
         self.save_cache_hook = save_cache_hook
@@ -157,6 +158,7 @@ class CachingAutotuner(KernelInterface):
         with self.lock:
             if self.launchers:
                 return
+
             self.launchers = [
                 self._precompile_config(c, warm_cache_only_with_cc)
                 for c in self.configs
@@ -920,7 +922,7 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
     configs = [
         triton_config_reduction(size_hints, xblock, rnumel)
         for xblock in (1, 8, 32, 128)
-        if rnumel * xblock <= 4096 and xblock <= xnumel
+        if xblock == 1 or (rnumel * xblock <= 4096 and xblock <= xnumel)
     ]
 
     # TODO(jansel): we should be able to improve these heuristics

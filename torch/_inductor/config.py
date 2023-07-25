@@ -348,8 +348,8 @@ class triton:
 
     # 0: disable
     # 1: enable, use tuning to pick between different subkernels
-    # 2: enable, force using persistent reduction
-    # 3: enable, force using regular reduction
+    # 2: enable, force using persistent reduction (for debugging)
+    # 3: enable, force using non-persistent reduction (for debugging)
     multi_kernel = int(os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "0"))
 
     # hint to Triton when arguments are divisible by 16

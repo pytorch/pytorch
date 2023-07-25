@@ -803,6 +803,9 @@ class TritonKernel(Kernel):
         threshold = {
             ReductionHint.INNER: 1024,
         }.get(self.reduction_hint, 64)
+        if config.triton.multi_kernel:
+            # TODO: this need to be finer tested and tuned
+            threshold *= 16
         last_numel = self.numels[-1]
         if not isinstance(last_numel, (int, sympy.Integer)):
             # Not static

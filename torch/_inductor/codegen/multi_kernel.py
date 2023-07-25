@@ -1,6 +1,11 @@
+import logging
+
+from .. import config
 from ..codecache import PyCodeCache, TritonFuture
 from ..utils import do_bench
 from ..virtualized import V
+
+log = logging.getLogger(__name__)
 
 
 def get_kernel_argdefs(kernel):
@@ -136,6 +141,11 @@ class MultiKernelCall:
         self._kernels = kernels
 
         self.picked_kernel = None
+        if config.triton.multi_kernel > 1:
+            # manually force a subkernel to ease perf testing
+            self.picked_by_config = config.triton.multi_kernel - 2
+            assert self.picked_by_config < len(self._kernels)
+            self.picked_kernel = self.picked_by_config
 
         self._run = PyCodeCache.load(src_code).run
 
@@ -164,4 +174,10 @@ class MultiKernelCall:
                 for kernel_call in kernel_calls
             ]
             self.picked_kernel = timings.index(min(timings))
+            log.debug(
+                "pick %dth sub-kernel in %s. Timings %s",
+                self.picked_kernel,
+                [k.fn.__name__ for k in self.kernels],
+                timings,
+            )
         kernel_calls[self.picked_kernel]()
