@@ -3,7 +3,6 @@ import copy
 import dataclasses
 import sympy
 from typing import Any, Dict, List, Optional, Tuple, Union
-from torch._dynamo.exc import UserError, UserErrorType
 from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
 
 import torch
@@ -314,14 +313,11 @@ class ExportedProgram:
     def graph(self):
         return self.graph_module.graph
 
-    def module(self, flat=True) -> Optional[torch.fx.GraphModule]:
+    def module(self) -> Optional[torch.fx.GraphModule]:
         """
         Returns a self contained GraphModule with all the states
-        flattened if flat=True. Otherwise, returns a GraphModule that
-        preserves original eager model hierarchy.
+        flattened.
         """
-        if not flat:
-            raise UserError(UserErrorType.INVALID_INPUT, "Unflattened module nyi")
         return unlift_exported_program_lifted_states(self)
 
 

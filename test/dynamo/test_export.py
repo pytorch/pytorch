@@ -3366,7 +3366,10 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
                 b_conv = self.conv(b)
                 b_linear = self.linear(b_conv)
                 return {
-                    "a": a1_linear.cos() + b_linear.sin(),
+                    "a": [
+                        a1_linear.cos() + b_linear.sin(),
+                        a1_linear.cos() + b_linear.sin(),
+                    ],
                     "b": a2_linear.sin() + b_linear.cos(),
                 }
 
@@ -3383,9 +3386,65 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
             "b": torch.randn(20, 16, 50, 100),
         }
 
-        self.assertTrue(torch.allclose(gm(inp_test)["a"], gm2(inp_test)["a"]))
+        self.assertTrue(torch.allclose(gm(inp_test)["a"][0], gm2(inp_test)["a"][0]))
+        self.assertTrue(torch.allclose(gm(inp_test)["a"][1], gm2(inp_test)["a"][1]))
         self.assertTrue(torch.allclose(gm(inp_test)["b"], gm2(inp_test)["b"]))
 
+    def test_retracibility_nested_list_out(self):
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x):
+                a1, a2 = x["a"]
+                b = x["b"]
+                a1_conv = self.conv(a1)
+                a1_linear = self.linear(a1_conv)
+                a2_conv = self.conv(a2)
+                a2_linear = self.linear(a2_conv)
+                b_conv = self.conv(b)
+                b_linear = self.linear(b_conv)
+                return [
+                    [
+                        a1_linear.cos() + b_linear.sin(),
+                        a1_linear.cos() + b_linear.sin(),
+                    ],
+                    [
+                        a2_linear.sin() + b_linear.cos(),
+                        a2_linear.sin() + b_linear.cos(),
+                    ],
+                ]
+
+        inp_container = {
+            "a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),
+            "b": torch.randn(20, 16, 50, 100),
+        }
+
+        gm, _ = torch._dynamo.export(Foo(), inp_container, aten_graph=True)
+        gm2, _ = torch._dynamo.export(gm, inp_container, aten_graph=True)
+
+        inp_test = {
+            "a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),
+            "b": torch.randn(20, 16, 50, 100),
+        }
+
+        self.assertTrue(torch.allclose(gm(inp_test)[0][0], gm2(inp_test)[0][0]))
+        self.assertTrue(torch.allclose(gm(inp_test)[0][1], gm2(inp_test)[0][1]))
+        self.assertTrue(torch.allclose(gm(inp_test)[1][0], gm2(inp_test)[1][0]))
+        self.assertTrue(torch.allclose(gm(inp_test)[1][1], gm2(inp_test)[1][1]))
+
+    @unittest.expectedFailure
     def test_fx_pytree(self):
         def foo(args):
             flat_args, spec = torch.utils._pytree.tree_flatten(args)
@@ -3393,7 +3452,6 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
             return flat_args_fx[0] + flat_args[0]
 
         inp_container = (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100))
-        print(foo(inp_container))
 
         gm, _ = torch._dynamo.export(foo, inp_container, aten_graph=True)
 

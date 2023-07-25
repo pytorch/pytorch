@@ -50,9 +50,9 @@ class ConstantVariable(VariableTracker):
 
     @staticmethod
     def is_literal(obj):
-        if type(obj) in (int, float, bool, type(None), type(torch.utils._pytree.LeafSpec), str):
+        if type(obj) in (int, float, bool, type(None), str):
             return True
-        if type(obj) in (list, tuple, set, frozenset, type(torch.utils._pytree.TreeSpec)):
+        if type(obj) in (list, tuple, set, frozenset):
             return all(ConstantVariable.is_literal(x) for x in obj)
         return False
 
