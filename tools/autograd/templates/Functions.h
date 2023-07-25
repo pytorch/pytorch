@@ -29,6 +29,7 @@ inline std::vector<Tensor> unpack_list(at::ArrayRef<SavedVariable> xs, std::shar
   // NB: we must explicitly do the conversion in the lambda, otherwise template
   // deduction will give a Tensor of Variable which is not convertible
   return fmap(xs, [&saved_for](const SavedVariable& x) {
+    // TODO(crcrpar): Use `std::move(saved_for)` to avoid incrementing refcount, which would need refactoring.
     return static_cast<Tensor>(x.unpack(saved_for));
   });
 }
