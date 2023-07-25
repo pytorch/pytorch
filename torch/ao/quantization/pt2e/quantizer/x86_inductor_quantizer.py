@@ -100,9 +100,7 @@ def _is_quantized_op_pt2e(node: torch.fx.Node):
         return False
     quantization_annotation = node.meta.get("quantization_annotation", None)
     assert isinstance(quantization_annotation, _X86InductorQuantizationAnnotation)
-    return True if (
-        quantization_annotation._is_output_of_quantized_pattern
-    ) else False
+    return quantization_annotation._is_output_of_quantized_pattern
 
 
 def _supported_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
