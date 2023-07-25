@@ -362,13 +362,12 @@ Tensor q_maxpool_2d<uint8_t>(
               oC, "x", oH, "x", oW,
               "). Output size is too small.");
 
-  std::vector<int64_t> oSizes = {nbatch, oC, oH, oW};
   Tensor qy = at::empty(
-    oSizes,
-    device(c10::kCPU)
+    {nbatch, oC, oH, oW},
+    qx.options()
+      .device(c10::kCPU)
       .dtype(qx.scalar_type())
-      .memory_format(c10::MemoryFormat::ChannelsLast),
-    c10::nullopt);
+      .memory_format(c10::MemoryFormat::ChannelsLast));
   qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
   return qy;
 }
