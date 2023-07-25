@@ -55,6 +55,7 @@ fallbacks = set()
 aten = torch.ops.aten
 tr_c10d = torch.ops.tr_c10d
 prims = torch.ops.prims
+quantized = torch.ops.quantized
 needs_realized_inputs = set()
 foreach_ops = set()
 
@@ -90,6 +91,7 @@ add_needs_realized_inputs(
         aten.upsample_nearest2d,
         aten.upsample_bicubic2d,
         aten._int_mm,
+        quantized.max_pool2d,
     ]
 )
 
@@ -3502,6 +3504,33 @@ def max_pool2d_with_indices_backward(
         dtype=grad_output.get_dtype(),
         inner_fn=fn,
         ranges=new_size,
+    )
+
+
+@register_lowering(quantized.max_pool2d, type_promotion_kind=None)
+def quantized_maxpool2d(
+    x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False
+):
+    if padding == 0:
+        padding = [0, 0]
+    if dilation == 1:
+        dilation = [1, 1]
+    if not stride:
+        stride = kernel_size
+    kernel_size = pad_listlike(kernel_size, 2)
+    stride = pad_listlike(stride, 2)
+    padding = pad_listlike(padding, 2)
+    dilation = pad_listlike(dilation, 2)
+
+    return TensorBox.create(
+        ir.QMaxpool2dPT2E.create(
+            x,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            ceil_mode,
+        )
     )
 
 

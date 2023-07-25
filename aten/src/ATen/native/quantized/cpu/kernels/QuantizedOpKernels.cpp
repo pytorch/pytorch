@@ -1476,7 +1476,12 @@ void qmaxpool_2d_nhwc_kernel(
     int64_t dH,
     int64_t dW, // dilation
     Tensor& qy) {
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "max_pool2d_nhwc", [&]() {
+
+  // In below dispatch: ScalarType::Byte has no underlying type.
+  // Only ScalarType::QUInt8 has the underlying type. We map ScalarType::Byte back to ScalarType::QUInt8.
+  auto dispatch_type = (qx.scalar_type() == ScalarType::Byte) ? ScalarType::QUInt8 : qx.scalar_type();
+
+  AT_DISPATCH_QINT_TYPES(dispatch_type, "max_pool2d_nhwc", [&]() {
     scalar_t* idata = static_cast<scalar_t*>(qx.data_ptr());
     scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
 
