@@ -14,10 +14,12 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch.nn.functional as F
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.testing import expectedFailureDynamic, same
-from torch.nn import functional as F
+from torch.distributed._tensor import DeviceMesh
+from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 
@@ -504,7 +506,7 @@ class _DenseBlock(torch.nn.ModuleDict):
 
     def forward(self, init_features):
         features = [init_features]
-        for name, layer in self.items():
+        for layer in self.values():
             new_features = layer(features)
             features.append(new_features)
         return torch.cat(features, 1)
@@ -2070,6 +2072,52 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         ref = fn(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+
+import torch.distributed as dist
+from torch.testing._internal.distributed.fake_pg import FakeStore
+
+
+class TestDTensorCompile(torch._dynamo.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        fake_store = FakeStore()
+        dist.init_process_group(
+            "fake", store=fake_store, rank=0, world_size=self.world_size
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    @property
+    def device_type(self) -> str:
+        return "cuda" if torch.cuda.is_available() else "cpu"
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def test_dtensor_fullgraph(self):
+        class SimpleMLP(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.net1 = torch.nn.Linear(5, 1024, device=device)
+                self.relu = torch.nn.ReLU()
+                self.net2 = torch.nn.Linear(1024, 4, device=device)
+
+            def forward(self, x):
+                return self.net2(F.relu(self.net1(x)))
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        model = SimpleMLP(self.device_type)
+        model = parallelize_module(model, mesh, PairwiseParallel())
+        inp = torch.rand(20, 5, device=self.device_type)
+        out = model(inp)
+        compiled_mod = torch.compile(model, backend="eager", fullgraph=True)
+        compiled_out = compiled_mod(inp)
+        self.assertEqual(compiled_out, out)
 
 
 if __name__ == "__main__":

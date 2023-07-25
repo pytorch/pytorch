@@ -5,6 +5,7 @@ import torch
 from ..exc import unimplemented
 from ..utils import istype
 from .base import VariableTracker
+from .constant import ConstantVariable
 
 
 class DistributedVariable(VariableTracker):
@@ -128,3 +129,8 @@ class DeviceMeshVariable(DistributedVariable):
 
     def as_python_constant(self):
         return self.value
+
+    def var_getattr(self, tx, name: str) -> VariableTracker:
+        if name == "ndim":
+            return ConstantVariable(self.value.ndim)
+        return super().var_getattr(tx, name)
