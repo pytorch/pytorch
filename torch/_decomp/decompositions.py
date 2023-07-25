@@ -1881,32 +1881,6 @@ def cudnn_batch_norm_backward(
     )
 
 
-@register_decomposition(aten.miopen_batch_norm_backward)
-def miopen_batch_norm_backward(
-    input: Tensor,
-    grad_output: Tensor,
-    weight: Tensor,
-    running_mean: Optional[Tensor],
-    running_var: Optional[Tensor],
-    save_mean: Optional[Tensor],
-    save_var: Optional[Tensor],
-    epsilon: float,
-    reserveSpace: Tensor,
-):
-    return aten.native_batch_norm_backward(
-        grad_output,
-        input,
-        weight,
-        running_mean,
-        running_var,
-        save_mean,
-        save_var,
-        True,
-        epsilon,
-        [True, True, True],
-    )
-
-
 @register_decomposition(aten._adaptive_avg_pool2d)
 @pw_cast_for_opmath
 def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
