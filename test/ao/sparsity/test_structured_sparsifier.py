@@ -10,6 +10,7 @@ from torch.ao.pruning._experimental.pruner import (
     LSTMSaliencyPruner,
     BaseStructuredSparsifier,
     FakeStructuredSparsity,
+    FPGMSparsifier
 )
 from torch.nn.utils import parametrize
 
@@ -916,3 +917,170 @@ class TestBaseStructuredSparsifier(TestCase):
         # also check that output of linear is the same shape, this means we've resized
         # linear columns correctly.
         assert out_expected.shape == out_pruned.shape
+
+class TestFPGMSparsifier(TestCase):
+    """
+    Test case for the implementation of paper:
+    "Filter Pruning via Geometric Median for Deep Convolutional Neural Networks Acceleration"
+    https://arxiv.org/abs/1811.00250.
+    """
+    class SimpleConvFPGM(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv2d1 = nn.Conv2d(in_channels=1, out_channels=3, kernel_size=3, padding=1, bias=False)
+            # Manually set the filter weights for demonstration purposes
+            # Large norm filters with similar Euclidean distances
+            self.conv2d1.weight.data[0] = torch.tensor([[1.0, 1.0, 1.0],
+                                                        [1.0, 1.0, 1.0],
+                                                        [1.0, 1.0, 1.0]])
+            self.conv2d1.weight.data[1] = torch.tensor([[2.0, 2.0, 2.0],
+                                                        [2.0, 2.0, 2.0],
+                                                        [2.0, 2.0, 2.0]])
+            # Small norm filter with large distance from the other two filters
+            self.conv2d1.weight.data[2] = torch.tensor([[0.1, 0.1, 0.1],
+                                                        [0.1, 0.1, 0.1],
+                                                        [0.1, 0.1, 0.1]])
+
+            # Second Convolutional Layer
+            self.conv2d2 = nn.Conv2d(in_channels=3, out_channels=4, kernel_size=3, padding=1, bias=False)
+            # Manually set the filter weights for demonstration purposes
+            # Large norm filters
+            self.conv2d2.weight.data[0] = torch.tensor([[3.0, 3.0, 3.0],
+                                                        [3.0, 3.0, 3.0],
+                                                        [3.0, 3.0, 3.0]])
+            self.conv2d2.weight.data[1] = torch.tensor([[4.0, 4.0, 4.0],
+                                                        [4.0, 4.0, 4.0],
+                                                        [4.0, 4.0, 4.0]])
+            # Small norm filters
+            self.conv2d2.weight.data[2] = torch.tensor([[0.2, 0.2, 0.2],
+                                                        [0.2, 0.2, 0.2],
+                                                        [0.2, 0.2, 0.2]])
+            self.conv2d2.weight.data[3] = torch.tensor([[0.3, 0.3, 0.3],
+                                                        [0.3, 0.3, 0.3],
+                                                        [0.3, 0.3, 0.3]])
+
+        def forward(self, x):
+            x = self.conv2d1(x)
+            x = self.conv2d2(x)
+            return x
+
+    def test_compute_distance(self, device="cpu"):
+        """Test the distance computation function"""
+        model = TestFPGMSparsifier.SimpleConvFPGM().to(device)
+        pruner = FPGMSparsifier(0.3)
+        dist_conv1 = pruner._compute_distance(model.conv2d1.weight)
+
+        # compute the distance matrix using torch.cdist
+        flattened_filters = torch.Tensor([
+            [1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000],
+            [2.0000, 2.0000, 2.0000, 2.0000, 2.0000, 2.0000, 2.0000, 2.0000, 2.0000],
+            [0.1000, 0.1000, 0.1000, 0.1000, 0.1000, 0.1000, 0.1000, 0.1000, 0.1000]
+        ])
+
+        """
+        Expected distance matrix should have the following values:
+            [[0.0000, 3.0000, 2.7000],
+            [3.0000, 0.0000, 5.7000],
+            [2.7000, 5.7000, 0.0000]
+        the distance should therefore be:
+            [5.7000, 8.7000, 8.4000]
+        """
+        expected_dist_matrix_conv1 = torch.cdist(flattened_filters, flattened_filters, p=2)
+        expected_dist_conv1 = torch.sum(torch.abs(expected_dist_matrix_conv1), 1)
+        assert torch.isclose(dist_conv1, expected_dist_conv1, rtol=1e-05, atol=1e-07).all()
+
+    def test_update_mask(self, device="cpu"):
+        """Test that pruning is conducted based on the pair-wise distance measurement instead of absolute norm value"""
+        # test pruning with one layer of conv2d
+        model = TestFPGMSparsifier.SimpleConvFPGM().to(device)
+        x = torch.ones((1, 1, 32, 32), device=device)
+        pruner = FPGMSparsifier(0.3)
+        config = [{"tensor_fqn": "conv2d1.weight"}]
+        pruner.prepare(model, config)
+        pruner.enable_mask_update = True
+        pruner.step()
+        assert pruner.groups[0]["module"].parametrizations.weight[0].mask[-1].item() is not False,\
+            "do not prune the least-norm filter"
+
+        # fusion step
+        pruned_model = pruner.prune()
+        expected_conv1 = torch.Tensor([
+            [
+                [
+                    [2.0000, 2.0000, 2.0000],
+                    [2.0000, 2.0000, 2.0000],
+                    [2.0000, 2.0000, 2.0000]
+                ]
+            ],
+            [
+                [
+                    [0.1000, 0.1000, 0.1000],
+                    [0.1000, 0.1000, 0.1000],
+                    [0.1000, 0.1000, 0.1000]
+                ]
+            ]
+        ])
+
+        pruned_y = pruned_model(x)
+        # assert shapes
+        assert pruned_y.shape == (1, 4, 32, 32)
+        assert pruned_model.conv2d1.weight.shape == expected_conv1.shape
+        assert pruned_model.conv2d2.weight.shape == (4, 2, 3, 3), "conv2d2 should have input channel pruned"
+        # assert value
+        assert torch.isclose(pruned_model.conv2d1.weight, expected_conv1, rtol=1e-05, atol=1e-07).all()
+
+
+        model = TestFPGMSparsifier.SimpleConvFPGM().to(device)
+        x = torch.ones((1, 1, 32, 32), device=device)
+        pruner = FPGMSparsifier(0.3)
+        config = [
+            {"tensor_fqn": "conv2d1.weight"},
+            {"tensor_fqn": "conv2d2.weight", "sparsity_level": 0.5}
+        ]
+        pruner.prepare(model, config)
+        pruner.enable_mask_update = True
+        pruner.step()
+        # Get the masks for the two least-norm filters
+        mask1 = pruner.groups[0]['module'].parametrizations.weight[0].mask[-1]
+        mask2 = pruner.groups[0]['module'].parametrizations.weight[0].mask[-2]
+        # Check if either of the least-norm filters is not pruned
+        assert mask1.item() is not False or mask2.item() is not False, "Do not prune all least-norm filters"
+
+        # fusion step
+        pruned_model = pruner.prune()
+        expected_conv2 = torch.Tensor([
+            [
+                [
+                    [4.0000, 4.0000, 4.0000],
+                    [4.0000, 4.0000, 4.0000],
+                    [4.0000, 4.0000, 4.0000]
+                ],
+                [
+                    [4.0000, 4.0000, 4.0000],
+                    [4.0000, 4.0000, 4.0000],
+                    [4.0000, 4.0000, 4.0000]
+                ]
+            ],
+
+            [
+                [
+                    [0.2000, 0.2000, 0.2000],
+                    [0.2000, 0.2000, 0.2000],
+                    [0.2000, 0.2000, 0.2000]
+                ],
+                [
+                    [0.2000, 0.2000, 0.2000],
+                    [0.2000, 0.2000, 0.2000],
+                    [0.2000, 0.2000, 0.2000]
+                ]
+            ]
+        ])
+
+        pruned_y = pruned_model(x)
+        # assert shapes
+        assert pruned_y.shape == (1, 2, 32, 32)
+        assert pruned_model.conv2d1.weight.shape == expected_conv1.shape
+        assert pruned_model.conv2d2.weight.shape == expected_conv2.shape
+        # assert values
+        assert torch.isclose(pruned_model.conv2d1.weight, expected_conv1, rtol=1e-05, atol=1e-07).all()
+        assert torch.isclose(pruned_model.conv2d2.weight, expected_conv2, rtol=1e-05, atol=1e-07).all()
