@@ -35,7 +35,7 @@ def register_debug_prims():
         dtype: torch.dtype,
         device: torch.device,
     ) -> torch.Tensor:
-        ...
+        raise NotImplementedError()
 
     @load_tensor.impl_factory()
     def load_tensor_factory(name, size, stride, dtype, device):
