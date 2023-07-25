@@ -3,7 +3,6 @@
 
 import torch
 import torch.distributed as dist
-import torch.nn as nn
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
@@ -13,7 +12,6 @@ from torch.distributed.tensor.parallel import (
     PairwiseParallel,
     parallelize_module,
     SequenceParallel,
-    TensorParallelMultiheadAttention,
 )
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.testing._internal.common_utils import (
