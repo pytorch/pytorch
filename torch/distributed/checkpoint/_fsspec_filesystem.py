@@ -125,7 +125,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         self.current_items: collections.deque = collections.deque()
         self.idx = 0
         self.started = False
-        self.device_type = (getattr(stream, "device", torch.device("cuda"))).type
+        self.device_type = stream.device.type if stream else torch.device("cuda").type
         self.device_module = _get_device_module(self.device_type)
         self.stream = stream or self.device_module.current_stream()
         if self.stream != self.device_module.current_stream():
@@ -297,7 +297,7 @@ def _write_files_from_queue(
                     )
 
                 for tensor, write_item in loader.values():
-                    assert tensor.device.type not in ["cuda", torch._C._get_privateuse1_backend_name()]
+                    assert tensor.is_cpu
                     write_results.append(
                         _write_item(stream, tensor, write_item, storage_key)
                     )

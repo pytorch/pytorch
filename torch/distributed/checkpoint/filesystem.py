@@ -295,7 +295,7 @@ def _write_files_from_queue(
                     )
 
                 for tensor, write_item in loader.values():
-                    assert tensor.device.type not in ["cuda", torch._C._get_privateuse1_backend_name()]
+                    assert tensor.is_cpu
                     write_results.append(
                         _write_item(stream, tensor, write_item, storage_key)
                     )

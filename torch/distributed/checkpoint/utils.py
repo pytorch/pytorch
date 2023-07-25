@@ -389,3 +389,15 @@ class _ReaderView(io.IOBase):
 def _create_file_view(file: io.IOBase, offset: int, length: int) -> io.IOBase:
     # FIXME (kumpera) torch.load fails if we wrap with io.BufferedReader
     return _ReaderView(file, offset, length)
+
+def _normalize_device(device_info: str) -> str:
+    r""" _normalize device and rank info,
+    for `cpu`, it should be `cpu` not `cpu:0`
+
+    Args:
+    device_info(str): device_type and rank id, "cuda:0", "cpu:0"
+    """
+    if device_info.split(":")[0] == "cpu":
+        return "cpu"
+    else:
+        return device_info

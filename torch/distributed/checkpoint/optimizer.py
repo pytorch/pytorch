@@ -38,6 +38,7 @@ from torch.distributed.checkpoint._nested_dict import unflatten_state_dict
 from torch.distributed.checkpoint.utils import (
     _element_wise_add,
     _element_wise_sub,
+    _normalize_device,
 )
 
 from torch._utils import _get_device_module
@@ -54,7 +55,7 @@ __all__ = [
 def _gen_rank_device(global_rank: int, device_type: str = "cuda") -> str:
     device_module = _get_device_module(device_type)
     if device_module.is_available():
-        return f"{device_type}:{global_rank % device_module.device_count()}"
+        return _normalize_device(f"{device_type}:{global_rank % device_module.device_count()}")
     return "cpu"
 
 
@@ -263,13 +264,11 @@ def load_sharded_optimizer_state_dict(
     dp_pg_device_type = dist.distributed_c10d._get_pg_default_device(dp_pg).type
     device_module = _get_device_module(dp_pg_device_type)
     if dp_pg is None:
-        sharding_spec = ChunkShardingSpec(
-            dim=0,
-            placements=[
-                f"rank:{i}/{dp_pg_device_type}:{i % device_module.device_count()}"
-                for i in range(dist.get_world_size())
-            ],
-        )
+        placements = []
+        for i in range(dist.get_world_size()):
+            device_info = _normalize_device(f"{dp_pg_device_type}:{i % device_module.device_count()}")
+            placements.append(f"rank:{i}/{device_info}")
+        sharding_spec = ChunkShardingSpec(dim=0, placements=placements)  # type: ignore[arg-type]
     else:
         sharding_spec = _create_colwise_spec(dp_pg)
 

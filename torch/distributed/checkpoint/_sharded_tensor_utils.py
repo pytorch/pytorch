@@ -26,7 +26,7 @@ from ._traverse import (
     STATE_DICT_ITEM,
 )
 
-from .utils import _element_wise_add
+from .utils import _element_wise_add, _normalize_device
 
 
 # TODO: We need to refactor this code.
@@ -92,11 +92,13 @@ def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
 
         # Attribute other rank for the other shards
         for shard_md in st_meta.shards_metadata:
-            shard_md.placement = _remote_device(f"rank:{other_rank}/{device_type}:0")
+            device_rank_info = _normalize_device(f"{device_type}:0")
+            shard_md.placement = _remote_device(f"rank:{other_rank}/{device_rank_info}")
 
         # Add other inner shards from the inner tensor
         for inner_md in inner_st.metadata().shards_metadata:
             if inner_md.shard_offsets != inner_shard.metadata.shard_offsets:
+                device_info = _normalize_device(f"{device_type}:0")
                 st_meta.shards_metadata.append(
                     ShardMetadata(
                         shard_offsets=_element_wise_add(
@@ -104,7 +106,7 @@ def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
                             inner_md.shard_offsets,
                         ),
                         shard_sizes=inner_md.shard_sizes,
-                        placement=f"rank:{other_rank}/{device_type}:0",
+                        placement=f"rank:{other_rank}/{device_info}",
                     )
                 )
 
