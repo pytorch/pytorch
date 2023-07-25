@@ -3993,7 +3993,7 @@ class TestLinalg(TestCase):
             if well_conditioned:
                 make_fullrank = make_fullrank_matrices_with_distinct_singular_values
                 make_well_conditioned_arg = partial(make_fullrank, device=device, dtype=dtype)
-                PLU = torch.linalg.lu(make_well_conditioned_arg(make_randn(*size_a)))
+                PLU = torch.linalg.lu(make_well_conditioned_arg(*size_a))
                 if uni:
                     # A = L from PLU
                     A = PLU[1].transpose(-2, -1).contiguous()
