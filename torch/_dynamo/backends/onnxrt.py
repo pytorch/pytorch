@@ -2,6 +2,7 @@ import importlib
 import logging
 import os
 import tempfile
+from typing import Dict, List, Optional, Union
 
 import torch
 from .common import device_from_inputs, fake_tensor_unsupported
@@ -49,10 +50,16 @@ def has_onnxruntime():
 
 @register_backend
 @fake_tensor_unsupported
-def onnxrt(gm, example_inputs, *, filename=None, provider=None):
+def onnxrt(
+    gm,
+    example_inputs,
+    *,
+    filename=None,
+    options: Optional[Dict[str, Union[str, List]]] = None,
+):
     if filename is None:
         with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp:
-            return onnxrt(gm, example_inputs, filename=tmp.name)
+            return onnxrt(gm, example_inputs, filename=tmp.name, options=options)
 
     import onnxruntime  # type: ignore[import]
 
@@ -78,10 +85,17 @@ def onnxrt(gm, example_inputs, *, filename=None, provider=None):
     )
     del example_inputs, example_outputs
 
-    if provider is None:
-        provider = default_provider(device_type)
-    assert provider in onnxruntime.get_available_providers()
-    session = onnxruntime.InferenceSession(filename, providers=[provider])
+    providers = options.get("providers") if options else None
+    if providers is None:
+        providers = [default_provider(device_type)]
+
+    for provider in providers:
+        if isinstance(provider, str):
+            assert provider in onnxruntime.get_available_providers()
+        elif isinstance(provider, tuple):
+            assert provider[0] in onnxruntime.get_available_providers()
+
+    session = onnxruntime.InferenceSession(filename, providers=providers)
 
     def _call(*initial_args):
         binding = session.io_binding()

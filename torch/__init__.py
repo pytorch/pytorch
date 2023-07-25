@@ -33,7 +33,7 @@ if _running_with_deploy():
 else:
     from .torch_version import __version__ as __version__
 
-from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union, List
 import builtins
 
 __all__ = [
@@ -1591,7 +1591,7 @@ def compile(model: Optional[Callable] = None, *,
             dynamic: Optional[builtins.bool] = None,
             backend: Union[str, Callable] = "inductor",
             mode: Union[str, None] = None,
-            options: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
+            options: Optional[Dict[str, Union[str, builtins.int, builtins.bool, List[Union[str, tuple]]]]] = None,
             disable: builtins.bool = False) -> Callable:
     """
     Optimizes given model/function using TorchDynamo and specified backend.
@@ -1649,6 +1649,7 @@ def compile(model: Optional[Callable] = None, *,
         - `trace.enabled` which is the most useful debugging flag to turn on
         - `trace.graph_diagram` which will show you a picture of your graph after fusion
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
+        - For onnxrt `providers` which will be useful to configure detailed EP information
        disable (bool): Turn torch.compile() into a no-op for testing
 
     Example::

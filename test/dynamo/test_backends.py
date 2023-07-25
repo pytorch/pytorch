@@ -96,11 +96,11 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
-    def _check_backend_works(self, backend):
+    def _check_backend_works(self, backend, options=None):
         model = Seq().eval()
         input = torch.randn(2, 10)
         r1 = model(input)
-        r2 = torch.compile(model, backend=backend)(input)
+        r2 = torch.compile(model, backend=backend, options=options)(input)
         self.assertTrue(same(r1, r2.float(), tol=0.01))
 
     def test_eager(self):
@@ -125,6 +125,24 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
     def test_onnxrt(self):
         self._check_backend_works("onnxrt")
+
+    @requires_cuda()
+    @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
+    def test_onnxrt_with_options(self):
+        providers = [
+            (
+                "CUDAExecutionProvider",
+                {
+                    "device_id": 0,
+                    "arena_extend_strategy": "kNextPowerOfTwo",
+                    "gpu_mem_limit": 2 * 1024 * 1024 * 1024,
+                    "cudnn_conv_algo_search": "EXHAUSTIVE",
+                    "do_copy_in_default_stream": True,
+                },
+            ),
+            "CPUExecutionProvider",
+        ]
+        self._check_backend_works("onnxrt", options={"providers": providers})
 
     @unittest.skipIf(not has_tvm(), "requires tvm")
     def test_tvm(self):
