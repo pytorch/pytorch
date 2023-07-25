@@ -273,7 +273,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
                     node_occurrence[ns.call_function(v)] = expected_node_occurrence[k]
             self.checkGraphModuleNodes(m_fx, expected_node_occurrence=node_occurrence)
             fx_quant_output = m_fx(*example_inputs)
-            self.assertTrue(torch.allclose(fx_quant_output, pt2_quant_output))
+            self.assertEqual(fx_quant_output, pt2_quant_output)
 
     def _verify_symmetric_qnnpack_qat_numerics(
         self,
