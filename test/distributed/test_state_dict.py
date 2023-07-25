@@ -50,14 +50,6 @@ if not dist.is_available():
     sys.exit(0)
 
 
-if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip dev-asan as torch + multiprocessing spawn have known issues",
-        file=sys.stderr,
-    )
-    sys.exit(0)
-
-
 class TestStateDict(FSDPTest):
     """Tests distributed_state_dict and distributed_load_state_dict"""
 
@@ -159,6 +151,11 @@ class TestStateDict(FSDPTest):
             dist_model(batch).sum().backward()
             if not isinstance(dist_optim, list):
                 dist_optim.step()
+                dist_optim.zero_grad()
+            else:
+                for optim in dist_optim:
+                    optim.zero_grad()
+            orig_optim.zero_grad()
 
         # Get the state_dict, and compare the result
         orig_msd = orig_model.state_dict()
@@ -276,11 +273,10 @@ class TestStateDict(FSDPTest):
                 fully_shard(dist_model, policy=ModuleWrapPolicy({UnitModule}))
             else:
                 dist_model.l = DDP(dist_model.l)
-                use_orig_params = True if optim_in_backward else False
                 dist_model = FSDP(
                     copy.deepcopy(orig_model),
                     auto_wrap_policy=ModuleWrapPolicy({UnitModule}),
-                    use_orig_params=use_orig_params,
+                    use_orig_params=optim_in_backward,
                     ignored_modules=[dist_model.l],
                 )
             if optim_in_backward:
@@ -313,18 +309,8 @@ class TestStateDict(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_apply_optimizer_in_backward(self) -> None:
-        def init_model_optim():
-            orig_model = CompositeParamModel(device=torch.device("cuda"))
-            orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
-            dist_model = copy.deepcopy(orig_model)
-            dist_model = DDP(dist_model)
-            _apply_optimizer_in_backward(
-                torch.optim.Adam, dist_model.parameters(), {"lr": 1e-3}
-            )
-            dist_optim = [p._in_backward_optimizers[0] for p in dist_model.parameters()]
-            return orig_model, orig_optim, dist_model, dist_optim
-
-        # TODO: we should just use self._test_fsdp_ddp to verify the case.
-        # However, apply_optimizer_in_backward cause some model state_dict
-        # mismatch when using FSDP, fully_shard, and replicate.
-        self._test_save_load(init_model_optim)
+        self.run_subtests(
+            {"use_composable": [True, False]},
+            self._test_fsdp_ddp,
+            optim_in_backward=True,
+        )
