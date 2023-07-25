@@ -2350,7 +2350,6 @@ class TestLinalg(TestCase):
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
     @skipCUDAIfNoCusolver
-    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_svd_lowrank(self, device, dtype):
@@ -7209,7 +7208,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         run_test((1, 1), (1, 1, 1025))
 
     @skipCUDAIfNoCusolver
-    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     def test_pca_lowrank(self, device):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
