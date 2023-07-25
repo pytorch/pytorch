@@ -48,6 +48,7 @@ from .utils import (
     counters,
     dynamo_timed,
     format_bytecode,
+    format_frame_info,
     gen_record_file_name,
     guard_failures,
     increment_frame,
@@ -137,6 +138,36 @@ def wrap_convert_context(fn):
 
     _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
     return _fn
+
+
+def has_jagged_tensor(frame):
+    """
+    This is a short term solution to skip Dynamo tracing on frame whose inputs
+    are Jagged tensors. These tensors contain a list of integers on the side
+    which in current state causes excessive recompilations and guards.
+
+    We are looking at ways on how to better handle this situation. Meawhile this
+    stop gap solution will allow full model compilation without the slow
+    recompilation.
+    """
+    try:
+        import torchrec  # type: ignore[import]  # noqa:F401
+        from torchrec.sparse.jagged_tensor import (  # type: ignore[import]
+            JaggedTensor,
+            KeyedJaggedTensor,
+        )
+    except ImportError:
+        return False
+
+    # Check if the passed arguments are of type Tensor
+    for value in frame.f_locals.values():
+        if isinstance(value, (JaggedTensor, KeyedJaggedTensor)):
+            log.info(
+                "Skipping this frame because of (Keyed)JaggedTensor in frame: %s",
+                format_frame_info(frame),
+            )
+            return True
+    return False
 
 
 @TorchPatcher.suppress_torch_distributed_warnings
@@ -337,6 +368,9 @@ def convert_frame_assert(
             unimplemented("cache_size_limit reached")
 
         if not has_tensor_in_frame(frame):
+            return None
+
+        if has_jagged_tensor(frame):
             return None
 
         global initial_grad_state

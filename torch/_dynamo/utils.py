@@ -1565,6 +1565,13 @@ def format_bytecode(prefix, name, filename, line_no, code):
     return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
 
 
+def format_frame_info(frame):
+    name = frame.f_code.co_name
+    filename = frame.f_code.co_filename
+    lineno = frame.f_code.co_firstlineno
+    return f"{name}({filename}:{lineno})"
+
+
 forward_hook_names = ["_forward_pre_hooks", "_forward_hooks"]
 backward_hook_names = ["_backward_pre_hooks", "_backward_hooks"]
 state_dict_hook_names = [
