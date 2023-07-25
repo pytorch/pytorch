@@ -12,7 +12,7 @@ from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
 
@@ -270,11 +270,15 @@ class TestCompiledAutograd(TestCase):
         self.check_output_and_recompiles(fn, count=1)
 
 
-testdir = Path(__file__).absolute().parent.parent
-with mock.patch("sys.path", [*sys.path, str(testdir)]):
-    test_autograd = SourceFileLoader(
-        "test_autograd", str(testdir / "test_autograd.py")
-    ).load_module()
+def load_test_module(name):
+    testdir = Path(__file__).absolute().parent.parent
+    with mock.patch("sys.path", [*sys.path, str(testdir)]):
+        return SourceFileLoader(
+            name, str(testdir / f"{name.replace('.', '/')}.py")
+        ).load_module()
+
+
+test_autograd = load_test_module("test_autograd")
 
 
 class EagerAutogradTests(TestCase):
@@ -356,6 +360,10 @@ skips = {
     "test_var_mean_differentiable",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/pytorch/torch/c
     "test_wrapped_number_saved_variable_hooks",  # RuntimeError: this hook should not be called
 }
+
+if not HAS_CUDA:
+    # Found Tesla M60 which is too old to be supported by the triton GPU compiler
+    skips.add("test_type_conversions")
 
 for name, fn in test_autograd.TestAutograd.__dict__.items():
     EagerAutogradTests.add_test(name, fn)
