@@ -277,14 +277,15 @@ class StateDictConfig:
     ``StateDictConfig`` is the base class for all ``state_dict`` configuration
     classes. Users should instantiate a child class (e.g.
     ``FullStateDictConfig``) in order to configure settings for the
-    corresponding ``state_dict`` type.
+    corresponding ``state_dict`` type supported by FSDP.
 
     Attributes:
-        offload_to_cpu (bool): If ``True``, then FSDP will offload the state
-            dict values to CPU. (Default: ``False``)
-        use_dtensor (bool): If ``True``, then FSDP will save the state dict
-            values as ``DTensor``, and if ``False``, then FSDP will save them
-            as ``ShardedTensor``. (Default: ``False``)
+        offload_to_cpu (bool): If ``True``, then FSDP offloads the state dict
+            values to CPU, and if ``False``, then FSDP keeps them on GPU.
+            (Default: ``False``)
+        use_dtensor (bool): If ``True``, then FSDP saves the state dict values
+            as ``DTensor``, and if ``False``, then FSDP saves them as
+            ``ShardedTensor``. (Default: ``False``)
     """
 
     offload_to_cpu: bool = False
@@ -302,22 +303,27 @@ class FullStateDictConfig(StateDictConfig):
     follows:
 
         >>> # xdoctest: +SKIP("undefined variables")
+        >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
         >>> fsdp = FSDP(model, auto_wrap_policy=...)
         >>> cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-        >>> with FullyShardedDataParallel.state_dict_type(fsdp, StateDictType.FULL_STATE_DICT, cfg):
+        >>> with FSDP.state_dict_type(fsdp, StateDictType.FULL_STATE_DICT, cfg):
         >>>     state = fsdp.state_dict()
-        >>>     # state will be empty on non rank 0 and contain CPU tensors on rank 0.
+        >>>     # `state` will be empty on non rank 0 and contain CPU tensors on rank 0.
         >>> # To reload checkpoint for inference, finetuning, transfer learning, etc:
         >>> model = model_fn() # Initialize model on CPU in preparation for wrapping with FSDP
         >>> if dist.get_rank() == 0:
         >>>     # Load checkpoint only on rank 0 to avoid memory redundancy
         >>>     state_dict = torch.load("my_checkpoint.pt")
         >>>     model.load_state_dict(state_dict)
-        >>> # All ranks initialize FSDP module as usual. ``sync_module_states`` argument
+        >>> # All ranks initialize FSDP module as usual. `sync_module_states` argument
         >>> # communicates loaded checkpoint states from rank 0 to rest of the world.
         >>> fsdp = FSDP(model, device_id=torch.cuda.current_device(), auto_wrap_policy=..., sync_module_states=True)
         >>> # After this point, all ranks have FSDP model with loaded checkpoint.
 
+    Attributes:
+        rank0_only (bool): If ``True``, then only rank 0 saves the full state
+            dict, and nonzero ranks save an empty dict. If ``False``, then all
+            ranks save the full state dict. (Default: ``False``)
     """
 
     rank0_only: bool = False
@@ -336,10 +342,19 @@ class ShardedStateDictConfig(StateDictConfig):
 @dataclass
 class OptimStateDictConfig:
     """
-    ``OptimStateDictConfig`` is the base class for all optimizer state_dict
-    configuration classes.  Users should instantiate a child version
-    (i.e. ``FullOptimStateDictConfig``) in order to configure settings for the
-    particular type of ``optim_state_dict`` implementation FSDP will use.
+    ``OptimStateDictConfig`` is the base class for all ``optim_state_dict``
+    configuration classes.  Users should instantiate a child class (e.g.
+    ``FullOptimStateDictConfig``) in order to configure settings for the
+    corresponding ``optim_state_dict`` type supported by FSDP.
+
+    Attributes:
+        offload_to_cpu (bool): If ``True``, then FSDP offloads the state dict's
+            tensor values to CPU, and if ``False``, then FSDP keeps them on the
+            original device (which is GPU unless parameter CPU offloading is
+            enabled). (Default: ``True``)
+        use_dtensor (bool): If ``True``, then FSDP saves the state dict values
+            as ``DTensor``, and if ``False``, then FSDP saves them as
+            ``ShardedTensor``. (Default: ``False``)
     """
 
     # TODO: actually use this flag in the _optim_utils.py
@@ -349,6 +364,13 @@ class OptimStateDictConfig:
 
 @dataclass
 class FullOptimStateDictConfig(OptimStateDictConfig):
+    """
+    Attributes:
+        rank0_only (bool): If ``True``, then only rank 0 saves the full state
+            dict, and nonzero ranks save an empty dict. If ``False``, then all
+            ranks save the full state dict. (Default: ``False``)
+    """
+
     rank0_only: bool = False
 
 
