@@ -391,10 +391,39 @@ class Optimizer:
 
         It contains two entries:
 
-        * state - a dict holding current optimization state. Its content
-            differs between optimizer classes.
-        * param_groups - a list containing all parameter groups where each
-            parameter group is a dict
+        * ``state`` - a Dict holding current optimization state. Its content
+            differs between optimizer classes, but some common characteristics
+            hold. For example, state is saved per parameter, and the parameter
+            itself is NOT saved. ``state`` is a Dictionary mapping parameter ids
+            to a Dict with state corresponding to each parameter.
+        * ``param_groups`` - a List containing all parameter groups where each
+            parameter group is a Dict. Each parameter group contains metadata
+            specific to the optimizer, such as learning rate and weight decay,
+            as well as a List of parameter ids of the parameters in the group.
+
+        As an example, a returned state dict might look something like:
+        {
+            'state': {
+                0: {'momentum_buffer': tensor(...), ...},
+                1: {'momentum_buffer': tensor(...), ...},
+                2: {'momentum_buffer': tensor(...), ...},
+                3: {'momentum_buffer': tensor(...), ...}
+            },
+            'param_groups': [
+                {
+                    'lr': 0.01,
+                    'weight_decay': 0,
+                    ...
+                    'params': [0, 1]
+                },
+                {
+                    'lr': 0.001,
+                    'weight_decay': 0.5,
+                    ...
+                    'params': [2, 3]
+                }
+            ]
+        }
         """
         # Save order indices instead of Tensors
         param_mappings = {}
