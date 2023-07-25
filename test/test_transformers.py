@@ -1452,15 +1452,11 @@ class TestSDPAFailureModes(NNTestCase):
 
 
 class TestSDPA(NNTestCase):
-    """ Used to test the functionality of scaled_dot_product_attention
-    Quarks:
-        There is some trickiness with this function. It's runtime behavior
-        is dependent on the CUDA architecture you are testing it on. See
-        `PLATFORM_SUPPORTS_FUSED_SDPA` at the top of the file.
-        Summary:
-            Math: always supported
-            FlashAttention: Supported on sm80 or newer hardware
-            MemEfficientAttention: Supported on sm50 or newer hardware
+    """ Used to test generic functionality of scaled_dot_product_attention
+    Summary:
+        If you are adding a new test to this class, make sure that it runs
+        for both cpu and cuda. If you're test is only applicable to cuda,
+        add it to TestSDPACudaOnly.
     """
     @parametrize("contiguous_inputs", [True, False])
     def test_sdp_math_gradcheck(self, device, contiguous_inputs: bool):
@@ -1498,7 +1494,7 @@ class TestSDPA(NNTestCase):
             assert torch._fused_sdp_choice(q, k, v) == SDPBackend.MATH
 
 class TestSDPACudaOnly(NNTestCase):
-    """ Used to test the functionality of scaled_dot_product_attention
+    """ Used to test CUDA only functionality of scaled_dot_product_attention
     Quarks:
         There is some trickiness with this function. It's runtime behavior
         is dependent on the CUDA architecture you are testing it on. See
@@ -2629,9 +2625,9 @@ class TestSDPACudaOnly(NNTestCase):
 
 device_types = ("cpu", "cuda")
 instantiate_device_type_tests(TestTransformers, globals(), only_for=device_types)
+instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types)
 instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types)
 instantiate_device_type_tests(TestSDPACudaOnly, globals(), only_for=("cuda"))
-instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types)
 
 
 if __name__ == '__main__':
