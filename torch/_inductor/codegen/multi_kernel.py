@@ -57,14 +57,19 @@ class MultiKernelState:
         self.subkernel_to_kernel_name[kernel_names] = multi_kernel_name
 
         wrapper = V.graph.wrapper_code
-        # TODO: clone the args if doing the benchmarking
         # TODO: handle arbitrary number of subkernels
         src_code = f"""
 def run(multi_kernel_call, {', '.join(get_all_kernel_argdefs(kernels))}, {', '.join(get_numel_argdefs(kernels[0]))}, grid, stream):
-    def call0():
-        multi_kernel_call.kernels[0].run({', '.join(get_kernel_argdefs(kernels[0]))}, {', '.join(get_numel_argdefs(kernels[0]))}, grid=grid, stream=stream)
-    def call1():
-        multi_kernel_call.kernels[1].run({', '.join(get_kernel_argdefs(kernels[1]))}, {', '.join(get_numel_argdefs(kernels[1]))}, grid=grid, stream=stream)
+    def call0(need_clone_args=False):
+        args = [{', '.join(get_kernel_argdefs(kernels[0]))}]
+        if need_clone_args:
+            args = multi_kernel_call.kernels[0].clone_args(*args)
+        multi_kernel_call.kernels[0].run(*args, {', '.join(get_numel_argdefs(kernels[0]))}, grid=grid, stream=stream)
+    def call1(need_clone_args=False):
+        args = [{', '.join(get_kernel_argdefs(kernels[1]))}]
+        if need_clone_args:
+            args = multi_kernel_call.kernels[1].clone_args(*args)
+        multi_kernel_call.kernels[1].run(*args, {', '.join(get_numel_argdefs(kernels[1]))}, grid=grid, stream=stream)
     multi_kernel_call.run_with_argless_kernels([call0, call1])
         """  # noqa: B950 line too long
         wrapper.header.splice(
@@ -170,7 +175,7 @@ class MultiKernelCall:
     def run_with_argless_kernels(self, kernel_calls):
         if self.picked_kernel is None:
             timings = [
-                do_bench(kernel_call, rep=40, fast_flush=True)
+                do_bench(lambda: kernel_call(True), rep=40, fast_flush=True)
                 for kernel_call in kernel_calls
             ]
             self.picked_kernel = timings.index(min(timings))
