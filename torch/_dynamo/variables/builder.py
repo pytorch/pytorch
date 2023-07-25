@@ -217,6 +217,7 @@ class VariableBuilder:
             TensorVariable,
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
+            NumpyNdarrayVariable,
         ]:
             return True
         return False
