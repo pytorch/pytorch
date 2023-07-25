@@ -3181,17 +3181,9 @@ Target Guards:
                 floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
                 if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
                     raise NotImplementedError
-                solutions = sympy.solve(lhs - rhs, free[0], dict=True)
-                if len(solutions) != 1:
-                    return
-                # TODO: remove after checking our 'solve' is equivalent.
-                solution = solutions[0][free[0]]
                 r = try_solve(expr, free[0])
-                if r is None or r[1] != solution:
-                    rstr = "None" if r is None else r[1]
-                    print(f"EQ ({free[0]}): {lhs} = {rhs} ==> {solution} != {rstr} (ours)")
-                if all(t.is_integer for t in sympy.preorder_traversal(solution)):
-                    new_var = self._find(solution)
+                if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
+                    new_var = self._find(r[1])
                     self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
             except NotImplementedError:
                 pass
@@ -3201,13 +3193,8 @@ Target Guards:
         if expr.has(Mod):
             mod_expr = tuple(expr.atoms(Mod))[0]
             try:
-                # TODO: remove after checking our 'solve' is equivalent.
-                solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
-                if len(solutions) == 1 and solutions[0][mod_expr] == 0:
-                    r = try_solve(expr, mod_expr)
-                    if r is None or r[1] != solutions[0][mod_expr]:
-                        rstr = "None" if r is None else r[1]
-                        print(f"EQ ({free[0]}): {lhs} = {rhs} ==> {solutions[0][mod_expr]} != {rstr} (ours)")
+                r = try_solve(expr, mod_expr)
+                if r is not None and r[1] == 0:
                     self.divisible.add(mod_expr)
             except NotImplementedError:
                 pass

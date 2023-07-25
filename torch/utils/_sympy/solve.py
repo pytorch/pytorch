@@ -5,6 +5,12 @@ import sympy
 from torch.utils._sympy.functions import FloorDiv
 
 
+# Tries to simplify 'expr', so as to leave only 'thing' in the left-hand side.
+# Returns a tuple of:
+#   1. The simplified expression
+#   2. The expression on the right-hand side
+# Returns 'None' if it can't reach a state where the only thing in the left
+# hand side is 'thing'.
 def try_solve(
     expr: sympy.Basic, thing: sympy.Basic, trials: int = 5
 ) -> Optional[Tuple[sympy.Rel, sympy.Basic]]:
@@ -40,9 +46,8 @@ def try_solve(
     return None
 
 
-# The transformations below only work if b is positive.
-# Note: we only have this information for constants.
-def _is_floordiv_with_positive_denominator(e) -> bool:
+# Returns whether 'e' is a FloorDiv and its denominator is positive.
+def _is_floordiv_with_positive_denominator(e: sympy.Basic) -> bool:
     if not isinstance(e, FloorDiv):
         return False
     number = e.args[1]
@@ -64,6 +69,13 @@ def _try_isolate_lhs(expr: sympy.Basic, thing: sympy.Basic) -> sympy.Basic:
     lhs = lhs - lhs_const  # type: ignore[arg-type]
     rhs = rhs - lhs_const  # type: ignore[arg-type]
 
+    # Divide both sides by the factors that don't contain thing.
+    if isinstance(lhs, sympy.Mul):
+        other = sympy.Mul(*[a for a in lhs.args if not a.has(thing)])
+        if isinstance(expr, (sympy.Eq, sympy.Ne)) or other.is_positive:
+            lhs = lhs / other
+            rhs = rhs / other
+
     ################################################################################
     # left-hand side is FloorDiv
     ################################################################################
@@ -83,6 +95,8 @@ def _try_isolate_lhs(expr: sympy.Basic, thing: sympy.Basic) -> sympy.Basic:
             sympy.Lt(numerator, (rhs * denominator)),  # type: ignore[arg-type]
             sympy.Ge(numerator, ((rhs + 1) * denominator)),  # type: ignore[arg-type]
         )
+    # The transformations below only work if b is positive.
+    # Note: we only have this information for constants.
     # a // b > expr  => a >= (b + 1) * expr
     # a // b >= expr => a >= b * expr
     if isinstance(
