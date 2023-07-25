@@ -98,7 +98,7 @@ from ._unshard_param_utils import (
     _unshard_params_recurse,
 )
 from .flat_param import FlatParameter
-from .wrap import _FSDPPolicy
+from .wrap import ModuleWrapPolicy
 
 
 __all__ = [
@@ -225,36 +225,42 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         module (nn.Module):
             This is the module to be wrapped with FSDP.
         process_group (Optional[Union[ProcessGroup, Tuple[ProcessGroup, ProcessGroup]]]):
-            This is the process group used for collective communications and
-            the one over which the model is sharded. For hybrid sharding strategies such as
-            ``ShardingStrategy.HYBRID_SHARD`` users can
-            pass in a tuple of process groups representing the groups to shard and replicate across,
-            respectively.
+            This is the process group over which the model is sharded and thus
+            the one used for FSDP's all-gather and reduce-scatter collective
+            communications. If ``None``, then FSDP uses the default process
+            group. For hybrid sharding strategies such as
+            ``ShardingStrategy.HYBRID_SHARD``, users can pass in a tuple of
+            process groups, representing the groups over which to shard and
+            replicate, respectively. If ``None``, then FSDP constructs process
+            groups for the user to shard intra-node and replicate inter-node.
+            (Default: ``None``)
         sharding_strategy (Optional[ShardingStrategy]):
-            This configures the sharding strategy used by FSDP, which may trade
-            off memory saving and communication overhead. See
-            :class:`ShardingStrategy` for details. (Default: ``FULL_SHARD``)
+            This configures the sharding strategy, which may trade off memory
+            saving and communication overhead. See :class:`ShardingStrategy`
+            for details. (Default: ``FULL_SHARD``)
         cpu_offload (Optional[CPUOffload]):
             This configures CPU offloading. If this is set to ``None``, then
             no CPU offloading happens. See :class:`CPUOffload` for details.
             (Default: ``None``)
-        auto_wrap_policy (Optional[Union[Callable[[nn.Module, bool, int], bool], _FSDPPolicy]]):
-            This is either ``None``, an ``_FSDPPolicy``, or a callable of
-            a fixed signature. If it is ``None``, then ``module`` is wrapped
-            with only a top-level FSDP instance without any nested wrapping. If
-            it is an ``_FSDPPolicy``, then the wrapping follows the given
-            policy. ``ModuleWrapPolicy`` in ``torch.distributed.fsdp.wrap.py``
-            is an example. If it is a callable, then it should take in three
-            arguments ``module: nn.Module``, ``recurse: bool``, and
+        auto_wrap_policy (Optional[Union[Callable[[nn.Module, bool, int], bool], ModuleWrapPolicy]]):
+            This specifies a policy to apply FSDP to submodules of ``module``,
+            which is needed for communication and computation overlap and thus
+            affects performance. If ``None``, then FSDP only applies to
+            ``module``, and users should manually apply FSDP to parent modules
+            themselves (proceeding bottom-up). For convenience, this accepts
+            ``ModuleWrapPolicy`` directly, which allows users to specify the
+            module classes to wrap (e.g. the transformer block). Otherwise,
+            this should be a callable that takes in three arguments
+            ``module: nn.Module``, ``recurse: bool``, and
             ``nonwrapped_numel: int`` and should return a ``bool`` specifying
-            whether the passed-in ``module`` should be wrapped if
-            ``recurse=False`` or if the traversal should continue down the
-            subtree if ``recurse=True``. Additional custom arguments may be
-            added to the callable. The ``size_based_auto_wrap_policy`` in
+            whether the passed-in ``module`` should have FSDP applied if
+            ``recurse=False`` or if the traversal should continue into the
+            module's subtree if ``recurse=True``. Users may add additional
+            arguments to the callable. The ``size_based_auto_wrap_policy`` in
             ``torch.distributed.fsdp.wrap.py`` gives an example callable that
-            wraps a module if the parameters in its subtree exceed 100M numel.
-            A good practice is to print the model after wrapping and adjust as
-            needed.
+            applies FSDP to a module if the parameters in its subtree exceed
+            100M numel. We recommend printing the model after applying FSDP
+            and adjusting as needed.
 
             Example::
 
@@ -270,7 +276,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 >>> my_auto_wrap_policy = functools.partial(custom_auto_wrap_policy, min_num_params=int(1e5))
 
         backward_prefetch (Optional[BackwardPrefetch]):
-            This configures explicit backward prefetching of all-gathers. See
+            This configures explicit backward prefetching of all-gathers. If
+            ``None``, then FSDP does not backward prefetch, and there is no
+            communication and computation overlap in the backward pass. See
             :class:`BackwardPrefetch` for details. (Default: ``BACKWARD_PRE``)
         mixed_precision (Optional[MixedPrecision]):
             This configures native mixed precision for FSDP. If this is set to
@@ -319,28 +327,27 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 >>> # Will initialize via deferred_init.materialize_module().
                 >>> fsdp_model = FSDP(module, auto_wrap_policy=size_based_auto_wrap_policy)
 
-        device_id (Optional[Union[int, torch.device]]): An ``int`` or ``torch.device``
-            describing the CUDA device the FSDP module should be moved to determining where
-            initialization such as sharding takes place. If this argument is not specified
-            and ``module`` is on CPU, we issue a warning mentioning that this argument can
-            be specified for faster initialization. If specified, resulting FSDP instances
-            will reside on this device, including moving ignored modules' parameters if
-            needed. Note that if ``device_id`` is specified but ``module`` is already on a
-            different CUDA device, an error will be thrown. (Default: ``None``)
-        sync_module_states (bool): If ``True``, each individually wrapped FSDP unit will broadcast
-            module parameters from rank 0 to ensure they are the same across all ranks after
-            initialization. This helps ensure model parameters are the same across ranks
-            before starting training, but adds communication overhead to ``__init__``, as at least
-            one broadcast is triggered per individually wrapped FSDP unit.
-            This can also help load checkpoints taken by ``state_dict`` and to be loaded by
-            ``load_state_dict`` in a memory efficient way. See documentation for
-            :class:`FullStateDictConfig` for an example of this. (Default: ``False``)
+        device_id (Optional[Union[int, torch.device]]): An ``int`` or
+            ``torch.device`` giving the CUDA device on which FSDP
+            initialization takes place, including the module initialization
+            if needed and the parameter sharding. This should be specified to
+            improve initialization speed if ``module`` is on CPU. If the
+            default CUDA device was set (e.g. via ``torch.cuda.set_device``),
+            then the user may pass ``torch.cuda.current_device`` to this.
+            (Default: ``None``)
+        sync_module_states (bool): If ``True``, then each FSDP module will
+            broadcast module parameters and buffers from rank 0 to ensure that
+            they are replicated across ranks (adding communication overhead to
+            this constructor). This can help load ``state_dict`` checkpoints
+            via ``load_state_dict`` in a memory efficient way. See
+            :class:`FullStateDictConfig` for an example of this. (Default:
+            ``False``)
         forward_prefetch (bool): If ``True``, then FSDP *explicitly* prefetches
-            the next upcoming all-gather while executing in the forward pass.
-            This may improve communication and computation overlap for CPU
-            bound workloads. This should only be used for static graph models
-            since the forward order is fixed based on the first iteration's
-            execution. (Default: ``False``)
+            the next forward-pass all-gather before the current forward
+            computation. This is only useful for CPU-bound workloads, in which
+            case issuing the next all-gather earlier may improve overlap. This
+            should only be used for static-graph models since the prefetching
+            follows the first iteration's execution order. (Default: ``False``)
         limit_all_gathers (bool): If ``True``, then FSDP explicitly
             synchronizes the CPU thread to ensure GPU memory usage from only
             *two* consecutive FSDP instances (the current instance running
@@ -385,7 +392,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         process_group: ProcessGroupType = None,
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
-        auto_wrap_policy: Optional[Union[Callable, _FSDPPolicy]] = None,
+        auto_wrap_policy: Optional[Union[Callable, ModuleWrapPolicy]] = None,
         backward_prefetch: Optional[BackwardPrefetch] = BackwardPrefetch.BACKWARD_PRE,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
