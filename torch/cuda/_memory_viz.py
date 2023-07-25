@@ -248,7 +248,7 @@ def segsum(data):
             finish_ = (start_ + size)
             start = start_ // PAGE_SIZE
             finish = (finish_ - 1) // PAGE_SIZE + 1
-            m = chr((ord('a' if active else 'A') + (i % 26)))
+            m = chr(ord('a' if active else 'A') + (i % 26))
             for j in range(start, finish):
                 s = max(start_, j * PAGE_SIZE)
                 e = min(finish_, (j + 1) * PAGE_SIZE)

@@ -90,8 +90,7 @@ class LowRankMultivariateNormal(Distribution):
             raise ValueError("cov_factor must be at least two-dimensional, "
                              "with optional leading batch dimensions")
         if cov_factor.shape[-2:-1] != event_shape:
-            raise ValueError("cov_factor must be a batch of matrices with shape {} x m"
-                             .format(event_shape[0]))
+            raise ValueError(f"cov_factor must be a batch of matrices with shape {event_shape[0]} x m")
         if cov_diag.shape[-1:] != event_shape:
             raise ValueError(f"cov_diag must be a batch of vectors with shape {event_shape}")
 
