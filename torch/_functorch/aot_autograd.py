@@ -36,6 +36,7 @@ from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompo
 from . import config
 from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs, Source
+from torchgen.utils import dataclass_repr
 
 log = logging.getLogger(__name__)
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
@@ -578,6 +579,9 @@ class ViewAndMutationMeta:
         else:
             return slice(0, 0)  # empty slice
 
+    def __str__(self):
+        return dataclass_repr(self)
+
     def __eq__(self, other):
         if not isinstance(other, ViewAndMutationMeta):
             return NotImplemented
@@ -711,7 +715,8 @@ def _get_hints(exprs):
 def run_functionalized_fw_and_collect_metadata(
     f,
     *,
-    keep_input_mutations: bool
+    keep_input_mutations: bool,
+    aot_config: 'AOTConfig',
 ) -> ViewAndMutationMeta:
     memo = {}
 
@@ -945,6 +950,7 @@ def run_functionalized_fw_and_collect_metadata(
             keep_input_mutations=keep_input_mutations,
             traced_tangents=traced_tangents,
         )
+        log.debug("ViewAndMutationMeta for %s:\n%s", aot_config.aot_id, metadata)
         return metadata
 
     return inner
@@ -2198,6 +2204,7 @@ fw_metadata={str(fw_metadata)}
         ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
             wrapped_flat_fn,
             keep_input_mutations=fw_metadata.keep_input_mutations,
+            aot_config=aot_config,
         )(*deduped_flat_args)
         assert ref_fw_metadata == updated_fw_metadata, \
             f'ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(updated_fw_metadata)}'
@@ -2338,6 +2345,7 @@ fw_metadata={str(fw_metadata)}
         ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
             wrapped_flat_fn,
             keep_input_mutations=fw_metadata.keep_input_mutations,
+            aot_config=aot_config,
         )(*flat_args_with_synthetic_bases)
         assert ref_fw_metadata == fw_metadata_updated, (
             f'ref_metadata={pprint.pformat(partial_asdict(ref_fw_metadata))}, '
@@ -3262,6 +3270,7 @@ def create_aot_dispatcher_function(
                 fw_metadata = run_functionalized_fw_and_collect_metadata(
                     flat_fn,
                     keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
+                    aot_config=aot_config,
                 )(*fake_flat_args)
 
         if aot_config.is_export:
