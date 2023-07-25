@@ -291,6 +291,7 @@ class LibUVStoreDaemon : public BackgroundThread {
   void unregisterClient(UvHandle* client);
   void clearClientWaitState(UvHandle* client);
 
+  uint16_t get_socket_port(uv_tcp_t* handle);
   void init(const TCPStoreOptions& opts);
 
  protected:
@@ -325,6 +326,8 @@ class LibUVStoreDaemon : public BackgroundThread {
   void onExitRequest();
   void wakeupWaitingClients(const std::string& key);
   bool tryListen(bool use_ipv6);
+
+  static void print_active_handles(uv_handle_t* handle, void* arg);
 };
 
 class UvClient : public UvHandle {
@@ -720,7 +723,7 @@ void LibUVStoreDaemon::onExitRequest() {
   uv_stop(&loop);
 }
 
-uint16_t get_socket_port(uv_tcp_t* handle) {
+uint16_t LibUVStoreDaemon::get_socket_port(uv_tcp_t* handle) {
   sockaddr_storage addr_s{};
 
   int addr_len = sizeof(addr_s);
@@ -843,10 +846,10 @@ uint16_t LibUVStoreDaemon::port() const {
   return port_;
 }
 
-void close_all_stuff(uv_handle_t* handle, void* arg) {
+void LibUVStoreDaemon::print_active_handles(uv_handle_t* handle, void* arg) {
   C10D_DEBUG(
       "UV live handle type {} active:{} is-closing:{}",
-      handle->type,
+      (int)handle->type,
       uv_is_active(handle),
       uv_is_closing(handle));
 }
@@ -862,7 +865,7 @@ void LibUVStoreDaemon::run() {
 
   if (debug_enabled) {
     C10D_DEBUG("Walking live handles prior to closing clients");
-    uv_walk(&loop, close_all_stuff, nullptr);
+    uv_walk(&loop, LibUVStoreDaemon::print_active_handles, nullptr);
   }
 
   for (auto it = clients_.begin(); it != clients_.end(); ++it) {
@@ -872,7 +875,7 @@ void LibUVStoreDaemon::run() {
 
   if (debug_enabled) {
     C10D_DEBUG("Walking live handles after closing clients");
-    uv_walk(&loop, close_all_stuff, nullptr);
+    uv_walk(&loop, LibUVStoreDaemon::print_active_handles, nullptr);
   }
 
   while (1) {
