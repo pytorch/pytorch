@@ -304,6 +304,7 @@ class OnnxFunctionDispatcher:
         )
 
         # NOTE: Fall back to default overload if the ONNX registry doesn't have the overload.
+        # TODO: Should we have a better fallback mechanism?
         if function_group is None:
             function_group = self.onnx_registry.get_functions(
                 namespace=internal_opname.namespace,
@@ -319,7 +320,7 @@ class OnnxFunctionDispatcher:
                 diagnostic = diagnostic_context.inflight_diagnostic()
                 diagnostic.with_additional_message(
                     "### The operator overload is not found in onnx registry!\n"
-                    "Cannot find the operator overload in onnx registry, but"
+                    "Cannot find the operator overload in onnx registry, but "
                     "the default overload is found. Please check the ONNX output carefully. \n",
                 )
                 diagnostic.level = diagnostics.levels.WARNING
