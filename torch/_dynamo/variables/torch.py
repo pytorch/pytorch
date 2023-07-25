@@ -550,7 +550,14 @@ class TorchVariable(VariableTracker):
             # bake the result into the trace
             assert len(args) == 1, "Expected one arg (pg)"
             assert isinstance(args[0], ProcessGroupVariable)
-            return ConstantVariable(self.value(args[0].as_python_constant()))
+
+            invocation_result = self.value(args[0].as_python_constant())
+            # Note - while we *could* cook up sources around invocations, like a FunctionSource
+            # the space of invoking functions in the middle of the guard chain is very iffy. As such,
+            # guard propagaiton via options is the best we can do.
+            from .builder import SourcelessBuilder
+
+            return SourcelessBuilder()(tx, invocation_result).add_options(options)
         elif is_from_local(self.value):
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
             # and rewrite args to have only proxyable args, then insert call_function
