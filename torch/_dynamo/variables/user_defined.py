@@ -259,7 +259,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 and len(args) == 1
                 and isinstance(args[0], (ConstantVariable, BuiltinVariable))
                 and inspect.getattr_static(type(self.value), "keys")
-                is collections.OrderedDict.keys
+                in (collections.OrderedDict.keys, dict.keys)
             ):
                 assert not kwargs
                 return ConstantVariable(

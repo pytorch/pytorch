@@ -589,14 +589,31 @@ class TorchVariable(VariableTracker):
                 unimplemented("Unsupported unflatten with len(args) != 2")
 
             unflattened = torch.utils._pytree.tree_unflatten(args[0], args[1].value)
-            if isinstance(unflattened, list):
-                return ListVariable(unflattened, **options)
-            if isinstance(unflattened, tuple):
-                return TupleVariable(list(unflattened), **options)
-            if isinstance(unflattened, dict):
-                return ConstDictVariable(unflattened, type(unflattened), **options)
-            assert isinstance(unflattened, VariableTracker)
-            return unflattened
+
+            def _wrap_in_dynamo_variables(container):
+                if isinstance(container, VariableTracker):
+                    return container
+
+                if isinstance(container, list):
+                    return ListVariable(
+                        [_wrap_in_dynamo_variables(elem) for elem in container],
+                        **options,
+                    )
+
+                if isinstance(container, tuple):
+                    return TupleVariable(
+                        [_wrap_in_dynamo_variables(elem) for elem in container],
+                        **options,
+                    )
+
+                if isinstance(container, dict):
+                    return ConstDictVariable(
+                        {k: _wrap_in_dynamo_variables(v) for k, v in container.items()},
+                        type(container),
+                        **options,
+                    )
+
+            return _wrap_in_dynamo_variables(unflattened)
 
         elif self.value == torch.fx._pytree.tree_flatten_spec:
             if len(args) != 2:
