@@ -111,7 +111,7 @@ def custom_op(qualname, func_or_schema=None):
     if isinstance(func_or_schema, str):
         return _custom_op_with_schema(qualname, func_or_schema)
     else:
-        inner(func)
+        return inner(func_or_schema)
 
 
 def impl(qualname, *, device_types=("cpu", "cuda"), func=None):
