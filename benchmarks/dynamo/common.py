@@ -1677,7 +1677,7 @@ class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None
         self.grad_scaler = DummyGradScaler()
-        self.autocast = contextlib.nullcontext
+        self.autocast = contextlib.nullcontext()
         self.optimizer = None
         self._args = None
 
@@ -1707,9 +1707,17 @@ class BenchmarkRunner:
             #  factor between eager and dynamo run, making accuracy check
             #  harder.
             # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
-            self.autocast = torch.cuda.amp.autocast
+            self.autocast = torch.cuda.amp.autocast()
+        elif self.args.amp and self.args.devices == ["xpu"]:
+            amp_dtype = os.getenv("INDUCTOR_AMP_DT")
+            if amp_dtype in ["fp16", "float16", "FP16", "FLOAT16"]:
+                amp_dtype = torch.float16
+            else:
+                amp_dtype = torch.bfloat16
+            print("Test amp with dt:", amp_dtype)
+            self.autocast = torch.xpu.amp.autocast(dtype=amp_dtype)
         elif (self.args.bfloat16 or self.args.amp) and self.args.devices == ["cpu"]:
-            self.autocast = torch.cpu.amp.autocast
+            self.autocast = torch.cpu.amp.autocast()
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
@@ -2408,7 +2416,7 @@ def parse_args(args=None):
         help="ID of the benchmark suite partition to be run. Used to divide CI tasks",
     )
     parser.add_argument(
-        "--devices", "--device", "-d", action="append", help="cpu or cuda"
+        "--devices", "--device", "-d", action="append", help="cpu, xpu or cuda"
     )
     parser.add_argument("--device-index", help="CUDA device index")
     parser.add_argument(
@@ -3027,13 +3035,19 @@ def run(runner, args, original_dir=None):
             log.warning("torch.cuda.is_available() == False, using CPU")
             args.devices = ["cpu"]
 
-    if args.devices != ["cpu"] and torch.cuda.is_available():
+    if "xpu" in args.devices:
+        import intel_extension_for_pytorch as ipex
+
+    if args.devices != ["cpu"] and (torch.cuda.is_available() or torch.xpu.is_available()):
         global synchronize
-        synchronize = torch.cuda.synchronize
+        synchronize = torch.cuda.synchronize if (torch.cuda.is_available()) else torch.xpu.synchronize
 
     if (
         args.devices == ["cuda"]
         and torch.cuda.get_device_properties(0).total_memory < 25 * 2**30
+    ) or (
+        args.devices == ["xpu"]
+        and torch.xpu.get_device_properties(0).total_memory < 25 * 2**30
     ):
         # OOM errors on an RTX 3090 with 24gb RAM
         runner.skip_models.update(
