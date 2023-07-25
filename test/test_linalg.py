@@ -3991,7 +3991,8 @@ class TestLinalg(TestCase):
                 size_b = size_b[1:]
 
             if well_conditioned:
-                PLU = torch.linalg.lu(make_randn(*size_a))
+                U, _, Vh = torch.linalg.svd(make_randn(*size_a), full_matrices=False)
+                PLU = torch.linalg.lu(U @ Vh)
                 if uni:
                     # A = L from PLU
                     A = PLU[1].transpose(-2, -1).contiguous()
