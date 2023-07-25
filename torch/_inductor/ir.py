@@ -1824,7 +1824,6 @@ class FixedLayout(Layout):
     ):
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)
-        # breakpoint()
         super().__init__(
             device,
             dtype,
@@ -2463,8 +2462,6 @@ class TemplateBuffer(Buffer):
             ),
             None,
         )
-
-# class SDPABuffer(TemplateBuffer):
 
 
 @dataclasses.dataclass

@@ -185,12 +185,6 @@ class TritonTemplateKernel(TritonKernel):
         return texpr(self.rename_indexing(val))
 
     def modification(self, fixed_inputs):
-        # self.body.clear()
-        # self.body.writeline("m = offs_m[:, None]")
-        # self.body.writeline("n = start_n + offs_n[None, :]")
-        # self.body.writeline("qk = qk + (m - n) * 0")
-        # self.body.clear()
-
         # HACK, but I can't figure out how to reuse existing Triton codegen properly
         class PlaceholderSubstitution(V.MockHandler):
             self.name = "PlaceholderSubstitution"
@@ -209,10 +203,6 @@ class TritonTemplateKernel(TritonKernel):
             with V.set_ops_handler(PlaceholderSubstitution()):
                 out = self.subgraph.data.data.data.inner_fn((1,))
                 return out.value
-
-        # print(self.body.getvalue())
-        # breakpoint()
-        # print()
 
     def store_output(self, indices, val, mask):
         """

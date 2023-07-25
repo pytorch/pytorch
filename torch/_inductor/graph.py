@@ -641,7 +641,6 @@ class GraphLowering(torch.fx.Interpreter):
         raise AssertionError()
 
     def output(self, target, args, kwargs):
-        # breakpoint()
         result = super().output(target, args, kwargs)
         assert isinstance(result, (tuple, list)), type(result)
         assert all(
@@ -689,11 +688,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
 
     def finalize(self):
-        # breakpoint()
         for buf in self.buffers:
             buf.decide_layout()
-        # breakpoint()
-        # print()
 
     def run_node(self, n: torch.fx.Node):
         origins = {n}
