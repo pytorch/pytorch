@@ -65,10 +65,35 @@ def _aot_capture(mod, flat_args):
 
     out_spec = None
 
+    graph_module = None
+    num_fwd_returns = None
+
+    def fw_compiler(gm, inputs):
+        nonlocal graph_module
+        graph_module = gm
+
+    def partition_fn(joint_module, joint_inputs, *, num_fwd_outputs, **kwargs):
+        nonlocal num_fwd_returns
+        num_fwd_returns = num_fwd_outputs
+        return default_partition(
+            joint_module, joint_inputs, num_fwd_outputs=num_fwd_outputs, **kwargs
+        )
+
+    aot_config = AOTConfig(
+        fw_compiler=fw_compiler,
+        bw_compiler=lambda gm, inputs: None,
+        partition_fn=partition_fn,
+        decompositions=CORE_ATEN_DECOMPOSITIONS_TABLE,  # type: ignore[arg-type]
+        num_params_buffers=params_len,
+        aot_id=-1,
+        keep_inference_input_mutations=False,
+    )
+
     with enable_python_dispatcher():
         fw_metadata = run_functionalized_fw_and_collect_metadata(
             lambda *args: pytree.tree_flatten(functional_call(*args))[0],
             keep_input_mutations=False,
+            aot_config=aot_config,
         )(*copy.deepcopy(full_args))  # type: ignore[operator]
 
     assert len(fw_metadata.input_info) == len(full_args)
@@ -77,21 +102,6 @@ def _aot_capture(mod, flat_args):
         for i, input_info in enumerate(fw_metadata.input_info)
         if input_info.mutates_data or input_info.mutates_metadata
     ]
-
-    graph_module = None
-
-    def fw_compiler(gm, inputs):
-        nonlocal graph_module
-        graph_module = gm
-
-    num_fwd_returns = None
-
-    def partition_fn(joint_module, joint_inputs, *, num_fwd_outputs, **kwargs):
-        nonlocal num_fwd_returns
-        num_fwd_returns = num_fwd_outputs
-        return default_partition(
-            joint_module, joint_inputs, num_fwd_outputs=num_fwd_outputs, **kwargs
-        )
 
     def set_state_proxies(state_args):
         modes = get_torch_dispatch_modes()
@@ -104,16 +114,6 @@ def _aot_capture(mod, flat_args):
                 m.tracer for m in proxy_tensor_modes if has_proxy_slot(arg, m.tracer)
             )
             set_proxy_slot(arg, tracer, params_flat[i])
-
-    aot_config = AOTConfig(
-        fw_compiler=fw_compiler,
-        bw_compiler=lambda gm, inputs: None,
-        partition_fn=partition_fn,
-        decompositions=CORE_ATEN_DECOMPOSITIONS_TABLE,  # type: ignore[arg-type]
-        num_params_buffers=params_len,
-        aot_id=-1,
-        keep_inference_input_mutations=False,
-    )
 
     def exported_call(*args):
         state_args = args[:params_len]
