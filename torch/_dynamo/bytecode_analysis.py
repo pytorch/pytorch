@@ -212,7 +212,9 @@ def stacksize_analysis(instructions):
             changed = stack_sizes[inst.target].offset_of(
                 stack_size, stack_effect(inst.opcode, inst.arg, jump=True)
             )
-            if changed:
+            if changed and (
+                sys.version_info >= (3, 9) or inst.opcode != dis.opmap["CALL_FINALLY"]
+            ):
                 worklist.append(indexof[id(inst.target)])
 
     if False:
