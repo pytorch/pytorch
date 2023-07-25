@@ -5464,12 +5464,14 @@
   autogen: sum.out
 
 - func: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  # TODO: Align the signature of sum.dim_IntList and _sparse_csr_sum.dim_dtype
   structured_delegate: sum.IntList_out
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
     NestedTensorCPU: NestedTensor_sum_dim_CPU
     SparseCPU, SparseCUDA: sum_sparse_coo
+    SparseCsrCPU, SparseCsrCUDA: sum_sparse_compressed
   tags: core
 
 - func: sum.dim_DimnameList(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
