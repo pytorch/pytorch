@@ -923,6 +923,9 @@ class NumpyNdarrayVariable(TensorVariable):
         from torch._dynamo.variables.builder import wrap_fx_proxy_cls
         from ..utils import numpy_method_wrapper
 
+        if name in ["__len__", "size"]:
+            # delegate back to TensorVariable
+            return super().call_method(tx, name, args, kwargs)
         result = wrap_fx_proxy_cls(
             target_cls=NumpyNdarrayVariable,
             tx=tx,

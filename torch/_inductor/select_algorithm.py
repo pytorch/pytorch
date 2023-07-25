@@ -26,7 +26,7 @@ from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 
 from .codegen.triton_utils import config_of, signature_of
 
-from .utils import do_bench, sympy_dot, sympy_product
+from .utils import do_bench, sympy_dot, sympy_product, unique
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -129,6 +129,11 @@ class TritonTemplateKernel(TritonKernel):
             arg_name = f"arg_{name}"
             self.named_input_nodes[name] = input_node
             self.args.input_buffers[input_node.get_name()] = arg_name
+
+        # The args may be duplicated, so renaming must be after args are de-duplicated.
+        for name in argnames:
+            input_node = self.named_input_nodes[name]
+            arg_name = self.args.input_buffers[input_node.get_name()]
             if input_node.get_layout().offset == 0:
                 renames.writeline(f"{name} = {arg_name}")
             else:
@@ -206,6 +211,7 @@ class TritonTemplateKernel(TritonKernel):
             contiguous_index = sympy_dot(
                 ir.FlexibleLayout.contiguous_strides(lengths), index_symbols
             )
+            contiguous_index = self.rename_indexing(contiguous_index)
             self.body.writeline("xindex = " + texpr(contiguous_index))
             self.range_trees[0].lookup(
                 sympy.Integer(1), sympy_product(lengths)
@@ -213,6 +219,7 @@ class TritonTemplateKernel(TritonKernel):
             self.template_mask = mask
             self.template_indices = indices
             output_index = self.output_node.get_layout().make_indexer()(index_symbols)
+            output_index = self.rename_indexing(output_index)
             if output_index == contiguous_index:
                 output_index = sympy.Symbol("xindex")
 
@@ -296,6 +303,8 @@ class TritonTemplateKernel(TritonKernel):
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
+            if isinstance(call_args[i], sympy.Symbol):
+                call_args[i] = texpr(call_args[i])
 
         if V.graph.cpp_wrapper:
             wrapper.generate_kernel_call(
@@ -460,15 +469,15 @@ class TritonTemplate:
             mod = PyCodeCache.load(code, extra)
             _, call_args, _ = kernel.args.python_argdefs()
 
-        expected_args = [x.get_name() for x in input_nodes] + [fake_out.get_name()]
-        # TODO(nmacchioni) fix bug here in CI tests
-        # assert list(call_args) == expected_args, (call_args, expected_args)
-        if list(call_args) != expected_args:
-            return None
+        expected_args = list(unique(x.get_name() for x in input_nodes))
+        expected_args.extend([fake_out.get_name()])
+        assert list(call_args)[: len(expected_args)] == expected_args, (
+            call_args,
+            expected_args,
+        )
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, call_args[len(expected_args) :])
         )
-        assert not extra_args, "TODO: dynamic shapes"
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
 
@@ -704,7 +713,11 @@ class AlgorithmSelectorCache(PersistentCache):
     def __call__(self, name, choices: List[ChoiceCaller], input_nodes, layout):
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
-        assert len(choices) > 0, "no choices to select"
+        if len(choices) == 0:
+            raise RuntimeError(
+                "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
+                "config (defined in torch/_inductor/config.py) to allow at least one choice. "
+            )
 
         if len(choices) == 1:
             return choices[0].output_node()
@@ -762,15 +775,20 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes,
         layout,
     ):
-        example_inputs = [cls.benchmark_example_value(x) for x in input_nodes]
-        example_inputs_extern = list(example_inputs)
-        for i in range(len(example_inputs)):
-            if input_nodes[i].get_layout().offset != 0:
-                offset = V.graph.sizevars.size_hint(input_nodes[i].get_layout().offset)
-                data = example_inputs_extern[i]
-                example_inputs_extern[i] = torch.as_strided(
-                    data, data.size(), data.stride(), offset
-                )
+        # de-duplicate args
+        unique_example_inputs = {
+            x.get_name(): cls.benchmark_example_value(x) for x in input_nodes
+        }
+        example_inputs = list(unique_example_inputs.values())
+        example_inputs_extern = [
+            torch.as_strided(
+                unique_example_inputs[input_node.get_name()],
+                V.graph.sizevars.size_hints(input_node.get_size()),
+                V.graph.sizevars.size_hints(input_node.get_stride()),
+                V.graph.sizevars.size_hint(input_node.get_layout().offset),
+            )
+            for input_node in input_nodes
+        ]
 
         out = cls.benchmark_example_value(layout)
         out_extern = torch.as_strided(
@@ -874,12 +892,14 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         if isinstance(node, ir.Layout):
             node = ir.Buffer("fake", node)
+        # triton templates want the base tensor.
+        if isinstance(node, ir.BaseView):
+            node = node.unwrap_view()
         return rand_strided(
             V.graph.sizevars.size_hints(node.get_size()),
             V.graph.sizevars.size_hints(node.get_stride()),
             device=node.get_device(),
             dtype=node.get_dtype(),
-            extra_size=V.graph.sizevars.size_hint(node.get_layout().offset),
         )
 
     @staticmethod
