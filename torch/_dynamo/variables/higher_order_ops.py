@@ -116,6 +116,7 @@ def speculate_subgraph(
     #       to always lift args in future and remove this
     #       argument.
     manually_set_subgraph_inputs=True,
+    restore_side_effects=True,
 ):
     if sub_kwargs is None:
         sub_kwargs = {}
@@ -140,17 +141,19 @@ def speculate_subgraph(
                 dynamo_enable_grad(tx) if enable_grad else contextlib.nullcontext()
             )
 
-            prev_side_effects = tx.output.side_effects.clone()
+            if restore_side_effects:
+                prev_side_effects = tx.output.side_effects.clone()
 
             with autograd_ctx:
                 output = f.call_function(tx, args, sub_kwargs)
 
-            # Captured variables are tracked in side-effects
-            # and they show up in output graph incorrectly.
-            # It is ok to undo this side-effect tracking
-            # as speculate_subgraph will allow only
-            # pure functions.
-            tx.output.side_effects = prev_side_effects
+            if restore_side_effects:
+                # Captured variables are tracked in side-effects
+                # and they show up in output graph incorrectly.
+                # It is ok to undo this side-effect tracking
+                # as speculate_subgraph will allow only
+                # pure functions.
+                tx.output.side_effects = prev_side_effects
 
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
@@ -891,6 +894,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             checkpoint,
             # Backwards should never, ever be stored!
             always_restore=always_restore,
+            restore_side_effects=False,
         )
         post_guards = tx.output.guards
         if body_lifted_freevars:
