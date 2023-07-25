@@ -245,7 +245,7 @@ AdamW.__doc__ = r"""Implements AdamW algorithm.
        \end{aligned}
 
     For further details regarding the algorithm we refer to `Decoupled Weight Decay Regularization`_.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -258,21 +258,17 @@ AdamW.__doc__ = r"""Implements AdamW algorithm.
         amsgrad (bool, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_
             (default: False)
-        {maximize}
-        {foreach}
-        {capturable}
-        {differentiable}
-        {fused}
+        {_maximize_doc}
+        {_foreach_doc}
+        {_capturable_doc}
+        {_differentiable_doc}
+        {_fused_doc}
     .. _Decoupled Weight Decay Regularization:
         https://arxiv.org/abs/1711.05101
     .. _On the Convergence of Adam and Beyond:
         https://openreview.net/forum?id=ryQu7f-RZ
 
-    """.format(maximize=_maximize_doc,
-               foreach=_foreach_doc,
-               fused=_fused_doc,
-               capturable=_capturable_doc,
-               differentiable=_differentiable_doc)
+    """
 
 
 def adamw(

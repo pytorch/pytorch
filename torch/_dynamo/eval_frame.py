@@ -185,15 +185,18 @@ def innermost_fn(fn):
 
 
 @contextlib.contextmanager
-def enable_dynamic(enable: bool = True, export: bool = False):
-    if not enable:
+def enable_dynamic(enable: Optional[bool] = None, export: bool = False):
+    if enable is None:
         yield
-        return
-    # dynamic=True used to mean fully dynamic. However, with automatic dynamic, the default flipped to
-    # deriving dynamism. For back compat, and forward compat for when dynamic=True is default, we take
-    # dynamic=True here to mean "fully dynamic from the start".
-    with config.patch(assume_static_by_default=False):
-        yield
+    elif enable:
+        # Assume everything is dynamic by deafult
+        with config.patch(assume_static_by_default=False):
+            yield
+    else:
+        with config.patch(
+            automatic_dynamic_shapes=False, assume_static_by_default=True
+        ):
+            yield
 
 
 class _TorchDynamoContext:
@@ -206,7 +209,7 @@ class _TorchDynamoContext:
         first_ctx=False,
         *,
         export=False,
-        dynamic=False,
+        dynamic=None,
         compiler_config=None,
     ):
         super().__init__()
@@ -379,7 +382,7 @@ class OptimizeContext(_TorchDynamoContext):
         first_ctx=False,
         *,
         export=False,
-        dynamic=False,
+        dynamic=None,
         compiler_config=None,
     ):
         def on_enter():
@@ -475,7 +478,7 @@ def _optimize_catch_errors(
     hooks: Hooks,
     backend_ctx_ctor=null_context,
     export=False,
-    dynamic=False,
+    dynamic=None,
     compiler_config=None,
 ):
     return OptimizeContext(
@@ -529,7 +532,7 @@ def optimize(
     guard_export_fn=None,
     guard_fail_fn=None,
     disable=False,
-    dynamic=False,
+    dynamic=None,
 ):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -547,7 +550,9 @@ def optimize(
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.
         disable: If True, turn this decorator into a no-op
-        dynamic: If True, turn on dynamic shapes support
+        dynamic: If True, upfront compile as dynamic a kernel as possible.  If False,
+            disable all dynamic shapes support (always specialize).  If None, automatically
+            detect when sizes vary and generate dynamic kernels upon recompile.
 
     Example Usage::
 
@@ -1169,7 +1174,7 @@ def optimize_assert(
     hooks=Hooks(None, None),
     export=False,
     export_constraints=None,
-    dynamic=False,
+    dynamic=None,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
