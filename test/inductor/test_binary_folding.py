@@ -100,8 +100,13 @@ class BinaryFoldingTemplate(TestCase):
 
             torch.manual_seed(1234)
             inp = torch.rand(inps).to(self.device)
+            script_mode = torch.jit.trace(mod_eager, inp)
+            script_mode = torch.jit.freeze(script_mode)
+            script_out = script_mode(inp)
+            script_out = script_mode(inp)
             out_eager = mod_eager(inp)
             out_optimized = out_optimized(inp)
+            self.assertEqual(script_out, out_eager)
             self.assertEqual(out_optimized, out_eager)
             if expect_success:
                 self.assertTrue(n_binary_ops == 0)
