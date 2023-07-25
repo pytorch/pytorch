@@ -306,6 +306,7 @@ variable_list compiled_autograd(
   static std::mutex lock;
   std::lock_guard<std::mutex> lock_guard(lock);
   pybind11::gil_scoped_acquire gil;
+  at::ThreadLocalStateGuard tls_guard(graph_task.thread_locals_);
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call;
