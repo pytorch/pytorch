@@ -97,9 +97,10 @@ try:
         def min(self, a: z3.ArithRef, b: z3.ArithRef) -> z3.ArithRef:
             return z3.If(a < b, a, b)  # type: ignore[return-value]
 
+        # Python semantics for 'Mod' is defined as: p % q = p - floordiv(p, q) * q
+        # It should work with both integer and reals.
         def mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
-            self.validator.add_assertion(q != 0)  # type: ignore[arg-type]
-            return Z3Ops.to_int(p) % Z3Ops.to_int(q)
+            return p - self.floordiv(p, q) * q
 
         def pow(self, base: z3.ArithRef, exp: z3.ArithRef) -> z3.ArithRef:
             # Z3 can't handle complex numbers very well.
@@ -242,6 +243,9 @@ try:
         def truediv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             return self._ops.div(numerator, denominator)
 
+        def floordiv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
+            return self._ops.floordiv(numerator, denominator)
+
         def div(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             return self._ops.floordiv(numerator, denominator)
 
@@ -378,9 +382,19 @@ try:
                 # wish to prove. So, we just return.
                 return self.Result(success=True)
 
-            # Here, we use "QF_NRA" logic for the solver, since guards have no quantifiers
-            # and are potentially non-linear.
+            # Here, we use "QF_NRA" logic for the solver:
+            #   "Quantifier-free Non-linear Real Arithmetic".
+            #
+            # Most of the guards expressions have:
+            #   1. arithmetic between integer and reals
+            #   2. no quantifiers
+            #   3. potentially non-linear.
+            #
+            # Although there's also "QF_NIRA" (mixed integer-real arithmetic),
+            # "QF_NRA" seems to work better on 'dynamo/test_dynamic_shapes.py'.
             solver = z3.SolverFor("QF_NRA")
+            # Set a timeout for finding a solution.
+            solver.set(timeout=translation_validation_timeout())
 
             # Add all the assertions to the solver.
             for assertion in self._assertions:
@@ -407,23 +421,35 @@ try:
                     # Could not find a solution. It didn't fail, but it also
                     # didn't succeed. Canceling the validation execution (keyboard
                     # interrupt) also gets to this branch.
-                    log.warning("translation validation: could not validate")
-                    return self.Result(success=False)
+                    log.warning("translation validation: could not validate: got z3.unknown")
                 else:
                     # Target expressions are sound.
                     assert r == z3.unsat
                     log.debug("translation validation: success")
-                    return self.Result(success=True)
+                return self.Result(success=True)
 except ImportError:
     _HAS_Z3 = False
 else:
     _HAS_Z3 = True
 
+from torch._dynamo import config
 
-def translation_validator_enabled() -> bool:
-    from torch._dynamo import config
+def translation_validation_enabled() -> bool:
+    # Checks everytime this function is called, in case the Dynamo
+    # option is set, but Z3 is not installed.
+    assert_z3_installed_if_tv_set()
+    return _HAS_Z3 and config.translation_validation
+
+
+def translation_validation_timeout() -> int:
+    return config.translation_validation_timeout
+
+
+def assert_z3_installed_if_tv_set():
     assert _HAS_Z3 or not config.translation_validation, (
         "translation validation requires Z3 package. Please, either install "
         "z3-solver or disable translation validation."
     )
-    return config.translation_validation
+
+# Checks when this module is loaded.
+assert_z3_installed_if_tv_set()
