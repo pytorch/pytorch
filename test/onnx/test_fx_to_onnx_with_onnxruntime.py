@@ -566,11 +566,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((x2,),)],
         )
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
+    # NOTE:The test was meant to test the empty bounding box case, but it is not
+    # supported. When we have vision model examples, we will have a better test case
+    # to demonstrate in FX and FX exporter.
     def test_view_dynamic_zero_dim(self):
         class ViewModel(torch.nn.Module):
             def forward(self, input):
@@ -578,9 +576,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return input.view(1, -1)
 
         x = torch.ones(2)
+        # y = torch.empty(0)
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             ViewModel(),
             (x,),
+            # additional_test_inputs=[((y,),)],
         )
 
     @pytorch_test_common.skip_min_ort_version(
