@@ -54,7 +54,7 @@ class TestPythonRegistration(TestCase):
 
         self.assertTrue(torch.neg(x).is_neg())
 
-        # RuntimeError: impl("aten::neg", ...)
+        # RuntimeError: impl("aten::neg", ...):
         # Explicitly provided namespace (aten) in operator name does not match ...
         with self.assertRaisesRegex(RuntimeError, "operator name does not match namespace"):
             my_lib3 = Library("foo", "DEF")
@@ -1426,7 +1426,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             def __new__(cls, elem, *args, **kwargs):
                 # Wrong device here!
                 r = torch.Tensor._make_subclass(cls, elem.to("meta"), elem.requires_grad)
-                # raise NotImplementedError() real tensor is held as an element on the tensor.
+                # ...the real tensor is held as an element on the tensor.
                 r.elem = elem
                 return r
 
@@ -1572,7 +1572,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 called.append(func)
                 # This argument still requires grad because it was passed
-                # through directlyraise NotImplementedError()
+                # through directly...
                 self.assertTrue(args[0].requires_grad)
                 r = super().__torch_dispatch__(func, types, args, kwargs)
                 # But the output better not require grad, because that means
@@ -1652,7 +1652,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         #        - exit Conjugate: nothing was inplace so just exit
         #        - exit PythonTLSSnapshot: done with this call, reset the saved TLS to empty
         #    - Python: Reset the TLS again based on the snapshot. <- this used to fail
-        #    - More stepsraise NotImplementedError()
+        #    - More steps....
         y.exp()
 
     @staticmethod
