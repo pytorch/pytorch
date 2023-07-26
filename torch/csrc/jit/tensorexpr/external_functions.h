@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/Config.h>
 #include <ATen/Functions.h>
 #include <c10/macros/Macros.h>
 #include <torch/csrc/Export.h>
@@ -97,6 +98,9 @@ void DispatchParallel(
     int8_t* packed_data) noexcept;
 
 FOR_ALL_EXTERNAL_FUNCTIONS(DECLARE_EXTERNAL_FUNCTION)
+#if AT_MKLDNN_ENABLED()
+DECLARE_EXTERNAL_FUNCTION(nnc_mkldnn_prepacked_conv_run);
+#endif
 
 TORCH_API void nnc_aten_free(int64_t bufs_num, void** ptrs) noexcept;
 

@@ -25,7 +25,7 @@ class Int8LeakyReluOp final : public Operator<CPUContext> {
 #endif
   }
 
-  ~Int8LeakyReluOp() {
+  ~Int8LeakyReluOp() override {
     if (this->qnnpackOperator_ != nullptr) {
       qnnp_delete_operator(this->qnnpackOperator_);
       this->qnnpackOperator_ = nullptr;

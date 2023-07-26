@@ -1,5 +1,5 @@
 import torch
-from typing import cast, Iterable, List, Union
+from typing import Iterable, List, Union
 from . import _lazy_init, _lazy_call, device_count, current_device
 from .. import Tensor
 
@@ -48,14 +48,15 @@ def set_rng_state(new_state: Tensor, device: Union[int, str, torch.device] = 'cu
         device (torch.device or int, optional): The device to set the RNG state.
             Default: ``'cuda'`` (i.e., ``torch.device('cuda')``, the current CUDA device).
     """
-    new_state_copy = new_state.clone(memory_format=torch.contiguous_format)
+    with torch._C._DisableFuncTorch():
+        new_state_copy = new_state.clone(memory_format=torch.contiguous_format)
     if isinstance(device, str):
         device = torch.device(device)
     elif isinstance(device, int):
         device = torch.device('cuda', device)
 
     def cb():
-        idx = cast(torch.device, device).index
+        idx = device.index
         if idx is None:
             idx = current_device()
         default_generator = torch.cuda.default_generators[idx]

@@ -55,12 +55,21 @@ inline std::tuple<dim3, dim3> getCatGridContig(unsigned int max_elements_per_ten
   ptrdiff_t nTensors) {
   constexpr unsigned int threads_per_block = 128;
   constexpr unsigned int min_aligned_vec_per_thread = 1;
+  constexpr unsigned int max_tb_per_sm = 32;
 
   unsigned int elements_per_thread = ALIGNED_VEC_LOAD_BYTES / sizeof(T) *
     min_aligned_vec_per_thread;
   unsigned int max_threads = ceil_div(max_elements_per_tensor, elements_per_thread);
+  unsigned int thread_blocks = ceil_div(max_threads, threads_per_block);
+
+  // Limit the number of thread blocks to prevent too many threads to load the metadata
+  // if they operate on very small tensors.
+
+  const unsigned int num_sm = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  thread_blocks = std::min(num_sm * max_tb_per_sm, thread_blocks);
+
   dim3 block = dim3(threads_per_block);
-  dim3 grid = dim3(ceil_div(max_threads, threads_per_block), (long long)nTensors);
+  dim3 grid = dim3(thread_blocks, (long long)nTensors);
 
   return std::make_tuple(grid, block);
 }
