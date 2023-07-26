@@ -47,6 +47,10 @@ class TestCustomOpTesting(TestCase):
         self.libraries.append(result)
         return result
 
+    def get_op(self, qualname):
+        ns, name = qualname.split("::")
+        return getattr(getattr(torch.ops, ns), name).default
+
     def test_incorrect_schema_mutation(self, device):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
@@ -327,7 +331,9 @@ class TestCustomOpTesting(TestCase):
         with self.assertRaisesRegex(
             RuntimeError, "Autograd has not been implemented for operator"
         ):
-            operator_compile_check(lambda x: foo(x), (x,), {})
+            operator_compile_check(
+                lambda x: self.get_op(f"{self.test_ns}::foo")(x), (x,), {}
+            )
 
     def test_assert_raises_regex(self, device):
         from torch.testing._internal.optests.aot_autograd import assert_raises_regex
@@ -358,6 +364,10 @@ class TestCustomOp(TestCase):
             if not key.startswith(f"{TestCustomOp.test_ns}::"):
                 continue
             torch._custom_op.impl.global_registry[key]._destroy()
+
+    def get_op(self, qualname):
+        ns, name = qualname.split("::")
+        return getattr(getattr(torch.ops, ns), name).default
 
     def test_invalid_schemas(self):
         # function schmea validation goes through torchgen, so this is just a
@@ -578,7 +588,8 @@ class TestCustomOp(TestCase):
 
             try:
                 for example in generate_examples(typ):
-                    foo(torch.randn([]), example)
+                    op = self.get_op(f"{self.test_ns}::foo")
+                    op(torch.randn([]), example)
                     self.assertEqual(yeet, example, msg=f"{typ} {example}")
                     yeet = None
             finally:
@@ -597,13 +608,13 @@ class TestCustomOp(TestCase):
             def __len__(self):
                 return len(self._container)
 
-        @custom_ops.custom_op("blah::foo")
+        @custom_ops.custom_op(f"{self.test_ns}::foo")
         def foo(x: torch.Tensor, sizes: Sequence[int]) -> torch.Tensor:
             raise NotImplementedError()
 
         called = 0
 
-        @custom_ops.impl("blah::foo", device_types="cpu")
+        @custom_ops.impl(f"{self.test_ns}::foo", device_types="cpu")
         def foo_cpu(x, sizes):
             nonlocal called
             called += 1
@@ -613,7 +624,8 @@ class TestCustomOp(TestCase):
 
         x = torch.randn([])
         seq = MySequence()
-        foo(x, seq)
+        op = self.get_op(f"{self.test_ns}::foo")
+        op(x, seq)
         self.assertEqual(called, 1)
 
     def test_unsupported_param_types(self):
@@ -651,12 +663,6 @@ class TestCustomOp(TestCase):
 
             del foo
 
-    def test_custom_op_repr(self):
-        from torch.testing._internal.custom_op_db import numpy_mul
-
-        expected = "<OpOverloadPacket(op='_torch_testing.numpy_mul')>"
-        self.assertEqual(repr(numpy_mul), expected)
-
     def test_supported_schemas(self):
         # All of these should already be tested by PyTorch codegen
         # (we share the same mechanism), but here's a sanity check.
@@ -686,7 +692,7 @@ class TestCustomOp(TestCase):
             custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo", schema)
             custom_ops._destroy(f"{TestCustomOp.test_ns}::foo")
         for schema in other_schemas:
-            op = custom_ops.custom_op(f"{TestCustomOp.test_ns}::bar", schema)
+            custom_ops.custom_op(f"{TestCustomOp.test_ns}::bar", schema)
             custom_ops._destroy(f"{TestCustomOp.test_ns}::bar")
 
     def test_reserved_ns(self):
@@ -736,9 +742,11 @@ class TestCustomOp(TestCase):
             raise NotImplementedError()
 
         x = torch.randn(3, requires_grad=True)
+        op = self.get_op(f"{self.test_ns}::foo")
         with self.assertRaisesRegex(RuntimeError, "Autograd has not been implemented"):
-            foo(x)
+            op(x)
         custom_ops._destroy(f"{TestCustomOp.test_ns}::foo")
+        del foo
 
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: Sequence[torch.Tensor]) -> torch.Tensor:
@@ -746,9 +754,11 @@ class TestCustomOp(TestCase):
 
         x = torch.randn(3, requires_grad=True)
         y = torch.randn(3)
+        op = self.get_op(f"{self.test_ns}::foo")
         with self.assertRaisesRegex(RuntimeError, "Autograd has not been implemented"):
-            foo([y, x])
+            op([y, x])
         custom_ops._destroy(f"{TestCustomOp.test_ns}::foo")
+        del foo
 
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -756,8 +766,9 @@ class TestCustomOp(TestCase):
 
         x = torch.randn(3, requires_grad=True)
         y = torch.randn(3)
+        op = self.get_op(f"{self.test_ns}::foo")
         with self.assertRaisesRegex(RuntimeError, "Autograd has not been implemented"):
-            foo(y, x)
+            op(y, x)
         custom_ops._destroy(f"{TestCustomOp.test_ns}::foo")
 
     def test_autograd_notimplemented_gradmode(self):
@@ -771,9 +782,10 @@ class TestCustomOp(TestCase):
 
         x = torch.randn(3, requires_grad=True)
         y = torch.randn(3)
+        op = self.get_op(f"{self.test_ns}::foo")
         with torch.no_grad():
             # Shouldn't raise, because we are in no_grad
-            foo(y, x)
+            op(y, x)
 
     def test_impl_cpu(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
@@ -785,7 +797,8 @@ class TestCustomOp(TestCase):
             return x.sin()
 
         x = torch.randn(3)
-        result = foo(x)
+        op = self.get_op(f"{self.test_ns}::foo")
+        result = op(x)
         self.assertEqual(result, foo_cpu(x))
 
     def test_impl_invalid_devices(self):
@@ -827,10 +840,11 @@ class TestCustomOp(TestCase):
             return grad * saved.cos()
 
         x = torch.randn([], requires_grad=True)
+        op = self.get_op(f"{self.test_ns}::foo")
         with self.assertRaisesRegex(
             RuntimeError, "unable to find a 'save_for_backward'"
         ):
-            y = foo(x)
+            y = op(x)
             y.backward()
 
     def test_save_for_backward_inputs_are_namedtuple(self):
@@ -857,7 +871,8 @@ class TestCustomOp(TestCase):
             return {"x": grad * saved.cos()}
 
         x = torch.randn([], requires_grad=True)
-        y = foo(x)
+        op = self.get_op(f"{self.test_ns}::foo")
+        y = op(x)
         self.assertEqual(hit, 1)
         y.backward()
         self.assertEqual(hit, 1)
@@ -880,7 +895,8 @@ class TestCustomOp(TestCase):
             return grad * saved.cos()
 
         x = torch.randn([], requires_grad=True)
-        y = foo(x)
+        op = self.get_op(f"{self.test_ns}::foo")
+        y = op(x)
         with self.assertRaisesRegex(RuntimeError, "to be a dict"):
             y.backward()
 
@@ -902,7 +918,8 @@ class TestCustomOp(TestCase):
             return {"x": grad * saved.cos(), "y": None}
 
         x = torch.randn([], requires_grad=True)
-        y = foo(x)
+        op = self.get_op(f"{self.test_ns}::foo")
+        y = op(x)
         with self.assertRaisesRegex(RuntimeError, "to have keys {'x'}"):
             y.backward()
 
@@ -924,7 +941,8 @@ class TestCustomOp(TestCase):
             return {"x": grad * saved.cos(), "dim": None}
 
         x = torch.randn([], requires_grad=True)
-        y = foo(x, 32)
+        op = self.get_op(f"{self.test_ns}::foo")
+        y = op(x, 32)
         with self.assertRaisesRegex(RuntimeError, "non-Tensor-like types"):
             y.backward()
 
@@ -946,7 +964,8 @@ class TestCustomOp(TestCase):
             return {"x": grad * saved.cos()}
 
         x = torch.randn([], requires_grad=True)
-        y = foo(x, x)
+        op = self.get_op(f"{self.test_ns}::foo")
+        y = op(x, x)
         with self.assertRaisesRegex(RuntimeError, r"to have keys {.*'y'.*}"):
             y.backward()
 
@@ -968,7 +987,8 @@ class TestCustomOp(TestCase):
             return {"x": grad * saved.cos()}
 
         x = torch.randn([], requires_grad=True)
-        y = foo(x, None)
+        op = self.get_op(f"{self.test_ns}::foo")
+        y = op(x, None)
         with self.assertRaisesRegex(RuntimeError, r"to have keys {.*'y'.*}"):
             y.backward()
 
@@ -990,7 +1010,8 @@ class TestCustomOp(TestCase):
             return {"x": (grad * saved.cos(),)}
 
         x = torch.randn([], requires_grad=True)
-        y = foo(x)
+        op = self.get_op(f"{self.test_ns}::foo")
+        y = op(x)
         with self.assertRaisesRegex(RuntimeError, "either None or a Tensor"):
             y.backward()
 
@@ -1012,7 +1033,8 @@ class TestCustomOp(TestCase):
             return {"xs": [grad * saved.cos(), None]}
 
         xs = [torch.randn([], requires_grad=True) for _ in range(3)]
-        y = foo(xs)
+        op = self.get_op(f"{self.test_ns}::foo")
+        y = op(xs)
         with self.assertRaisesRegex(RuntimeError, "3 gradients but got 2"):
             y.backward()
 
@@ -1034,7 +1056,8 @@ class TestCustomOp(TestCase):
             return {"xs": [grad * saved.cos(), None, (None,)]}
 
         xs = [torch.randn([], requires_grad=True) for _ in range(3)]
-        y = foo(xs)
+        op = self.get_op(f"{self.test_ns}::foo")
+        y = op(xs)
         with self.assertRaisesRegex(RuntimeError, "None or Tensor"):
             y.backward()
 
@@ -1056,7 +1079,8 @@ class TestCustomOp(TestCase):
             return {"xs": None}
 
         xs = [torch.randn([], requires_grad=True) for _ in range(3)]
-        y = foo(xs)
+        op = self.get_op(f"{self.test_ns}::foo")
+        y = op(xs)
         with self.assertRaisesRegex(RuntimeError, "list of gradients"):
             y.backward()
 
@@ -1101,11 +1125,13 @@ class TestCustomOp(TestCase):
             return x.cos()
 
         x = torch.randn(3)
-        result = foo(x)
+        op = self.get_op(f"{self.test_ns}::foo")
+        result = op(x)
         self.assertEqual(result, foo_cpu(x))
 
         x_cuda = x.cuda()
-        result = foo(x_cuda)
+        op = self.get_op(f"{self.test_ns}::foo")
+        result = op(x_cuda)
         self.assertEqual(result, foo_cuda(x_cuda))
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
@@ -1123,7 +1149,8 @@ class TestCustomOp(TestCase):
         self.assertEqual(result, foo_impl(x))
 
         x_cuda = x.cuda()
-        result = foo(x_cuda)
+        op = self.get_op(f"{self.test_ns}::foo")
+        result = op(x_cuda)
         self.assertEqual(result, foo_impl(x_cuda))
 
     def test_impl_meta(self):
@@ -1138,7 +1165,8 @@ class TestCustomOp(TestCase):
             return x.new_empty(output_shape)
 
         x = torch.randn(2, 3, device="meta")
-        result = foo(x, 1)
+        op = self.get_op(f"{self.test_ns}::foo")
+        result = op(x, 1)
         self.assertEqual(result.shape, foo_meta(x, 1).shape)
 
     def test_duplicate_impl(self):
@@ -1179,14 +1207,13 @@ class TestCustomOp(TestCase):
             return torch.clone(x)
 
         x = torch.randn(2, 3, device="cpu")
-        make_fx(foo, tracing_mode="symbolic")(x)
+        op = self.get_op(f"{self.test_ns}::foo")
+        make_fx(op, tracing_mode="symbolic")(x)
 
     def test_meta_for_data_dependent_shape_operation(self):
-        from torch.testing._internal.custom_op_db import numpy_nonzero
-
         x = torch.randn(10, device="meta")
         with self.assertRaisesRegex(RuntimeError, "data-dependent output shape"):
-            numpy_nonzero(x)
+            torch.ops._torch_testing.numpy_nonzero(x)
 
     def test_basic_make_fx(self):
         # More serious tests are in our CustomOp opinfo db,
@@ -1200,7 +1227,8 @@ class TestCustomOp(TestCase):
             return x.sum()
 
         x = torch.randn(3)
-        gm = make_fx(foo, tracing_mode="symbolic")(x)
+        op = self.get_op(f"{self.test_ns}::foo")
+        gm = make_fx(op, tracing_mode="symbolic")(x)
         self.assertTrue(f"{TestCustomOp.test_ns}.foo" in gm.code)
 
     def test_not_implemented_error(self):
@@ -1209,19 +1237,21 @@ class TestCustomOp(TestCase):
             raise NotImplementedError()
 
         x = torch.randn(3)
+        op = self.get_op(f"{self.test_ns}::foo")
         with self.assertRaisesRegex(NotImplementedError, "cpu impl registered"):
-            foo(x)
+            op(x)
 
         x = torch.randn(3, device="meta")
         with self.assertRaisesRegex(NotImplementedError, "abstract impl registered"):
-            foo(x)
+            op(x)
 
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::bar")
         def bar(sizes: Sequence[int]) -> torch.Tensor:
             raise NotImplementedError()
 
+        op = self.get_op(f"{self.test_ns}::bar")
         with self.assertRaisesRegex(NotImplementedError, "no Tensor inputs"):
-            bar((1, 2, 3))
+            op((1, 2, 3))
 
     def test_abstract_registration_location(self):
         custom_op = torch._custom_op.impl._find_custom_op(
@@ -1232,20 +1262,16 @@ class TestCustomOp(TestCase):
         self.assertIsNotNone(matches)
 
     def test_data_dependent_basic(self):
-        from torch.testing._internal.custom_op_db import numpy_nonzero
-
         def f(x):
-            return numpy_nonzero(x)
+            return torch.ops._torch_testing.numpy_nonzero(x)
 
         x = torch.randn(5, 5)
         gm = make_fx(f, tracing_mode="symbolic")(x)
         self.assertTrue("nonzero" in gm.code)
 
     def test_data_dependent_fake_tracing(self):
-        from torch.testing._internal.custom_op_db import numpy_nonzero
-
         def f(x):
-            return numpy_nonzero(x)
+            return torch.ops._torch_testing.numpy_nonzero(x)
 
         x = torch.randn(5, 5)
         with self.assertRaises(
@@ -1255,7 +1281,7 @@ class TestCustomOp(TestCase):
 
     def test_symints(self):
         def f(x):
-            return torch.testing._internal.custom_op_db.numpy_view_copy(x, x.shape)
+            return torch.ops._torch_testing.numpy_view_copy(x, x.shape)
 
         x = torch.randn(2, 3, 4)
         gm = make_fx(f, tracing_mode="symbolic")(x)

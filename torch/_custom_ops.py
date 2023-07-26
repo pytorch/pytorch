@@ -33,9 +33,8 @@ def custom_op(qualname, func_or_schema=None):
 
     This API may be used as a decorator (see examples).
 
-    Also see
+    For a detailed guide on custom ops, please see
     https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
-    for more details.
 
     Arguments:
         qualname (str): Should be a string that looks like
@@ -104,12 +103,13 @@ def custom_op(qualname, func_or_schema=None):
             )
 
         schema = infer_schema(func)
-        return _custom_op_with_schema(qualname, schema)
+        _custom_op_with_schema(qualname, schema)
+        return func
 
     if func_or_schema is None:
         return inner
     if isinstance(func_or_schema, str):
-        return _custom_op_with_schema(qualname, func_or_schema)
+        _custom_op_with_schema(qualname, func_or_schema)
     else:
         return inner(func_or_schema)
 
@@ -124,14 +124,14 @@ def impl(qualname, *, device_types=("cpu", "cuda"), func=None):
 
     This API may be used as a decorator (see examples).
 
-    Also see
+    For a detailed guide on custom ops, please see
     https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
-    for more details.
 
     Arguments:
         device_types (str or Iterable[str]): the device type(s) to register the function for.
 
     Example::
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> import torch
         >>> import numpy as np
         >>> from torch import Tensor
@@ -195,9 +195,9 @@ def impl_abstract(qualname, *, func=None):
     intermediate Tensors).
 
     This API may be used as a decorator (see examples).
-    Also see
+
+    For a detailed guide on custom ops, please see
     https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
-    for more details.
 
     Examples::
         >>> import numpy as np
@@ -306,15 +306,15 @@ def impl_backward(qualname, output_differentiability=None, *, func=None):
     were declared to be Tensors in the operator definition must be accounted
     for in the dict. The gradient may be a Tensor or None.
 
-    Please see
+    For a detailed guide on custom ops, please see
     https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
-    for more details.
 
     """
 
     def inner(func):
         custom_op = _find_custom_op(qualname)
         custom_op.impl_backward(output_differentiability, _stacklevel=3)(func)
+        return func
 
     if func is None:
         return inner

@@ -14,23 +14,10 @@ import torch.library as library
 from .autograd import autograd_kernel_indirection, construct_autograd_kernel
 
 """
-There are various APIs for defining custom-operator-like things in PyTorch:
-- [user-facing] autograd.Function (Python)
-- [user-facing] custom_op (Python)
-- [for power users] torch.library (Python)
-- [for power users] TORCH_LIBRARY (C++)
+For a detailed guide on custom ops, please see
+https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
 
-This file contains the implementation for a Simple Custom Operator API (CustomOp).
-Using CustomOp, you are able to define a custom operator and implement interactions
-between the CustomOp and various PyTorch subsystems, including all the subsystems
-that are necessary for a custom operator to work with torch.compile (i.e.,
-autograd, FakeTensor, functionalization).
-
-CustomOp is positioned as being safer and easier to use than
-torch.library/TORCH_LIBRARY, which require deep understanding of PyTorch internals.
-In additional, it supports torch.compile better than and is in general more
-comprehensive than autograd.Function, which only supports implementing gradient
-computation and vmap rules.
+This file includes pieces of the implementation of our custom operator API.
 """
 
 __all__ = ["custom_op", "CustomOp", "get_ctx", "AbstractImplCtx"]
@@ -57,6 +44,11 @@ def custom_op(
     qualname: str, manual_schema: typing.Optional[str] = None
 ) -> typing.Callable:
     r"""Creates a new CustomOp object.
+
+    WARNING: if you're a user, please do not use this directly
+    (instead use the torch._custom_ops APIs).
+    Also please see the following for a detailed guide on custom ops.
+    https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
 
     In PyTorch, defining an op (short for "operator") is a two step-process:
     - we need to define (create) the op
@@ -258,6 +250,11 @@ class CustomOp:
     ) -> typing.Callable:
         r"""Register an implementation for a device type for this CustomOp object.
 
+        WARNING: if you're a user, please do not use this directly
+        (instead use the torch._custom_ops APIs).
+        Also please see the following for a detailed guide on custom ops.
+        https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
+
         If the CustomOp is passed multiple Tensor inputs with different device
         types, it will dispatch to the registered implementation for the highest
         priority device type among those present.
@@ -319,6 +316,10 @@ class CustomOp:
 
     def impl_abstract(self, _stacklevel=2) -> typing.Callable:
         r"""Register an abstract implementation for this operator.
+
+        WARNING: please do not use this directly (and instead use the torch._custom_ops
+        APIs). Also please see the following for a detailed guide on custom ops.
+        https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
 
         An "abstract implementation" specifies the behavior of this operator on
         Tensors that carry no data. Given some input Tensors with certain properties
@@ -445,6 +446,11 @@ class CustomOp:
     def impl_backward(self, output_differentiability=None, _stacklevel=2):
         r"""Registers a backward formula.
 
+        WARNING: if you're a user, please do not use this directly
+        (instead use the torch._custom_ops APIs).
+        Also please see the following for a detailed guide on custom ops.
+        https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
+
         In order for the CustomOp to work with autograd, you need to register
         a backward formula. There are two pieces to this:
         1. You must give us a function to specify what to save for backward.
@@ -472,8 +478,6 @@ class CustomOp:
         an input to the CustomOp to its corresponding gradient. All inputs that
         were declared to be Tensors in the CustomOp definition must be accounted
         for in the dict. The gradient may be a Tensor or None.
-
-        TODO(rzou): Add example when this PR is closer to landing.
 
         """
         if output_differentiability is not None:

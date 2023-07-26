@@ -48,7 +48,7 @@ def numpy_cube_save_for_backward(inputs, output):
 @custom_ops.impl_backward('_torch_testing::numpy_cube')
 def numpy_cube_backward(ctx, saved, grad_out, grad_dx):
     x, dx = saved
-    grad_x = numpy_mul(grad_out, dx) + 6 * numpy_mul(grad_dx, x)
+    grad_x = torch.ops._torch_testing.numpy_mul(grad_out, dx) + 6 * torch.ops._torch_testing.numpy_mul(grad_dx, x)
     return {'x': grad_x}
 
 @custom_ops.custom_op('_torch_testing::numpy_mul')
@@ -109,7 +109,7 @@ def numpy_sort_save_for_backward(inputs, output):
 @custom_ops.impl_backward('_torch_testing::numpy_sort', output_differentiability=[True, False, False])
 def numpy_sort_backward(ctx, saved, grad_out, grad_ind, grad_ind_inv):
     dim, ind, ind_inv = saved
-    return {'x': numpy_take(grad_out, ind_inv, ind, dim)}
+    return {'x': torch.ops._torch_testing.numpy_take(grad_out, ind_inv, ind, dim)}
 
 @custom_ops.custom_op('_torch_testing::numpy_take')
 def numpy_take(x: Tensor, ind: Tensor, ind_inv: Tensor, dim: int) -> Tensor:
@@ -141,7 +141,7 @@ def numpy_take_save_for_backward(inputs, output):
 @custom_ops.impl_backward('_torch_testing::numpy_take')
 def numpy_take_backward(ctx, saved, grad_out):
     return {
-        'x': numpy_take(grad_out, saved['ind_inv'], saved['ind'], saved['dim']),
+        'x': torch.ops._torch_testing.numpy_take(grad_out, saved['ind_inv'], saved['ind'], saved['dim']),
         'ind': None,
         'ind_inv': None,
     }
@@ -194,7 +194,7 @@ def numpy_view_copy_save_for_backward(inputs, output) -> Tensor:
 
 @custom_ops.impl_backward('_torch_testing::numpy_view_copy')
 def numpy_view_copy_backward(ctx, x_shape, grad_out) -> Tensor:
-    return {'x': numpy_view_copy(grad_out, x_shape)}
+    return {'x': torch.ops._torch_testing.numpy_view_copy(grad_out, x_shape)}
 
 def sample_inputs_numpy_view_copy(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -312,44 +312,38 @@ def sample_inputs_numpy_nms(opinfo, device, dtype, requires_grad, **kwargs):
 
     yield SampleInput(boxes, args=(scores, iou_threshold))
 
-# CustomOp isn't deepcopy-able, so we wrap in a function that is.
-def wrap_for_opinfo(op):
-    def inner(*args, **kwargs):
-        return op(*args, **kwargs)
-    return inner
-
 custom_op_db = [
     OpInfo(
         'NumpyCubeCustomOp',
-        op=wrap_for_opinfo(numpy_cube),
+        op=torch.ops._torch_testing.numpy_cube,
         sample_inputs_func=sample_inputs_numpy_cube,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
     ),
     OpInfo(
         'NumpyMulCustomOp',
-        op=wrap_for_opinfo(numpy_mul),
+        op=torch.ops._torch_testing.numpy_mul,
         sample_inputs_func=sample_inputs_numpy_mul,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
     ),
     OpInfo(
         'NumpySortCustomOp',
-        op=wrap_for_opinfo(numpy_sort),
+        op=torch.ops._torch_testing.numpy_sort,
         sample_inputs_func=sample_inputs_numpy_sort,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
     ),
     OpInfo(
         'NumpyTakeCustomOp',
-        op=wrap_for_opinfo(numpy_take),
+        op=torch.ops._torch_testing.numpy_take,
         sample_inputs_func=sample_inputs_numpy_take,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
     ),
     OpInfo(
         'NumpyNonzeroCustomOp',
-        op=wrap_for_opinfo(numpy_nonzero),
+        op=torch.ops._torch_testing.numpy_nonzero,
         sample_inputs_func=sample_inputs_numpy_nonzero,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_autograd=False,
@@ -357,7 +351,7 @@ custom_op_db = [
     ),
     OpInfo(
         'NumpyNMSCustomOp',
-        op=wrap_for_opinfo(numpy_nms),
+        op=torch.ops._torch_testing.numpy_nms,
         sample_inputs_func=sample_inputs_numpy_nms,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_autograd=False,
@@ -365,7 +359,7 @@ custom_op_db = [
     ),
     OpInfo(
         'NumpyViewCopyCustomOp',
-        op=wrap_for_opinfo(numpy_view_copy),
+        op=torch.ops._torch_testing.numpy_view_copy,
         sample_inputs_func=sample_inputs_numpy_view_copy,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_autograd=True,
@@ -373,7 +367,7 @@ custom_op_db = [
     ),
     OpInfo(
         'NumpyCatCustomOp',
-        op=wrap_for_opinfo(numpy_cat),
+        op=torch.ops._torch_testing.numpy_cat,
         sample_inputs_func=sample_inputs_numpy_cat,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_autograd=True,
