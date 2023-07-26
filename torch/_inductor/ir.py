@@ -4493,22 +4493,15 @@ class QMaxpool2dPT2E(ExternKernelAlloc):
         padding,
         dilation,
         ceil_mode,
+        output_size,
     ):
-        x.realize()
-        *batch, h, w = x.get_size()
-
         # Force input to channel_last memory
         req_stride_order = [0] + list(reversed(range(1, len(stride) + 1)))
         req_stride_order = [len(req_stride_order)] + req_stride_order
         x = cls.require_stride_order(x, req_stride_order)
 
-        from .lowering import pooling_size
-
-        h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
-        w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
-        output_size = list(batch) + [h_out, w_out]
-        output_stride = make_channels_last_strides_for(output_size)
         # set output dtype and memory format
+        output_stride = make_channels_last_strides_for(output_size)
         kernel_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),

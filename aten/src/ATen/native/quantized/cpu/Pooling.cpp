@@ -255,122 +255,85 @@ Tensor q_maxpool_2d(
     // In this case, we can preserve the data layout in memory
     // as well as use a loop nest that is more amenable to
     // vectorization.
-    Tensor qy = at::_empty_affine_quantized(
-        oSizes,
+    if constexpr(std::is_same_v<Q, uint8_t>) {
+      Tensor qy = at::empty(
+        {nbatch, oC, oH, oW},
         qx.options()
-          .dtype(toQIntType(qx.scalar_type()))
-          .memory_format(qx.suggest_memory_format()),
-        qx.q_scale(),
-        qx.q_zero_point(),
-        c10::nullopt);
-    qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
-    return qy;
+          .device(c10::kCPU)
+          .dtype(qx.scalar_type())
+          .memory_format(c10::MemoryFormat::ChannelsLast));
+      qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
+      return qy;
+    } else {
+      Tensor qy = at::_empty_affine_quantized(
+          oSizes,
+          qx.options()
+            .dtype(toQIntType(qx.scalar_type()))
+            .memory_format(qx.suggest_memory_format()),
+          qx.q_scale(),
+          qx.q_zero_point(),
+          c10::nullopt);
+      qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
+      return qy;
+    }
   } else {
     Tensor qy = at::_empty_affine_quantized(
         oSizes,
         qx.options().dtype(toQIntType(qx.scalar_type())),
         qx.q_scale(),
         qx.q_zero_point());
-    auto qx_contig = qx.contiguous();
-    auto qxd = qx_contig.data_ptr<Q>();
-    auto qyd = qy.data_ptr<Q>();
-    if (ndim == 3 || nbatch == 1) {
-      auto* iData = qxd;
-      auto* oData = qyd;
-      spatial_dilated_max_pooling<Q>(
-          iData,
-          iC,
-          iH,
-          iW,
-          oH,
-          oW,
-          kH,
-          kW,
-          sH,
-          sW,
-          pH,
-          pW,
-          dH,
-          dW,
-          oData);
+    if constexpr (!std::is_same_v<Q, uint8_t>) {
+      auto qx_contig = qx.contiguous();
+      auto qxd = qx_contig.data_ptr<Q>();
+      auto qyd = qy.data_ptr<Q>();
+      if (ndim == 3 || nbatch == 1) {
+        auto* iData = qxd;
+        auto* oData = qyd;
+        spatial_dilated_max_pooling<Q>(
+            iData,
+            iC,
+            iH,
+            iW,
+            oH,
+            oW,
+            kH,
+            kW,
+            sH,
+            sW,
+            pH,
+            pW,
+            dH,
+            dW,
+            oData);
+      } else {
+        at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
+          for (const auto p : c10::irange(start, end)) {
+            auto* iData = qxd + p * iC * iW * iH;
+            auto* oData = qyd + p * oC * oW * oH;
+            spatial_dilated_max_pooling<Q>(
+                iData,
+                iC,
+                iH,
+                iW,
+                oH,
+                oW,
+                kH,
+                kW,
+                sH,
+                sW,
+                pH,
+                pW,
+                dH,
+                dW,
+                oData);
+          }
+        });
+      }
     } else {
-      at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-        for (const auto p : c10::irange(start, end)) {
-          auto* iData = qxd + p * iC * iW * iH;
-          auto* oData = qyd + p * oC * oW * oH;
-          spatial_dilated_max_pooling<Q>(
-              iData,
-              iC,
-              iH,
-              iW,
-              oH,
-              oW,
-              kH,
-              kW,
-              sH,
-              sW,
-              pH,
-              pW,
-              dH,
-              dW,
-              oData);
-        }
-      });
+      TORCH_CHECK(false, "q_maxpool_2d only support uint8 data type with channel_last format.");
     }
     return qy;
   }
-}
-
-template <>
-Tensor q_maxpool_2d<uint8_t>(
-    Tensor qx, // Input Tensor (Quantized)
-    int64_t kH,
-    int64_t kW, // kernel size
-    int64_t sH,
-    int64_t sW, // strides
-    int64_t pH,
-    int64_t pW, // padding
-    int64_t dH,
-    int64_t dW,
-    bool ceil_mode) { // dilation
-
-  // std::cout<<"---- hit the uint8 specilization ----"<<std::endl;
-
-  TORCH_CHECK(!qx.is_quantized()
-  && qx.scalar_type() == c10::ScalarType::Byte
-  && qx.is_contiguous(c10::MemoryFormat::ChannelsLast),
-  "Expected channel_last plain tensor with uint8 data type as input.");
-  int ndim = qx.dim();
-  TORCH_CHECK(ndim == 4, "Expecting the input tensor of rank 4.");
-  int dimc = 1;
-  int dimh = 2;
-  int dimw = 3;
-  int nbatch = qx.size(0);
-  // Check if inputs are valid.
-  int64_t iC = qx.size(dimc);
-  int64_t iH = qx.size(dimh);
-  int64_t iW = qx.size(dimw);
-  TORCH_CHECK(iC > 0 && iH > 0 && iW > 0, "input dimensions must be non-zero.");
-
-  // Check output dimensions.
-  int64_t oC = iC;
-  int64_t oH = pooling_output_shape(iH, kH, pH, sH, dH, ceil_mode);
-  int64_t oW = pooling_output_shape(iW, kW, pW, sW, dW, ceil_mode);
-  TORCH_CHECK(oH > 0 && oW > 0,
-              "Given input size: (",
-              iC, "x", iH, "x", iW,
-              "). Calculated output size: (",
-              oC, "x", oH, "x", oW,
-              "). Output size is too small.");
-
-  Tensor qy = at::empty(
-    {nbatch, oC, oH, oW},
-    qx.options()
-      .device(c10::kCPU)
-      .dtype(qx.scalar_type())
-      .memory_format(c10::MemoryFormat::ChannelsLast));
-  qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
-  return qy;
 }
 
 template <typename Q>
@@ -759,7 +722,7 @@ class QMaxPool_arr_args final {
       std::vector<int64_t> padding,
       std::vector<int64_t> dilation,
       bool ceil_mode) {
-    if (!qx.is_quantized() && kSpatialDim == 2){
+    if (!qx.is_quantized() && kSpatialDim == 2 && qx.scalar_type() == c10::ScalarType::Byte){
       return at::native::quantized_max_pool2d(qx, kernel_size, stride, padding,
                                       dilation, ceil_mode);
     }

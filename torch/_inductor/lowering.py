@@ -3522,6 +3522,14 @@ def quantized_maxpool2d(
     padding = pad_listlike(padding, 2)
     dilation = pad_listlike(dilation, 2)
 
+    x.realize()
+    *batch, h, w = x.get_size()
+
+    h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
+    w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
+
+    output_size = list(batch) + [h_out, w_out]
+
     return TensorBox.create(
         ir.QMaxpool2dPT2E.create(
             x,
@@ -3530,6 +3538,7 @@ def quantized_maxpool2d(
             padding,
             dilation,
             ceil_mode,
+            output_size,
         )
     )
 
