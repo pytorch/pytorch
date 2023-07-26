@@ -1130,27 +1130,6 @@ def filter_nodes(nodes, fn):
     return [node for node in nodes if node.target in fns]
 
 
-@functools.lru_cache(None)
-def view_ops():
-    view_ops = [
-        aten.squeeze,
-        aten.unsqueeze,
-        aten.alias,
-        aten.view,
-        aten.slice,
-        aten.permute,
-        aten.t,
-        prims.broadcast_in_dim,
-        aten.expand,
-        aten.as_strided,
-    ]
-    result = set(view_ops)
-    for op in view_ops:
-        for overload_name in op.overloads():
-            result.add(getattr(op, overload_name))
-    return result
-
-
 def remove_extra_clones(graph: torch.fx.Graph):
     seen = set()
     for node in reversed(graph.nodes):
@@ -1159,8 +1138,9 @@ def remove_extra_clones(graph: torch.fx.Graph):
             if (
                 isinstance(src, torch.fx.Node)
                 and src.op == "call_function"
+                and isinstance(src.target, torch._ops.OpOverload)
+                and not src.target.is_view
                 and not any(u in seen for u in src.users)
-                and src.target not in view_ops()
             ):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
