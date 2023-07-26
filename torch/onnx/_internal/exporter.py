@@ -904,6 +904,10 @@ def pre_export_passes(
             diagnostic_context, module, original_model
         ).run()
 
+    # This operation should be invoked as the last pre export pass.
+    # See [NOTE: Modularize pass ordering]
+    module = passes.Modularize(diagnostic_context, module).run()
+
     # ONNX does not support None inputs. During graph building, all None inputs
     # are removed. Here we register this step to input adapter.
     options.fx_tracer.input_adapter.append_step(io_adapter.RemoveNoneInputStep())

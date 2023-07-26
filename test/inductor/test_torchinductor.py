@@ -6592,14 +6592,15 @@ class CommonTemplate:
 
         # The first two values should be the same, attention output
         # and logsumexp since dropout is not being set
-        def fn(q, k, v, compute_log_sumexp):
+        def fn(q, k, v, attn_bias, compute_log_sumexp):
             return aten._scaled_dot_product_efficient_attention(
-                q, k, v, compute_log_sumexp
+                q, k, v, attn_bias, compute_log_sumexp
             )[:2]
 
         self.common(
             fn,
             (
+                torch.randn(4, 4, 36, 36),
                 torch.randn(4, 4, 36, 36),
                 torch.randn(4, 4, 36, 36),
                 torch.randn(4, 4, 36, 36),
