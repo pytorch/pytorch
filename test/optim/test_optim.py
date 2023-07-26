@@ -842,6 +842,11 @@ class TestOptim(TestCase):
             (optim.NAdam, dict(weight_decay=1.0, momentum_decay=6e-3)),
             (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3)),
             (optim.NAdam, dict(weight_decay=0.01, momentum_decay=4e-3)),
+            (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3, decoupled_weight_decay=True)),
+            (
+                optim.NAdam,
+                dict(weight_decay=0.01, momentum_decay=4e-3, decoupled_weight_decay=True),
+            ),
             (
                 optim.SGD,
                 dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True),
@@ -849,6 +854,14 @@ class TestOptim(TestCase):
             (
                 optim.SGD,
                 dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False),
+            ),
+            (
+                optim.SGD,
+                dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True, maximize=True),
+            ),
+            (
+                optim.SGD,
+                dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False, maximize=True),
             ),
             (optim.RAdam, dict(weight_decay=0, eps=1e-6)),
             (optim.RAdam, dict(weight_decay=0)),
@@ -900,7 +913,7 @@ class TestOptim(TestCase):
         configs = [
             (o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ in [
                 "Adadelta", "Adagrad", "Adamax", "Adam", "AdamW", "ASGD", "NAdam",
-                "RAdam", "RMSprop"
+                "RAdam", "RMSprop", "SGD"
             ]
         ]
         self._test_foreach_memory(configs)
@@ -1077,8 +1090,10 @@ class TestOptim(TestCase):
             constructor_accepts_foreach=True,
         )
         self._test_complex_2d(optim.Adam)
-        self._test_complex_2d(functools.partial(optim.Adam, foreach=True))
-        self._test_complex_2d(functools.partial(optim.Adam, foreach=True, weight_decay=0.2))
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=False))
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=False, amsgrad=True))
+        self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2))
+        self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2, amsgrad=True))
 
         with self.assertRaisesRegex(
             ValueError, "Invalid beta parameter at index 0: 1.0"
@@ -1130,7 +1145,10 @@ class TestOptim(TestCase):
             constructor_accepts_foreach=True,
         )
         self._test_complex_2d(optim.AdamW)
-        self._test_complex_2d(functools.partial(optim.AdamW, foreach=True))
+        self._test_complex_2d(functools.partial(optim.AdamW, foreach=False))
+        self._test_complex_2d(functools.partial(optim.AdamW, foreach=False, amsgrad=True))
+        self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2))
+        self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2, amsgrad=True))
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.AdamW(None, lr=1e-2, weight_decay=-1)
 
@@ -1239,6 +1257,30 @@ class TestOptim(TestCase):
                 lr=1e-3,
                 weight_decay=0.1,
                 momentum_decay=6e-3,
+                foreach=foreach,
+            ),
+            [lambda opt: ExponentialLR(opt, gamma=0.9)],
+            constructor_accepts_foreach=True,
+        )
+        # NAdamW tests
+        self._test_basic_cases(
+            lambda weight, bias, foreach: optim.NAdam(
+                [weight, bias],
+                lr=1e-3,
+                weight_decay=0.1,
+                momentum_decay=6e-3,
+                decoupled_weight_decay=True,
+                foreach=foreach,
+            ),
+            constructor_accepts_foreach=True,
+        )
+        self._test_basic_cases(
+            lambda weight, bias, foreach: optim.NAdam(
+                [weight, bias],
+                lr=1e-3,
+                weight_decay=0.1,
+                momentum_decay=6e-3,
+                decoupled_weight_decay=True,
                 foreach=foreach,
             ),
             [lambda opt: ExponentialLR(opt, gamma=0.9)],
@@ -2129,6 +2171,18 @@ class TestDifferentiableOptimizer(TestCase):
                 state,
                 torch.optim.NAdam,
                 {"lr": 0.9, "differentiable": True},
+                *state.values(),
+            ),
+        )
+
+        gradcheck(
+            _diff_fn,
+            (
+                p,
+                grad,
+                state,
+                torch.optim.NAdam,
+                {"lr": 0.9, "decoupled_weight_decay": True, "differentiable": True},
                 *state.values(),
             ),
         )

@@ -18,7 +18,7 @@ from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.ao.quantization.pt2e.quantizer import X86InductorQuantizer
-from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e_quantizer
+from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
@@ -292,7 +292,10 @@ class OptimizeForInferenceTemplate(TestCase):
             out_eager = mod(x)
             out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
 
-        FileCheck().check_not("native_batch_norm_legit_no_training").run(code[0])
+        self.assertNotIn(
+            "aten._native_batch_norm_legit_no_training(",
+            code[0],
+        )
 
         self.assertEqual(out_optimized_for_infernece, out_eager)
 
@@ -555,7 +558,7 @@ class OptimizeForInferenceQuantizationPT2E(TestCase):
             # int8_weight -> dequant_per_channel -> convolution
             self.assertTrue(torch._inductor.config.freezing)
 
-            prepare_model = prepare_pt2e_quantizer(export_model, quantizer)
+            prepare_model = prepare_pt2e(export_model, quantizer)
             prepare_model(*example_inputs)
 
             convert_model = convert_pt2e(prepare_model)

@@ -1805,8 +1805,8 @@ def forward(self, tangents_1):
         device = "cuda"
         input_dtype = torch.float16
         param_dtype = torch.float32
-        weight, bias = [torch.ones(64, device=device, dtype=param_dtype, requires_grad=True) for _ in range(2)]
-        running_mean, running_var = [torch.ones(64, device=device, dtype=param_dtype) for _ in range(2)]
+        weight, bias = (torch.ones(64, device=device, dtype=param_dtype, requires_grad=True) for _ in range(2))
+        running_mean, running_var = (torch.ones(64, device=device, dtype=param_dtype) for _ in range(2))
 
         def bn(x):
             return torch.ops.aten.cudnn_batch_norm(
@@ -1945,7 +1945,7 @@ def forward(self, tangents_1):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer = torch.nn.Buffer(torch.ones(4, 5))
+                self.register_buffer("buffer", torch.ones(4, 5))
 
             def forward(self, x):
                 y = self.buffer.add_(3)
@@ -2140,7 +2140,7 @@ class <lambda>(torch.nn.Module):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer1 = torch.nn.Buffer(torch.ones(6, 4))
+                self.register_buffer("buffer1", torch.ones(6, 4))
 
             def forward(self, x):
                 x.add_(4)
@@ -2153,7 +2153,7 @@ class <lambda>(torch.nn.Module):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer1 = torch.nn.Buffer(torch.ones(6, 4))
+                self.register_buffer("buffer1", torch.ones(6, 4))
 
             def forward(self, x, y):
                 y.add_(4)
@@ -2798,7 +2798,6 @@ symbolic_aot_autograd_failures = {
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cdist', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cholesky_inverse', ''),  # could not find kernel
-    xfail('cholesky_solve', ''),  # could not find kernel
     xfail('combinations', ''),  # aten.masked_select.default
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
