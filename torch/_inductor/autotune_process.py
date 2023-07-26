@@ -2,7 +2,7 @@ import dataclasses
 import queue
 import time
 import warnings
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import multiprocessing
@@ -36,7 +36,9 @@ class TuningProcess:
     response_queue: multiprocessing.Queue = None
 
     @staticmethod
-    def process_main(request_queue, response_queue):
+    def process_main(
+        request_queue: multiprocessing.Queue, response_queue: multiprocessing.Queue
+    ) -> None:
         print("enter child process main")
         while True:
             obj = request_queue.get()
@@ -50,17 +52,17 @@ class TuningProcess:
             else:
                 raise RuntimeError(f"Invalid request type {type(obj)}")
 
-    def valid(self):
+    def valid(self) -> bool:
         return (
             self.process is not None
             and self.request_queue is not None
             and self.response_queue is not None
         )
 
-    def clear(self):
+    def clear(self) -> None:
         self.process = self.request_queue = self.response_queue = None
 
-    def initialize(self):
+    def initialize(self) -> None:
         """
         Create child process, request/response queues and do the warm up.
         """
@@ -95,7 +97,7 @@ class TuningProcess:
         resp = self.response_queue.get()
         assert isinstance(resp, Pong)
 
-    def terminate(self):
+    def terminate(self) -> None:
         if self.valid():
             self.request_queue.put(None)
             self.process.join()
@@ -113,7 +115,12 @@ class TensorMeta:
     offset: int
 
     @classmethod
-    def from_irnodes(cls, irnodes):
+    def from_irnodes(
+        cls,
+        irnodes: Union[
+            ir.Layout, torch.Tensor, Tuple[torch.Tensor], List[torch.Tensor]
+        ],
+    ) -> torch.Tensor:
         if isinstance(irnodes, (tuple, list)):
             return [cls.from_irnodes(x) for x in irnodes]
 
@@ -157,7 +164,11 @@ class BenchmarkRequest:
     input_tensors: List[TensorMeta]
     output_tensor: TensorMeta
 
-    def benchmark(self, *input_tensors, output_tensor=None) -> float:
+    def benchmark(
+        self,
+        *input_tensors: List[TensorMeta],
+        output_tensor: Optional[TensorMeta] = None,
+    ) -> float:
         if DEBUG:
             start_ts = time.time()
 
@@ -176,14 +187,14 @@ class BenchmarkRequest:
         # create args and out tensor
         if output_tensor is None:
             assert len(input_tensors) == 0
-            input_tensors = [x.to_tensor() for x in self.input_tensors]
+            input_tensors = tuple(x.to_tensor() for x in self.input_tensors)
             output_tensor = self.output_tensor.to_tensor()
 
         if DEBUG:
             create_tensor_elapse = time.time() - start_ts
             start_ts = time.time()
 
-        def worker():
+        def worker() -> float:
             return run(
                 *input_tensors,
                 output_tensor,
@@ -206,7 +217,7 @@ class BenchmarkRequest:
 
 
 def benchmark_in_sub_process(
-    choice: "ChoiceCaller",
+    choice: "ChoiceCaller",  # type: ignore[name-defined]
 ) -> float:
     """
     Do benchmarking in subprocess and return the perf number (latency).
