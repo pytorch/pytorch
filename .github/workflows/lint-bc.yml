@@ -11,13 +11,13 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened, labeled, unlabeled]
     branches: [main]
-    paths-ignore: [.github]
+    paths-ignore: [.github/workflows/lint-bc.yaml]
 
   # To allow testing PRs that change workflows.
   # May be triggered together with pull_request_target, it's OK.
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
-    paths: [.github]
+    paths: [.github/workflows/lint-bc.yaml]
     branches-ignore: [nightly]
 
   workflow_dispatch:
