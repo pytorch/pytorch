@@ -2021,7 +2021,7 @@ class Module:
                                       .format(key, input_param.shape, param.shape))
                     continue
 
-                if param.is_meta and not input_param.is_meta and not assign:
+                if param.is_meta and not input_param.is_meta and not assign_to_params_buffers:
                     warnings.warn(f'for {key}: copying from a non-meta parameter in the checkpoint to a meta '
                                   'parameter in the current model, which is a no-op. (Did you mean to '
                                   'pass `assign=True` to assign items in the state dictionary to their '
