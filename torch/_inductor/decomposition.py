@@ -2,6 +2,7 @@ import functools
 import logging
 import math
 import numbers
+import typing
 
 import torch
 import torch._decomp as decomp
