@@ -223,14 +223,25 @@ def _is_annotated(nodes: List[Node]):
         )
     return annotated
 
+def _get_module_name_filter(name: str):
+
+    def module_name_filter(n: Node) -> bool:
+        # example: {'L__self___sub': ("L['self'].sub", <class '....Sub'>), 'L__self___sub_linear': ("L['self'].sub.linear", <class 'torch.nn.modules.linear.Linear'>)}
+        nn_module_stack = n.meta["nn_module_stack"]
+        names = [n[len("L__self___"):].replace("_", ".") for n in nn_module_stack.keys()]
+        return name in names
+
+    return module_name_filter
+
 
 class XNNPACKQuantizer(Quantizer):
     supported_config_and_operators = _get_supported_config_and_operators()
 
     def __init__(self):
         super().__init__()
-        self.global_config: QuantizationConfig = None  # type: ignore[assignment]
+        self.global_config: Optional[QuantizationConfig] = None
         self.operator_type_config: Dict[str, Optional[QuantizationConfig]] = {}
+        self.module_name_config: Dict[str, Optional[QuantizationConfig]] = {}
 
     @classmethod
     def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
@@ -263,60 +274,89 @@ class XNNPACKQuantizer(Quantizer):
         self.global_config = quantization_config
         return self
 
-    def set_config_for_operator_type(
+    def set_operator_type(
         self, operator_type: str, quantization_config: QuantizationConfig
     ) -> XNNPACKQuantizer:
         self.operator_type_config[operator_type] = quantization_config
         return self
 
+    def set_module_name(
+        self, module_name: str, quantization_config: QuantizationConfig
+    ):
+        self.module_name_config[module_name] = quantization_config
+        return self
+
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""
         # hacked for handling dynamic linear quant. will fix later.
-        if self.global_config.input_activation.is_dynamic:  # type: ignore[union-attr]
+        if self.global_config and self.global_config.input_activation.is_dynamic:  # type: ignore[union-attr]
             model = self._annotate_for_dynamic_quantization_config(model)
         else:
             model = self._annotate_for_static_quantization_config(model)
         return model
 
+    def _annotate_all_patterns(
+        self,
+        model: torch.fx.GraphModule,
+        config: Optional[QuantizationConfig],
+        filter_fn: Optional[Callable[[Node], bool]] = None
+    ) -> torch.fx.GraphModule:
+        # TODO: implement the support for None to be canceling out previous annotations
+        if config is None:
+            return
+
+        self._annotate_linear(model, config, filter_fn)
+        self._annotate_conv2d_patterns(model, config, filter_fn)
+        self._annotate_maxpool2d(model, config, filter_fn)
+        self._annotate_add_patterns(model, config, filter_fn)
+        self._annotate_hardtanh(model, config, filter_fn)
+        self._annotate_mean(model, config, filter_fn)
+        self._annotate_adaptive_avg_pool2d(model, config, filter_fn)
+        self._annotate_gru(model, config, filter_fn)
+        return model
+
     def _annotate_for_static_quantization_config(
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
-        config = self.global_config
-        self._annotate_linear(model, config)
-        self._annotate_conv2d_patterns(model, config)
-        self._annotate_maxpool2d(model, config)
-        self._annotate_add_patterns(model, config)
-        self._annotate_hardtanh(model, config)
-        self._annotate_mean(model, config)
-        self._annotate_adaptive_avg_pool2d(model, config)
-        self._annotate_gru(model, config)
+
+        for module_name, config in self.module_name_config.items():
+            self._annotate_all_patterns(model, config, _get_module_name_filter(module_name))
+        self._annotate_all_patterns(model, self.global_config)
         return model
 
     def _annotate_for_dynamic_quantization_config(
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
-        config = self.global_config
-        self._annotate_linear(model, config)
+        for module_name, config in self.module_name_config.items():
+            self._annotate_linear(model, config, _get_module_name_filter(module_name))
+
+        self._annotate_linear(model, self.global_config)
         return model
 
     def _annotate_conv2d_patterns(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         if quantization_config.is_qat:
-            self._annotate_conv2d_bn_relu(gm, quantization_config)
-            self._annotate_conv2d_bn(gm, quantization_config)
-        self._annotate_conv2d_relu(gm, quantization_config)
-        self._annotate_conv2d(gm, quantization_config)
+            self._annotate_conv2d_bn_relu(gm, quantization_config, filter_fn)
+            self._annotate_conv2d_bn(gm, quantization_config, filter_fn)
+        self._annotate_conv2d_relu(gm, quantization_config, filter_fn)
+        self._annotate_conv2d(gm, quantization_config, filter_fn)
 
     def _annotate_conv2d_bn(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         """
         Find Conv2d + batchnorm parititions
         Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
         """
         fused_partitions = find_sequential_partitions(
-            gm, [torch.nn.Conv2d, torch.nn.BatchNorm2d]
+            gm, [torch.nn.Conv2d, torch.nn.BatchNorm2d], filter_fn
         )
         for fused_partition in fused_partitions:
             conv_partition, bn_partition = fused_partition
@@ -361,7 +401,10 @@ class XNNPACKQuantizer(Quantizer):
             _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     def _annotate_conv2d_bn_relu(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         """
         Find Conv2d + batchnorm + relu parititions
@@ -417,7 +460,10 @@ class XNNPACKQuantizer(Quantizer):
             _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     def _annotate_conv2d_relu(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         fused_partitions = find_sequential_partitions(
             gm, [torch.nn.Conv2d, torch.nn.ReLU]
@@ -469,10 +515,13 @@ class XNNPACKQuantizer(Quantizer):
             )
 
     def _annotate_conv2d(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         conv_partitions = get_source_partitions(
-            gm.graph, [torch.nn.Conv2d, torch.nn.functional.conv2d]
+            gm.graph, [torch.nn.Conv2d, torch.nn.functional.conv2d], filter_fn
         )
         conv_partitions = list(itertools.chain(*conv_partitions.values()))
         for conv_partition in conv_partitions:
@@ -508,10 +557,13 @@ class XNNPACKQuantizer(Quantizer):
             )
 
     def _annotate_linear(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         module_partitions = get_source_partitions(
-            gm.graph, [torch.nn.Linear, torch.nn.functional.linear]
+            gm.graph, [torch.nn.Linear, torch.nn.functional.linear], filter_fn
         )
         input_act_qspec = get_input_act_qspec(quantization_config)
         output_act_qspec = get_output_act_qspec(quantization_config)
@@ -576,9 +628,12 @@ class XNNPACKQuantizer(Quantizer):
 
     # TODO: move this to BoltNNQuantizer?
     def _annotate_gru(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
-        gru_partitions = get_source_partitions(gm.graph, [torch.nn.GRU])
+        gru_partitions = get_source_partitions(gm.graph, [torch.nn.GRU], filter_fn)
         gru_partitions = list(itertools.chain(*gru_partitions.values()))
         for gru_partition in gru_partitions:
             output_nodes = gru_partition.output_nodes
@@ -621,10 +676,13 @@ class XNNPACKQuantizer(Quantizer):
             _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     def _annotate_maxpool2d(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         module_partitions = get_source_partitions(
-            gm.graph, [torch.nn.MaxPool2d, torch.nn.functional.max_pool2d]
+            gm.graph, [torch.nn.MaxPool2d, torch.nn.functional.max_pool2d], filter_fn
         )
         maxpool_partitions = list(itertools.chain(*module_partitions.values()))
         for maxpool_partition in maxpool_partitions:
@@ -665,10 +723,12 @@ class XNNPACKQuantizer(Quantizer):
         op: Callable,
         gm: torch.fx.GraphModule,
         quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         module_partitions = get_source_partitions(
             gm.graph,
             [op],
+            filter_fn
         )
         partitions = list(itertools.chain(*module_partitions.values()))
         for partition in partitions:
@@ -700,7 +760,10 @@ class XNNPACKQuantizer(Quantizer):
             )
 
     def _annotate_hardtanh(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         self._annotate_input_out_obs_sharing_op(
             torch.nn.modules.Hardtanh, gm, quantization_config
@@ -710,25 +773,37 @@ class XNNPACKQuantizer(Quantizer):
         )
 
     def _annotate_mean(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         self._annotate_input_out_obs_sharing_op(torch.mean, gm, quantization_config)
 
     def _annotate_adaptive_avg_pool2d(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         self._annotate_input_out_obs_sharing_op(
             torch.nn.AdaptiveAvgPool2d, gm, quantization_config
         )
 
     def _annotate_add_patterns(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         self._annotate_add_relu(gm, quantization_config)
         self._annotate_add(gm, quantization_config)
 
     def _annotate_add_relu(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         fused_partitions = find_sequential_partitions(gm, [torch.add, torch.nn.ReLU])
         for fused_partition in fused_partitions:
@@ -765,9 +840,12 @@ class XNNPACKQuantizer(Quantizer):
             )
 
     def _annotate_add(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
-        add_partitions = get_source_partitions(gm.graph, [operator.add, torch.add])
+        add_partitions = get_source_partitions(gm.graph, [operator.add, torch.add], filter_fn)
         add_partitions = list(itertools.chain(*add_partitions.values()))
         for add_partition in add_partitions:
             add_node = add_partition.output_nodes[0]
