@@ -571,10 +571,10 @@ TEST(TensorIndexingTest, TestGetitemScalars) {
   assert_tensor_equal(a.index({0, 1}), a.index({zero, one}));
   assert_tensor_equal(a.index({0, one}), a.index({zero, 1}));
 
-  // indexing by a scalar should slice (not copy)
-  ASSERT_EQ(a.index({0, 1}).data_ptr(), a.index({zero, one}).data_ptr());
-  ASSERT_EQ(a.index({1}).data_ptr(), a.index({one.to(torch::kInt)}).data_ptr());
-  ASSERT_EQ(
+  // indexing by a scalar should copy
+  ASSERT_NE(a.index({0, 1}).data_ptr(), a.index({zero, one}).data_ptr());
+  ASSERT_NE(a.index({1}).data_ptr(), a.index({one.to(torch::kInt)}).data_ptr());
+  ASSERT_NE(
       a.index({1}).data_ptr(), a.index({one.to(torch::kShort)}).data_ptr());
 
   // scalar indexed with scalar
