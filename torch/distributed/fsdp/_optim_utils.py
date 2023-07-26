@@ -1002,6 +1002,7 @@ def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[FlatParameter, str]:
     ``FlatParameter`` s in the module otherwise.
 
     """
+
     def module_fn(module, prefix, tree_level, flat_param_to_fqn):
         for param_name, param in _named_parameters_with_duplicates(
             module, recurse=False
