@@ -17,10 +17,10 @@ from io import StringIO
 from tempfile import mkdtemp, mkstemp
 from warnings import WarningMessage
 
-import torch_np as np
-from torch_np import arange, array
-from torch_np import asarray as asanyarray
-from torch_np import empty, float32, intp, ndarray
+import torch._numpy as np
+from torch._numpy import arange, array
+from torch._numpy import asarray as asanyarray
+from torch._numpy import empty, float32, intp, ndarray
 
 __all__ = [
     "assert_equal",
@@ -212,7 +212,7 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
         for k in range(len(desired)):
             assert_equal(actual[k], desired[k], f"item={k!r}\n{err_msg}", verbose)
         return
-    from torch_np import imag, iscomplexobj, isscalar, ndarray, real, signbit
+    from torch._numpy import imag, iscomplexobj, isscalar, ndarray, real, signbit
 
     if isinstance(actual, ndarray) or isinstance(desired, ndarray):
         return assert_array_equal(actual, desired, err_msg, verbose)
@@ -391,7 +391,7 @@ def assert_almost_equal(actual, desired, decimal=7, err_msg="", verbose=True):
 
     """
     __tracebackhide__ = True  # Hide traceback for py.test
-    from torch_np import imag, iscomplexobj, ndarray, real
+    from torch._numpy import imag, iscomplexobj, ndarray, real
 
     # Handle complex numbers: separate into real/imag to handle
     # nan/inf/negative zero correctly
@@ -561,7 +561,7 @@ def assert_array_compare(
     strict=False,
 ):
     __tracebackhide__ = True  # Hide traceback for py.test
-    from torch_np import all, array, asarray, bool_, inf, isnan, max
+    from torch._numpy import all, array, asarray, bool_, inf, isnan, max
 
     x = asarray(x)
     y = asarray(y)
@@ -927,8 +927,8 @@ def assert_array_almost_equal(x, y, decimal=6, err_msg="", verbose=True):
 
     """
     __tracebackhide__ = True  # Hide traceback for py.test
-    from torch_np import any as npany
-    from torch_np import array, float_, issubdtype, number, result_type
+    from torch._numpy import any as npany
+    from torch._numpy import array, float_, issubdtype, number, result_type
 
     def compare(x, y):
         try:
