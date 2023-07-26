@@ -887,14 +887,6 @@ def pre_export_passes(
     # Insert type casts explicitly where needed.
     module = passes.InsertTypePromotion(diagnostic_context, module).run()
 
-    # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes
-    # The pass added nodes with static shape into original node metadata:
-    # node.meta["static_shape"]: FakeTensor/int/float/SymInt/SynFloat
-    if options.op_level_debug:
-        module = passes.ShapeInferenceWithFakeTensor(diagnostic_context, module).run(
-            *fx_module_args
-        )
-
     analysis.UnsupportedFxNodesAnalysis(
         diagnostic_context, module, options.onnxfunction_dispatcher
     ).analyze(infra.levels.ERROR)
@@ -903,6 +895,10 @@ def pre_export_passes(
         module = passes.RestoreParameterAndBufferNames(
             diagnostic_context, module, original_model
         ).run()
+
+    # This operation should be invoked as the last pre export pass.
+    # See [NOTE: Modularize pass ordering]
+    module = passes.Modularize(diagnostic_context, module).run()
 
     # ONNX does not support None inputs. During graph building, all None inputs
     # are removed. Here we register this step to input adapter.
