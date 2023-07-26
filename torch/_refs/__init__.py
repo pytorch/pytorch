@@ -1725,9 +1725,9 @@ def true_divide(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def xlogy(a: Union[TensorLikeType, NumberType],
-        b: Union[TensorLikeType, NumberType,
+        b: Union[TensorLikeType, NumberType],
         device: Optional[torch.device] = None,
-]):
+):
     torch._check(
         isinstance(a, TensorLike) or isinstance(b, TensorLike),
         lambda: 'Expected either argument a or b to be a Tensor"',
@@ -5481,7 +5481,7 @@ def cauchy(self, median=0, sigma=1, generator=None,
     type_promoting_args=("self", "device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-def exponential(self, rate=1, generator=None,device: Optional[torch.device] = None,):
+def exponential(self, rate=1, generator=None, device: Optional[torch.device] = None,):
     assert generator is None
     torch._check(
         not utils.is_complex_dtype(self.dtype)
