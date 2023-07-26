@@ -1,3 +1,5 @@
+# Owner(s): ["module: dynamo"]
+
 """Light smoke test switching between numpy to pytorch random streams.
 """
 import pytest
