@@ -204,7 +204,7 @@ class TestMkldnnFusion(JitTestCase):
                 x = self.unary(x)
                 return x
 
-        for pointwise_name, pointwise_info in self._unary_list().items():
+        for pointwise_info in self._unary_list().values():
             options = itertools.product([[2, 3, 10], [2, 10]], [True, False])
             for input_shape, bias in options:
                 with torch.no_grad():
@@ -233,7 +233,7 @@ class TestMkldnnFusion(JitTestCase):
                 return x
 
         input_shapes = {2: (112, 112), 3: (55, 55, 55)}
-        for pointwise_name, pointwise_info in self._unary_list().items():
+        for pointwise_info in self._unary_list().values():
             for dim in [2, 3]:
                 channels_last = torch.channels_last if dim == 2 else torch.channels_last_3d
                 options = itertools.product([True, False], [1, 2], [1, 4], [torch.contiguous_format, channels_last])
@@ -347,7 +347,7 @@ class TestMkldnnFusion(JitTestCase):
 
         input_shapes = {2: (28, 28)}
         kernel_size = 3
-        for pointwise_name, pointwise_info in self._unary_list().items():
+        for pointwise_info in self._unary_list().values():
             for dim in [2]:
                 channels_last = torch.channels_last if dim == 2 else torch.channels_last_3d
                 options = itertools.product([True, False], [1, 2], [1, 4], [torch.contiguous_format, channels_last], [False, True])
@@ -366,7 +366,7 @@ class TestMkldnnFusion(JitTestCase):
 
                         if prepack_weight:
                             packed_weight = torch.ops.mkldnn._reorder_convolution_transpose_weight(
-                                mod.conv_transpose.weight.to_mkldnn(),
+                                mod.conv_transpose.weight,
                                 mod.conv_transpose.padding,
                                 mod.conv_transpose.output_padding,
                                 mod.conv_transpose.stride,

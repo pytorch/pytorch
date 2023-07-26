@@ -170,7 +170,9 @@ class autocast:
     (see :ref:`Working with Multiple GPUs<amp-multigpu>`).
 
     Args:
-        device_type(str, required):  Whether to use 'cuda' or 'cpu' device
+        device_type(str, required):  Device type to use. Possible values are: 'cuda', 'cpu', 'xpu' and 'hpu'.
+                                     The type is the same as the `type` attribute of a :class:`torch.device`.
+                                     Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
         enabled(bool, optional):  Whether autocasting should be enabled in the region.
             Default: ``True``
         dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16.
@@ -374,3 +376,20 @@ class autocast:
         if torch._jit_internal.is_scripting():
             return func
         return autocast_decorator(self, func)
+
+# These functions aren't meant for public usage.
+# They are what we trace into a graph during pre_dispatch tracing
+# when we encounter an autocast context manager.
+def _enter_autocast(*vals):
+    # For pre-dispatch tracing, if a TorchFunction mode is active, we'll want to trace this into a graph.
+    if torch._C._is_torch_function_mode_enabled():
+        return torch.overrides.handle_torch_function(torch.amp._enter_autocast, [], *vals)
+    mode = torch.amp.autocast(*vals)
+    mode.__enter__()
+    return mode
+
+
+def _exit_autocast(mode):
+    if torch._C._is_torch_function_mode_enabled():
+        return torch.overrides.handle_torch_function(torch.amp._exit_autocast, [], mode)
+    mode.__exit__(None, None, None)

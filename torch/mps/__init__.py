@@ -1,5 +1,8 @@
 r"""
-This package enables an interface for accessing MPS backend in python
+This package enables an interface for accessing MPS (Metal Performance Shaders) backend in Python.
+Metal is Apple's API for programming metal GPU (graphics processor unit). Using MPS means that increased
+performance can be achieved, by running work on the metal GPU(s).
+See https://developer.apple.com/documentation/metalperformanceshaders for more details.
 """
 import torch
 from .. import Tensor
@@ -76,7 +79,7 @@ def set_per_process_memory_fraction(fraction) -> None:
     if not isinstance(fraction, float):
         raise TypeError('Invalid type for fraction argument, must be `float`')
     if fraction < 0 or fraction > 2:
-        raise ValueError('Invalid fraction value: {}. Allowed range: 0~2'.format(fraction))
+        raise ValueError(f'Invalid fraction value: {fraction}. Allowed range: 0~2')
 
     torch._C._mps_setMemoryFraction(fraction)
 

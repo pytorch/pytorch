@@ -37,8 +37,7 @@ def broadcast(a: List[int], b: List[int]):
         if sizeA != sizeB and sizeA != 1 and sizeB != 1:
             # TODO: only assertion error is bound in C++ compilation right now
             raise AssertionError(
-                "The size of tensor a {} must match the size of tensor b ("
-                "{}) at non-singleton dimension {}".format(sizeA, sizeB, i)
+                f"The size of tensor a {sizeA} must match the size of tensor b ({sizeB}) at non-singleton dimension {i}"
             )
 
         expandedSizes.append(sizeB if sizeA == 1 else sizeA)
@@ -81,8 +80,7 @@ def broadcast_inplace(a: List[int], b: List[int]):
     dimsB = len(b)
     if dimsB > dimsA:
         raise AssertionError(
-            "The dims of tensor b ({}) must be less than or equal to"
-            "the dims of tensor a ({}) ".format(dimsB, dimsA)
+            f"The dims of tensor b ({dimsB}) must be less than or equal tothe dims of tensor a ({dimsA}) "
         )
     for dimA in range(dimsA):
         dimB = dimsB - dimsA + dimA
@@ -292,7 +290,7 @@ def max_pool2d(
 
     assert (
         len(padding) == 1 or len(padding) == 2
-    ), "max_pool2d: padding must be either be a single int, or a tuple of two ints"
+    ), "max_pool2d: padding must either be a single int, or a tuple of two ints"
     padH = padding[0]
     padW = padH if len(padding) == 1 else padding[1]
 

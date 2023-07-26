@@ -24,7 +24,6 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfRocm
 
 
 class ExportTests(torch._dynamo.test_case.TestCase):
@@ -1817,7 +1816,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 aten_graph=True,
             )
 
-    @skipIfRocm
     @config.patch(capture_scalar_outputs=True)
     def test_dynamic_slicing_simple(self):
         def f(x):
@@ -1853,7 +1851,6 @@ def forward(self, x):
     return pytree.tree_unflatten([matmul_default], self._out_spec)""",
         )
 
-    @skipIfRocm
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_cond_in_aten_symbolic(self):
         class ConditionOp(torch.nn.Module):
@@ -2244,7 +2241,6 @@ def forward(self, x):
         torch._dynamo.export(my_dyn_fn, y, y, y)
         torch._dynamo.export(my_dyn_fn, y, y, y, constraints=[dynamic_dim(y, 0)])
 
-    @skipIfRocm
     def test_export_multi_dynamic_dim_unsafe_relationship(self):
         x = torch.randn([3, 3, 3])
         y = torch.randn([2, 2, 2])
@@ -2877,7 +2873,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "HigherOrderOperator can't return non-tensor scalar output",
+            "HigherOrderOperator body's output must consist of tensors only",
         ):
             torch._dynamo.export(
                 f_branch_return_non_tensor,
@@ -3000,6 +2996,32 @@ def forward(self, x):
     return pytree.tree_unflatten([slice_tensor, slice_tensor_3, slice_tensor_6, slice_tensor_9], self._out_spec)""",
         )
 
+    def test_capture_symbolic_tracing_simple_within_fake_mode(self):
+        from torch._dynamo.output_graph import config
+        from torch._subclasses import fake_tensor
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        def f(x):
+            y = torch.randn(3)
+            return x + x * y
+
+        with fake_tensor.FakeTensorMode(
+            shape_env=ShapeEnv(
+                allow_scalar_outputs=config.capture_scalar_outputs,
+                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+                frame_id=0,
+            ),
+        ):
+            x = torch.randn(3)
+
+            for aten_graph in [True, False]:
+                gm, _ = torch._dynamo.export(f, x, aten_graph=aten_graph)
+                self.assertTrue(
+                    isinstance(gm, torch.fx.GraphModule),
+                    msg="test_capture_symbolic_tracing_simple_within_fake_mode_aten_graph_"
+                    + str(aten_graph),
+                )
+
     def test_capture_symbolic_tracing(self) -> None:
         from torch._dynamo.output_graph import config
         from torch._subclasses import fake_tensor
@@ -3041,6 +3063,46 @@ def forward(self, x):
                 isinstance(graph_module, torch.fx.GraphModule),
                 msg="test_capture_symbolic_tracing_aten_graph_" + str(aten_graph),
             )
+
+    def test_capture_symbolic_tracing_within_fake_mode(self):
+        from torch._dynamo.output_graph import config
+        from torch._subclasses import fake_tensor
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+                self.linear2 = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                out = self.linear(x)
+                out = self.linear2(out)
+                return out
+
+        # User-instantiated FakeTensorMode
+        fake_mode = fake_tensor.FakeTensorMode(
+            allow_non_fake_inputs=False,
+            allow_fallback_kernels=True,
+            shape_env=ShapeEnv(
+                allow_scalar_outputs=config.capture_scalar_outputs,
+                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+                frame_id=0,
+            ),
+        )
+        # Fakefy input+model before exporting it
+        with fake_mode:
+            x = torch.rand(5, 2, 2)
+            model = Model()
+
+            # Export the model with fake inputs and parameters
+            for aten_graph in [True, False]:
+                graph_module, _ = torch._dynamo.export(model, x, aten_graph=aten_graph)
+                self.assertTrue(
+                    isinstance(graph_module, torch.fx.GraphModule),
+                    msg="test_capture_symbolic_tracing_within_fake_mode_aten_graph_"
+                    + str(aten_graph),
+                )
 
     def test_cond_op_param_buffer_lifted(self):
         class A(torch.nn.Module):
@@ -3209,7 +3271,7 @@ def forward(self, pred, x):
     ones_3 = torch.ones(6, 4)
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.cond(arg0, cond_true_0, cond_false_0, [arg1, ones, ones_1, ones_3, ones, ones_1, ones_2]);  arg0 = cond_true_0 = cond_false_0 = arg1 = ones = ones_1 = ones_3 = ones_2 = None
+    cond = torch.ops.higher_order.cond(arg0, cond_true_0, cond_false_0, [arg1, ones, ones_1, ones_3, ones, ones_1, ones_2]);  arg0 = cond_true_0 = cond_false_0 = arg1 = ones = ones_1 = ones_3 = ones_2 = None
     return pytree.tree_unflatten([cond], self._out_spec)""",  # noqa: B950,E122
         )
 

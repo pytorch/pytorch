@@ -128,7 +128,9 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
 }
 
 void InputOutputEncoder::push(const at::Tensor& t) {
-  if (t.defined() && !t.is_nested()) { // TODO fix nested sizes
+  // TODO fix nested and symbolic sizes
+  if (t.defined() && !t.is_nested() &&
+      !t.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
     tags_.emplace_back(Tag::Tensor);
     tensor_metadata_.emplace_back(t);
     tensor_sizes_strides_.copy(t.sizes());
@@ -387,7 +389,7 @@ struct StealOrDefault {
 
 void ThreadLocalSubqueue::TorchOpStorage::materialize(
     std::vector<std::shared_ptr<Result>>& out,
-    const std::function<time_t(approx_time_t)> time_converter,
+    const std::function<time_t(approx_time_t)>& time_converter,
     const uint64_t tid,
     const kineto::DeviceAndResource& kineto_info) {
   // Plumb Autograd info to the top level annotation.

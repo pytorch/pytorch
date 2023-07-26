@@ -29,6 +29,7 @@ enum class OpType : std::uint8_t {
   BARRIER = 15,
   _REDUCE_SCATTER_BASE = 16,
   COALESCED = 17,
+  _ALLREDUCE_SPARSE = 18,
   UNKNOWN = 100,
 };
 
@@ -109,7 +110,7 @@ class TORCH_API Work : public torch::CustomClassHolder {
   OpType retrieveOpType();
 
   static c10::intrusive_ptr<Work> create_from_future(
-      c10::intrusive_ptr<c10::ivalue::Future>);
+      const c10::intrusive_ptr<c10::ivalue::Future>&);
 
  protected:
   // Completes the work object and optionally sets the exception in a

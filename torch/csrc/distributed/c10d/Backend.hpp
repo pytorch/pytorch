@@ -53,6 +53,12 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return size_;
   }
 
+  // Returns an unique opaque ID of this backend that can be used to correlate
+  // with its collectives.
+  int64_t getID() const {
+    return reinterpret_cast<std::intptr_t>(this);
+  }
+
   virtual void startCoalescing() {
     TORCH_CHECK(
         false,
@@ -84,6 +90,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str("Backend ", getBackendName(), " does not support allreduce"));
+  }
+
+  virtual c10::intrusive_ptr<Work> allreduce_sparse(
+      std::vector<at::Tensor>& /* tensors */,
+      const AllreduceOptions& /* opts */ = AllreduceOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), "does not support allreduce"));
   }
 
   virtual c10::intrusive_ptr<Work> allreduce_coalesced(

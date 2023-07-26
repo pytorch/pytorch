@@ -3,6 +3,7 @@ import functools
 import itertools
 import logging
 import os
+import traceback
 import weakref
 from dataclasses import dataclass
 from functools import partial
@@ -23,13 +24,18 @@ from torch._prims_common import (
 )
 from torch._subclasses.meta_utils import MetaConverter
 from torch._utils import render_call
-from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
+from torch.fx.experimental.symbolic_shapes import (
+    DimConstraint,
+    DimDynamic,
+    free_symbols,
+)
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode_stack,
+    is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
 
@@ -152,6 +158,19 @@ def _is_tensor_constructor(func: OpOverload):
     return (
         len(schema.returns) == 1 and schema.returns[0].type is torch._C.TensorType.get()
     )
+
+
+def is_fake(x):
+    if isinstance(x, FakeTensor):
+        return True
+    if is_traceable_wrapper_subclass(x):
+        flattened_tensors, _ = type(x).__tensor_flatten__(x)
+        # need to recurse because we could have nested subclasses
+        all_fake = all(is_fake(x) for x in flattened_tensors)
+        any_fake = any(is_fake(x) for x in flattened_tensors)
+        assert all_fake == any_fake, "got mixed fake and real tensors!"
+        return all_fake
+    return False
 
 
 @functools.lru_cache(None)
@@ -501,7 +520,15 @@ def nonzero(fake_mode, func, arg):
         # disjoint with what can actually occur.  But this is fine:
         # remember, the hypothesis is that if your later code works
         # with N >= 2, it will work with N = 1 and N = 0.
-        constrain_range(nnz, min=2, max=sys.maxsize - 1)
+        maxval = sys.maxsize - 1
+        if not free_symbols(arg.numel()):
+            # Don't upgrade the range if numel is less than two, since we then
+            # have an empty range which makes things go explodey.  We also
+            # don't allow for 2 because that would specialize the unbacked
+            # SymInt to 2, which is also likely to be buggy.
+            if arg.numel() >= 2:
+                maxval = arg.numel()
+        constrain_range(nnz, min=2, max=maxval)
 
         arg._nonzero_memo = nnz
         arg._nonzero_memo_vc = arg._version
@@ -553,6 +580,16 @@ def index_tensor(fake_mode, func, *args, **kwargs):
     with fake_mode:
         out = meta_index_Tensor(*args, **kwargs)
         return out.to(out_device)
+
+
+# Can take mixed meta/non-meta arguments; the meta registration
+# will roughly do the right thing even when given real devices
+@register_op_impl(aten._embedding_bag.default)
+def embedding_bag(fake_mode, func, *args, **kwargs):
+    from torch._meta_registrations import meta_embedding_bag
+
+    with fake_mode:
+        return meta_embedding_bag(*args, **kwargs)
 
 
 # takes in multiple-devices, dont default to default device handling
@@ -1153,6 +1190,8 @@ class FakeTensorMode(TorchDispatchMode):
 
         self.shape_env = shape_env
 
+        self.stack = "".join(traceback.format_stack())
+
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         assert self not in _get_current_dispatch_mode_stack(), func
@@ -1230,7 +1269,7 @@ class FakeTensorMode(TorchDispatchMode):
                 FakeTensor, lambda t: t.constant, (args, kwargs)
             )
             out = func(*const_args, **const_kwargs)
-            if self.may_turn_const(out):
+            if isinstance(out, torch.Tensor) and self.may_turn_const(out):
                 # NB: not in_kernel_invocation_manager because we're doing real
                 # compute here
                 with no_dispatch():
@@ -1395,6 +1434,7 @@ class FakeTensorMode(TorchDispatchMode):
                 "vision",
                 "torchtext",
                 "torchaudio",
+                "fbgemm",
             }
 
         # run kernel registered to meta for func, which include
