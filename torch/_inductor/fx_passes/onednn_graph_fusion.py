@@ -1,20 +1,19 @@
+import itertools
 import logging
 from functools import lru_cache
 from typing import Callable, Dict, List, Sequence
-import itertools
 
 import torch
 import torch._C._onednn as llga
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor.decomposition import select_decomp_table
-from torch.csrc.jit.codegen.onednn.LlgaGraph import LlgaGraph
+from torch.csrc.jit.codegen.onednn.llga_graph import LlgaGraph
 from torch.fx import Graph, GraphModule, Node, subgraph_rewriter
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 from torch.fx.passes.utils.matcher_utils import InternalMatch
 from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_map
-from .. import config
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -27,10 +26,10 @@ def onednn_graph_fuse_fx(gm: GraphModule, is_inference: bool):
 
     rewrite_graph(gm)
     log.debug("Build oneDNN graph")
-    llga_graph = build_onednn_graph(gm)
-    llga_graph.is_inference = is_inference
+    onednn_graph = build_onednn_graph(gm)
+    onednn_graph.is_inference = is_inference
     log.debug("Fuse fx graph based on oneDNN graph partitions")
-    fuse_graph(gm, llga_graph)
+    fuse_graph(gm, onednn_graph)
     log.debug("Re-apply Inductor Decomps after fusion for any un-lowered ops")
     reapply_decomps(gm)
 
@@ -40,7 +39,7 @@ def onednn_graph_fuse_fx(gm: GraphModule, is_inference: bool):
     return gm
 
 
-llga_intensive_ops = [
+onednn_graph_intensive_ops = [
     aten.addmm.default,
     aten.avg_pool2d.default,
     aten.bmm.default,
@@ -54,14 +53,16 @@ llga_intensive_ops = [
 ]
 
 
-def get_filtered_partitions(llga_graph: LlgaGraph, allowed_ops=llga_intensive_ops):
+def get_filtered_partitions(
+    onednn_graph: LlgaGraph, allowed_ops=onednn_graph_intensive_ops
+):
     """
-    Get llga partitions which include at least one op which is in allowed_ops.
+    Get onednn Graph partitions which include at least one op which is in allowed_ops.
     By default this function will return partitions which are intensive,
-    i.e. defined in llga_intensive_ops and known to have performant onednn code.
+    i.e. defined in onednn_graph_intensive_ops and known to have performant onednn code.
 
     Args:
-        ``llga_graph``: The LlgaGraph containing lowered ops to partition
+        ``onednn_graph``: The LlgaGraph containing lowered ops to partition
         ``allowed_ops``: The list of aten.ops which will allow a partition to be lowered
 
     Returns:
@@ -71,24 +72,24 @@ def get_filtered_partitions(llga_graph: LlgaGraph, allowed_ops=llga_intensive_op
         fx Graph which correspond to each partition
     """
 
-    llga_partitions = llga_graph.get_partitions()
-    supported_llga_partitions = [lp for lp in llga_partitions if lp.is_supported()]
+    onednn_graph_partitions = onednn_graph.get_partitions()
+    supported_partitions = [lp for lp in onednn_graph_partitions if lp.is_supported()]
     node_lists = [
-        [llga_graph.get_node_from_desc(id) for id in lp.get_ops()]
-        for lp in supported_llga_partitions
+        [onednn_graph.get_node_from_desc(id) for id in lp.get_ops()]
+        for lp in supported_partitions
     ]
 
     if not allowed_ops:
-        return supported_llga_partitions, node_lists
+        return supported_partitions, node_lists
 
     filtered_partitions = []
     filtered_node_lists = []
-    for partition, nodes in zip(supported_llga_partitions, node_lists):
+    for partition, nodes in zip(supported_partitions, node_lists):
         if any(node.target in allowed_ops for node in nodes):
             filtered_partitions.append(partition)
             filtered_node_lists.append(nodes)
     # Need to reset descs with any_layout since set of supported partitions is different
-    llga_graph.set_any_layout(filtered_partitions)
+    onednn_graph.set_any_layout(filtered_partitions)
     return filtered_partitions, filtered_node_lists
 
 
@@ -97,10 +98,10 @@ def allocate_empty_aten_from_desc(desc: llga.logical_tensor) -> torch.Tensor:
     return torch.empty_strided(desc.get_dims(), desc.get_strides())
 
 
-class LlgaPartitionModule(torch.nn.Module):
+class OnednnGraphPartitionModule(torch.nn.Module):
     def __init__(
         self,
-        llga_graph: LlgaGraph,
+        onednn_graph: LlgaGraph,
         partition: llga.partition,
         input_order_data: List = [],
         name="",
@@ -109,7 +110,7 @@ class LlgaPartitionModule(torch.nn.Module):
         self.is_opaque = True
         self.__name__ = name
         self.partition = partition
-        self.llga_graph = llga_graph
+        self.onednn_graph = onednn_graph
         self.input_order_data = input_order_data
         self.input_descs = partition.get_in_ports()
         self.kernel = None
@@ -118,7 +119,7 @@ class LlgaPartitionModule(torch.nn.Module):
     def name(self):
         return self.__name__
 
-    @record_function("LlgaPartitionModule__call__")
+    @record_function("OnednnGraphPartitionModule__call__")
     def __call__(self, *args):
         # If val is an int, then it gives the index of args, otherwise it is a scalar tensor so we use as-is
         input_tensors = [
@@ -126,13 +127,13 @@ class LlgaPartitionModule(torch.nn.Module):
         ]
         fake_mode = detect_fake_mode(args)
         if fake_mode:
-            input_descs = self.llga_graph.update_input_descs(
+            input_descs = self.onednn_graph.update_input_descs(
                 self.input_descs, input_tensors
             )
-            compiled_partition = self.llga_graph.compile_partition(
+            compiled_partition = self.onednn_graph.compile_partition(
                 self.partition, input_descs
             )
-            output_descs = self.llga_graph.get_compiled_output_descs(
+            output_descs = self.onednn_graph.get_compiled_output_descs(
                 compiled_partition, self.partition.get_out_ports()
             )
             output_tensors = [
@@ -142,19 +143,19 @@ class LlgaPartitionModule(torch.nn.Module):
             return output_tensors[0] if len(output_tensors) == 1 else output_tensors
 
         if not self.kernel:
-            cache_parameter = self.llga_graph.is_inference
-            self.input_descs = self.llga_graph.update_input_descs(
+            cache_parameter = self.onednn_graph.is_inference
+            self.input_descs = self.onednn_graph.update_input_descs(
                 self.input_descs, input_tensors, cache_parameter
             )
-            self.kernel = self.llga_graph.compile_partition(
+            self.kernel = self.onednn_graph.compile_partition(
                 self.partition, self.input_descs
             )
-            self.output_descs = self.llga_graph.get_compiled_output_descs(
+            self.output_descs = self.onednn_graph.get_compiled_output_descs(
                 self.kernel, self.partition.get_out_ports()
             )
 
-        input_llga_tensors = [
-            llga.tensor(input_desc, self.llga_graph.engine, input_tensor.data_ptr())
+        input_onednn_tensors = [
+            llga.tensor(input_desc, self.onednn_graph.engine, input_tensor.data_ptr())
             for input_desc, input_tensor in zip(self.input_descs, input_tensors)
         ]
         with record_function("output_tensor_creation"):
@@ -162,8 +163,8 @@ class LlgaPartitionModule(torch.nn.Module):
                 allocate_empty_aten_from_desc(out_desc)
                 for out_desc in self.output_descs
             ]
-        output_llga_tensors = [
-            llga.tensor(output_desc, self.llga_graph.engine, output_tensor.data_ptr())
+        output_onednn_tensors = [
+            llga.tensor(output_desc, self.onednn_graph.engine, output_tensor.data_ptr())
             for output_desc, output_tensor in zip(self.output_descs, output_tensors)
         ]
 
@@ -173,14 +174,14 @@ class LlgaPartitionModule(torch.nn.Module):
 
         with record_function(f"onednn_fuse_{self.__name__}"):
             self.kernel.execute(
-                self.llga_graph.stream, input_llga_tensors, output_llga_tensors
+                self.onednn_graph.stream, input_onednn_tensors, output_onednn_tensors
             )
         # TODO: It seems like this fix and also the return statements of def call_function should be handled differently.
         return output_tensors[0] if len(output_tensors) == 1 else output_tensors
 
 
 def build_onednn_graph(gm: GraphModule) -> LlgaGraph:
-    llga_graph = LlgaGraph()
+    onednn_graph = LlgaGraph()
 
     graph_input_nodes = list(filter(lambda n: n.op == "placeholder", gm.graph.nodes))
 
@@ -191,7 +192,7 @@ def build_onednn_graph(gm: GraphModule) -> LlgaGraph:
 
         def placeholder(self, target, args, kwargs):
             # Add an input to graph
-            return llga_graph.create_llga_descs_from_node(self.current_node)[0]
+            return onednn_graph.create_onednn_descs_from_node(self.current_node)[0]
 
         def call_function(self, target, args, kwargs):
             # With placeholder defined, args is always a tuple of logical tensors except for the case of scalars
@@ -200,21 +201,21 @@ def build_onednn_graph(gm: GraphModule) -> LlgaGraph:
                 if "getitem" in self.current_node.name and isinstance(
                     res, llga.logical_tensor
                 ):
-                    out_descs = llga_graph.create_llga_descs_from_node(
+                    out_descs = onednn_graph.create_onednn_descs_from_node(
                         self.current_node
                     )
-                    llga_graph.add_op(
+                    onednn_graph.add_op(
                         llga.op.Wildcard, self.current_node.name, [res], out_descs
                     )
                     return out_descs[0]
                 return res
 
-            out_descs = llga_graph.create_llga_descs_from_node(self.current_node)
+            out_descs = onednn_graph.create_onednn_descs_from_node(self.current_node)
 
             if target not in lowerings or not self._is_valid_lowering(
                 target, args, out_descs
             ):
-                llga_graph.add_op(
+                onednn_graph.add_op(
                     llga.op.Wildcard,
                     self.current_node.name,
                     [
@@ -225,9 +226,9 @@ def build_onednn_graph(gm: GraphModule) -> LlgaGraph:
                     out_descs,
                 )
             else:
-                # target in lowerings, add node to llga_graph
+                # target in lowerings, add node to onednn_graph
                 lowerings[target](
-                    llga_graph, self.current_node.name, args, out_descs, dict(kwargs)
+                    onednn_graph, self.current_node.name, args, out_descs, dict(kwargs)
                 )
             if isinstance(self.current_node.meta["val"], Sequence):
                 return out_descs
@@ -243,13 +244,13 @@ def build_onednn_graph(gm: GraphModule) -> LlgaGraph:
                     llga.logical_tensor.f16,
                     llga.logical_tensor.bf16,
                 ]:
-                    endop_id = llga_graph.add_op(
+                    endop_id = onednn_graph.add_op(
                         llga.op.End,
                         self.current_node.name + str(output_logten.get_id()),
                         [output_logten],
                         [],
                     )
-                    llga_graph.register_node_by_desc(self.current_node, endop_id)
+                    onednn_graph.register_node_by_desc(self.current_node, endop_id)
 
         def _is_valid_lowering(self, target, args, out_descs):
             valid_types = [
@@ -271,13 +272,13 @@ def build_onednn_graph(gm: GraphModule) -> LlgaGraph:
                 return False
             return True
 
-    llga_args = tuple(graph_input_nodes)
-    FusionInterpreter(gm).run(*llga_args)
-    return llga_graph
+    onednn_graph_args = tuple(graph_input_nodes)
+    FusionInterpreter(gm).run(*onednn_graph_args)
+    return onednn_graph
 
 
-def fuse_graph(gm: GraphModule, llga_graph: LlgaGraph) -> GraphModule:
-    supported_llga_partitions, node_lists = get_filtered_partitions(llga_graph)
+def fuse_graph(gm: GraphModule, onednn_graph: LlgaGraph) -> GraphModule:
+    supported_partitions, node_lists = get_filtered_partitions(onednn_graph)
 
     if len(node_lists) == 0:
         return
@@ -287,7 +288,7 @@ def fuse_graph(gm: GraphModule, llga_graph: LlgaGraph) -> GraphModule:
     for node in gm.graph.nodes:
         if node.op == "call_module" and "fused_" in node.name:
             partition_idx = int(node.name.split("fused_")[1])
-            current_partition = supported_llga_partitions[partition_idx]
+            current_partition = supported_partitions[partition_idx]
             current_partition_nodes = node_lists[partition_idx]
             current_partition_ext_name = "_".join(
                 [n.name for n in current_partition_nodes]
@@ -295,29 +296,29 @@ def fuse_graph(gm: GraphModule, llga_graph: LlgaGraph) -> GraphModule:
 
             out_descs = current_partition.get_out_ports()
             if len(out_descs) == 1:
-                llga_graph.register_node_by_desc(node, out_descs[0])
+                onednn_graph.register_node_by_desc(node, out_descs[0])
             else:
                 getitem_users = [
                     node for node in node.users.keys() if "getitem" in node.name
                 ]
                 for getitem in getitem_users:
                     ind = getitem.args[1]
-                    llga_graph.register_node_by_desc(getitem, out_descs[ind])
+                    onednn_graph.register_node_by_desc(getitem, out_descs[ind])
 
-            args_to_llga_order = llga_graph.get_args_to_llga_partition_order(
+            args_to_onednn_order = onednn_graph.get_args_to_onednn_partition_order(
                 current_partition, node.args
             )
 
             gm.delete_submodule(node.target)
             node.name = f"onednn_{node.name}"
             node.op = "call_function"
-            node.target = LlgaPartitionModule(
-                llga_graph,
+            node.target = OnednnGraphPartitionModule(
+                onednn_graph,
                 current_partition,
-                input_order_data=args_to_llga_order,
+                input_order_data=args_to_onednn_order,
                 name=current_partition_ext_name,
             )
-            log.info("Using oneDNN fusion:" + current_partition_ext_name)
+            log.info(f"Using oneDNN fusion: {current_partition_ext_name}")
 
     gm.recompile()
     return gm
@@ -562,7 +563,8 @@ def rewrite_graph(gm):
     allow_manydim_bmm(gm)
     # Replace (transpose + (add/b)mm) with single call to addmm with kwarg "transpose_=True" to integrate with oneDNN API
     replace_t_matmul_to_matmul(gm)
-    # Replace aten::max_pool{2,3}d_with_indices to aten::max_pool{2,3}d because LLGA MaxPool currently doesn't support with indices
+    # Replace aten::max_pool{2,3}d_with_indices to aten::max_pool{2,3}d because
+    # MaxPool currently doesn't support with indices
     replace_max_pool_with_indices(gm, num_dims=2)
     replace_max_pool_with_indices(gm, num_dims=3)
 
@@ -588,7 +590,9 @@ def replace_node_with_subgraph(node: Node, subgraph: Graph):
 
 def reapply_decomps(gm: GraphModule):
     all_decomps = select_decomp_table()
-    search_decomps = {key: all_decomps[key] for key in (lowerings.keys() & all_decomps.keys())}
+    search_decomps = {
+        key: all_decomps[key] for key in (lowerings.keys() & all_decomps.keys())
+    }
     for node in gm.graph.nodes:
         if node.op == "call_function" and node.target in search_decomps:
             args = [
@@ -601,7 +605,7 @@ def reapply_decomps(gm: GraphModule):
     gm.recompile()
 
 
-# define lowerings for aten IR to LLGA IR
+# define lowerings for aten IR to oneDNN IR
 lowerings = {}
 
 
@@ -637,6 +641,20 @@ class LoweringConfig:
         attribute_inputs={},
         scalar_in_descs=False,
     ):
+        """
+        Map aten op to llga op for lowering.
+
+        Args:
+            ``llga_op``: The llga Op for lowering
+            ``in_descs_filtering``: A lambda function which is used to reorder or filter
+            the input logical tensors `in_descs`. For example,
+            `lambda in_descs: [in_descs[1], in_descs[2], in_descs[0]]` could be used to
+            reorder the inputs. For convenience, the string "first" can be used in place of
+            `lambda in_descs: in_descs[:1]`
+            ``attribute_inputs``: A dictionary with llga op attributes as keys, and
+            lambda functions to retrieve the value from the input logical tensors `in_descs`
+            ``scalar_in_descs``: bool, True if scalar inputs should be cast to match other input types
+        """
         self.llga_op = llga_op
         self.in_descs_filtering_func = in_descs_filtering
         if in_descs_filtering == "first":
@@ -744,7 +762,7 @@ for op in _lowerings_map:
 
     @register_lowering(op)
     def _lowering(
-        llga_graph,
+        onednn_graph,
         node_name,
         in_descs,
         out_descs,
@@ -763,8 +781,8 @@ for op in _lowerings_map:
             in_descs = lowering_config.in_descs_filtering_func(in_descs)
         if lowering_config.scalar_in_descs:
             # If scalar inputs should be cast to match other input type
-            in_descs = llga_graph.overwrite_scalar_args(in_descs)
-        return llga_graph.add_op(
+            in_descs = onednn_graph.overwrite_scalar_args(in_descs)
+        return onednn_graph.add_op(
             lowering_config.llga_op, node_name, in_descs, out_descs, kwargs
         )
 
@@ -772,11 +790,11 @@ for op in _lowerings_map:
 
 
 @register_lowering(aten.convolution)
-def _onednn_convolution(llga_graph, node_name, in_descs, out_descs, kwargs):
+def _onednn_convolution(onednn_graph, node_name, in_descs, out_descs, kwargs):
     # in_descs[2] is None when optional bias is False
     input_len = 2 if len(in_descs) > 2 and in_descs[2] is None else 3
     if in_descs[6]:  # if ConvTranspose
-        return llga_graph.add_op(
+        return onednn_graph.add_op(
             llga.op.ConvTranspose,
             node_name,
             in_descs[:input_len],
@@ -793,7 +811,7 @@ def _onednn_convolution(llga_graph, node_name, in_descs, out_descs, kwargs):
             },
         )
     else:
-        return llga_graph.add_op(
+        return onednn_graph.add_op(
             llga.op.Convolution,
             node_name,
             in_descs[:input_len],
@@ -811,8 +829,8 @@ def _onednn_convolution(llga_graph, node_name, in_descs, out_descs, kwargs):
 
 
 @register_lowering([aten.view, aten.reshape, aten.squeeze, aten.unsqueeze])
-def _onednn_view(llga_graph, node_name, in_descs, out_descs, kwargs):
-    return llga_graph.add_op(
+def _onednn_view(onednn_graph, node_name, in_descs, out_descs, kwargs):
+    return onednn_graph.add_op(
         llga.op.StaticReshape,
         node_name,
         in_descs[:1],
