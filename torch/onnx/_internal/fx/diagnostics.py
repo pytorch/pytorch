@@ -15,7 +15,7 @@ from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import decorator, formatter, utils
 
-from torch.onnx._internal.fx import type_utils as fx_type_utils
+from torch.onnx._internal.fx import registration, type_utils as fx_type_utils
 
 # NOTE: Symbolic shapes could be a calculation of values, such as
 # Tensor(i64[s0, 64, (s1//2) - 2, (s1//2) - 2]) where s0 and s1 are symbolic
@@ -102,6 +102,29 @@ def _torch_fx_symbolic_float(obj: torch.SymFloat) -> str:
 @_format_argument.register
 def _torch_tensor(obj: torch.Tensor) -> str:
     return f"Tensor({fx_type_utils.from_torch_dtype_to_abbr(obj.dtype)}{_stringify_shape(obj.shape)})"
+
+
+@_format_argument.register
+def _int(obj: int) -> str:
+    return str(obj)
+
+
+@_format_argument.register
+def _float(obj: float) -> str:
+    return str(obj)
+
+
+@_format_argument.register
+def _bool(obj: bool) -> str:
+    return str(obj)
+
+
+@_format_argument.register
+def _registration_symbolic_function(obj: registration.SymbolicFunction) -> str:
+    # TODO: Compact display of `param_schema`.
+    return (
+        f"registration.SymbolicFunction({obj.op_full_name}, is_custom={obj.is_custom})"
+    )
 
 
 @_format_argument.register
