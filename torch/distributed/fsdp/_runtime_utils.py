@@ -818,6 +818,7 @@ def _should_free_in_backward(
     )
 
 
+@no_type_check
 def _reduce_grad(state: _FSDPState, handle: FlatParamHandle):
     flat_param = handle.flat_param
     uses_hybrid_sharded_strategy = handle._sharding_strategy in (
@@ -856,6 +857,7 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle):
     return grad_to_offload
 
 
+@no_type_check
 def _get_reduce_scatter_tensors(
     state: _FSDPState, unsharded_grad: torch.Tensor
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -868,6 +870,7 @@ def _get_reduce_scatter_tensors(
     return padded_unsharded_grad, new_sharded_grad
 
 
+@no_type_check
 def _accumulate_sharded_grad(
     state: _FSDPState,
     handle: FlatParamHandle,
@@ -888,6 +891,7 @@ def _accumulate_sharded_grad(
     return grad_to_offload
 
 
+@no_type_check
 def _reduce_grad_no_shard(state: _FSDPState, handle: FlatParamHandle) -> torch.Tensor:
     flat_param = handle.flat_param
     if state._comm_hook is None:  # default path
@@ -904,6 +908,7 @@ def _reduce_grad_no_shard(state: _FSDPState, handle: FlatParamHandle) -> torch.T
     return grad_to_offload
 
 
+@no_type_check
 def _offload_grad(
     state: _FSDPState,
     handle: FlatParamHandle,
@@ -929,6 +934,7 @@ def _offload_grad(
     _no_dispatch_record_stream(grad_to_offload.data, state._post_backward_stream)
 
 
+@no_type_check
 def _post_backward_use_sharded_grad_views(handle: FlatParamHandle):
     if not handle._use_orig_params:
         return
