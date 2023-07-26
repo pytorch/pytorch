@@ -9,7 +9,7 @@ from torch._numpy.testing import (
     assert_equal,
 )
 
-from .. import _util
+from torch._numpy import _util
 
 
 class TestFlatnonzero:

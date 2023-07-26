@@ -2,14 +2,9 @@
 # do not edit manually!
 
 import numpy as np
-import torch
 
-from .._ufuncs import *
-from ..testing import assert_allclose
-
-
-def test_absolute():
-    assert_allclose(np.absolute(0.5), absolute(0.5), atol=1e-14, check_dtype=False)
+from torch._numpy._ufuncs import *
+from torch._numpy.testing import assert_allclose
 
 
 def test_absolute():
