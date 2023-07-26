@@ -885,12 +885,12 @@ def allclose(a: ArrayLike, b: ArrayLike, rtol=1e-05, atol=1e-08, equal_nan=False
 
 def _tensor_equal(a1, a2, equal_nan=False):
     # Implementation of array_equal/array_equiv.
+    if a1.shape != a2.shape:
+        return False
+    cond = a1 == a2
     if equal_nan:
-        return (a1.shape == a2.shape) and (
-            (a1 == a2) | (torch.isnan(a1) & torch.isnan(a2))
-        ).all().item()
-    else:
-        return torch.equal(a1, a2)
+        cond = cond | (torch.isnan(a1) & torch.isnan(a2))
+    return cond.all().item()
 
 
 def array_equal(a1: ArrayLike, a2: ArrayLike, equal_nan=False):
@@ -1409,10 +1409,12 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
 
     tensors = _util.typecast_tensors(tensors, target_dtype, casting)
 
+    from torch.backends import opt_einsum
     try:
         # set the global state to handle the optimize=... argument, restore on exit
-        old_strategy = torch.backends.opt_einsum.strategy
-        torch.backends.opt_einsum.strategy = optimize
+        if opt_einsum.is_available():
+            old_strategy = torch.backends.opt_einsum.strategy
+            torch.backends.opt_einsum.strategy = optimize
 
         if sublist_format:
             # recombine operands
@@ -1429,7 +1431,8 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
             result = torch.einsum(subscripts, *tensors)
 
     finally:
-        torch.backends.opt_einsum.strategy = old_strategy
+        if opt_einsum.is_available():
+            torch.backends.opt_einsum.strategy = old_strategy
 
     result = maybe_copy_to(out, result)
     return wrap_tensors(result)
