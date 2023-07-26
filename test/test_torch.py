@@ -3279,9 +3279,9 @@ else:
                         if reduce == 'prod':
                             expected[idx[i]] *= src[i]
                         elif reduce == 'amin':
-                            torch.minimum(expected[idx[i]], src[i], out=expected[idx[i].item()])
+                            torch.minimum(expected[idx[i]], src[i], out=expected[idx[i]])
                         elif reduce == 'amax':
-                            torch.maximum(expected[idx[i]], src[i], out=expected[idx[i].item()])
+                            torch.maximum(expected[idx[i]], src[i], out=expected[idx[i]])
                         else:
                             expected[idx[i]] += src[i]
                     if reduce == 'mean':

@@ -18742,13 +18742,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.bucketize",
         torch_opinfo_name="bucketize",
-        supports_nvfuser=False,
-        # skips=(
-        #     # RuntimeError: It appears that you're trying to get value out of a tracing tensor with
-        #     #  aten._local_scalar_dense.default - erroring out! [...]
-        #     # triggered by mid_val = boundaries[mid]
-        #     DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_executor"),
-        # )
     ),
     PythonRefInfo(
         "_refs.equal",
