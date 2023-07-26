@@ -4862,18 +4862,6 @@ def _cudnn_rnn(
     return output, hy, cy, reserve, weight_buf
 
 
-@register_meta(torch.ops.mkldnn._reorder_mkldnn_rnn_layer_weight.default)
-def reorder_mkldnn_rnn_layer_weight(
-    weight0, weight1, weight2, weight3, input_size=None
-):
-    return (
-        torch.empty_like(weight0),
-        torch.empty_like(weight1),
-        torch.empty_like(weight2),
-        torch.empty_like(weight3),
-    )
-
-
 @register_meta(aten.mkldnn_rnn_layer.default)
 def mkldnn_rnn_layer(
     input,
