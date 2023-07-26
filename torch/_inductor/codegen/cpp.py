@@ -395,7 +395,6 @@ def get_current_node_opt_ctx() -> OptimizationContext:
     return get_opt_ctx(V.interpreter.current_node)
 
 
-@functools.lru_cache(None)
 def get_computation_dtype(dtype) -> torch.dtype:
     opt_ctx: OptimizationContext = get_current_node_opt_ctx()
     assert opt_ctx
