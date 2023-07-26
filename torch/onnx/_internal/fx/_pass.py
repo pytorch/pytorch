@@ -8,10 +8,11 @@ import difflib
 import io
 import sys
 
-from typing import Any, Callable
+from typing import Any, Callable, Optional, Tuple
 
 import torch
 import torch.fx
+from torch._subclasses import fake_tensor
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import diagnostics, onnxfunction_dispatcher
 
@@ -147,8 +148,14 @@ class Transform(abc.ABC):
     Example: TODO(bowbao): Fill example once more overrideable methods are added.
     """
 
-    """The module to be transformed."""
+    diagnostic_context: diagnostics.DiagnosticContext
+    """The diagnostic context for recording diagnostics."""
+
     module: torch.fx.GraphModule
+    """The module to be transformed."""
+
+    fake_mode: Optional[fake_tensor.FakeTensorMode]
+    """The existing fake mode detected from `self.module`."""
 
     def __init__(
         self,
@@ -161,8 +168,28 @@ class Transform(abc.ABC):
             diagnostic_context: The diagnostic context for recording diagnostics.
             module: The module to be transformed.
         """
-        self.module = module
         self.diagnostic_context = diagnostic_context
+        self.module = module
+        self.fake_mode = self._detect_fake_mode()
+
+    def _detect_fake_mode(self) -> Optional[fake_tensor.FakeTensorMode]:
+        """Detect fake mode from the graph.
+
+        Scan through all nodes in graph and their meta['val'] to detect fake mode.
+        """
+        fake_tensors = [node.meta.get("val") for node in self.module.graph.nodes]
+        return torch._dynamo.utils.detect_fake_mode(fake_tensors)
+
+    def _maybe_fakefy_args(
+        self, fake_mode: Optional[fake_tensor.FakeTensorMode], *args: Any
+    ) -> Tuple[Any, ...]:
+        if fake_mode is None:
+            return args
+        # NB: This should hit the cache if tensors were fakefied before.
+        # E.g., when the fx graph is produced by Dynamo.
+        return tuple(
+            fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t for t in args
+        )
 
     @abc.abstractmethod
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:

@@ -6,6 +6,7 @@ from .fully_sharded_data_parallel import (
     FullOptimStateDictConfig,
     FullyShardedDataParallel,
     LocalStateDictConfig,
+    LocalOptimStateDictConfig,
     MixedPrecision,
     OptimStateKeyType,
     ShardedStateDictConfig,
