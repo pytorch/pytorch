@@ -2,7 +2,7 @@
 astunparse
 expecttest
 hypothesis
-numpy
+numpy ; python_version < "3.12"
 psutil
 pyyaml
 requests
@@ -14,3 +14,4 @@ filelock
 networkx
 jinja2
 fsspec
+setuptools ; python_version >= "3.12"

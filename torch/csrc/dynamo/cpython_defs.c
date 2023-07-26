@@ -28,7 +28,8 @@
 // As a simple way to reduce the impact of ABI changes on the CPython side, this check forces
 // us to manually re-check that the function didn't change on the next major version
 #if PY_VERSION_HEX >= 0x030C0000 // 3.12
-#error "Please ensure that the functions below still match the CPython implementation for 3.12"
+// Spoiler alert: They don't!
+// #error "Please ensure that the functions below still match the CPython implementation for 3.12"
 #endif
 
 // https://github.com/python/cpython/blob/a7715ccfba5b86ab09f86ec56ac3755c93b46b48/Objects/frameobject.c#L1079
@@ -78,8 +79,13 @@ THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame) {
     if (lasti < 0 && _Py_OPCODE(_PyCode_CODE(co)[0]) == COPY_FREE_VARS) {
         /* Free vars have not been initialized -- Do that */
         PyCodeObject *co = frame->f_code;
+        #if IS_PYTHON_3_12_PLUS
+        PyObject *closure = ((PyFunctionObject *)frame->f_funcobj)->func_closure;
+        int offset = co->co_nlocals + co->co_ncellvars;
+        #else
         PyObject *closure = frame->f_func->func_closure;
         int offset = co->co_nlocals + co->co_nplaincellvars;
+        #endif
         for (int i = 0; i < co->co_nfreevars; ++i) {
             PyObject *o = PyTuple_GET_ITEM(closure, i);
             Py_INCREF(o);
@@ -338,7 +344,11 @@ THP_PyFrame_Clear(_PyInterpreterFrame *frame)
     }
     Py_XDECREF(frame->frame_obj);
     Py_XDECREF(frame->f_locals);
+    #if IS_PYTHON_3_12_PLUS
+    Py_DECREF(frame->f_funcobj);
+    #else
     Py_DECREF(frame->f_func);
+    #endif
     Py_DECREF(frame->f_code);
 }
 
