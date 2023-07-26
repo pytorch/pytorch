@@ -771,6 +771,9 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             in_dims_v, arg_spec
         )
 
+        # We want to pass unbatched input to speculate subgraph.
+        # So we loop through the inputs and select only one sample
+        # from the batch.
         unbatched_input_args = []
         for arg, in_dim in zip(flat_args, broadcasted_in_dims):
             if in_dim is not None:
@@ -782,6 +785,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             else:
                 unbatched_input_args.append(arg)
 
+        # trace through the function with unbatched inputs.
         _, body_graph, body_lifted_freevars = speculate_subgraph(
             tx,
             fn,
