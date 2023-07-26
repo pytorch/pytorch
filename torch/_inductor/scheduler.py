@@ -51,7 +51,6 @@ class OutputNode:
 
 def fuse(node1: "BaseSchedulerNode", node2: "BaseSchedulerNode"):
     if node1.is_foreach():
-        assert node2.is_foreach()
         return ForeachKernelSchedulerNode.fuse(node1, node2)
     else:
         return FusedSchedulerNode.fuse(node1, node2)
@@ -59,7 +58,7 @@ def fuse(node1: "BaseSchedulerNode", node2: "BaseSchedulerNode"):
 
 class BaseSchedulerNode:
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer):
-        self.scheduler: "Scheduler" = scheduler
+        self.scheduler: Scheduler = scheduler
         self.node: ir.Buffer = node
         self.users: Optional[List[NodeUser]] = None
         self.inverse_users: List[BaseSchedulerNode] = []
@@ -231,6 +230,9 @@ class BaseSchedulerNode:
     def can_inplace(self, read_dep: dependencies.MemoryDep):
         return False
 
+    def has_side_effects(self):
+        return False
+
     def allocate(self):
         if not self.node.should_allocate():
             return
@@ -264,7 +266,7 @@ class BaseSchedulerNode:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
                     read.name
                 )
-                if input_node and V.graph.wrapper_code.can_reuse(input_node):
+                if input_node and V.graph.wrapper_code.can_reuse(input_node, self):
                     remaining_uses = [
                         x
                         for x in input_node.users
@@ -361,6 +363,9 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
 
     def is_extern(self):
         return True
+
+    def has_side_effects(self):
+        return hasattr(self.node, "has_side_effects") and self.node.has_side_effects()
 
     def can_inplace(self, read_dep: dependencies.MemoryDep):
         if self.get_aliases() or self.is_template():
@@ -501,21 +506,18 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self.users = None
         self.inverse_users = []
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
-        self.recursive_predecessors = functools.reduce(
-            set.union, [x.recursive_predecessors for x in snodes]
+        self.recursive_predecessors = set.union(
+            *[x.recursive_predecessors for x in snodes]
         )
+
         self.set_read_writes(
-            functools.reduce(
-                dependencies.ReadWrites.merge, [x.read_writes for x in snodes]
-            )
+            dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
         )
-        names = set(self.get_names())
+
         self.unmet_dependencies = {
             dep
-            for dep in functools.reduce(
-                set.union, [x.unmet_dependencies for x in snodes]
-            )
-            if dep.name not in names
+            for dep in set.union(*[x.unmet_dependencies for x in snodes])
+            if dep.name not in self.get_names()
         } - self.read_writes.writes
         self.min_order = min([x.min_order for x in self.snodes])
         self.max_order = max([x.max_order for x in self.snodes])
@@ -529,7 +531,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
     @cache_on_self
     def get_names(self) -> Set[str]:
-        return functools.reduce(set.union, [x.get_names() for x in self.snodes])
+        return set.union(*[x.get_names() for x in self.snodes])
 
     def debug_str_extra(self):
         return (
@@ -551,13 +553,11 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
     @cache_on_self
     def used_buffer_names(self) -> Set[str]:
-        return functools.reduce(set.union, [x.used_buffer_names() for x in self.snodes])
+        return set.union(*[x.used_buffer_names() for x in self.snodes])
 
     @cache_on_self
     def used_or_aliased_buffer_names(self) -> Set[str]:
-        return functools.reduce(
-            set.union, (x.used_or_aliased_buffer_names() for x in self.snodes)
-        )
+        return set.union(*[x.used_or_aliased_buffer_names() for x in self.snodes])
 
     def get_nodes(self) -> List[BaseSchedulerNode]:
         return self.snodes
@@ -623,9 +623,25 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
     @classmethod
     def fuse(cls, node1, node2):
-        fused_nodes = [
-            FusedSchedulerNode.fuse(l, r) for l, r in zip(node1.snodes, node2.snodes)
-        ]
+        assert node1.is_foreach() or node2.is_foreach()
+        if node1.is_foreach() and node2.is_foreach():
+            fused_nodes = [
+                FusedSchedulerNode.fuse(l, r)
+                for l, r in zip(node1.snodes, node2.snodes)
+            ]
+        else:
+            non_foreach_node = node1 if node2.is_foreach() else node2
+            foreach_node = node2 if node2.is_foreach() else node1
+            fused_nodes = []
+            fusion_completed = False
+            for node in foreach_node.snodes:
+                if not fusion_completed and node1.scheduler.can_fuse(
+                    node, non_foreach_node
+                ):
+                    fused_nodes.append(FusedSchedulerNode.fuse(node, non_foreach_node))
+                    fusion_completed = True
+                else:
+                    fused_nodes.append(node)
         return cls(node1.scheduler, fused_nodes)
 
     def __init__(self, scheduler: "Scheduler", nodes: List[SchedulerNode]):
@@ -633,6 +649,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         # TODO: ensure all buffers are on the same device in lowerings
         self.group = (nodes[0].get_device(), 0)
         self.snodes = nodes
+        self.node_set = set(nodes)
         self.origins = set()
 
     def mark_run(self):
@@ -656,10 +673,17 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         """Returns all nodes contained in this kernel, unpacking fused nodes into their constituent scheduler nodes."""
         return list(itertools.chain(*[x.get_nodes() for x in self.snodes]))
 
-    def can_fuse(self, other: "ForeachKernelSchedulerNode"):
-        return len(self.snodes) == len(other.snodes) and all(
-            self.scheduler.can_fuse(l, r) for l, r in zip(self.snodes, other.snodes)
-        )
+    def can_fuse(self, other: SchedulerNode):
+        if other.is_foreach():
+            return len(self.snodes) == len(other.snodes) and all(
+                self.scheduler.can_fuse(l, r) for l, r in zip(self.snodes, other.snodes)
+            )
+        else:
+            # the == 1 check is overly conservative, but this is meant purely for epilogue copy fusion
+            # at the moment
+            return len(other.inverse_users) == 1 and any(
+                self.scheduler.can_fuse(l, other) for l in self.snodes
+            )
 
 
 def pick_loop_order(stride_lengths, sizes, priority_idx=()):
@@ -916,7 +940,10 @@ class Scheduler:
         while again:
             updated_nodes = []
             for node in self.nodes:
-                if any(n.get_name() not in V.graph.removed_buffers for n in node.users):
+                if (
+                    any(n.get_name() not in V.graph.removed_buffers for n in node.users)
+                    or node.has_side_effects()
+                ):
                     updated_nodes.append(node)
                 else:
                     # dead code
@@ -1023,8 +1050,12 @@ class Scheduler:
 
                     if self.can_fuse(node1, node2):
                         possible_fusions.append(key)
-                    elif node2.is_template() and self.can_fuse(node2, node1):
-                        # epilogue fusions are order dependent
+                    elif (
+                        node2.is_template()
+                        or node2.is_foreach()
+                        and self.can_fuse(node2, node1)
+                    ):
+                        # foreach fusions and epilogue fusions are order dependent
                         possible_fusions.append((node2, node1))
 
         buffer_names_grouping = collections.defaultdict(list)
@@ -1075,6 +1106,33 @@ class Scheduler:
         ) - combined_names
         return any(check(self.name_to_fused_node[n]) for n in combined_predecessors)
 
+    def can_fusion_increase_peak_memory(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ):
+        """
+        This function prevents fusion for nodes that can increase memory
+        footprint. This problem is more common in horizontal fusion, where nodes
+        that are far apart in the original order get fused, lengthening the live
+        intervals of tensors. This is very evident in models with activation
+        checkpointing, where the recomputed nodes from different checkpointed
+        regions get fused and significantly increase the memory footprint.
+
+        The current attempt is a quick, possibly hacky, heuristic to prevent the
+        fusion of nodes that are far away in the original order.
+
+        A better but difficult to implement heursitic would be to use live
+        intervals of the buffers, find region of peak pressure in the original
+        program and prevent fusion that crosses that peak region. We might need
+        special care or good approximation in this implementation, as fusion of
+        node changes live intervals, and re-computing live intervals and peak
+        memory after each fusion can introduce large compilation overhead.
+        """
+        proximity_score = max(
+            abs(node1.min_order - node2.max_order),
+            abs(node2.min_order - node1.max_order),
+        )
+        return proximity_score > 64
+
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """
         Determine if it is possible to combine node1 and node2 into a
@@ -1092,8 +1150,10 @@ class Scheduler:
             and not node2.is_template()
         ):
             return False
+
         if node2.get_names() & node1.recursive_predecessors:
             return False  # node2 must go before node1
+
         if node2.is_template():
             return False  # only epilogues
         if node1.is_template() and (
@@ -1101,11 +1161,6 @@ class Scheduler:
             or node2.is_reduction()
             or not config.epilogue_fusion
         ):
-            return False
-
-        node1_is_foreach = isinstance(node1, ForeachKernelSchedulerNode)
-        node2_is_foreach = isinstance(node2, ForeachKernelSchedulerNode)
-        if node1_is_foreach is not node2_is_foreach:
             return False
 
         device = node1.get_device()
@@ -1118,7 +1173,11 @@ class Scheduler:
         ):
             return False  # heuristic not needed for correctness
 
-        if len(node1.get_nodes()) + len(node2.get_nodes()) > config.max_fusion_size:
+        if (
+            not node1.is_foreach()
+            and not node2.is_foreach()
+            and len(node1.get_nodes()) + len(node2.get_nodes()) > config.max_fusion_size
+        ):
             return False  # heuristic not needed for correctness
 
         if node1.get_names() & node2.recursive_predecessors:
@@ -1126,9 +1185,11 @@ class Scheduler:
             if not self.can_fuse_vertical(node1, node2):
                 return False
             return self.get_backend(device).can_fuse_vertical(node1, node2)
-        elif node1_is_foreach and node2_is_foreach:
+        elif node1.is_foreach() and node2.is_foreach():
             return False
         else:  # nodes don't depend on each other, but may have common reads
+            if self.can_fusion_increase_peak_memory(node1, node2):
+                return False
             return self.get_backend(device).can_fuse_horizontal(node1, node2)
 
     def can_fuse_vertical(self, node1, node2):
@@ -1224,7 +1285,11 @@ class Scheduler:
 
     def free_buffers(self):
         """Free any buffers that are no longer needed"""
-        for name in sorted(self.buffer_names_to_free - V.graph.removed_buffers):
+        for name in sorted(
+            self.buffer_names_to_free
+            - V.graph.removed_buffers
+            - V.graph.wrapper_code.freed
+        ):
             if name in self.name_to_node:
                 node = self.name_to_node[name]
                 if node.can_free():
@@ -1259,6 +1324,8 @@ class Scheduler:
         for name in names_to_remove:
             if name in V.kernel.args.inplace_buffers:
                 buf = V.kernel.args.inplace_buffers[name]
+                if buf == "REMOVED":
+                    continue
                 remove = all(n in names_to_remove for n in buf.other_names)
                 if remove:
                     self.remove_inplace_buffer(name)

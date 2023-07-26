@@ -6,7 +6,6 @@ import torch
 from torch import Tensor
 from torch._inductor import utils
 from torch.utils._mode_utils import no_dispatch
-from ..._dynamo.utils import counters
 
 from ..pattern_matcher import inference_graph, register_replacement, training_graph
 
@@ -165,7 +164,10 @@ def get_flops(dtype):
 def is_mm_compute_bound(M, K, N, dtype):
     from triton.testing import get_dram_gbps
 
-    arithmetic_intensity = (M * N * K) / (M * K + N * K + M * N)
+    denominator = M * K + N * K + M * N
+    if denominator == 0:
+        return False
+    arithmetic_intensity = (M * N * K) / denominator
 
     # Fails with AMD
     try:
@@ -454,6 +456,3 @@ def _pad_mm_init():
             extra_check=extra_check,
             scalar_workaround=workaround,
         )
-
-    # copy pasta - needed ?
-    counters["inductor"].clear()  # clear view matches encountered during mm tracing

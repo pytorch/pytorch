@@ -22,15 +22,15 @@ class Adamax(Optimizer):
         differentiable: bool = False,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
+            raise ValueError(f"Invalid beta parameter at index 0: {betas[0]}")
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
+            raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
         defaults = dict(
             lr=lr,
@@ -156,7 +156,7 @@ Adamax.__doc__ = r"""Implements Adamax algorithm (a variant of Adam based on inf
        \end{aligned}
 
     For further details regarding the algorithm we refer to `Adam: A Method for Stochastic Optimization`_.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -166,14 +166,14 @@ Adamax.__doc__ = r"""Implements Adamax algorithm (a variant of Adam based on inf
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        {foreach}
-        {maximize}
-        {differentiable}
+        {_foreach_doc}
+        {_maximize_doc}
+        {_differentiable_doc}
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
 
-    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
+    """
 
 
 def adamax(
@@ -266,7 +266,7 @@ def _single_tensor_adamax(
             exp_inf = torch.view_as_real(exp_inf)
 
         # Update biased first moment estimate.
-        exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+        exp_avg.lerp_(grad, 1 - beta1)
         # Update the exponentially weighted infinity norm.
         norm_buf = torch.cat(
             [exp_inf.mul_(beta2).unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)], 0
@@ -305,7 +305,7 @@ def _multi_tensor_adamax(
         return
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_infs, state_steps])
-    for grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_infs, grouped_state_steps in grouped_tensors.values():
+    for ((grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_infs, grouped_state_steps), _) in grouped_tensors.values():
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
 
@@ -318,11 +318,14 @@ def _multi_tensor_adamax(
         torch._foreach_add_(grouped_state_steps, 1)
 
         if weight_decay != 0:
-            grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+            if maximize:
+                # Re-use the intermediate memory (device_grads) already allocated for maximize
+                torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
+            else:
+                grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
         # Update biased first moment estimate.
-        torch._foreach_mul_(grouped_exp_avgs, beta1)
-        torch._foreach_add_(grouped_exp_avgs, grouped_grads, alpha=1 - beta1)
+        torch._foreach_lerp_(grouped_exp_avgs, grouped_grads, 1 - beta1)
 
         # Update the exponentially weighted infinity norm.
         torch._foreach_mul_(grouped_exp_infs, beta2)
@@ -332,6 +335,8 @@ def _multi_tensor_adamax(
                 [exp_inf.unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)], 0
             )
             torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
+
         bias_corrections = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
         clr = _stack_if_compiling([-1 * (lr / bias_correction) for bias_correction in bias_corrections])
+
         torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, grouped_exp_infs, clr)

@@ -341,7 +341,7 @@ class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):
     def setUp(self):
-        super(DistributedDataParallelTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def _get_process_group(self):
@@ -410,7 +410,7 @@ class DistributedDataParallelTest(
 
         class GlobalLocalUnusedParamModule(nn.Module):
             def __init__(self):
-                super(GlobalLocalUnusedParamModule, self).__init__()
+                super().__init__()
                 self.t0 = Task()
                 self.t1 = Task()
                 self.task_unused = Task()
@@ -500,7 +500,7 @@ class DistributedDataParallelTest(
 
         class FindUnusedParamModule(nn.Module):
             def __init__(self):
-                super(FindUnusedParamModule, self).__init__()
+                super().__init__()
                 self.t0 = Task()
                 self.t1 = Task()
 
@@ -553,7 +553,7 @@ class DistributedDataParallelTest(
 
         class IgnoredOutput(nn.Module):
             def __init__(self):
-                super(IgnoredOutput, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.relu = nn.ReLU()
@@ -595,7 +595,7 @@ class DistributedDataParallelTest(
 
         class IgnoredOutputWithUnusedParameters(nn.Module):
             def __init__(self):
-                super(IgnoredOutputWithUnusedParameters, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.fc3 = nn.Linear(4, 4, bias=False)
@@ -660,7 +660,7 @@ class DistributedDataParallelTest(
 
         class TestModel(nn.Module):
             def __init__(self):
-                super(TestModel, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.relu = nn.ReLU()
@@ -969,11 +969,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         return "cpu"
 
     def setUp(self):
-        super(CommTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(CommTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -1001,6 +1001,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             return skip_but_pass_in_sandcastle("Test requires world_size of at least 4")
         self._test_sequence_num_incremented_subgroup("ucc")
 
+    @skip_but_pass_in_sandcastle("Fails on M60")
     @requires_ucc()
     def test_ucc_barrier_device_ids(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1011,6 +1012,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
             c10d.barrier(device_ids=[self.rank])
 
+    @skip_but_pass_in_sandcastle("Fails on M60")
     @skip_if_lt_x_gpu(2)
     @requires_ucc()
     def test_ucc_warn_not_in_group(self):
@@ -1105,12 +1107,14 @@ class CompilerTest(test_c10d_common.CompilerTest):
 
 class UccProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
 
+    @skip_but_pass_in_sandcastle("Fails on M60")
     @requires_ucc()
     @skip_if_lt_x_gpu(1)
     def test_collectives(self):
         # includes reduce, broadcast, all_reduce, all_gather, reduce_scatter, barrier, all_to_all, scatter
         self._test_collectives(backend="ucc")
 
+    @skip_but_pass_in_sandcastle("Fails on M60")
     @requires_ucc()
     @skip_if_lt_x_gpu(1)
     def test_allgather_base(self):

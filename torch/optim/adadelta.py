@@ -22,13 +22,13 @@ class Adadelta(Optimizer):
         differentiable: bool = False,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= rho <= 1.0:
-            raise ValueError("Invalid rho value: {}".format(rho))
+            raise ValueError(f"Invalid rho value: {rho}")
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
         defaults = dict(
             lr=lr,
@@ -148,7 +148,7 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
        \end{aligned}
 
     For further details regarding the algorithm we refer to `ADADELTA: An Adaptive Learning Rate Method`_.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -159,14 +159,14 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
         lr (float, optional): coefficient that scale delta before it is applied
             to the parameters (default: 1.0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        {foreach}
-        {maximize}
-        {differentiable}
+        {_foreach_doc}
+        {_maximize_doc}
+        {_differentiable_doc}
 
     .. _ADADELTA\: An Adaptive Learning Rate Method:
         https://arxiv.org/abs/1212.5701
 
-    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
+    """
 
 
 def adadelta(
@@ -276,12 +276,16 @@ def _multi_tensor_adadelta(
         return
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, square_avgs, acc_deltas])
-    for device_params, device_grads, device_square_avgs, device_acc_deltas in grouped_tensors.values():
+    for ((device_params, device_grads, device_square_avgs, device_acc_deltas), _) in grouped_tensors.values():
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
 
         if weight_decay != 0:
-            device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
+            # Re-use the intermediate memory (device_grads) already allocated for maximize
+            if maximize:
+                torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
+            else:
+                device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
 
         torch._foreach_mul_(device_square_avgs, rho)
         torch._foreach_addcmul_(device_square_avgs, device_grads, device_grads, value=1 - rho)

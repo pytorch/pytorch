@@ -53,6 +53,12 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return size_;
   }
 
+  // Returns an unique opaque ID of this backend that can be used to correlate
+  // with its collectives.
+  int64_t getID() const {
+    return reinterpret_cast<std::intptr_t>(this);
+  }
+
   virtual void startCoalescing() {
     TORCH_CHECK(
         false,
@@ -84,6 +90,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str("Backend ", getBackendName(), " does not support allreduce"));
+  }
+
+  virtual c10::intrusive_ptr<Work> allreduce_sparse(
+      std::vector<at::Tensor>& /* tensors */,
+      const AllreduceOptions& /* opts */ = AllreduceOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), "does not support allreduce"));
   }
 
   virtual c10::intrusive_ptr<Work> allreduce_coalesced(
@@ -198,6 +212,21 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ",
             getBackendName(),
             " does not support _reduce_scatter_base"));
+  }
+
+  // This function is a coalesced version of `reduce_scatter_tensor` (currently
+  // still named as `_reduce_scatter_base`). Each tensor in the vector corresponds to
+  // an input/output of one `reduce_scatter_tensor` operation.
+  virtual c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+      std::vector<at::Tensor>& /* outputs */,
+      std::vector<at::Tensor>& /* inputs */,
+      const ReduceScatterOptions& /* opts */ = ReduceScatterOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support reduce_scatter_tensor_coalesced"));
   }
 
   virtual c10::intrusive_ptr<Work> alltoall_base(

@@ -83,24 +83,16 @@ def _push_mode(mode, k: Optional[DispatchKey] = None):
             for key in ks:
                 op._uncache_dispatch(key)
         push_mode_for_key(k, mode)
-    # Note [Per-Dispatch-Key Modes Must Be Reentrant]
-    # The idea here is that we are allowed to push modes onto any dispatch key's mode stack, but:
-    # (1) We **always** push the mode onto the python mode stack. Operators can have fallthrough
-    #     kernels registered to any dispatch key, so we use the Python mode stack as a catchall,
-    #     to guarantee that every op will be seen by our mode.
-    # (2) We expect the mode that you push to handle being re-entrant: If we end up invoking the mode
-    #     at both the Autograd key and the Python key, nothing bad should happen.
-    #     The main use case for this is pre-autograd tracing with TorchProxyDispatchMode.
-    _push_on_torch_dispatch_stack(mode)
+    else:
+        _push_on_torch_dispatch_stack(mode)
 
 
 def _pop_mode(k: Optional[DispatchKey] = None):
-    m = _pop_torch_dispatch_stack()
     if k is not None:
         from torch._ops import pop_mode_for_key
-        tmp = pop_mode_for_key(k)
-        assert m is tmp
-    return m
+        return pop_mode_for_key(k)
+    else:
+        return _pop_torch_dispatch_stack()
 
 
 @contextlib.contextmanager
@@ -128,3 +120,20 @@ class BaseTorchDispatchMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
         return func(*args, **kwargs)
+
+
+def is_traceable_wrapper_subclass(t):
+    # In order for a tensor subclass to support TorchDispatchMode-style tracing in PT2,
+    # It must implement two magic methods: __tensor_flatten__ and __tensor_unflatten__.
+
+    is_subclass = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
+    return is_subclass and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
+
+def transform_subclass(t, callback):
+    assert is_traceable_wrapper_subclass(t), f"Expects traceable wrapper subclass but got {type(t)}"
+    # convert the tensor subclass into its constituent dense tensors,
+    # and apply a transformation to each dense tensor.
+    from torch.utils._pytree import tree_map_only
+    flattened_tensors, ctx = type(t).__tensor_flatten__(t)
+    transformed_tensors = tree_map_only(torch.Tensor, callback, flattened_tensors)
+    return type(t).__tensor_unflatten__(transformed_tensors, ctx)

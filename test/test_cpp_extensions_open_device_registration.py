@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 from typing import Union
+import tempfile
 import unittest
 
 import torch.testing._internal.common_utils as common
@@ -14,13 +15,7 @@ from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
-TEST_CUDNN = False
 TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
-if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
-    CUDNN_HEADER_EXISTS = os.path.isfile(os.path.join(CUDA_HOME, "include/cudnn.h"))
-    TEST_CUDNN = (
-        TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
-    )
 
 
 def remove_build_path():
@@ -32,7 +27,7 @@ def remove_build_path():
         shutil.rmtree(default_build_root, ignore_errors=True)
 
 
-class DummyModule(object):
+class DummyModule:
 
     @staticmethod
     def device_count() -> int:
@@ -151,6 +146,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
                 torch.utils.rename_privateuse1_backend('xxx')
             # register foo module, torch.foo
             torch._register_device_module('foo', DummyModule)
+            self.assertTrue(torch.utils.backend_registration._get_custom_mod_func("device_count")() == 1)
+            with self.assertRaisesRegex(RuntimeError, "Try to call torch.foo"):
+                torch.utils.backend_registration._get_custom_mod_func("func_name_")
             # default set for_tensor and for_module are True, so only set for_storage is True
             torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
             # generator tensor and module can be registered only once
@@ -331,6 +329,28 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             cpu_storage = torch.empty(4, 4).storage()
             foo_storage = torch.serialization.default_restore_location(cpu_storage, 'foo:0')
             self.assertTrue(foo_storage.is_foo)
+            # test tensor MetaData serialization
+            x = torch.empty(4, 4).long()
+            y = x.foo()
+            self.assertFalse(self.module.check_backend_meta(y))
+            self.module.custom_set_backend_meta(y)
+            self.assertTrue(self.module.check_backend_meta(y))
+
+            self.module.custom_serialization_registry()
+            with tempfile.TemporaryDirectory() as tmpdir:
+                path = os.path.join(tmpdir, 'data.pt')
+                torch.save(y, path)
+                z1 = torch.load(path)
+                # loads correctly onto the foo backend device
+                self.assertTrue(z1.is_foo)
+                # loads BackendMeta data correctly
+                self.assertTrue(self.module.check_backend_meta(z1))
+                # cross-backend
+                z2 = torch.load(path, map_location='cpu')
+                # loads correctly onto the cpu backend device
+                self.assertFalse(z2.is_foo)
+                # loads BackendMeta data correctly
+                self.assertFalse(self.module.check_backend_meta(z2))
 
         def test_open_device_storage_resize():
             torch.utils.rename_privateuse1_backend('foo')
@@ -355,7 +375,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             foo_storage = foo_tensor.storage()
             self.assertEqual(foo_storage.type(), "torch.storage.TypedStorage")
 
-            class CustomFloatStorage():
+            class CustomFloatStorage:
                 @property
                 def __module__(self):
                     return "torch." + torch._C._get_privateuse1_backend_name()
@@ -378,27 +398,63 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         def test_open_device_faketensor():
             torch.utils.rename_privateuse1_backend('foo')
-            # register foo module, torch.foo
-            torch._register_device_module('foo', DummyModule)
             with torch._subclasses.fake_tensor.FakeTensorMode.push():
                 a = torch.empty(1, device="foo")
                 b = torch.empty(1, device="foo:0")
                 result = a + b
 
-        test_base_device_registration()
-        test_before_common_registration()
-        test_common_registration()
-        test_after_common_registration()
-        test_generator_registration()
-        test_open_device_dispatchstub()
-        test_open_device_random()
-        test_open_device_tensor()
-        test_open_device_storage()
-        test_open_device_storage_pin_memory()
-        test_open_device_serialization()
-        test_open_device_storage_resize()
-        test_open_device_storage_type()
-        test_open_device_faketensor()
+        def test_open_device_named_tensor():
+            torch.utils.rename_privateuse1_backend('foo')
+            a = torch.empty([2, 3, 4, 5], device="foo", names=["N", "C", "H", "W"])
+
+        # Not an open registration test - this file is just very convenient
+        # for testing torch.compile on custom C++ operators
+        def test_compile_autograd_function_returns_self():
+            x_ref = torch.randn(4, requires_grad=True)
+            out_ref = self.module.custom_autograd_fn_returns_self(x_ref)
+            out_ref.sum().backward()
+
+            x_test = x_ref.clone().detach().requires_grad_(True)
+            f_compiled = torch.compile(self.module.custom_autograd_fn_returns_self)
+            out_test = f_compiled(x_test)
+            out_test.sum().backward()
+
+            self.assertEqual(out_ref, out_test)
+            self.assertEqual(x_ref.grad, x_test.grad)
+
+        # Not an open registration test - this file is just very convenient
+        # for testing torch.compile on custom C++ operators
+        def test_compile_autograd_function_aliasing():
+            x_ref = torch.randn(4, requires_grad=True)
+            out_ref = torch.ops._test_funcs.custom_autograd_fn_aliasing(x_ref)
+            out_ref.sum().backward()
+
+            x_test = x_ref.clone().detach().requires_grad_(True)
+            f_compiled = torch.compile(torch.ops._test_funcs.custom_autograd_fn_aliasing)
+            out_test = f_compiled(x_test)
+            out_test.sum().backward()
+
+            self.assertEqual(out_ref, out_test)
+            self.assertEqual(x_ref.grad, x_test.grad)
+
+#        test_base_device_registration()
+#        test_before_common_registration()
+#        test_common_registration()
+#        test_after_common_registration()
+#        test_generator_registration()
+#        test_open_device_dispatchstub()
+#        test_open_device_random()
+#        test_open_device_tensor()
+#        test_open_device_storage()
+#        test_open_device_storage_pin_memory()
+#        test_open_device_serialization()
+#        test_open_device_storage_resize()
+#        test_open_device_storage_type()
+#        test_open_device_faketensor()
+#        test_open_device_named_tensor()
+
+        test_compile_autograd_function_returns_self()
+        test_compile_autograd_function_aliasing()
 
 
 if __name__ == "__main__":

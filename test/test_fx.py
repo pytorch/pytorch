@@ -153,6 +153,10 @@ class Foo:  # noqa: B209
         self.a = a
         self.b = b
 
+class Add(torch.nn.Module):
+    def forward(self, x):
+        return x + x
+
 @torch.fx.has_side_effect
 @torch.fx.wrap
 def side_effect_func(x: torch.Tensor):
@@ -239,6 +243,14 @@ class TestFX(JitTestCase):
 
         x = torch.randn(5, 3)
         torch.testing.assert_close(new_instance(x), torch.relu(x))
+
+    def test_informative_co_filename(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, a):
+                return a * 2
+
+        gm = symbolic_trace(MyModule())
+        self.assertIn(os.path.basename(__file__), gm.forward.__code__.co_filename)
 
     def test_custom_import(self):
         graph = torch.fx.Graph()
@@ -1273,7 +1285,7 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(st)
         traced.graph.lint()
         stringed = str(traced.graph)
-        for s in ['args', 'kwargs', '#users']:
+        for s in ['args', 'kwargs', 'num_users']:
             assert s in stringed
 
     def test_custom_proxy_type(self):
@@ -3478,7 +3490,7 @@ class TestFX(JitTestCase):
 
         def f_sum_dict(x):
             out = 0
-            for k, v in x.items():
+            for v in x.values():
                 out += v
             return out
 
@@ -4068,6 +4080,18 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                 found = True
         self.assertTrue(found)
 
+    def test_preserve_unused_attr_after_unpickle(self):
+        gm = torch.fx.symbolic_trace(Add())
+        gm.add_submodule("foo", Add())
+        gm.register_buffer("dummy_buffer", torch.empty(1))
+        gm.register_parameter("dummy_parameter", torch.nn.Parameter(torch.empty(1)))
+        b = io.BytesIO()
+        torch.save(gm, b)
+        b.seek(0)
+        reload_gm = torch.load(b)
+        self.assertTrue(hasattr(reload_gm, "foo"))
+        self.assertTrue(hasattr(reload_gm, "dummy_buffer"))
+        self.assertTrue(hasattr(reload_gm, "dummy_parameter"))
 
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):
@@ -4278,7 +4302,7 @@ class TestFunctionalTracing(JitTestCase):
                 try:
                     sig = inspect.signature(fn)
                     has_tensor_arg = False
-                    for arg, param in sig.parameters.items():
+                    for param in sig.parameters.values():
                         if isinstance(param.annotation, type) and issubclass(param.annotation, torch.Tensor):
                             has_tensor_arg = True
                     if not has_tensor_arg:

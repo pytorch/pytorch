@@ -44,16 +44,14 @@ def numpy_random(dtype, *shapes):
 def set_omp_threads(num_threads):
     existing_value = os.environ.get('OMP_NUM_THREADS', '')
     if existing_value != '':
-        print("Overwriting existing OMP_NUM_THREADS value: {}; Setting it to {}.".format(
-            existing_value, num_threads))
+        print(f"Overwriting existing OMP_NUM_THREADS value: {existing_value}; Setting it to {num_threads}.")
     os.environ["OMP_NUM_THREADS"] = str(num_threads)
 
 
 def set_mkl_threads(num_threads):
     existing_value = os.environ.get('MKL_NUM_THREADS', '')
     if existing_value != '':
-        print("Overwriting existing MKL_NUM_THREADS value: {}; Setting it to {}.".format(
-            existing_value, num_threads))
+        print(f"Overwriting existing MKL_NUM_THREADS value: {existing_value}; Setting it to {num_threads}.")
     os.environ["MKL_NUM_THREADS"] = str(num_threads)
 
 
