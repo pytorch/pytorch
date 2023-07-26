@@ -1452,7 +1452,7 @@ void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
 
 
 template <>
-void getrsBatched<float>(HIPBLAS_GETRS_ARGTYPES(float)) {
+void getrsBatched<float>(HIPBLAS_GETRS_BATCHED_ARGTYPES(float)) {
   TORCH_HIPBLAS_CHECK(cublasSgetrsBatched(
       handle,
       trans,
@@ -1468,7 +1468,7 @@ void getrsBatched<float>(HIPBLAS_GETRS_ARGTYPES(float)) {
 }
 
 template <>
-void getrsBatched<double>(HIPBLAS_GETRS_ARGTYPES(double)) {
+void getrsBatched<double>(HIPBLAS_GETRS_BATCHED_ARGTYPES(double)) {
   TORCH_HIPBLAS_CHECK(cublasDgetrsBatched(
       handle,
       trans,
@@ -1485,7 +1485,7 @@ void getrsBatched<double>(HIPBLAS_GETRS_ARGTYPES(double)) {
 
 
 template <>
-void getrsBatched<c10::complex<float>>(HIPBLAS_GETRS_ARGTYPES(c10::complex<float>)) {
+void getrsBatched<c10::complex<float>>(HIPBLAS_GETRS_BATCHED_ARGTYPES(c10::complex<float>)) {
   TORCH_HIPBLAS_CHECK(cublasCgetrsBatched(
       handle,
       trans,
@@ -1501,7 +1501,7 @@ void getrsBatched<c10::complex<float>>(HIPBLAS_GETRS_ARGTYPES(c10::complex<float
 }
 
 template <>
-void getrsBatched<c10::complex<double>>(HIPBLAS_GETRS_ARGTYPES(c10::complex<double>)) {
+void getrsBatched<c10::complex<double>>(HIPBLAS_GETRS_BATCHED_ARGTYPES(c10::complex<double>)) {
   TORCH_HIPBLAS_CHECK(cublasZgetrsBatched(
       handle,
       trans,
@@ -1519,7 +1519,7 @@ void getrsBatched<c10::complex<double>>(HIPBLAS_GETRS_ARGTYPES(c10::complex<doub
 #else
 
 template <>
-void getrsBatched<float>(CUDABLAS_GETRS_ARGTYPES(float)) {
+void getrsBatched<float>(CUDABLAS_GETRS_BATCHED_ARGTYPES(float)) {
   TORCH_CUDABLAS_CHECK(cublasSgetrsBatched(
       handle,
       trans,
@@ -1535,7 +1535,7 @@ void getrsBatched<float>(CUDABLAS_GETRS_ARGTYPES(float)) {
 }
 
 template <>
-void getrsBatched<double>(CUDABLAS_GETRS_ARGTYPES(double)) {
+void getrsBatched<double>(CUDABLAS_GETRS_BATCHED_ARGTYPES(double)) {
   TORCH_CUDABLAS_CHECK(cublasDgetrsBatched(
       handle,
       trans,
@@ -1551,7 +1551,7 @@ void getrsBatched<double>(CUDABLAS_GETRS_ARGTYPES(double)) {
 }
 
 template <>
-void getrsBatched<c10::complex<float>>(CUDABLAS_GETRS_ARGTYPES(c10::complex<float>)) {
+void getrsBatched<c10::complex<float>>(CUDABLAS_GETRS_BATCHED_ARGTYPES(c10::complex<float>)) {
   TORCH_CUDABLAS_CHECK(cublasCgetrsBatched(
       handle,
       trans,
@@ -1567,7 +1567,7 @@ void getrsBatched<c10::complex<float>>(CUDABLAS_GETRS_ARGTYPES(c10::complex<floa
 }
 
 template <>
-void getrsBatched<c10::complex<double>>(CUDABLAS_GETRS_ARGTYPES(c10::complex<double>)) {
+void getrsBatched<c10::complex<double>>(CUDABLAS_GETRS_BATCHED_ARGTYPES(c10::complex<double>)) {
   TORCH_CUDABLAS_CHECK(cublasZgetrsBatched(
       handle,
       trans,
@@ -1902,9 +1902,7 @@ void gelsBatched<c10::complex<float>>(HIPBLAS_GELS_BATCHED_ARGTYPES(c10::complex
       batchSize));
 }
 
-#else
-
-#ifdef CUDART_VERSION
+#elif defined(CUDART_VERSION)
 
 template <>
 void gelsBatched<double>(CUDABLAS_GELS_BATCHED_ARGTYPES(double)) {
@@ -1946,7 +1944,6 @@ void gelsBatched<c10::complex<float>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::comple
       batchSize));
 }
 
-#endif //CUDART_VERSION
 #endif //USE_ROCM
 
 
