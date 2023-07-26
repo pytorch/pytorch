@@ -116,13 +116,11 @@ class TestDispatch(TestCase):
             )
             self.assertMultiLineEqual(
                 expected_state, actual_state,
-                "expected from {}; actual from {}"
-                .format(expected_provenance, actual_provenance)
+                f"expected from {expected_provenance}; actual from {actual_provenance}"
             )
             self.assertMultiLineEqual(
                 expected_table, actual_table,
-                "expected from {}; actual from {}"
-                .format(expected_provenance, actual_provenance)
+                f"expected from {expected_provenance}; actual from {actual_provenance}"
             )
 
         results.setdefault(frozenset(), Result("", "", "hardcoded initial state"))
@@ -179,8 +177,7 @@ class TestDispatch(TestCase):
             else:
                 active_ops.remove(op_ix)
             check_invariants(
-                "running ctors {}, then running dtors {}"
-                .format(ctor_order[:last_ctor + 1], dtor_order[:i + 1])
+                f"running ctors {ctor_order[:last_ctor + 1]}, then running dtors {dtor_order[:i + 1]}"
             )
         return results[set_to_report][0]
 
@@ -785,11 +782,11 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
         impls = C._dispatch_find_dangling_impls()
         self.assertEqual(1, len(impls))
         self.assertEqual(
-            '''\
+            f'''\
 name: __test::foo
 schema: (none)
-CPU: registered at {}:5 :: () -> () [ boxed unboxed ]
-'''.format(extension_path),
+CPU: registered at {extension_path}:5 :: () -> () [ boxed unboxed ]
+''',
             impls[0])
 
     def test_dispatch_print_registrations_for_dispatch_key_invalid(self):

@@ -292,7 +292,10 @@ class OptimizeForInferenceTemplate(TestCase):
             out_eager = mod(x)
             out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
 
-        FileCheck().check_not("native_batch_norm_legit_no_training").run(code[0])
+        self.assertNotIn(
+            "aten._native_batch_norm_legit_no_training(",
+            code[0],
+        )
 
         self.assertEqual(out_optimized_for_infernece, out_eager)
 

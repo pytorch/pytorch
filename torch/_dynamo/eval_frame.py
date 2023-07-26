@@ -57,6 +57,7 @@ from .utils import compile_times
 log = logging.getLogger(__name__)
 
 from torch._dispatch.python import enable_python_dispatcher
+from torch.utils._python_dispatch import _disable_current_modes
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
@@ -160,7 +161,7 @@ def remove_from_cache(f):
     elif hasattr(getattr(f, "forward", None), "__code__"):
         reset_code(f.forward.__code__)
     else:
-        from . import reset
+        from . import reset  # type: ignore[attr-defined]
 
         reset()
         log.warning("could not determine __code__ for %s", f)
@@ -184,15 +185,18 @@ def innermost_fn(fn):
 
 
 @contextlib.contextmanager
-def enable_dynamic(enable: bool = True, export: bool = False):
-    if not enable:
+def enable_dynamic(enable: Optional[bool] = None, export: bool = False):
+    if enable is None:
         yield
-        return
-    # dynamic=True used to mean fully dynamic. However, with automatic dynamic, the default flipped to
-    # deriving dynamism. For back compat, and forward compat for when dynamic=True is default, we take
-    # dynamic=True here to mean "fully dynamic from the start".
-    with config.patch(assume_static_by_default=False):
-        yield
+    elif enable:
+        # Assume everything is dynamic by deafult
+        with config.patch(assume_static_by_default=False):
+            yield
+    else:
+        with config.patch(
+            automatic_dynamic_shapes=False, assume_static_by_default=True
+        ):
+            yield
 
 
 class _TorchDynamoContext:
@@ -205,7 +209,7 @@ class _TorchDynamoContext:
         first_ctx=False,
         *,
         export=False,
-        dynamic=False,
+        dynamic=None,
         compiler_config=None,
     ):
         super().__init__()
@@ -378,7 +382,7 @@ class OptimizeContext(_TorchDynamoContext):
         first_ctx=False,
         *,
         export=False,
-        dynamic=False,
+        dynamic=None,
         compiler_config=None,
     ):
         def on_enter():
@@ -462,7 +466,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                     )
                     return hijacked_callback(frame, cache_size, hooks, frame_state)
 
-        with compile_lock:
+        with compile_lock, _disable_current_modes():
             return callback(frame, cache_size, hooks, frame_state)
 
     catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
@@ -474,7 +478,7 @@ def _optimize_catch_errors(
     hooks: Hooks,
     backend_ctx_ctor=null_context,
     export=False,
-    dynamic=False,
+    dynamic=None,
     compiler_config=None,
 ):
     return OptimizeContext(
@@ -528,7 +532,7 @@ def optimize(
     guard_export_fn=None,
     guard_fail_fn=None,
     disable=False,
-    dynamic=False,
+    dynamic=None,
 ):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -546,7 +550,9 @@ def optimize(
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.
         disable: If True, turn this decorator into a no-op
-        dynamic: If True, turn on dynamic shapes support
+        dynamic: If True, upfront compile as dynamic a kernel as possible.  If False,
+            disable all dynamic shapes support (always specialize).  If None, automatically
+            detect when sizes vary and generate dynamic kernels upon recompile.
 
     Example Usage::
 
@@ -591,7 +597,7 @@ def optimize(
 @patch("torch._dynamo.symbolic_convert.explain", True)
 def explain(f, *args, **kwargs):
     # TODO(voz): Do we want a decorator for this?
-    from . import reset
+    from . import reset  # type: ignore[attr-defined]
 
     reset()
 
@@ -839,7 +845,7 @@ def export(
 
         pre_dispatch (bool): If True, exports a graph with ATen operators,
         but before any logic in the PyTorch dispatcher has run.
-        This can be useful if you want to apply further tranformations on a graph before running it
+        This can be useful if you want to apply further transformations on a graph before running it
         through autograd, autocast, or any other functionalities that are integrated into the dispatcher.
         This flag is only valid if aten_graph=True is set.
         Default is False.
@@ -851,7 +857,7 @@ def export(
 
         fake_mode (fake_tensor.FakeTensorMode): Use this fake_mode instead of creating an internal one.
         Useful during symbolic tracing, when user input is already fakefied. Implies free fake tensors
-        are allowed on `make_fx`.
+        are allowed on `make_fx`. `fake_mode` must contain a valid (not None) `shape_env` instance.
 
         **kwargs: Arbitrary keyword arguments to be passed to the function f.
 
@@ -880,10 +886,14 @@ def export(
     call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
     original_signature = inspect.signature(call_to_inspect)
 
+    assert (
+        not fake_mode or fake_mode.shape_env is not None
+    ), "The specified fake_mode must contain a valid shape_env"
     graph = None
     out_guards = None
     graph_captured_input = None
     graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
+    fake_mode = fake_mode or _guards.detect_fake_mode(args)
     _allow_fake_constant: bool = (
         fake_mode is not None
     )  # Allow fake constants during symbolic tracing
@@ -1164,7 +1174,7 @@ def optimize_assert(
     hooks=Hooks(None, None),
     export=False,
     export_constraints=None,
-    dynamic=False,
+    dynamic=None,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
