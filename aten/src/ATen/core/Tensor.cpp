@@ -89,8 +89,6 @@ std::string TensorBase::toString() const {
       dispatchkey_str = c10::get_privateuse1_backend();
     } else if (dispatchkey == c10::DispatchKey::AutocastPrivateUse1) {
       dispatchkey_str = "Autocast" + c10::get_privateuse1_backend();
-    } else if (dispatchkey == c10::DispatchKey::QuantizedPrivateUse1) {
-      dispatchkey_str = "Quantized" + c10::get_privateuse1_backend();
     } else {
       dispatchkey_str = at::toString(dispatchkey);
     }

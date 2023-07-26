@@ -8,37 +8,37 @@
 namespace at {
 namespace native {
 
-TORCH_API Tensor& quantize_tensor_per_tensor_affine(
+Tensor& quantize_tensor_per_tensor_affine(
     const Tensor& rtensor,
     Tensor& qtensor,
     double scale,
     int64_t zero_point);
-TORCH_API Tensor& quantize_tensor_per_channel_affine(
+Tensor& quantize_tensor_per_channel_affine(
     const Tensor& rtensor,
     Tensor& qtensor,
     Tensor scales,
     Tensor zero_points,
     int64_t axis);
 
-TORCH_API Tensor& quantize_tensor_per_channel_float_qparams(
+Tensor& quantize_tensor_per_channel_float_qparams(
     const Tensor& rtensor,
     Tensor& qtensor,
     Tensor scales,
     Tensor zero_points,
     int64_t axis);
 
-TORCH_API Tensor& dequantize_tensor_per_tensor_affine(
+Tensor& dequantize_tensor_per_tensor_affine(
     const Tensor& qtensor,
     Tensor& rtensor,
     double scale,
     int64_t zero_point);
-TORCH_API Tensor& dequantize_tensor_per_channel_affine(
+Tensor& dequantize_tensor_per_channel_affine(
     const Tensor& qtensor,
     Tensor& rtensor,
     Tensor scales,
     Tensor zero_points,
     int64_t axis);
-TORCH_API Tensor& dequantize_tensor_per_channel_float_qparams(
+Tensor& dequantize_tensor_per_channel_float_qparams(
     const Tensor& qtensor,
     Tensor& rtensor,
     Tensor scales,
