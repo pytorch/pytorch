@@ -30,7 +30,7 @@ class SomeClass:
                     # (Sep 17, 2017)
                     downloadFromURLToFile(url, dest)
             except Exception as e:
-                print("Abort: {reason}".format(reason=e))
+                print(f"Abort: {e}")
                 print("Cleaning up...")
                 deleteDirectory(model_dir)
                 exit(1)
@@ -53,20 +53,20 @@ class SomeClass:
         if os.path.exists(model_dir):
             return
         os.makedirs(model_dir)
-        url = 'https://s3.amazonaws.com/download.onnx/models/{}.tar.gz'.format(model)
+        url = f'https://s3.amazonaws.com/download.onnx/models/{model}.tar.gz'
 
         # On Windows, NamedTemporaryFile cannot be opened for a
         # second time
         download_file = tempfile.NamedTemporaryFile(delete=False)
         try:
             download_file.close()
-            print('Start downloading model {} from {}'.format(model, url))
+            print(f'Start downloading model {model} from {url}')
             urlretrieve(url, download_file.name)
             print('Done')
             with tarfile.open(download_file.name) as t:
                 t.extractall(models_dir)
         except Exception as e:
-            print('Failed to prepare data for model {}: {}'.format(model, e))
+            print(f'Failed to prepare data for model {model}: {e}')
             raise
         finally:
             os.remove(download_file.name)
@@ -133,7 +133,7 @@ def upload_models():
             's3',
             'cp',
             model + '.tar.gz',
-            "s3://download.onnx/models/{}.tar.gz".format(model),
+            f"s3://download.onnx/models/{model}.tar.gz",
             '--acl', 'public-read'
         ], cwd=onnx_models_dir)
 
