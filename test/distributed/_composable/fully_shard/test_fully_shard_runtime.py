@@ -71,8 +71,16 @@ class TestRuntime(FSDPTest):
             )
         elif fsdp_wrap_mode == FSDPWrapMode.MANUAL_WRAP:
             fsdp_wrapped_model = copy.deepcopy(local_model)
-            fsdp_wrapped_model.u2 = FSDP(fsdp_wrapped_model.u2, use_orig_params=True, sharding_strategy=sharding_strategy)
-            fsdp_wrapped_model = FSDP(fsdp_wrapped_model, use_orig_params=True, sharding_strategy=sharding_strategy)
+            fsdp_wrapped_model.u2 = FSDP(
+                fsdp_wrapped_model.u2,
+                use_orig_params=True,
+                sharding_strategy=sharding_strategy,
+            )
+            fsdp_wrapped_model = FSDP(
+                fsdp_wrapped_model,
+                use_orig_params=True,
+                sharding_strategy=sharding_strategy,
+            )
             fully_shard(composable_module.u2, strategy=sharding_strategy)
             fully_shard(composable_module, strategy=sharding_strategy)
         else:
@@ -100,12 +108,14 @@ class TestRuntime(FSDPTest):
                     ShardingStrategy.FULL_SHARD,
                     ShardingStrategy.SHARD_GRAD_OP,
                     ShardingStrategy.NO_SHARD,
-                ]
+                ],
             },
             self._test_training,
         )
 
-    def _test_training(self, fsdp_wrap_mode: FSDPWrapMode, sharding_strategy: ShardingStrategy):
+    def _test_training(
+        self, fsdp_wrap_mode: FSDPWrapMode, sharding_strategy: ShardingStrategy
+    ):
         device = torch.device("cuda")
         (
             composable_module,
@@ -150,7 +160,9 @@ class TestRuntime(FSDPTest):
             composable_optim,
             fsdp_wrapped_model,
             fsdp_wrapped_optim,
-        ) = self._init_models_and_optims(device, fsdp_wrap_mode, ShardingStrategy.FULL_SHARD)
+        ) = self._init_models_and_optims(
+            device, fsdp_wrap_mode, ShardingStrategy.FULL_SHARD
+        )
         # Before checking the unshard/reshard order, sanity check that the
         # assumption about wrapper FQN being a suffix of composable FQN holds
         all_composable_handles = traversal_utils._get_fsdp_handles(composable_module)
