@@ -23,6 +23,9 @@ def try_solve(
         sympy.Lt: sympy.Gt,
     }
 
+    # Ignore unsupported expressions:
+    #   - Those that are not relational operations
+    #   - Those that don't have a mirror (just avoiding unexpected classes)
     if not (isinstance(expr, sympy.Rel) and type(expr) in MIRROR):
         return None
 
@@ -38,8 +41,13 @@ def try_solve(
             continue
 
         for _ in range(trials):
-            e = _try_isolate_lhs(e, thing)  # type: ignore[assignment]
+            trial = _try_isolate_lhs(e, thing)
+            # Stop if there was no change in this trial.
+            if trial == e:
+                break
+            e = trial
 
+        # Return if we were able to isolate 'thing' on the left-hand side.
         if isinstance(e, sympy.Rel) and e.lhs == thing:
             return e, e.rhs
 
@@ -47,6 +55,8 @@ def try_solve(
 
 
 def _try_isolate_lhs(expr: sympy.Basic, thing: sympy.Basic) -> sympy.Basic:
+    # Give up if 'expr' is not a relational operation or if 'thing'
+    # is not on the left-hand side.
     if not isinstance(expr, sympy.Rel) or not expr.lhs.has(thing):
         return expr
 

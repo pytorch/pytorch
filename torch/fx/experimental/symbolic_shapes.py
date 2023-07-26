@@ -3373,7 +3373,10 @@ Target Guards:
 
             r = try_solve(expr, symbol)
 
-            if r is None:
+            if r is None or not (symbol.is_integer and r[1].is_integer):
+                # Range refinement only supports integer symbols for now.
+                # There are lots of SymPy bugs when it comes to comparing
+                # reals and integers, so we skip that for now.
                 continue
 
             r_expr, rhs = r
