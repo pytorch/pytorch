@@ -23,7 +23,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
     NUM_DEVICES,
-    skip_unless_torch_gpu,
     with_comms,
 )
 
