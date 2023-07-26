@@ -15,7 +15,7 @@ from torch.ao.quantization import (
     ObserverOrFakeQuantize,
     QConfigMapping,
 )
-from torch.ao.quantization.pt2e.quantizer import (
+from torch.ao.quantization.quantizer import (
     ComposableQuantizer,
     DerivedQuantizationSpec,
     EmbeddingQuantizer,
@@ -27,10 +27,10 @@ from torch.ao.quantization.pt2e.quantizer import (
     Quantizer,
     SharedQuantizationSpec,
 )
-from torch.ao.quantization.pt2e.quantizer.composable_quantizer import (  # noqa: F811
+from torch.ao.quantization.quantizer.composable_quantizer import (  # noqa: F811
     ComposableQuantizer,
 )
-from torch.ao.quantization.pt2e.quantizer.xnnpack_quantizer import (
+from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
 )
 from torch.ao.quantization.quantize_pt2e import (
