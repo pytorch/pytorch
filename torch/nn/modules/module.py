@@ -2020,6 +2020,13 @@ class Module:
                                       'the shape in current model is {}.'
                                       .format(key, input_param.shape, param.shape))
                     continue
+
+                if param.is_meta and not input_param.is_meta:
+                    warnings.warn(f'for {key}: copying from a non-meta parameter in the checkpoint to a meta '
+                                  'parameter in the current model, which is a no-op. (Did you mean to '
+                                  'pass `assign=True` to assign items in the state dictionary to their '
+                                  'corresponding key in the module instead of copying them in place?)')
+
                 try:
                     with torch.no_grad():
                         if assign_to_params_buffers:
@@ -2037,11 +2044,6 @@ class Module:
                                       'whose dimensions in the checkpoint are {}, '
                                       'an exception occurred : {}.'
                                       .format(key, param.size(), input_param.size(), ex.args))
-                    if (str(ex) == "Cannot copy out of meta tensor; no data!"):
-                        error_msgs.append('Did you mean to pass `assign=True` to '
-                                          'assign items in the state dictionary to their '
-                                          'corresponding keys in the module instead of '
-                                          'copying them inplace?')
             elif strict:
                 missing_keys.append(key)
 
