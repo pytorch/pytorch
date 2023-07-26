@@ -1397,6 +1397,10 @@ def _register_post_backward_reshard_only_hook(
     input activations to ensure that all gradients that may depend on the
     parameters have been computed before resharding.
     """
+    # If there is no gradient computation, then there is no need for
+    # post-backward logic
+    if not torch.is_grad_enabled():
+        return
     # Construct `inp_tensors` lazily to avoid CPU overhead in typical case
     # where each flat parameter requires gradient
     inp_tensors: Optional[List[torch.Tensor]] = None
