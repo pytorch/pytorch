@@ -473,11 +473,8 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    auto symint = torch::is_symint(index)
-        ? SymInt(static_cast<SymNode>(
-              c10::make_intrusive<torch::impl::PythonSymNodeImpl>(
-                  py::reinterpret_steal<py::object>(index).attr("node"))))
-        : SymInt(THPUtils_unpackLong(index));
+    auto symint = torch::is_symint(index) ? py::cast<SymInt>(index)
+                                          : SymInt(THPUtils_unpackLong(index));
     dispatch_set_item(self_, {at::indexing::TensorIndex(symint)}, value);
     return 0;
   } else if (PySlice_Check(index)) {

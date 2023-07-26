@@ -235,20 +235,21 @@ static inline Tensor applySelect(
     int64_t real_dim,
     const at::Device& /*self_device*/,
     const c10::optional<SymIntArrayRef>& self_sizes) {
-  auto opt_index_value = index.maybe_as_int();
   // See NOTE [nested tensor size for indexing]
-  if (self_sizes.has_value() && opt_index_value.has_value()) {
-    int64_t index_value = opt_index_value.value();
-    TORCH_CHECK_INDEX(
-        !(index_value == 0 && dim == 0 && self_sizes->empty()),
-        "invalid index of a 0-dim tensor. ",
-        "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
+  if (self_sizes.has_value()) {
+    auto maybe_index = index.maybe_as_int();
+    if (maybe_index.has_value()) {
+      TORCH_CHECK_INDEX(
+          !(maybe_index.value() == 0 && dim == 0 && self_sizes->empty()),
+          "invalid index of a 0-dim tensor. ",
+          "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
+    }
 
     auto size = (*self_sizes)[dim];
     TORCH_CHECK_INDEX(
-        size >= -index_value && size > index_value,
+        size >= -index && size > index,
         "index ",
-        index_value,
+        index,
         " is out of bounds for dimension ",
         real_dim,
         " with size ",
