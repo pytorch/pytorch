@@ -2173,15 +2173,19 @@ class TritonScheduling:
         size_hint = V.graph.sizevars.size_hint
         has_hint = V.graph.sizevars.shape_env.has_hint
 
-        if not V.graph.sizevars.is_expr_static_and_true(numel <= int_max):
-            if not has_hint(numel) or size_hint(numel) > int_max:
-                return False
+        def within_32bit(e):
+            # Allow for unhinted e as long as we can still statically prove
+            # (e.g., via ValueRanges) that it is still in bounds
+            if V.graph.sizevars.is_expr_static_and_true(e <= int_max):
+                return True
+            # Otherwise, the hint MUST exist and be in range
+            return has_hint(e) and size_hint(e) <= int_max
+
+        if not within_32bit(numel):
+            return False
 
         buf_sizes = [buf.get_layout().storage_size() for buf in buffers]
-        if any(
-            not V.graph.sizevars.is_expr_static_and_true(size > int_max) and
-            (not has_hint(size) or size_hint(size) > int_max) for size in buf_sizes
-        ):
+        if not all(within_32bit(size) for size in buf_sizes):
             return False
 
         # Only install guards for 32-bit indexing as there is no correctness
