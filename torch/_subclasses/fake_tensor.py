@@ -1166,6 +1166,8 @@ class FakeTensor(torch.Tensor):
             has_scalar_only_inputs = True
             common_device = torch.device("cpu")
 
+        assert common_device is not None, f"Could not find common device for {func}"
+
         return common_device, has_scalar_only_inputs
 
     __torch_function__ = torch._C._disabled_torch_function_impl
@@ -1529,20 +1531,8 @@ class FakeTensorMode(TorchDispatchMode):
         # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
         # It's possible that the kernel will return NotImplementedError
         try:
-            common_device = FakeTensor._find_common_device(func, args, kwargs)
             with in_kernel_invocation_manager(self):
                 r = func(*args, **kwargs)
-                if (
-                    common_device is not None
-                    and common_device[0] is not None
-                    and is_noncontiguous_supported(common_device[0]) is False
-                ):
-                    from torch.distributed._tensor.ops.pointwise_ops import(
-                        pointwise_ops,
-                    )
-
-                    if func in pointwise_ops:
-                        r = r.new_empty(r.shape)
         except NotImplementedError as not_implemented_error:
             return maybe_run_unsafe_fallback(not_implemented_error)
 
