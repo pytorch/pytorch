@@ -11,7 +11,7 @@ import typing
 import torch.testing._internal.custom_op_db
 from functorch import make_fx
 from torch import Tensor
-from torch._custom_op.impl import custom_op
+from torch._custom_op.impl import custom_op, CustomOp
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.optests.compile_check import operator_compile_check
 from typing import *  # noqa: F403
