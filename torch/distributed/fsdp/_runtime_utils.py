@@ -925,7 +925,7 @@ def _offload_grad(
     # the optimizer step executes on CPU. If we want to use non-blocking=True
     # here, we'll have to synchronize before using result on CPU.
     non_blocking = handle.uses_sharded_strategy and not handle._has_optim_in_backward
-    flat_param._cpu_grad.copy_(  # type: ignore[attr-defined]
+    handle.flat_param._cpu_grad.copy_(
         grad_to_offload.detach(), non_blocking=non_blocking
     )  # synchronized in the post-backward callback
     # Since the gradient being offloaded may have been produced in the
