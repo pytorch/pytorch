@@ -297,8 +297,7 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
                     "gradients are not None."
                 )
             if param.requires_grad:
-                grad = torch.zeros_like(param)
-                param.grad = torch.autograd.Variable(grad)
+                param.grad = torch.zeros_like(param)
     optim.step(closure=None)
     optim.zero_grad(set_to_none=True)
 
