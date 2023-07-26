@@ -229,9 +229,7 @@ python_min_version = (3, 8, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print(
-        "You are using Python {}. Python >={} is required.".format(
-            platform.python_version(), python_min_version_str  # noqa: UP032
-        )
+        f"You are using Python {platform.python_version()}. Python >={python_min_version_str} is required."
     )
     sys.exit(-1)
 
