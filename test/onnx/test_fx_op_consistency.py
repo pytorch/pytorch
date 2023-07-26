@@ -706,10 +706,18 @@ for opset in onnx_test_common.FX_TESTED_OPSETS:
         opset=opset,
         skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
     )
+
+    onnx_test_common.add_decorate_info(
+        OPS_DB,
+        test_class_name,
+        "test_output_match_complex",
+        opset=opset,
+        skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
+    )
+
     common_device_type.instantiate_device_type_tests(
         globals()[test_class_name], globals(), only_for="cpu"
     )
-
 
 if __name__ == "__main__":
     common_utils.run_tests()

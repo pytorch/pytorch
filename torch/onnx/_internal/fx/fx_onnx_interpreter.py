@@ -523,11 +523,16 @@ class FxOnnxInterpreter:
                 input_name=None,
             )
         elif isinstance(fake_tensor, torch.Tensor):
+            # NOTE: ONNX doesn't support tensor of complex64/complex128, so we
+            # convert them to float32/float64.
+            if fx_type_utils.is_torch_complex_dtype(fake_tensor.dtype):
+                fake_tensor = torch.view_as_real(fake_tensor)
             output = onnxscript_graph.add_input(
                 input_name=node.name,
                 shape=fake_tensor.shape,
                 dtype=fake_tensor.dtype,
             )
+
         elif isinstance(fake_tensor, (torch.SymBool, torch.SymInt, torch.SymFloat)):
             output = onnxscript_graph.add_input(
                 input_name=node.name,

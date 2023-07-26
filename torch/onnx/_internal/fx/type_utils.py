@@ -102,6 +102,9 @@ _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: Dict[
     int: {"tensor(int16)", "tensor(int32)", "tensor(int64)"},
     float: {"tensor(float16)", "tensor(float)", "tensor(double)"},
     bool: {"tensor(int32)", "tensor(int64)", "tensor(bool)"},
+    torch.complex32: {"tensor(float16)"},
+    torch.complex64: {"tensor(float)"},
+    torch.complex128: {"tensor(double)"},
 }
 
 _COMPLEX_TO_FLOAT: Dict[torch.dtype, torch.dtype] = {
