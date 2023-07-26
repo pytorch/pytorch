@@ -1,7 +1,7 @@
 from typing import List
 
 import torch
-from torch.ao.quantization.pt2e.quantizer.quantizer import (
+from torch.ao.quantization.quantizer.quantizer import (
     QuantizationAnnotation,
     QuantizationConfig,
     QuantizationSpec,
@@ -14,6 +14,7 @@ __all__ = [
     "get_weight_qspec",
     "get_bias_qspec",
 ]
+
 
 def get_input_act_qspec(quantization_config: QuantizationConfig):
     if quantization_config is None:
@@ -91,11 +92,11 @@ def _annotate_output_qspec(node: Node, qspec):
 
 def _is_sym_size_node(node: Node):
     return (
-        node.op == "call_function" and
-        node.target == torch.ops.aten.sym_size.default or
-        node.target == torch.ops.aten.sym_numel.default or
-        node.target == torch.ops.aten.sym_numel or
-        node.target == torch.ops.aten.sym_size
+        node.op == "call_function"
+        and node.target == torch.ops.aten.sym_size.default
+        or node.target == torch.ops.aten.sym_numel.default
+        or node.target == torch.ops.aten.sym_numel
+        or node.target == torch.ops.aten.sym_size
     )
 
 
