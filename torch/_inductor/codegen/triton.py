@@ -2293,6 +2293,7 @@ class TritonScheduling:
         kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)
         kernel.kernel_name = kernel_name
+        kernel.code_hash = code_hash(src_code)
 
         if kernel.persistent_reduction and config.triton.multi_kernel:
             V.graph.restore_state()
@@ -2305,6 +2306,7 @@ class TritonScheduling:
             src_code2 = kernel2.codegen_kernel()
             kernel_name2 = self.define_kernel(src_code2, node_schedule)
             kernel2.kernel_name = kernel_name2
+            kernel2.code_hash = code_hash(src_code2)
 
             multi_kernel = MultiKernel([kernel, kernel2])
             multi_kernel.call_kernel()

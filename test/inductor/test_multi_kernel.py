@@ -1,4 +1,7 @@
 # Owner(s): ["module: inductor"]
+import random
+
+import numpy as np
 import torch
 from torch import nn
 
@@ -7,8 +10,14 @@ from torch.nn import functional as F
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
-config.triton.multi_kernel = True
+config.triton.multi_kernel = 1
 config.benchmark_kernel = True
+
+
+def reset_rng_state():
+    torch.manual_seed(1337)
+    random.seed(1337)
+    np.random.seed(1337)
 
 
 class TransformerSnippet(nn.Module):
@@ -55,14 +64,29 @@ class MultiKernelTest(TestCase):
             y = model(*x)
             return y
 
+        reset_rng_state()
         ref = f(*x)
 
         opt_f = torch.compile(f)
+        reset_rng_state()
         act = opt_f(*x)
 
-        # don't compare tensor since inductor random number implementation
-        # is different to eager. We should fallback to eager if we want to
-        # test accuracy.
+        # don't compare tensor if using inductor random number generator.
+        # inductor random number implementation is different to eager.
+        # We should fallback to eager if we want to test accuracy.
+        if config.fallback_random:
+            self.assertTrue(
+                torch.allclose(ref, act, atol=1e-4, rtol=1e-4),
+                f"ref:\n{ref}\nact:\n{act}",
+            )
+
+    def test_transformer_snippet_with_fallback_random(self):
+        """
+        Same as test_transformer_snippet but fallback the random number
+        generator to eager so we can check accuracy.
+        """
+        with config.patch("fallback_random", True):
+            self.test_transformer_snippet()
 
 
 if __name__ == "__main__":

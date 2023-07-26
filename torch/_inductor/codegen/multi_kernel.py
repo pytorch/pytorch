@@ -1,4 +1,5 @@
 import logging
+import os
 
 from .. import config
 from ..codecache import PyCodeCache, TritonFuture
@@ -57,19 +58,37 @@ class MultiKernelState:
         self.subkernel_to_kernel_name[kernel_names] = multi_kernel_name
 
         wrapper = V.graph.wrapper_code
-        # TODO: handle arbitrary number of subkernels
+
+        kernel_call_def_code = "\n".join(
+            [
+                f"""
+    def call{idx}(need_clone_args=False):
+        args = [{', '.join(get_kernel_argdefs(kernels[idx]))}]
+        if need_clone_args:
+            args = multi_kernel_call.kernels[{idx}].clone_args(*args)
+        multi_kernel_call.kernels[{idx}].run(*args, {', '.join(get_numel_argdefs(kernels[idx]))}, grid=grid, stream=stream)
+        """.format(
+                    idx
+                ).strip(
+                    "\n"
+                )
+                for idx in range(len(kernels))
+            ]
+        )
+
+        # add subkernel src code hashes to the multi-kernel source code so changing a
+        # subkernel implementation will result in a differnt py file for
+        # multi-kernel. This makes cache implementation straightforward since
+        # we can decide cache file name based on multi-kernel py file name
+        # directly.
+        subkernel_hashes = "\n".join(
+            f"# subkernel{i} code hash: {kernel.code_hash}"
+            for i, kernel in enumerate(kernels)
+        )
         src_code = f"""
+{subkernel_hashes}
 def run(multi_kernel_call, {', '.join(get_all_kernel_argdefs(kernels))}, {', '.join(get_numel_argdefs(kernels[0]))}, grid, stream):
-    def call0(need_clone_args=False):
-        args = [{', '.join(get_kernel_argdefs(kernels[0]))}]
-        if need_clone_args:
-            args = multi_kernel_call.kernels[0].clone_args(*args)
-        multi_kernel_call.kernels[0].run(*args, {', '.join(get_numel_argdefs(kernels[0]))}, grid=grid, stream=stream)
-    def call1(need_clone_args=False):
-        args = [{', '.join(get_kernel_argdefs(kernels[1]))}]
-        if need_clone_args:
-            args = multi_kernel_call.kernels[1].clone_args(*args)
-        multi_kernel_call.kernels[1].run(*args, {', '.join(get_numel_argdefs(kernels[1]))}, grid=grid, stream=stream)
+{kernel_call_def_code}
     multi_kernel_call.run_with_argless_kernels([call0, call1])
         """  # noqa: B950 line too long
         wrapper.header.splice(
@@ -137,8 +156,6 @@ class MultiKernel:
 class MultiKernelCall:
     """
     This class is called at run time to actually run the kernel
-
-    TODO: we could add cache for the choices piced by the MultiKernelCall
     """
 
     def __init__(self, kernels, src_code):
@@ -153,6 +170,31 @@ class MultiKernelCall:
             self.picked_kernel = self.picked_by_config
 
         self._run = PyCodeCache.load(src_code).run
+        self.load_cache()
+
+    def cache_file_path(self):
+        py_file_path = self._run.__globals__["__file__"]
+        return os.path.splitext(py_file_path)[0] + ".picked_kernel"
+
+    def load_cache(self):
+        assert self.picked_kernel is None
+        path = self.cache_file_path()
+        if os.path.exists(path):
+            with open(path) as fd:
+                self.picked_kernel = int(fd.read())
+                assert self.picked_kernel >= 0 and self.picked_kernel < len(
+                    self._kernels
+                )
+                log.debug(
+                    "Load picked kernel %d from cache file %s", self.picked_kernel, path
+                )
+
+    def store_cache(self):
+        assert self.picked_kernel is not None
+        path = self.cache_file_path()
+        with open(path, "w") as fd:
+            fd.write(str(self.picked_kernel))
+        log.debug("Store picked kernel %d to cache file %s", self.picked_kernel, path)
 
     @property
     def kernels(self):
@@ -185,4 +227,5 @@ class MultiKernelCall:
                 [k.fn.__name__ for k in self.kernels],
                 timings,
             )
+            self.store_cache()
         kernel_calls[self.picked_kernel]()
