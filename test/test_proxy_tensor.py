@@ -1537,7 +1537,6 @@ fake_tensor_failures = {
 symbolic_tensor_failures = {
     xfail('linalg.eig'),
     xfail('linalg.eigvals'),
-    xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
     xfail('combinations', ''),
     xfail('diff', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
