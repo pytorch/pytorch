@@ -1032,14 +1032,6 @@ def _check_orig_params_flattened(
             )
 
 
-def _get_(state: _FSDPState):
-    if state.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
-        global_world_size = ...
-    else:
-        global_world_size = state.process_group.size()
-    ...
-
-
 def _get_default_comm_hook(sharding_strategy: ShardingStrategy):
     return (
         default_hooks.allreduce_hook
