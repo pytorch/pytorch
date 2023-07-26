@@ -7,11 +7,12 @@ import torch
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
-from torch.distributed._tensor import DTensor
+from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import (
     ShardedOptimStateDictConfig,
     ShardedStateDictConfig,
+    ShardingStrategy,
     StateDictType,
 )
 from torch.testing._internal.common_utils import (
@@ -225,6 +226,30 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
             self.assertEqual(k1, k2)
             # check whether DTensor are the same
             self.assertEqual(v1, v2)
+
+
+class TestFSDPDeviceMeshInit(DTensorTestBase):
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_device_mesh_init_1d(self):
+        mesh_tensor = torch.arange(self.world_size)
+        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+        model = FSDP(TestDummyModel().cuda(), _device_mesh=device_mesh)
+        optim = torch.optim.Adam(model.parameters(), lr=0.1)
+        model(model.get_input()).sum().backward()
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_device_mesh_init_2d(self):
+        mesh_tensor = torch.arange(self.world_size).view(2, -1)
+        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+        model = FSDP(
+            TestDummyModel().cuda(),
+            _device_mesh=device_mesh,
+            sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+        )
+        optim = torch.optim.Adam(model.parameters(), lr=0.1)
+        model(model.get_input()).sum().backward()
 
 
 instantiate_parametrized_tests(TestDtensorShardedOptimStateDict)

@@ -208,10 +208,10 @@ def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module):
 def _init_device_mesh(
     root_state: _FSDPState,
 ) -> Optional[DeviceMesh]:
-    # We are testing 1D DeviceMesh where dist.get_world_size(pg) == dist.get_world_size() for now.
-    # TODO: Address cases when dist.get_world_size(pg) != dist.get_world_size(). This would capture
-    #       what 1D DeviceMesh currently would not work for:
-    #       1) HSDP Hybrid Sharding, 2) 2D FSDP + TP, 3) dist.new_group() cannot be expressed in 1D DeviceMesh.
+    # TODO: Remove it once we fully introduce device_mesh as an kwarg of FSDP.
+    # Temporarily keeping it here so MS folks can use it to build out support for 1D DTensor state_dict.
+    if root_state._device_mesh is not None:
+        return root_state._device_mesh
     if root_state.process_group != dist.distributed_c10d._get_default_group():
         return None
     if get_backend() == "fake" or not root_state.compute_device:
