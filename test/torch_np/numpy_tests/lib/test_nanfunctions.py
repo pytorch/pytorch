@@ -1274,7 +1274,6 @@ class TestNanFunctions_Quantile:
         assert np.isnan(out).all()
         assert out.dtype == array.dtype
 
-@pytest.mark.xfail(reason='TODO: implement')
 @pytest.mark.parametrize("arr, expected", [
     # array of floats with some nans
     (np.array([np.nan, 5.0, np.nan, np.inf]),
