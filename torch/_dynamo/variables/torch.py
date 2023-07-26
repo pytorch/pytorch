@@ -209,6 +209,7 @@ class TorchVariable(VariableTracker):
             CUDAStreamContextVariable,
             CUDAStreamVariable,
             DeterministicAlgorithmsVariable,
+            DisabledSavedTensorsHooksVariable,
             GradModeVariable,
             SymNodeVariable,
             TensorVariable,
@@ -314,6 +315,11 @@ class TorchVariable(VariableTracker):
             return ConstantVariable(
                 torch.are_deterministic_algorithms_enabled(), **options
             ).add_guards(DeterministicAlgorithmsVariable._guards_singleton)
+        elif self.value is torch.autograd.graph.disable_saved_tensors_hooks:
+            assert len(args) == 1
+            return DisabledSavedTensorsHooksVariable.create(
+                tx, args[0].as_python_constant(), **options
+            )
         elif self.value is torch._C._is_torch_function_enabled:
             assert not (args or kwargs)
             return ConstantVariable(
