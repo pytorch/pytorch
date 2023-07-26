@@ -236,8 +236,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   }
 
   // AotAutograd symints are all dynamic
-  auto prior =
-      args.set_default_dyn_type(torch::dynamo::autograd::SizeInput::DYNAMIC);
+  auto prior = args.set_default_dyn_type(SizeInput::DYNAMIC);
   args.collect(f->compiled_autograd_symints);
   args.set_default_dyn_type(prior);
 
