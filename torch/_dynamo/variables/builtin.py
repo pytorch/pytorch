@@ -411,6 +411,7 @@ class BuiltinVariable(VariableTracker):
 
     def as_proxy(self):
         DTYPE = {
+            bool: torch.bool,
             int: torch.int64,
             float: torch.float64,
         }

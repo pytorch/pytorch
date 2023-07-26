@@ -1284,7 +1284,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         x = np.random.rand(5)
 
         def fn(x):
-            return (x * 5).astype(int) + 8
+            return (x * 5).astype(bool).astype(float).astype(int) + 8
 
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
@@ -1297,7 +1297,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(5)
 
         def fn(x):
-            return (x * 5).to(int) + 8
+            return (x * 5).to(bool).to(float).to(int) + 8
 
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
