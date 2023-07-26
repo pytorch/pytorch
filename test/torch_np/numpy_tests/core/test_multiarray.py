@@ -207,46 +207,6 @@ class TestFlags:
             assert_(vals.flags.writeable)
             assert_(isinstance(vals.base, bytes))
 
-    def test_writeable_from_c_data(self):
-        # Test that the writeable flag can be changed for an array wrapping
-        # low level C-data, but not owning its data.
-        # Also see that this is deprecated to change from python.
-        from numpy.core._multiarray_tests import get_c_wrapping_array
-
-        arr_writeable = get_c_wrapping_array(True)
-        assert not arr_writeable.flags.owndata
-        assert arr_writeable.flags.writeable
-        view = arr_writeable[...]
-
-        # Toggling the writeable flag works on the view:
-        view.flags.writeable = False
-        assert not view.flags.writeable
-        view.flags.writeable = True
-        assert view.flags.writeable
-        # Flag can be unset on the arr_writeable:
-        arr_writeable.flags.writeable = False
-
-        arr_readonly = get_c_wrapping_array(False)
-        assert not arr_readonly.flags.owndata
-        assert not arr_readonly.flags.writeable
-
-        for arr in [arr_writeable, arr_readonly]:
-            view = arr[...]
-            view.flags.writeable = False  # make sure it is readonly
-            arr.flags.writeable = False
-            assert not arr.flags.writeable
-
-            with assert_raises(ValueError):
-                view.flags.writeable = True
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("error", DeprecationWarning)
-                with assert_raises(DeprecationWarning):
-                    arr.flags.writeable = True
-
-            with assert_warns(DeprecationWarning):
-                arr.flags.writeable = True
-
     def test_warnonwrite(self):
         a = np.arange(10)
         a.flags._warn_on_write = True
@@ -359,14 +319,6 @@ class TestAttributes:
         assert_(self.three.dtype.str[0] in '<>')
         assert_equal(self.one.dtype.str[1], 'i')
         assert_equal(self.three.dtype.str[1], 'f')
-
-    def test_int_subclassing(self):
-        # Regression test for https://github.com/numpy/numpy/pull/3526
-
-        numpy_int = np.int_(0)
-
-        # int_ doesn't inherit from Python int, because it's not fixed-width
-        assert_(not isinstance(numpy_int, int))
 
     def test_stridesattr(self):
         x = self.one
@@ -701,27 +653,12 @@ class TestAssignment:
         assert_equal(a[0], b"1.1234567890123457")
 
 
-@pytest.mark.xfail(reason='TODO: dtypes')
 class TestDtypedescr:
     def test_construction(self):
         d1 = np.dtype('i4')
         assert_equal(d1, np.dtype(np.int32))
         d2 = np.dtype('f8')
         assert_equal(d2, np.dtype(np.float64))
-
-    def test_byteorders(self):
-        assert_(np.dtype('<i4') != np.dtype('>i4'))
-        assert_(np.dtype([('a', '<i4')]) != np.dtype([('a', '>i4')]))
-
-    def test_structured_non_void(self):
-        fields = [('a', '<i2'), ('b', '<i2')]
-        dt_int = np.dtype(('i4', fields))
-        assert_equal(str(dt_int), "(numpy.int32, [('a', '<i2'), ('b', '<i2')])")
-
-        # gh-9821
-        arr_int = np.zeros(4, dt_int)
-        assert_equal(repr(arr_int),
-            "array([0, 0, 0, 0], dtype=(numpy.int32, [('a', '<i2'), ('b', '<i2')]))")
 
 
 @pytest.mark.xfail(reason='TODO: zero-rank?')
@@ -2838,7 +2775,6 @@ class TestMethods:
         assert_equal(ac, np.conjugate(a))
 
 
-    @pytest.mark.xfail(reason="TODO: ndarray.conjugate with out")
     def test_conjugate_out(self):
         # Minimal test for the out argument being passed on correctly
         # NOTE: The ability to pass `out` is currently undocumented!
@@ -2879,7 +2815,6 @@ class TestMethods:
         assert_raises(TypeError, complex, c)
 
 
-@pytest.mark.xfail(reason='TODO')
 class TestCequenceMethods:
     def test_array_contains(self):
         assert_(4.0 in np.arange(16.).reshape(4,4))
@@ -3073,136 +3008,6 @@ class TestSubscripting:
         x = np.array([1, 2, 3])
         assert_(isinstance(x[0], np.int_))
         assert_(type(x[0, ...]) is np.ndarray)
-
-
-@pytest.mark.xfail(reason='TODO')
-class TestPickling:
-    @pytest.mark.skipif(pickle.HIGHEST_PROTOCOL >= 5,
-                        reason=('this tests the error messages when trying to'
-                                'protocol 5 although it is not available'))
-    def test_correct_protocol5_error_message(self):
-        array = np.arange(10)
-
-    def test_record_array_with_object_dtype(self):
-        my_object = object()
-
-        arr_with_object = np.array(
-                [(my_object, 1, 2.0)],
-                dtype=[('a', object), ('b', int), ('c', float)])
-        arr_without_object = np.array(
-                [('xxx', 1, 2.0)],
-                dtype=[('a', str), ('b', int), ('c', float)])
-
-        for proto in range(2, pickle.HIGHEST_PROTOCOL + 1):
-            depickled_arr_with_object = pickle.loads(
-                    pickle.dumps(arr_with_object, protocol=proto))
-            depickled_arr_without_object = pickle.loads(
-                    pickle.dumps(arr_without_object, protocol=proto))
-
-            assert_equal(arr_with_object.dtype,
-                         depickled_arr_with_object.dtype)
-            assert_equal(arr_without_object.dtype,
-                         depickled_arr_without_object.dtype)
-
-    @pytest.mark.skipif(pickle.HIGHEST_PROTOCOL < 5,
-                        reason="requires pickle protocol 5")
-    def test_f_contiguous_array(self):
-        f_contiguous_array = np.array([[1, 2, 3], [4, 5, 6]], order='F')
-        buffers = []
-
-        # When using pickle protocol 5, Fortran-contiguous arrays can be
-        # serialized using out-of-band buffers
-        bytes_string = pickle.dumps(f_contiguous_array, protocol=5,
-                                    buffer_callback=buffers.append)
-
-        assert len(buffers) > 0
-
-        depickled_f_contiguous_array = pickle.loads(bytes_string,
-                                                    buffers=buffers)
-
-        assert_equal(f_contiguous_array, depickled_f_contiguous_array)
-
-    def test_non_contiguous_array(self):
-        non_contiguous_array = np.arange(12).reshape(3, 4)[:, :2]
-        assert not non_contiguous_array.flags.c_contiguous
-        assert not non_contiguous_array.flags.f_contiguous
-
-        # make sure non-contiguous arrays can be pickled-depickled
-        # using any protocol
-        for proto in range(2, pickle.HIGHEST_PROTOCOL + 1):
-            depickled_non_contiguous_array = pickle.loads(
-                    pickle.dumps(non_contiguous_array, protocol=proto))
-
-            assert_equal(non_contiguous_array, depickled_non_contiguous_array)
-
-    def test_roundtrip(self):
-        for proto in range(2, pickle.HIGHEST_PROTOCOL + 1):
-            carray = np.array([[2, 9], [7, 0], [3, 8]])
-            DATA = [
-                carray,
-                np.transpose(carray),
-                np.array([('xxx', 1, 2.0)], dtype=[('a', (str, 3)), ('b', int),
-                                                   ('c', float)])
-            ]
-
-            refs = [weakref.ref(a) for a in DATA]
-            for a in DATA:
-                assert_equal(
-                        a, pickle.loads(pickle.dumps(a, protocol=proto)),
-                        err_msg="%r" % a)
-            del a, DATA, carray
-            break_cycles()
-            # check for reference leaks (gh-12793)
-            for ref in refs:
-                assert ref() is None
-
-    def _loads(self, obj):
-        return pickle.loads(obj, encoding='latin1')
-
-    # version 0 pickles, using protocol=2 to pickle
-    # version 0 doesn't have a version field
-    def test_version0_int8(self):
-        s = b'\x80\x02cnumpy.core._internal\n_reconstruct\nq\x01cnumpy\nndarray\nq\x02K\x00\x85U\x01b\x87Rq\x03(K\x04\x85cnumpy\ndtype\nq\x04U\x02i1K\x00K\x01\x87Rq\x05(U\x01|NNJ\xff\xff\xff\xffJ\xff\xff\xff\xfftb\x89U\x04\x01\x02\x03\x04tb.'
-        a = np.array([1, 2, 3, 4], dtype=np.int8)
-        p = self._loads(s)
-        assert_equal(a, p)
-
-    def test_version0_float32(self):
-        s = b'\x80\x02cnumpy.core._internal\n_reconstruct\nq\x01cnumpy\nndarray\nq\x02K\x00\x85U\x01b\x87Rq\x03(K\x04\x85cnumpy\ndtype\nq\x04U\x02f4K\x00K\x01\x87Rq\x05(U\x01<NNJ\xff\xff\xff\xffJ\xff\xff\xff\xfftb\x89U\x10\x00\x00\x80?\x00\x00\x00@\x00\x00@@\x00\x00\x80@tb.'
-        a = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
-        p = self._loads(s)
-        assert_equal(a, p)
-
-    def test_version0_object(self):
-        s = b'\x80\x02cnumpy.core._internal\n_reconstruct\nq\x01cnumpy\nndarray\nq\x02K\x00\x85U\x01b\x87Rq\x03(K\x02\x85cnumpy\ndtype\nq\x04U\x02O8K\x00K\x01\x87Rq\x05(U\x01|NNJ\xff\xff\xff\xffJ\xff\xff\xff\xfftb\x89]q\x06(}q\x07U\x01aK\x01s}q\x08U\x01bK\x02setb.'
-        a = np.array([{'a': 1}, {'b': 2}])
-        p = self._loads(s)
-        assert_equal(a, p)
-
-    # version 1 pickles, using protocol=2 to pickle
-    def test_version1_int8(self):
-        s = b'\x80\x02cnumpy.core._internal\n_reconstruct\nq\x01cnumpy\nndarray\nq\x02K\x00\x85U\x01b\x87Rq\x03(K\x01K\x04\x85cnumpy\ndtype\nq\x04U\x02i1K\x00K\x01\x87Rq\x05(K\x01U\x01|NNJ\xff\xff\xff\xffJ\xff\xff\xff\xfftb\x89U\x04\x01\x02\x03\x04tb.'
-        a = np.array([1, 2, 3, 4], dtype=np.int8)
-        p = self._loads(s)
-        assert_equal(a, p)
-
-    def test_version1_float32(self):
-        s = b'\x80\x02cnumpy.core._internal\n_reconstruct\nq\x01cnumpy\nndarray\nq\x02K\x00\x85U\x01b\x87Rq\x03(K\x01K\x04\x85cnumpy\ndtype\nq\x04U\x02f4K\x00K\x01\x87Rq\x05(K\x01U\x01<NNJ\xff\xff\xff\xffJ\xff\xff\xff\xfftb\x89U\x10\x00\x00\x80?\x00\x00\x00@\x00\x00@@\x00\x00\x80@tb.'
-        a = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
-        p = self._loads(s)
-        assert_equal(a, p)
-
-    def test_version1_object(self):
-        s = b'\x80\x02cnumpy.core._internal\n_reconstruct\nq\x01cnumpy\nndarray\nq\x02K\x00\x85U\x01b\x87Rq\x03(K\x01K\x02\x85cnumpy\ndtype\nq\x04U\x02O8K\x00K\x01\x87Rq\x05(K\x01U\x01|NNJ\xff\xff\xff\xffJ\xff\xff\xff\xfftb\x89]q\x06(}q\x07U\x01aK\x01s}q\x08U\x01bK\x02setb.'
-        a = np.array([{'a': 1}, {'b': 2}])
-        p = self._loads(s)
-        assert_equal(a, p)
-
-    def test_subarray_int_shape(self):
-        s = b"cnumpy.core.multiarray\n_reconstruct\np0\n(cnumpy\nndarray\np1\n(I0\ntp2\nS'b'\np3\ntp4\nRp5\n(I1\n(I1\ntp6\ncnumpy\ndtype\np7\n(S'V6'\np8\nI0\nI1\ntp9\nRp10\n(I3\nS'|'\np11\nN(S'a'\np12\ng3\ntp13\n(dp14\ng12\n(g7\n(S'V4'\np15\nI0\nI1\ntp16\nRp17\n(I3\nS'|'\np18\n(g7\n(S'i1'\np19\nI0\nI1\ntp20\nRp21\n(I3\nS'|'\np22\nNNNI-1\nI-1\nI0\ntp23\nb(I2\nI2\ntp24\ntp25\nNNI4\nI1\nI0\ntp26\nbI0\ntp27\nsg3\n(g7\n(S'V2'\np28\nI0\nI1\ntp29\nRp30\n(I3\nS'|'\np31\n(g21\nI2\ntp32\nNNI2\nI1\nI0\ntp33\nbI4\ntp34\nsI6\nI1\nI0\ntp35\nbI00\nS'\\x01\\x01\\x01\\x01\\x01\\x02'\np36\ntp37\nb."
-        a = np.array([(1, (1, 2))], dtype=[('a', 'i1', (2, 2)), ('b', 'i1', 2)])
-        p = self._loads(s)
-        assert_equal(a, p)
 
 
 class TestFancyIndexing:
@@ -6954,7 +6759,6 @@ class TestArrayCreationCopyArgument(object):
                       order='F', dtype=np.int64)
 
 
-@pytest.mark.xfail(reason='TODO')
 class TestArrayAttributeDeletion:
 
     def test_multiarray_writable_attributes_deletion(self):
@@ -7356,10 +7160,12 @@ if not IS_PYPY:
     class TestSizeOf:
 
         def test_empty_array(self):
+            pytest.xpass()
             x = np.array([])
             assert_(sys.getsizeof(x) > 0)
 
         def check_array(self, dtype):
+            pytest.xpass()
             elem_size = dtype(0).itemsize
 
             for length in [10, 50, 100, 500]:
@@ -7396,6 +7202,7 @@ if not IS_PYPY:
             assert_(old < sys.getsizeof(d))
 
         def test_error(self):
+            pytest.xpass()
             d = np.ones(100)
             assert_raises(TypeError, d.__sizeof__, "a")
 
@@ -7413,9 +7220,9 @@ class TestHashing:
 
 
 
-@pytest.mark.xfail(reason='TODO')
 class TestFormat:
 
+    @pytest.mark.xfail(reason='TODO')
     def test_0d(self):
         a = np.array(np.pi)
         assert_equal('{:0.3g}'.format(a), '3.14')
@@ -7640,7 +7447,6 @@ def test_richcompare_scalar_boolean_singleton_return():
 
 
 
-@pytest.mark.xfail(reason='npymath')
 @pytest.mark.parametrize(
     ["fun", "npfun"],
     [

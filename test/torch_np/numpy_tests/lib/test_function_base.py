@@ -25,10 +25,12 @@ from torch._numpy.random import rand
 
 
 # FIXME: make from torch._numpy
+# These are commented, as if they are imported, some of the tests pass for the wrong reasons
+# from numpy lib import digitize, piecewise, trapz, select, trim_zeros, interp
 from numpy.lib import (
-    delete, digitize, extract,
-    insert, interp, msort, piecewise, place,
-    select, setxor1d, trapz, trim_zeros, unwrap, vectorize
+    delete, extract,
+    insert, msort, place,
+    setxor1d, unwrap, vectorize
     )
 from torch._numpy._util import normalize_axis_tuple
 
@@ -3034,7 +3036,6 @@ class TestPercentile:
         assert_equal(np.percentile(d, 25, axis=(1, 3))[2, 2],
                      np.percentile(d[2,:, 2,:].flatten(), 25))
 
-    @pytest.mark.xfail(reason='pytorch percentile does not support tuple axes.')
     def test_extended_axis_invalid(self):
         d = np.ones((3, 5, 7, 11))
         assert_raises(np.AxisError, np.percentile, d, axis=-5, q=25)
@@ -3069,7 +3070,6 @@ class TestPercentile:
         assert_equal(np.percentile(d, [1, 7], axis=(0, 3),
                                    keepdims=True).shape, (2, 1, 5, 7, 1))
 
-    @pytest.mark.xfail(reason='pytorch percentile does not support tuple axes.')
     @pytest.mark.parametrize('q', [7, [1, 7]])
     @pytest.mark.parametrize(
         argnames='axis',
@@ -3082,6 +3082,9 @@ class TestPercentile:
         ]
     )
     def test_keepdims_out(self, q, axis):
+        if isinstance(axis, tuple) or isinstance(q, list):
+            pytest.xfail("NotImplemented")
+
         d = np.ones((3, 5, 7, 11))
         if axis is None:
             shape_out = (1,) * d.ndim
@@ -3287,13 +3290,15 @@ class TestQuantile:
                           method="nearest")
         assert res.dtype == dtype
 
-    @pytest.mark.xfail(reason="1) np.sort not implemented; 2) methods")
     @pytest.mark.parametrize("method",
              ['inverted_cdf', 'averaged_inverted_cdf', 'closest_observation',
               'interpolated_inverted_cdf', 'hazen', 'weibull', 'linear',
               'median_unbiased', 'normal_unbiased',
               'nearest', 'lower', 'higher', 'midpoint'])
     def test_quantile_monotonic(self, method):
+        if method not in ("linear", "lower", "higher", "midpoint", "nearest"):
+            pytest.xfail("Not implemented")
+
         # GH 14685
         # test that the return value of quantile is monotonic if p0 is ordered
         # Also tests that the boundary values are not mishandled.
@@ -3569,7 +3574,6 @@ class TestMedian:
         assert_equal(np.median(d, axis=(0, 1, 3), keepdims=True).shape,
                      (1, 1, 7, 1))
 
-    @pytest.mark.xfail(reason="median: tuple axis")
     @pytest.mark.parametrize(
         argnames='axis',
         argvalues=[
@@ -3581,6 +3585,9 @@ class TestMedian:
         ]
     )
     def test_keepdims_out(self, axis):
+        if isinstance(axis, tuple):
+            pytest.xfail("median: tuple axis")
+
         d = np.ones((3, 5, 7, 11))
         if axis is None:
             shape_out = (1,) * d.ndim
