@@ -53,6 +53,7 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
+    get_kernel_metadata,
     pad_listlike,
     sympy_dot,
     sympy_product,
@@ -2615,6 +2616,11 @@ class ExternKernel(InputsKernel):
             self.apply_constraint()
             self.freeze_layout()
 
+    def codegen_comment(self, wrapper):
+        origin_str, detailed_origin_str = get_kernel_metadata(self, wrapper)
+        if origin_str:
+            wrapper.writeline(origin_str)
+
     def codegen(self, wrapper):
         raise NotImplementedError()
 
@@ -2954,6 +2960,7 @@ class ExternKernelOut(ExternKernel):
     output_view: Optional[ReinterpretView] = None
 
     def codegen(self, wrapper):
+        self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs()]
         wrapper.generate_extern_kernel_out(
             self.output_view,
@@ -3003,6 +3010,7 @@ class RandomSeeds(ExternKernelOut):
 
 class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper):
+        self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs()]
         V.graph.wrapper_code.generate_extern_kernel_alloc(
             self.get_name(), self.kernel, args, self.get_origin_node()
