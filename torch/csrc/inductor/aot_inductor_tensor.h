@@ -35,8 +35,6 @@ typedef struct {
   int8_t device_id;
 } AotInductorDevice;
 
-// using DeleterFnPtr  void (*)(void*);
-
 // Bare minumum tensor struct to interchange data between AOTInducotor
 // generated shared library and libtorch to avoid ABI compatibility issues
 typedef struct {
