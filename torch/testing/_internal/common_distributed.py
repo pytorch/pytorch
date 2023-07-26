@@ -782,6 +782,8 @@ class MultiProcessTestCase(TestCase):
         # If no processes are spawned, there is nothing to check.
         if not self.processes:
             logger.warning("Note: no subprocesses were spawned, test was likely skipped.")
+            return
+
         first_process = self.processes[0]
         # first, we check if there are errors in actual processes
         # (via TEST_ERROR_EXIT CODE), and raise an exception for those.
