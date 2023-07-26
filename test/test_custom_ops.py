@@ -1137,12 +1137,12 @@ class TestCustomOp(CustomOpTestCaseBase):
         def foo_impl(x):
             return x.cos()
 
+        op = self.get_op(f"{self.test_ns}::foo")
         x = torch.randn(3)
-        result = foo(x)
+        result = op(x)
         self.assertEqual(result, foo_impl(x))
 
         x_cuda = x.cuda()
-        op = self.get_op(f"{self.test_ns}::foo")
         result = op(x_cuda)
         self.assertEqual(result, foo_impl(x_cuda))
 
