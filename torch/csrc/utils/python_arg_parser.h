@@ -68,6 +68,7 @@
 
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/core/Tensor.h>
+#include <c10/core/DefaultDevice.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
@@ -790,7 +791,7 @@ inline at::Device toDevice(PyObject* obj) {
   if (THPUtils_checkLong(obj)) {
     const auto device_index = THPUtils_unpackLong(obj);
     TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(c10::DeviceType::CUDA, device_index);
+    return at::Device(c10::get_default_argument_device_type(), device_index);
   }
   const std::string& device_str = THPUtils_unpackString(obj);
   return at::Device(device_str);
