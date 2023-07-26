@@ -1851,10 +1851,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         model = ToyModel()
         forward_handles = {}
-        activations = []
+        activations = {}
 
         def save_activations(name, mod, inp, out):
-            activations.append((name, inp))
+            activations[name] = inp
 
         for name, module in model.named_modules():
             forward_handles[name] = module.register_forward_hook(
