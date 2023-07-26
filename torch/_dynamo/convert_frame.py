@@ -33,6 +33,7 @@ from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
     format_error_msg,
+    format_error_msg_verbose,
     InternalTorchDynamoError,
     TorchRuntimeError,
     unimplemented,
@@ -204,18 +205,30 @@ def has_tensor_in_frame(frame):
     return False
 
 
-def exception_handler(e, code, frame=None):
+def exception_handler(e, code, frame=None, export=False):
     record_filename = None
     if hasattr(e, "exec_record"):
         record_filename = gen_record_file_name(e, code)
         write_record_to_file(record_filename, e.exec_record)
         e.record_filename = record_filename
 
-    augment_exc_message(e)
+    augment_exc_message(e, export=export)
     # Only log the exception if we are going to suppress it
     # if aren't suppressing it, a higher level except block will handle it
     if config.suppress_errors:
-        log.error(format_error_msg(e, code, record_filename, frame))
+        if config.is_fbcode():
+            from torch._dynamo.fb.logging import (  # type: ignore[import]
+                log_dynamo_suppress_errors,
+            )
+
+            error_msg = format_error_msg_verbose(e, code, record_filename, frame)
+            log_dynamo_suppress_errors(
+                code.co_name, code.co_filename, code.co_firstlineno, error_msg
+            )
+        else:
+            error_msg = format_error_msg(e, code, record_filename, frame)
+
+        log.warning(error_msg)
 
 
 FRAME_COUNTER = 0
@@ -527,10 +540,10 @@ def _compile(
         ConstraintViolationError,
         GuardOnDataDependentSymNode,
     ) as e:
-        exception_handler(e, code, frame)
+        exception_handler(e, code, frame, export=export)
         raise
     except Exception as e:
-        exception_handler(e, code, frame)
+        exception_handler(e, code, frame, export=export)
         raise InternalTorchDynamoError(str(e)).with_traceback(e.__traceback__) from None
 
 
@@ -551,7 +564,7 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
         except Exception:
             if not config.suppress_errors:
                 raise
-            log.info("converting frame raised error, suppressing error")
+            log.warning("converting frame raised error, suppressing error")
         return None
 
     _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
