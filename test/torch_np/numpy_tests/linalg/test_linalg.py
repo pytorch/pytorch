@@ -90,11 +90,13 @@ all_tags = {
 
 
 class LinalgCase:
-    def __init__(self, name, a, b, tags=set()):
+    def __init__(self, name, a, b, tags=None):
         """
         A bundle of arguments to be passed to a test case, with an identifying
         name, the operands a and b, and a set of tags to filter the tests
         """
+        if tags is None:
+            tags = set()
         assert_(isinstance(name, str))
         self.name = name
         self.a = a
@@ -323,11 +325,15 @@ CASES += _make_generalized_cases()
 class LinalgTestCase:
     TEST_CASES = CASES
 
-    def check_cases(self, require=set(), exclude=set()):
+    def check_cases(self, require=None, exclude=None):
         """
         Run func on each of the cases with all of the tags in require, and none
         of the tags in exclude
         """
+        if require is None:
+            require = set()
+        if exclude is None:
+            exclude = set()
         for case in self.TEST_CASES:
             # filter by require and exclude
             if case.tags & require != require:

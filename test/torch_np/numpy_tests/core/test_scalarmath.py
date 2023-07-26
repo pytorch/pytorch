@@ -677,8 +677,8 @@ class TestNegative:
 
     def test_result(self):
         types = np.typecodes["AllInteger"] + np.typecodes["AllFloat"]
-        ##        with suppress_warnings() as sup:
-        ##            sup.filter(RuntimeWarning)
+        # with suppress_warnings() as sup:
+        #     sup.filter(RuntimeWarning)
         for dt in types:
             a = np.ones((), dtype=dt)[()]
             if dt in np.typecodes["UnsignedInteger"]:
@@ -693,7 +693,7 @@ class TestSubtract:
     def test_exceptions(self):
         a = np.ones((), dtype=np.bool_)[()]
         with assert_raises((TypeError, RuntimeError)):  # XXX: TypeError from numpy
-            operator.sub(a, a)  #  RuntimeError from torch
+            operator.sub(a, a)  # RuntimeError from torch
 
     def test_result(self):
         types = np.typecodes["AllInteger"] + np.typecodes["AllFloat"]

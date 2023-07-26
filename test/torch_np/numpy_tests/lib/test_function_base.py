@@ -243,7 +243,7 @@ class TestCopy:
     def test_order(self):
         # It turns out that people rely on np.copy() preserving order by
         # default; changing this broke scikit-learn:
-        # github.com/scikit-learn/scikit-learn/commit/7842748cf777412c506a8c0ed28090711d3a3783  # noqa
+        # github.com/scikit-learn/scikit-learn/commit/7842748cf777412c506
         a = np.array([[1, 2], [3, 4]])
         assert_(a.flags.c_contiguous)
         assert_(not a.flags.f_contiguous)
@@ -721,7 +721,7 @@ class TestDiff:
         assert_raises(ValueError, diff, x, n=-1)
         output = [diff(x, n=n) for n in range(1, 5)]
         expected = [[1, 1], [0], [], []]
-        ##    assert_(diff(x, n=0) is x)
+        # assert_(diff(x, n=0) is x)
         for n, (expected, out) in enumerate(zip(expected, output), start=1):
             assert_(type(out) is np.ndarray)
             assert_array_equal(out, expected)

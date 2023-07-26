@@ -336,10 +336,10 @@ class TestConcatenate:
 
         # XXX: a single argument; relies on an ndarray being a sequence
         r4 = list(range(4))
-        ##        assert_array_equal(concatenate((r4,)), r4)
-        ##        # Any sequence
-        ##        assert_array_equal(concatenate((tuple(r4),)), r4)
-        ##        assert_array_equal(concatenate((array(r4),)), r4)
+        # assert_array_equal(concatenate((r4,)), r4)
+        # # Any sequence
+        # assert_array_equal(concatenate((tuple(r4),)), r4)
+        # assert_array_equal(concatenate((array(r4),)), r4)
         # 1D default concatenation
         r3 = list(range(3))
         assert_array_equal(concatenate((r4, r3)), r4 + r3)

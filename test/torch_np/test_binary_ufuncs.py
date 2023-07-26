@@ -4,7 +4,7 @@
 # do not edit manually!
 import numpy as np
 
-from torch._numpy._ufuncs import *
+from torch._numpy._ufuncs import *  # noqa: F403
 from torch._numpy.testing import assert_allclose
 
 

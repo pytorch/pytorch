@@ -629,7 +629,7 @@ class TestAssignment:
         b = np.array([b"done"])
 
         class bad_sequence:
-            def __getitem__(self):
+            def __getitem__(self, value):
                 pass
 
             def __len__(self):
@@ -1140,7 +1140,7 @@ class TestCreation:
         with assert_raises(ValueError):
             a[:] = C()  # Segfault!
 
-        np.array(C()) == list(C())
+        assert_equal(np.array(C()), list(C()))
 
     def test_failed_len_sequence(self):
         # gh-7393
@@ -1547,7 +1547,7 @@ class TestMethods:
         assert_equal(b, np.flip(a), msg)
 
     @pytest.mark.xfail(reason="sort complex")
-    def test_sort_complex(self):
+    def test_sort_complex_nans(self):
         # check complex
         msg = "Test complex sort order with nans"
         a = np.zeros(9, dtype=np.complex128)
@@ -2920,10 +2920,10 @@ class TestMethods:
         ]
         for dt in dtypes:
             a = np.array([1, 2, 3], dtype=dt)
-            assert_raises(TypeError, complex, a)
+            assert_raises(ValueError, complex, a)
 
         c = np.array([(1.0, 3), (2e-3, 7)], dtype=dt)
-        assert_raises(TypeError, complex, c)
+        assert_raises(ValueError, complex, c)
 
 
 class TestCequenceMethods:

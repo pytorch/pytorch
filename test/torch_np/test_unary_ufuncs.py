@@ -5,7 +5,7 @@
 
 import numpy as np
 
-from torch._numpy._ufuncs import *
+from torch._numpy._ufuncs import *  # noqa: F403
 from torch._numpy.testing import assert_allclose
 
 
@@ -43,10 +43,6 @@ def test_cbrt():
 
 def test_ceil():
     assert_allclose(np.ceil(0.5), ceil(0.5), atol=1e-14, check_dtype=False)
-
-
-def test_conjugate():
-    assert_allclose(np.conjugate(0.5), conjugate(0.5), atol=1e-14, check_dtype=False)
 
 
 def test_conjugate():
