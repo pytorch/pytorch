@@ -9,10 +9,10 @@ from ._normalizations import (
     ArrayLike,
     CastingModes,
     DTypeLike,
+    normalizer,
     NotImplementedType,
     OutArray,
     Scalar,
-    normalizer,
 )
 
 
@@ -84,7 +84,6 @@ def deco_binary_ufunc(torch_func):
         signature: NotImplementedType = None,
         extobj: NotImplementedType = None,
     ):
-
         if dtype is not None:
 
             def cast(x, dtype):
@@ -133,7 +132,6 @@ def matmul(
     axes: NotImplementedType = None,
     axis: NotImplementedType = None,
 ):
-
     if dtype is None:
         dtype = _dtypes_impl.result_type_impl(x1, x2)
     x1, x2 = _util.typecast_tensors((x1, x2), dtype, casting)

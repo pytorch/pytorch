@@ -1,17 +1,21 @@
-import warnings
-import pytest
 import inspect
+import warnings
+
+import pytest
 
 import torch._numpy as np
+from pytest import raises as assert_raises
 from torch._numpy._util import normalize_axis_tuple
 from torch._numpy.testing import (
-    assert_, assert_equal, assert_almost_equal,
-    assert_array_equal, #suppress_warnings
-    )
-from pytest import raises as assert_raises
+    assert_,
+    assert_almost_equal,
+    assert_array_equal,  # suppress_warnings
+    assert_equal,
+)
 
 # Inline the implementations of these two functions from numpy
 # from numpy.lib.nanfunctions import _nan_mask, _replace_nan
+
 
 def _nan_mask(a, out=None):
     """
@@ -33,7 +37,7 @@ def _nan_mask(a, out=None):
     """
     # we assume that a is an array for this private function
 
-    if a.dtype.kind not in 'fc':
+    if a.dtype.kind not in "fc":
         return True
 
     y = np.isnan(a, out=out)
@@ -86,34 +90,47 @@ def _replace_nan(a, val):
     return a, mask
 
 
-
 # Test data
-_ndat = np.array([[0.6244, np.nan, 0.2692, 0.0116, np.nan, 0.1170],
-                  [0.5351, -0.9403, np.nan, 0.2100, 0.4759, 0.2833],
-                  [np.nan, np.nan, np.nan, 0.1042, np.nan, -0.5954],
-                  [0.1610, np.nan, np.nan, 0.1859, 0.3146, np.nan]])
+_ndat = np.array(
+    [
+        [0.6244, np.nan, 0.2692, 0.0116, np.nan, 0.1170],
+        [0.5351, -0.9403, np.nan, 0.2100, 0.4759, 0.2833],
+        [np.nan, np.nan, np.nan, 0.1042, np.nan, -0.5954],
+        [0.1610, np.nan, np.nan, 0.1859, 0.3146, np.nan],
+    ]
+)
 
 
 # Rows of _ndat with nans removed
-_rdat = [np.array([0.6244, 0.2692, 0.0116, 0.1170]),
-         np.array([0.5351, -0.9403, 0.2100, 0.4759, 0.2833]),
-         np.array([0.1042, -0.5954]),
-         np.array([0.1610, 0.1859, 0.3146])]
+_rdat = [
+    np.array([0.6244, 0.2692, 0.0116, 0.1170]),
+    np.array([0.5351, -0.9403, 0.2100, 0.4759, 0.2833]),
+    np.array([0.1042, -0.5954]),
+    np.array([0.1610, 0.1859, 0.3146]),
+]
 
 # Rows of _ndat with nans converted to ones
-_ndat_ones = np.array([[0.6244, 1.0, 0.2692, 0.0116, 1.0, 0.1170],
-                       [0.5351, -0.9403, 1.0, 0.2100, 0.4759, 0.2833],
-                       [1.0, 1.0, 1.0, 0.1042, 1.0, -0.5954],
-                       [0.1610, 1.0, 1.0, 0.1859, 0.3146, 1.0]])
+_ndat_ones = np.array(
+    [
+        [0.6244, 1.0, 0.2692, 0.0116, 1.0, 0.1170],
+        [0.5351, -0.9403, 1.0, 0.2100, 0.4759, 0.2833],
+        [1.0, 1.0, 1.0, 0.1042, 1.0, -0.5954],
+        [0.1610, 1.0, 1.0, 0.1859, 0.3146, 1.0],
+    ]
+)
 
 # Rows of _ndat with nans converted to zeros
-_ndat_zeros = np.array([[0.6244, 0.0, 0.2692, 0.0116, 0.0, 0.1170],
-                        [0.5351, -0.9403, 0.0, 0.2100, 0.4759, 0.2833],
-                        [0.0, 0.0, 0.0, 0.1042, 0.0, -0.5954],
-                        [0.1610, 0.0, 0.0, 0.1859, 0.3146, 0.0]])
+_ndat_zeros = np.array(
+    [
+        [0.6244, 0.0, 0.2692, 0.0116, 0.0, 0.1170],
+        [0.5351, -0.9403, 0.0, 0.2100, 0.4759, 0.2833],
+        [0.0, 0.0, 0.0, 0.1042, 0.0, -0.5954],
+        [0.1610, 0.0, 0.0, 0.1859, 0.3146, 0.0],
+    ]
+)
 
 
-@pytest.mark.xfail(reason='TODO: implement')
+@pytest.mark.xfail(reason="TODO: implement")
 class TestSignatureMatch:
     NANFUNCS = {
         np.nanmin: np.amin,
@@ -156,14 +173,11 @@ class TestSignatureMatch:
 
     def test_exhaustiveness(self):
         """Validate that all nan functions are actually tested."""
-        np.testing.assert_equal(
-            set(self.IDS), set(np.lib.nanfunctions.__all__)
-        )
+        np.testing.assert_equal(set(self.IDS), set(np.lib.nanfunctions.__all__))
 
 
-@pytest.mark.xfail(reason='TODO: implement')
+@pytest.mark.xfail(reason="TODO: implement")
 class TestNanFunctions_MinMax:
-
     nanfuncs = [np.nanmin, np.nanmax]
     stdfuncs = [np.min, np.max]
 
@@ -192,7 +206,7 @@ class TestNanFunctions_MinMax:
             assert_almost_equal(res, tgt)
 
     def test_dtype_from_input(self):
-        codes = 'efdFD'
+        codes = "efdFD"
         for nf, rf in zip(self.nanfuncs, self.stdfuncs):
             for c in codes:
                 mat = np.eye(3, dtype=c)
@@ -212,13 +226,17 @@ class TestNanFunctions_MinMax:
 
     @pytest.mark.parametrize("axis", [None, 0, 1])
     @pytest.mark.parametrize("dtype", np.typecodes["AllFloat"])
-    @pytest.mark.parametrize("array", [
-        np.array(np.nan),
-        np.full((3, 3), np.nan),
-    ], ids=["0d", "2d"])
+    @pytest.mark.parametrize(
+        "array",
+        [
+            np.array(np.nan),
+            np.full((3, 3), np.nan),
+        ],
+        ids=["0d", "2d"],
+    )
     def test_allnans(self, axis, dtype, array):
         if axis is not None and array.ndim == 0:
-            pytest.skip(f"`axis != None` not supported for 0d arrays")
+            pytest.skip("`axis != None` not supported for 0d arrays")
 
         array = array.astype(dtype)
         match = "All-NaN slice encountered"
@@ -240,7 +258,7 @@ class TestNanFunctions_MinMax:
 
     def test_scalar(self):
         for f in self.nanfuncs:
-            assert_(f(0.) == 0.)
+            assert_(f(0.0) == 0.0)
 
     def test_subclass(self):
         class MyNDArray(np.ndarray):
@@ -263,23 +281,24 @@ class TestNanFunctions_MinMax:
         mine[1] = np.nan
         for f in self.nanfuncs:
             with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter('always')
+                warnings.simplefilter("always")
                 res = f(mine, axis=0)
                 assert_(isinstance(res, MyNDArray))
                 assert_(not np.any(np.isnan(res)))
                 assert_(len(w) == 0)
 
             with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter('always')
+                warnings.simplefilter("always")
                 res = f(mine, axis=1)
                 assert_(isinstance(res, MyNDArray))
-                assert_(np.isnan(res[1]) and not np.isnan(res[0])
-                        and not np.isnan(res[2]))
-                assert_(len(w) == 1, 'no warning raised')
+                assert_(
+                    np.isnan(res[1]) and not np.isnan(res[0]) and not np.isnan(res[2])
+                )
+                assert_(len(w) == 1, "no warning raised")
                 assert_(issubclass(w[0].category, RuntimeWarning))
 
             with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter('always')
+                warnings.simplefilter("always")
                 res = f(mine)
                 assert_(res.shape == ())
                 assert_(res != np.nan)
@@ -326,9 +345,8 @@ class TestNanFunctions_MinMax:
             assert ret2 == reference
 
 
-@pytest.mark.xfail(reason='TODO: implement')
+@pytest.mark.xfail(reason="TODO: implement")
 class TestNanFunctions_ArgminArgmax:
-
     nanfuncs = [np.nanargmin, np.nanargmax]
 
     def test_mutation(self):
@@ -353,13 +371,17 @@ class TestNanFunctions_ArgminArgmax:
 
     @pytest.mark.parametrize("axis", [None, 0, 1])
     @pytest.mark.parametrize("dtype", np.typecodes["AllFloat"])
-    @pytest.mark.parametrize("array", [
-        np.array(np.nan),
-        np.full((3, 3), np.nan),
-    ], ids=["0d", "2d"])
+    @pytest.mark.parametrize(
+        "array",
+        [
+            np.array(np.nan),
+            np.full((3, 3), np.nan),
+        ],
+        ids=["0d", "2d"],
+    )
     def test_allnans(self, axis, dtype, array):
         if axis is not None and array.ndim == 0:
-            pytest.skip(f"`axis != None` not supported for 0d arrays")
+            pytest.skip("`axis != None` not supported for 0d arrays")
 
         array = array.astype(dtype)
         for func in self.nanfuncs:
@@ -377,7 +399,7 @@ class TestNanFunctions_ArgminArgmax:
 
     def test_scalar(self):
         for f in self.nanfuncs:
-            assert_(f(0.) == 0.)
+            assert_(f(0.0) == 0.0)
 
     def test_subclass(self):
         class MyNDArray(np.ndarray):
@@ -420,20 +442,14 @@ class TestNanFunctions_ArgminArgmax:
             assert ret == reference
 
 
-
-_TEST_ARRAYS = {
-    "0d": np.array(5),
-    "1d": np.array([127, 39, 93, 87, 46])
-}
+_TEST_ARRAYS = {"0d": np.array(5), "1d": np.array([127, 39, 93, 87, 46])}
 for _v in _TEST_ARRAYS.values():
- ## XXX  _v.setflags(write=False)
+    ## XXX  _v.setflags(write=False)
     pass
 
-@pytest.mark.xfail(reason='TODO: implement')
-@pytest.mark.parametrize(
-    "dtype",
-    np.typecodes["AllInteger"] + np.typecodes["AllFloat"]
-)
+
+@pytest.mark.xfail(reason="TODO: implement")
+@pytest.mark.parametrize("dtype", np.typecodes["AllInteger"] + np.typecodes["AllFloat"])
 @pytest.mark.parametrize("mat", _TEST_ARRAYS.values(), ids=_TEST_ARRAYS.keys())
 class TestNanFunctions_NumberTypes:
     nanfuncs = {
@@ -522,11 +538,11 @@ class SharedNanFunctionsTestsMixin:
 
     def test_dtype_from_dtype(self):
         mat = np.eye(3)
-        codes = 'efdFD'
+        codes = "efdFD"
         for nf, rf in zip(self.nanfuncs, self.stdfuncs):
             for c in codes:
                 with suppress_warnings() as sup:
-                    if nf in {np.nanstd, np.nanvar} and c in 'FD':
+                    if nf in {np.nanstd, np.nanvar} and c in "FD":
                         # Giving the warning is a small bug, see gh-8000
                         sup.filter(np.ComplexWarning)
                     tgt = rf(mat, dtype=np.dtype(c), axis=1).dtype.type
@@ -539,11 +555,11 @@ class SharedNanFunctionsTestsMixin:
 
     def test_dtype_from_char(self):
         mat = np.eye(3)
-        codes = 'efdFD'
+        codes = "efdFD"
         for nf, rf in zip(self.nanfuncs, self.stdfuncs):
             for c in codes:
                 with suppress_warnings() as sup:
-                    if nf in {np.nanstd, np.nanvar} and c in 'FD':
+                    if nf in {np.nanstd, np.nanvar} and c in "FD":
                         # Giving the warning is a small bug, see gh-8000
                         sup.filter(np.ComplexWarning)
                     tgt = rf(mat, dtype=c, axis=1).dtype.type
@@ -555,13 +571,13 @@ class SharedNanFunctionsTestsMixin:
                     assert_(res is tgt)
 
     def test_dtype_from_input(self):
-        codes = 'efdFD'
+        codes = "efdFD"
         for nf, rf in zip(self.nanfuncs, self.stdfuncs):
             for c in codes:
                 mat = np.eye(3, dtype=c)
                 tgt = rf(mat, axis=1).dtype.type
                 res = nf(mat, axis=1).dtype.type
-                assert_(res is tgt, "res %s, tgt %s" % (res, tgt))
+                assert_(res is tgt, f"res {res}, tgt {tgt}")
                 # scalar case
                 tgt = rf(mat, axis=None).dtype.type
                 res = nf(mat, axis=None).dtype.type
@@ -575,7 +591,7 @@ class SharedNanFunctionsTestsMixin:
 
     def test_scalar(self):
         for f in self.nanfuncs:
-            assert_(f(0.) == 0.)
+            assert_(f(0.0) == 0.0)
 
     def test_subclass(self):
         class MyNDArray(np.ndarray):
@@ -600,21 +616,24 @@ class SharedNanFunctionsTestsMixin:
             assert_(res.shape == expected_shape)
 
 
-@pytest.mark.xfail(reason='TODO: implement')
+@pytest.mark.xfail(reason="TODO: implement")
 class TestNanFunctions_SumProd(SharedNanFunctionsTestsMixin):
-
     nanfuncs = [np.nansum, np.nanprod]
     stdfuncs = [np.sum, np.prod]
 
     @pytest.mark.parametrize("axis", [None, 0, 1])
     @pytest.mark.parametrize("dtype", np.typecodes["AllFloat"])
-    @pytest.mark.parametrize("array", [
-        np.array(np.nan),
-        np.full((3, 3), np.nan),
-    ], ids=["0d", "2d"])
+    @pytest.mark.parametrize(
+        "array",
+        [
+            np.array(np.nan),
+            np.full((3, 3), np.nan),
+        ],
+        ids=["0d", "2d"],
+    )
     def test_allnans(self, axis, dtype, array):
         if axis is not None and array.ndim == 0:
-            pytest.skip(f"`axis != None` not supported for 0d arrays")
+            pytest.skip("`axis != None` not supported for 0d arrays")
 
         array = array.astype(dtype)
         for func, identity in zip(self.nanfuncs, [0, 1]):
@@ -625,7 +644,7 @@ class TestNanFunctions_SumProd(SharedNanFunctionsTestsMixin):
     def test_empty(self):
         for f, tgt_value in zip([np.nansum, np.nanprod], [0, 1]):
             mat = np.zeros((0, 3))
-            tgt = [tgt_value]*3
+            tgt = [tgt_value] * 3
             res = f(mat, axis=0)
             assert_equal(res, tgt)
             tgt = []
@@ -660,21 +679,19 @@ class TestNanFunctions_SumProd(SharedNanFunctionsTestsMixin):
             assert ret == reference
 
 
-@pytest.mark.xfail(reason='TODO: implement')
+@pytest.mark.xfail(reason="TODO: implement")
 class TestNanFunctions_CumSumProd(SharedNanFunctionsTestsMixin):
-
     nanfuncs = [np.nancumsum, np.nancumprod]
     stdfuncs = [np.cumsum, np.cumprod]
 
     @pytest.mark.parametrize("axis", [None, 0, 1])
     @pytest.mark.parametrize("dtype", np.typecodes["AllFloat"])
-    @pytest.mark.parametrize("array", [
-        np.array(np.nan),
-        np.full((3, 3), np.nan)
-    ], ids=["0d", "2d"])
+    @pytest.mark.parametrize(
+        "array", [np.array(np.nan), np.full((3, 3), np.nan)], ids=["0d", "2d"]
+    )
     def test_allnans(self, axis, dtype, array):
         if axis is not None and array.ndim == 0:
-            pytest.skip(f"`axis != None` not supported for 0d arrays")
+            pytest.skip("`axis != None` not supported for 0d arrays")
 
         array = array.astype(dtype)
         for func, identity in zip(self.nanfuncs, [0, 1]):
@@ -685,13 +702,13 @@ class TestNanFunctions_CumSumProd(SharedNanFunctionsTestsMixin):
     def test_empty(self):
         for f, tgt_value in zip(self.nanfuncs, [0, 1]):
             mat = np.zeros((0, 3))
-            tgt = tgt_value*np.ones((0, 3))
+            tgt = tgt_value * np.ones((0, 3))
             res = f(mat, axis=0)
             assert_equal(res, tgt)
             tgt = mat
             res = f(mat, axis=1)
             assert_equal(res, tgt)
-            tgt = np.zeros((0))
+            tgt = np.zeros(0)
             res = f(mat, axis=None)
             assert_equal(res, tgt)
 
@@ -719,7 +736,7 @@ class TestNanFunctions_CumSumProd(SharedNanFunctionsTestsMixin):
             tgt = np.cumprod(_ndat_ones, axis=axis)
             res = np.nancumprod(_ndat, axis=axis)
             assert_almost_equal(res, tgt)
-            tgt = np.cumsum(_ndat_zeros,axis=axis)
+            tgt = np.cumsum(_ndat_zeros, axis=axis)
             res = np.nancumsum(_ndat, axis=axis)
             assert_almost_equal(res, tgt)
 
@@ -734,9 +751,8 @@ class TestNanFunctions_CumSumProd(SharedNanFunctionsTestsMixin):
                 assert_almost_equal(res, tgt)
 
 
-@pytest.mark.xfail(reason='TODO: implement')
+@pytest.mark.xfail(reason="TODO: implement")
 class TestNanFunctions_MeanVarStd(SharedNanFunctionsTestsMixin):
-
     nanfuncs = [np.nanmean, np.nanvar, np.nanstd]
     stdfuncs = [np.mean, np.var, np.std]
 
@@ -779,13 +795,17 @@ class TestNanFunctions_MeanVarStd(SharedNanFunctionsTestsMixin):
 
     @pytest.mark.parametrize("axis", [None, 0, 1])
     @pytest.mark.parametrize("dtype", np.typecodes["AllFloat"])
-    @pytest.mark.parametrize("array", [
-        np.array(np.nan),
-        np.full((3, 3), np.nan),
-    ], ids=["0d", "2d"])
+    @pytest.mark.parametrize(
+        "array",
+        [
+            np.array(np.nan),
+            np.full((3, 3), np.nan),
+        ],
+        ids=["0d", "2d"],
+    )
     def test_allnans(self, axis, dtype, array):
         if axis is not None and array.ndim == 0:
-            pytest.skip(f"`axis != None` not supported for 0d arrays")
+            pytest.skip("`axis != None` not supported for 0d arrays")
 
         array = array.astype(dtype)
         match = "(Degrees of freedom <= 0 for slice.)|(Mean of empty slice)"
@@ -806,13 +826,13 @@ class TestNanFunctions_MeanVarStd(SharedNanFunctionsTestsMixin):
         for f in self.nanfuncs:
             for axis in [0, None]:
                 with warnings.catch_warnings(record=True) as w:
-                    warnings.simplefilter('always')
+                    warnings.simplefilter("always")
                     assert_(np.isnan(f(mat, axis=axis)).all())
                     assert_(len(w) == 1)
                     assert_(issubclass(w[0].category, RuntimeWarning))
             for axis in [1]:
                 with warnings.catch_warnings(record=True) as w:
-                    warnings.simplefilter('always')
+                    warnings.simplefilter("always")
                     assert_equal(f(mat, axis=axis), np.zeros([]))
                     assert_(len(w) == 0)
 
@@ -836,9 +856,8 @@ class TestNanFunctions_MeanVarStd(SharedNanFunctionsTestsMixin):
 _TYPE_CODES = list(np.typecodes["AllFloat"])
 
 
-@pytest.mark.xfail(reason='TODO: implement')
+@pytest.mark.xfail(reason="TODO: implement")
 class TestNanFunctions_Median:
-
     def test_mutation(self):
         # Check that passed array is not modified.
         ndat = _ndat.copy()
@@ -873,14 +892,14 @@ class TestNanFunctions_Median:
             assert_equal(res.shape, (1, 1, 7, 1))
 
     @pytest.mark.parametrize(
-        argnames='axis',
+        argnames="axis",
         argvalues=[
             None,
             1,
-            (1, ),
+            (1,),
             (0, 1),
             (-3, -1),
-        ]
+        ],
     )
     @pytest.mark.filterwarnings("ignore:All-NaN slice:RuntimeWarning")
     def test_keepdims_out(self, axis):
@@ -894,7 +913,8 @@ class TestNanFunctions_Median:
         else:
             axis_norm = normalize_axis_tuple(axis, d.ndim)
             shape_out = tuple(
-                1 if i in axis_norm else d.shape[i] for i in range(d.ndim))
+                1 if i in axis_norm else d.shape[i] for i in range(d.ndim)
+            )
         out = np.empty(shape_out)
         result = np.nanmedian(d, axis=axis, keepdims=True, out=out)
         assert result is out
@@ -925,7 +945,7 @@ class TestNanFunctions_Median:
             # Randomly set some elements to NaN:
             w = np.random.randint(0, d.size, size=d.size // 5)
             d.ravel()[w] = np.nan
-            d[:,0] = 1.  # ensure at least one good value
+            d[:, 0] = 1.0  # ensure at least one good value
             # use normal median without nans to compare
             tgt = []
             for x in d:
@@ -935,9 +955,9 @@ class TestNanFunctions_Median:
             assert_array_equal(np.nanmedian(d, axis=-1), tgt)
 
     def test_result_values(self):
-            tgt = [np.median(d) for d in _rdat]
-            res = np.nanmedian(_ndat, axis=1)
-            assert_almost_equal(res, tgt)
+        tgt = [np.median(d) for d in _rdat]
+        res = np.nanmedian(_ndat, axis=1)
+        assert_almost_equal(res, tgt)
 
     @pytest.mark.parametrize("axis", [None, 0, 1])
     @pytest.mark.parametrize("dtype", _TYPE_CODES)
@@ -970,18 +990,18 @@ class TestNanFunctions_Median:
         mat = np.zeros((0, 3))
         for axis in [0, None]:
             with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter('always')
+                warnings.simplefilter("always")
                 assert_(np.isnan(np.nanmedian(mat, axis=axis)).all())
                 assert_(len(w) == 1)
                 assert_(issubclass(w[0].category, RuntimeWarning))
         for axis in [1]:
             with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter('always')
+                warnings.simplefilter("always")
                 assert_equal(np.nanmedian(mat, axis=axis), np.zeros([]))
                 assert_(len(w) == 0)
 
     def test_scalar(self):
-        assert_(np.nanmedian(0.) == 0.)
+        assert_(np.nanmedian(0.0) == 0.0)
 
     def test_extended_axis_invalid(self):
         d = np.ones((3, 5, 7, 11))
@@ -995,14 +1015,13 @@ class TestNanFunctions_Median:
         with suppress_warnings() as sup:
             sup.filter(RuntimeWarning)
             for inf in [np.inf, -np.inf]:
-                a = np.array([[inf,  np.nan], [np.nan, np.nan]])
-                assert_equal(np.nanmedian(a, axis=0), [inf,  np.nan])
-                assert_equal(np.nanmedian(a, axis=1), [inf,  np.nan])
+                a = np.array([[inf, np.nan], [np.nan, np.nan]])
+                assert_equal(np.nanmedian(a, axis=0), [inf, np.nan])
+                assert_equal(np.nanmedian(a, axis=1), [inf, np.nan])
                 assert_equal(np.nanmedian(a), inf)
 
                 # minimum fill value check
-                a = np.array([[np.nan, np.nan, inf],
-                             [np.nan, np.nan, inf]])
+                a = np.array([[np.nan, np.nan, inf], [np.nan, np.nan, inf]])
                 assert_equal(np.nanmedian(a), inf)
                 assert_equal(np.nanmedian(a, axis=0), [np.nan, np.nan, inf])
                 assert_equal(np.nanmedian(a, axis=1), inf)
@@ -1011,36 +1030,41 @@ class TestNanFunctions_Median:
                 a = np.array([[inf, inf], [inf, inf]])
                 assert_equal(np.nanmedian(a, axis=1), inf)
 
-                a = np.array([[inf, 7, -inf, -9],
-                              [-10, np.nan, np.nan, 5],
-                              [4, np.nan, np.nan, inf]],
-                              dtype=np.float32)
+                a = np.array(
+                    [
+                        [inf, 7, -inf, -9],
+                        [-10, np.nan, np.nan, 5],
+                        [4, np.nan, np.nan, inf],
+                    ],
+                    dtype=np.float32,
+                )
                 if inf > 0:
-                    assert_equal(np.nanmedian(a, axis=0), [4., 7., -inf, 5.])
+                    assert_equal(np.nanmedian(a, axis=0), [4.0, 7.0, -inf, 5.0])
                     assert_equal(np.nanmedian(a), 4.5)
                 else:
-                    assert_equal(np.nanmedian(a, axis=0), [-10., 7., -inf, -9.])
+                    assert_equal(np.nanmedian(a, axis=0), [-10.0, 7.0, -inf, -9.0])
                     assert_equal(np.nanmedian(a), -2.5)
-                assert_equal(np.nanmedian(a, axis=-1), [-1., -2.5, inf])
+                assert_equal(np.nanmedian(a, axis=-1), [-1.0, -2.5, inf])
 
                 for i in range(0, 10):
                     for j in range(1, 10):
                         a = np.array([([np.nan] * i) + ([inf] * j)] * 2)
                         assert_equal(np.nanmedian(a), inf)
                         assert_equal(np.nanmedian(a, axis=1), inf)
-                        assert_equal(np.nanmedian(a, axis=0),
-                                     ([np.nan] * i) + [inf] * j)
+                        assert_equal(
+                            np.nanmedian(a, axis=0), ([np.nan] * i) + [inf] * j
+                        )
 
                         a = np.array([([np.nan] * i) + ([-inf] * j)] * 2)
                         assert_equal(np.nanmedian(a), -inf)
                         assert_equal(np.nanmedian(a, axis=1), -inf)
-                        assert_equal(np.nanmedian(a, axis=0),
-                                     ([np.nan] * i) + [-inf] * j)
+                        assert_equal(
+                            np.nanmedian(a, axis=0), ([np.nan] * i) + [-inf] * j
+                        )
 
 
-@pytest.mark.xfail(reason='TODO: implement')
+@pytest.mark.xfail(reason="TODO: implement")
 class TestNanFunctions_Percentile:
-
     def test_mutation(self):
         # Check that passed array is not modified.
         ndat = _ndat.copy()
@@ -1050,10 +1074,8 @@ class TestNanFunctions_Percentile:
     def test_keepdims(self):
         mat = np.eye(3)
         for axis in [None, 0, 1]:
-            tgt = np.percentile(mat, 70, axis=axis, out=None,
-                                overwrite_input=False)
-            res = np.nanpercentile(mat, 70, axis=axis, out=None,
-                                   overwrite_input=False)
+            tgt = np.percentile(mat, 70, axis=axis, out=None, overwrite_input=False)
+            res = np.nanpercentile(mat, 70, axis=axis, out=None, overwrite_input=False)
             assert_(res.ndim == tgt.ndim)
 
         d = np.ones((3, 5, 7, 11))
@@ -1076,16 +1098,16 @@ class TestNanFunctions_Percentile:
             res = np.nanpercentile(d, 90, axis=(0, 1, 3), keepdims=True)
             assert_equal(res.shape, (1, 1, 7, 1))
 
-    @pytest.mark.parametrize('q', [7, [1, 7]])
+    @pytest.mark.parametrize("q", [7, [1, 7]])
     @pytest.mark.parametrize(
-        argnames='axis',
+        argnames="axis",
         argvalues=[
             None,
             1,
             (1,),
             (0, 1),
             (-3, -1),
-        ]
+        ],
     )
     @pytest.mark.filterwarnings("ignore:All-NaN slice:RuntimeWarning")
     def test_keepdims_out(self, q, axis):
@@ -1099,7 +1121,8 @@ class TestNanFunctions_Percentile:
         else:
             axis_norm = normalize_axis_tuple(axis, d.ndim)
             shape_out = tuple(
-                1 if i in axis_norm else d.shape[i] for i in range(d.ndim))
+                1 if i in axis_norm else d.shape[i] for i in range(d.ndim)
+            )
         shape_out = np.shape(q) + shape_out
 
         out = np.empty(shape_out)
@@ -1126,11 +1149,11 @@ class TestNanFunctions_Percentile:
         assert_almost_equal(res, tgt)
 
     def test_complex(self):
-        arr_c = np.array([0.5+3.0j, 2.1+0.5j, 1.6+2.3j], dtype='G')
+        arr_c = np.array([0.5 + 3.0j, 2.1 + 0.5j, 1.6 + 2.3j], dtype="G")
         assert_raises(TypeError, np.nanpercentile, arr_c, 0.5)
-        arr_c = np.array([0.5+3.0j, 2.1+0.5j, 1.6+2.3j], dtype='D')
+        arr_c = np.array([0.5 + 3.0j, 2.1 + 0.5j, 1.6 + 2.3j], dtype="D")
         assert_raises(TypeError, np.nanpercentile, arr_c, 0.5)
-        arr_c = np.array([0.5+3.0j, 2.1+0.5j, 1.6+2.3j], dtype='F')
+        arr_c = np.array([0.5 + 3.0j, 2.1 + 0.5j, 1.6 + 2.3j], dtype="F")
         assert_raises(TypeError, np.nanpercentile, arr_c, 0.5)
 
     def test_result_values(self):
@@ -1144,13 +1167,17 @@ class TestNanFunctions_Percentile:
 
     @pytest.mark.parametrize("axis", [None, 0, 1])
     @pytest.mark.parametrize("dtype", np.typecodes["Float"])
-    @pytest.mark.parametrize("array", [
-        np.array(np.nan),
-        np.full((3, 3), np.nan),
-    ], ids=["0d", "2d"])
+    @pytest.mark.parametrize(
+        "array",
+        [
+            np.array(np.nan),
+            np.full((3, 3), np.nan),
+        ],
+        ids=["0d", "2d"],
+    )
     def test_allnans(self, axis, dtype, array):
         if axis is not None and array.ndim == 0:
-            pytest.skip(f"`axis != None` not supported for 0d arrays")
+            pytest.skip("`axis != None` not supported for 0d arrays")
 
         array = array.astype(dtype)
         with pytest.warns(RuntimeWarning, match="All-NaN slice encountered"):
@@ -1162,18 +1189,18 @@ class TestNanFunctions_Percentile:
         mat = np.zeros((0, 3))
         for axis in [0, None]:
             with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter('always')
+                warnings.simplefilter("always")
                 assert_(np.isnan(np.nanpercentile(mat, 40, axis=axis)).all())
                 assert_(len(w) == 1)
                 assert_(issubclass(w[0].category, RuntimeWarning))
         for axis in [1]:
             with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter('always')
+                warnings.simplefilter("always")
                 assert_equal(np.nanpercentile(mat, 40, axis=axis), np.zeros([]))
                 assert_(len(w) == 0)
 
     def test_scalar(self):
-        assert_equal(np.nanpercentile(0., 100), 0.)
+        assert_equal(np.nanpercentile(0.0, 100), 0.0)
         a = np.arange(6)
         r = np.nanpercentile(a, 50, axis=0)
         assert_equal(r, 2.5)
@@ -1200,21 +1227,22 @@ class TestNanFunctions_Percentile:
                 with suppress_warnings() as sup:
                     sup.filter(RuntimeWarning, "All-NaN slice encountered")
                     val = np.percentile(mat, perc, axis=axis, keepdims=keepdim)
-                    nan_val = np.nanpercentile(nan_mat, perc, axis=axis,
-                                               keepdims=keepdim)
+                    nan_val = np.nanpercentile(
+                        nan_mat, perc, axis=axis, keepdims=keepdim
+                    )
                     assert_equal(nan_val.shape, val.shape)
 
-                    val = np.percentile(large_mat, perc, axis=axis,
-                                        keepdims=keepdim)
-                    nan_val = np.nanpercentile(large_mat, perc, axis=axis,
-                                               keepdims=keepdim)
+                    val = np.percentile(large_mat, perc, axis=axis, keepdims=keepdim)
+                    nan_val = np.nanpercentile(
+                        large_mat, perc, axis=axis, keepdims=keepdim
+                    )
                     assert_equal(nan_val, val)
 
         megamat = np.ones((3, 4, 5, 6))
         assert_equal(np.nanpercentile(megamat, perc, axis=(1, 2)).shape, (2, 3, 6))
 
 
-@pytest.mark.xfail(reason='TODO: implement')
+@pytest.mark.xfail(reason="TODO: implement")
 class TestNanFunctions_Quantile:
     # most of this is already tested by TestPercentile
 
@@ -1223,50 +1251,59 @@ class TestNanFunctions_Quantile:
         ar[0][1] = np.nan
 
         assert_equal(np.nanquantile(ar, q=0.5), np.nanpercentile(ar, q=50))
-        assert_equal(np.nanquantile(ar, q=0.5, axis=0),
-                     np.nanpercentile(ar, q=50, axis=0))
-        assert_equal(np.nanquantile(ar, q=0.5, axis=1),
-                     np.nanpercentile(ar, q=50, axis=1))
-        assert_equal(np.nanquantile(ar, q=[0.5], axis=1),
-                     np.nanpercentile(ar, q=[50], axis=1))
-        assert_equal(np.nanquantile(ar, q=[0.25, 0.5, 0.75], axis=1),
-                     np.nanpercentile(ar, q=[25, 50, 75], axis=1))
+        assert_equal(
+            np.nanquantile(ar, q=0.5, axis=0), np.nanpercentile(ar, q=50, axis=0)
+        )
+        assert_equal(
+            np.nanquantile(ar, q=0.5, axis=1), np.nanpercentile(ar, q=50, axis=1)
+        )
+        assert_equal(
+            np.nanquantile(ar, q=[0.5], axis=1), np.nanpercentile(ar, q=[50], axis=1)
+        )
+        assert_equal(
+            np.nanquantile(ar, q=[0.25, 0.5, 0.75], axis=1),
+            np.nanpercentile(ar, q=[25, 50, 75], axis=1),
+        )
 
     def test_basic(self):
         x = np.arange(8) * 0.5
-        assert_equal(np.nanquantile(x, 0), 0.)
+        assert_equal(np.nanquantile(x, 0), 0.0)
         assert_equal(np.nanquantile(x, 1), 3.5)
         assert_equal(np.nanquantile(x, 0.5), 1.75)
 
     def test_complex(self):
-        arr_c = np.array([0.5+3.0j, 2.1+0.5j, 1.6+2.3j], dtype='G')
+        arr_c = np.array([0.5 + 3.0j, 2.1 + 0.5j, 1.6 + 2.3j], dtype="G")
         assert_raises(TypeError, np.nanquantile, arr_c, 0.5)
-        arr_c = np.array([0.5+3.0j, 2.1+0.5j, 1.6+2.3j], dtype='D')
+        arr_c = np.array([0.5 + 3.0j, 2.1 + 0.5j, 1.6 + 2.3j], dtype="D")
         assert_raises(TypeError, np.nanquantile, arr_c, 0.5)
-        arr_c = np.array([0.5+3.0j, 2.1+0.5j, 1.6+2.3j], dtype='F')
+        arr_c = np.array([0.5 + 3.0j, 2.1 + 0.5j, 1.6 + 2.3j], dtype="F")
         assert_raises(TypeError, np.nanquantile, arr_c, 0.5)
 
     def test_no_p_overwrite(self):
         # this is worth retesting, because quantile does not make a copy
         p0 = np.array([0, 0.75, 0.25, 0.5, 1.0])
         p = p0.copy()
-        np.nanquantile(np.arange(100.), p, method="midpoint")
+        np.nanquantile(np.arange(100.0), p, method="midpoint")
         assert_array_equal(p, p0)
 
         p0 = p0.tolist()
         p = p.tolist()
-        np.nanquantile(np.arange(100.), p, method="midpoint")
+        np.nanquantile(np.arange(100.0), p, method="midpoint")
         assert_array_equal(p, p0)
 
     @pytest.mark.parametrize("axis", [None, 0, 1])
     @pytest.mark.parametrize("dtype", np.typecodes["Float"])
-    @pytest.mark.parametrize("array", [
-        np.array(np.nan),
-        np.full((3, 3), np.nan),
-    ], ids=["0d", "2d"])
+    @pytest.mark.parametrize(
+        "array",
+        [
+            np.array(np.nan),
+            np.full((3, 3), np.nan),
+        ],
+        ids=["0d", "2d"],
+    )
     def test_allnans(self, axis, dtype, array):
         if axis is not None and array.ndim == 0:
-            pytest.skip(f"`axis != None` not supported for 0d arrays")
+            pytest.skip("`axis != None` not supported for 0d arrays")
 
         array = array.astype(dtype)
         with pytest.warns(RuntimeWarning, match="All-NaN slice encountered"):
@@ -1274,22 +1311,23 @@ class TestNanFunctions_Quantile:
         assert np.isnan(out).all()
         assert out.dtype == array.dtype
 
-@pytest.mark.parametrize("arr, expected", [
-    # array of floats with some nans
-    (np.array([np.nan, 5.0, np.nan, np.inf]),
-     np.array([False, True, False, True])),
-    # int64 array that can't possibly have nans
-    (np.array([1, 5, 7, 9], dtype=np.int64),
-     True),
-    # bool array that can't possibly have nans
-    (np.array([False, True, False, True]),
-     True),
-    # 2-D complex array with nans
-    (np.array([[np.nan, 5.0],
-               [np.nan, np.inf]], dtype=np.complex64),
-     np.array([[False, True],
-               [False, True]])),
-    ])
+
+@pytest.mark.parametrize(
+    "arr, expected",
+    [
+        # array of floats with some nans
+        (np.array([np.nan, 5.0, np.nan, np.inf]), np.array([False, True, False, True])),
+        # int64 array that can't possibly have nans
+        (np.array([1, 5, 7, 9], dtype=np.int64), True),
+        # bool array that can't possibly have nans
+        (np.array([False, True, False, True]), True),
+        # 2-D complex array with nans
+        (
+            np.array([[np.nan, 5.0], [np.nan, np.inf]], dtype=np.complex64),
+            np.array([[False, True], [False, True]]),
+        ),
+    ],
+)
 def test__nan_mask(arr, expected):
     for out in [None, np.empty(arr.shape, dtype=np.bool_)]:
         actual = _nan_mask(arr, out=out)
@@ -1301,9 +1339,9 @@ def test__nan_mask(arr, expected):
             assert actual is True
 
 
-@pytest.mark.xfail(reason='TODO: implement')
+@pytest.mark.xfail(reason="TODO: implement")
 def test__replace_nan():
-    """ Test that _replace_nan returns the original array if there are no
+    """Test that _replace_nan returns the original array if there are no
     NaNs, not a copy.
     """
     for dtype in [np.bool_, np.int32, np.int64]:
@@ -1316,7 +1354,7 @@ def test__replace_nan():
     for dtype in [np.float32, np.float64]:
         arr = np.array([0, 1], dtype=dtype)
         result, mask = _replace_nan(arr, 2)
-        assert (mask == False).all()
+        assert (mask is False).all()
         # mask is not None, so we make a copy
         assert result is not arr
         assert_equal(result, arr)

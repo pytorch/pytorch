@@ -1,33 +1,32 @@
-import sys
 import operator
-import pytest
-import types
-from typing import Any
-
-import torch._numpy as np
-from torch._numpy.testing import (assert_, assert_equal, assert_array_equal)
-from pytest import raises as assert_raises
 
 import pickle
+import sys
+import types
 from itertools import permutations
-import random
+from typing import Any
 
+import pytest
+
+import torch._numpy as np
+from pytest import raises as assert_raises
+from torch._numpy.testing import assert_, assert_equal
 
 
 def assert_dtype_equal(a, b):
     assert_equal(a, b)
-    assert_equal(hash(a), hash(b),
-                 "two equivalent types do not hash to the same value !")
+    assert_equal(
+        hash(a), hash(b), "two equivalent types do not hash to the same value !"
+    )
 
 
 def assert_dtype_not_equal(a, b):
     assert_(a != b)
-    assert_(hash(a) != hash(b),
-            "two different types hash to the same value !")
+    assert_(hash(a) != hash(b), "two different types hash to the same value !")
 
 
 class TestBuiltin:
-    @pytest.mark.parametrize('t', [int, float, complex, np.int32])
+    @pytest.mark.parametrize("t", [int, float, complex, np.int32])
     def test_run(self, t):
         """Only test hash runs at all."""
         dt = np.dtype(t)
@@ -48,29 +47,29 @@ class TestBuiltin:
     def test_invalid_types(self):
         # Make sure invalid type strings raise an error
 
-        assert_raises(TypeError, np.dtype, 'O3')
-        assert_raises(TypeError, np.dtype, 'O5')
-        assert_raises(TypeError, np.dtype, 'O7')
-        assert_raises(TypeError, np.dtype, 'b3')
-        assert_raises(TypeError, np.dtype, 'h4')
-        assert_raises(TypeError, np.dtype, 'I5')
-        assert_raises(TypeError, np.dtype, 'e3')
-        assert_raises(TypeError, np.dtype, 'f5')
+        assert_raises(TypeError, np.dtype, "O3")
+        assert_raises(TypeError, np.dtype, "O5")
+        assert_raises(TypeError, np.dtype, "O7")
+        assert_raises(TypeError, np.dtype, "b3")
+        assert_raises(TypeError, np.dtype, "h4")
+        assert_raises(TypeError, np.dtype, "I5")
+        assert_raises(TypeError, np.dtype, "e3")
+        assert_raises(TypeError, np.dtype, "f5")
 
-        if np.dtype('l').itemsize == 8:
-            assert_raises(TypeError, np.dtype, 'l4')
-            assert_raises(TypeError, np.dtype, 'L4')
+        if np.dtype("l").itemsize == 8:
+            assert_raises(TypeError, np.dtype, "l4")
+            assert_raises(TypeError, np.dtype, "L4")
         else:
-            assert_raises(TypeError, np.dtype, 'l8')
-            assert_raises(TypeError, np.dtype, 'L8')
+            assert_raises(TypeError, np.dtype, "l8")
+            assert_raises(TypeError, np.dtype, "L8")
 
- # XXX: what is 'q'? on my 64-bit ubuntu maching it's int64, same as 'l'
- #       if np.dtype('q').itemsize == 8:
- #           assert_raises(TypeError, np.dtype, 'q4')
- #           assert_raises(TypeError, np.dtype, 'Q4')
- #       else:
- #           assert_raises(TypeError, np.dtype, 'q8')
- #           assert_raises(TypeError, np.dtype, 'Q8')
+    # XXX: what is 'q'? on my 64-bit ubuntu maching it's int64, same as 'l'
+    #       if np.dtype('q').itemsize == 8:
+    #           assert_raises(TypeError, np.dtype, 'q4')
+    #           assert_raises(TypeError, np.dtype, 'Q4')
+    #       else:
+    #           assert_raises(TypeError, np.dtype, 'q8')
+    #           assert_raises(TypeError, np.dtype, 'Q8')
 
     def test_richcompare_invalid_dtype_equality(self):
         # Make sure objects that cannot be converted to valid
@@ -81,8 +80,8 @@ class TestBuiltin:
         assert np.dtype(np.int32) != 7, "dtype richcompare failed for !="
 
     @pytest.mark.parametrize(
-        'operation',
-        [operator.le, operator.lt, operator.ge, operator.gt])
+        "operation", [operator.le, operator.lt, operator.ge, operator.gt]
+    )
     def test_richcompare_invalid_dtype_comparison(self, operation):
         # Make sure TypeError is raised for comparison operators
         # for invalid dtypes. Here 7 is an invalid dtype.
@@ -90,27 +89,58 @@ class TestBuiltin:
         with pytest.raises(TypeError):
             operation(np.dtype(np.int32), 7)
 
-    @pytest.mark.parametrize("dtype",
-             ['Bool', 'Bytes0', 'Complex32', 'Complex64',
-              'Datetime64', 'Float16', 'Float32', 'Float64',
-              'Int8', 'Int16', 'Int32', 'Int64',
-              'Object0', 'Str0', 'Timedelta64',
-              'UInt8', 'UInt16', 'Uint32', 'UInt32',
-              'Uint64', 'UInt64', 'Void0',
-              "Float128", "Complex128"])
+    @pytest.mark.parametrize(
+        "dtype",
+        [
+            "Bool",
+            "Bytes0",
+            "Complex32",
+            "Complex64",
+            "Datetime64",
+            "Float16",
+            "Float32",
+            "Float64",
+            "Int8",
+            "Int16",
+            "Int32",
+            "Int64",
+            "Object0",
+            "Str0",
+            "Timedelta64",
+            "UInt8",
+            "UInt16",
+            "Uint32",
+            "UInt32",
+            "Uint64",
+            "UInt64",
+            "Void0",
+            "Float128",
+            "Complex128",
+        ],
+    )
     def test_numeric_style_types_are_invalid(self, dtype):
         with assert_raises(TypeError):
             np.dtype(dtype)
 
 
-@pytest.mark.skip(reason='dtype attributes not yet implemented')
+@pytest.mark.skip(reason="dtype attributes not yet implemented")
 class TestDtypeAttributeDeletion:
-
     def test_dtype_non_writable_attributes_deletion(self):
         dt = np.dtype(np.double)
-        attr = ["subdtype", "descr", "str", "name", "base", "shape",
-                "isbuiltin", "isnative", "isalignedstruct", "fields",
-                "metadata", "hasobject"]
+        attr = [
+            "subdtype",
+            "descr",
+            "str",
+            "name",
+            "base",
+            "shape",
+            "isbuiltin",
+            "isnative",
+            "isalignedstruct",
+            "fields",
+            "metadata",
+            "hasobject",
+        ]
 
         for s in attr:
             assert_raises(AttributeError, delattr, dt, s)
@@ -123,7 +153,6 @@ class TestDtypeAttributeDeletion:
 
 
 class TestPickling:
-
     def check_pickling(self, dtype):
         for proto in range(pickle.HIGHEST_PROTOCOL + 1):
             buf = pickle.dumps(dtype, proto)
@@ -134,10 +163,10 @@ class TestPickling:
             pickled = pickle.loads(buf)
             assert_equal(pickled, dtype)
 
-   ## XXX: out dtypes do not have .descr
-   ##         assert_equal(pickled.descr, dtype.descr)
-   ##         if dtype.metadata is not None:
-   ##             assert_equal(pickled.metadata, dtype.metadata)
+            ## XXX: out dtypes do not have .descr
+            ##         assert_equal(pickled.descr, dtype.descr)
+            ##         if dtype.metadata is not None:
+            ##             assert_equal(pickled.metadata, dtype.metadata)
             # Check the reconstructed dtype is functional
 
             x = np.zeros(3, dtype=dtype)
@@ -145,12 +174,13 @@ class TestPickling:
             assert_equal(x, y)
             assert_equal(x[0], y[0])
 
-    @pytest.mark.parametrize('t', [int, float, complex, np.int32, bool])
+    @pytest.mark.parametrize("t", [int, float, complex, np.int32, bool])
     def test_builtin(self, t):
         self.check_pickling(np.dtype(t))
 
-    @pytest.mark.parametrize("DType",
-        [type(np.dtype(t)) for t in np.typecodes['All']] + [np.dtype])
+    @pytest.mark.parametrize(
+        "DType", [type(np.dtype(t)) for t in np.typecodes["All"]] + [np.dtype]
+    )
     def test_pickle_types(self, DType):
         # Check that DTypes (the classes/types) roundtrip when pickling
         for proto in range(pickle.HIGHEST_PROTOCOL + 1):
@@ -163,16 +193,21 @@ class TestPromotion:
     """Test cases related to more complex DType promotions.  Further promotion
     tests are defined in `test_numeric.py`
     """
-    @pytest.mark.parametrize(["other", "expected", "expected_weak"],
-            [(2**16-1, np.complex64, None),
-             (2**32-1, np.complex128, np.complex64),
-             (np.float16(2), np.complex64, None),
-             (np.float32(2), np.complex64, None),
-             # repeat for complex scalars:
-             (np.complex64(2), np.complex64, None),
-             ])
-    def test_complex_other_value_based(self,
-            weak_promotion, other, expected, expected_weak):
+
+    @pytest.mark.parametrize(
+        ["other", "expected", "expected_weak"],
+        [
+            (2**16 - 1, np.complex64, None),
+            (2**32 - 1, np.complex128, np.complex64),
+            (np.float16(2), np.complex64, None),
+            (np.float32(2), np.complex64, None),
+            # repeat for complex scalars:
+            (np.complex64(2), np.complex64, None),
+        ],
+    )
+    def test_complex_other_value_based(
+        self, weak_promotion, other, expected, expected_weak
+    ):
         if weak_promotion and expected_weak is not None:
             expected = expected_weak
 
@@ -185,15 +220,18 @@ class TestPromotion:
         res = np.minimum(other, np.ones(3, dtype=min_complex)).dtype
         assert res == expected
 
-    @pytest.mark.parametrize(["other", "expected"],
-                 [(np.bool_, np.complex128),
-                  (np.int64, np.complex128),
-                  (np.float16, np.complex64),
-                  (np.float32, np.complex64),
-                  (np.float64, np.complex128),
-                  (np.complex64, np.complex64),
-                  (np.complex128, np.complex128),
-                  ])
+    @pytest.mark.parametrize(
+        ["other", "expected"],
+        [
+            (np.bool_, np.complex128),
+            (np.int64, np.complex128),
+            (np.float16, np.complex64),
+            (np.float32, np.complex64),
+            (np.float64, np.complex128),
+            (np.complex64, np.complex64),
+            (np.complex128, np.complex128),
+        ],
+    )
     def test_complex_scalar_value_based(self, other, expected):
         # This would change if we modify the value based promotion
         complex_scalar = 1j
@@ -204,8 +242,7 @@ class TestPromotion:
         res = np.minimum(np.ones(3, dtype=other), complex_scalar).dtype
         assert res == expected
 
-
-    @pytest.mark.parametrize("val", [2, 2**32, 2**63, 2**64, 2*100])
+    @pytest.mark.parametrize("val", [2, 2**32, 2**63, 2**64, 2 * 100])
     def test_python_integer_promotion(self, val):
         # If we only path scalars (mainly python ones!), the result must take
         # into account that the integer may be considered int32, int64, uint64,
@@ -215,22 +252,24 @@ class TestPromotion:
         # For completeness sake, also check with a NumPy scalar as second arg:
         assert np.result_type(val, np.int8(0)) == expected_dtype
 
-
-    @pytest.mark.parametrize(["dtypes", "expected"], [
-             # These promotions are not associative/commutative:
-             ([np.int16, np.float16], np.float32),
-             ([np.int8, np.float16], np.float32),
-             ([np.uint8, np.int16, np.float16], np.float32),
-             # The following promotions are not ambiguous, but cover code
-             # paths of abstract promotion (no particular logic being tested)
-             ([1, 1, np.float64], np.float64),
-             ([1, 1., np.complex128], np.complex128),
-             ([1, 1j, np.float64], np.complex128),
-             ([1., 1., np.int64], np.float64),
-             ([1., 1j, np.float64], np.complex128),
-             ([1j, 1j, np.float64], np.complex128),
-             ([1, True, np.bool_], np.int_),
-            ])
+    @pytest.mark.parametrize(
+        ["dtypes", "expected"],
+        [
+            # These promotions are not associative/commutative:
+            ([np.int16, np.float16], np.float32),
+            ([np.int8, np.float16], np.float32),
+            ([np.uint8, np.int16, np.float16], np.float32),
+            # The following promotions are not ambiguous, but cover code
+            # paths of abstract promotion (no particular logic being tested)
+            ([1, 1, np.float64], np.float64),
+            ([1, 1.0, np.complex128], np.complex128),
+            ([1, 1j, np.float64], np.complex128),
+            ([1.0, 1.0, np.int64], np.float64),
+            ([1.0, 1j, np.float64], np.complex128),
+            ([1j, 1j, np.float64], np.complex128),
+            ([1, True, np.bool_], np.int_),
+        ],
+    )
     def test_permutations_do_not_influence_result(self, dtypes, expected):
         # Tests that most permutations do not influence the result.  In the
         # above some uint and int combintations promote to a larger integer
@@ -239,12 +278,10 @@ class TestPromotion:
             assert np.result_type(*perm) == expected
 
 
-
 def test_dtypes_are_true():
     # test for gh-6294
-    assert bool(np.dtype('f8'))
-    assert bool(np.dtype('i8'))
-
+    assert bool(np.dtype("f8"))
+    assert bool(np.dtype("i8"))
 
 
 @pytest.mark.xfail(reason="No keyword arg for dtype ctor.")
@@ -261,8 +298,10 @@ class TestFromDTypeAttribute:
         assert np.dtype(dt) == np.float64
         assert np.dtype(dt()) == np.float64
 
-    @pytest.mark.skip(reason="We simply require the .name attribute, so this "
-                             "fails with an AttributeError.")
+    @pytest.mark.skip(
+        reason="We simply require the .name attribute, so this "
+        "fails with an AttributeError."
+    )
     def test_recursion(self):
         class dt:
             pass
@@ -275,7 +314,6 @@ class TestFromDTypeAttribute:
         dt_instance.dtype = dt
         with pytest.raises(RecursionError):
             np.dtype(dt_instance)
-
 
 
 @pytest.mark.skip(reason="Parameteric dtypes, our stuff is simpler.")

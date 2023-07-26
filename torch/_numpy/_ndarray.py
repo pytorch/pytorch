@@ -6,12 +6,12 @@ import operator
 
 import torch
 
-from . import _dtypes, _dtypes_impl, _funcs, _funcs_impl, _ufuncs, _util
+from . import _dtypes, _dtypes_impl, _funcs, _ufuncs, _util
 from ._normalizations import (
     ArrayLike,
-    NotImplementedType,
     normalize_array_like,
     normalizer,
+    NotImplementedType,
 )
 
 newaxis = None
@@ -481,9 +481,9 @@ def _tolist(obj):
 
 def array(obj, dtype=None, *, copy=True, order="K", subok=False, ndmin=0, like=None):
     if subok is not False:
-        raise NotImplementedError(f"'subok' parameter is not supported.")
+        raise NotImplementedError("'subok' parameter is not supported.")
     if like is not None:
-        raise NotImplementedError(f"'like' parameter is not supported.")
+        raise NotImplementedError("'like' parameter is not supported.")
     if order != "K":
         raise NotImplementedError
 
@@ -552,7 +552,7 @@ def result_type(*arrays_and_dtypes):
     for entry in arrays_and_dtypes:
         try:
             t = asarray(entry).tensor
-        except ((RuntimeError, ValueError, TypeError)):
+        except (RuntimeError, ValueError, TypeError):
             dty = _dtypes.dtype(entry)
             t = torch.empty(1, dtype=dty.torch_dtype)
         tensors.append(t)
