@@ -63,6 +63,25 @@ def boolean_ops():
     )
 
 
+DTYPE_TO_COMPUTATION_DTYPE = {
+    torch.bfloat16: torch.float,
+    torch.float16: torch.float,
+    **{
+        dtype: dtype
+        for dtype in [
+            torch.bool,
+            torch.float32,
+            torch.float64,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.uint8,
+        ]
+    },
+}
+
+
 class DataTypePropagation:
     def __init__(self, body) -> None:
         self.body = body
@@ -98,8 +117,6 @@ class DataTypePropagation:
         return dtype
 
     def deduce_node_dtype(self, node: torch.fx.Node):
-        from .cpp import DTYPE_TO_COMPUTATION_DTYPE
-
         if node.target in boolean_ops():
             return torch.bool
 

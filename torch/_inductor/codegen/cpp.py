@@ -39,6 +39,7 @@ from .common import (
     CSE,
     DataTypePropagation,
     DeferredLine,
+    DTYPE_TO_COMPUTATION_DTYPE,
     ExprPrinter,
     IndentedBuffer,
     Kernel,
@@ -48,24 +49,6 @@ from .common import (
 )
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
-
-DTYPE_TO_COMPUTATION_DTYPE = {
-    torch.bfloat16: torch.float,
-    torch.float16: torch.float,
-    **{
-        dtype: dtype
-        for dtype in [
-            torch.bool,
-            torch.float32,
-            torch.float64,
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.uint8,
-        ]
-    },
-}
 
 DTYPE_TO_CPP = {
     torch.float32: "float",
@@ -412,10 +395,17 @@ def get_current_node_opt_ctx() -> OptimizationContext:
     return get_opt_ctx(V.interpreter.current_node)
 
 
+@functools.lru_cache(None)
 def get_computation_dtype(dtype) -> torch.dtype:
     opt_ctx: OptimizationContext = get_current_node_opt_ctx()
     assert opt_ctx
-    assert opt_ctx.dtype == DTYPE_TO_COMPUTATION_DTYPE[dtype]
+    if opt_ctx.dtype != DTYPE_TO_COMPUTATION_DTYPE[dtype]:
+        # the Vec kernel might cast fp64/int64 to fp32/int32 in "constant" to support vectorization
+        assert dtype in (torch.int64, torch.float64)
+        if dtype == torch.int64:
+            assert opt_ctx.dtype == torch.int32
+        else:
+            assert opt_ctx.dtype == torch.float32
     return opt_ctx.dtype
 
 
@@ -2101,6 +2091,9 @@ class CppVecKernelChecker(CppVecKernel):
                 with RecordOptimizationContext(__name__) as node_ctx:
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
+                    # VecKernel override dtype for constant
+                    # Vectorization only support int32/fp32 now
+                    # So if dtype = int64/fp64, we will cast it to int32/fp32 if possible
                     i32_iinfo = numpy.iinfo(numpy.int32)
                     if (
                         dtype == torch.int64
