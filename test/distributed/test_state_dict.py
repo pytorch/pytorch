@@ -21,6 +21,8 @@ from torch.distributed.state_dict import (
     distributed_load_state_dict,
     distributed_state_dict,
     DistributedStateDictOptions,
+    patch_model_state_dict,
+    patch_optimizer_state_dict,
     PG,
 )
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -138,7 +140,7 @@ class TestStateDict(FSDPTest):
         use_dtensor: bool = False,
     ) -> None:
         options = DistributedStateDictOptions(
-            no_return_frozen_parameters=test_frozen, use_dtensor=use_dtensor
+            save_frozen_params=(not test_frozen), use_dtensor=use_dtensor
         )
         # Initialize original model and distributed model.
         orig_model, orig_optim, dist_model, dist_optim = init_model_optim()
@@ -199,6 +201,15 @@ class TestStateDict(FSDPTest):
         dist_msd, dist_osd = distributed_state_dict(
             dist_model, dist_optim, options=options
         )
+        self._verify_state_dict(
+            orig_model, orig_optim, orig_msd, orig_osd, dist_msd, dist_osd, test_frozen
+        )
+
+        # Test patch_model_state_dict, and patch_optimizer_state_dict
+        patch_model_state_dict(dist_model, options=options)
+        patch_optimizer_state_dict(dist_model, dist_optim, options=options)
+        dist_msd = dist_model.state_dict()
+        dist_osd = dist_optim[0].state_dict()
         self._verify_state_dict(
             orig_model, orig_optim, orig_msd, orig_osd, dist_msd, dist_osd, test_frozen
         )
@@ -314,3 +325,14 @@ class TestStateDict(FSDPTest):
             self._test_fsdp_ddp,
             optim_in_backward=True,
         )
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_gpu(self) -> None:
+        def init_model_optim():
+            orig_model = CompositeParamModel(device=torch.device("cuda"))
+            orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
+            model_copy = copy.deepcopy(orig_model)
+            optim_copy = torch.optim.Adam(model_copy.parameters(), lr=1e-3)
+            return orig_model, orig_optim, model_copy, optim_copy
+
+        self._test_save_load(init_model_optim)

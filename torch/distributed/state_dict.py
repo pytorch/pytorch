@@ -26,19 +26,21 @@ FLAT_PARAM = "_flat_param"
 PG = "param_groups"
 FQNS_T = Set[str]
 
+_patched_state_dict: Set[Callable] = set()
+
 
 @dataclass
 class DistributedStateDictOptions:
-    use_dtensor: bool = False
+    use_dtensor: bool = True
     # The default should be sharded_state_dict
     fsdp_state_dict_type: StateDictType = StateDictType.SHARDED_STATE_DICT
     save_to_cpu: bool = True
-    # Do not save parameters that requires_grad is False.
-    no_return_frozen_parameters: bool = False
+    # Whether to save the frozen parameters. The default is True.
+    save_frozen_params: bool = True
 
 
 @dataclass
-class StateDictInfo(DistributedStateDictOptions):
+class _StateDictInfo(DistributedStateDictOptions):
     fqn_param_mapping: Dict[
         Union[FQNS_T, torch.Tensor], Union[FQNS_T, torch.Tensor]
     ] = field(default_factory=dict)
@@ -98,9 +100,9 @@ def _verify_options(
     model_only: bool,
     optim_only: bool,
     options: Optional[DistributedStateDictOptions] = None,
-) -> StateDictInfo:
+) -> _StateDictInfo:
     """
-    Verify the model and options passed by the user and generates StateDictInfo.
+    Verify the model and options passed by the user and generates _StateDictInfo.
     """
     if options is None:
         options = DistributedStateDictOptions()
@@ -115,14 +117,18 @@ def _verify_options(
             fqn_param_mapping[fqn] = param
         if isinstance(param, DTensor) and not options.use_dtensor:
             # TODO: better way to detect TP.
-            raise RuntimeError("TP is used by use_dtensor is set to False")
+            raise RuntimeError("TP is used by but use_dtensor is set to False")
 
     fsdp_modules = FSDP.fsdp_modules(model)
     if fsdp_modules:
         # FSDP API only work if at least one FSDP instance exists.
         if options.fsdp_state_dict_type == StateDictType.FULL_STATE_DICT:
-            state_dict_config = FullStateDictConfig()
-            optim_state_dict_config = FullOptimStateDictConfig()
+            state_dict_config = FullStateDictConfig(
+                offload_to_cpu=True, rank0_only=True
+            )
+            optim_state_dict_config = FullOptimStateDictConfig(
+                offload_to_cpu=True, rank0_only=True
+            )
         elif options.fsdp_state_dict_type == StateDictType.SHARDED_STATE_DICT:
             state_dict_config = ShardedStateDictConfig(use_dtensor=options.use_dtensor)
             optim_state_dict_config = ShardedOptimStateDictConfig(
@@ -143,7 +149,7 @@ def _verify_options(
     else:
         fsdp_context = contextlib.nullcontext
 
-    info = StateDictInfo(
+    info = _StateDictInfo(
         **asdict(options),
         fqn_param_mapping=fqn_param_mapping,
         fsdp_context=fsdp_context,
@@ -154,27 +160,33 @@ def _verify_options(
         raise RuntimeError(
             "Both model_only and optim_only are set, which one do you need?"
         )
+    if model_only and optims:
+        raise RuntimeError(
+            "If model_only is True optims must be an empty iterable object."
+        )
     if optim_only and not optims:
         raise RuntimeError(
             "Optimizers are not passed in but optim_only is set to True."
         )
 
     info.handle_model = model_only or not optim_only
-    info.handle_optim = optim_only or (not model_only and not optims)
+    info.handle_optim = optim_only or (not model_only and optims)
     return info
 
 
 def _verify_state_dict(
     model_state_dict: Dict[str, Any],
     optim_state_dict: Dict[str, Any],
-    info: StateDictInfo,
+    info: _StateDictInfo,
 ) -> None:
 
     # FSDP root must exist otherwise FSDP state_dict will be incorrect.
     has_fsdp_root = False
     for module in info.fsdp_modules:
         fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
-        has_fsdp_root = has_fsdp_root or fsdp_state._is_root
+        if fsdp_state._is_root:
+            has_fsdp_root = True
+            break
     if info.fsdp_modules and not has_fsdp_root:
         raise RuntimeError("The model has FSDP modules but no FSDP root module exists.")
 
@@ -200,9 +212,16 @@ def _verify_state_dict(
             )
 
 
-def _get_model_state_dict(model: nn.Module, info: StateDictInfo) -> Dict[str, Any]:
+def _state_dict_fn(obj: Union[nn.Module, torch.optim.Optimizer], api: str) -> Callable:
+    call = getattr(obj, api)
+    if call in _patched_state_dict:
+        call = functools.partial(getattr(obj.__class__, api), self=obj)
+    return call
+
+
+def _get_model_state_dict(model: nn.Module, info: _StateDictInfo) -> Dict[str, Any]:
     with info.fsdp_context():
-        state_dict = model.state_dict()
+        state_dict = _state_dict_fn(model, "state_dict")()
 
     for key in list(state_dict.keys()):
         fqns = _get_fqns(model, key)
@@ -232,7 +251,7 @@ def _get_model_state_dict(model: nn.Module, info: StateDictInfo) -> Dict[str, An
                 raise RuntimeError(f"An unexpected key, {key}, exists. FQN is {fqn}")
             state_dict[fqn] = state_dict.pop(key)
 
-    if info.no_return_frozen_parameters:
+    if not info.save_frozen_params:
         for key, param in model.named_parameters():
             if param.requires_grad:
                 continue
@@ -245,7 +264,7 @@ def _get_model_state_dict(model: nn.Module, info: StateDictInfo) -> Dict[str, An
 def _load_model_state_dict(
     model: nn.Module,
     state_dict: Dict[str, Any],
-    info: StateDictInfo,
+    info: _StateDictInfo,
 ) -> Dict[str, Any]:
     for key, _ in model.named_parameters():
         fqns = _get_fqns(model, key)
@@ -255,7 +274,7 @@ def _load_model_state_dict(
                 state_dict[fqn_with_ddp_prefix] = state_dict.pop(fqn)
 
     with info.fsdp_context():
-        return model.load_state_dict(state_dict)
+        return _state_dict_fn(model, "load_state_dict")(state_dict)
 
 
 def _init_optim_state(optim: torch.optim.Optimizer) -> None:
@@ -268,6 +287,15 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
 
     for param_group in optim.param_groups:
         for param in param_group["params"]:
+            if param.grad is not None:
+                raise RuntimeError(
+                    "distributed_state_dict can only be used if the optimizer "
+                    "states are initialized (usually after one step() with "
+                    "gradients) or gradients are None. For the later case, "
+                    "distributed_state_dict will fake the gradients as zero "
+                    "to initialize the optimizer states. However, the "
+                    "gradients are not None."
+                )
             if param.requires_grad:
                 grad = torch.zeros_like(param)
                 param.grad = torch.autograd.Variable(grad)
@@ -278,12 +306,12 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
 def _get_optim_state_dict(
     model: nn.Module,
     optims: Tuple[torch.optim.Optimizer],
-    info: StateDictInfo,
+    info: _StateDictInfo,
 ) -> Dict[str, Any]:
     optim_state_dict = {"state": {}, PG: []}
     for optim in optims:
         _init_optim_state(optim)
-        osd = optim.state_dict()
+        osd = _state_dict_fn(optim, "state_dict")()
         if info.fsdp_modules:
             with info.fsdp_context():
                 osd = FSDP.optim_state_dict(model, optim, osd)
@@ -318,7 +346,7 @@ def _split_optim_state_dict(
     model: nn.Module,
     optim: torch.optim.Optimizer,
     optim_state_dict: Dict[str, Any],
-    info: StateDictInfo,
+    info: _StateDictInfo,
 ) -> Dict[str, Any]:
     """
     Extract the corresponding optim state_dict from ``optim_state_dict`` for
@@ -329,7 +357,7 @@ def _split_optim_state_dict(
         optim (torch.optim.Optimizer): the optimizer.
         optim_state_dict (Dict[str, Any]): the superset optim state_dict that
             contains the optim state_dict of ``optim``.
-        info (StateDictInfo): state dict information.
+        info (_StateDictInfo): state dict information.
 
     Returns:
         The optim state_dict of ``optim``.
@@ -358,7 +386,7 @@ def _load_optim_state_dict(
     model: nn.Module,
     optims: Tuple[torch.optim.Optimizer],
     state_dict: Dict[str, Any],
-    info: StateDictInfo,
+    info: _StateDictInfo,
 ) -> None:
     for optim in optims:
         optim_state_dict = _split_optim_state_dict(model, optim, state_dict, info)
@@ -373,7 +401,7 @@ def _load_optim_state_dict(
         # torch.optim.Optimizer.load_state_dict() is able to directly map
         # the FQN to param id by using the order saved in the param group.
         _init_optim_state(optim)
-        optim.load_state_dict(optim_state_dict)
+        _state_dict_fn(optim, "load_state_dict")(optim_state_dict)
 
 
 def distributed_state_dict(
@@ -384,8 +412,55 @@ def distributed_state_dict(
     optim_only: bool = False,
     options: Optional[DistributedStateDictOptions] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """
-    TODO: document
+    """Return the model state_dict and optimizers state_dict.
+
+    The main difference of ``distributed_state_dict`` and tradtional
+    ``module.state_dict`` is that ``distributed_state_dict`` convert all the
+    FQNs (fully-qualified names) to the canonical FQNs. Here, canonical means
+    the FQN based on a parameter's position in nn.Module hierarchy. A canonical
+    FQN to a parameter is the FQN returned by ``module.named_parameters()``
+    or ``module.named_buffers()`` when ``module`` is not distributed by
+    any parallelisms. Another difference is that ``distributed_state_dict``
+    converts the parameter IDs in the optimizer state_dict to the canoical FQNs.
+
+
+    ``distributed_state_dict`` can process any module that is parallelized by
+    ``FSDP/fully_shard``, ``DDP/replicate``, ``tensor_parallel`` and any
+    combination of the previous parallelisms. ``distributed_state_dict`` can
+    also process a model that is not parallelized at all. In such a case,
+    ``distributed_state_dict`` only performs one function -- converting the
+    optimizer parameter IDs to the canoical FQNs.
+
+    Example:
+        model = fully_shard(model)
+        _apply_optimizer_in_backward(
+            torch.optim.Adam, model.parameters(), {"lr": 1e-3}
+        )
+        optims = _get_in_backward_optimizers(model)
+        model_state_dict, optim_state_dict = distributed_state_dict(model, optims)
+        distributed_load_state_dict(
+            model, optims, model_state_dict, optim_state_dict
+        )
+
+    Args:
+        model (nn.Module): the nn.Module to the model.
+        optims (Iterable[Optimizer]): The optimizers that are used to optimize
+            ``model``. Note that optims accept multiple optimizers so the typing
+            is Iterable. If optims is empty, the returned optimizer state_dict
+            is empty.
+        model_only (bool): if model_only is True, the returned optimizer
+            state_dict will be empty (default: False)
+
+        optim_only (bool): if optim_only is True, the returned model state_dict
+            will be empty (default: False)
+        options (DistributedStateDictOptions): the options to control how
+            model state_dict and optimizer state_dict should be returned. See
+            `DistributedStateDictOptions` for the details.
+    Returns:
+        A tuple of state_dict. The first one is model state_dict and the second
+        one is optimizer state_dict. The model state_dict will be empty if
+        `optim_only` is True. The optimizer state_dict will be empty if
+        `model_only` is True or `optims` is empty.
     """
     optims = tuple(optims)
     info = _verify_options(model, optims, model_only, optim_only, options)
@@ -405,8 +480,32 @@ def distributed_load_state_dict(
     optim_only: bool = False,
     options: Optional[DistributedStateDictOptions] = None,
 ) -> None:
-    """
-    TODO: document
+    """Load the model state_dict and optimizers state_dict.
+
+    The counterpart of ``distributed_state_dict`` to load the state_dict
+    generated by ``distributed_state_dict`` back to the model and optimizers.
+    The given ``model_state_dict`` and ``optim_state_dict`` do not have to be
+    returned by ``distributed_state_dict`` but must meet the following
+    conditions:
+        1. All FQNs are canoical FQNs as defined in ``distributed_state_dict``.
+        2. If a tensor is sharded, it must be a ShardedTensor or DTensor.
+        3. Optimizer state_dict must contain the canoical FQNs instead of
+           parameter IDs.
+
+    Args:
+        model (nn.Module): the nn.Module to the model.
+        optims (Iterable[Optimizer]): The optimizers that are used to optimize
+            ``model``. Note that optims accept multiple optimizers so the typing
+            is Iterable. ``optims`` can be an empty Iterable.
+        model_only (bool): if model_only is True, only the model state_dict will
+            be loaded (default: False)
+        optim_only (bool): if optim_only is True, only the optimizer state_dict
+            will be loaded (default: False)
+        options (DistributedStateDictOptions): the options to control how
+            model state_dict and optimizer state_dict should be loaded. See
+            `DistributedStateDictOptions` for the details.
+    Returns:
+        None
     """
     optims = tuple(optims)
     info = _verify_options(model, optims, model_only, optim_only, options)
@@ -420,21 +519,51 @@ def patch_model_state_dict(
     *,
     options: Optional[DistributedStateDictOptions] = None,
 ) -> None:
-    model.state_dict = functools.partial(
+    """Patch the ``state_dict`` and ``load_state_dict`` attributes of ``model``.
+
+    Patch the ``state_dict`` and ``load_state_dict`` attributes of ``model`` to
+    be a partial function to call ``distributed_state_dict``.
+
+    Example:
+        model = fully_shard(model)
+        patch_model_state_dict(model)
+
+        state_dict = model.state_dict()
+        model.load_state_dict(state_dict)
+
+    Args:
+        model (nn.Module): the nn.Module to the model.
+        options (DistributedStateDictOptions): the options to control how
+            model state_dict and optimizer state_dict should be loaded. See
+            `DistributedStateDictOptions` for the details.
+    Returns:
+        None
+    """
+
+    _state_dict_call = functools.partial(
         distributed_state_dict,
         model=model,
         optims=tuple(),
         model_only=True,
         options=options,
     )
+    state_dict_call = lambda: _state_dict_call()[0]
+    model.state_dict = state_dict_call
 
-    model.load_state_dict = functools.partial(
+    _load_state_dict_call = functools.partial(
         distributed_load_state_dict,
         model=model,
         optims=tuple(),
         model_only=True,
         options=options,
     )
+    load_state_dict_call = lambda state_dict: _load_state_dict_call(
+        state_dict=state_dict
+    )[1]
+    model.load_state_dict = load_state_dict_call
+
+    _patched_state_dict.add(state_dict_call)
+    _patched_state_dict.add(load_state_dict_call)
 
 
 def patch_optimizer_state_dict(
@@ -443,22 +572,55 @@ def patch_optimizer_state_dict(
     *,
     options: Optional[DistributedStateDictOptions] = None,
 ) -> None:
-    for optim in optims:
-        optim.state_dict = functools.partial(
-            distributed_state_dict,
-            model=model,
-            optims=optims,
-            optim_only=True,
-            options=options,
-        )
+    """Patch the ``state_dict`` and ``load_state_dict`` attributes of ``optims``.
 
-        optim_load_state_dict = functools.partial(
-            distributed_load_state_dict,
-            model=model,
-            optims=optims,
-            optim_only=True,
-            options=options,
+    Patch the ``state_dict`` and ``load_state_dict`` attributes of ``optims`` to
+    be a partial function to call ``distributed_state_dict``.
+
+    Note that if there are multiple optimizers, all of the optims will be patched.
+    So users only need to call one of the state_dict() to get the full result.
+
+    Example:
+        model = fully_shard(model)
+        _apply_optimizer_in_backward(
+            torch.optim.Adam, model.parameters(), {"lr": 1e-3}
         )
-        model.load_state_dict = lambda state_dict: optim_load_state_dict(
-            optim_state_dict=state_dict
-        )
+        optims = _get_in_backward_optimizers(model)
+        patch_optimizer_state_dict(model, optims)
+
+        state_dict = optims[0].state_dict()
+        optims[0].load_state_dict(state_dict)
+
+    Args:
+        model (nn.Module): the nn.Module to the model.
+        options (DistributedStateDictOptions): the options to control how
+            model state_dict and optimizer state_dict should be loaded. See
+            `DistributedStateDictOptions` for the details.
+    Returns:
+        None
+    """
+
+    _state_dict_call = functools.partial(
+        distributed_state_dict,
+        model=model,
+        optims=optims,
+        optim_only=True,
+        options=options,
+    )
+    state_dict_call = lambda: _state_dict_call()[1]
+    _load_state_dict_call = functools.partial(
+        distributed_load_state_dict,
+        model=model,
+        optims=optims,
+        optim_only=True,
+        options=options,
+    )
+    load_state_dict_call = lambda state_dict: _load_state_dict_call(
+        optim_state_dict=state_dict
+    )
+    _patched_state_dict.add(state_dict_call)
+    _patched_state_dict.add(load_state_dict_call)
+
+    for optim in optims:
+        optim.state_dict = state_dict_call
+        optim.load_state_dict = load_state_dict_call
