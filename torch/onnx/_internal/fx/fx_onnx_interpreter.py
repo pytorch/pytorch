@@ -403,6 +403,7 @@ class FxOnnxInterpreter:
                 fx_name_to_onnxscript_value,
                 onnxfunction_dispatcher,
                 op_level_debug,
+                fx_graph_module,
             )
         elif node.op == "call_method":
             self.call_method(node)
@@ -544,6 +545,7 @@ class FxOnnxInterpreter:
         ],
         onnxfunction_dispatcher: onnxfunction_dispatcher.OnnxFunctionDispatcher,
         op_level_debug: bool,
+        fx_graph_module: torch.fx.GraphModule,
     ):
         # aten ops and other stateless functions.
         if node.target == operator.getitem and isinstance(
@@ -564,10 +566,10 @@ class FxOnnxInterpreter:
 
         # Map FX inputs to ONNX inputs and fill optional inputs with default values.
         # torch_args and torch_kwargs are for op-level validation
-        complete_args, complete_kwargs = _fill_in_default_kwargs(node)
+        fx_args, fx_kwargs = _fill_in_default_kwargs(node)
         onnx_args, onnx_kwargs = _wrap_fx_args_as_onnxscript_args(
-            complete_args,
-            complete_kwargs,
+            fx_args,
+            fx_kwargs,
             fx_name_to_onnxscript_value,
             onnxscript_tracer,
         )
@@ -605,29 +607,14 @@ class FxOnnxInterpreter:
             and node.target != torch.ops.aten.sym_size
             and not isinstance(node.target, types.BuiltinFunctionType)
         ):
-            (
-                node_with_fixed_shape_args,
-                node_with_fixed_shape_kwargs,
-            ) = _fill_in_default_kwargs(node)
-            try:
-                torch_args, torch_kwargs = op_validation.wrap_fx_args_as_torch_args(
-                    node_with_fixed_shape_args, node_with_fixed_shape_kwargs
-                )
-            except ValueError as value_error:
-                diagnostic = self.diagnostic_context.inflight_diagnostic()
-                diagnostic.with_additional_message(
-                    f"### Op level debug fails due to unsupported input types\n"
-                    f"{diagnostics.decorator.format_exception_in_markdown(value_error)}"
-                )
-                diagnostic.level = diagnostics.levels.ERROR
-            else:
-                op_validation.validate_op_between_ort_torch(
-                    self.diagnostic_context,
-                    node,
-                    symbolic_fn,
-                    torch_args,
-                    torch_kwargs,
-                )
+            op_validation.validate_op_between_ort_torch(
+                self.diagnostic_context,
+                node,
+                symbolic_fn,
+                fx_args,
+                fx_kwargs,
+                fx_graph_module,
+            )
         fx_name_to_onnxscript_value[node.name] = output
 
     @_beartype.beartype

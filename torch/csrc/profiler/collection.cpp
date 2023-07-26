@@ -389,7 +389,7 @@ struct StealOrDefault {
 
 void ThreadLocalSubqueue::TorchOpStorage::materialize(
     std::vector<std::shared_ptr<Result>>& out,
-    const std::function<time_t(approx_time_t)> time_converter,
+    const std::function<time_t(approx_time_t)>& time_converter,
     const uint64_t tid,
     const kineto::DeviceAndResource& kineto_info) {
   // Plumb Autograd info to the top level annotation.
@@ -1458,6 +1458,25 @@ void set_fwd_bwd_enabled_fn(std::function<bool()> fn) {
 
 void set_fwd_bwd_enabled_val(bool val) {
   fwd_bwd_enabled_fn() = [val]() { return val; };
+}
+
+namespace {
+std::function<bool()>& cuda_sync_enabled_fn() {
+  static std::function<bool()> fn = []() { return true; };
+  return fn;
+}
+} // namespace
+
+bool get_cuda_sync_enabled() {
+  return cuda_sync_enabled_fn()();
+}
+
+void set_cuda_sync_enabled_fn(std::function<bool()> fn) {
+  cuda_sync_enabled_fn() = std::move(fn);
+}
+
+void set_cuda_sync_enabled_val(bool val) {
+  cuda_sync_enabled_fn() = [val]() { return val; };
 }
 
 } // namespace impl
