@@ -14,7 +14,7 @@ from typing import Optional
 import torch
 
 from . import _dtypes_impl, _util
-from ._normalizations import ArrayLike, array_or_scalar, normalizer
+from ._normalizations import array_or_scalar, ArrayLike, normalizer
 
 _default_dtype = _dtypes_impl.default_dtypes.float_dtype
 
@@ -121,7 +121,6 @@ def randint(low, high=None, size=None):
 @deco_stream
 @normalizer
 def choice(a: ArrayLike, size=None, replace=True, p: Optional[ArrayLike] = None):
-
     # https://stackoverflow.com/questions/59461811/random-choice-with-pytorch
     if a.numel() == 1:
         a = torch.arange(a)

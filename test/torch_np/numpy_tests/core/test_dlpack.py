@@ -1,4 +1,5 @@
 import sys
+
 import pytest
 
 import torch
@@ -36,12 +37,21 @@ class TestDLPack:
         del y
         assert sys.getrefcount(x) == 2
 
-    @pytest.mark.parametrize("dtype", [
-        np.int8, np.int16, np.int32, np.int64,
-        np.uint8,
-        np.float16, np.float32, np.float64,
-        np.complex64, np.complex128
-    ])
+    @pytest.mark.parametrize(
+        "dtype",
+        [
+            np.int8,
+            np.int16,
+            np.int32,
+            np.int64,
+            np.uint8,
+            np.float16,
+            np.float32,
+            np.float64,
+            np.complex64,
+            np.complex128,
+        ],
+    )
     def test_dtype_passthrough(self, dtype):
         x = np.arange(5, dtype=dtype)
         y = np.from_dlpack(x)
@@ -91,7 +101,7 @@ class TestDLPack:
         with pytest.raises(RuntimeError):
             self.dlpack_deleter_exception()
 
-    @pytest.mark.skip(reason='no readonly arrays in pytorch')
+    @pytest.mark.skip(reason="no readonly arrays in pytorch")
     def test_readonly(self):
         x = np.arange(5)
         x.flags.writeable = False
@@ -112,4 +122,3 @@ class TestDLPack:
         a = np.arange(4)
         t = torch.from_dlpack(a)
         assert_array_equal(np.asarray(t), a)
-

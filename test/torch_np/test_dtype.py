@@ -16,7 +16,7 @@ np_dtype_params.append(
     pytest.param(
         "bool",
         np.dtype("bool"),
-        id=f"np.dtype('bool')",
+        id="np.dtype('bool')",
         marks=pytest.mark.xfail(reason="XXX: np.dtype() objects not supported"),
     )
 )

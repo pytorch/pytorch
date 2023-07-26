@@ -17,7 +17,6 @@ import torch
 from . import _dtypes_impl, _util
 from ._normalizations import (
     ArrayLike,
-    AxisLike,
     CastingModes,
     DTypeLike,
     NDArray,
@@ -1410,6 +1409,7 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
     tensors = _util.typecast_tensors(tensors, target_dtype, casting)
 
     from torch.backends import opt_einsum
+
     try:
         # set the global state to handle the optimize=... argument, restore on exit
         if opt_einsum.is_available():

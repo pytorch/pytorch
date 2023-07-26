@@ -2,12 +2,10 @@ import itertools
 
 import pytest
 
-# import numpy as np
-import torch
-from pytest import raises as assert_raises
-
 import torch._numpy as np
-from torch._numpy._ndarray import ndarray
+
+# import numpy as np
+from pytest import raises as assert_raises
 from torch._numpy.testing import assert_equal
 
 
@@ -162,7 +160,6 @@ class TestNonzero:
 
 
 class TestArgmaxArgminCommon:
-
     sizes = [
         (),
         (3,),
@@ -191,7 +188,6 @@ class TestArgmaxArgminCommon:
     )
     @pytest.mark.parametrize("method", [np.argmax, np.argmin])
     def test_np_argmin_argmax_keepdims(self, size, axis, method):
-
         # arr = np.random.normal(size=size)
         arr = np.empty(shape=size)
 
@@ -263,7 +259,7 @@ class TestArgmaxArgminCommon:
     @pytest.mark.parametrize("method", ["max", "min"])
     def test_all(self, method):
         # a = np.random.normal(0, 1, (4, 5, 6, 7, 8))
-        a = np.arange((4 * 5 * 6 * 7 * 8)).reshape((4, 5, 6, 7, 8))
+        a = np.arange(4 * 5 * 6 * 7 * 8).reshape((4, 5, 6, 7, 8))
         arg_method = getattr(a, "arg" + method)
         val_method = getattr(a, method)
         for i in range(a.ndim):
@@ -427,7 +423,6 @@ class TestArgmax:
         assert_equal(rarr[np.argmax(rarr)], val, err_msg="%r" % rarr)
 
     def test_maximum_signed_integers(self):
-
         a = np.array([1, 2**7 - 1, -(2**7)], dtype=np.int8)
         assert_equal(np.argmax(a), 1)
 
@@ -531,7 +526,6 @@ class TestArgmin:
         assert_equal(rarr[np.argmin(rarr)], min_val, err_msg="%r" % rarr)
 
     def test_minimum_signed_integers(self):
-
         a = np.array([1, -(2**7), -(2**7) + 1, 2**7 - 1], dtype=np.int8)
         assert_equal(np.argmin(a), 1)
 
@@ -572,7 +566,7 @@ class TestAmin:
 def test_contains():
     a = np.arange(12).reshape(3, 4)
     assert 2 in a
-    assert not 42 in a
+    assert 42 not in a
 
 
 # make sure ndarray does not carry extra methods/attributes

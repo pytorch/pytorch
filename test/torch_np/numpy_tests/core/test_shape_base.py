@@ -1,23 +1,20 @@
 import pytest
-from pytest import raises as assert_raises
 
 import torch._numpy as np
+from pytest import raises as assert_raises
 from torch._numpy import (
     array,
     atleast_1d,
     atleast_2d,
     atleast_3d,
-    column_stack,
+    AxisError,
     concatenate,
-    dstack,
-    expand_dims,
     hstack,
+    newaxis,
     stack,
     vstack,
-    AxisError,
-    newaxis,
 )
-from torch._numpy.testing import assert_array_equal, assert_equal, assert_
+from torch._numpy.testing import assert_, assert_array_equal, assert_equal
 
 IS_PYPY = False
 
@@ -54,8 +51,7 @@ class TestAtleast1d:
         assert_array_equal(res, desired)
 
     def test_r1array(self):
-        """Test to make sure equivalent Travis O's r1array function
-        """
+        """Test to make sure equivalent Travis O's r1array function"""
         assert atleast_1d(3).shape == (1,)
         assert atleast_1d(3j).shape == (1,)
         assert atleast_1d(3.0).shape == (1,)
@@ -94,8 +90,7 @@ class TestAtleast2d:
         assert_array_equal(res, desired)
 
     def test_r2array(self):
-        """Test to make sure equivalent Travis O's r2array function
-        """
+        """Test to make sure equivalent Travis O's r2array function"""
         assert atleast_2d(3).shape == (1, 1)
         assert atleast_2d([3j, 1]).shape == (1, 2)
         assert atleast_2d([[[3, 1], [4, 5]], [[3, 5], [1, 2]]]).shape == (2, 2, 2)
@@ -120,7 +115,7 @@ class TestAtleast3d:
         a = array([[1, 2], [1, 2]])
         b = array([[2, 3], [2, 3]])
         res = [atleast_3d(a), atleast_3d(b)]
-        desired = [a[:,:, newaxis], b[:,:, newaxis]]
+        desired = [a[:, :, newaxis], b[:, :, newaxis]]
         assert_array_equal(res, desired)
 
     def test_3D_array(self):
@@ -164,9 +159,9 @@ class TestHstack:
     def test_generator(self):
         # numpy 1.24 emits warnings but we don't
         # with assert_warns(FutureWarning):
-        hstack((np.arange(3) for _ in range(2)))
+        hstack(np.arange(3) for _ in range(2))
         # with assert_warns(FutureWarning):
-        hstack(map(lambda x: x, np.ones((3, 2))))
+        hstack(x for x in np.ones((3, 2)))
 
     def test_casting_and_dtype(self):
         a = np.array([1, 2, 3])
@@ -217,10 +212,10 @@ class TestVstack:
         desired = array([[1, 2], [1, 2]])
         assert_array_equal(res, desired)
 
-    @pytest.mark.xfail(reason='vstack w/generators')
+    @pytest.mark.xfail(reason="vstack w/generators")
     def test_generator(self):
         with pytest.raises(TypeError, match="arrays to stack must be"):
-            vstack((np.arange(3) for _ in range(2)))
+            vstack(np.arange(3) for _ in range(2))
 
     def test_casting_and_dtype(self):
         a = np.array([1, 2, 3])
@@ -234,7 +229,6 @@ class TestVstack:
         b = np.array([2.5, 3.5, 4.5])
         with pytest.raises(TypeError):
             vstack((a, b), casting="safe", dtype=np.int64)
-        
 
 
 class TestConcatenate:
@@ -254,10 +248,12 @@ class TestConcatenate:
     def test_exceptions(self):
         # test axis must be in bounds
         for ndim in [1, 2, 3]:
-            a = np.ones((1,)*ndim)
+            a = np.ones((1,) * ndim)
             np.concatenate((a, a), axis=0)  # OK
             assert_raises((IndexError, np.AxisError), np.concatenate, (a, a), axis=ndim)
-            assert_raises((IndexError, np.AxisError), np.concatenate, (a, a), axis=-(ndim + 1))
+            assert_raises(
+                (IndexError, np.AxisError), np.concatenate, (a, a), axis=-(ndim + 1)
+            )
 
         # Scalars cannot be concatenated
         assert_raises((RuntimeError, ValueError), concatenate, (0,))
@@ -292,7 +288,9 @@ class TestConcatenate:
                 (a, b),
                 axis=axis[1],
             )
-            assert_raises((RuntimeError, ValueError), np.concatenate, (a, b), axis=axis[2])
+            assert_raises(
+                (RuntimeError, ValueError), np.concatenate, (a, b), axis=axis[2]
+            )
             a = np.moveaxis(a, -1, 0)
             b = np.moveaxis(b, -1, 0)
             axis.append(axis.pop(0))
@@ -374,13 +372,16 @@ class TestConcatenate:
         assert_(out is rout)
         assert_equal(res, rout)
 
-    @pytest.mark.skipif(reason='concat, arrays, sequence')
-    @pytest.mark.skipif(IS_PYPY, reason="PYPY handles sq_concat, nb_add differently than cpython")
+    @pytest.mark.skipif(reason="concat, arrays, sequence")
+    @pytest.mark.skipif(
+        IS_PYPY, reason="PYPY handles sq_concat, nb_add differently than cpython"
+    )
     def test_operator_concat(self):
         import operator
+
         a = array([1, 2])
         b = array([3, 4])
-        n = [1,2]
+        n = [1, 2]
         res = array([1, 2, 3, 4])
         assert_raises(TypeError, operator.concat, a, b)
         assert_raises(TypeError, operator.concat, a, n)
@@ -393,8 +394,8 @@ class TestConcatenate:
         b = array([3, 4])
 
         assert_raises(ValueError, concatenate, (a, b), out=np.empty(5))
-        assert_raises(ValueError, concatenate, (a, b), out=np.empty((4,1)))
-        assert_raises(ValueError, concatenate, (a, b), out=np.empty((1,4)))
+        assert_raises(ValueError, concatenate, (a, b), out=np.empty((4, 1)))
+        assert_raises(ValueError, concatenate, (a, b), out=np.empty((1, 4)))
         concatenate((a, b), out=np.empty(4))
 
     @pytest.mark.parametrize("axis", [None, 0])
@@ -411,13 +412,12 @@ class TestConcatenate:
             with assert_raises(TypeError):
                 concatenate(to_concat, out=out, axis=axis, casting=casting)
             with assert_raises(TypeError):
-                concatenate(to_concat, dtype=out.dtype,
-                            axis=axis, casting=casting)
+                concatenate(to_concat, dtype=out.dtype, axis=axis, casting=casting)
         else:
-            res_out = concatenate(to_concat, out=out,
-                                  axis=axis, casting=casting)
-            res_dtype = concatenate(to_concat, dtype=out.dtype,
-                                    axis=axis, casting=casting)
+            res_out = concatenate(to_concat, out=out, axis=axis, casting=casting)
+            res_dtype = concatenate(
+                to_concat, dtype=out.dtype, axis=axis, casting=casting
+            )
             assert res_out is out
             assert_array_equal(out, res_dtype)
             assert res_dtype.dtype == out_dtype
@@ -431,9 +431,11 @@ def test_stack():
     assert_raises(TypeError, stack, 1)
 
     # 0d input
-    for input_ in [(1, 2, 3),
-                   [np.int32(1), np.int32(2), np.int32(3)],
-                   [np.array(1), np.array(2), np.array(3)]]:
+    for input_ in [
+        (1, 2, 3),
+        [np.int32(1), np.int32(2), np.int32(3)],
+        [np.array(1), np.array(2), np.array(3)],
+    ]:
         assert_array_equal(stack(input_), [1, 2, 3])
     # 1d input examples
     a = np.array([1, 2, 3])
@@ -442,7 +444,7 @@ def test_stack():
     assert_array_equal(np.stack((a, b)), r1)
     assert_array_equal(np.stack((a, b), axis=1), r1.T)
     # all input types
-    assert_array_equal(np.stack(list([a, b])), r1)
+    assert_array_equal(np.stack([a, b]), r1)
     assert_array_equal(np.stack(array([a, b])), r1)
     # all shapes for 1d input
     arrays = [np.random.randn(3) for _ in range(10)]
@@ -457,8 +459,14 @@ def test_stack():
     # all shapes for 2d input
     arrays = [np.random.randn(3, 4) for _ in range(10)]
     axes = [0, 1, 2, -1, -2, -3]
-    expected_shapes = [(10, 3, 4), (3, 10, 4), (3, 4, 10),
-                       (3, 4, 10), (3, 10, 4), (10, 3, 4)]
+    expected_shapes = [
+        (10, 3, 4),
+        (3, 10, 4),
+        (3, 4, 10),
+        (3, 4, 10),
+        (3, 10, 4),
+        (10, 3, 4),
+    ]
     for axis, expected_shape in zip(axes, expected_shapes):
         assert_equal(np.stack(arrays, axis).shape, expected_shape)
 
@@ -477,12 +485,14 @@ def test_stack():
     assert_raises((RuntimeError, ValueError), stack, [1, np.arange(3)])
     assert_raises((RuntimeError, ValueError), stack, [np.arange(3), 1])
     assert_raises((RuntimeError, ValueError), stack, [np.arange(3), 1], axis=1)
-    assert_raises((RuntimeError, ValueError), stack, [np.zeros((3, 3)), np.zeros(3)], axis=1)
+    assert_raises(
+        (RuntimeError, ValueError), stack, [np.zeros((3, 3)), np.zeros(3)], axis=1
+    )
     assert_raises((RuntimeError, ValueError), stack, [np.arange(2), np.arange(3)])
 
     # generator is deprecated: numpy 1.24 emits a warning but we don't
     # with assert_warns(FutureWarning):
-    result = stack((x for x in range(3)))
+    result = stack(x for x in range(3))
 
     assert_array_equal(result, np.array([0, 1, 2]))
 
@@ -510,13 +520,10 @@ def test_stack_out_and_dtype(axis, out_dtype, casting):
 
     if not np.can_cast(to_concat[0], out_dtype, casting=casting):
         with assert_raises(TypeError):
-            stack(to_concat, dtype=out_dtype,
-                  axis=axis, casting=casting)
+            stack(to_concat, dtype=out_dtype, axis=axis, casting=casting)
     else:
-        res_out = stack(to_concat, out=out,
-                        axis=axis, casting=casting)
-        res_dtype = stack(to_concat, dtype=out_dtype,
-                          axis=axis, casting=casting)
+        res_out = stack(to_concat, out=out, axis=axis, casting=casting)
+        res_dtype = stack(to_concat, dtype=out_dtype, axis=axis, casting=casting)
         assert res_out is out
         assert_array_equal(out, res_dtype)
         assert res_dtype.dtype == out_dtype
@@ -527,7 +534,7 @@ def test_stack_out_and_dtype(axis, out_dtype, casting):
 
 @pytest.mark.xfail(reason="TODO: implement block(...)")
 class TestBlock:
-    @pytest.fixture(params=['block', 'force_concatenate', 'force_slicing'])
+    @pytest.fixture(params=["block", "force_concatenate", "force_slicing"])
     def block(self, request):
         # blocking small arrays and large arrays go through different paths.
         # the algorithm is triggered depending on the number of element
@@ -544,14 +551,14 @@ class TestBlock:
             arrays, list_ndim, result_ndim, _ = _block_setup(arrays)
             return _block_slicing(arrays, list_ndim, result_ndim)
 
-        if request.param == 'force_concatenate':
+        if request.param == "force_concatenate":
             return _block_force_concatenate
-        elif request.param == 'force_slicing':
+        elif request.param == "force_slicing":
             return _block_force_slicing
-        elif request.param == 'block':
+        elif request.param == "block":
             return block
         else:
-            raise ValueError('Unknown blocking request. There is a typo in the tests.')
+            raise ValueError("Unknown blocking request. There is a typo in the tests.")
 
     def test_returns_copy(self, block):
         a = np.eye(3)
@@ -578,18 +585,14 @@ class TestBlock:
     def test_block_simple_row_wise(self, block):
         a_2d = np.ones((2, 2))
         b_2d = 2 * a_2d
-        desired = np.array([[1, 1, 2, 2],
-                            [1, 1, 2, 2]])
+        desired = np.array([[1, 1, 2, 2], [1, 1, 2, 2]])
         result = block([a_2d, b_2d])
         assert_equal(desired, result)
 
     def test_block_simple_column_wise(self, block):
         a_2d = np.ones((2, 2))
         b_2d = 2 * a_2d
-        expected = np.array([[1, 1],
-                             [1, 1],
-                             [2, 2],
-                             [2, 2]])
+        expected = np.array([[1, 1], [1, 1], [2, 2], [2, 2]])
         result = block([[a_2d], [b_2d]])
         assert_equal(expected, result)
 
@@ -604,8 +607,7 @@ class TestBlock:
     def test_block_with_1d_arrays_multiple_rows(self, block):
         a = np.array([1, 2, 3])
         b = np.array([2, 3, 4])
-        expected = np.array([[1, 2, 3, 2, 3, 4],
-                             [1, 2, 3, 2, 3, 4]])
+        expected = np.array([[1, 2, 3, 2, 3, 4], [1, 2, 3, 2, 3, 4]])
         result = block([[a, b], [a, b]])
         assert_equal(expected, result)
 
@@ -613,8 +615,7 @@ class TestBlock:
         # # # 1-D vectors are treated as row arrays
         a_1d = np.array([1, 2, 3])
         b_1d = np.array([2, 3, 4])
-        expected = np.array([[1, 2, 3],
-                             [2, 3, 4]])
+        expected = np.array([[1, 2, 3], [2, 3, 4]])
         result = block([[a_1d], [b_1d]])
         assert_equal(expected, result)
 
@@ -622,9 +623,7 @@ class TestBlock:
         a_2d = np.ones((2, 2))
         b_1d = np.array([2, 2])
         result = block([[a_2d], [b_1d]])
-        expected = np.array([[1, 1],
-                             [1, 1],
-                             [2, 2]])
+        expected = np.array([[1, 1], [1, 1], [2, 2]])
         assert_equal(expected, result)
 
     def test_block_complicated(self, block):
@@ -637,18 +636,20 @@ class TestBlock:
         six_1d = np.array([6, 6, 6, 6, 6])
         zero_2d = np.zeros((2, 6))
 
-        expected = np.array([[1, 1, 1, 2, 2, 2],
-                             [3, 3, 3, 3, 3, 3],
-                             [4, 4, 4, 4, 4, 4],
-                             [5, 6, 6, 6, 6, 6],
-                             [0, 0, 0, 0, 0, 0],
-                             [0, 0, 0, 0, 0, 0]])
+        expected = np.array(
+            [
+                [1, 1, 1, 2, 2, 2],
+                [3, 3, 3, 3, 3, 3],
+                [4, 4, 4, 4, 4, 4],
+                [5, 6, 6, 6, 6, 6],
+                [0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0],
+            ]
+        )
 
-        result = block([[one_2d, two_2d],
-                        [three_2d],
-                        [four_1d],
-                        [five_0d, six_1d],
-                        [zero_2d]])
+        result = block(
+            [[one_2d, two_2d], [three_2d], [four_1d], [five_0d, six_1d], [zero_2d]]
+        )
         assert_equal(result, expected)
 
     def test_nested(self, block):
@@ -660,24 +661,17 @@ class TestBlock:
         six = np.array([6, 6, 6, 6, 6])
         zero = np.zeros((2, 6))
 
-        result = block([
+        result = block([[block([[one], [three], [four]]), two], [five, six], [zero]])
+        expected = np.array(
             [
-                block([
-                   [one],
-                   [three],
-                   [four]
-                ]),
-                two
-            ],
-            [five, six],
-            [zero]
-        ])
-        expected = np.array([[1, 1, 1, 2, 2, 2],
-                             [3, 3, 3, 2, 2, 2],
-                             [4, 4, 4, 2, 2, 2],
-                             [5, 6, 6, 6, 6, 6],
-                             [0, 0, 0, 0, 0, 0],
-                             [0, 0, 0, 0, 0, 0]])
+                [1, 1, 1, 2, 2, 2],
+                [3, 3, 3, 2, 2, 2],
+                [4, 4, 4, 2, 2, 2],
+                [5, 6, 6, 6, 6, 6],
+                [0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0],
+            ]
+        )
 
         assert_equal(result, expected)
 
@@ -694,45 +688,57 @@ class TestBlock:
 
         a111 = np.ones((3, 3, 3), int) * 8
 
-        result = block([
+        result = block(
             [
-                [a000, a001],
-                [a010, a011],
-            ],
-            [
-                [a100, a101],
-                [a110, a111],
+                [
+                    [a000, a001],
+                    [a010, a011],
+                ],
+                [
+                    [a100, a101],
+                    [a110, a111],
+                ],
             ]
-        ])
-        expected = array([[[1, 1, 4, 4, 4],
-                           [1, 1, 4, 4, 4],
-                           [3, 3, 5, 5, 5],
-                           [3, 3, 5, 5, 5],
-                           [3, 3, 5, 5, 5]],
-
-                          [[1, 1, 4, 4, 4],
-                           [1, 1, 4, 4, 4],
-                           [3, 3, 5, 5, 5],
-                           [3, 3, 5, 5, 5],
-                           [3, 3, 5, 5, 5]],
-
-                          [[2, 2, 6, 6, 6],
-                           [2, 2, 6, 6, 6],
-                           [7, 7, 8, 8, 8],
-                           [7, 7, 8, 8, 8],
-                           [7, 7, 8, 8, 8]],
-
-                          [[2, 2, 6, 6, 6],
-                           [2, 2, 6, 6, 6],
-                           [7, 7, 8, 8, 8],
-                           [7, 7, 8, 8, 8],
-                           [7, 7, 8, 8, 8]],
-
-                          [[2, 2, 6, 6, 6],
-                           [2, 2, 6, 6, 6],
-                           [7, 7, 8, 8, 8],
-                           [7, 7, 8, 8, 8],
-                           [7, 7, 8, 8, 8]]])
+        )
+        expected = array(
+            [
+                [
+                    [1, 1, 4, 4, 4],
+                    [1, 1, 4, 4, 4],
+                    [3, 3, 5, 5, 5],
+                    [3, 3, 5, 5, 5],
+                    [3, 3, 5, 5, 5],
+                ],
+                [
+                    [1, 1, 4, 4, 4],
+                    [1, 1, 4, 4, 4],
+                    [3, 3, 5, 5, 5],
+                    [3, 3, 5, 5, 5],
+                    [3, 3, 5, 5, 5],
+                ],
+                [
+                    [2, 2, 6, 6, 6],
+                    [2, 2, 6, 6, 6],
+                    [7, 7, 8, 8, 8],
+                    [7, 7, 8, 8, 8],
+                    [7, 7, 8, 8, 8],
+                ],
+                [
+                    [2, 2, 6, 6, 6],
+                    [2, 2, 6, 6, 6],
+                    [7, 7, 8, 8, 8],
+                    [7, 7, 8, 8, 8],
+                    [7, 7, 8, 8, 8],
+                ],
+                [
+                    [2, 2, 6, 6, 6],
+                    [2, 2, 6, 6, 6],
+                    [7, 7, 8, 8, 8],
+                    [7, 7, 8, 8, 8],
+                    [7, 7, 8, 8, 8],
+                ],
+            ]
+        )
 
         assert_array_equal(result, expected)
 
@@ -742,83 +748,73 @@ class TestBlock:
         assert_raises(ValueError, block, [a, b])
         assert_raises(ValueError, block, [b, a])
 
-        to_block = [[np.ones((2,3)), np.ones((2,2))],
-                    [np.ones((2,2)), np.ones((2,2))]]
+        to_block = [
+            [np.ones((2, 3)), np.ones((2, 2))],
+            [np.ones((2, 2)), np.ones((2, 2))],
+        ]
         assert_raises(ValueError, block, to_block)
+
     def test_no_lists(self, block):
-        assert_equal(block(1),         np.array(1))
+        assert_equal(block(1), np.array(1))
         assert_equal(block(np.eye(3)), np.eye(3))
 
     def test_invalid_nesting(self, block):
-        msg = 'depths are mismatched'
+        msg = "depths are mismatched"
         assert_raises_regex(ValueError, msg, block, [1, [2]])
         assert_raises_regex(ValueError, msg, block, [1, []])
         assert_raises_regex(ValueError, msg, block, [[1], 2])
         assert_raises_regex(ValueError, msg, block, [[], 2])
-        assert_raises_regex(ValueError, msg, block, [
-            [[1], [2]],
-            [[3, 4]],
-            [5]  # missing brackets
-        ])
+        assert_raises_regex(
+            ValueError, msg, block, [[[1], [2]], [[3, 4]], [5]]  # missing brackets
+        )
 
     def test_empty_lists(self, block):
-        assert_raises_regex(ValueError, 'empty', block, [])
-        assert_raises_regex(ValueError, 'empty', block, [[]])
-        assert_raises_regex(ValueError, 'empty', block, [[1], []])
+        assert_raises_regex(ValueError, "empty", block, [])
+        assert_raises_regex(ValueError, "empty", block, [[]])
+        assert_raises_regex(ValueError, "empty", block, [[1], []])
 
     def test_tuple(self, block):
-        assert_raises_regex(TypeError, 'tuple', block, ([1, 2], [3, 4]))
-        assert_raises_regex(TypeError, 'tuple', block, [(1, 2), (3, 4)])
+        assert_raises_regex(TypeError, "tuple", block, ([1, 2], [3, 4]))
+        assert_raises_regex(TypeError, "tuple", block, [(1, 2), (3, 4)])
 
     def test_different_ndims(self, block):
-        a = 1.
+        a = 1.0
         b = 2 * np.ones((1, 2))
         c = 3 * np.ones((1, 1, 3))
 
         result = block([a, b, c])
-        expected = np.array([[[1., 2., 2., 3., 3., 3.]]])
+        expected = np.array([[[1.0, 2.0, 2.0, 3.0, 3.0, 3.0]]])
 
         assert_equal(result, expected)
 
     def test_different_ndims_depths(self, block):
-        a = 1.
+        a = 1.0
         b = 2 * np.ones((1, 2))
         c = 3 * np.ones((1, 2, 3))
 
         result = block([[a, b], [c]])
-        expected = np.array([[[1., 2., 2.],
-                              [3., 3., 3.],
-                              [3., 3., 3.]]])
+        expected = np.array([[[1.0, 2.0, 2.0], [3.0, 3.0, 3.0], [3.0, 3.0, 3.0]]])
 
         assert_equal(result, expected)
 
     def test_block_memory_order(self, block):
         # 3D
-        arr_c = np.zeros((3,)*3, order='C')
-        arr_f = np.zeros((3,)*3, order='F')
+        arr_c = np.zeros((3,) * 3, order="C")
+        arr_f = np.zeros((3,) * 3, order="F")
 
-        b_c = [[[arr_c, arr_c],
-                [arr_c, arr_c]],
-               [[arr_c, arr_c],
-                [arr_c, arr_c]]]
+        b_c = [[[arr_c, arr_c], [arr_c, arr_c]], [[arr_c, arr_c], [arr_c, arr_c]]]
 
-        b_f = [[[arr_f, arr_f],
-                [arr_f, arr_f]],
-               [[arr_f, arr_f],
-                [arr_f, arr_f]]]
+        b_f = [[[arr_f, arr_f], [arr_f, arr_f]], [[arr_f, arr_f], [arr_f, arr_f]]]
 
-        assert block(b_c).flags['C_CONTIGUOUS']
-        assert block(b_f).flags['F_CONTIGUOUS']
+        assert block(b_c).flags["C_CONTIGUOUS"]
+        assert block(b_f).flags["F_CONTIGUOUS"]
 
-        arr_c = np.zeros((3, 3), order='C')
-        arr_f = np.zeros((3, 3), order='F')
+        arr_c = np.zeros((3, 3), order="C")
+        arr_f = np.zeros((3, 3), order="F")
         # 2D
-        b_c = [[arr_c, arr_c],
-               [arr_c, arr_c]]
+        b_c = [[arr_c, arr_c], [arr_c, arr_c]]
 
-        b_f = [[arr_f, arr_f],
-               [arr_f, arr_f]]
+        b_f = [[arr_f, arr_f], [arr_f, arr_f]]
 
-        assert block(b_c).flags['C_CONTIGUOUS']
-        assert block(b_f).flags['F_CONTIGUOUS']
-
+        assert block(b_c).flags["C_CONTIGUOUS"]
+        assert block(b_f).flags["F_CONTIGUOUS"]

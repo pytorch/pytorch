@@ -90,7 +90,7 @@ def normalize_axis_tuple(axis, ndim, argname=None, allow_duplicate=False):
     axis = tuple([normalize_axis_index(ax, ndim, argname) for ax in axis])
     if not allow_duplicate and len(set(axis)) != len(axis):
         if argname:
-            raise ValueError("repeated axis in `{}` argument".format(argname))
+            raise ValueError(f"repeated axis in `{argname}` argument")
         else:
             raise ValueError("repeated axis")
     return axis
@@ -230,7 +230,7 @@ def _coerce_to_tensor(obj, dtype=None, copy=False, ndmin=0):
 
 def ndarrays_to_tensors(*inputs):
     """Convert all ndarrays from `inputs` to tensors. (other things are intact)"""
-    from ._ndarray import asarray, ndarray
+    from ._ndarray import ndarray
 
     if len(inputs) == 0:
         return ValueError()
