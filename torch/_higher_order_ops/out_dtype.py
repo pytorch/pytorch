@@ -18,7 +18,7 @@ from torch._functorch.eager_transforms import (
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._prims_common import elementwise_dtypes, ELEMENTWISE_TYPE_PROMOTION_KIND
-
+from torch._higher_order_ops.utils import autograd_not_implemented_check
 
 # TODO to figure out a more generic approach
 ALLOWABLE_OPS = [
@@ -124,12 +124,7 @@ def out_dtype_autograd(
     *args
 ):
     # TODO: maybe support autograd
-    flat_operands, _ = pytree.tree_flatten(args)
-    if torch.is_grad_enabled() and any(
-        f.requires_grad for f in flat_operands if isinstance(f, torch.Tensor)
-    ):
-        raise RuntimeError("Autograd is not supported for out_dtype")
-
+    autograd_not_implemented_check(args, "out_dtype")
     with torch._C._AutoDispatchBelowAutograd():
         return out_dtype(op, output_dtype, *args)
 
