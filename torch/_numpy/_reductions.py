@@ -29,7 +29,6 @@ def _deco_axis_expand(func):
 
     @functools.wraps(func)
     def wrapped(a, axis=None, *args, **kwds):
-
         if axis is not None:
             axis = _util.normalize_axis_tuple(axis, a.ndim)
 

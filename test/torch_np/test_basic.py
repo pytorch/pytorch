@@ -4,11 +4,11 @@ import inspect
 import numpy as _np
 import pytest
 import torch
-from pytest import raises as assert_raises
 
 import torch._numpy as w
 import torch._numpy._ufuncs as _ufuncs
 import torch._numpy._util as _util
+from pytest import raises as assert_raises
 from torch._numpy.testing import assert_equal
 
 # These function receive one array_like arg and return one array_like result

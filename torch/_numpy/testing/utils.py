@@ -18,9 +18,7 @@ from tempfile import mkdtemp, mkstemp
 from warnings import WarningMessage
 
 import torch._numpy as np
-from torch._numpy import arange, array
-from torch._numpy import asarray as asanyarray
-from torch._numpy import empty, float32, intp, ndarray
+from torch._numpy import arange, asarray as asanyarray, empty, float32, intp, ndarray
 
 __all__ = [
     "assert_equal",
@@ -202,7 +200,7 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
         if not isinstance(actual, dict):
             raise AssertionError(repr(type(actual)))
         assert_equal(len(actual), len(desired), err_msg, verbose)
-        for k, i in desired.items():
+        for k in desired.keys():
             if k not in actual:
                 raise AssertionError(repr(k))
             assert_equal(actual[k], desired[k], f"key={k!r}\n{err_msg}", verbose)
@@ -672,9 +670,7 @@ def assert_array_compare(
             n_elements = flagged.size if flagged.ndim != 0 else reduced.size
             percent_mismatch = 100 * n_mismatch / n_elements
             remarks = [
-                "Mismatched elements: {} / {} ({:.3g}%)".format(
-                    n_mismatch, n_elements, percent_mismatch
-                )
+                f"Mismatched elements: {n_mismatch} / {n_elements} ({percent_mismatch:.3g}%)"
             ]
 
             ##            with errstate(all='ignore'):
@@ -927,8 +923,7 @@ def assert_array_almost_equal(x, y, decimal=6, err_msg="", verbose=True):
 
     """
     __tracebackhide__ = True  # Hide traceback for py.test
-    from torch._numpy import any as npany
-    from torch._numpy import array, float_, issubdtype, number, result_type
+    from torch._numpy import any as npany, float_, issubdtype, number, result_type
 
     def compare(x, y):
         try:
@@ -1432,8 +1427,8 @@ def assert_array_max_ulp(a, b, maxulp=1, dtype=None):
     ret = nulp_diff(a, b, dtype)
     if not np.all(ret <= maxulp):
         raise AssertionError(
-            "Arrays are not almost equal up to %g "
-            "ULP (max difference is %g ULP)" % (maxulp, np.max(ret))
+            "Arrays are not almost equal up to {:g} "
+            "ULP (max difference is {:g} ULP)".format(maxulp, np.max(ret))
         )
     return ret
 
@@ -1490,9 +1485,7 @@ def nulp_diff(x, y, dtype=None):
     y[np.isnan(y)] = np.nan
 
     if not x.shape == y.shape:
-        raise ValueError(
-            "x and y do not have the same shape: %s - %s" % (x.shape, y.shape)
-        )
+        raise ValueError(f"x and y do not have the same shape: {x.shape} - {y.shape}")
 
     def _diff(rx, ry, vdt):
         diff = np.asarray(rx - ry, dtype=vdt)
@@ -2327,7 +2320,7 @@ def _parse_size(size_str):
     }
 
     size_re = re.compile(
-        r"^\s*(\d+|\d+\.\d+)\s*({0})\s*$".format("|".join(suffixes.keys())), re.I
+        r"^\s*(\d+|\d+\.\d+)\s*({})\s*$".format("|".join(suffixes.keys())), re.I
     )
 
     m = size_re.match(size_str.lower())
@@ -2347,7 +2340,7 @@ def _get_mem_available():
 
     if sys.platform.startswith("linux"):
         info = {}
-        with open("/proc/meminfo", "r") as f:
+        with open("/proc/meminfo") as f:
             for line in f:
                 p = line.split()
                 info[p[0].strip(":").lower()] = int(p[1]) * 1024

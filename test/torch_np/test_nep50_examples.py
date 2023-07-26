@@ -10,16 +10,16 @@ except ImportError:
     HAVE_NUMPY = False
 
 import torch._numpy as tnp
-from torch._numpy import (
+from torch._numpy import (  # noqa: F401
     array,
-    bool_,
-    complex64,
+    bool_,  # noqa: F401
     complex128,
+    complex64,
     float32,
     float64,
     inf,
     int16,
-    int32,
+    int32,  # noqa: F401
     int64,
     uint8,
 )
@@ -77,7 +77,6 @@ examples = {
 
 @pytest.mark.parametrize("example", examples)
 def test_nep50_exceptions(example):
-
     old, new = examples[example]
 
     if new == Exception:
@@ -170,7 +169,6 @@ corners = {
 @pytest.mark.parametrize("name", tnp._ufuncs._binary)
 @pytest.mark.parametrize("scalar, array", itertools.product(weaks, non_weaks))
 def test_compare_ufuncs(name, scalar, array):
-
     if name in corners and (
         array.dtype.name in corners[name]
         or tnp.asarray(scalar).dtype.name in corners[name]

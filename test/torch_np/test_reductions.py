@@ -1,15 +1,15 @@
 import pytest
-from pytest import raises as assert_raises
 
 import torch._numpy as np
+from pytest import raises as assert_raises
+
+from torch._numpy import _util
 from torch._numpy.testing import (
     assert_allclose,
     assert_almost_equal,
     assert_array_equal,
     assert_equal,
 )
-
-from torch._numpy import _util
 
 
 class TestFlatnonzero:

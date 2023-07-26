@@ -4,15 +4,15 @@ Poking around ufunc casting/broadcasting/dtype/out behavior.
 The goal is to validate on numpy, and tests should work when replacing
 >>> import numpy as no
 
-by 
+by
 >>> import torch._numpy as np
 """
 import operator
 
 import pytest
-from pytest import raises as assert_raises
 
 import torch._numpy as np
+from pytest import raises as assert_raises
 from torch._numpy.testing import assert_equal
 
 # import numpy as np
@@ -360,7 +360,6 @@ class TestNdarrayDunderVsUfunc:
 
 class TestUfuncDtypeKwd:
     def test_binary_ufunc_dtype(self):
-
         # default computation uses float64:
         r64 = np.add(1, 1e-15)
         assert r64.dtype == "float64"
@@ -376,7 +375,6 @@ class TestUfuncDtypeKwd:
         assert rb.dtype == bool
 
     def test_binary_ufunc_dtype_and_out(self):
-
         # all in float64: no precision loss
         out64 = np.empty(2, dtype=np.float64)
         r64 = np.add([1.0, 2.0], 1.0e-15, out=out64)
