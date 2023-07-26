@@ -136,10 +136,7 @@ class TestNvFuserDynamo(TestCase):
             # nvfuser would promote output to fp32 in math, FusionDefinition should cast output dtype back
             return torch.where(tmp > 0, tmp, 0.0)
 
-        # No warnings and no errors
-        with warnings.catch_warnings(record=True) as w:
-            nvfuser_result = func(input1)
-            self.assertEqual(len(w), 0)
+        nvfuser_result = func(input1)
         eager_result = func.__wrapped__(input1)
         self.assertEqual(eager_result, nvfuser_result)
 

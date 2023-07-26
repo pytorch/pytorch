@@ -458,10 +458,8 @@ def _update_special_qspecs_after_replacement(
         if isinstance(edge_or_node, Node):
             _node = edge_or_node
             return original_to_replacement_node.get(_node, _node)
-        # TODO: It's really should be
-        # isinstance(edge_or_node, tuple) and len(edge_or_node) == 2 and all(isinstance(x, Node) for x in edge_or_node)
-        elif isinstance(edge_or_node, Tuple[Node, Node]):  # type: ignore[arg-type]
-            src, dest = edge_or_node  # type: ignore[misc]
+        elif isinstance(edge_or_node, tuple) and len(edge_or_node) == 2 and all(isinstance(x, Node) for x in edge_or_node):
+            src, dest = edge_or_node
             return (
                 original_to_replacement_node.get(src, src),
                 original_to_replacement_node.get(dest, dest),
@@ -558,7 +556,7 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
             _get_conv_bn_getitem_nodes(r.replacements)
 
         # Step (3a): Copy over metadata for all three nodes in [conv - bn - getitem]
-        for match_pattern_node, original_node in _filter_nodes_map(r.nodes_map).items():
+        for original_node in _filter_nodes_map(r.nodes_map).values():
             if original_node.target == torch.ops.aten.convolution.default:
                 replacement_conv_node.meta = original_node.meta
                 original_to_replacement_node[original_node] = replacement_conv_node
