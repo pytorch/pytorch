@@ -1,3 +1,5 @@
+# Owner(s): ["module: dynamo"]
+
 # from numpy.testing._private.utils import requires_memory
 import pytest
 import torch._numpy as np

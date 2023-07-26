@@ -1,3 +1,5 @@
+# Owner(s): ["module: dynamo"]
+
 import contextlib
 import itertools
 import operator
