@@ -826,12 +826,19 @@ def run_functionalized_fw_and_collect_metadata(
                 curr for curr in out_storage_to_tensors[curr_storage]
                 if has_same_metadata(o, curr) and curr.requires_grad and o is not curr
             ]
+            is_result_of_custom_autograd_fn = False
+            if isinstance(o, torch.Tensor):
+                # Need to check for both custom cpp (CppFunction) and python (BackwardCFunction) autograd fns
+                if type(o.grad_fn).__name__ == "CppFunction":
+                    is_result_of_custom_autograd_fn = True
+                if isinstance(o.grad_fn, torch.autograd.function.BackwardCFunction):
+                    is_result_of_custom_autograd_fn = True
+
             if not isinstance(o, torch.Tensor):
                 output_type = OutputType.non_alias
                 base_idx = None
-            # Need to check for both custom cpp (CppFunction) and python (BackwardCFunction) autograd fns
             elif curr_storage in inp_storage_refs and o.grad_fn is not None \
-                    and type(o.grad_fn).__name__ in ["CppFunction", "BackwardCFunction"]:
+                    and is_result_of_custom_autograd_fn:
                 output_type = OutputType.custom_function_view
                 base_idx = None
             elif curr_storage in inp_storage_refs:
