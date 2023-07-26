@@ -406,7 +406,7 @@ class TestVmapAPI(TestCase):
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, [0, 0])(x, y)
         with self.assertRaisesRegex(ValueError, msg):
-            vmap(torch.mul, set({0, 0}))(x, y)
+            vmap(torch.mul, set({0}))(x, y)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, 'lol')(x, y)
         with self.assertRaisesRegex(ValueError, msg):

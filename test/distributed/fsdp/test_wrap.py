@@ -151,8 +151,13 @@ class TestFSDPWrap(FSDPTest):
         if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
             wrapped_fsdp = wrapped_fsdp.cuda()
 
-        with self.assertRaisesRegex(ValueError, "to NOT be FullyShardedDataParallel"):
-            mod = FSDP(wrapped_fsdp, auto_wrap_policy=size_based_auto_wrap_policy)
+        wrapped_module_name = "lin1.1" if nested else "lin1"
+        with self.assertRaisesRegex(
+            ValueError,
+            "FSDP auto wrapping requires modules to not already have FSDP "
+            f"applied but found {wrapped_module_name} in",
+        ):
+            FSDP(wrapped_fsdp, auto_wrap_policy=size_based_auto_wrap_policy)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_or_policy", [True, False])
