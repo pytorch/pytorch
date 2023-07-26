@@ -15,8 +15,7 @@ from .pt2e.representation import reference_representation_rewrite
 from .fx.prepare import prepare as fx_prepare
 from .quantize_fx import _convert_to_reference_decomposed_fx
 from torch.ao.quantization import QConfigMapping
-# TODO: move quantizer to torch.ao.quantization
-from torch.ao.quantization.pt2e.quantizer import (  # noqa: F401
+from torch.ao.quantization.quantizer import (  # noqa: F401
     OperatorConfig,
     OperatorPatternType,
     QuantizationConfig,
@@ -31,13 +30,13 @@ from torch.ao.quantization.pt2e.quantizer import (  # noqa: F401
     EmbeddingQuantizer,
     ComposableQuantizer,
 )
-from torch.ao.quantization.pt2e.quantizer.utils import (  # noqa: F401
+from torch.ao.quantization.quantizer.utils import (  # noqa: F401
     get_bias_qspec,
     get_input_act_qspec,
     get_output_act_qspec,
     get_weight_qspec,
 )
-from torch.ao.quantization.pt2e.quantizer.xnnpack_quantizer import (  # noqa: F401
+from torch.ao.quantization.quantizer.xnnpack_quantizer import (  # noqa: F401
     get_symmetric_quantization_config,
 )
 from torch.ao.quantization.backend_config import BackendConfig
