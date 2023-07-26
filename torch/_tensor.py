@@ -529,7 +529,7 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.register_hook, (self,), self, hook)
         if not self.requires_grad:
             raise RuntimeError(
-                "cannot register a hook on a tensor that " "doesn't require gradient"
+                "cannot register a hook on a tensor that doesn't require gradient"
             )
         if self._backward_hooks is None:
             self._backward_hooks = OrderedDict()
