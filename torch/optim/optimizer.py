@@ -499,8 +499,9 @@ class Optimizer:
             state_dict (dict): optimizer state. Should be an object returned
                 from a call to :meth:`state_dict`.
         """
-        # deepcopy, to be consistent with module API
-        state_dict = deepcopy(state_dict)
+        # shallow copy, to be consistent with module API
+        state_dict = state_dict.copy()
+
         # Validate the state_dict
         groups = self.param_groups
         saved_groups = state_dict['param_groups']
