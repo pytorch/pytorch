@@ -752,6 +752,8 @@ def _post_backward_hook(
             ):
                 flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
 
+            prediv_factor = state._gradient_predivide_factor
+            postdiv_factor = state._gradient_postdivide_factor
             if handle.uses_sharded_strategy:
                 uses_hybrid_sharded_strategy = handle._sharding_strategy in (
                     HandleShardingStrategy.HYBRID_SHARD,
@@ -776,24 +778,18 @@ def _post_backward_hook(
                 new_sharded_grad = torch.empty_like(chunks[0])  # padded
 
                 if state._comm_hook is None:  # default path
-                    _div_if_needed(
-                        padded_unsharded_grad, state._gradient_predivide_factor
-                    )
+                    _div_if_needed(padded_unsharded_grad, prediv_factor)
                     dist.reduce_scatter_tensor(
                         new_sharded_grad,
                         padded_unsharded_grad,
                         group=state.process_group,
                     )
                     if not uses_hybrid_sharded_strategy:
-                        _div_if_needed(
-                            new_sharded_grad, state._gradient_postdivide_factor
-                        )
+                        _div_if_needed(new_sharded_grad, postdiv_factor)
                     if uses_hybrid_sharded_strategy:
                         dist.all_reduce(new_sharded_grad, group=state._inter_node_pg)
                         # TODO: Refactor this if we make the all-reduce async
-                        _div_if_needed(
-                            new_sharded_grad, state._gradient_postdivide_factor
-                        )
+                        _div_if_needed(new_sharded_grad, postdiv_factor)
                 else:
                     state._comm_hook(
                         state._comm_hook_state, padded_unsharded_grad, new_sharded_grad
@@ -815,9 +811,9 @@ def _post_backward_hook(
                 grad_to_offload = flat_param._saved_grad_shard
             else:
                 if state._comm_hook is None:  # default path
-                    _div_if_needed(flat_param.grad, state._gradient_predivide_factor)
+                    _div_if_needed(flat_param.grad, prediv_factor)
                     dist.all_reduce(flat_param.grad, group=state.process_group)
-                    _div_if_needed(flat_param.grad, state._gradient_postdivide_factor)
+                    _div_if_needed(flat_param.grad, postdiv_factor)
                 else:
                     state._comm_hook(state._comm_hook_state, flat_param.grad)
                 # For `NO_SHARD`, we can keep the low precision gradients by
