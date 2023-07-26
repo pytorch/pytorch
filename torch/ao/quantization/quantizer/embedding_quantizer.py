@@ -5,7 +5,8 @@ from typing import List, Set
 
 import torch
 import torch.nn.functional as F
-from torch.ao.quantization.pt2e.quantizer.quantizer import (
+from torch.ao.quantization.observer import PerChannelMinMaxObserver
+from torch.ao.quantization.quantizer.quantizer import (
     OperatorConfig,
     OperatorPatternType,
     QuantizationAnnotation,
@@ -13,12 +14,12 @@ from torch.ao.quantization.pt2e.quantizer.quantizer import (
     QuantizationSpec,
     Quantizer,
 )
-from torch.ao.quantization.observer import PerChannelMinMaxObserver
 
 __all__ = [
     "get_embedding_operators_config",
     "EmbeddingQuantizer",
 ]
+
 
 def get_embedding_operators_config() -> OperatorConfig:
     weight_quantization_spec = QuantizationSpec(
