@@ -276,7 +276,6 @@ class IRNode:
     def __post_init__(self):
         self.origins = set(self._current_origins)
         self.traceback = traceback.format_stack() if config.debug_ir_traceback else None
-        V.graph.register_is_user_of(self)
 
     def get_traceback(self):
         return self.traceback

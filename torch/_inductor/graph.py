@@ -438,10 +438,16 @@ class GraphLowering(torch.fx.Interpreter):
         self.lists[name] = buffer_names
         return name
 
-    def register_is_user_of(self, ir_node):
-        if isinstance(ir_node, ir.Buffer):
-            for read_name in ir_node.get_read_names():
-                self.name_to_users[read_name].append(ir_node)
+    def register_users_of(self, node_output):
+        def register(value):
+            if isinstance(value, (list, tuple)):
+                for x in value:
+                    register(x)
+            if isinstance(value, ir.IRNode):
+                for read_name in value.get_read_names():
+                    self.name_to_users[read_name].append(value)
+
+        register(node_output)
 
     def mark_buffer_mutated(self, name: str):
         """
@@ -451,7 +457,9 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(name, str)
         self.mutated_buffers.add(name)
 
-        assert name in self.name_to_users
+        if name not in self.name_to_users:
+            return
+
         for user in self.name_to_users[name]:
             user.realize()
 
@@ -672,6 +680,8 @@ class GraphLowering(torch.fx.Interpreter):
                     result = super().run_node(n)
             else:
                 result = super().run_node(n)
+
+            self.register_users_of(result)
 
             # require the same stride order for dense outputs,
             # 1. user-land view() will not throw because inductor
