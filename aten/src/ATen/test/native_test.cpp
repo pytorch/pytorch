@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <ATen/native/cpu/CatKernel.h>
 #include <c10/util/irange.h>
+#include "torch/torch.h" // @manual
 
 using namespace at;
 
@@ -41,6 +43,34 @@ void TestChunk(TensorOptions T, Tensor& t) {
 
   // test rebuilding with cat
   ASSERT_EQUAL(at::cat(chunkMethod, 0), t);
+}
+
+void _test_cat(TensorList inputs, Tensor& expected_out, Tensor& out, int64_t dim) {
+  torch::cat_out(out, inputs, dim);
+  at::cat_out(expected_out, inputs, dim);
+  ASSERT_EQUAL(out, expected_out);
+}
+
+void _test_fast_cat(TensorList inputs, Tensor& expected_out, Tensor& out, int64_t dim) {
+  auto materialized_inputs = ITensorListRef(std::move(inputs)).materialize();
+  at::native::cat_fast_stub(kCPU, out, materialized_inputs, dim);
+  at::cat_out(expected_out, inputs, dim);
+  ASSERT_EQUAL(out, expected_out);
+}
+
+// cat: test method, namespace give same result
+void TestCat(TensorOptions T, Tensor& t) {
+  // test dim0
+  at::Tensor expected_out_dim0 = at::empty({9, 3}, T);
+  at::Tensor out_dim0 = at::empty({9, 3}, T);
+  _test_cat({t, t, t}, expected_out_dim0, out_dim0, 0);
+  _test_fast_cat({t, t, t}, expected_out_dim0, out_dim0, 0);
+
+  // test dim1
+  at::Tensor expected_out_dim1 = at::empty({3, 9}, T);
+  at::Tensor out_dim1 = at::empty({3, 9}, T);
+  _test_cat({t, t, t}, expected_out_dim1, out_dim1, 1);
+  _test_fast_cat({t, t, t}, expected_out_dim1, out_dim1, 1);
 }
 
 typedef Tensor StackFunc (TensorList, int64_t);
@@ -245,6 +275,7 @@ void test(TensorOptions T, TensorOptions AccT) {
   auto t = randn({3, 3}, T);
   TestSplit(T, t);
   TestChunk(T, t);
+  TestCat(T, t);
   TestStack(T, t);
   TestSize(T, t);
   TestMatmul(T, t, AccT);

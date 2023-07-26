@@ -61,8 +61,66 @@ void cat_serial_kernel(const Tensor& result, const MaterializedITensorListRef& t
   });
 }
 
+template <typename scalar_t>
+void cat_fast_dim0_kernel_impl(const Tensor& result, const MaterializedITensorListRef& tensors) {
+  auto outBytes = result.nbytes();
+  char* dataPtr = reinterpret_cast<char*>(result.data_ptr());
+  size_t totalBytes = 0;
+  for (const Tensor& input : tensors) {
+    const auto inputNbytes = input.nbytes();
+    TORCH_CHECK(outBytes >= (totalBytes + inputNbytes));
+    if (inputNbytes == 0) {
+      continue;
+    }
+    std::memcpy(dataPtr + totalBytes, input.data_ptr(), input.nbytes());
+    totalBytes += input.nbytes();
+  }
+  TORCH_CHECK(outBytes == totalBytes);
+}
+
+template <typename scalar_t>
+void cat_fast_dim1_kernel_impl(const Tensor& result, const MaterializedITensorListRef& tensors) {
+  auto outBytes = result.nbytes();
+  char* outputDataPtr = reinterpret_cast<char*>(result.data_ptr());
+  size_t sliceBytes = 0;
+  size_t offsetInSlice = 0;
+  for (const Tensor& input : tensors) {
+    sliceBytes += input.nbytes() / input.size(0);
+  }
+  for (const Tensor& input : tensors) {
+    size_t inputBytes = input.nbytes();
+    char* inputDataPtr = reinterpret_cast<char*>(input.data_ptr());
+    size_t inputSliceBytes = input.nbytes() / input.size(0);
+    for (auto s = 0; s < input.size(0); ++s) {
+      auto destOffset = sliceBytes * s + offsetInSlice;
+      auto srcOffset = inputSliceBytes * s;
+      TORCH_CHECK(destOffset + inputSliceBytes <= outBytes);
+      TORCH_CHECK(srcOffset + inputSliceBytes <= inputBytes);
+      std::memcpy(
+          outputDataPtr + destOffset,
+          inputDataPtr + srcOffset,
+          inputSliceBytes);
+    }
+    offsetInSlice += inputSliceBytes;
+  }
+  TORCH_CHECK(offsetInSlice == sliceBytes);
+}
+
+void cat_fast_kernel(const Tensor& result, const MaterializedITensorListRef& tensors, int64_t dim) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, result.scalar_type(), "cat_fast_kernel", [&]() {
+    if (dim == 0) {
+      cat_fast_dim0_kernel_impl<scalar_t>(result, tensors);
+    } else if (dim == 1) {
+      cat_fast_dim1_kernel_impl<scalar_t>(result, tensors);
+    } else {
+      TORCH_CHECK(false, "Only dim = 0, 1 is supported for cat_fast now");
+    }
+  });
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(cat_serial_stub, &cat_serial_kernel);
+REGISTER_DISPATCH(cat_fast_stub, &cat_fast_kernel);
 
 } // at::native

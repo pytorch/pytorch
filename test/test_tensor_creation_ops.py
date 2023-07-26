@@ -588,6 +588,32 @@ class TestTensorCreation(TestCase):
         self.assertEqual(res1, res2)
         self.assertTrue(res1.is_contiguous(memory_format=torch.channels_last))
 
+    @onlyCPU
+    def test_cat_out_fast(self, device):
+        inp_size = (4, 4, 4, 4)
+        x = torch.randn(inp_size, device=device).contiguous()
+        y = torch.randn(inp_size, device=device).contiguous()
+
+        # test fast cat at dimension 0
+        expected_size_dim0 = (8, 4, 4, 4)
+        res_dim0 = torch.empty(expected_size_dim0, device=device).contiguous(memory_format=torch.channels_last)
+        torch.cat((x, y), dim = 0, out = res_dim0)
+        fast_res_dim0 = torch.empty(expected_size_dim0, device=device).contiguous()
+        torch.cat((x, y), dim = 0, out=fast_res_dim0)
+        self.assertFalse(res_dim0.is_contiguous())
+        self.assertTrue(fast_res_dim0.is_contiguous())
+        self.assertEqual(res_dim0, fast_res_dim0)
+
+        # test fast cat at dimension 1
+        expected_size_dim1 = (4, 8, 4, 4)
+        res_dim1 = torch.empty(expected_size_dim1, device=device).contiguous(memory_format=torch.channels_last)
+        torch.cat((x, y), dim = 1, out = res_dim1)
+        fast_res_dim1 = torch.empty(expected_size_dim1, device=device).contiguous()
+        torch.cat((x, y), dim = 1, out=fast_res_dim1)
+        self.assertFalse(res_dim1.is_contiguous())
+        self.assertTrue(fast_res_dim1.is_contiguous())
+        self.assertEqual(res_dim1, fast_res_dim1)
+
     @onlyCUDA
     def test_cat_out_memory_format(self, device):
         inp_size = (4, 4, 4, 4)
