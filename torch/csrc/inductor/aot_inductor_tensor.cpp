@@ -107,9 +107,8 @@ AotInductorTensor aten_tensor_to_aot_tensor(void* aten_tensor) {
         by aot_inductor and have a deleteNothing deleter")
 
   if (deleter != deleteNothing) {
-    bool success = mutable_ptr.compare_exchange_deleter(deleter, deleteNothing);
     AOT_INDUCTOR_CHECK(
-        success,
+        mutable_ptr.compare_exchange_deleter(deleter, deleteNothing),
         "Unexpected deleter function on storage, could not swap function");
   }
 

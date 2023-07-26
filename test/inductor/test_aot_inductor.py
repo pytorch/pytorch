@@ -6,22 +6,31 @@ import copy
 import torch
 import torch._export
 import torch._inductor
-
 import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
-
 from torch._inductor import config
 
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils import _pytree as pytree
 
+try:
+    try:
+        from . import test_torchinductor
+    except ImportError:
+        import test_torchinductor
+except unittest.SkipTest:
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
+
+
 aten = torch.ops.aten
 
 
 class AOTInductorModelRunner:
     @classmethod
-    def load(cls, model, example_inputs, example_outputs, with_c_adaptor):
+    def load(cls, model, example_inputs, example_outputs):
         # AOTInductorModel relies on the caller to pass in output_tensors,
         # so we need to explicitly allocate output tensors here.
         output_tensors = []
@@ -40,7 +49,7 @@ class AOTInductorModelRunner:
         so_path = torch._inductor.aot_compile(exported.graph_module, all_args)
 
         # Use a utility function for easier testing
-        if with_c_adaptor:
+        if config.aot_inductor.abi_compatible:
             source = """
             #include <torch/csrc/inductor/aot_inductor_model.h>
             #include <c10/cuda/CUDAStream.h>
@@ -81,7 +90,11 @@ class AOTInductorModelRunner:
             name="aot_inductor",
             cpp_sources=[source],
             functions=["run"],
-            extra_cflags=["-DAOT_INDUCTOR_ABI_COMPATIBLE" if with_c_adaptor else ""],
+            extra_cflags=[
+                "-D AOT_INDUCTOR_ABI_COMPATIBLE"
+                if config.aot_inductor.abi_compatible
+                else ""
+            ],
             extra_ldflags=[so_path],
             with_cuda=True,
         ).run
@@ -89,10 +102,10 @@ class AOTInductorModelRunner:
         return optimized, exported, output_tensors, output_spec
 
     @classmethod
-    def run(cls, model, example_inputs, example_outputs, with_c_adaptor):
+    def run(cls, model, example_inputs, example_outputs):
         example_outputs = copy.deepcopy(example_outputs)
         optimized, exported, output_tensors, output_spec = AOTInductorModelRunner.load(
-            model, example_inputs, example_outputs, with_c_adaptor
+            model, example_inputs, example_outputs
         )
         param_buffer_values = list(exported.state_dict.values())
         flat_example_inputs = fx_pytree.tree_flatten_spec(
@@ -103,7 +116,7 @@ class AOTInductorModelRunner:
         return pytree.tree_unflatten(output_tensors, output_spec)
 
 
-class AotInductorTests(TestCase):
+class AotInductorTestsTemplate:
     def test_missing_output(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -117,13 +130,12 @@ class AotInductorTests(TestCase):
 
         model = Repro()
         example_inputs = [
-            torch.randn(10, 10, device="cuda"),
-            torch.randn(10, 10, device="cuda"),
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
         ]
         expected = model(*example_inputs)
-        actual = AOTInductorModelRunner.run(
-            model, example_inputs, expected, config.aot_inductor.abi_compatible
-        )
+        with config.patch("aot_inductor.abi_compatible", self.abi_compatible):
+            actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
     def test_output_misaligned(self):
@@ -142,13 +154,12 @@ class AotInductorTests(TestCase):
 
         model = Repro()
         example_inputs = [
-            torch.randn(10, 10, device="cuda"),
-            torch.randn(10, 10, device="cuda"),
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
         ]
         expected = model(*example_inputs)
-        actual = AOTInductorModelRunner.run(
-            model, example_inputs, expected, config.aot_inductor.abi_compatible
-        )
+        with config.patch("aot_inductor.abi_compatible", self.abi_compatible):
+            actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
     def test_addmm_activation(self):
@@ -162,32 +173,38 @@ class AotInductorTests(TestCase):
 
         model = Repro()
         example_inputs = [
-            torch.randn(32, 32, device="cuda"),
-            torch.randn(32, 10, device="cuda"),
-            torch.randn(10, 32, device="cuda"),
+            torch.randn(32, 32, device=self.device),
+            torch.randn(32, 10, device=self.device),
+            torch.randn(10, 32, device=self.device),
         ]
         expected = model(*example_inputs)
-        actual = AOTInductorModelRunner.run(
-            model, example_inputs, expected, config.aot_inductor.abi_compatible
-        )
+        with config.patch("aot_inductor.abi_compatible", self.abi_compatible):
+            actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
 
-@config.patch({"aot_inductor.abi_compatible": True})
-def run_with_abi_compatible():
-    from torch._dynamo.test_case import run_tests
-
-    run_tests(needs="filelock")
+class AotInductorAbiCompatibile(TestCase):
+    abi_compatible = True
+    device = "cuda"
 
 
-@config.patch({"aot_inductor.abi_compatible": False})
-def run_with_no_abi_compatible():
-    from torch._dynamo.test_case import run_tests
+test_torchinductor.copy_tests(
+    AotInductorTestsTemplate, AotInductorAbiCompatibile, "abi_compatible"
+)
 
-    run_tests(needs="filelock")
+
+class AotInductorNotAbiCompatibile(TestCase):
+    abi_compatible = False
+    device = "cuda"
+
+
+test_torchinductor.copy_tests(
+    AotInductorTestsTemplate, AotInductorNotAbiCompatibile, "not_abi_compatible"
+)
 
 
 if __name__ == "__main__":
     if HAS_CUDA and not TEST_WITH_ROCM:
-        run_with_no_abi_compatible()
-        run_with_abi_compatible()
+        from torch._dynamo.test_case import run_tests
+
+        run_tests(needs="filelock")

@@ -1,6 +1,9 @@
 #include <torch/csrc/inductor/aot_inductor_interface.h>
 #include <torch/csrc/inductor/aot_inductor_model_container.h>
+#ifdef AOT_INDUCTOR_ABI_COMPATIBLE
 #include <torch/csrc/inductor/aot_inductor_tensor.h>
+#endif
+
 #include <stdexcept>
 #include <vector>
 #include <iostream>

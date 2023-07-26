@@ -1,22 +1,6 @@
-#ifndef __AOT_INDUCTOR_TENSOR__
-#define __AOT_INDUCTOR_TENSOR__
+#pragma once
 
-#include <stdbool.h>
-#include <stdint.h>
-#include <memory>
-
-#ifdef __GNUC__
-#define AOT_INDUCTOR_EXPORT __attribute__((__visibility__("default")))
-#else // !__GNUC__
-#ifdef _WIN32
-#define AOT_INDUCTOR_EXPORT __declspec(dllexport)
-#else // !_WIN32
-#define AOT_INDUCTOR_EXPORT
-#endif // _WIN32
-#endif // __GNUC__
-
-#define AOT_INDUCTOR_CHECK(cond, msg) \
-  { assert((cond) && (msg)); }
+#include <torch/csrc/inductor/aot_inductor_utils.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -123,6 +107,4 @@ AOT_INDUCTOR_EXPORT AotInductorTensor aot_inductor_mm_out(
 
 #ifdef __cplusplus
 }
-#endif
-
 #endif

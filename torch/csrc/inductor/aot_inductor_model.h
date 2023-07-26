@@ -8,31 +8,12 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
+#ifdef AOT_INDUCTOR_ABI_COMPATIBLE
 #include <torch/csrc/inductor/aot_inductor_tensor.h>
-
-#ifndef AOT_INDUCTOR_ABI_COMPATIBLE
+#else
 #include <ATen/Tensor.h>
+#include <torch/csrc/inductor/aot_inductor_utils.h>
 #endif
-
-#define AOT_VECTOR_SIZE_CHECK(vec, expected_size)                 \
-  {                                                               \
-    auto actual_size = vec.size();                                \
-    std::string msg = "expected vector size to be ";              \
-    msg += std::to_string(expected_size);                         \
-    msg += ", but got ";                                          \
-    msg += std::to_string(actual_size);                           \
-    AOT_INDUCTOR_CHECK(actual_size == expected_size, msg.c_str()) \
-  }
-
-#define CUDA_ERROR_CHECK(EXPR)                 \
-  do {                                         \
-    cudaError_t __err = EXPR;                  \
-    if (__err != cudaSuccess) {                \
-      std::string msg = "CUDA driver error: "; \
-      msg += std::to_string(__err);            \
-      AOT_INDUCTOR_CHECK(false, msg.c_str())   \
-    }                                          \
-  } while (0);
 
 namespace torch {
 namespace aot_inductor {
