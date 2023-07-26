@@ -191,7 +191,6 @@ class TestRavelUnravelIndex:
             np.unravel_index([1], (2, 1, 0))
 
 
-@pytest.mark.xfail(reason='mgrid not implemented')
 class TestGrid:
     def test_basic(self):
         a = mgrid[-1:1:10j]
@@ -205,6 +204,7 @@ class TestGrid:
         assert_almost_equal(b[-1], b[0]+19*0.1, 11)
         assert_almost_equal(a[1]-a[0], 2.0/9.0, 11)
 
+    @pytest.mark.xfail(reason='retstep not implemented')
     def test_linspace_equivalence(self):
         y, st = np.linspace(2, 10, retstep=True)
         assert_almost_equal(st, 8/49.0)
@@ -249,6 +249,7 @@ class TestGrid:
         assert_equal(grid.size, expected[0])
         assert_equal(grid_small.size, expected[1])
 
+    @pytest.mark.xfail(reason='mgrid not implementd')
     def test_accepts_npfloating(self):
         # regression test for #16466
         grid64 = mgrid[0.1:0.33:0.1, ]
@@ -262,6 +263,7 @@ class TestGrid:
         assert_(grid32.dtype == np.float64)
         assert_array_almost_equal(grid64, grid32)
 
+    @pytest.mark.skip(reason='longdouble')
     def test_accepts_longdouble(self):
         # regression tests for #16945
         grid64 = mgrid[0.1:0.33:0.1, ]
@@ -284,6 +286,7 @@ class TestGrid:
         assert_(grid128.dtype == np.longdouble)
         assert_array_almost_equal(grid64, grid128)
 
+    @pytest.mark.skip(reason='longdouble')
     def test_accepts_npcomplexfloating(self):
         # Related to #16466
         assert_array_almost_equal(
@@ -307,8 +310,8 @@ class TestGrid:
         assert_array_equal(grid64_a, grid64_b)
 
 
-@pytest.mark.xfail(reason='r_[] not implemented')
 class TestConcatenator:
+    @pytest.mark.xfail(reason='r_ not implemented')
     def test_1d(self):
         assert_array_equal(r_[1, 2, 3, 4, 5, 6], np.array([1, 2, 3, 4, 5, 6]))
         b = np.ones(5)
@@ -319,10 +322,12 @@ class TestConcatenator:
         g = r_[10.1, 1:10]
         assert_(g.dtype == 'f8')
 
+    @pytest.mark.xfail(reason='r_ not implemented')
     def test_more_mixed_type(self):
         g = r_[-10.1, np.array([1]), np.array([2, 3, 4]), 10.0]
         assert_(g.dtype == 'f8')
 
+    @pytest.mark.xfail(reason='r_ not implemented')
     def test_complex_step(self):
         # Regression test for #12262
         g = r_[0:36:100j]
@@ -332,6 +337,7 @@ class TestConcatenator:
         g = r_[0:36:np.complex64(100j)]
         assert_(g.shape == (100,))
 
+    @pytest.mark.xfail(reason='r_ not implemented')
     def test_2d(self):
         b = np.random.rand(5, 5)
         c = np.random.rand(5, 5)
@@ -344,13 +350,13 @@ class TestConcatenator:
         assert_array_equal(d[:5, :], b)
         assert_array_equal(d[5:, :], c)
 
+    @pytest.mark.xfail(reason='r_ not implemented')
     def test_0d(self):
         assert_equal(r_[0, np.array(1), 2], [0, 1, 2])
         assert_equal(r_[[0, 1, 2], np.array(3)], [0, 1, 2, 3])
         assert_equal(r_[np.array(0), [1, 2, 3]], [0, 1, 2, 3])
 
 
-@pytest.mark.xfail(reason='ndenumerate not implemented')
 class TestNdenumerate:
     def test_basic(self):
         a = np.array([[1, 2], [3, 4]])
@@ -372,25 +378,26 @@ class TestIndexExpression:
         assert_equal(a[:, :3, [1, 2]], a[s_[:, :3, [1, 2]]])
 
 
-@pytest.mark.xfail(reason='ix_ not implemented')
 class TestIx_:
+    @pytest.mark.xfail(reason='ix_ not implemented')
     def test_regression_1(self):
         # Test empty untyped inputs create outputs of indexing type, gh-5804
-        a, = np.ix_(range(0))
+        a, = ix_(range(0))
         assert_equal(a.dtype, np.intp)
 
-        a, = np.ix_([])
+        a, = ix_([])
         assert_equal(a.dtype, np.intp)
 
         # but if the type is specified, don't change it
-        a, = np.ix_(np.array([], dtype=np.float32))
+        a, = ix_(np.array([], dtype=np.float32))
         assert_equal(a.dtype, np.float32)
 
+    @pytest.mark.xfail(reason='ix_ not implemented')
     def test_shape_and_dtype(self):
         sizes = (4, 5, 3, 2)
         # Test both lists and arrays
         for func in (range, np.arange):
-            arrays = np.ix_(*[func(sz) for sz in sizes])
+            arrays = ix_(*[func(sz) for sz in sizes])
             for k, (a, sz) in enumerate(zip(arrays, sizes)):
                 assert_equal(a.shape[k], sz)
                 assert_(all(sh == 1 for j, sh in enumerate(a.shape) if j != k))
@@ -399,11 +406,11 @@ class TestIx_:
     def test_bool(self):
         bool_a = [True, False, True, True]
         int_a, = np.nonzero(bool_a)
-        assert_equal(np.ix_(bool_a)[0], int_a)
+        assert_equal(ix_(bool_a)[0], int_a)
 
     def test_1d_only(self):
         idx2d = [[1, 2, 3], [4, 5, 6]]
-        assert_raises(ValueError, np.ix_, idx2d)
+        assert_raises(ValueError, ix_, idx2d)
 
     def test_repeated_input(self):
         length_of_vector = 5
@@ -539,7 +546,6 @@ class TestDiagIndicesFrom:
             diag_indices_from(x)
 
 
-@pytest.mark.xfail(reason='ndindex not implemented')
 def test_ndindex():
     x = list(ndindex(1, 2, 3))
     expected = [ix for ix, e in ndenumerate(np.zeros((1, 2, 3)))]

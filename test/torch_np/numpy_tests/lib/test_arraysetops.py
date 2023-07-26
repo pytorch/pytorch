@@ -7,9 +7,10 @@ from torch._numpy.testing import (assert_array_equal, assert_equal)
 
 from torch._numpy import unique
 
-from numpy.lib.arraysetops import (
-    ediff1d, intersect1d, setxor1d, union1d, setdiff1d, in1d, isin
-    )
+# TODO: NotImplemented
+# from numpy.lib.arraysetops import (
+#    ediff1d, intersect1d, setxor1d, union1d, setdiff1d, in1d, isin
+#    )
 import pytest
 from pytest import raises as assert_raises
 
