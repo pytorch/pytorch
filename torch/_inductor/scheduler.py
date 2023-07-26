@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Set
 import sympy
 
 import torch
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import dynamo_profiled, dynamo_timed
 
 from . import config, dependencies, ir, metrics
 from .dependencies import StarDep, WeakDep
@@ -50,7 +50,7 @@ class OutputNode:
 
 
 def fuse(node1: "BaseSchedulerNode", node2: "BaseSchedulerNode"):
-    if node1.is_foreach():
+    if node1.is_foreach() or node2.is_foreach():
         return ForeachKernelSchedulerNode.fuse(node1, node2)
     else:
         return FusedSchedulerNode.fuse(node1, node2)
@@ -621,35 +621,143 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     """Scheduler node which consists of a list of scheduler nodes that each operate on a
     distinct tensor in a list of tensors."""
 
+    def get_consumer_subnode_for(self, producer):
+        if producer.get_name() in self.read_to_node:
+            return self.read_to_node[producer.get_name()]
+
+        return None
+
+    def get_producer_subnode_for(self, consumer):
+        for rd in consumer.read_writes.reads:
+            if rd.name in self.name_to_node:
+                return self.name_to_node[rd.name]
+
+        return None
+
     @classmethod
-    def fuse(cls, node1, node2):
-        assert node1.is_foreach() or node2.is_foreach()
-        if node1.is_foreach() and node2.is_foreach():
+    def can_fuse(cls, producer, consumer):
+        if producer.is_foreach() and consumer.is_foreach():
+            return len(producer.snodes) == len(consumer.snodes) and all(
+                producer.scheduler.can_fuse(l, r)
+                for l, r in zip(producer.snodes, consumer.snodes)
+            )
+        elif consumer.is_foreach():
+            # the == 1 check is overly conservative, but this is meant purely for epilogue copy fusion
+            # at the moment
+            if len(producer.users) != 1:
+                return False
+
+            consumer_subnode = consumer.get_consumer_subnode_for(producer)
+            if consumer_subnode is not None:
+                return consumer.scheduler.can_fuse(producer, consumer_subnode)
+
+            return False
+
+        elif producer.is_foreach():
+            if len(consumer.inverse_users) != 1:
+                return False
+
+            producer_subnode = producer.get_producer_subnode_for(consumer)
+            if producer_subnode is not None:
+                return producer.scheduler.can_fuse(producer_subnode, consumer)
+
+            return False
+
+        raise AssertionError(
+            "At least one node passed to ForeachKernelSchedulerNode.can_fuse should be a foreach node"
+        )
+
+    @classmethod
+    def fuse(cls, producer, consumer):
+        assert producer.is_foreach() or consumer.is_foreach()
+        prev_node_1 = None
+        prev_node_2 = None
+        if producer.is_foreach() and consumer.is_foreach():
             fused_nodes = [
                 FusedSchedulerNode.fuse(l, r)
-                for l, r in zip(node1.snodes, node2.snodes)
+                for l, r in zip(producer.snodes, consumer.snodes)
             ]
-        else:
-            non_foreach_node = node1 if node2.is_foreach() else node2
-            foreach_node = node2 if node2.is_foreach() else node1
+        elif producer.is_foreach():
+            producer_subnode = producer.get_producer_subnode_for(consumer)
             fused_nodes = []
-            fusion_completed = False
-            for node in foreach_node.snodes:
-                if not fusion_completed and node1.scheduler.can_fuse(
-                    node, non_foreach_node
-                ):
-                    fused_nodes.append(FusedSchedulerNode.fuse(node, non_foreach_node))
-                    fusion_completed = True
+            prev_node_1 = producer
+            prev_node_2 = None
+            for node in producer.snodes:
+                if node is producer_subnode:
+                    new_node = FusedSchedulerNode.fuse(node, consumer)
+                    prev_node_2 = new_node
+                    fused_nodes.append(new_node)
                 else:
                     fused_nodes.append(node)
-        return cls(node1.scheduler, fused_nodes)
 
-    def __init__(self, scheduler: "Scheduler", nodes: List[SchedulerNode]):
-        super().__init__(scheduler, nodes)
-        # TODO: ensure all buffers are on the same device in lowerings
+        elif consumer.is_foreach():
+            consumer_subnode = consumer.get_consumer_subnode_for(producer)
+            fused_nodes = []
+            prev_node_1 = consumer
+            prev_node_2 = None
+
+            for node in consumer.snodes:
+                if node is consumer_subnode:
+                    new_node = FusedSchedulerNode.fuse(producer, node)
+                    prev_node_2 = new_node
+                    fused_nodes.append(new_node)
+                else:
+                    fused_nodes.append(node)
+
+        return cls(producer.scheduler, fused_nodes, prev_node_1, prev_node_2)
+
+    def __init__(
+        self,
+        scheduler: "Scheduler",
+        nodes: List[SchedulerNode],
+        prev_node_1=None,
+        prev_node_2=None,
+    ):
+        self.read_to_node = {}
+        self.name_to_node = {}
+
+        if prev_node_1 is None or prev_node_2 is None:
+            super().__init__(scheduler, nodes)
+
+            for node in nodes:
+                for read in node.read_writes.reads:
+                    self.read_to_node[read.name] = node
+
+                for name in node.get_names():
+                    self.name_to_node[name] = node
+        else:
+            self.scheduler = scheduler
+            self.snodes = nodes
+
+            self.set_read_writes(
+                dependencies.ReadWrites.merge_list(
+                    [prev_node_1.read_writes, prev_node_2.read_writes]
+                )
+            )
+
+            self.unmet_dependencies = {
+                dep
+                for dep in set.union(
+                    prev_node_1.unmet_dependencies, prev_node_2.unmet_dependencies
+                )
+                if dep.name not in self.get_names()
+            } - self.read_writes.writes
+
+            self.min_order = min([prev_node_1.min_order, prev_node_2.min_order])
+            self.max_order = max([prev_node_1.max_order, prev_node_2.max_order])
+
+            foreach_node = prev_node_1 if prev_node_1.is_foreach() else prev_node_2
+            other_node = prev_node_2 if prev_node_1.is_foreach() else prev_node_1
+
+            self.recursive_predecessors = foreach_node.recursive_predecessors
+            self.recursive_predecessors.update(other_node.recursive_predecessors)
+
+            self.name_to_node = foreach_node.name_to_node
+            for name in other_node.get_names():
+                self.name_to_node[name] = other_node
+
         self.group = (nodes[0].get_device(), 0)
-        self.snodes = nodes
-        self.node_set = set(nodes)
+
         self.origins = set()
 
     def mark_run(self):
@@ -672,18 +780,6 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def get_nodes(self):
         """Returns all nodes contained in this kernel, unpacking fused nodes into their constituent scheduler nodes."""
         return list(itertools.chain(*[x.get_nodes() for x in self.snodes]))
-
-    def can_fuse(self, other: SchedulerNode):
-        if other.is_foreach():
-            return len(self.snodes) == len(other.snodes) and all(
-                self.scheduler.can_fuse(l, r) for l, r in zip(self.snodes, other.snodes)
-            )
-        else:
-            # the == 1 check is overly conservative, but this is meant purely for epilogue copy fusion
-            # at the moment
-            return len(other.inverse_users) == 1 and any(
-                self.scheduler.can_fuse(l, other) for l in self.snodes
-            )
 
 
 def pick_loop_order(stride_lengths, sizes, priority_idx=()):
@@ -736,10 +832,11 @@ class NodeUser:
 
 
 class Scheduler:
-    @dynamo_timed
+    @dynamo_profiled
     def __init__(self, nodes):
         super().__init__()
         self.backends = {}
+        self.fuse_cache = {}
 
         self.nodes = []
         self.available_buffer_names = {
@@ -775,6 +872,7 @@ class Scheduler:
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.create_foreach_nodes()
+        self.topological_sort_schedule()
         self.fuse_nodes()
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
@@ -1003,6 +1101,7 @@ class Scheduler:
             if len(self.nodes) == old_len:
                 break
 
+    @dynamo_timed
     def fuse_nodes_once(self):
         """
         Mutates self.nodes to combine nodes into FusedSchedulerNodes.
@@ -1042,7 +1141,7 @@ class Scheduler:
 
         def check_all_pairs(nodes):
             for node1_index, node1 in enumerate(nodes):
-                for node2 in nodes[node1_index + 1 :]:
+                for node2 in nodes[node1_index + 1 : (node1_index + 64)]:
                     key = (node1, node2)
                     if key in seen:
                         continue
@@ -1133,11 +1232,13 @@ class Scheduler:
         )
         return proximity_score > 64
 
+    @functools.lru_cache
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """
         Determine if it is possible to combine node1 and node2 into a
         single fused node.
         """
+
         if node1 is node2:
             return False
         if (
@@ -1150,6 +1251,9 @@ class Scheduler:
             and not node2.is_template()
         ):
             return False
+
+        if node1.is_foreach() or node2.is_foreach():
+            return ForeachKernelSchedulerNode.can_fuse(node1, node2)
 
         if node2.get_names() & node1.recursive_predecessors:
             return False  # node2 must go before node1
@@ -1185,8 +1289,6 @@ class Scheduler:
             if not self.can_fuse_vertical(node1, node2):
                 return False
             return self.get_backend(device).can_fuse_vertical(node1, node2)
-        elif node1.is_foreach() and node2.is_foreach():
-            return False
         else:  # nodes don't depend on each other, but may have common reads
             if self.can_fusion_increase_peak_memory(node1, node2):
                 return False
