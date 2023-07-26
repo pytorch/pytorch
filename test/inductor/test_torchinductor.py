@@ -295,7 +295,7 @@ def check_model(
     torch.manual_seed(0)
     actual = run(*example_inputs, **kwargs)
     # if not called:
-    #     exp = torch._dynamo.explain(run, *example_inputs)
+    #     exp = torch._dynamo.explain(run)(*example_inputs)
     #     print("Explain:", exp[0])
     #     for graph in exp[2]:
     #         print("Graph", graph)
