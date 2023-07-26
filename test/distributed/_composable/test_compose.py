@@ -22,7 +22,7 @@ from torch.testing._internal.common_distributed import (
     SaveForwardInputsModel,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTest, FSDPTestMultiThread
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
@@ -42,8 +42,113 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+class TestComposeMultiThread(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
 
-class TestFSDPCheckpoint(FSDPTest):
+    @skip_if_lt_x_gpu(2)
+    def test_fully_shard_replicate_correct_replicate_params(self):
+        model = CompositeParamModel(device=torch.device("cuda"))
+        # Shard Linears within UnitModule
+        fully_shard(model.u1, policy=ModuleWrapPolicy({nn.Linear}))
+        fully_shard(model.u2, policy=ModuleWrapPolicy({nn.Linear}))
+        # replicate the rest
+        replicate(model)
+        # Run fwd + bwd to initialize DDP
+        inp = torch.randn(2, 100, device="cuda")
+        model(inp).sum().backward()
+        # Ensure replicate param names are as expected, i.e.
+        # immediate parameters of model and parameters of model's non-UnitModule
+        # submodules are replicated
+        param_names = replicate.state(model)._replicate_param_names
+        replicated_modules = [
+            (name, mod)
+            for (name, mod) in model.named_children()
+            if mod not in [model.u1, model.u2]
+        ]
+        replicated_param_names = [
+            f"{module_name}.{n}"
+            for module_name, mod in replicated_modules
+            for n, _ in mod.named_parameters()
+        ]
+        replicated_param_names.extend(
+            [n for n, _ in model.named_parameters(recurse=False)]
+        )
+        self.assertEqual(set(param_names), set(replicated_param_names))
+
+    @skip_if_lt_x_gpu(2)
+    def test_checkpoint_fully_shard_cast_forward_inputs(self):
+        self.run_subtests(
+            {
+                "checkpoint_strict_submodule": [False, True],
+            },
+            self._test_checkpoint_fully_shard_cast_forward_inputs,
+        )
+
+    def _test_checkpoint_fully_shard_cast_forward_inputs(
+        self, checkpoint_strict_submodule: bool
+    ):
+        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
+        fp16_mp = MixedPrecision(param_dtype=torch.float16, cast_forward_inputs=True)
+        fp32_mp = MixedPrecision(param_dtype=torch.float32, cast_forward_inputs=True)
+
+        model = SaveForwardInputsModel(
+            forward_inputs=forward_inputs, cast_forward_inputs=False
+        ).cuda()
+        x = torch.zeros(2, 100, device="cuda")
+
+        fully_shard(model.c2, mixed_precision=fp16_mp)
+        if checkpoint_strict_submodule:
+            checkpoint(model.c2.l)
+        else:
+            checkpoint(model.c2)
+        fully_shard(model, mixed_precision=fp32_mp)
+
+        loss = model(x).sum()
+        loss.backward()
+
+        self.assertEqual(forward_inputs[model].dtype, torch.float32)
+        self.assertEqual(forward_inputs[model.c1].dtype, torch.float32)
+        # Notably, check that the recomputed forward preserves the right dtype
+        self.assertEqual(forward_inputs[model.c2].dtype, torch.float16)
+
+    @skip_if_lt_x_gpu(2)
+    def test_composable_fsdp_replicate(self):
+        # Verify how the APIs can be composed, e.g. if both `fully_shard` and
+        # `replicate` are applied on the same module, it should raise exception.
+        model = CompositeModel(device=torch.device("cpu"))
+        fully_shard(model.l1)
+        with self.assertRaisesRegex(AssertionError, "Cannot apply .*replicate"):
+            replicate(model.l1)
+        replicate(model.l2)  # should not raise
+
+    @skip_if_lt_x_gpu(2)
+    def test_state_dict_fsdp_submodules(self):
+        model = CompositeModel(device=torch.device("cuda"))
+
+        full_shard_args = {"strategy": ShardingStrategy.FULL_SHARD}
+        no_shard_args = {"strategy": ShardingStrategy.NO_SHARD}
+
+        model.u1 = fully_shard(model.u1, **full_shard_args)
+        model.u2 = fully_shard(model.u2, **no_shard_args)
+
+        FSDP.set_state_dict_type(
+            model,
+            StateDictType.SHARDED_STATE_DICT,
+        )
+
+        state_dict = model.state_dict()
+        for fqn, tensor in state_dict.items():
+            if "u1" in fqn:
+                self.assertIsInstance(tensor, ShardedTensor)
+            elif "u2" in fqn:
+                self.assertIsInstance(tensor, torch.Tensor)
+        # Ensure that get_state_dict_type can still correctly get the settings.
+        _ = FSDP.get_state_dict_type(model)
+
+
+class TestComposeMultiProcess(FSDPTest):
     @property
     def world_size(self) -> int:
         return 2
@@ -138,72 +243,6 @@ class TestFSDPCheckpoint(FSDPTest):
         self._test_checkpoint_fsdp_submodules()
 
     @skip_if_lt_x_gpu(2)
-    def test_checkpoint_fully_shard_cast_forward_inputs(self):
-        self.run_subtests(
-            {
-                "checkpoint_strict_submodule": [False, True],
-            },
-            self._test_checkpoint_fully_shard_cast_forward_inputs,
-        )
-
-    def _test_checkpoint_fully_shard_cast_forward_inputs(
-        self, checkpoint_strict_submodule: bool
-    ):
-        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
-        fp16_mp = MixedPrecision(param_dtype=torch.float16, cast_forward_inputs=True)
-        fp32_mp = MixedPrecision(param_dtype=torch.float32, cast_forward_inputs=True)
-
-        model = SaveForwardInputsModel(
-            forward_inputs=forward_inputs, cast_forward_inputs=False
-        ).cuda()
-        x = torch.zeros(2, 100, device="cuda")
-
-        fully_shard(model.c2, mixed_precision=fp16_mp)
-        if checkpoint_strict_submodule:
-            checkpoint(model.c2.l)
-        else:
-            checkpoint(model.c2)
-        fully_shard(model, mixed_precision=fp32_mp)
-
-        loss = model(x).sum()
-        loss.backward()
-
-        self.assertEqual(forward_inputs[model].dtype, torch.float32)
-        self.assertEqual(forward_inputs[model.c1].dtype, torch.float32)
-        # Notably, check that the recomputed forward preserves the right dtype
-        self.assertEqual(forward_inputs[model.c2].dtype, torch.float16)
-
-    @skip_if_lt_x_gpu(2)
-    def test_fully_shard_replicate_correct_replicate_params(self):
-        model = CompositeParamModel(device=torch.device("cuda"))
-        # Shard Linears within UnitModule
-        fully_shard(model.u1, policy=ModuleWrapPolicy({nn.Linear}))
-        fully_shard(model.u2, policy=ModuleWrapPolicy({nn.Linear}))
-        # replicate the rest
-        replicate(model)
-        # Run fwd + bwd to initialize DDP
-        inp = torch.randn(2, 100, device="cuda")
-        model(inp).sum().backward()
-        # Ensure replicate param names are as expected, i.e.
-        # immediate parameters of model and parameters of model's non-UnitModule
-        # submodules are replicated
-        param_names = replicate.state(model)._replicate_param_names
-        replicated_modules = [
-            (name, mod)
-            for (name, mod) in model.named_children()
-            if mod not in [model.u1, model.u2]
-        ]
-        replicated_param_names = [
-            f"{module_name}.{n}"
-            for module_name, mod in replicated_modules
-            for n, _ in mod.named_parameters()
-        ]
-        replicated_param_names.extend(
-            [n for n, _ in model.named_parameters(recurse=False)]
-        )
-        self.assertEqual(set(param_names), set(replicated_param_names))
-
-    @skip_if_lt_x_gpu(2)
     def test_checkpoint_fsdp_submodules_with_param(self):
         model = CompositeParamModel(device=torch.device("cuda"))
 
@@ -248,16 +287,6 @@ class TestFSDPCheckpoint(FSDPTest):
             },
             self._test_parity,
         )
-
-    @skip_if_lt_x_gpu(2)
-    def test_composable_fsdp_replicate(self):
-        # Verify how the APIs can be composed, e.g. if both `fully_shard` and
-        # `replicate` are applied on the same module, it should raise exception.
-        model = CompositeModel(device=torch.device("cpu"))
-        fully_shard(model.l1)
-        with self.assertRaisesRegex(AssertionError, "Cannot apply .*replicate"):
-            replicate(model.l1)
-        replicate(model.l2)  # should not raise
 
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_replicate_composability(self):
@@ -339,32 +368,9 @@ class TestFSDPCheckpoint(FSDPTest):
             False,
         )
 
-    @skip_if_lt_x_gpu(2)
-    def test_state_dict_fsdp_submodules(self):
-        model = CompositeModel(device=torch.device("cuda"))
 
-        full_shard_args = {"strategy": ShardingStrategy.FULL_SHARD}
-        no_shard_args = {"strategy": ShardingStrategy.NO_SHARD}
-
-        model.u1 = fully_shard(model.u1, **full_shard_args)
-        model.u2 = fully_shard(model.u2, **no_shard_args)
-
-        FSDP.set_state_dict_type(
-            model,
-            StateDictType.SHARDED_STATE_DICT,
-        )
-
-        state_dict = model.state_dict()
-        for fqn, tensor in state_dict.items():
-            if "u1" in fqn:
-                self.assertIsInstance(tensor, ShardedTensor)
-            elif "u2" in fqn:
-                self.assertIsInstance(tensor, torch.Tensor)
-        # Ensure that get_state_dict_type can still correctly get the settings.
-        _ = FSDP.get_state_dict_type(model)
-
-
-instantiate_parametrized_tests(TestFSDPCheckpoint)
+instantiate_parametrized_tests(TestComposeMultiProcess)
+instantiate_parametrized_tests(TestComposeMultiThread)
 
 
 if __name__ == "__main__":
