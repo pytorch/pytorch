@@ -1791,11 +1791,9 @@ def emit_body(
                         + (
                             "[i]"
                             if is_tensor_list_type(
-                                (
-                                    inp.type
-                                    if not inplace
-                                    else refargname2inplace_foreacharg[inp.name].type
-                                )
+                                inp.type
+                                if not inplace
+                                else refargname2inplace_foreacharg[inp.name].type
                             )
                             else ""
                         ),
@@ -1838,11 +1836,9 @@ def emit_body(
             for inp in differentiable_inputs:
                 inp_name = inp.name
                 is_input_tensorlist = is_foreach and is_tensor_list_type(
-                    (
-                        inp.type
-                        if not inplace
-                        else refargname2inplace_foreacharg[inp.name].type
-                    )
+                    inp.type
+                    if not inplace
+                    else refargname2inplace_foreacharg[inp.name].type
                 )
                 input_suffix = "[i]" if is_input_tensorlist else ""
                 if is_inplace_foreach:
