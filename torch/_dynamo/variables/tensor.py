@@ -522,13 +522,16 @@ class TensorVariable(VariableTracker):
                             "Input tensor for tolist must be an integer tensor"
                         )
 
+                    if tensor.dim() == 0:
+                        return wrap(tensor, sub_proxy)
+
                     if tensor.dim() == 1:
                         return [wrap(val, sub_proxy[i]) for i, val in enumerate(tensor)]
-                    else:
-                        return [
-                            tolist(sub_tensor, sub_proxy=sub_proxy[i])
-                            for i, sub_tensor in enumerate(tensor)
-                        ]
+
+                    return [
+                        tolist(sub_tensor, sub_proxy=sub_proxy[i])
+                        for i, sub_tensor in enumerate(tensor)
+                    ]
 
                 out = tolist(
                     self.as_proxy().node.meta["example_value"], self.as_proxy()
