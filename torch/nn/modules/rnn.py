@@ -282,6 +282,10 @@ class RNNBase(Module):
         return s.format(**self.__dict__)
 
     def __getstate__(self):
+        # If weights have been changed, re-init _flat_weights in __getstate__ here.
+        if not torch.jit.is_scripting():
+            if self._weights_have_changed():
+                self._init_flat_weights()
         # Don't serialize the weight references.
         state = self.__dict__.copy()
         del state['_flat_weight_refs']
@@ -723,7 +727,6 @@ class LSTM(RNNBase):
 
     def __init__(self, *args, **kwargs):
         super().__init__('LSTM', *args, **kwargs)
-        self.forward_op = _VF.lstm
 
     def get_expected_cell_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:
         if batch_sizes is not None:
@@ -833,12 +836,12 @@ class LSTM(RNNBase):
                 hx = self.permute_hidden(hx, sorted_indices)
 
         if batch_sizes is None:
-            result = self.forward_op(input, hx, self._flat_weights, self.bias, self.num_layers,
-                                     self.dropout, self.training, self.bidirectional, self.batch_first)
+            result = _VF.lstm(input, hx, self._flat_weights, self.bias, self.num_layers,
+                              self.dropout, self.training, self.bidirectional, self.batch_first)
 
         else:
-            result = self.forward_op(input, batch_sizes, hx, self._flat_weights, self.bias,
-                                     self.num_layers, self.dropout, self.training, self.bidirectional)
+            result = _VF.lstm(input, batch_sizes, hx, self._flat_weights, self.bias,
+                              self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1:]
         # xxx: isinstance check needs to be in conditional for TorchScript to compile

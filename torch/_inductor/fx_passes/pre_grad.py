@@ -16,7 +16,6 @@ from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 from .. import config
 
 from ..fx_utils import matches_module_function_pattern
-from ..mkldnn import mkldnn_fuse_fx
 from ..pattern_matcher import (
     init_once_fakemode,
     PatternMatcherPass,
@@ -94,11 +93,6 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         return gm
     gm = remove_identity(gm)
     gm = fuse_conv_bn(gm)
-    # TODO: lstm will be decomposed after AOTAutograd and we're not able to
-    # prepack it then. Add a temporary pass for lstm prepack before
-    # AOTAutograd to get the performance benifit and need to figure
-    # out a way to make this pass work after the AOTAutograd.
-    gm = mkldnn_fuse_fx(gm, example_inputs)
     return gm
 
 

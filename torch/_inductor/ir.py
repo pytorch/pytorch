@@ -4165,15 +4165,15 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         )
 
 
-class LSTM(ExternKernelAlloc):
+class MkldnnRnnLayer(ExternKernelAlloc):
     def __init__(
-        self,
-        layout,
-        inputs,
-        constant_args=(),
-        kernel="torch.ops.mkldnn._lstm",
+        self, layout, inputs, constant_args=(), kernel="aten.mkldnn_rnn_layer"
     ):
-        super().__init__(layout, inputs, constant_args)
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+        )
         self.kernel = kernel
 
     def codegen(self, wrapper):
@@ -4185,48 +4185,59 @@ class LSTM(ExternKernelAlloc):
     def create(
         cls,
         x: "TensorBox",
-        hx: List["TensorBox"],
-        params: List["TensorBox"],
-        has_biases: bool,
+        w0: "TensorBox",
+        w1: "TensorBox",
+        w2: "TensorBox",
+        w3: "TensorBox",
+        hx: "TensorBox",
+        cx: "TensorBox",
+        reverse: bool,
+        batch_sizes: List[int],
+        mode: int,
+        hidden_size: int,
         num_layers: int,
-        dropout: float,
-        train: bool,
+        has_biases: bool,
         bidirectional: bool,
         batch_first: bool,
+        train: bool,
     ):
-        x.realize()
-        hx[0].realize()
-        hx[1].realize()
+        x = cls.require_stride1(cls.realize_input(x))
+        # TODO: x should be contiguous before calling mkldnn_rnn_layer. Do other inputs need this as well?
+        x.freeze_layout()
+        w0 = cls.require_stride1(cls.realize_input(w0))
+        w1 = cls.require_stride1(cls.realize_input(w1))
+        w2 = cls.require_stride1(cls.realize_input(w2))
+        w3 = cls.require_stride1(cls.realize_input(w3))
+        hx = cls.require_stride1(cls.realize_input(hx))
+        cx = cls.require_stride1(cls.realize_input(cx))
+
         input_size = x.get_size()
         assert len(input_size) == 3, "Expect lstm input to be 3D"
-        if batch_first:
-            input_size = [input_size[1], input_size[0], input_size[2]]
+        # batch_first is handled in the lstm OP. When entering
+        # rnn_layer here, we'll always have batch_first = False
 
         seq_length, mini_batch, input_size = input_size
-        num_directions = 2 if bidirectional else 1
-        num_gates = 4
-        hidden_size = hx[0].get_size()[2]
-        output_shape = [seq_length, mini_batch, num_directions * hidden_size]
+        output_shape = [seq_length, mini_batch, hidden_size]
 
-        if batch_first:
-            output_shape = [output_shape[1], output_shape[0], output_shape[2]]
-
-        hy_shape = hx[0].get_size()
-        cy_shape = hx[1].get_size()
+        hy_shape = hx.get_size()
+        cy_shape = cx.get_size()
 
         res: List[IRNode] = []
 
-        inputs = [x, hx, params]
+        inputs = [x, w0, w1, w2, w3, hx, cx]
         constant_args = [
-            has_biases,
+            reverse,
+            batch_sizes,
+            mode,
+            hidden_size,
             num_layers,
-            dropout,
-            train,
+            has_biases,
             bidirectional,
             batch_first,
+            train,
         ]
 
-        packed = LSTM(
+        packed = MkldnnRnnLayer(
             MultiOutputLayout(x.get_device()),
             inputs=inputs,
             constant_args=constant_args,
@@ -4234,10 +4245,7 @@ class LSTM(ExternKernelAlloc):
 
         def get_strides_of_lstm_output(output_shape, batch_first):
             assert len(output_shape) == 3, "Expect output_shape to be 3D"
-            if batch_first:
-                return [output_shape[2], output_shape[2] * output_shape[0], 1]
-            else:
-                return make_contiguous_strides_for(output_shape)
+            return make_contiguous_strides_for(output_shape)
 
         indices = []
         output_sizes = [output_shape, hy_shape, cy_shape]

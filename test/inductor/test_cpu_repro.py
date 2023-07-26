@@ -282,11 +282,13 @@ class CPUReproTests(TestCase):
                     (v,),
                 )
 
+    # TODO: move to test_mkldnn_pattern_matcher and check match node num
     @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
     @torch._dynamo.config.patch(allow_rnn=True)
+    @config.patch(freezing=True)
     def test_lstm_packed(self):
         def _lstm_params_list():
             params_dict = {
@@ -350,18 +352,20 @@ class CPUReproTests(TestCase):
                     bidirectional,
                     batch_first,
                 ).eval()
-                mod = mod.to(dtype)
-                v = v.to(dtype)
-                h = h.to(dtype)
-                c = c.to(dtype)
-                with torch.no_grad():
+                maybe_autocast = (
+                    torch.cpu.amp.autocast()
+                    if dtype == torch.bfloat16
+                    else contextlib.nullcontext()
+                )
+
+                with torch.no_grad(), maybe_autocast:
                     inps = [v]
                     if not empty_state:
                         inps.append((h, c))
 
                     fn_opt = torch._dynamo.optimize("inductor")(mod)
                     code = run_and_get_cpp_code(fn_opt, *inps)
-                    self.assertTrue("torch.ops.mkldnn._lstm" in code)
+                    self.assertTrue("aten.mkldnn_rnn_layer" in code)
                     self.assertEqual(fn_opt(*inps), mod(*inps))
 
     @torch._dynamo.config.patch(dynamic_shapes=True)

@@ -2377,6 +2377,8 @@ def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
     batch_first = False
 
     train = False
+    # TODO: ensure other inputs are contiguous as well & freeze_layout in ir.py
+    inp = inp.contiguous()
     outputs = torch.ops.aten.mkldnn_rnn_layer.default(
         inp,
         w0,
@@ -2396,7 +2398,8 @@ def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
         train,
     )
     y, hy, cy = outputs[0], outputs[1], outputs[2]
-    return y, (hy.squeeze(1), cy.squeeze(1))
+    # TODO: batch_first (squeeze(1)?) or not
+    return y, (hy.squeeze(0), cy.squeeze(0))
 
 
 def _rnn_helper(
@@ -2412,6 +2415,8 @@ def _rnn_helper(
     layer_fn,
 ):
     input = input.transpose(0, 1) if batch_first else input
+    # TODO: contiguous here will impact all decomposition; Make this inside layer func for now
+    # input = input.contiguous()
     final_hiddens = []
 
     for i in range(num_layers):
@@ -2685,16 +2690,14 @@ def use_mkldnn(input, hx, params):
     if len(devices) != 1:
         return False
 
-    dtypes = {t.dtype for t in tensors}
-    if len(dtypes) != 1:
-        return False
-
     device = devices.pop()
-    dtype = dtypes.pop()
     if device != torch.device("cpu"):
         return False
-    if dtype not in [torch.float, torch.bfloat16]:
-        return False
+    # With autocast, possible to have mixed dtype here
+    dtypes = {t.dtype for t in tensors}
+    for dtype in dtypes:
+        if dtype not in [torch.float, torch.bfloat16]:
+            return False
 
     if input.requires_grad:
         return False

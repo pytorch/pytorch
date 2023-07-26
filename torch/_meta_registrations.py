@@ -1849,44 +1849,6 @@ if torch._C._has_mkldnn:
     ):
         return input_tensor.new_empty((*input_tensor.shape[:-1], weight.shape[0]))
 
-    @register_meta(torch.ops.mkldnn._lstm.default)
-    def meta_lstm(
-        input_tensor,
-        hx,
-        _flat_weights,
-        has_biases,
-        num_layers,
-        dropout,
-        training,
-        bidirectional,
-        batch_first,
-    ):
-        input_tensor_shape = input_tensor.shape
-        assert len(input_tensor_shape) == 3, "Expect lstm input to be 3D"
-        if batch_first:
-            input_tensor_shape = [
-                input_tensor_shape[1],
-                input_tensor_shape[0],
-                input_tensor_shape[2],
-            ]
-
-        seq_length, batch_size, input_feature_size = input_tensor_shape
-        assert len(hx[0].shape) == 3, "Expect lstm hx to be 3D"
-        hidden_size = hx[0].shape[2]
-        direction = 2 if bidirectional else 1
-
-        if batch_first:
-            y = input_tensor.new_empty(
-                [batch_size, seq_length, direction * hidden_size]
-            )
-        else:
-            y = input_tensor.new_empty(
-                [seq_length, batch_size, direction * hidden_size]
-            )
-        hy = input_tensor.new_empty([direction * num_layers, batch_size, hidden_size])
-        cy = input_tensor.new_empty([direction * num_layers, batch_size, hidden_size])
-        return y, hy, cy
-
     if torch._C.has_mkl:
         _meta_lib_dont_use_me_use_register_meta_for_mkl = torch.library.Library(
             "mkl", "IMPL", "Meta"
@@ -4898,6 +4860,18 @@ def _cudnn_rnn(
     reserve = input.new_empty(reserve_shape, dtype=torch.uint8)
 
     return output, hy, cy, reserve, weight_buf
+
+
+@register_meta(torch.ops.mkldnn._reorder_mkldnn_rnn_layer_weight.default)
+def reorder_mkldnn_rnn_layer_weight(
+    weight0, weight1, weight2, weight3, input_size=None
+):
+    return (
+        torch.empty_like(weight0),
+        torch.empty_like(weight1),
+        torch.empty_like(weight2),
+        torch.empty_like(weight3),
+    )
 
 
 @register_meta(aten.mkldnn_rnn_layer.default)
