@@ -21,12 +21,15 @@
 namespace {
 AotInductorDevice convert_to_aot_inductor_device(c10::Device device) {
   AotInductorDevice result{
-      AotInductorDeviceType(device.type()), device.index()};
+      static_cast<AotInductorDeviceType>(device.type()),
+      static_cast<int8_t>(device.index())};
   return result;
 }
 
 c10::Device convert_to_c10_device(AotInductorDevice device) {
-  c10::Device result{c10::DeviceType(device.device_type), device.device_id};
+  c10::Device result{
+      static_cast<c10::DeviceType>(device.device_type),
+      static_cast<c10::DeviceIndex>(device.device_id)};
   return result;
 }
 
@@ -116,7 +119,7 @@ AotInductorTensor aten_tensor_to_aot_tensor(void* aten_tensor) {
       data_ptr,
       (void*)deleter,
       convert_to_aot_inductor_device(t->device()),
-      AotInductorScalarType(t->scalar_type()),
+      static_cast<AotInductorScalarType>(t->scalar_type()),
       t->dim(),
       register_sizes(t->sizes()),
       register_strides(t->strides()),
@@ -132,7 +135,7 @@ void aot_tensor_to_aten_tensor(
   c10::TensorOptions options =
       c10::TensorOptions()
           .device(convert_to_c10_device(aot_tensor.device))
-          .dtype(c10::ScalarType(aot_tensor.dtype));
+          .dtype(static_cast<c10::ScalarType>(aot_tensor.dtype));
 
   // aot_tensor.data_ptr is managed by the runtime here, so create an aten
   // tensor with an empty deleter
@@ -156,6 +159,9 @@ void aot_inductor_initialize() {
       kAotInductorCPU == int(c10::kCPU), "kAotInductorCPU != c10::kCPU");
   AOT_INDUCTOR_CHECK(
       kAotInductorCUDA == int(c10::kCUDA), "kAotInductorCUDA != c10::kCUDA");
+  AOT_INDUCTOR_CHECK(
+      sizeof(c10::DeviceIndex) == sizeof(AotInductorDevice::device_id),
+      "c10::DeviceIndex data type has changed ")
 
   AOT_INDUCTOR_CHECK(
       kAotInductorByte == int(c10::kByte), "kAotInductorByte != c10::kByte");
@@ -270,7 +276,7 @@ AotInductorTensor aot_inductor_empty_strided(
       sizes,
       strides,
       c10::TensorOptions(convert_to_c10_device(device))
-          .dtype(c10::ScalarType(type)));
+          .dtype(static_cast<c10::ScalarType>(type)));
   AotInductorTensor result = aten_tensor_to_aot_tensor(&aten_result);
 #ifndef NDEBUG
   live_buffer_->insert(result.data_ptr);

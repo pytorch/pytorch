@@ -7,7 +7,8 @@
 #include <string>
 
 #ifdef __GNUC__
-#define AOT_INDUCTOR_EXPORT __attribute__((__visibility__("default"))) __attribute__((used))
+#define AOT_INDUCTOR_EXPORT \
+  __attribute__((__visibility__("default"))) __attribute__((used))
 #else // !__GNUC__
 #ifdef _WIN32
 #define AOT_INDUCTOR_EXPORT __declspec(dllexport)

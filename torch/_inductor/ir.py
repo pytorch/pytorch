@@ -2877,9 +2877,6 @@ class ExternKernel(InputsKernel):
         kwargs = []
 
         if V.graph.cpp_wrapper:
-            assert (
-                self.ordered_kwargs_for_cpp_kernel is not None
-            ), "ordered_kwargs_for_cpp_kernel has to be provided"
             for arg_name in self.ordered_kwargs_for_cpp_kernel:
                 v = self.get_kwargs_value(arg_name)
                 kwargs.append(V.graph.wrapper_code.val_to_str(v))
@@ -3270,19 +3267,20 @@ class FallbackKernel(ExternKernelAlloc):
                 if V.graph.cpp_wrapper
                 else f"aten.{kernel.__name__}"
             )
-            if schema is None:
+            if schema is None and "_addmm_activation" in self.kernel:
+                # Special handling of _addmm_activation for now
                 schema = getattr(op_overload_packet, "_schema", None) or getattr(
                     op_overload_packet.default, "_schema", None
                 )
-
-            self.ordered_kwargs_for_cpp_kernel = [
-                x.name for x in schema.arguments if x.kwarg_only
-            ]
-            self.kwargs_default_value = {
-                x.name: {"type": x.real_type, "value": x.default_value}
-                for x in schema.arguments
-                if x.kwarg_only
-            }
+            if schema is not None:
+                self.ordered_kwargs_for_cpp_kernel = [
+                    x.name for x in schema.arguments if x.kwarg_only
+                ]
+                self.kwargs_default_value = {
+                    x.name: {"type": x.real_type, "value": x.default_value}
+                    for x in schema.arguments
+                    if x.kwarg_only
+                }
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
                 self.kernel = f"torch._prims.rng_prims.{kernel.__name__}"
