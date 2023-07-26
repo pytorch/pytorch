@@ -7,7 +7,7 @@ import onnx
 import pytorch_test_common
 import torch
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
-from torch.onnx import _constants, symbolic_helper
+from torch.onnx import _constants, symbolic_helper, utils
 from torch.onnx._internal import jit_utils
 from torch.testing._internal import common_utils
 
@@ -23,7 +23,7 @@ def expect_tensor(scalar_type, shape=None):
     return verify
 
 
-def g_op(graph: torch.Graph, op_name: str, *args, **kwargs):
+def as_graphcontext(graph: torch.Graph) -> jit_utils.GraphContext:
     return jit_utils.GraphContext(
         graph=graph,
         block=graph.block(),
@@ -31,7 +31,11 @@ def g_op(graph: torch.Graph, op_name: str, *args, **kwargs):
         original_node=None,  # type: ignore[arg-type]
         params_dict={},
         env={},
-    ).op(op_name, *args, **kwargs)
+    )
+
+
+def g_op(graph: torch.Graph, op_name: str, *args, **kwargs):
+    return as_graphcontext(graph).op(op_name, *args, **kwargs)
 
 
 class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
@@ -330,6 +334,38 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         gather_idx = self.insert_tensor_constant(g, torch.tensor([0], dtype=torch.long))
         gather = g_op(g, "Gather", batch_size, gather_idx, axis_i=0)
         self.run_test(g, gather.node(), expect_tensor("Long", shape=(None,)))
+
+    def test_squeeze_after_dynamic_if(self):
+        from torch.onnx.symbolic_opset11 import squeeze as squeeze11
+
+        g = self.create_empty_graph()
+
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.float).with_sizes([1, None, 5]))
+
+        # Type is intentionally not bool to test that
+        # the added "Cast" node doesn't stop shape inference.
+        cond = g.addInput()
+        cond.setType(input.type().with_dtype(torch.int32).with_sizes([1]))
+        if_op, (if_context, else_context), new_node = jit_utils.add_op_with_blocks(
+            as_graphcontext(g), "If", cond, n_blocks=2
+        )
+        block1_output = if_context.op("Add", input, input)
+        block2_output = else_context.op("Identity", input)
+        utils._add_output_to_block(if_context.block, block1_output)
+        utils._add_output_to_block(else_context.block, block2_output)
+        if_output = torch._C._jit_pass_fixup_onnx_controlflow_node(
+            new_node, _constants.ONNX_MAX_OPSET
+        )[0]
+        torch._C._jit_pass_onnx_node_shape_type_inference(
+            new_node, {}, _constants.ONNX_MAX_OPSET
+        )
+
+        # Exporter will add "If" instead of raw "Squeeze" if it does not know
+        # that if the dimension it is squeezing has size 1.
+        squeezed = squeeze11(as_graphcontext(g), if_output, dim=0)
+        assert squeezed.node().kind() == "onnx::Squeeze"
+        self.run_test(g, squeezed.node(), expect_tensor("Float", shape=(None, 5)))
 
 
 class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
