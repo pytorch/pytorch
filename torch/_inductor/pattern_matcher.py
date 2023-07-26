@@ -29,6 +29,7 @@ from .lowering import fallback_node_due_to_unsupported_type
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 Constant = Any
 NodeOrConstant = Union[Constant, torch.fx.Node]
@@ -1127,3 +1128,40 @@ def filter_nodes(nodes, fn):
         fns.extend([getattr(fn, overload) for overload in fn.overloads()])
 
     return [node for node in nodes if node.target in fns]
+
+
+@functools.lru_cache(None)
+def view_ops():
+    view_ops = [
+        aten.squeeze,
+        aten.unsqueeze,
+        aten.alias,
+        aten.view,
+        aten.slice,
+        aten.permute,
+        aten.t,
+        prims.broadcast_in_dim,
+        aten.expand,
+        aten.as_strided,
+    ]
+    result = set(view_ops)
+    for op in view_ops:
+        for overload_name in op.overloads():
+            result.add(getattr(op, overload_name))
+    return result
+
+
+def remove_extra_clones(graph: torch.fx.Graph):
+    seen = set()
+    for node in reversed(graph.nodes):
+        if node.target is aten.clone.default:
+            src = node.args[0]
+            if (
+                isinstance(src, torch.fx.Node)
+                and src.op == "call_function"
+                and not any(u in seen for u in src.users)
+                and src.target not in view_ops()
+            ):
+                node.replace_all_uses_with(src)
+                graph.erase_node(node)
+        seen.add(node)
