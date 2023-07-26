@@ -69,12 +69,12 @@ def custom_op(qualname, func_or_schema=None):
         >>> # Step 2: Register an implementation for various PyTorch subsystems
         >>>
         >>> # Register an implementation for CPU tensors
-        >>> @torch._custom_ops.impl("mylibrary::numpy_sin", backends="cpu")
+        >>> @torch._custom_ops.impl("mylibrary::numpy_sin", device_types="cpu")
         >>> def numpy_sin_impl_cpu(x):
         >>>     return torch.from_numpy(np.sin(x.numpy()))
         >>>
         >>> # Register an implementation for CUDA tensors
-        >>> @torch._custom_ops.impl("mylibrary::numpy_sin", backends="cuda")
+        >>> @torch._custom_ops.impl("mylibrary::numpy_sin", device_types="cuda")
         >>> def numpy_sin_impl_cuda(x):
         >>>     return torch.from_numpy(np.sin(x.cpu().numpy())).to(x.device)
         >>>
