@@ -201,6 +201,9 @@ def adagrad(
     See :class:`~torch.optim.Adagrad` for details.
     """
 
+    if has_sparse_grad is None:
+        has_sparse_grad = False
+
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"
