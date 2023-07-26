@@ -38,13 +38,14 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     # We need a few rounds of binary folding to get rid of all the
     # unnecessary nodes, but may need a good method to chose the rounds number.
     # works like: conv+binary+binary.
-    binary_folding = 0
+    binary_folding = counters["inductor"]["binary_folding"]
     for _ in range(4):
         constant_fold(gm)
         # Make sure meta['val'] is properly set for all nodes
         fake_tensor_prop(gm, aot_example_inputs, True)
         binary_folding_pass.apply(gm.graph)
         # If we don't have binary folding, we don't need to run the pass again.
+        # TODO: remove the need to run fake_tensor_prop on the whole model.
         if counters["inductor"]["binary_folding"] == binary_folding:
             break
         binary_folding += counters["inductor"]["binary_folding"]
