@@ -551,6 +551,24 @@ class TestPythonRegistration(TestCase):
             getattr(torch.ops, self.test_ns).foo.default,
             getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, w))
 
+    def test_register_fallthrough(self):
+        my_lib = Library('aten', 'IMPL')
+        my_lib.impl("mm", torch.library.Fallthrough(), "AutocastCPU")
+
+        a = torch.randn(2, 3, device='cpu', dtype=torch.float32)
+        b = torch.randn(3, 2, device='cpu', dtype=torch.float32)
+        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            # dtype for mm should be float32 since we registered a fallthrough
+            self.assertTrue(torch.mm(a, b).dtype == torch.float32)
+            # ops that don't have a fallthrough registered should not be affected
+            self.assertTrue(torch.matmul(a, b).dtype == torch.bfloat16)
+
+        del my_lib
+
+        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            # default behavior should have been restored
+            self.assertTrue(torch.mm(a, b).dtype == torch.bfloat16)
+
 
 class TestCustomOp(TestCase):
     test_ns = '_test_custom_op'

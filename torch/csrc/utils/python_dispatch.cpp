@@ -313,17 +313,30 @@ void initDispatchBindings(PyObject* module) {
              py::object func) {
             HANDLE_TH_ERRORS
             auto& lib = self.cast<torch::Library&>();
-            lib.impl(
-                name,
-                torch::dispatch(
-                    dispatch,
-                    CppFunction::makeFromBoxedFunctor(
-                        std::make_unique<PythonKernelHolder>(func, dispatch))),
-                register_or_verify());
-            python_registrations_[lib._resolve(name)].insert_or_assign(
-                dispatch,
-                std::make_shared<c10::SafePyObject>(
-                    func.release().ptr(), getPyInterpreter()));
+            if (py::isinstance(
+                    func,
+                    py::module::import("torch.library").attr("Fallthrough"))) {
+              lib.impl(
+                  name,
+                  torch::dispatch(dispatch, CppFunction::makeFallthrough()),
+                  register_or_verify());
+              // FIXME: does fallthrough ned to be added to
+              // python_registrations_
+              // TODO: what does the trampoline do?
+            } else {
+              lib.impl(
+                  name,
+                  torch::dispatch(
+                      dispatch,
+                      CppFunction::makeFromBoxedFunctor(
+                          std::make_unique<PythonKernelHolder>(
+                              func, dispatch))),
+                  register_or_verify());
+              python_registrations_[lib._resolve(name)].insert_or_assign(
+                  dispatch,
+                  std::make_shared<c10::SafePyObject>(
+                      func.release().ptr(), getPyInterpreter()));
+            }
             END_HANDLE_TH_ERRORS_PYBIND
           },
           "",
