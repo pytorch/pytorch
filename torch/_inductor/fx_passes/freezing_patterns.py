@@ -21,6 +21,8 @@ pass_patterns = [
     PatternMatcherPass(),
 ]
 
+binary_folding_pass = PatternMatcherPass()
+
 
 def freezing_passes(gm: torch.fx.GraphModule):
     """
@@ -28,6 +30,7 @@ def freezing_passes(gm: torch.fx.GraphModule):
     """
 
     lazy_init()
+    binary_folding_pass.apply(gm.graph)
     for patterns in pass_patterns:
         patterns.apply(gm.graph)
 
@@ -48,7 +51,10 @@ def lazy_init():
 
         _mkldnn_weight_pack_init()
 
+    from .binary_folding import binary_folding_init
+
     addmm_patterns_init()
+    binary_folding_init()
 
 
 def register_freezing_graph_pattern(pattern, extra_check=_return_true, pass_number=0):
@@ -56,6 +62,14 @@ def register_freezing_graph_pattern(pattern, extra_check=_return_true, pass_numb
         pattern,
         extra_check=extra_check,
         pass_dict=pass_patterns[pass_number],
+    )
+
+
+def register_binary_folding_pattern(pattern, extra_check=_return_true):
+    return register_graph_pattern(
+        pattern,
+        extra_check=extra_check,
+        pass_dict=binary_folding_pass,
     )
 
 
