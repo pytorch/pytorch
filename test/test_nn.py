@@ -2705,7 +2705,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         state_dict = m.state_dict()
         state_dict['weight'] = torch.empty_like(state_dict['weight'], device='cpu')
         with self.assertWarnsRegex(UserWarning, "for weight: copying from a non-meta parameter in the checkpoint to a meta"):
-            m.load_state_dict(state_dict, assign=True)
+            m.load_state_dict(state_dict)
 
     def test_extra_state_missing_set_extra_state(self):
 
