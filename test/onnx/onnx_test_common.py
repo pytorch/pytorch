@@ -311,8 +311,31 @@ def run_ort(
         ort_model = buffer.getvalue()
     else:
         ort_model = onnx_model
+
+    # NOTE: Inline model before running in onnxruntime.
+    # This is a workaround since onnxruntime crashes or segfaults when loading model
+    # with nested functions.
+    # Ref: https://github.com/microsoft/onnxruntime/issues/15849
+    try:
+        import onnx.inliner
+    except ImportError:
+        warnings.warn("Cannot import onnx.inliner. Skip inlining model.")
+    else:
+        if isinstance(ort_model, bytes):
+            buffer = io.BytesIO(ort_model)
+        else:
+            assert isinstance(ort_model, str)
+            buffer = ort_model
+
+        model_proto = onnx.load(buffer)
+        inlined_model_proto = onnx.inliner.inline_local_functions(model_proto)
+        ort_model = inlined_model_proto.SerializeToString()
+
+    # Suppress floods of warnings from ONNX Runtime
+    session_options = onnxruntime.SessionOptions()
+    session_options.log_severity_level = 3  # Error
     session = onnxruntime.InferenceSession(
-        ort_model, providers=["CPUExecutionProvider"]
+        ort_model, providers=["CPUExecutionProvider"], sess_options=session_options
     )
     input_names = [ort_input.name for ort_input in session.get_inputs()]
 

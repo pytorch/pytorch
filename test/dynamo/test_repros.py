@@ -2632,7 +2632,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # https://github.com/pytorch/pytorch/issues/93781
         @torch.compile
         def f():
-            _generator_type = type((_ for _ in ()))
+            _generator_type = type(_ for _ in ())
 
         self.assertNoUnraisable(f)
 
@@ -2667,6 +2667,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager")(f)
         with self.assertRaisesRegex(ValueError, "input sum needs to be 3"):
             opt_fn(*args)
+
+    def test_rewrite_assert_dont_change_bytecode(self):
+        def fn(x):
+            with torch.no_grad():
+                assert x.max() < 5, f"invalid max {x.max()}"
+                x = torch.sin(x)
+            return x
+
+        x = torch.ones(4)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        self.assertTrue(same(fn(x), opt_fn(x)))
 
     def test_rewrite_assert_without_msg(self):
         def f(x):
@@ -3418,6 +3429,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return torch.compile(fn, backend="eager")
 
         make_fn(None)()
+
+    def test_string_format(self):
+        s = "temp{i}"
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            if s.format(i=4) == "temp4":
+                return torch.sin(x)
+            return torch.cos(x)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), torch.sin(x))
 
 
 if __name__ == "__main__":
