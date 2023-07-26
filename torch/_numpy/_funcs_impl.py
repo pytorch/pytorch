@@ -24,11 +24,6 @@ from ._normalizations import (
     OutArray,
 )
 
-# Export all the functios from _reductions, which will be picked up at funcs.py
-from ._reductions import *
-
-# ###### array creation routines
-
 
 def copy(
     a: ArrayLike, order: NotImplementedType = "K", subok: NotImplementedType = False

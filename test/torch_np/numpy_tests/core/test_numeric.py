@@ -24,8 +24,6 @@ from torch._numpy.testing import (
 IS_WASM = False
 HAS_REFCOUNT = True
 
-import pytest
-
 from hypothesis import given, strategies as st
 from hypothesis.extra import numpy as hynp
 from pytest import raises as assert_raises
@@ -222,7 +220,7 @@ class TestNonarrayArgs:
         assert_(isinstance(round(i, ndigits=-2), np.int64))
         assert_array_max_ulp(round(i, ndigits=-2), 500)
 
-    ##   @pytest.mark.xfail(raises=AssertionError, reason="gh-15896")
+    # @pytest.mark.xfail(raises=AssertionError, reason="gh-15896")
     @pytest.mark.xfail
     def test_round_py_consistency(self):
         f = 5.1 * 10**73
@@ -2675,30 +2673,30 @@ class TestMoveaxis:
 
     def test_errors(self):
         x = np.random.randn(1, 2, 3)
-        assert_raises(np.AxisError, np.moveaxis, x, 3, 0)  #'source.*out of bounds',
-        assert_raises(np.AxisError, np.moveaxis, x, -4, 0)  #'source.*out of bounds',
+        assert_raises(np.AxisError, np.moveaxis, x, 3, 0)  # 'source.*out of bounds',
+        assert_raises(np.AxisError, np.moveaxis, x, -4, 0)  # 'source.*out of bounds',
         assert_raises(
-            np.AxisError, np.moveaxis, x, 0, 5  #'destination.*out of bounds',
+            np.AxisError, np.moveaxis, x, 0, 5  # 'destination.*out of bounds',
         )
         assert_raises(
-            ValueError, np.moveaxis, x, [0, 0], [0, 1]  #'repeated axis in `source`',
+            ValueError, np.moveaxis, x, [0, 0], [0, 1]  # 'repeated axis in `source`',
         )
         assert_raises(
-            ValueError,  #'repeated axis in `destination`',
+            ValueError,  # 'repeated axis in `destination`',
             np.moveaxis,
             x,
             [0, 1],
             [1, 1],
         )
         assert_raises(
-            (ValueError, RuntimeError),  #'must have the same number',
+            (ValueError, RuntimeError),  # 'must have the same number',
             np.moveaxis,
             x,
             0,
             [0, 1],
         )
         assert_raises(
-            (ValueError, RuntimeError),  #'must have the same number',
+            (ValueError, RuntimeError),  # 'must have the same number',
             np.moveaxis,
             x,
             [0, 1],

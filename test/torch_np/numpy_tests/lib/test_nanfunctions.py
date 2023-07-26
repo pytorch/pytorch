@@ -446,7 +446,7 @@ class TestNanFunctions_ArgminArgmax:
 
 _TEST_ARRAYS = {"0d": np.array(5), "1d": np.array([127, 39, 93, 87, 46])}
 for _v in _TEST_ARRAYS.values():
-    ## XXX  _v.setflags(write=False)
+    # XXX  _v.setflags(write=False)
     pass
 
 

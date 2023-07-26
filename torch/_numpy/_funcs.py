@@ -1,6 +1,7 @@
 import inspect
+import itertools
 
-from . import _funcs_impl
+from . import _funcs_impl, _reductions
 from ._normalizations import normalizer
 
 # _funcs_impl.py contains functions which mimic NumPy's eponimous equivalents,
@@ -13,15 +14,21 @@ from ._normalizations import normalizer
 # - Implements the semantics for the `out=` arg
 # - Wraps back the outputs into `torch._numpy.ndarrays`
 
-__all__ = [
-    x
-    for x in dir(_funcs_impl)
-    if inspect.isfunction(getattr(_funcs_impl, x)) and not x.startswith("_")
-]
+
+def _public_functions(mod):
+    def is_public_function(f):
+        return inspect.isfunction(f) and not f.__name__.startswith("_")
+
+    return inspect.getmembers(mod, is_public_function)
+
+
+# We fill in __all__ in the loop below
+__all__ = []
 
 # decorate implementer functions with argument normalizers and export to the top namespace
-for name in __all__:
-    func = getattr(_funcs_impl, name)
+for name, func in itertools.chain(
+    _public_functions(_funcs_impl), _public_functions(_reductions)
+):
     if name in ["percentile", "quantile", "median"]:
         decorated = normalizer(func, promote_scalar_result=True)
     elif name == "einsum":
@@ -33,6 +40,7 @@ for name in __all__:
     decorated.__qualname__ = name
     decorated.__name__ = name
     vars()[name] = decorated
+    __all__.append(name)
 
 
 """

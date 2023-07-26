@@ -65,14 +65,14 @@ class TestReshape:
 
 
 # XXX : order='C' / 'F'
-##        tgt = [[1, 4, 7, 10],
-##               [2, 5, 8, 11],
-##               [3, 6, 9, 12]]
-##        assert np.all(arr.T.reshape((3, 4), order='C') == tgt)
-##
-##        tgt = [[1, 10, 8, 6], [4, 2, 11, 9], [7, 5, 3, 12]]
-##        assert_equal(arr.reshape((3, 4), order='F'), tgt)
-##
+#        tgt = [[1, 4, 7, 10],
+#               [2, 5, 8, 11],
+#               [3, 6, 9, 12]]
+#        assert np.all(arr.T.reshape((3, 4), order='C') == tgt)
+#
+#        tgt = [[1, 10, 8, 6], [4, 2, 11, 9], [7, 5, 3, 12]]
+#        assert_equal(arr.reshape((3, 4), order='F'), tgt)
+#
 
 
 class TestTranspose:

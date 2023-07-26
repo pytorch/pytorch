@@ -165,10 +165,10 @@ class TestPickling:
             pickled = pickle.loads(buf)
             assert_equal(pickled, dtype)
 
-            ## XXX: out dtypes do not have .descr
-            ##         assert_equal(pickled.descr, dtype.descr)
-            ##         if dtype.metadata is not None:
-            ##             assert_equal(pickled.metadata, dtype.metadata)
+            # XXX: out dtypes do not have .descr
+            #         assert_equal(pickled.descr, dtype.descr)
+            #         if dtype.metadata is not None:
+            #             assert_equal(pickled.metadata, dtype.metadata)
             # Check the reconstructed dtype is functional
 
             x = np.zeros(3, dtype=dtype)

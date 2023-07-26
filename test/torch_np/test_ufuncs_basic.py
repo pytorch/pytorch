@@ -17,21 +17,6 @@ import torch._numpy as np
 from pytest import raises as assert_raises
 from torch._numpy.testing import assert_equal
 
-# import numpy as np
-# from numpy.testing import assert_equal
-
-try:
-    import numpy as _np
-
-    HAVE_NUMPY = True
-
-    def _numpy_result(op, a, b):
-        """what would numpy do"""
-        return op(a._tensor.numpy(), b._tensor.numpy())
-
-except ImportError:
-    HAVE_NUMPY = False
-
 
 parametrize_unary_ufuncs = pytest.mark.parametrize("ufunc", [np.sin])
 parametrize_casting = pytest.mark.parametrize(
