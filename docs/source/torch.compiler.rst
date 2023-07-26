@@ -14,7 +14,7 @@ written in Python and it marks the transition of PyTorch from C++ to Python.
 
 ``torch.compile`` leverages the following underlying technologies:
 
-* **TorchDynamo (``torch._dynamo``)** is an internal API that uses a CPython
+* **TorchDynamo (torch._dynamo)** is an internal API that uses a CPython
   feature called the Frame Evaluation API to safely capture PyTorch graphs.
   Methods that are available externally for PyTorch users are surfaced
   through the ``torch.compiler`` namespace.
