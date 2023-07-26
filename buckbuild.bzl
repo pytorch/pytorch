@@ -860,6 +860,12 @@ def define_buck_targets(
         ]),
         visibility = ["PUBLIC"],
         labels = labels,
+        deps = select({
+            "DEFAULT": [],
+            "ovr_config//runtime:fbcode-arm64": [
+              third_party("sleef_arm"),
+            ],
+        }),
     )
 
     fb_xplat_cxx_library(
