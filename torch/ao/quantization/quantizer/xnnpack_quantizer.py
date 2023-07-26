@@ -223,12 +223,14 @@ def _is_annotated(nodes: List[Node]):
         )
     return annotated
 
-def _get_module_name_filter(name: str):
 
+def _get_module_name_filter(name: str):
     def module_name_filter(n: Node) -> bool:
         # example: {'L__self___sub': ("L['self'].sub", <class '....Sub'>), 'L__self___sub_linear': ("L['self'].sub.linear", <class 'torch.nn.modules.linear.Linear'>)}
         nn_module_stack = n.meta["nn_module_stack"]
-        names = [n[len("L__self___"):].replace("_", ".") for n in nn_module_stack.keys()]
+        names = [
+            n[len("L__self___") :].replace("_", ".") for n in nn_module_stack.keys()
+        ]
         return name in names
 
     return module_name_filter
@@ -299,7 +301,7 @@ class XNNPACKQuantizer(Quantizer):
         self,
         model: torch.fx.GraphModule,
         config: Optional[QuantizationConfig],
-        filter_fn: Optional[Callable[[Node], bool]] = None
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> torch.fx.GraphModule:
         # TODO: implement the support for None to be canceling out previous annotations
         if config is None:
@@ -318,9 +320,10 @@ class XNNPACKQuantizer(Quantizer):
     def _annotate_for_static_quantization_config(
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
-
         for module_name, config in self.module_name_config.items():
-            self._annotate_all_patterns(model, config, _get_module_name_filter(module_name))
+            self._annotate_all_patterns(
+                model, config, _get_module_name_filter(module_name)
+            )
         self._annotate_all_patterns(model, self.global_config)
         return model
 
@@ -725,11 +728,7 @@ class XNNPACKQuantizer(Quantizer):
         quantization_config: QuantizationConfig,
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
-        module_partitions = get_source_partitions(
-            gm.graph,
-            [op],
-            filter_fn
-        )
+        module_partitions = get_source_partitions(gm.graph, [op], filter_fn)
         partitions = list(itertools.chain(*module_partitions.values()))
         for partition in partitions:
             io_obs_sharing_node = partition.output_nodes[0]
@@ -845,7 +844,9 @@ class XNNPACKQuantizer(Quantizer):
         quantization_config: QuantizationConfig,
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
-        add_partitions = get_source_partitions(gm.graph, [operator.add, torch.add], filter_fn)
+        add_partitions = get_source_partitions(
+            gm.graph, [operator.add, torch.add], filter_fn
+        )
         add_partitions = list(itertools.chain(*add_partitions.values()))
         for add_partition in add_partitions:
             add_node = add_partition.output_nodes[0]
