@@ -5,7 +5,7 @@ import logging
 import math
 import operator
 import types
-from typing import Dict, List
+from typing import Dict, List, Type
 
 import torch
 from torch import sym_float, sym_int
@@ -408,6 +408,15 @@ class BuiltinVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.fn
+
+    def as_proxy(self):
+        DTYPE = {
+            int: torch.int64,
+            float: torch.float64,
+        }
+        if self.fn in DTYPE:
+            return DTYPE[self.fn]
+        return super().as_proxy()
 
     def reconstruct(self, codegen):
         name = self.fn.__name__
