@@ -5,8 +5,6 @@
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <torch/library.h>
-#include <ATen/MatrixRef.h>
-#include <tuple>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

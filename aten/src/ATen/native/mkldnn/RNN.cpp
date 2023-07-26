@@ -565,7 +565,6 @@ void lstm_mkldnn(Tensor& output, Tensor& hy, Tensor& cy,
 
 REGISTER_ALL_CPU_DISPATCH(lstm_mkldnn_stub, &lstm_mkldnn);
 
-
 } // namespace at::native
 
 #endif // AT_MKLDNN_EBABLED
