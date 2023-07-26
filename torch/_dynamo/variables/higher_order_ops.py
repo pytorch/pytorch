@@ -853,23 +853,35 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             example_value=example_value,
         )
 
+
 class SdpaHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def create_wrapped_node(self, tx, args, kwargs):
         # See NOTE [HigherOrderOperator tracing design] for more details
         checkpoint = tx.copy_graphstate()
         graph_checkpoint = tx.output.graph
 
-        example_vals = [torch.zeros((), dtype=args[0].dtype)] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
+        example_vals = [torch.zeros((), dtype=args[0].dtype)] + [
+            torch.zeros((), dtype=torch.int) for _ in range(4)
+        ]
         with tx.output.new_subtracer() as tracer:
+
             def create_dynamo_inp(example_value, name):
                 new_proxy = tracer.create_graph_input(name)
-                from .builder import wrap_fx_proxy
                 from torch._dynamo.source import ConstantSource
+                from .builder import wrap_fx_proxy
+
                 new_arg = wrap_fx_proxy(
-                    tx=tx, proxy=new_proxy, example_value=example_value, source=ConstantSource("foo")
+                    tx=tx,
+                    proxy=new_proxy,
+                    example_value=example_value,
+                    source=ConstantSource("foo"),
                 )
                 return new_arg
-            example_vals = [create_dynamo_inp(example_val, f"inp_{i}") for i, example_val in enumerate(example_vals)]
+
+            example_vals = [
+                create_dynamo_inp(example_val, f"inp_{i}")
+                for i, example_val in enumerate(example_vals)
+            ]
         (
             body_r,
             body_graph,
@@ -925,6 +937,8 @@ class SdpaHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ),
             example_value=example_value,
         )
+
+
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]

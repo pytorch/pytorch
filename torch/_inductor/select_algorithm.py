@@ -22,7 +22,13 @@ from .autotune_process import BenchmarkRequest, TensorMeta
 from .codecache import code_hash, PersistentCache, PyCodeCache
 
 from .codegen.common import IndentedBuffer
-from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling, TritonOverrides
+from .codegen.triton import (
+    texpr,
+    TritonKernel,
+    TritonOverrides,
+    TritonPrinter,
+    TritonScheduling,
+)
 
 from .codegen.triton_utils import config_of, signature_of
 
@@ -76,6 +82,7 @@ class TritonTemplateKernel(TritonKernel):
         self.defines = defines
         self.kernel_name = kernel_name
         self.template_mask = None
+        self.modification_cache = None
         self.use_jit = use_jit
         self.num_stages = num_stages
         self.num_warps = num_warps
@@ -184,25 +191,41 @@ class TritonTemplateKernel(TritonKernel):
             val = self.named_input_nodes[name].get_stride()[index]
         return texpr(self.rename_indexing(val))
 
-    def modification(self, fixed_inputs):
+    def modification(self, **fixed_inputs):
         # HACK, but I can't figure out how to reuse existing Triton codegen properly
-        class PlaceholderSubstitution(V.MockHandler):
+        class PlaceholderSubstitution(V.WrapperHandler):
             self.name = "PlaceholderSubstitution"
 
             def load(self, name: str, index: sympy.Expr):
+                if name not in fixed_inputs:
+                    # return self._inner.load(name, index)
+                    assert (
+                        False
+                    ), f"All loads should be coming from fixed inputs - {name}"
                 return f"({fixed_inputs[name]})"
 
-            def constant(self, value, dtype):
-                return TritonOverrides.constant(value, dtype)
+            # Doesn't work yet
+            def indirect_indexing(self, index_var, size, check):
+                from .utils import sympy_symbol
 
-            def __getattr__(self, name):
-                return getattr(TritonOverrides, name)
+                return self._inner.indirect_indexing(index_var, size, False)
+                # return sympy_symbol(str(index_var))
 
+        if self.modification_cache is None:
+            with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
+                # Kinda hacky
+                if isinstance(self.subgraph.data.data, ir.InputBuffer):
+                    out = self.subgraph.make_loader()((1,))
+                else:
+                    out = self.subgraph.data.data.data.inner_fn((1,))
 
-        with TritonKernel(1, 1, index_dtype=torch.int64) as kernel:
-            with V.set_ops_handler(PlaceholderSubstitution()):
-                out = self.subgraph.data.data.data.inner_fn((1,))
-                return out.value
+            self.codegen_body()
+            self.body.writeline(f"{fixed_inputs['out']} = {out.value}")
+
+            self.modification_cache = self.body.getvalue()
+            self.body.clear()
+            self.cse.invalidate(set())
+        return self.modification_cache
 
     def store_output(self, indices, val, mask):
         """
@@ -345,14 +368,24 @@ class TritonTemplateKernel(TritonKernel):
             )
 
 
+def indent_except_first(s, amount=1, ch="    "):
+    lines = s.splitlines(True)
+    if len(lines) > 1:
+        lines[1:] = [amount * ch + line for line in lines[1:]]
+    return "".join(lines)
+
+
 @functools.lru_cache(None)
 def _jinja2_env():
     try:
         import jinja2
 
-        return jinja2.Environment(
+        env = jinja2.Environment(
             undefined=jinja2.StrictUndefined,
         )
+        env.filters["indent_except_first"] = indent_except_first
+        return env
+
     except ImportError:
         return None
 

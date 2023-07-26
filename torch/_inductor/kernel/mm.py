@@ -77,10 +77,14 @@ mm_template = TritonTemplate(
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
 """,
 )
+
+
 def sdpa_grid(S, H, M, D, meta):
     import triton
-    return (triton.cdiv(M, meta["BLOCK_M"]), S*H, 1)
+
+    return (triton.cdiv(M, meta["BLOCK_M"]), S * H, 1)
     # return (1, 1, 1)
+
 
 sdpa_template = TritonTemplate(
     name="sdpa",
@@ -131,6 +135,7 @@ sdpa_template = TritonTemplate(
         block_shape=(BLOCK_N, BLOCK_DMODEL),
         order=(1, 0)
     )
+    # Inductor templates don't support writing to block pointers today
     # O_block_ptr = tl.make_block_ptr(
     #     base=out_ptr1 + qvk_offset,
     #     shape=(N_CTX, BLOCK_DMODEL),
@@ -166,13 +171,20 @@ sdpa_template = TritonTemplate(
         k = tl.load(K_block_ptr)
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         qk += tl.dot(q, k)
-        qk = {{modification({"score": "qk", "b": "off_hz // H", "h": "off_hz % H", "m": "offs_m[:, None]", "n": "start_n + offs_n[None, :]"})}}
+        {{ modification(
+            score="qk",
+            b="off_hz // H",
+            h="off_hz % H",
+            m="offs_m[:, None]",
+            n="start_n + offs_n[None, :]",
+            out="qk"
+        ) | indent_except_first(2) }}
         # qk = tl.where(offs_m[:, None] >= (start_n + offs_n[None, :]), qk, float("-inf"))
         # -- compute m_ij, p, l_ij
         sm_scale = 1
         qk = qk * sm_scale
         m_ij = tl.max(qk, 1)
-        # m_ij = tl.maximum(m_ij, -1e9)
+
         is_fully_masked = m_ij == float("-inf")
 
         p = tl.where(is_fully_masked[:, None], 0, tl.math.exp(qk - m_ij[:, None]))
@@ -181,6 +193,7 @@ sdpa_template = TritonTemplate(
         m_i_new = tl.maximum(m_i, m_ij)
         alpha = tl.math.exp(m_i - m_i_new)
         beta = tl.math.exp(m_ij - m_i_new)
+
         l_i = tl.where(is_fully_masked, l_i, l_i * alpha)
         l_i_new = tl.where(is_fully_masked, l_i, l_i + beta * l_ij)
         # scale p
@@ -211,7 +224,7 @@ sdpa_template = TritonTemplate(
     idx_d = tl.arange(0, BLOCK_DMODEL)[None, :]
     mask = (idx_m != -1) & (idx_d != -1)
     {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "acc", "mask")}}
- """
+ """,
 )
 
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
@@ -241,7 +254,8 @@ def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
 
     # options to tune from
-    choices = []
+    # choices = []
+    choices = [aten_mm.bind((mat1, mat2), layout)]
     if use_triton_template(layout):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(

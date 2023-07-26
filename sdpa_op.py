@@ -22,22 +22,22 @@ from torch._inductor.compile_fx import compile_fx_inner
 
 sdpa = HigherOrderOperator("sdpa")
 
-def math_attention(q, k, v, score_mod):
+def math_attention(q, k, v, score_mod, *other_buffers):
     scores = q @ k.transpose(-2, -1)
 
     from functorch.dim import dims
     b, h, m, n = dims()
 
     scores = scores[b, h, m, n]
-    scores = score_mod(scores, b, h, m, n)
+    scores = score_mod(scores, b, h, m, n, *other_buffers)
     scores = scores.order(b, h, m, n)
 
     scores = scores.softmax(dim=-1)
     return scores @ v
 
 @sdpa.py_impl(DispatchKey.CompositeExplicitAutograd)
-def sdpa_dense(q, k, v, score_mod):
-    return math_attention(q, k, v, score_mod).contiguous()
+def sdpa_dense(q, k, v, score_mod, *other_buffers):
+    return math_attention(q, k, v, score_mod, *other_buffers).contiguous()
     # out = F.scaled_dot_product_attention(q, k, v, scale=1).contiguous()
     # return out
 
@@ -46,7 +46,7 @@ def sdpa_autograd(*args, **kwargs):
     with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.AutogradCPU)):
         return sdpa(*args, **kwargs)
 
-def trace_sdpa(proxy_mode, q, k, v, score_mod):
+def trace_sdpa(proxy_mode, q, k, v, score_mod, *other_buffers):
     if score_mod is None:
         with proxy_mode:
             return F.scaled_dot_product_attention(q, k, v)
@@ -54,30 +54,30 @@ def trace_sdpa(proxy_mode, q, k, v, score_mod):
     with disable_proxy_modes_tracing():
         example_out = F.scaled_dot_product_attention(q, k, v)
     example_vals = [torch.zeros((), dtype=q.dtype)] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
-    score_graph = make_fx(score_mod)(*example_vals)
+    score_graph = make_fx(score_mod)(*example_vals, *other_buffers)
     proxy_mode.tracer.root.register_module("sdpa_score", score_graph)
-    node_args = (q, k, v, score_graph)
+    node_args = (q, k, v, score_graph, *other_buffers)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy('call_function', sdpa, proxy_args, {}, name="sdpa_impl")
     return track_tensor_tree(example_out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 @sdpa.py_impl(ProxyTorchDispatchMode)
-def sdpa_proxy_torch_dispatch_mode(q, k, v, score_mod):
+def sdpa_proxy_torch_dispatch_mode(q, k, v, score_mod, *other_buffers):
     mode = _get_current_dispatch_mode()
     assert (mode is not None), "Mode should always be enabled for python fallback key"
     with _pop_mode_temporarily() as mode:
         if mode.enable_tracing:
-            return trace_sdpa(mode, q, k, v, score_mod)
+            return trace_sdpa(mode, q, k, v, score_mod, *other_buffers)
         else:
-            return sdpa(q, k, v, score_mod)
+            return sdpa(q, k, v, score_mod, *other_buffers)
 
 @sdpa.py_impl(DispatchKey.Functionalize)
-def sdpa_functionalize(q, k, v, score_mod):
+def sdpa_functionalize(q, k, v, score_mod, *other_buffers):
     reapply_views = torch._C._functionalization_reapply_views_tls()
 
-    q, k, v = _unwrap_all_tensors_from_functional((q, k, v), reapply_views=reapply_views)
+    q, k, v, *other_buffers = _unwrap_all_tensors_from_functional((q, k, v, *other_buffers), reapply_views=reapply_views)
     with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
-        out = sdpa(q, k, v, score_mod)
+        out = sdpa(q, k, v, score_mod, *other_buffers)
         return _wrap_all_tensors_to_functional(out, level=0)
 
 @sdpa.py_impl(FakeTensorMode)
@@ -124,9 +124,11 @@ torch.manual_seed(0)
 q = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
 k = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
 v = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
+torch.set_default_device('cuda')
 
+vals = torch.randn(N_CTX, dtype=dtype)
 def identity(score, b, h, m, n):
-    return score * 0 # hack
+    return score
 
 def causal_mask(score, b, h, m, n):
     return torch.where(m <= n, score, float("-inf"))
@@ -161,7 +163,6 @@ score_mods = {
     }
 
 for name, score_mod in score_mods.items():
-    print(name)
     foo = create_attention(score_mod)
     compiled = torch.compile(foo)
 
