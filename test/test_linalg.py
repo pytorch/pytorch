@@ -3971,8 +3971,7 @@ class TestLinalg(TestCase):
 
     def _gen_shape_inputs_linalg_triangular_solve(self, shape, dtype, device, well_conditioned=False):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
-        make_randn = partial(torch.randn, dtype=dtype, device=device)
-        make_rand = partial(torch.rand, dtype=dtype, device=device)
+        make_fullrank = partial(make_fullrank_matrices_with_distinct_singular_values, dtype=dtype, device=device)
         b, n, k = shape
         for left, uni, expand_a, tr_a, conj_a, expand_b, tr_b, conj_b in product((True, False), repeat=8):
             # expand means that we generate a batch of matrices with a stride of zero in the batch dimension
@@ -3992,19 +3991,13 @@ class TestLinalg(TestCase):
                 size_b = size_b[1:]
 
             if well_conditioned:
-                X = make_randn(*size_a)
-                X = X + X.mH
-                U = torch.linalg.svd(X)[0]
+                PLU = torch.linalg.lu(make_fullrank(*size_a))
                 if uni:
-                    # A = L from cholesky(U @ U.mH),
-                    # and this matrix will be unidiagonal and have condition number 1.
-                    A = torch.linalg.cholesky(U @ U.mH)
+                    # A = L from PLU
+                    A = PLU[1].transpose(-2, -1).contiguous()
                 else:
-                    # A = L from cholesky(U @ S @ U.mH),
-                    # where S = rand(*size_a) + 1,
-                    # so A has condition number at most sqrt(2).
-                    S = make_rand(*size_s[:-1]) + 1
-                    A = torch.linalg.cholesky((U * S.unsqueeze(-2)) @ U.mH)
+                    # A = U from PLU
+                    A = PLU[2].contiguous()
             else:
                 A = make_arg(size_a)
                 A.triu_()
