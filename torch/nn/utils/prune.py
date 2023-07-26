@@ -63,9 +63,7 @@ class BasePruningMethod(ABC):
         """
         # to carry out the multiplication, the mask needs to have been computed,
         # so the pruning method must know what tensor it's operating on
-        assert self._tensor_name is not None, "Module {} has to be pruned".format(
-            module
-        )  # this gets set in apply()
+        assert self._tensor_name is not None, f"Module {module} has to be pruned"  # this gets set in apply()
         mask = getattr(module, self._tensor_name + "_mask")
         orig = getattr(module, self._tensor_name + "_orig")
         pruned_tensor = mask.to(dtype=orig.dtype) * orig
@@ -109,10 +107,8 @@ class BasePruningMethod(ABC):
                     found += 1
             assert (
                 found <= 1
-            ), "Avoid adding multiple pruning hooks to the\
-                same tensor {} of module {}. Use a PruningContainer.".format(
-                name, module
-            )
+            ), f"Avoid adding multiple pruning hooks to the\
+                same tensor {name} of module {module}. Use a PruningContainer."
 
             for k in hooks_to_remove:
                 del module._forward_pre_hooks[k]
@@ -155,10 +151,7 @@ class BasePruningMethod(ABC):
         if importance_scores is not None:
             assert (
                 importance_scores.shape == orig.shape
-            ), "importance_scores should have the same shape as parameter \
-                {} of {}".format(
-                name, module
-            )
+            ), f"importance_scores should have the same shape as parameter                 {name} of {module}"
         else:
             importance_scores = orig
 
@@ -244,10 +237,7 @@ class BasePruningMethod(ABC):
         # before removing pruning from a tensor, it has to have been applied
         assert (
             self._tensor_name is not None
-        ), "Module {} has to be pruned\
-            before pruning can be removed".format(
-            module
-        )  # this gets set in apply()
+        ), f"Module {module} has to be pruned            before pruning can be removed"  # this gets set in apply()
 
         # to update module[name] to latest trained weights
         weight = self.apply_mask(module)  # masked weights
@@ -272,7 +262,7 @@ class PruningContainer(BasePruningMethod):
     """
 
     def __init__(self, *args):
-        self._pruning_methods: Tuple["BasePruningMethod", ...] = tuple()
+        self._pruning_methods: Tuple[BasePruningMethod, ...] = tuple()
         if not isinstance(args, Iterable):  # only 1 item
             self._tensor_name = args._tensor_name
             self.add_pruning_method(args)
@@ -384,9 +374,7 @@ class PruningContainer(BasePruningMethod):
                 # if dim is still negative after subtracting it from n_dims
                 if dim < 0:
                     raise IndexError(
-                        "Index is out of bounds for tensor with dimensions {}".format(
-                            n_dims
-                        )
+                        f"Index is out of bounds for tensor with dimensions {n_dims}"
                     )
                 # find channels along dim = dim that aren't already tots 0ed out
                 keep_channel = mask.sum(dim=[d for d in range(n_dims) if d != dim]) != 0
@@ -1192,8 +1180,7 @@ def remove(module, name):
             return module
 
     raise ValueError(
-        "Parameter '{}' of module {} has to be pruned "
-        "before pruning can be removed".format(name, module)
+        f"Parameter '{name}' of module {module} has to be pruned before pruning can be removed"
     )
 
 
@@ -1244,7 +1231,7 @@ def _validate_pruning_amount_init(amount):
     """
     if not isinstance(amount, numbers.Real):
         raise TypeError(
-            "Invalid type for amount: {}. Must be int or float." "".format(amount)
+            f"Invalid type for amount: {amount}. Must be int or float."
         )
 
     if (isinstance(amount, numbers.Integral) and amount < 0) or (
@@ -1252,9 +1239,7 @@ def _validate_pruning_amount_init(amount):
         and (float(amount) > 1.0 or float(amount) < 0.0)
     ):
         raise ValueError(
-            "amount={} should either be a float in the "
-            "range [0, 1] or a non-negative integer"
-            "".format(amount)
+            f"amount={amount} should either be a float in the range [0, 1] or a non-negative integer"
         )
 
 
@@ -1276,8 +1261,7 @@ def _validate_pruning_amount(amount, tensor_size):
 
     if isinstance(amount, numbers.Integral) and amount > tensor_size:
         raise ValueError(
-            "amount={} should be smaller than the number of "
-            "parameters to prune={}".format(amount, tensor_size)
+            f"amount={amount} should be smaller than the number of parameters to prune={tensor_size}"
         )
 
 

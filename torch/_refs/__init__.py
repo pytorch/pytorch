@@ -4619,20 +4619,29 @@ def logspace(
         if isinstance(end, FloatLike):
             end = sym_int(end)
 
+    if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
+        default_complex_dtype = utils.corresponding_complex_dtype(
+            torch.get_default_dtype()
+        )
+        dtype = default_complex_dtype
+        _dtype = None  # torch.linspace will update the correct dtype
+    else:
+        _dtype = torch.float64
+
     assert not isinstance(base, complex)  # for mypy
     if base < 0:
         raise NotImplementedError
-    ret = torch.linspace(
+    ret = torch.linspace(  # type: ignore[misc]
         start,
         end,
         steps,  # type: ignore[arg-type]
-        dtype=torch.float64,
+        dtype=_dtype,
         layout=layout,
         device=device,
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return _maybe_convert_to_dtype(torch.pow(base, ret), dtype)
+    return _maybe_convert_to_dtype(torch.pow(base, ret), dtype)  # type: ignore[arg-type,return-value]
 
 
 @overload

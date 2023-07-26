@@ -869,7 +869,7 @@ def load(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """load(f, map_location=None, pickle_module=pickle, *, weights_only=False, **pickle_load_args)
+    """load(f, map_location=None, pickle_module=pickle, *, weights_only=False, mmap=None, **pickle_load_args)
 
     Loads an object saved with :func:`torch.save` from a file.
 
@@ -913,9 +913,9 @@ def load(
             loading only tensors, primitive types and dictionaries
         mmap: Indicates whether the file should be mmaped rather than loading all the storages into memory.
             Typically, tensor storages in the file will first be moved from disk to CPU memory, after which they
-            are moved to the location that they were tagged with when saving, or specified by `map_location`. This
-            second step is a no-op if the final location is CPU. When the `mmap` flag is set, instead of copying the
-            tensor storages from disk to CPU memory in the first step, f is mmaped.
+            are moved to the location that they were tagged with when saving, or specified by ``map_location``. This
+            second step is a no-op if the final location is CPU. When the ``mmap`` flag is set, instead of copying the
+            tensor storages from disk to CPU memory in the first step, ``f`` is mmaped.
         pickle_load_args: (Python 3 only) optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
             :attr:`errors=...`.
@@ -1221,7 +1221,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                 res = typed_storage
             return res
         else:
-            raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
+            raise RuntimeError(f"Unknown saved id type: {saved_id[0]}")
 
     _check_seekable(f)
     f_should_read_directly = _should_read_directly(f)
@@ -1250,7 +1250,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         raise RuntimeError("Invalid magic number; corrupt file?")
     protocol_version = pickle_module.load(f, **pickle_load_args)
     if protocol_version != PROTOCOL_VERSION:
-        raise RuntimeError("Invalid protocol version: %s" % protocol_version)
+        raise RuntimeError(f"Invalid protocol version: {protocol_version}")
 
     _sys_info = pickle_module.load(f, **pickle_load_args)
     unpickler = UnpicklerWrapper(f, **pickle_load_args)
