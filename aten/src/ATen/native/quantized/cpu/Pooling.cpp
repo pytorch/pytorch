@@ -255,17 +255,16 @@ Tensor q_maxpool_2d(
     // In this case, we can preserve the data layout in memory
     // as well as use a loop nest that is more amenable to
     // vectorization.
+    Tensor qy;
     if constexpr(std::is_same_v<Q, uint8_t>) {
-      Tensor qy = at::empty(
-        {nbatch, oC, oH, oW},
+      qy = at::empty(
+        oSizes,
         qx.options()
           .device(c10::kCPU)
           .dtype(qx.scalar_type())
           .memory_format(c10::MemoryFormat::ChannelsLast));
-      qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
-      return qy;
     } else {
-      Tensor qy = at::_empty_affine_quantized(
+      qy = at::_empty_affine_quantized(
           oSizes,
           qx.options()
             .dtype(toQIntType(qx.scalar_type()))
@@ -273,16 +272,16 @@ Tensor q_maxpool_2d(
           qx.q_scale(),
           qx.q_zero_point(),
           c10::nullopt);
-      qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
-      return qy;
     }
+    qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
+    return qy;
   } else {
     Tensor qy = at::_empty_affine_quantized(
         oSizes,
         qx.options().dtype(toQIntType(qx.scalar_type())),
         qx.q_scale(),
         qx.q_zero_point());
-    if constexpr (!std::is_same_v<Q, uint8_t>) {
+    if constexpr(!std::is_same_v<Q, uint8_t>) {
       auto qx_contig = qx.contiguous();
       auto qxd = qx_contig.data_ptr<Q>();
       auto qyd = qy.data_ptr<Q>();
