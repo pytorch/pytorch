@@ -419,7 +419,7 @@ class _OnnxSchemaChecker:
         self.onnxfunction = onnxfunction
         self.param_schema = self.onnxfunction.param_schemas()
         op_schema = self.onnxfunction.op_schema
-        # TODO: Both `OnnxFunction` and `TracedOnnxFunction` never returns None for `op_schema`.
+        # Both `OnnxFunction` and `TracedOnnxFunction` never return None for `op_schema`.
         # However their base class would. Hence return type is annotated as Optional[OpSchema].
         assert op_schema is not None
         self.op_schema = op_schema
