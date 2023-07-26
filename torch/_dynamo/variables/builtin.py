@@ -5,7 +5,7 @@ import logging
 import math
 import operator
 import types
-from typing import Dict, List, Type
+from typing import Dict, List
 
 import torch
 from torch import sym_float, sym_int
