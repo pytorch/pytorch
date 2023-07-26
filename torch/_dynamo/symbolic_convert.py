@@ -2289,7 +2289,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # Merge symbolic_globals back if parent and child are in the same namespace
             parent.symbolic_globals.update(tracer.symbolic_globals)
 
-        if getattr(func.fn, "_inline_success_disable", False):
+        if getattr(func, "fn", False) and getattr(
+            func.fn, "_inline_success_disable", False
+        ):
             func.fn._inline_success_disable(func.fn)
 
         log.debug("DONE INLINING %s", code)
