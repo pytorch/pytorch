@@ -155,7 +155,9 @@ def _unflatten_optim_state(
             shard_state,
         )
         for optim_state in unflat_param_state:
-            for key, state in optim_state.items():
+            # We can't use .items() below cuz we'd run into a concurrent modification error
+            for key in list(optim_state.keys()):
+                state = optim_state[key]
                 if isinstance(state, torch.Tensor):
                     optim_state[key] = state.cpu()
         return unflat_param_state
