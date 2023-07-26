@@ -399,6 +399,14 @@ def _pre_forward(
         kwargs (Dict[str, Any]): Module forward ``kwargs``.
     """
     with torch.profiler.record_function("FullyShardedDataParallel._pre_forward"):
+        # For `fully_shard` + `checkpoint`, skip pre-forward logic in the
+        # recomputed forward
+        if handle and handle._training_state == HandleTrainingState.BACKWARD_PRE:
+            # For both checkpoint implementations, we do not need to re-cast
+            # inputs here since they will be checkpointed in the low precision
+            # either by AC or normally by autograd as long as the AC region is
+            # nested within FSDP
+            return args, kwargs
         state.training_state = TrainingState.FORWARD_BACKWARD
         state._exec_order_data.record_pre_forward(handle, module.training)
         if handle:
@@ -479,6 +487,11 @@ def _post_forward(
     parameter.
     """
     with torch.profiler.record_function("FullyShardedDataParallel._post_forward"):
+        # For `fully_shard` + `checkpoint`, skip post-forward logic in the
+        # recomputed forward
+        if handle and handle._training_state == HandleTrainingState.BACKWARD_PRE:
+            return output
+
         state._exec_order_data.record_post_forward(handle)
         if reshard_fn is not None:
             reshard_fn(state, handle)
@@ -1400,6 +1413,10 @@ def _register_post_backward_reshard_only_hook(
     input activations to ensure that all gradients that may depend on the
     parameters have been computed before resharding.
     """
+    # If there is no gradient computation, then there is no need for
+    # post-backward logic
+    if not torch.is_grad_enabled():
+        return
     # Construct `inp_tensors` lazily to avoid CPU overhead in typical case
     # where each flat parameter requires gradient
     inp_tensors: Optional[List[torch.Tensor]] = None
