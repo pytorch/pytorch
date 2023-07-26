@@ -9,7 +9,7 @@ from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTest, FSDPTestMultiThread
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -93,7 +93,7 @@ class Model(torch.nn.Module):
         return fsdp_model.to(device)
 
 
-class TestFSDPExecOrder(FSDPTest):
+class TestFSDPExecOrderMultiThread(FSDPTestMultiThread):
     @property
     def device(self):
         return torch.device("cuda")
@@ -121,6 +121,12 @@ class TestFSDPExecOrder(FSDPTest):
         error_regex = "^(Forward order differs across ranks)"
         with self.assertRaisesRegex(RuntimeError, error_regex):
             fsdp_model(*inp)
+
+
+class TestFSDPExecOrderMultiProcess(FSDPTest):
+    @property
+    def device(self):
+        return torch.device("cuda")
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
@@ -207,7 +213,9 @@ class TestFSDPExecOrder(FSDPTest):
         # an `AssertionError` will be raised above for both sharding strategies
 
 
-instantiate_parametrized_tests(TestFSDPExecOrder)
+instantiate_parametrized_tests(TestFSDPExecOrderMultiThread)
+instantiate_parametrized_tests(TestFSDPExecOrderMultiProcess)
+
 
 if __name__ == "__main__":
     run_tests()
