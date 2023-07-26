@@ -1,22 +1,17 @@
 import itertools
 
-import unittest
 import weakref
 from typing import List, Optional, Tuple
 
 import torch
-import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
-from torch._dynamo.utils import detect_fake_mode, dynamo_timed
+from torch._dynamo.utils import dynamo_timed
 from torch._functorch.compile_utils import fx_graph_cse
 
-from torch._inductor.compile_fx import fake_tensor_prop
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
 from torch._inductor.fx_passes.post_grad import view_to_reshape
-from torch.ao.quantization.pt2e.utils import _fuse_conv_bn_
-from torch.fx.experimental.proxy_tensor import make_fx
+
 from . import config
-from .decomposition import select_decomp_table
 
 aten = torch.ops.aten
 
@@ -157,32 +152,6 @@ def constant_fold(gm):
     gm.recompile()
 
 
-@torch.utils._python_dispatch._disable_current_modes()
-def fuse_conv_bn(gm):
-    return _fuse_conv_bn_(gm)
-
-
-def decompose_unfused_batchnorms(gm, example_inputs, preserved_arg_indices):
-    if not any(
-        node.target is aten._native_batch_norm_legit_no_training.default
-        for node in gm.graph.nodes
-    ):
-        return gm
-
-    fake_mode = detect_fake_mode(example_inputs)
-
-    # constant params will be real tensors, not fake
-    # TODO: fake_mode should should enable py dispatcher if its symbolic ?
-    with unittest.mock.patch.object(
-        fake_mode, "allow_non_fake_inputs", True
-    ), fake_mode:
-        args = [e for i, e in enumerate(example_inputs) if i in preserved_arg_indices]
-        with fx_traceback.preserve_node_meta():
-            gm = make_fx(gm, select_decomp_table())(*args)
-
-    return gm
-
-
 def freeze(
     dynamo_gm: torch.fx.GraphModule,
     aot_autograd_gm: torch.fx.GraphModule,
@@ -216,23 +185,13 @@ def freeze(
         aot_autograd_gm, params_flat, fw_metadata
     )
 
-    constant_fold(aot_autograd_gm)
-
-    fuse_conv_bn(aot_autograd_gm)
-    # now, decomp batch norm if we were unable to fuse it
-    aot_autograd_gm = decompose_unfused_batchnorms(
-        aot_autograd_gm, example_inputs, preserved_arg_indices
-    )
     # TODO - further restrict cse ? right now needed to dedup aliasing ops
     cse_graph = fx_graph_cse(aot_autograd_gm.graph)
     aot_autograd_gm.graph = cse_graph
     aot_autograd_gm.recompile()
 
-    # Make sure meta['val'] is properly setup(weight conversion
-    # or decompose_unfused_batchnorms lost meta['val']).
     aot_example_inputs = [example_inputs[ind] for ind in preserved_arg_indices]
-    fake_tensor_prop(aot_autograd_gm, aot_example_inputs, True)
-    freezing_passes(aot_autograd_gm)
+    freezing_passes(aot_autograd_gm, aot_example_inputs)
 
     # TODO - apply legalization in pattern matcher
     torch.fx.passes.tools_common.legalize_graph(aot_autograd_gm)
