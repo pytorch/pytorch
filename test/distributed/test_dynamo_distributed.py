@@ -861,7 +861,10 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             test_outs.append(fsdp_model(x))
             # Check for no recompiles, which could happen if incorrectly
             # passing args to the staticmethod (e.g. doubly passing `self`)
-            self.assertEqual(cnt.frame_count, 1)
+            # 3 is expected here for 1 forward.
+            # Graph 1 should be add and imul 
+            # Graphs 2 and 3 are forward hooks on device mesh, and are fine to capture.
+            self.assertEqual(cnt.frame_count, 3)
         for test_out in test_outs:
             self.assertEqual(test_out, ref_out)
 
