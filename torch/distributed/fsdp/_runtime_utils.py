@@ -894,6 +894,7 @@ def _post_backward_hook(
                         handle.flat_param._cpu_grad = None
 
 
+@no_type_check
 def _log_post_backward_hook(state: _FSDPState, handle: FlatParamHandle) -> None:
     # Under TORCH_DISTRIBUTED_DEBUG=INFO, log the module names this hook fires for.
     # Below logging of module names this post-bwd hook fires for can help debug certain
