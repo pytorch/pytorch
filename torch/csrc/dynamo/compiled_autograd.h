@@ -10,8 +10,8 @@
 
 // see [Note: Compiled Autograd]
 
-namespace torch::dynamo::autograd {
-using namespace torch::autograd;
+namespace torch {
+namespace autograd {
 
 struct SizeInput {
   // Note: int value is still needed when dynamic to pass as an arg
@@ -597,11 +597,12 @@ class SwapSavedVariables {
   std::shared_ptr<Node> node;
 };
 
-} // namespace torch::dynamo::autograd
+} // namespace autograd
+} // namespace torch
 
 template <>
-struct std::hash<torch::dynamo::autograd::CacheKey> {
-  size_t operator()(const torch::dynamo::autograd::CacheKey& k) const {
+struct std::hash<torch::autograd::CacheKey> {
+  size_t operator()(const torch::autograd::CacheKey& k) const {
     return k.hash();
   }
 };
