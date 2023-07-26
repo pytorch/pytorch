@@ -1731,15 +1731,15 @@ def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
 def categorize_checks(
     check_runs: JobNameToStateDict,
     required_checks: List[str],
-    ok_failed_checks_threshold: int = -1,
+    ok_failed_checks_threshold: Optional[int] = None,
 ) -> Tuple[
     List[Tuple[str, Optional[str], Optional[int]]],
     List[Tuple[str, Optional[str], Optional[int]]],
 ]:
     """
-    Categories all jobs into the list of pending and failing jobs. Known flaky failures
-    and broken trunk are ignored by defaults by setting the ok_failed_checks_threshold
-    parameter to -1 (unlimited)
+    Categories all jobs into the list of pending and failing jobs. All known flaky
+    failures and broken trunk are ignored by defaults when ok_failed_checks_threshold
+    is not set (unlimited)
     """
     pending_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
     failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
@@ -1780,14 +1780,14 @@ def categorize_checks(
             + ", ".join([x[0] for x in ok_failed_checks])
             + (
                 f" but this is greater than the threshold of {ok_failed_checks_threshold} so merge will fail"
-                if ok_failed_checks_threshold != -1
+                if ok_failed_checks_threshold is not None
                 and len(ok_failed_checks) > ok_failed_checks_threshold
                 else ""
             )
         )
 
     if (
-        ok_failed_checks_threshold != -1
+        ok_failed_checks_threshold is not None
         and len(ok_failed_checks) > ok_failed_checks_threshold
     ):
         failed_checks = failed_checks + ok_failed_checks
