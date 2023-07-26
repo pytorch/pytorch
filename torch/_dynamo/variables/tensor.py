@@ -499,7 +499,7 @@ class TensorVariable(VariableTracker):
                 **options,
             )
         elif name == "tolist":
-            if free_symbols(self.size):
+            if self.size and free_symbols(self.size):
                 unimplemented(f"Tensor.{name}")
             else:
                 from .builder import SourcelessBuilder
