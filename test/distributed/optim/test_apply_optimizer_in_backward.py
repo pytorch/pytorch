@@ -13,7 +13,7 @@ from copy import deepcopy
 import torch
 import torch.nn as nn
 
-from torch.distributed.optim import _apply_optimizer_in_backward
+from torch.distributed.optim import _apply_optimizer_in_backward, _get_optimizers_in_backward
 
 # TODO (rohan-varma): Add FSDP & DDP tests once supported
 
@@ -137,3 +137,19 @@ class ApplyOverlappedOptimizerTest(unittest.TestCase):
             [model, model_with_opt_in_bwd],
             [opt_0, opt_1],
         )
+
+    def test_get_optimizers_in_backward(self):
+        # Create a simple test model
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super(TestModel, self).__init__()
+                self.linear1 = torch.nn.Linear(10, 5)
+                self.linear2 = torch.nn.Linear(5, 2)
+
+        model = TestModel()
+
+        # Apply optimizers in backward
+        _apply_optimizer_in_backward(torch.optim.SGD, model.parameters(), {'lr': 0.01})
+        result = set(_get_optimizers_in_backward(model))
+        expected = set([optim for p in model.parameters() for optim in p._in_backward_optimizers])
+        self.assertEqual(result, expected)
