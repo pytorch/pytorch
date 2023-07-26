@@ -1084,11 +1084,11 @@ def init_process_group(
 
     if not isinstance(timeout, timedelta):
         raise RuntimeError(
-            "Expected timeout argument to be of type" "datetime.timedelta"
+            "Expected timeout argument to be of type datetime.timedelta"
         )
 
     if GroupMember.WORLD is not None:
-        raise RuntimeError("trying to initialize the default process group " "twice!")
+        raise RuntimeError("trying to initialize the default process group twice!")
 
     assert (store is None) or (
         init_method is None
@@ -1204,7 +1204,7 @@ def _new_process_group_helper(
 
     if not isinstance(timeout, timedelta):
         raise RuntimeError(
-            "Expected timeout argument to be of type" "datetime.timedelta"
+            "Expected timeout argument to be of type datetime.timedelta"
         )
 
     if pg_tag not in [None, ""]:
@@ -1256,7 +1256,7 @@ def _new_process_group_helper(
             backend_type = ProcessGroup.BackendType.GLOO
         elif backend_str == Backend.NCCL:
             if not is_nccl_available():
-                raise RuntimeError("Distributed package doesn't have NCCL " "built in")
+                raise RuntimeError("Distributed package doesn't have NCCL built in")
             if pg_options is not None:
                 assert isinstance(
                     pg_options, ProcessGroupNCCL.Options
@@ -2968,7 +2968,7 @@ def all_gather_coalesced(
     _ensure_all_tensors_same_dtype(input_tensor_list)
     if not isinstance(output_tensor_lists, list):
         raise RuntimeError(
-            "Invalid function argument: " "output_tensor_lists should be a list"
+            "Invalid function argument: output_tensor_lists should be a list"
         )
     for output_tensor_list in output_tensor_lists:
         _check_tensor_list(output_tensor_list, "output_tensor_lists")
@@ -3128,7 +3128,7 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
     if src == my_rank:
         if not scatter_list:
             raise ValueError(
-                "Argument ``scatter_list`` must be specified " "on source rank."
+                "Argument ``scatter_list`` must be specified on source rank."
             )
         input_tensors = [scatter_list]
         output_tensors = [tensor]
@@ -3663,7 +3663,7 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
             opts.device_ids = device_ids
         else:
             raise RuntimeError(
-                "Invalid function argument: " "device_ids type should be List[int]"
+                "Invalid function argument: device_ids type should be List[int]"
             )
 
     if group is None:
