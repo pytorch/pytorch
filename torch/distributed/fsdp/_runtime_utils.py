@@ -782,9 +782,7 @@ def _post_backward_hook(
         with state._device_handle.stream(state._post_backward_stream):
             autograd_computed_grad = flat_param.grad.data
             if state._exec_order_data.is_first_iter:  # only check once
-                _check_comm_hook(
-                    state._communication_hook, state._communication_hook_state
-                )
+                _check_comm_hook(state._comm_hook, state._comm_hook_state)
             if (
                 not _low_precision_hook_enabled(state)
                 and flat_param.grad.dtype != handle._reduce_dtype
@@ -812,8 +810,8 @@ def _post_backward_hook(
                     else unsharded_grad
                 )
                 new_sharded_grad = torch.empty_like(chunks[0])  # padded
-                state._communication_hook(
-                    state._communication_hook_state,
+                state._comm_hook(
+                    state._comm_hook_state,
                     padded_unsharded_grad,
                     new_sharded_grad,
                 )
@@ -839,9 +837,7 @@ def _post_backward_hook(
                     flat_param._saved_grad_shard = new_sharded_grad
                 grad_to_offload = flat_param._saved_grad_shard
             else:
-                state._communication_hook(
-                    state._communication_hook_state, flat_param.grad
-                )
+                state._comm_hook(state._comm_hook_state, flat_param.grad)
                 # For `NO_SHARD`, we can keep the low precision gradients by
                 # simply omitting the cast altogether
                 if not handle._keep_low_precision_grads:
@@ -1020,7 +1016,7 @@ def _check_grad_to_accumulate(
 
 @no_type_check
 def _low_precision_hook_enabled(state: _FSDPState) -> bool:
-    return state._communication_hook in LOW_PRECISION_HOOKS
+    return state._comm_hook in LOW_PRECISION_HOOKS
 
 
 @no_type_check
