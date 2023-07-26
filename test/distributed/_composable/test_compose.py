@@ -2,7 +2,6 @@
 
 import copy
 import sys
-from typing import Dict
 
 import torch
 import torch.distributed as dist
@@ -10,17 +9,14 @@ import torch.nn as nn
 from torch.distributed._composable import checkpoint, fully_shard, replicate
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType
-from torch.distributed.fsdp.api import MixedPrecision, ShardingStrategy
+from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_dist_composable import (
     CompositeModel,
     CompositeParamModel,
     UnitModule,
 )
-from torch.testing._internal.common_distributed import (
-    SaveForwardInputsModel,
-    skip_if_lt_x_gpu,
-)
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
