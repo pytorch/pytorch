@@ -278,7 +278,7 @@ def parallel_num_threads():
     return threads
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def stride_at(var: sympy.Symbol, index: sympy.Expr):
     replacement = {var: var + 1}
     new_index = sympy_subs(index, replacement)
@@ -1990,6 +1990,8 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"store mode: {mode}")
                 return self.simd_vec
 
+            if len(index.free_symbols) == 0:
+                self.disable_vec(f"constant store index: {index}")
             if self.simd_vec and not self.could_vec(name, index):
                 self.disable_vec(f"not a loop: {index}")
             return self.simd_vec

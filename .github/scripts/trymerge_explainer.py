@@ -17,7 +17,7 @@ def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
     return len(list(filter(pattern.match, labels))) > 0
 
 
-class TryMergeExplainer(object):
+class TryMergeExplainer:
     force: bool
     labels: List[str]
     pr_num: int
