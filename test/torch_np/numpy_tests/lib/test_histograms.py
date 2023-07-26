@@ -397,7 +397,7 @@ class TestHistogram:
         edges = histogram_bin_edges(arr, bins="auto", range=(0, 1))
         assert_array_equal(edges, e)
 
-    ##  @requires_memory(free_bytes=1e10)
+    # @requires_memory(free_bytes=1e10)
     @pytest.mark.xfail(reason="pytorch does not support bins = [int, int, array]")
     @pytest.mark.slow
     def test_big_arrays(self):

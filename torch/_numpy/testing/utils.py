@@ -33,7 +33,6 @@ __all__ = [
     "decorate_methods",
     "print_assert_equal",
     "verbose",
-    "measure",
     "assert_",
     "assert_array_almost_equal_nulp",
     "assert_raises_regex",
@@ -673,7 +672,7 @@ def assert_array_compare(
                 f"Mismatched elements: {n_mismatch} / {n_elements} ({percent_mismatch:.3g}%)"
             ]
 
-            ##            with errstate(all='ignore'):
+            # with errstate(all='ignore'):
             # ignore errors for non-numeric types
             with contextlib.suppress(TypeError, RuntimeError):
                 error = abs(x - y)
@@ -1668,7 +1667,10 @@ def _gen_alignment_data(dtype=float32, type="binary", max_size=24):
     for o in range(3):
         for s in range(o + 2, max(o + 3, max_size)):
             if type == "unary":
-                inp = lambda: arange(s, dtype=dtype)[o:]
+
+                def inp():
+                    return arange(s, dtype=dtype)[o:]
+
                 out = empty((s,), dtype=dtype)[o:]
                 yield out, inp(), ufmt % (o, o, s, dtype, "out of place")
                 d = inp()
@@ -1690,8 +1692,11 @@ def _gen_alignment_data(dtype=float32, type="binary", max_size=24):
                 yield inp()[:-1], inp()[1:], ufmt % (o, o + 1, s - 1, dtype, "aliased")
                 yield inp()[1:], inp()[:-1], ufmt % (o + 1, o, s - 1, dtype, "aliased")
             if type == "binary":
-                inp1 = lambda: arange(s, dtype=dtype)[o:]
-                inp2 = lambda: arange(s, dtype=dtype)[o:]
+
+                def inp1():
+                    return arange(s, dtype=dtype)[o:]
+
+                inp2 = inp1
                 out = empty((s,), dtype=dtype)[o:]
                 yield out, inp1(), inp2(), bfmt % (o, o, o, s, dtype, "out of place")
                 d = inp1()
@@ -2386,4 +2391,7 @@ def _get_glibc_version():
 
 
 _glibcver = _get_glibc_version()
-_glibc_older_than = lambda x: (_glibcver != "0.0" and _glibcver < x)
+
+
+def _glibc_older_than(x):
+    return _glibcver != "0.0" and _glibcver < x

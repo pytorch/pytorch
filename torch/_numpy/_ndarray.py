@@ -165,7 +165,9 @@ def _upcast_int_indices(index):
     return index
 
 
-##################### ndarray class ###########################
+###############################################################
+#                      ndarray class                          #
+###############################################################
 
 
 class ndarray:
@@ -341,17 +343,15 @@ class ndarray:
     def tolist(self):
         return self.tensor.tolist()
 
-    ###  niceties ###
     def __str__(self):
         return (
             str(self.tensor)
-            .replace("tensor", "array_w")
+            .replace("tensor", "torch.ndarray")
             .replace("dtype=torch.", "dtype=")
         )
 
     __repr__ = create_method(__str__)
 
-    ### comparisons ###
     def __eq__(self, other):
         try:
             return _ufuncs.equal(self, other)
@@ -361,40 +361,27 @@ class ndarray:
             return asarray(falsy)
 
     def __ne__(self, other):
-        try:
-            return _ufuncs.not_equal(self, other)
-        except (RuntimeError, TypeError):
-            # Failed to convert other to array: definitely not equal.
-            falsy = torch.full(self.shape, fill_value=True, dtype=bool)
-            return asarray(falsy)
-
-    def __bool__(self):
-        try:
-            return bool(self.tensor)
-        except RuntimeError:
-            raise ValueError(
-                "The truth value of an array with more than one "
-                "element is ambiguous. Use a.any() or a.all()"
-            )
+        return ~(self == other)
 
     def __index__(self):
         try:
             return operator.index(self.tensor.item())
         except Exception:
-            mesg = "only integer scalar arrays can be converted to a scalar index"
-            raise TypeError(mesg)
+            raise TypeError(
+                "only integer scalar arrays can be converted to a scalar index"
+            )
+
+    def __bool__(self):
+        return bool(self.tensor)
+
+    def __int__(self):
+        return int(self.tensor)
 
     def __float__(self):
         return float(self.tensor)
 
     def __complex__(self):
-        try:
-            return complex(self.tensor)
-        except ValueError as e:
-            raise TypeError(*e.args)
-
-    def __int__(self):
-        return int(self.tensor)
+        return complex(self.tensor)
 
     def is_integer(self):
         try:
@@ -404,14 +391,12 @@ class ndarray:
             result = False
         return result
 
-    ### sequence ###
     def __len__(self):
         return self.tensor.shape[0]
 
     def __contains__(self, x):
         return self.tensor.__contains__(x)
 
-    ### methods to match namespace functions
     def transpose(self, *axes):
         # np.transpose(arr, axis=None) but arr.transpose(*axes)
         return _funcs.transpose(self, axes)
@@ -424,7 +409,6 @@ class ndarray:
         # ndarray.sort works in-place
         _funcs.copyto(self, _funcs.sort(self, axis, kind, order))
 
-    ### indexing ###
     def item(self, *args):
         # Mimic NumPy's implementation with three special cases (no arguments,
         # a flat index and a multi-index):
@@ -527,9 +511,6 @@ def ascontiguousarray(a, dtype=None, *, like=None):
 def from_dlpack(x, /):
     t = torch.from_dlpack(x)
     return ndarray(t)
-
-
-###### dtype routines
 
 
 def _extract_dtype(entry):

@@ -1,6 +1,6 @@
 from . import fft, linalg, random
-from ._dtypes import *
-from ._funcs import *
+from ._dtypes import *  # noqa: F403
+from ._funcs import *  # noqa: F403
 from ._getlimits import errstate, finfo, iinfo
 from ._ndarray import (
     array,
@@ -12,7 +12,7 @@ from ._ndarray import (
     newaxis,
     result_type,
 )
-from ._ufuncs import *
+from ._ufuncs import *  # noqa: F403
 from ._util import AxisError, UFuncTypeError
 
 # from . import testing
