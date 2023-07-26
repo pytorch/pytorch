@@ -2037,6 +2037,11 @@ class Module:
                                       'whose dimensions in the checkpoint are {}, '
                                       'an exception occurred : {}.'
                                       .format(key, param.size(), input_param.size(), ex.args))
+                    if (str(ex) == "Cannot copy out of meta tensor; no data!"):
+                        error_msgs.append('Did you mean to pass `assign=True` to '
+                                          'assign items in the state dictionary to their '
+                                          'corresponding keys in the module instead of '
+                                          'copying them inplace?')
             elif strict:
                 missing_keys.append(key)
 
