@@ -93,8 +93,8 @@ MPSDevice::MPSDevice() : _mtl_device(nil), _mtl_indexing_library(nil) {
   NSArray* devices = [MTLCopyAllDevices() autorelease];
   for (unsigned long i = 0; i < [devices count]; i++) {
     id<MTLDevice> device = devices[i];
-    if (![device isLowPower]) { // exclude Intel GPUs
-      _mtl_device = [device retain];
+    if (true) { // exclude Intel GPUs
+      _mtl_device = device;
       break;
     }
   }
