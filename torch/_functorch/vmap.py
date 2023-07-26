@@ -247,9 +247,6 @@ def lazy_load_decompositions():
     _register_python_decomposition_vmap(torch.ops.aten.huber_loss_backward.default)
     _register_python_decomposition_vmap(torch.ops.aten.addr.default)
 
-def lazy_dynamo_disable(func):
-    import torch._dynamo
-    return torch._dynamo.disable(func)
 
 def vmap_impl(func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs):
     lazy_load_decompositions()
