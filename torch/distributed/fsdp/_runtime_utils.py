@@ -845,9 +845,23 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle):
         if not uses_hybrid_sharded_strategy:
             _div_if_needed(new_sharded_grad, state._gradient_postdivide_factor)
         if uses_hybrid_sharded_strategy:
-            dist.all_reduce(new_sharded_grad, group=state._inter_node_pg)
-            # TODO: Refactor this if we make the all-reduce async
-            _div_if_needed(new_sharded_grad, state._gradient_postdivide_factor)
+            if _can_run_all_reduce_as_async(state, handle):
+                _p_assert(
+                    handle._all_reduce_fut is None,
+                    f"An all-reduce future already exists",
+                )
+                fut = dist.all_reduce(
+                    new_sharded_grad, group=state._inter_node_pg, async_op=True
+                ).get_future()
+                fut.then(
+                    functools.partial(
+                        _all_reduce_callback, state, handle, new_sharded_grad
+                    )
+                )
+                handle._all_reduce_fut = fut
+            else:
+                dist.all_reduce(new_sharded_grad, group=state._inter_node_pg)
+                _div_if_needed(new_sharded_grad, state._gradient_postdivide_factor)
     else:
         state._comm_hook(
             state._comm_hook_state, padded_unsharded_grad, new_sharded_grad
@@ -855,6 +869,23 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle):
         # NOTE: HSDP variants do not support communication hook.
     grad_to_offload = _accumulate_sharded_grad(state, handle, new_sharded_grad)
     return grad_to_offload
+
+
+def _can_run_all_reduce_as_async(state: _FSDPState, handle: FlatParamHandle) -> bool:
+    return (
+        not hasattr(handle.flat_param, "_saved_grad_shard")
+        and not handle._offload_params
+    )
+
+
+def _all_reduce_callback(
+    state: _FSDPState,
+    handle: FlatParamHandle,
+    new_sharded_grad: torch.Tensor,
+):
+    _div_if_needed(new_sharded_grad, state._gradient_postdivide_factor)
+    _accumulate_sharded_grad(state, handle, new_sharded_grad)
+    _post_backward_use_sharded_grad_views(handle)
 
 
 @no_type_check

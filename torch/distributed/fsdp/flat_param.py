@@ -504,6 +504,8 @@ class FlatParamHandle:
         self._training_state = HandleTrainingState.IDLE
         self._debug_level = dist.get_debug_level()
         self._fully_sharded_module = fully_sharded_module
+        # Used for async all-reduce for HSDP variants
+        self._all_reduce_fut: Optional[torch.futures.Future] = None
         # For strategies that do not free after forward, we skip using sharded
         # views after forward since the unsharded data exists. We still switch
         # `self.flat_param` to point to the sharded flat parameter since what
@@ -1521,6 +1523,9 @@ class FlatParamHandle:
                         self._use_sharded_grad_views()
 
         flat_param = self.flat_param
+        if self._all_reduce_fut is not None:
+            self._all_reduce_fut.wait()
+            self._all_reduce_fut = None
         # TODO (awgu): We should replace these conditional checks to encode
         # the logical intention more directly.
         if hasattr(flat_param, "_cpu_grad"):
