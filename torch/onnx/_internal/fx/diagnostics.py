@@ -21,8 +21,10 @@ from torch.onnx._internal.fx import registration, type_utils as fx_type_utils
 # Tensor(i64[s0, 64, (s1//2) - 2, (s1//2) - 2]) where s0 and s1 are symbolic
 # so we need to relax the length limit.
 _LENGTH_LIMIT: int = 120
-# NOTE: The following limits are for the number of items in a list, tuple or dict.
-# The limits are set to be small to avoid heavy workload.
+# NOTE: The following limits are for the number of items to display in diagnostics for
+# a list, tuple or dict. The limit is picked such that common useful scenarios such as
+# operator arguments are covered, while preventing excessive processing loads on considerably
+# large containers such as the dictionary mapping from fx to onnx nodes.
 _CONTAINER_ITEM_LIMIT: int = 10
 
 # NOTE(bowbao): This is a shim over `torch.onnx._internal.diagnostics`, which is
