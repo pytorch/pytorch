@@ -32,7 +32,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
     This subclass stores the dense tensor in a compressed form by only storing the specified elements and corresponding metadata.
     These two are stored next to each other in one contiguous tensor.
 
-    We choose to store the specified elements and the metadata in a single tensor for compatibilty with cuSPARSELt, which expects the datat to be stored in this format.
+    We choose to store the specified elements and the metadata in a single tensor for compatibilty with cuSPARSELt,
+    which expects the datat to be stored in this format.
 
     compressed tensor = [ specified elements of original tensor | metadata ]
 
@@ -290,7 +291,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                     )
                 else:
                     return torch._cslt_sparse_mm(
-                        input_B.compressed_tensor, input_A.T, bias
+                        input_B.compressed_tensor, input_A.T, bias  # type: ignore[arg-type]
                     ).t()
 
         # handle mm
@@ -304,7 +305,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                     ).t()
                 else:
                     return torch._cslt_sparse_mm(
-                        input_A.compressed_tensor, input_B, None
+                        input_A.compressed_tensor, input_B, None  # type: ignore[arg-type]
                     )
 
             elif isinstance(input_B, cls) and input_B.transposed:
@@ -313,7 +314,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                         input_A, input_B.values(), input_B.indices()
                     )
                 else:
-                    return torch._cslt_sparse_mm(input_B.compressed_tensor, input_A.T, None).t()
+                    return torch._cslt_sparse_mm(input_B.compressed_tensor, input_A.T, None).t()  # type: ignore[arg-type]
 
         # When torch is run with inference mode, pytorch does not decompose torch.ops.aten.linear into a .t() and addmm(),
         # so we must match the aten.linear op. In this case, we need to explicitly handle collapsing to 2d matmul
@@ -331,7 +332,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                     )
                 else:
                     return torch._cslt_sparse_mm(
-                        weight.compressed_tensor,
+                        weight.compressed_tensor,  # type: ignore[arg-type]
                         input_tensor.view(-1, shape[-1]).T,
                         bias
                     ).t().view(*shape[:-1], -1)

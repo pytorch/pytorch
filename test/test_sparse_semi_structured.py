@@ -152,7 +152,8 @@ class TestSparseSemiStructured(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_cutlass_dispatch_layouts"):
                     sparse_result = torch.mm(A_sparse, B)
             else:
-                with self.assertRaisesRegex(RuntimeError, "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"):
+                with self.assertRaisesRegex(RuntimeError,
+                                            "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"):
                     sparse_result = torch.mm(A_sparse, B)
 
             # test transpose
