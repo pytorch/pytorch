@@ -510,19 +510,6 @@ class FlatParamHandle:
         # it points to parameterizes behavior. We use the following attribute
         # to track which tensor data the parameters are unsharded views into.
         self._unsharded_flat_param_for_skipped_views: Optional[Tensor] = None
-        # The index in the state's `all_handles`, which must be the
-        # same across ranks for the execution order validation to work
-        self._handle_index: Optional[int] = None
-        # Index in handles_to_pre_forward_order
-        self._pre_forward_order_index: Optional[int] = None
-        # Index in `handles_post_forward_order`
-        self._post_forward_index: Optional[int] = None
-        # Used for guarding against mistargeted forward prefetches
-        self._needs_pre_forward_unshard = False
-        # Used for guarding against mistargeted backward prefetches
-        self._needs_pre_backward_unshard = False
-        # Was the handle prefetched? Set on successful _prefetch_handle and unshard
-        self._prefetched = False
         # Optimistically assume a valid input `params` and set dtype attributes
         # before `_init_flat_param()`, which performs the actual validation
         self._orig_param_dtype = params[0].dtype
@@ -1670,7 +1657,8 @@ class FlatParamHandle:
         if self._use_orig_params:
             in_forward = self._training_state == HandleTrainingState.FORWARD
             skip_use_sharded_views = (
-                in_forward
+                torch.is_grad_enabled()
+                and in_forward
                 and self._sharding_strategy
                 in NO_RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES
             )
