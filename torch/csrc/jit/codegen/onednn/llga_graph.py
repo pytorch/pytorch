@@ -1,9 +1,11 @@
-import torch
-import torch._C._onednn as llga
-from torch.fx import Graph, GraphModule, Node, subgraph_rewriter
 import numbers
 from math import prod
 from typing import List
+
+import torch
+import torch._C._onednn as llga
+from torch.fx import Node
+
 
 class LlgaGraph:
     def __init__(self):
@@ -43,8 +45,8 @@ class LlgaGraph:
     # based on
     # https://github.com/oneapi-src/oneDNN/blob/6dbeffbae1f23cbbeae17adb7b5b13f1f37c080e/tests/benchdnn/graph/helpers_any_layout.hpp#L29-L96
     # Set tensor layout to "any" when used only by LLGA partitions
-    def set_any_layout(self, partitions=[]):
-        if not partitions:
+    def set_any_layout(self, partitions=None):
+        if partitions is None:
             partitions = self.partitions
         self.desc_ids_with_any_layout = set()
         # map from output id to all supported flags of supported partitions
@@ -73,12 +75,27 @@ class LlgaGraph:
                 if all(flags):
                     self.desc_ids_with_any_layout.add(id)
 
-    def update_input_descs(self, descs: List[llga.logical_tensor], aten_inputs: List[torch.Tensor], cache_weight: bool = False):
+    def update_input_descs(
+        self,
+        descs: List[llga.logical_tensor],
+        aten_inputs: List[torch.Tensor],
+        cache_weight: bool = False,
+    ):
         assert len(descs) == len(aten_inputs)
         for i, (d, at_in) in enumerate(zip(descs, aten_inputs)):
             make_constant = cache_weight and isinstance(at_in, torch.nn.Parameter)
-            property_type = llga.logical_tensor.property_type.constant if make_constant else llga.logical_tensor.property_type.variable
-            descs[i] = llga.logical_tensor(d.get_id(), d.get_data_type(), at_in.size(), at_in.stride(), property_type)
+            property_type = (
+                llga.logical_tensor.property_type.constant
+                if make_constant
+                else llga.logical_tensor.property_type.variable
+            )
+            descs[i] = llga.logical_tensor(
+                d.get_id(),
+                d.get_data_type(),
+                at_in.size(),
+                at_in.stride(),
+                property_type,
+            )
         return descs
 
     def get_compiled_output_descs(
@@ -132,21 +149,22 @@ class LlgaGraph:
         self.current_id += 1
         return id
 
-    def create_llga_descs_from_node(
+    def create_onednn_descs_from_node(
         self, node: Node, ptype=llga.logical_tensor.property_type.variable
     ) -> List[llga.logical_tensor]:
         assert node.op in ["placeholder", "call_function"]
         if isinstance(node.meta["val"], (list, tuple)):
             outputs = [
-                self.create_llga_desc_from_meta(val, ptype) for val in node.meta["val"]
+                self.create_onednn_desc_from_meta(val, ptype)
+                for val in node.meta["val"]
             ]
         else:
-            outputs = [self.create_llga_desc_from_meta(node.meta["val"], ptype)]
+            outputs = [self.create_onednn_desc_from_meta(node.meta["val"], ptype)]
         for desc in outputs:
             self.register_node_by_desc(node, desc)
         return outputs
 
-    def create_llga_desc_from_meta(
+    def create_onednn_desc_from_meta(
         self, val, ptype=llga.logical_tensor.property_type.variable
     ) -> llga.logical_tensor:
         if isinstance(val, torch.SymInt):
@@ -167,12 +185,14 @@ class LlgaGraph:
             and stride == sorted(stride, reverse=True)
         ):
             stride[0] = prod(size)
-        llga_desc = llga.logical_tensor(self.generate_id(), dtype, size, stride, ptype)
-        return llga_desc
+        onednn_desc = llga.logical_tensor(
+            self.generate_id(), dtype, size, stride, ptype
+        )
+        return onednn_desc
 
-    def create_llga_desc_from_scalar(self, scalar, dtype=None) -> llga.logical_tensor:
+    def create_onednn_desc_from_scalar(self, scalar, dtype=None) -> llga.logical_tensor:
         fake_tensor = torch.tensor([scalar], dtype=dtype)
-        desc = self.create_llga_desc_from_meta(
+        desc = self.create_onednn_desc_from_meta(
             fake_tensor, ptype=llga.logical_tensor.property_type.constant
         )
         self.register_scalar_data(scalar, desc, dtype)
@@ -192,7 +212,7 @@ class LlgaGraph:
             if isinstance(arg, numbers.Number):
                 # arg is a scalar value, we get a logical_tensor of shape=()
                 cast_type = torch_type if cast_scalar else None
-                args[arg_idx] = self.create_llga_desc_from_scalar(arg, cast_type)
+                args[arg_idx] = self.create_onednn_desc_from_scalar(arg, cast_type)
         return args
 
     def register_node_by_desc(self, node, desc):
@@ -215,24 +235,24 @@ class LlgaGraph:
             desc = desc.get_id()
         return self.desc_to_scalar_data[desc]
 
-    def get_args_to_llga_partition_order(self, llga_partition, node_args):
-        llga_input_names = [
+    def get_args_to_onednn_partition_order(self, onednn_partition, node_args):
+        onednn_input_names = [
             in_desc.get_id()
             if in_desc.get_id() in self.desc_to_scalar_data.keys()
             else self.get_node_from_desc(in_desc).name
-            for in_desc in llga_partition.get_in_ports()
+            for in_desc in onednn_partition.get_in_ports()
         ]
         arg_names = [n.name for n in node_args]
 
         # Get the index in args if arg exists in args, otherwise get the relevant scalar data from graph
-        args_to_llga_order = []
-        for name in llga_input_names:
+        args_to_onednn_order = []
+        for name in onednn_input_names:
             if name in arg_names:
-                args_to_llga_order.append(arg_names.index(name))
+                args_to_onednn_order.append(arg_names.index(name))
             else:
                 scalar, dtype = self.get_scalar_data_from_desc(name)
                 scalar = torch.tensor([scalar], dtype=dtype)
                 if hasattr(scalar, "constant"):
                     scalar = scalar.constant
-                args_to_llga_order.append(scalar)
-        return args_to_llga_order
+                args_to_onednn_order.append(scalar)
+        return args_to_onednn_order

@@ -306,7 +306,7 @@ class cpp:
     max_horizontal_fusion_size = 16
 
     # Use oneDNN Graph fusions for compute intensive ops
-    onednn_graph = False
+    onednn_graph = os.environ.get("TORCHINDUCTOR_ONEDNN_GRAPH", "0") == "1"
 
 
 # config specific to codegen/triton.py
