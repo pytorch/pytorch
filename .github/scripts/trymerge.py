@@ -1853,7 +1853,11 @@ def merge(
 
     if ignore_current:
         checks = pr.get_checkrun_conclusions()
-        _, failing = categorize_checks(checks, list(checks.keys()))
+        _, failing = categorize_checks(
+            checks,
+            list(checks.keys()),
+            ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD,
+        )
         ignore_current_checks_info = failing
 
     gh_post_pr_comment(
