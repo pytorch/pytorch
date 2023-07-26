@@ -67,9 +67,10 @@ assume_static_by_default = True
 automatic_dynamic_shapes = True
 
 # This flag changes how the shapes of parameters are treated. 
-# If this flag is set to False, then the shapes of torch.nn.Parameter are assumed to be static.
-# If this flag is set to True, then the shapes of torch.nn.Parameter are assumed to be dynamic
-assume_parameters_shapes_static_by_default = False
+# If this flag is set to True, then the shapes of torch.nn.Parameter as well as of torch.Tensor are attempted to be dynamic
+# If this flag is set to False, then the shapes of torch.nn.Parameter are assumed to be static, 
+# while the shapes of torch.Tensor are assumed to be dynamic.
+attempt_tensor_always_has_dynamic_shape = False
 
 # Typically, if you mark_dynamic a dimension, we will error if the dimension
 # actually ended up getting specialized.  This knob changes the behavior so

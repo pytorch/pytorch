@@ -223,7 +223,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         # Recompile, alias changed
         self.assertEqual(cnt.frame_count, 2)
 
-    def test_recompiles_true_false_flop(self):
+    def test_dynamic_parameter_shape_recompile(self):
         # Test the matrix multiplication with Parameters.
         # Without the config assume_parameters_shapes_static_by_default, 
         # the torch.nn.Parameter shapes are assumed to be static which leads to recompilation
@@ -251,25 +251,25 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
             return cnt
 
-        @patch.object(torch._dynamo.config, "assume_parameters_shapes_static_by_default", False)
+        @patch.object(torch._dynamo.config, "attempt_tensor_always_has_dynamic_shape", False)
         @patch.object(torch._dynamo.config, "automatic_dynamic_shapes", False)
         @patch.object(torch._dynamo.config, "assume_static_by_default", True)
         def run_static_comp_default_param():
             return run_foo_6_times_and_count_recompiles()
 
-        @patch.object(torch._dynamo.config, "assume_parameters_shapes_static_by_default", False)
+        @patch.object(torch._dynamo.config, "attempt_tensor_always_has_dynamic_shape", False)
         @patch.object(torch._dynamo.config, "automatic_dynamic_shapes", True)
         @patch.object(torch._dynamo.config, "assume_static_by_default", True)
         def run_dynamic_comp_default_param():
             return run_foo_6_times_and_count_recompiles()
 
-        @patch.object(torch._dynamo.config, "assume_parameters_shapes_static_by_default", True)
+        @patch.object(torch._dynamo.config, "attempt_tensor_always_has_dynamic_shape", True)
         @patch.object(torch._dynamo.config, "automatic_dynamic_shapes", False)
         @patch.object(torch._dynamo.config, "assume_static_by_default", True)
         def run_static_comp_dynamic_param():
             return run_foo_6_times_and_count_recompiles()
 
-        @patch.object(torch._dynamo.config, "assume_parameters_shapes_static_by_default", True)
+        @patch.object(torch._dynamo.config, "attempt_tensor_always_has_dynamic_shape", True)
         @patch.object(torch._dynamo.config, "automatic_dynamic_shapes", True)
         @patch.object(torch._dynamo.config, "assume_static_by_default", True)
         def run_dynamic_comp_dynamic_param():
