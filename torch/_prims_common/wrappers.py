@@ -108,6 +108,12 @@ class elementwise_type_promotion_wrapper:
         @wraps(fn)
         def _fn(*args, **kwargs):
             bound = sig.bind(*args, **kwargs)
+            common_device = None
+            for arg in args:
+                if hasattr(arg, 'fake_device'):
+                    common_device = arg.fake_device
+                    break
+
             type_promoting_args = tuple(
                 bound.arguments[x]
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
@@ -125,6 +131,7 @@ class elementwise_type_promotion_wrapper:
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
                 if x in bound.arguments.keys()
             }
+            promoted_args.update({'device':common_device})
             bound.arguments.update(promoted_args)
 
             result = fn(**bound.arguments)

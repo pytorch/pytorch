@@ -337,6 +337,14 @@ DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 aten = torch._ops.ops.aten
 
 
+# This function indicates if the backend device
+# supports non-contiguous tensors
+def is_noncontiguous_supported(device):
+    if device is not None and device.type == "hpu":
+        return False
+    return True
+
+
 def _broadcast_shapes(*_shapes):
     shapes = tuple(
         (x,) if isinstance(x, IntLike) else x
@@ -426,14 +434,20 @@ def _make_elementwise_unary_reference(
         @out_wrapper()
         @elementwise_unary_scalar_wrapper
         @elementwise_type_promotion_wrapper(
-            type_promoting_args=("a",),
+            type_promoting_args=("a","device"),
             type_promotion_kind=type_promotion_kind,
         )
-        def _ref(a: TensorLikeType) -> TensorLikeType:
+        def _ref(a: TensorLikeType,
+                device: Optional[torch.device] = None
+            ) -> TensorLikeType:
             if extra_meta is not None:
                 extra_meta(a)
 
-            return prim(a)
+            out = prim(a)
+            if is_noncontiguous_supported(device) is False:
+                out = out.new_empty(out.shape)
+
+            return out
 
         if aten_op is infer_aten_op:
             aten_op = utils.get_aten_op(prim, prim.__name__)
@@ -588,10 +602,13 @@ def exp2(a):
 # CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("a,"),
+    type_promoting_args=("a,","device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
-def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
+def fill(a: TensorLikeType,
+        value: NumberType,
+        device: Optional[torch.device] = None,
+) -> TensorLikeType:
     assert isinstance(a, TensorLike)
     assert isinstance(value, Number)
 
@@ -747,11 +764,12 @@ def log_softmax(
 @register_decomposition(aten.logsumexp)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("self",),
+    type_promoting_args=("self","device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def logsumexp(
-    self: TensorLikeType, dim: DimsType, keepdim: bool = False
+    self: TensorLikeType, dim: DimsType, keepdim: bool = False,
+    device: Optional[torch.device] = None,
 ) -> TensorLikeType:
     if not isinstance(dim, Iterable):
         dim = (dim,)
@@ -933,12 +951,13 @@ def _make_elementwise_binary_reference(
 
         @wraps(prim)
         @elementwise_type_promotion_wrapper(
-            type_promoting_args=("a", "b"),
+            type_promoting_args=("a", "b","device"),
             type_promotion_kind=type_promotion_kind,
         )
         def _ref(
             a: Union[Tensor, NumberType],
             b: Union[Tensor, NumberType],
+            device: Optional[torch.device] = None,
         ) -> Tensor:
             torch._check_value(
                 supports_lhs_python_scalar or not isinstance(a, Number),
@@ -956,7 +975,12 @@ def _make_elementwise_binary_reference(
                 lambda: f"{name}: Receive two Number inputs to an elementwise binary operation!",
             )
             a, b = _maybe_broadcast(a, b)
-            return prim(a, b)
+            out = prim(a, b)
+
+            if is_noncontiguous_supported(device) is False:
+                out = out.new_empty(out.shape)
+
+            return out
 
         if has_out:
             _ref = out_wrapper()(_ref)
@@ -976,7 +1000,7 @@ def _make_elementwise_binary_reference(
 @register_decomposition(aten.add)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("a", "b"),
+    type_promoting_args=("a", "b", "device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def add(
@@ -984,6 +1008,7 @@ def add(
     b: Union[TensorLikeType, NumberType],
     *,
     alpha: Optional[NumberType] = None,
+    device: Optional[torch.device] = None,
 ):
     """
     Reference implementation of torch.add
@@ -1645,7 +1670,7 @@ def rsub(
 @register_decomposition(aten.sub)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("a", "b"),
+    type_promoting_args=("a", "b", "device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def sub(
@@ -1653,6 +1678,7 @@ def sub(
     b: Union[TensorLikeType, NumberType],
     *,
     alpha: Optional[NumberType] = None,
+    device: Optional[torch.device] = None,
 ):
     """
     Reference implementation of torch.sub
@@ -1695,10 +1721,13 @@ def true_divide(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 @register_decomposition(aten.xlogy)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("a", "b"),
+    type_promoting_args=("a", "b", "device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
-def xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]):
+def xlogy(a: Union[TensorLikeType, NumberType],
+        b: Union[TensorLikeType, NumberType,
+        device: Optional[torch.device] = None,
+]):
     torch._check(
         isinstance(a, TensorLike) or isinstance(b, TensorLike),
         lambda: 'Expected either argument a or b to be a Tensor"',
@@ -1741,7 +1770,7 @@ def trunc_divide(
 @register_decomposition(aten.addcdiv)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("self", "tensor1", "tensor2"),
+    type_promoting_args=("self", "tensor1", "tensor2", "device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def addcdiv(
@@ -1750,6 +1779,7 @@ def addcdiv(
     tensor2: TensorLikeType,
     *,
     value: NumberType = 1,
+    device: Optional[torch.device] = None,
 ) -> TensorLikeType:
     """
     Reference implementation of torch.addcdiv
@@ -1770,7 +1800,7 @@ def addcdiv(
 @register_decomposition(aten.addcmul)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("self", "tensor1", "tensor2"),
+    type_promoting_args=("self", "tensor1", "tensor2", "device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def addcmul(
@@ -1779,6 +1809,7 @@ def addcmul(
     tensor2: TensorLikeType,
     *,
     value: NumberType = 1,
+    device: Optional[torch.device] = None,
 ) -> TensorLikeType:
     """
     Reference implementation of torch.addcmul
@@ -1799,13 +1830,14 @@ def addcmul(
 @register_decomposition(aten.clamp)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("a", "min", "max"),
+    type_promoting_args=("a", "min", "max", "device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def clamp(
     a: TensorLikeType,
     min: Optional[TensorOrNumberLikeType] = None,
     max: Optional[TensorOrNumberLikeType] = None,
+    device: Optional[torch.device] = None,
 ) -> TensorLikeType:
     # NOTE: grad behavior with implementation `where` is not consistent on `nan`
     if min is None and max is None:
@@ -1856,13 +1888,14 @@ def clamp_max(
 @register_decomposition(aten.where)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("a", "b"),
+    type_promoting_args=("a", "b", "device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
 def where(
     pred: Tensor,
     a: Optional[TensorOrNumberLikeType] = None,
     b: Optional[TensorOrNumberLikeType] = None,
+    device: Optional[torch.device] = None,
 ):
     """ """
 
@@ -2499,7 +2532,7 @@ def var_mean(
 @register_decomposition(aten.addr)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("self", "vec1", "vec2"),
+    type_promoting_args=("self", "vec1", "vec2", "device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def addr(
@@ -2509,6 +2542,7 @@ def addr(
     *,
     beta: NumberType = 1,
     alpha: NumberType = 1,
+    device: Optional[torch.device] = None,
 ) -> TensorLikeType:
     torch._check(
         vec1.ndim == 1,
@@ -2652,10 +2686,12 @@ def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
 @register_decomposition(aten.cat)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("tensors",),
+    type_promoting_args=("tensors", "device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
-def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
+def cat(tensors: TensorSequenceType, dim: int = 0,
+        device: Optional[torch.device] = None,
+) -> TensorLikeType:
     def cat_compute_output_memory_format(inputs):
         format = None
         for t in inputs:
@@ -4523,10 +4559,14 @@ def arange(
 @register_decomposition(aten.lerp)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("start", "end", "weight"),
+    type_promoting_args=("start", "end", "weight", "device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
+def lerp(start: Tensor,
+        end: Tensor,
+        weight: Union[Tensor, NumberType],
+        device: Optional[torch.device] = None,
+):
     inputs = [start, end]
     if isinstance(weight, Number):
         weight = start.new_full((), weight)  # type: ignore[arg-type]
@@ -5414,10 +5454,12 @@ def bucketize(
 @register_decomposition(aten.cauchy)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("self",),
+    type_promoting_args=("self", "device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-def cauchy(self, median=0, sigma=1, generator=None):
+def cauchy(self, median=0, sigma=1, generator=None,
+            device: Optional[torch.device] = None,
+):
     assert generator is None
     torch._check(
         not utils.is_complex_dtype(self.dtype)
@@ -5436,10 +5478,10 @@ def cauchy(self, median=0, sigma=1, generator=None):
 @register_decomposition(aten.exponential)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("self",),
+    type_promoting_args=("self", "device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-def exponential(self, rate=1, generator=None):
+def exponential(self, rate=1, generator=None,device: Optional[torch.device] = None,):
     assert generator is None
     torch._check(
         not utils.is_complex_dtype(self.dtype)
@@ -5458,10 +5500,10 @@ def exponential(self, rate=1, generator=None):
 @register_decomposition(aten.geometric)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("self",),
+    type_promoting_args=("self", "device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-def geometric(self, p, generator=None):
+def geometric(self, p, generator=None, device: Optional[torch.device] = None,):
     assert generator is None
     # TODO: fix inductor rand_like for integer, bool dtypes
     torch._check(
@@ -5479,10 +5521,10 @@ def geometric(self, p, generator=None):
 @register_decomposition(aten.log_normal)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("self",),
+    type_promoting_args=("self", "device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-def log_normal(self, mean=1, std=2, generator=None):
+def log_normal(self, mean=1, std=2, generator=None, device: Optional[torch.device] = None,):
     assert generator is None
     torch._check(
         not utils.is_complex_dtype(self.dtype)
@@ -5501,10 +5543,10 @@ def log_normal(self, mean=1, std=2, generator=None):
 @register_decomposition(aten.normal)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("self",),
+    type_promoting_args=("self", "device"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-def normal(self, mean=0, std=1, generator=None):
+def normal(self, mean=0, std=1, generator=None, device: Optional[torch.device] = None,):
     assert generator is None
     torch._check(std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}")
     normal_samples = prims.normal(
