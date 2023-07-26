@@ -284,7 +284,7 @@ def tree_flatten(pytree: PyTree) -> Tuple[List[Any], TreeSpec]:
 
     # Recursively flatten the children
     result : List[Any] = []
-    children_specs : List['TreeSpec'] = []
+    children_specs : List[TreeSpec] = []
     for child in child_pytrees:
         flat, child_spec = tree_flatten(child)
         result += flat
