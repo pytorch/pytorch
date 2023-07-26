@@ -151,7 +151,7 @@ def increment_op_count(cnt):
 def print_time_report():
     total = 0
     total_by_key = {}
-    for frame, timings in frame_phase_timing.items():
+    for timings in frame_phase_timing.values():
         for key, timing in timings.items():
             total += timing
             if key not in total_by_key:

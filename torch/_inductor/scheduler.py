@@ -58,7 +58,7 @@ def fuse(node1: "BaseSchedulerNode", node2: "BaseSchedulerNode"):
 
 class BaseSchedulerNode:
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer):
-        self.scheduler: "Scheduler" = scheduler
+        self.scheduler: Scheduler = scheduler
         self.node: ir.Buffer = node
         self.users: Optional[List[NodeUser]] = None
         self.inverse_users: List[BaseSchedulerNode] = []
@@ -266,7 +266,7 @@ class BaseSchedulerNode:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
                     read.name
                 )
-                if input_node and V.graph.wrapper_code.can_reuse(input_node):
+                if input_node and V.graph.wrapper_code.can_reuse(input_node, self):
                     remaining_uses = [
                         x
                         for x in input_node.users
