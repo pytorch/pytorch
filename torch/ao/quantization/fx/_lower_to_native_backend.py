@@ -1002,7 +1002,8 @@ def _lower_quantized_binary_op(
         model.graph.erase_node(q_node)
         if relu_node is not None:
             model.graph.erase_node(relu_node)
-        model.graph.erase_node(bop_node)
+        if not bop_node.users:
+            model.graph.erase_node(bop_node)
 
 def special_pattern_replacement(model: GraphModule):
     modules = dict(model.named_modules(remove_duplicate=False))
