@@ -3,20 +3,25 @@
 import copy
 import sys
 
+from typing import Dict
+
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import checkpoint, fully_shard, replicate
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType
-from torch.distributed.fsdp.api import ShardingStrategy
+from torch.distributed.fsdp.api import MixedPrecision, ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_dist_composable import (
     CompositeModel,
     CompositeParamModel,
     UnitModule,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    SaveForwardInputsModel,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -127,6 +132,46 @@ class TestFSDPCheckpoint(FSDPTest):
             },
             self._test_parity,
         )
+
+    @skip_if_lt_x_gpu(2)
+    def test_checkpoint_fsdp_submodules_non_reentrant(self):
+        self._test_checkpoint_fsdp_submodules()
+
+    @skip_if_lt_x_gpu(2)
+    def test_checkpoint_fully_shard_cast_forward_inputs(self):
+        self.run_subtests(
+            {
+                "checkpoint_strict_submodule": [False, True],
+            },
+            self._test_checkpoint_fully_shard_cast_forward_inputs,
+        )
+
+    def _test_checkpoint_fully_shard_cast_forward_inputs(
+        self, checkpoint_strict_submodule: bool
+    ):
+        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
+        fp16_mp = MixedPrecision(param_dtype=torch.float16, cast_forward_inputs=True)
+        fp32_mp = MixedPrecision(param_dtype=torch.float32, cast_forward_inputs=True)
+
+        model = SaveForwardInputsModel(
+            forward_inputs=forward_inputs, cast_forward_inputs=False
+        ).cuda()
+        x = torch.zeros(2, 100, device="cuda")
+
+        fully_shard(model.c2, mixed_precision=fp16_mp)
+        if checkpoint_strict_submodule:
+            checkpoint(model.c2.l)
+        else:
+            checkpoint(model.c2)
+        fully_shard(model, mixed_precision=fp32_mp)
+
+        loss = model(x).sum()
+        loss.backward()
+
+        self.assertEqual(forward_inputs[model].dtype, torch.float32)
+        self.assertEqual(forward_inputs[model.c1].dtype, torch.float32)
+        # Notably, check that the recomputed forward preserves the right dtype
+        self.assertEqual(forward_inputs[model.c2].dtype, torch.float16)
 
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_replicate_correct_replicate_params(self):
