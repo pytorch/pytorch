@@ -14,6 +14,7 @@
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseCsrTensorMath.h>
 #include <c10/util/irange.h>
+#include <ATen/AccumulateType.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1025,29 +1026,36 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
   new_crow_indices[0] = 0;
   new_crow_indices[1] = nnz;
 
-  Tensor new_values = at::empty({nnz}, values.options());
-  new_values.fill_(rop.identity());
+  // Set `is_cuda` = `true` in acc_type in CPU backend. Because the accumulate type
+  // of float should be float in current scenario. In CUDA, float is the accumulate type
+  // of float, while in CPU, double is the accumulate type of float.
+  using acc_t = at::acc_type<scalar_t, true>;
+  auto acc_buffer = at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
+      values.options(), values.scalar_type(), nnz);
+  Tensor new_values = std::get<0>(acc_buffer);
+  Tensor new_values_acc = std::get<1>(acc_buffer);
+  new_values_acc.fill_(rop.identity());
 
-  AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "reduce_sparse_csr_dim0_cpu_indices",
-                          [&]() {
-                            index_t* columns_map_ptr = columns_map.data_ptr<index_t>();
-                            scalar_t* values_ptr = values.data_ptr<scalar_t>();
-                            scalar_t* new_values_ptr = new_values.data_ptr<scalar_t>();
+  int64_t* columns_map_ptr = columns_map.data_ptr<int64_t>();
+  scalar_t* values_ptr = values.data_ptr<scalar_t>();
+  acc_t* new_values_acc_ptr =
+      new_values_acc.data_ptr<acc_t>();
 
-                            // There is no point in parallelizing the following for-loop
-                            // because about 99.3% of the computation time is spent in the
-                            // at::_unique call above.
-                            for (int64_t i=0; i<numel; i++) {
-                              index_t col = columns_map_ptr[i];
-                              scalar_t val = values_ptr[i];
-                              new_values_ptr[col] = rop(new_values_ptr[col], val);
-                            }
-                          });
+  // There is no point in parallelizing the following for-loop
+  // because about 99.3% of the computation time is spent in the
+  // at::_unique call above.
+  for (const auto i : c10::irange(numel)) {
+    int64_t col = columns_map_ptr[i];
+    scalar_t val = values_ptr[i];
+    new_values_acc_ptr[col] = rop(new_values_acc_ptr[col], static_cast<acc_t>(val));
+  }
+  copy_from_acc_buffer(new_values, new_values_acc);
+
   return at::native::_sparse_csr_tensor_unsafe(new_crow_indices, new_col_indices, new_values,
-                                               {1, sparse.size(1)},
-                                               new_values.scalar_type(),
-                                               sparse.layout(),
-                                               new_values.device());
+                                              {1, sparse.size(1)},
+                                              new_values.scalar_type(),
+                                              sparse.layout(),
+                                              new_values.device());
 }
 
 template <typename scalar_t, typename ReductionOp>
@@ -1104,8 +1112,16 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
 
   Tensor new_crow_indices = at::empty({crow_indices.numel()}, ioptions);
   Tensor new_col_indices = at::empty({}, ioptions);
-  Tensor new_values = at::empty({}, values.options());
   Tensor row_map = at::empty({nrows}, ioptions);
+
+  // Set `is_cuda` = `true` in acc_type in CPU backend. Because the accumulate type
+  // of float should be float in current scenario. In CUDA, float is the accumulate type
+  // of float, while in CPU, double is the accumulate type of float.
+  using acc_t = at::acc_type<scalar_t, true>;
+  auto acc_buffer = at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
+      values.options(), values.scalar_type());
+  Tensor new_values = std::get<0>(acc_buffer);
+  Tensor new_values_acc = std::get<1>(acc_buffer);
 
   AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "reduce_sparse_csr_dim1_cpu_indices",
                           [&]() {
@@ -1124,9 +1140,10 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
     new_col_indices.resize_(nnz);
     new_col_indices.fill_(index_t(0));
     new_values.resize_(nnz);
+    new_values_acc.resize_(nnz);
 
     scalar_t* values_ptr = values.data_ptr<scalar_t>();
-    scalar_t* new_values_ptr = new_values.data_ptr<scalar_t>();
+    acc_t* new_values_acc_ptr = new_values_acc.data_ptr<acc_t>();
 
     at::parallel_for(
         0,
@@ -1138,21 +1155,23 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
               index_t i_start = i_end;
               i_end = crow_indices_ptr[h+1];
               if (i_start != i_end) {
-                scalar_t res = values_ptr[i_start];
+                acc_t res = static_cast<acc_t>(values_ptr[i_start]);
                 for (index_t i = i_start + 1; i < i_end; i++) {
-                  res = rop(res, values_ptr[i]);
+                  res = rop(res, static_cast<acc_t>(values_ptr[i]));
                 }
-                new_values_ptr[row_map_ptr[h]] = res;
+                new_values_acc_ptr[row_map_ptr[h]] = res;
               }
             }
         });
                           });
 
+  copy_from_acc_buffer(new_values, new_values_acc);
+
   return at::native::_sparse_csr_tensor_unsafe(new_crow_indices, new_col_indices, new_values,
-                                               {sparse.size(0), 1},
-                                               new_values.scalar_type(),
-                                               sparse.layout(),
-                                               new_values.device());
+                                                {sparse.size(0), 1},
+                                                new_values.scalar_type(),
+                                                sparse.layout(),
+                                                new_values.device());
 }
 
 template <typename scalar_t, typename ReductionOp>
@@ -1173,16 +1192,21 @@ In [3]: %timeit torch._sparse_csr_sum(t, dim=(0, 1), keepdim=True)
 In [4]: %timeit torch.sum(t.values())
 1.07 ms ± 291 ns per loop (mean ± std. dev. of 7 runs, 1000 loops each)
   */
+
+  // Set `is_cuda` = `true` in acc_type in CPU backend. Because the accumulate type
+  // of float should be float in current scenario. In CUDA, float is the accumulate type
+  // of float, while in CPU, double is the accumulate type of float.
+  using acc_t = at::acc_type<scalar_t, true>;
   scalar_t* values_ptr = values.data_ptr<scalar_t>();
-  scalar_t value = at::parallel_reduce(
+  acc_t value = at::parallel_reduce(
                                        0,
                                        numel,
                                        internal::GRAIN_SIZE,
                                        rop.identity(),
                                        [&](int64_t i_start, int64_t i_end, scalar_t identity) {
-                                         scalar_t res = identity;
+                                         acc_t res = acc_t(identity);
                                          for (int64_t i=i_start; i<i_end; i++) {
-                                           scalar_t val = values_ptr[i];
+                                           acc_t val = acc_t(values_ptr[i]);
                                            res = rop(res, val);
                                          }
                                          return res;
@@ -1192,11 +1216,12 @@ In [4]: %timeit torch.sum(t.values())
   Tensor new_col_indices = at::zeros({nnz}, ioptions);
   Tensor new_crow_indices = at::tensor(ArrayRef<int64_t>{0, nnz}, ioptions);
   Tensor new_values;
+  auto result_dtype = at::isIntegralType(values.scalar_type(), /*includeBool=*/true) ? ScalarType::Long : values.scalar_type();
   if (numel > 0) {
-    new_values = at::empty({1}, values.options());
+    new_values = at::empty({1}, values.options().dtype(result_dtype));
     new_values.fill_(value);
   } else {
-    new_values = at::empty({}, values.options());
+    new_values = at::empty({}, values.options().dtype(result_dtype));
   }
   return at::native::_sparse_csr_tensor_unsafe(new_crow_indices, new_col_indices, new_values,
                                                {1, std::min<int64_t>(1, sparse.size(1))},
@@ -1261,13 +1286,17 @@ struct ReductionMulOp {
 
 Tensor _sparse_csr_sum_cpu(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) {
   ScalarType dtype_ = dtype.value_or(input.scalar_type());
-  Tensor input_ = input.to(dtype_);
+  Tensor input_ = at::sparse_csr::to_type(input, dtype_);
   Tensor result;
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-    kHalf, kBFloat16, input_.scalar_type(), "_sparse_csr_sum_cpu",
-    [&] {
-      result = reduce_sparse_csr_cpu_template<scalar_t>(input_, dims_to_sum, keepdim, ReductionAddOp<scalar_t>());
-    });
+      kHalf, kBFloat16, input_.scalar_type(), "_sparse_csr_sum_cpu", [&] {
+        // Set `is_cuda` = `true` in acc_type in CPU backend. Because the accumulate type
+        // of float should be float in current scenario. In CUDA, float is the accumulate type
+        // of float, while in CPU, double is the accumulate type of float.
+        using acc_t = at::acc_type<scalar_t, true>;
+        result = reduce_sparse_csr_cpu_template<scalar_t>(
+            input_, dims_to_sum, keepdim, ReductionAddOp<acc_t>());
+      });
   return result;
 }
 

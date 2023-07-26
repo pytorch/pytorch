@@ -7947,7 +7947,17 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
         is_causal=is_causal,
         dropout_p=dropout_p
     )
-    samples.append(diff_v_head_dim)
+
+    # Add an attn_mask
+    samples.append(
+        SampleInput(
+            make((batch, num_heads, seq_q, head_dim)),
+            make((batch, num_heads, seq_kv, head_dim)),
+            make((batch, num_heads, seq_kv, head_dim)),
+            attn_mask=make((seq_q, seq_kv)),
+            is_causal=False,
+            dropout_p=0.0)
+    )
 
     yield from samples
 
@@ -13369,6 +13379,8 @@ op_db: List[OpInfo] = [
         decorators=[DecorateInfo(toleranceOverride(
             {torch.float32: tol(atol=5e-05, rtol=5e-6)}), 'TestCommon', device_type='cuda',), ],
         skips=(
+            # When attn mask is a composite tensor this fails backward by returning a none
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward', device_type='cuda'),
             # This is only failing on Linux Bionic 3.10 Cuda 11.6
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
                          device_type='cuda', active_if=_get_torch_cuda_version() >= (11, 6)),
