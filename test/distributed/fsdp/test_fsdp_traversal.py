@@ -8,7 +8,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
     FSDPInitMode,
-    FSDPTest,
+    FSDPTestMultiThread,
     NestedWrappedModule,
 )
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
@@ -25,10 +25,14 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestTraversal(FSDPTest):
+class TestTraversal(FSDPTestMultiThread):
     @property
     def world_size(self):
         return 2
+
+    @property
+    def process_group(self):
+        return dist.distributed_c10d._get_default_group()
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_modules(self):
