@@ -6,7 +6,7 @@ import sys
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._composable import fully_shard, checkpoint
+from torch.distributed._composable import checkpoint, fully_shard
 from torch.distributed.fsdp import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -31,7 +31,6 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestCompile(FSDPTest):
-
     @property
     def world_size(self) -> int:
         return torch.cuda.device_count()
@@ -54,7 +53,10 @@ class TestCompile(FSDPTest):
         )
 
     def _test_compile(
-        self, sharding_strategy: ShardingStrategy, skip_fsdp_guards: bool, act_checkpoint: bool,
+        self,
+        sharding_strategy: ShardingStrategy,
+        skip_fsdp_guards: bool,
+        act_checkpoint: bool,
     ):
         torch._dynamo.config.skip_fsdp_guards = skip_fsdp_guards
         fsdp_kwargs = {
@@ -77,7 +79,9 @@ class TestCompile(FSDPTest):
         model = fully_shard(copy.deepcopy(base_model), **fsdp_kwargs)
         if act_checkpoint:
             for module in model.modules():
-                if isinstance(module, (nn.TransformerEncoderLayer, nn.TransformerDecoderLayer)):
+                if isinstance(
+                    module, (nn.TransformerEncoderLayer, nn.TransformerDecoderLayer)
+                ):
                     checkpoint(module)
         model = torch.compile(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
