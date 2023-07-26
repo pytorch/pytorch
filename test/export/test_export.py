@@ -4,67 +4,10 @@ import unittest
 import torch
 import torch._dynamo as torchdynamo
 from torch._export import export, dynamic_dim
-from torch._export.trace import do_not_use_experimental_export
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 from functorch.experimental.control_flow import map
-
-
-@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
-class TestExperimentalExport(TestCase):
-    @unittest.skip("TypeError: <lambda>() missing 1 required positional argument")
-    def test_export_simple_model_with_attr(self):
-        class Foo(torch.nn.Module):
-            def __init__(self, float_val):
-                super().__init__()
-                self.float_val = float_val
-
-            def forward(self, x):
-                y = x + self.float_val
-                return y.cos()
-
-        inp = (torch.ones(6, 4, requires_grad=True),)
-        mod = Foo(0.5)
-
-        exported_program = do_not_use_experimental_export(mod, inp)
-        self.assertEqual(exported_program.fw_module(*inp)[0], mod(*inp))
-
-    def test_export_simple_model(self):
-        class Foo(torch.nn.Module):
-            def __init__(self, float_val):
-                super().__init__()
-                self.float_val = float_val
-
-            def forward(self, x):
-                return x.cos()
-
-        inp = (torch.ones(6, 4, requires_grad=True),)
-        mod = Foo(0.5)
-
-        exported_program = do_not_use_experimental_export(mod, inp)
-        self.assertEqual(exported_program.fw_module(*inp)[0], mod(*inp))
-
-    @unittest.skip("TypeError: <lambda>() missing 1 required positional argument")
-    def test_export_simple_model_buffer_mutation(self):
-        class Foo(torch.nn.Module):
-            def __init__(self, float_val):
-                super().__init__()
-                self.register_buffer("buffer1", torch.ones(6, 1))
-
-            def forward(self, x):
-                self.buffer1.add_(2)
-                return x.cos() + self.buffer1.sin()
-
-        inp = (torch.ones(6, 4, requires_grad=True),)
-        mod = Foo(0.5)
-
-        exported_program = do_not_use_experimental_export(mod, inp)
-        mutated_buffer, output = exported_program.fw_module(*inp)
-        # TODO (tmanlaibaatar) enable this once we figure out
-        # how to do buffer mutation
-        # self.assertEqual(mutated_buffer.sum().item(), 30)
-        self.assertEqual(output, mod(*inp))
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")

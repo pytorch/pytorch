@@ -6,7 +6,7 @@ from typing import Callable, Dict, Optional, Sequence, Union
 
 import torch
 import torch.library
-from torch._ops import OpOverload, OpOverloadPacket
+from torch._ops import has_composite_implicit_kernel, OpOverload, OpOverloadPacket
 from torch.utils._pytree import tree_map
 
 __all__ = [
@@ -179,16 +179,16 @@ def get_decompositions(
                 overloads.append(overload)
         for overload in overloads:
             # Maybe use a cpp decomp if one exists, and we haven't already found a python decomp
-            if torch._C._dispatch_has_kernel(overload.name()) and torch._C._dispatch_has_kernel_for_dispatch_key(
-                overload.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+            if (
+                has_composite_implicit_kernel(overload)
+                and overload not in decompositions
             ):
-                if overload not in decompositions:
-                    # Our synthetic cpp decomp: uses OpOverload.decompose to call
-                    # a CompositeImplicitAutograd kernel, if it exists.
-                    def cpp_decomp(*args, **kwargs):
-                        return overload.decompose(*args, **kwargs)
+                # Our synthetic cpp decomp: uses OpOverload.decompose to call
+                # a CompositeImplicitAutograd kernel, if it exists.
+                def cpp_decomp(*args, **kwargs):
+                    return overload.decompose(*args, **kwargs)
 
-                    decompositions[overload] = cpp_decomp
+                decompositions[overload] = cpp_decomp
 
     return decompositions
 

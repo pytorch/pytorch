@@ -337,7 +337,7 @@ def _parallelize_multihead_attn(
 
     if not isinstance(parallel_style, PairwiseParallel):
         raise NotImplementedError(
-            "Only support PairwiseParallel for Multihead Attention" " parallelization."
+            "Only support PairwiseParallel for Multihead Attention parallelization."
         )
 
     if device_mesh.ndim > 1:
