@@ -11,6 +11,7 @@ from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     requires_nccl_version,
@@ -270,6 +271,26 @@ class TestCommunicationHooks(FSDPTest):
             "^register_comm_hook can only be called on a root instance.$",
         ):
             submodules[1].register_comm_hook(dummy_state, dummy_hook)
+
+    @skip_if_lt_x_gpu(2)
+    def test_registering_hook_hybrid_strategy(self):
+        for sharding_strategy in (
+            ShardingStrategy.HYBRID_SHARD,
+            ShardingStrategy._HYBRID_SHARD_ZERO2,
+        ):
+            model = Net(False, None, None).cuda()
+            fsdp_model = FSDP(
+                model,
+                auto_wrap_policy=ModuleWrapPolicy({nn.Linear}),
+                sharding_strategy=sharding_strategy,
+            )
+            dummy_state = DummyState(process_group=None, noise=1234)
+            dummy_hook = DummyHook.dummy_hook_for_sharded_fsdp
+            with self.assertRaisesRegex(
+                AssertionError,
+                "Communication hook is not supported for hybrid strategies",
+            ):
+                fsdp_model.register_comm_hook(dummy_state, dummy_hook)
 
     @skip_if_lt_x_gpu(2)
     @parametrize(

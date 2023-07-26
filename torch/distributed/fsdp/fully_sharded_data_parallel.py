@@ -1943,7 +1943,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             )
         for fsdp_state in traversal_utils._get_fsdp_states(self):
             if fsdp_state.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
-                raise ValueError(
+                raise AssertionError(
                     f"Communication hook is not supported for hybrid strategies: {fsdp_state.sharding_strategy}"
                 )
             if fsdp_state._comm_hook is not None:
