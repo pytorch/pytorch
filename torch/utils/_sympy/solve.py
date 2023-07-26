@@ -45,7 +45,7 @@ def try_solve(
             # Stop if there was no change in this trial.
             if trial == e:
                 break
-            e = trial
+            e = trial  # type: ignore[assignment]
 
         # Return if we were able to isolate 'thing' on the left-hand side.
         if isinstance(e, sympy.Rel) and e.lhs == thing:
