@@ -1014,9 +1014,6 @@ def compile_fx(
     fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
 
     if config.freezing and not torch.is_grad_enabled():
-        decompositions = dict(decompositions)
-        del decompositions[torch.ops.aten._native_batch_norm_legit_no_training.default]
-
         inference_compiler = functools.partial(
             fw_compiler_freezing,
             dynamo_model=model_,

@@ -10,7 +10,6 @@ static struct PyModuleDef _module =
 
 namespace torch {
 namespace dynamo {
-using torch::dynamo::autograd::torch_c_dynamo_compiled_autograd_init;
 
 void initDynamoBindings(PyObject* torch) {
   PyObject* dynamo = PyModule_Create(&_module);
