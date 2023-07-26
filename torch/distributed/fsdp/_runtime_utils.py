@@ -875,9 +875,9 @@ def _accumulate_sharded_grad(
 ) -> torch.Tensor:
     flat_param = handle.flat_param
     _cast_grad_to_param_dtype(state, sharded_grad, flat_param)
-    # Save the sharded gradient in `_saved_grad_shard` to support
-    # gradient accumulation -- for multiple backwards, the gradient
-    # reductions may happen in arbitrary order
+    # Save the sharded gradient in `_saved_grad_shard` to support gradient
+    # accumulation -- for multiple backwards, the gradient reductions may
+    # happen in arbitrary order
     accumulate_grad = hasattr(flat_param, "_saved_grad_shard")
     if accumulate_grad:
         _check_grad_to_accumulate(sharded_grad, flat_param._saved_grad_shard)
@@ -896,8 +896,8 @@ def _reduce_grad_no_shard(state: _FSDPState, handle: FlatParamHandle) -> torch.T
         _div_if_needed(flat_param.grad, state._gradient_postdivide_factor)
     else:
         state._comm_hook(state._comm_hook_state, flat_param.grad)
-    # For `NO_SHARD`, we can keep the low precision gradients by
-    # simply omitting the cast altogether
+    # For `NO_SHARD`, we can keep the low precision gradients by simply
+    # omitting the cast altogether
     if not handle._keep_low_precision_grads:
         _cast_grad_to_param_dtype(state, flat_param.grad, flat_param)
     grad_to_offload = flat_param.grad.data
@@ -946,9 +946,9 @@ def _post_backward_use_sharded_grad_views(handle: FlatParamHandle):
                 orig_param, "_in_backward_optimizers"
             ):
                 # TODO (rohan-varma): For CPU offload, this unfortunately
-                # operates on CPU, because the parameters and gradients
-                # have already been offloaded. We should run this on
-                # GPU after refactoring.
+                # operates on CPU because the parameters and gradients have
+                # already been offloaded. We should run this on GPU after
+                # refactoring.
                 for optim in orig_param._in_backward_optimizers:
                     optim.step()
 
