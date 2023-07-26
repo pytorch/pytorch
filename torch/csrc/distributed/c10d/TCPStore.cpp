@@ -239,8 +239,9 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     : Store{opts.timeout},
       addr_{std::move(host)},
       numWorkers_{opts.numWorkers} {
-  if (opts.useLibUV && !::c10d::detail::is_libuv_tcpstore_backend_available()) {
-    throw std::invalid_argument(
+  if (opts.useLibUV) {
+    TORCH_CHECK(
+        ::c10d::detail::is_libuv_tcpstore_backend_available(),
         "use_libuv was requested but PyTorch was build without libuv support");
   }
 
