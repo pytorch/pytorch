@@ -475,7 +475,10 @@ def _pre_forward_unshard(
         _unshard(state, handle, state._unshard_stream, state._pre_unshard_stream)
     state._needs_pre_forward_unshard[handle] = False
     state._device_handle.current_stream().wait_stream(state._unshard_stream)
-    _prefetch_handle(state, handle, _PrefetchMode.FORWARD)
+    with torch.profiler.record_function(
+        "FullyShardedDataParallel._pre_forward_prefetch"
+    ):
+        _prefetch_handle(state, handle, _PrefetchMode.FORWARD)
 
 
 @no_type_check
@@ -716,7 +719,10 @@ def _pre_backward_hook(
         # Set this to `False` to ensure that a mistargeted prefetch does not
         # actually unshard these handles
         state._needs_pre_backward_unshard[handle] = False
-        _prefetch_handle(state, handle, _PrefetchMode.BACKWARD)
+        with torch.profiler.record_function(
+            "FullyShardedDataParallel._pre_backward_prefetch"
+        ):
+            _prefetch_handle(state, handle, _PrefetchMode.BACKWARD)
         handle.prepare_gradient_for_backward()
         state._ran_pre_backward_hook[handle] = True
 
@@ -924,7 +930,10 @@ def _post_backward_reshard(
     # TODO: Post-backward prefetching does not support the multiple handles
     # per module case since the post-backward hook runs per handle, not per
     # group of handles.
-    _prefetch_handle(state, handle, _PrefetchMode.BACKWARD)
+    with torch.profiler.record_function(
+        "FullyShardedDataParallel._post_backward_prefetch"
+    ):
+        _prefetch_handle(state, handle, _PrefetchMode.BACKWARD)
 
 
 @no_type_check
