@@ -1157,8 +1157,6 @@ def wrap_fx_proxy_cls(
     from ..symbolic_convert import InstructionTranslatorBase
 
     assert isinstance(tx, InstructionTranslatorBase)
-    if "guards" in options and options["guards"] is not None:
-        tx.output.guards.update(options["guards"])
 
     assert "example_value" not in proxy.node.meta, f"{proxy.node.meta['example_value']}"
 

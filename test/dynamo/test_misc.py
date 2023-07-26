@@ -5391,6 +5391,15 @@ def fn():
                 fn(torch.rand(2, 3), torch.rand(2, 3))
                 fn(torch.rand(2, 3), (1, 2, 3))
 
+    def test_error_on_recompile_dynamic(self):
+        @torch._dynamo.optimize("eager")
+        def fn(a, b):
+            return b + 2
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(0), torch.randn(2))
+            fn(torch.randn(2), torch.randn(2))
+
     @expectedFailureDynamic
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     def test_compile_profiler(self):
