@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import unittest
-from collections import deque
+from collections import deque, OrderedDict
 from contextlib import ContextDecorator
 from copy import deepcopy
 from typing import Tuple
@@ -180,7 +180,7 @@ class TestCheckpoint(TestCase):
         for p1, p2 in zip(net1.parameters(), net2.parameters()):
             self.assertEqual(p1.grad, p2.grad)
 
-    def test_raise_in_forward(self):
+    def test_clears_state_on_error_in_forward(self):
         class MyModel(torch.nn.Module):
             def __init__(self, raise_in_recomp):
                 super().__init__()
@@ -199,14 +199,15 @@ class TestCheckpoint(TestCase):
                     return self.a(x)
 
         m = MyModel(raise_in_recomp=True)
-        checkpoint(m)
+        m_seq = torch.nn.Sequential(OrderedDict({"m": m}))
+        checkpoint(m_seq.m)
         inp = torch.randn(1, 2)
+        out = m_seq(inp).sum()
         # Should raise in forward recomputation
-        out = m(inp).sum()
-
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "foo"):
             out.backward()
 
+        # Check that _ac_generator is cleared out
         self.assertEqual(None, checkpoint.state(m)._ac_generator)
 
         m = MyModel(raise_in_recomp=False)
