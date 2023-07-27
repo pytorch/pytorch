@@ -46,7 +46,7 @@ class TestRuntime(FSDPTest):
 
     @property
     def world_size(self) -> int:
-        return 2
+        return torch.cuda.device_count()
 
     def _init_models_and_optims(
         self,
@@ -108,6 +108,7 @@ class TestRuntime(FSDPTest):
                     ShardingStrategy.FULL_SHARD,
                     ShardingStrategy.SHARD_GRAD_OP,
                     ShardingStrategy.NO_SHARD,
+                    ShardingStrategy.HYBRID_SHARD,
                 ],
             },
             self._test_training,
@@ -116,6 +117,13 @@ class TestRuntime(FSDPTest):
     def _test_training(
         self, fsdp_wrap_mode: FSDPWrapMode, sharding_strategy: ShardingStrategy
     ):
+        if (
+            sharding_strategy
+            in [ShardingStrategy.HYBRID_SHARD, ShardingStrategy._HYBRID_SHARD_ZERO2]
+            and fsdp_wrap_mode == FSDPWrapMode.MANUAL_WRAP
+        ):
+            return  # TODO: manual wrap + HSDP requires explicit specification of pg
+
         device = torch.device("cuda")
         (
             composable_module,

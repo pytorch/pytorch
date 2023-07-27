@@ -333,10 +333,15 @@ class OptimizeForInferenceTemplate(TestCase):
 
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self, groups):
                 super().__init__()
                 self.kv = torch.nn.Conv2d(
-                    256, 384, kernel_size=(1, 1), stride=(1, 1), bias=False
+                    256,
+                    384,
+                    kernel_size=(1, 1),
+                    stride=(1, 1),
+                    bias=False,
+                    groups=groups,
                 )
 
             def forward(self, x):
@@ -356,16 +361,16 @@ class OptimizeForInferenceTemplate(TestCase):
                 )
                 return clone
 
-        mod = Model().to(self.device).eval()
-
         @torch.compile()
         def foo(mod, inp):
             return mod(inp)
 
         with torch.no_grad():
             x = torch.randn(8, 256, 16, 16).to(self.device)
-            mod_eager = mod(x)
-            self.assertEqual(foo(mod, x), mod_eager)
+            for groups in [1, 2]:
+                mod = Model(groups).to(self.device).eval()
+                mod_eager = mod(x)
+                self.assertEqual(foo(mod, x), mod_eager)
 
     def test_conv_layout_convert_with_view(self):
         class Model(torch.nn.Module):

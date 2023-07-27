@@ -2699,6 +2699,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, "size mismatch for fc1.weight: copying a param with shape"):
             net2.load_state_dict(state_dict, strict=False, assign=True)
 
+    def test_load_state_dict_warn_assign(self):
+        with torch.device('meta'):
+            m = torch.nn.Linear(3, 5)
+        state_dict = m.state_dict()
+        state_dict['weight'] = torch.empty_like(state_dict['weight'], device='cpu')
+        with self.assertWarnsRegex(UserWarning, "for weight: copying from a non-meta parameter in the checkpoint to a meta"):
+            m.load_state_dict(state_dict)
+
     def test_extra_state_missing_set_extra_state(self):
 
         class MyModule(torch.nn.Module):
