@@ -450,6 +450,9 @@ INTERNAL_CHANGES_CHECKRUN_NAME = "Meta Internal-Only Changes Check"
 HAS_NO_CONNECTED_DIFF_TITLE = (
     "There is no internal Diff connected, this can be merged now"
 )
+# This could be set to -1 to ignore all flaky and broken trunk failures. On the
+# other hand, using a large value like 10 here might be useful in sev situation
+IGNORABLE_FAILED_CHECKS_THESHOLD = 10
 
 
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
@@ -1347,7 +1350,9 @@ def find_matching_merge_rule(
         pending_checks, failed_checks = categorize_checks(
             checks,
             required_checks,
-            ok_failed_checks_threshold=3 if rule.ignore_flaky_failures else 0,
+            ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD
+            if rule.ignore_flaky_failures
+            else 0,
         )
 
         hud_link = f"https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}"
@@ -1726,11 +1731,16 @@ def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
 def categorize_checks(
     check_runs: JobNameToStateDict,
     required_checks: List[str],
-    ok_failed_checks_threshold: int = 3,
+    ok_failed_checks_threshold: Optional[int] = None,
 ) -> Tuple[
     List[Tuple[str, Optional[str], Optional[int]]],
     List[Tuple[str, Optional[str], Optional[int]]],
 ]:
+    """
+    Categories all jobs into the list of pending and failing jobs. All known flaky
+    failures and broken trunk are ignored by defaults when ok_failed_checks_threshold
+    is not set (unlimited)
+    """
     pending_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
     failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
     ok_failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
@@ -1770,12 +1780,16 @@ def categorize_checks(
             + ", ".join([x[0] for x in ok_failed_checks])
             + (
                 f" but this is greater than the threshold of {ok_failed_checks_threshold} so merge will fail"
-                if len(ok_failed_checks) > ok_failed_checks_threshold
+                if ok_failed_checks_threshold is not None
+                and len(ok_failed_checks) > ok_failed_checks_threshold
                 else ""
             )
         )
 
-    if len(ok_failed_checks) > ok_failed_checks_threshold:
+    if (
+        ok_failed_checks_threshold is not None
+        and len(ok_failed_checks) > ok_failed_checks_threshold
+    ):
         failed_checks = failed_checks + ok_failed_checks
 
     return (pending_checks, failed_checks)
@@ -1839,7 +1853,11 @@ def merge(
 
     if ignore_current:
         checks = pr.get_checkrun_conclusions()
-        _, failing = categorize_checks(checks, list(checks.keys()))
+        _, failing = categorize_checks(
+            checks,
+            list(checks.keys()),
+            ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD,
+        )
         ignore_current_checks_info = failing
 
     gh_post_pr_comment(
@@ -1908,7 +1926,9 @@ def merge(
                 checks,
                 required_checks
                 + [x for x in checks.keys() if x not in required_checks],
-                ok_failed_checks_threshold=3 if ignore_flaky_failures else 0,
+                ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD
+                if ignore_flaky_failures
+                else 0,
             )
             # HACK until GitHub will be better about surfacing those
             startup_failures = filter_checks_with_lambda(
