@@ -1238,11 +1238,6 @@ if(USE_CUDNN)
   target_include_directories(torch::cudnn INTERFACE ${CUDNN_FRONTEND_INCLUDE_DIR})
 endif()
 
-# ---[ cuSPARSELt
-if(USE_CUSPARSELT)
-  target_include_directories(torch::cusparselt INTERFACE ${CUSPARSELT_INCLUDE_DIR})
-endif()
-
 # ---[ HIP
 if(USE_ROCM)
   # This prevents linking in the libtinfo from /opt/conda/lib which conflicts with ROCm libtinfo.

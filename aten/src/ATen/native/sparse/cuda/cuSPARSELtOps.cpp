@@ -12,23 +12,43 @@
 #include <cstdint>
 #include <Exceptions.h>
 
+#if !AT_CUSPARSELT_ENABLED()
 
-#if AT_CUSPARSELT_ENABLED()
+namespace at{
+namespace native{
+
+at::Tensor _cslt_compress(const Tensor& sparse_input){
+    TORCH_CHECK(false, "cuSPARSELT not supported on your machine.");
+}
+
+at::Tensor _cslt_sparse_mm(
+    const Tensor& compressed_A,
+    const Tensor& dense_B,
+    const c10::optional<Tensor>& bias_opt,
+    bool transpose_result)
+{
+    TORCH_CHECK(false, "cuSPARSELT not supported on your machine.");
+}
+
+} // namespace native
+} //namespace at
+
+#else // No cuSPARSELt support, throw error if these functions are called.
+
 #include <cusparseLt.h>
-#endif
 
 namespace at {
 namespace native {
 
-#if AT_CUSPARSELT_ENABLED()
 cusparseLtHandle_t handle;
-#endif
+bool handle_initialized = false;
 
 at::Tensor _cslt_compress(const Tensor& sparse_input)
 {
-#if AT_CUSPARSELT_ENABLED()
-
-    TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
+    if (!handle_initialized){
+        TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
+        handle_initialized = true;
+    }
     // create sparse descriptor, dtype
     cusparseLtMatDescriptor_t sparse_input_descriptor;
     cudaDataType type;
@@ -52,6 +72,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
             type = CUDA_R_32F;
             break;
         default:
+            TORCH_CHECK(false, "Unsupported dtype for cuSPARSELt compressed matrix");
             break;
     }
 
@@ -92,9 +113,6 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         nullptr));
 
     return compressed_tensor;
-#else
-    TORCH_CHECK(false, "PyTorch must be compiled with cuSPARSELt to use _cslt_compress");
-#endif
 }
 
 
@@ -105,7 +123,10 @@ at::Tensor _cslt_sparse_mm(
     bool transpose_result
 )
 {
-#if AT_CUSPARSELT_ENABLED()
+  if (!handle_initialized){
+      TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
+      handle_initialized = true;
+  }
   // cupsarselt constructs
   cusparseLtMatmulDescriptor_t matmul;
   cusparseLtMatmulPlan_t plan;
@@ -137,7 +158,7 @@ at::Tensor _cslt_sparse_mm(
         compute_type = CUSPARSE_COMPUTE_TF32;
         break;
     default:
-        TORCH_CHECK(false, "Unsupported dtype for cuSPARSE compressed matrix multiplication.")
+        TORCH_CHECK(false, "Unsupported dtype for cuSPARSE compressed matrix multiplication.");
         break;
   }
 
@@ -165,7 +186,7 @@ at::Tensor _cslt_sparse_mm(
       &dense_input_descriptor,
       (dense_B.is_contiguous()) ? k : n,
       (dense_B.is_contiguous()) ? n : k,
-      k,
+      (dense_B.is_contiguous()) ? n : k,
       16,
       type,
       CUSPARSE_ORDER_ROW));
@@ -233,18 +254,18 @@ at::Tensor _cslt_sparse_mm(
       0));
 
 
+  //destroy descriptors
   TORCH_CUDASPARSE_CHECK(
       cusparseLtMatDescriptorDestroy(&sparse_input_descriptor));
   TORCH_CUDASPARSE_CHECK(
       cusparseLtMatDescriptorDestroy(&dense_input_descriptor));
   TORCH_CUDASPARSE_CHECK(cusparseLtMatDescriptorDestroy(&res_descriptor));
+  // destroy plan
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulPlanDestroy(&plan));
-
   return res;
-#else
-        TORCH_CHECK(false, "PyTorch ust be compiled with cuSPARSELt to use _cslt_sparse_mm");
-#endif
 }
 
 } // namespace native
 } // namespace at
+
+#endif

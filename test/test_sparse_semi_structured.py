@@ -236,7 +236,7 @@ class TestSparseSemiStructured(TestCase):
         Test nn.Linear has the same numerics
         """
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
-        input = torch.rand(8, 128, 128, device=device).half()
+        input = torch.rand(64, 128, 128, device=device).half()
         model = nn.Linear(128, 128).to(device).half()
         m, n = model.weight.shape
         mask = rand_sparse_semi_structured_mask(m, n, device=device, dtype=torch.bool)
