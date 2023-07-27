@@ -7,7 +7,7 @@ __all__ = ['no_grad', 'enable_grad', 'set_grad_enabled',
            'inference_mode', 'set_multithreading_enabled']
 
 class no_grad(_DecoratorContextManager):
-    r"""Context-manager that disabled gradient calculation.
+    r"""Context-manager that disables gradient calculation.
 
     Disabling gradient calculation is useful for inference, when you are sure
     that you will not call :meth:`Tensor.backward()`. It will reduce memory

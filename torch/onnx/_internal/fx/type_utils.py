@@ -15,6 +15,7 @@ from typing import (
 )
 
 import torch
+from torch._subclasses import fake_tensor
 
 if TYPE_CHECKING:
     import onnx.defs.OpSchema.AttrType  # type: ignore[import]
@@ -36,6 +37,10 @@ def is_torch_complex_dtype(tensor: TensorLike) -> bool:
 
 def from_complex_to_float(dtype: torch.dtype) -> torch.dtype:
     return _COMPLEX_TO_FLOAT[dtype]
+
+
+def from_sym_value_to_torch_dtype(sym_value: SYM_VALUE_TYPE) -> torch.dtype:
+    return _SYM_TYPE_TO_TORCH_DTYPE[type(sym_value)]
 
 
 def from_torch_dtype_to_onnx_dtype_str(dtype: Union[torch.dtype, type]) -> Set[str]:
@@ -102,6 +107,11 @@ _COMPLEX_TO_FLOAT: Dict[torch.dtype, torch.dtype] = {
     torch.complex64: torch.float32,
     torch.complex128: torch.float64,  # NOTE: ORT doesn't support torch.float64
 }
+_SYM_TYPE_TO_TORCH_DTYPE = {
+    torch.SymInt: torch.int64,
+    torch.SymFloat: torch.float32,
+    torch.SymBool: torch.bool,
+}
 
 _TORCH_DTYPE_TO_ABBREVIATION = {
     torch.bfloat16: "bf16",
@@ -119,6 +129,8 @@ _TORCH_DTYPE_TO_ABBREVIATION = {
     torch.uint8: "u8",
 }
 
+SYM_VALUE_TYPE = Union[torch.SymInt, torch.SymFloat, torch.SymBool]
+META_VALUE_TYPE = Union[fake_tensor.FakeTensor, SYM_VALUE_TYPE]
 # NOTE: Belows are from torch/fx/node.py
 BaseArgumentTypes = Union[
     str,
