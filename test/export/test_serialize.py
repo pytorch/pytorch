@@ -199,39 +199,34 @@ class TestDeserialize(TestCase):
 
         self.assertEqual(len(ep.graph.nodes), len(deserialized_ep.graph.nodes))
         for node1, node2 in zip(ep.graph.nodes, deserialized_ep.graph.nodes):
-            # Check "val" metadata
-            val1 = node1.meta.get("val", None)
-            val2 = node2.meta.get("val", None)
+            self.assertEqual(node1.op, node2.op)
+            if node1.op == "call_function":
+                # Check "val" metadata
+                val1 = node1.meta.get("val", None)
+                val2 = node2.meta.get("val", None)
+                if val1 is None or val2 is None:
+                    # Either both are None
+                    self.assertEqual(val1, val2)
+                elif isinstance(val1, FakeTensor) and isinstance(val2, FakeTensor):
+                    # Or both are fake tensors with the same shape/dtype
+                    self.assertEqual(len(val1.shape), len(val2.shape))
+                    for s1, s2 in zip(val1.shape, val2.shape):
+                        if is_concrete_int(s1) and is_concrete_int(s2):
+                            self.assertEqual(s1, s2)
+                        else:
+                            self.assertEqual(str(s1), str(s2))
+                    self.assertEqual(val1.dtype, val2.dtype)
+                elif isinstance(val1, list) and isinstance(val2, list):
+                    # Or both are fake tensors lists with one element and with the
+                    # same shape/dtype
+                    self.assertTrue(len(val1) == 1 and len(val2) == 1)
+                    self.assertEqual(val1[0].shape, val2[0].shape)
+                    self.assertEqual(val1[0].dtype, val2[0].dtype)
+                else:
+                    # For expressions like 's0 < 10' can only compare through string
+                    self.assertEqual(str(val1), str(val2))
 
-            if val1 is None or val2 is None:
-                # Either both are None
-                self.assertEqual(val1, val2)
-            elif isinstance(val1, FakeTensor) and isinstance(val2, FakeTensor):
-                # Or both are fake tensors with the same shape/dtype
-                self.assertEqual(len(val1.shape), len(val2.shape))
-                for s1, s2 in zip(val1.shape, val2.shape):
-                    if is_concrete_int(s1) and is_concrete_int(s2):
-                        self.assertEqual(s1, s2)
-                    else:
-                        self.assertEqual(str(s1), str(s2))
-                self.assertEqual(val1.dtype, val2.dtype)
-            elif isinstance(val1, list) and isinstance(val2, list):
-                # Or both are fake tensors lists with one element and with the
-                # same shape/dtype
-                self.assertTrue(len(val1) == 1 and len(val2) == 1)
-                self.assertEqual(val1[0].shape, val2[0].shape)
-                self.assertEqual(val1[0].dtype, val2[0].dtype)
-            else:
-                # For expressions like 's0 < 10' can only compare through string
-                self.assertEqual(str(val1), str(val2))
-
-            # Check "stack_trace" metadata
-            if "None" in node1.meta.get("stack_trace"):
-                self.assertTrue(
-                    node2.meta.get("stack_trace") is None
-                    or "None" in node2.meta.get("stack_trace")
-                )
-            else:
+                # Check "stack_trace" metadata
                 self.assertEqual(
                     node1.meta.get("stack_trace", None),
                     node2.meta.get("stack_trace", None),
