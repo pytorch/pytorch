@@ -65,7 +65,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
 
-        exported = torch._dynamo.export(func)
+        exported = torch._dynamo.export(func)()
         out_graph = exported[0]
 
         dynamo_result = out_graph()
@@ -945,7 +945,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 out = self.block(x)
                 return out
 
-        exported = torch._dynamo.export(MyModule())(inp, aten_graph=False)
+        exported = torch._dynamo.export(MyModule(), aten_graph=False)(inp)
         out_graph = exported[0]
 
         for node in out_graph.graph.nodes:
@@ -989,7 +989,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 return out
 
         m = MyModule()
-        exported = torch._dynamo.export(m)(inp, aten_graph=False)
+        exported = torch._dynamo.export(m, aten_graph=False)(inp)
         out_graph = exported[0]
 
         attr_access_count = 0
@@ -1787,7 +1787,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(count, 2)
 
-        gm_torch_mode, _ = torch._dynamo.export(f)(torch.randn(4, 5), aten_graph=False)
+        gm_torch_mode, _ = torch._dynamo.export(f, aten_graph=False)(torch.randn(4, 5))
 
         # In torch mode, the graph should contain 3 getitem methods
         # one for x.shape[0]-2 and one for x.shape[1]-1 and one for slice
@@ -3001,7 +3001,7 @@ def forward(self, x):
             x = torch.randn(3)
 
             for aten_graph in [True, False]:
-                gm, _ = torch._dynamo.export(f)(x, aten_graph=aten_graph)
+                gm, _ = torch._dynamo.export(f, aten_graph=aten_graph)(x)
                 self.assertTrue(
                     isinstance(gm, torch.fx.GraphModule),
                     msg="test_capture_symbolic_tracing_simple_within_fake_mode_aten_graph_"
@@ -3083,7 +3083,7 @@ def forward(self, x):
 
             # Export the model with fake inputs and parameters
             for aten_graph in [True, False]:
-                graph_module, _ = torch._dynamo.export(model)(x, aten_graph=aten_graph)
+                graph_module, _ = torch._dynamo.export(model, aten_graph=aten_graph)(x)
                 self.assertTrue(
                     isinstance(graph_module, torch.fx.GraphModule),
                     msg="test_capture_symbolic_tracing_within_fake_mode_aten_graph_"
@@ -3122,7 +3122,7 @@ def forward(self, x):
 
                 return (cond(x.shape[0] > 4, true_fn, false_fn, [x]),)
 
-        gm, _ = torch._dynamo.export(M())(torch.ones(6, 4), aten_graph=False)
+        gm, _ = torch._dynamo.export(M(), aten_graph=False)(torch.ones(6, 4))
         self.assertEqual(gm(torch.ones(6, 4)), M()(torch.ones(6, 4)))
         self.assertEqual(gm(torch.ones(3, 4)), M()(torch.ones(3, 4)))
 
@@ -3164,7 +3164,7 @@ def forward(self, x):
 
                 return (cond(x.shape[0] > 4, true_fn, false_fn, [x]),)
 
-        gm, _ = torch._dynamo.export(M())(torch.ones(6, 4), aten_graph=False)
+        gm, _ = torch._dynamo.export(M(), aten_graph=False)(torch.ones(6, 4))
         self.assertEqual(gm(torch.ones(6, 4)), M()(torch.ones(6, 4)))
         self.assertEqual(gm(torch.ones(5, 4)), M()(torch.ones(5, 4)))
         self.assertEqual(gm(torch.ones(3, 4)), M()(torch.ones(3, 4)))
