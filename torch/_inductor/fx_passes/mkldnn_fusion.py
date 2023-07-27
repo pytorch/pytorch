@@ -848,20 +848,23 @@ if torch._C._has_mkldnn:
                 )
                 is_bf16_weight = weight.meta.get("val").dtype == torch.bfloat16
                 batch_size = input.meta.get("val").shape[0]
-                if not free_symbols(batch_size):
-                    packed_weight_inputs = (transpose_weight_node, batch_size)
-                    packed_weight_op = (
-                        mkldnn._reorder_linear_weight
-                        if is_bf16_weight
-                        else torch.ops.mkl._mkl_reorder_linear_weight
-                    )
-                    packed_weight_node = graph.create_node(
-                        "call_function", packed_weight_op, args=packed_weight_inputs
-                    )
-                else:
-                    assert is_bf16_weight
-                    # For dynamic shape case, we need to pack weight in runtime.
-                    packed_weight_node = transpose_weight_node
+                if not is_bf16_weight:
+                    assert not free_symbols(batch_size)
+                # For bfloat dynamic shape path, using a dummy input to pack weight for a better performance.
+                packed_weight_inputs = (
+                    transpose_weight_node,
+                    None if free_symbols(batch_size) else batch_size,
+                )
+                packed_weight_inputs = (transpose_weight_node, batch_size)
+                packed_weight_op = (
+                    mkldnn._reorder_linear_weight
+                    if is_bf16_weight
+                    else torch.ops.mkl._mkl_reorder_linear_weight
+                )
+                packed_weight_node = graph.create_node(
+                    "call_function", packed_weight_op, args=packed_weight_inputs
+                )
+
                 packed_linear_inputs = (input, packed_weight_node)
                 if is_bf16_weight:
                     packed_linear_inputs += (bias, "none", [], "")
