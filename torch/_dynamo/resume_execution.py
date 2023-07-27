@@ -437,6 +437,8 @@ class ContinueExecutionCache:
                 if inst.offset == target.offset:
                     break
                 inst.starts_line = None
+                if sys.version_info >= (3, 11):
+                    inst.positions = None
 
             if cleanup:
                 prefix.extend(cleanup)
