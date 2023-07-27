@@ -159,7 +159,6 @@ def mps_ops_grad_modifier(ops):
 
         # See https://github.com/pytorch/pytorch/issues/106112 for more information
         'cumprod': [torch.float32],
-        'masked.cumprod': [torch.float32],
     }
 
     XPASSLIST_GRAD = {
