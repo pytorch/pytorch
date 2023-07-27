@@ -1463,23 +1463,6 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(output_cpu, output_mps)
         self.assertEqual(output_cpu.size(), output_mps.size())
 
-    def test_cumprod_backwards_mps(self, np_features, negative_slope, device):
-        # TODO PETER
-        cpu_x = torch.from_numpy(np_features).requires_grad_()
-        mps_x = torch.from_numpy(np_features).to('mps').requires_grad_()
-        relu_op = torch.nn.LeakyReLU(negative_slope)
-
-        cpu_leaky_relu = relu_op(cpu_x)
-        mps_leaky_relu = relu_op(mps_x)
-        torch.testing.assert_close(cpu_leaky_relu, mps_leaky_relu.to('cpu'))
-
-        # test backward pass
-        cpu_grad = torch.ones_like(cpu_leaky_relu)
-        mps_grad = cpu_grad.to('mps')
-        cpu_leaky_relu.backward(gradient=cpu_grad)
-        mps_leaky_relu.backward(gradient=mps_grad)
-        torch.testing.assert_close(cpu_x.grad, mps_x.grad.to('cpu'))
-
     def test_baddbmm(self):
         def helper(input_shape, batch1_shape, batch2_shape):
             M_cpu = torch.randn(input_shape)
@@ -10572,8 +10555,6 @@ class TestConsistency(TestCaseMPS):
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 
-    import os
-
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
     def test_output_grad_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
@@ -10672,9 +10653,7 @@ class TestConsistency(TestCaseMPS):
                 atol = 1e-3
                 rtol = 1e-3
 
-            print("got hereeee2")
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
-            print("got hereeee3")
 
 
 class TestErrorInputs(TestCase):
