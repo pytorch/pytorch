@@ -316,7 +316,9 @@ not_implemented_re = re.compile(
                 "has no attribute '_compiled_autograd_key'",
                 # make_fx() tracing errors:
                 "Cannot access storage of BatchedTensorImpl",
+                "Cannot access storage of SparseTensorImpl",
                 "data dependent operator:",
+                "inductor does not support",
             ],
         )
     )
@@ -327,15 +329,12 @@ skip_re = re.compile(r"^test_(sparse|profiler|gradcheck|checkpoint|named_tensor)
 
 # Bugs needing investigation:
 skips = {
-    "test_accumulate_grad_tensor_reference",  # torch._dynamo.exc.BackendCompilerFailed: backend='inner_compiler' rai
     "test_calculate_shape_util",  # AssertionError: NYI: aten._nested_tensor_from_tensor_list.default
     "test_current_graph_task_execution_order",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function <
     "test_current_node",  # RuntimeError: aten::detach() Expected a value of type 'Tensor' for argument 'self' but in
     "test_grad_unreachable_discovery",  # RuntimeError: tensor does not have a device
     "test_grad_unreachable",  # RuntimeError: tensor does not have a device
     "test_graph_save_on_cpu_cuda",  # AssertionError: 0 not greater than 0
-    "test_graph_save_on_cpu",  # torch._dynamo.exc.BackendCompilerFailed: backend='inner_compiler' raised:
-    "test_hooks_cpp",  # torch._dynamo.exc.BackendCompilerFailed: backend='inner_compiler' raised:
     "test_index_backward_does_not_save_tensor",  # RuntimeError: expected int but got i0
     "test_input_buffer_accum",  # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
     "test_integer_outputs",  # TypeError: unsupported operand type(s) for +: 'OpOverload' and 'str'
@@ -349,7 +348,6 @@ skips = {
     "test_setitem_mask",  # torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode: It appears that you're
     "test_tensor_hooks_inplace_over_view",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_tensor_hooks_inplace",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
-    "test_to_sparse_backward",  # torch._dynamo.exc.BackendCompilerFailed: backend='inner_compiler' raised:
     "test_wrapped_number_saved_variable_hooks",  # RuntimeError: this hook should not be called
 }
 
