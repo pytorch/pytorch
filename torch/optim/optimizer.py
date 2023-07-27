@@ -9,7 +9,6 @@ from typing import (
     Callable,
     DefaultDict,
     Dict,
-    OrderedDict,
     Hashable,
     Iterable,
     List,
@@ -232,10 +231,10 @@ class Optimizer:
 
     _optimizer_step_pre_hooks: Dict[int, OptimizerPreHook]
     _optimizer_step_post_hooks: Dict[int, OptimizerPostHook]
-    _optimizer_state_dict_pre_hooks: OrderedDict[int, Callable[["Optimizer"], None]]
-    _optimizer_state_dict_post_hooks: OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]
-    _optimizer_load_state_dict_pre_hooks: OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]
-    _optimizer_load_state_dict_post_hooks: OrderedDict[int, Callable[["Optimizer"], None]]
+    _optimizer_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
+    _optimizer_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
+    _optimizer_load_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
+    _optimizer_load_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
 
     def __init__(self, params: params_t, defaults: Dict[str, Any]) -> None:
         torch._C._log_api_usage_once("python.optimizer")
@@ -600,7 +599,7 @@ class Optimizer:
         :meth:`~torch.optim.Optimizer.load_state_dict` is called. It should have the
         following signature::
 
-            hook(optimizer, state_dict) -> None or state_dict
+            hook(optimizer, state_dict) -> state_dict or None
 
         The ``optimizer`` argument is the optimizer instance being used and the
         ``state_dict`` argument is a shallow copy of the ``state_dict`` the user
