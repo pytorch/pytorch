@@ -2990,62 +2990,6 @@ Target Guards:
         self.divisible = new_divisible
 
     @_lru_cache
-    def try_isolate_symbol_lhs(self, expr: "sympy.Expr") -> "sympy.Expr":
-        def get_added_const(expr):
-            """
-            Returns an integer constant being added at the top-level of this expression.
-            """
-            if isinstance(expr, sympy.Add):
-                for a in expr.args:
-                    if isinstance(a, sympy.Integer):
-                        return a
-            return None
-
-        # Move any constants in the left-hand side to the right-hand side.
-        if isinstance(expr, sympy.Rel):
-            lhs_const = get_added_const(expr.lhs)
-            if lhs_const is not None:
-                expr = type(expr)(expr.lhs - lhs_const, expr.rhs - lhs_const)  # type: ignore[arg-type]
-
-        # a // b == expr
-        # => a >= (b * expr) and a < ((b + 1) * expr)
-        if isinstance(expr, sympy.Eq) and isinstance(expr.lhs, FloorDiv):
-            numerator, denominator = expr.lhs.args
-            expr = sympy.And(
-                sympy.Ge(numerator, (expr.rhs * denominator)),  # type: ignore[arg-type]
-                sympy.Lt(numerator, ((expr.rhs + 1) * denominator))  # type: ignore[arg-type]
-            )
-        # a // b != expr
-        # => a < (b * expr) or a >= ((b + 1) * expr)
-        if isinstance(expr, sympy.Ne) and isinstance(expr.lhs, FloorDiv):
-            numerator, denominator = expr.lhs.args
-            expr = sympy.Or(
-                sympy.Lt(numerator, (expr.rhs * denominator)),  # type: ignore[arg-type]
-                sympy.Ge(numerator, ((expr.rhs + 1) * denominator))  # type: ignore[arg-type]
-            )
-
-        # The transformations below only work if b is positive.
-        # Note: we only have this information for constants.
-        def is_floordiv_with_positive_denominator(e) -> bool:
-            if not isinstance(e, FloorDiv):
-                return False
-            number = e.args[1]
-            return isinstance(number, sympy.Integer) and bool(number > 0)
-
-        # a // b > expr  => a >= (b + 1) * expr
-        # a // b >= expr => a >= b * expr
-        if isinstance(expr, (sympy.Gt, sympy.Ge)) and is_floordiv_with_positive_denominator(expr.lhs):
-            quotient = expr.rhs if isinstance(expr, sympy.Ge) else (expr.rhs + 1)  # type: ignore[arg-type]
-            expr = sympy.Ge(expr.lhs.args[0], (quotient * expr.lhs.args[1]))  # type: ignore[arg-type]
-        # a // b < expr  => a < b * expr
-        # a // b <= expr => a < (b + 1) * expr
-        if isinstance(expr, (sympy.Lt, sympy.Le)) and is_floordiv_with_positive_denominator(expr.lhs):
-            quotient = expr.rhs if isinstance(expr, sympy.Lt) else (expr.rhs + 1)  # type: ignore[arg-type]
-            expr = sympy.Lt(expr.lhs.args[0], (quotient * expr.lhs.args[1]))  # type: ignore[arg-type]
-
-        return expr
-
-    @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
         expr = self.replace(expr)
         # TODO it would seem that this pass is not necessary given the
@@ -3181,7 +3125,7 @@ Target Guards:
                 floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
                 if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
                     raise NotImplementedError
-                r = try_solve(expr, free[0])
+                r = try_solve(expr, free[0], floordiv_inequality=False)
                 if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
                     new_var = self._find(r[1])
                     self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
@@ -3193,7 +3137,7 @@ Target Guards:
         if expr.has(Mod):
             mod_expr = tuple(expr.atoms(Mod))[0]
             try:
-                r = try_solve(expr, mod_expr)
+                r = try_solve(expr, mod_expr, floordiv_inequality=False)
                 if r is not None and r[1] == 0:
                     self.divisible.add(mod_expr)
             except NotImplementedError:
