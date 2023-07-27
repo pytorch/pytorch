@@ -17,7 +17,7 @@ _reserved_namespaces = ['prim']
 
 def fallthrough_kernel():
     """
-    A dummy function to pass to Library.impl in order to register a fallthrough.
+    A dummy function to pass to ``Library.impl`` in order to register a fallthrough.
     """
     return
 
