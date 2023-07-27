@@ -747,7 +747,7 @@ inline static PyObject* eval_custom_code(
   // _PyFunction_CopyWithNewCode and _PyFrame_InitializeSpecials in particular
   PyFunctionObject* func;
   #else
-  PyFunctionObject* func = _PyFunction_CopyWithNewCode(orig_func, code);
+  PyFunctionObject* func = _PyFunction_CopyWithNewCode((PyFunctionObject*) frame->f_func, code);
   if (func == NULL) {
     return NULL;
   }
