@@ -3702,6 +3702,57 @@ TEST_F(VulkanAPITest, sub_to_scalar_wrapped) {
   ASSERT_TRUE(check);
 }
 
+void test_sum_dim(const at::IntArrayRef input_shape, const at::IntArrayRef dim_list) {
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::sum(in_cpu, dim_list);
+  const auto out_vulkan = at::sum(in_vulkan, dim_list);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    std::cout << "sum_dim test failed with input shape: "
+              << input_shape << " and dim_list: " << dim_list << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, sum_dim_2d) {
+  test_sum_dim({2, 3}, {-1});
+  test_sum_dim({2, 7}, {-2});
+}
+
+TEST_F(VulkanAPITest, sum_dim_3d) {
+  test_sum_dim({9, 7, 5}, {-1});
+  test_sum_dim({5, 7, 9}, {-2});
+  test_sum_dim({5, 7, 9}, {-3});
+
+  test_sum_dim({10, 7, 5}, {0, 1});
+  test_sum_dim({10, 7, 5}, {0, 2});
+  test_sum_dim({10, 7, 5}, {1, 2});
+}
+
+TEST_F(VulkanAPITest, sum_dim_4d) {
+  test_sum_dim({7, 9, 6, 5}, {-1});
+  test_sum_dim({6, 5, 7, 9}, {-2});
+  test_sum_dim({6, 5, 7, 9}, {-3});
+  test_sum_dim({6, 5, 7, 9}, {-4});
+
+  test_sum_dim({10, 7, 5, 6}, {0, 1});
+  test_sum_dim({10, 7, 5, 6}, {0, 2});
+  test_sum_dim({10, 7, 5, 6}, {0, 3});
+  test_sum_dim({10, 7, 5, 6}, {1, 2});
+  test_sum_dim({10, 7, 5, 6}, {1, 3});
+  test_sum_dim({10, 7, 5, 6}, {2, 3});
+
+  test_sum_dim({10, 7, 5, 6}, {0, 1, 2});
+  test_sum_dim({10, 7, 5, 6}, {0, 1, 3});
+  test_sum_dim({10, 7, 5, 6}, {0, 2, 3});
+  test_sum_dim({10, 7, 5, 6}, {3, 2, 1});
+}
+
 TEST_F(VulkanAPITest, uniform) {
   float a_min = -8.2f;
   float a_max = -1.4f;
