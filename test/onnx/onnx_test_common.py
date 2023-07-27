@@ -179,7 +179,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         input_kwargs: Optional[Mapping[str, _InputArgsType]] = None,
         rtol: Optional[float] = 1e-3,
         atol: Optional[float] = 1e-7,
-        opset_version: int = 18,
         has_mutation: bool = False,
         verbose: bool = False,
         additional_test_inputs: Optional[
@@ -199,7 +198,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             input_kwargs (Mapping[str, _InputArgsType]): torch input kwargs
             rtol (float, optional): relative tolerance. Defaults to 1e-3.
             atol (float, optional): absolute tolerance. Defaults to 1e-7.
-            opset_version (int, optional): ONNX opset version. Defaults to 18.
             has_mutation (bool, optional): Whether the model mutates its input or state.
                 `mutation` as `True` incurs extra overhead of cloning the inputs and model.
                 Defaults to False.
@@ -237,7 +235,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             *ref_input_args,
             **ref_input_kwargs,
             export_options=torch.onnx.ExportOptions(
-                opset_version=opset_version,
                 op_level_debug=self.op_level_debug,
                 dynamic_shapes=self.dynamic_shapes,
             ),

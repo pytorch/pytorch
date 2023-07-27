@@ -655,7 +655,7 @@ class Exporter:
 
         # Export TorchScript graph to ONNX ModelProto.
         onnx_model = onnxscript_graph.to_model_proto(
-            self.options.opset_version,
+            self.options.onnx_registry.opset_version,
             include_initializers=self.options.fake_context is None,
         )
 
@@ -804,7 +804,7 @@ def dynamo_export(
             torch.randn(2, 2, 2), # positional input 2
             my_nn_module_attribute="hello", # keyword input
             export_options=ExportOptions(
-                opset_version=17,
+                dynamic_shapes=True,
             )
         ).save("my_model.onnx")
     """
@@ -903,13 +903,16 @@ def pre_export_passes(
     options.fx_tracer.input_adapter.append_step(
         io_adapter.ConvertComplexToRealRepresentationInputStep()
     )
-    options.fx_tracer.output_adapter.append_step(
-        io_adapter.ConvertComplexToRealRepresentationOutputStep()
-    )
 
     # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
     # tensor, etc), we flatten the collection and register each element as output.
     options.fx_tracer.output_adapter.append_step(io_adapter.FlattenOutputStep())
+
+    # Output post-processing steps should happen after `FlattenOutputStep`.
+    options.fx_tracer.output_adapter.append_step(
+        io_adapter.ConvertComplexToRealRepresentationOutputStep()
+    )
+
     return module
 
 
