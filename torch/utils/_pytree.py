@@ -40,9 +40,8 @@ class TreeSpecSchema:
 # - unflatten_fn should take a flat list of values and some context
 #   (returned by flatten_fn). It returns the collection by reconstructing
 #   it from the list and the context.
-# - to_schema_fn takes a TreeSpec with the specific type and a list of its children
-#   TreeSpecs already converted to the TreeSpecSchema, and returns a
-#   TreeSpecSchema representation of this TreeSpec
+# - serialize_fn takes a TreeSpec, and returns a serialized string format of the
+#   type, and a serialized string format of the context
 # - maybe_from_schema_fn takes in a string representation of a type, a string
 #   representation of the context, and if the string type is a supported
 #   type, then it returns the python type and deserialized context. Otherwise it
@@ -51,15 +50,15 @@ Context = Any
 PyTree = Any
 FlattenFunc = Callable[[PyTree], Tuple[List, Context]]
 UnflattenFunc = Callable[[List, Context], PyTree]
-ToSchemaFunc = Callable[["TreeSpec", List[TreeSpecSchema]], TreeSpecSchema]
-MaybeFromSchemaFunc = Callable[[Optional[str], Optional[str]], Optional[Tuple[Any, Context]]]
+SerializeFn = Callable[["TreeSpec"], Tuple[Optional[str], Optional[str]]]
+MaybeDeserializeFn = Callable[[Optional[str], Optional[str]], Optional[Tuple[Any, Context]]]
 
 class NodeDef(NamedTuple):
     type: Type[Any]
     flatten_fn: FlattenFunc
     unflatten_fn: UnflattenFunc
-    to_schema_fn: ToSchemaFunc
-    maybe_from_schema_fn: MaybeFromSchemaFunc
+    serialize_fn: SerializeFn
+    maybe_deserialize_fn: MaybeDeserializeFn
 
 SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
 
@@ -67,22 +66,22 @@ def _register_pytree_node(
     typ: Any,
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
-    to_schema_fn: Optional[ToSchemaFunc] = None,
-    maybe_from_schema_fn: Optional[MaybeFromSchemaFunc] = None,
+    serialize_fn: Optional[SerializeFn] = None,
+    maybe_deserialize_fn: Optional[MaybeDeserializeFn] = None,
 ) -> None:
-    if to_schema_fn is None:
-        def _raise_error(spec: "TreeSpec", child_schemas: List[TreeSpecSchema]) -> TreeSpecSchema:
-            raise NotImplementedError(f"Serializing {typ} not implemented")
-        to_schema_fn = _raise_error
+    if serialize_fn is None:
+        def _raise_error(spec: "TreeSpec") -> Tuple[Optional[str], Optional[str]]:
+            raise NotImplementedError(f"Serializing {typ} in pytree is not registered.")
+        serialize_fn = _raise_error
 
-    if maybe_from_schema_fn is None:
+    if maybe_deserialize_fn is None:
         def dummy(type_: Optional[str], context: Optional[str]) -> Optional[Tuple[Any, Context]]:
             return None
-        maybe_from_schema_fn = dummy
+        maybe_deserialize_fn = dummy
 
-    assert to_schema_fn is not None
-    assert maybe_from_schema_fn is not None
-    node_def = NodeDef(typ, flatten_fn, unflatten_fn, to_schema_fn, maybe_from_schema_fn)
+    assert serialize_fn is not None
+    assert maybe_deserialize_fn is not None
+    node_def = NodeDef(typ, flatten_fn, unflatten_fn, serialize_fn, maybe_deserialize_fn)
     SUPPORTED_NODES[typ] = node_def
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
@@ -91,13 +90,13 @@ def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
 def _dict_unflatten(values: List[Any], context: Context) -> Dict[Any, Any]:
     return dict(zip(context, values))
 
-def _dict_to_schema(spec: "TreeSpec", child_strings: List[TreeSpecSchema]) -> TreeSpecSchema:
+def _dict_serialize(spec: "TreeSpec") -> Tuple[Optional[str], Optional[str]]:
     assert spec.type == dict
     assert isinstance(spec.context, list)
     serialized_context = json.dumps(spec.context)
-    return TreeSpecSchema("dict", serialized_context, child_strings)
+    return "dict", serialized_context
 
-def _maybe_schema_to_dict(type_: Optional[str], context_str: Optional[str]) -> Optional[Tuple[Any, Context]]:
+def _dict_deserialize(type_: Optional[str], context_str: Optional[str]) -> Optional[Tuple[Any, Context]]:
     if not type_ == "dict":
         return None
     if context_str is None:
@@ -111,11 +110,11 @@ def _list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
 def _list_unflatten(values: List[Any], context: Context) -> List[Any]:
     return list(values)
 
-def _list_to_schema(spec: "TreeSpec", child_strings: List[TreeSpecSchema]) -> TreeSpecSchema:
+def _list_serialize(spec: "TreeSpec") -> Tuple[Optional[str], Optional[str]]:
     assert spec.type == list
-    return TreeSpecSchema("list", None, child_strings)
+    return "list", None
 
-def _maybe_schema_to_list(type_: Optional[str], context_str: Optional[str]) -> Optional[Tuple[Any, Context]]:
+def _list_deserialize(type_: Optional[str], context_str: Optional[str]) -> Optional[Tuple[Any, Context]]:
     if not type_ == "list":
         return None
     assert context_str is None
@@ -127,11 +126,11 @@ def _tuple_flatten(d: Tuple[Any, ...]) -> Tuple[List[Any], Context]:
 def _tuple_unflatten(values: List[Any], context: Context) -> Tuple[Any, ...]:
     return tuple(values)
 
-def _tuple_to_schema(spec: "TreeSpec", child_strings: List[TreeSpecSchema]) -> TreeSpecSchema:
+def _tuple_serialize(spec: "TreeSpec") -> Tuple[Optional[str], Optional[str]]:
     assert spec.type == tuple
-    return TreeSpecSchema("tuple", None, child_strings)
+    return "tuple", None
 
-def _maybe_schema_to_tuple(type_: Optional[str], context_str: Optional[str]) -> Optional[Tuple[Any, Context]]:
+def _tuple_deserialize(type_: Optional[str], context_str: Optional[str]) -> Optional[Tuple[Any, Context]]:
     if not type_ == "tuple":
         return None
     assert context_str is None
@@ -143,7 +142,7 @@ def _namedtuple_flatten(d: NamedTuple) -> Tuple[List[Any], Context]:
 def _namedtuple_unflatten(values: List[Any], context: Context) -> NamedTuple:
     return cast(NamedTuple, context(*values))
 
-def _namedtuple_to_schema(spec: "TreeSpec", child_strings: List[TreeSpecSchema]) -> TreeSpecSchema:
+def _namedtuple_serialize(spec: "TreeSpec") -> Tuple[Optional[str], Optional[str]]:
     assert spec.type == namedtuple
 
     json_namedtuple = {
@@ -151,9 +150,9 @@ def _namedtuple_to_schema(spec: "TreeSpec", child_strings: List[TreeSpecSchema])
         "fields": spec.context._fields,
     }
     serialized_context = json.dumps(json_namedtuple)
-    return TreeSpecSchema("namedtuple", serialized_context, child_strings)
+    return "namedtuple", serialized_context
 
-def _maybe_schema_to_namedtuple(type_: Optional[str], context_str: Optional[str]) -> Optional[Tuple[Any, Context]]:
+def _namedtuple_deserialize(type_: Optional[str], context_str: Optional[str]) -> Optional[Tuple[Any, Context]]:
     if not type_ == "namedtuple":
         return None
     if context_str is None:
@@ -170,13 +169,13 @@ def _odict_flatten(d: 'OrderedDict[Any, Any]') -> Tuple[List[Any], Context]:
 def _odict_unflatten(values: List[Any], context: Context) -> 'OrderedDict[Any, Any]':
     return OrderedDict((key, value) for key, value in zip(context, values))
 
-def _odict_to_schema(spec: "TreeSpec", child_strings: List[TreeSpecSchema]) -> TreeSpecSchema:
+def _odict_serialize(spec: "TreeSpec") -> Tuple[Optional[str], Optional[str]]:
     assert spec.type == OrderedDict
     assert isinstance(spec.context, list)
     serialized_context = json.dumps(spec.context)
-    return TreeSpecSchema("odict", serialized_context, child_strings)
+    return "odict", serialized_context
 
-def _maybe_schema_to_odict(type_: Optional[str], context_str: Optional[str]) -> Optional[Tuple[Any, Context]]:
+def _odict_deserialize(type_: Optional[str], context_str: Optional[str]) -> Optional[Tuple[Any, Context]]:
     if not type_ == "odict":
         return None
     if context_str is None:
@@ -185,11 +184,11 @@ def _maybe_schema_to_odict(type_: Optional[str], context_str: Optional[str]) -> 
     return OrderedDict, context
 
 
-_register_pytree_node(dict, _dict_flatten, _dict_unflatten, _dict_to_schema, _maybe_schema_to_dict)
-_register_pytree_node(list, _list_flatten, _list_unflatten, _list_to_schema, _maybe_schema_to_list)
-_register_pytree_node(tuple, _tuple_flatten, _tuple_unflatten, _tuple_to_schema, _maybe_schema_to_tuple)
-_register_pytree_node(namedtuple, _namedtuple_flatten, _namedtuple_unflatten, _namedtuple_to_schema, _maybe_schema_to_namedtuple)
-_register_pytree_node(OrderedDict, _odict_flatten, _odict_unflatten, _odict_to_schema, _maybe_schema_to_odict)
+_register_pytree_node(dict, _dict_flatten, _dict_unflatten, _dict_serialize, _dict_deserialize)
+_register_pytree_node(list, _list_flatten, _list_unflatten, _list_serialize, _list_deserialize)
+_register_pytree_node(tuple, _tuple_flatten, _tuple_unflatten, _tuple_serialize, _tuple_deserialize)
+_register_pytree_node(namedtuple, _namedtuple_flatten, _namedtuple_unflatten, _namedtuple_serialize, _namedtuple_deserialize)
+_register_pytree_node(OrderedDict, _odict_flatten, _odict_unflatten, _odict_serialize, _odict_deserialize)
 
 
 # h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
@@ -452,9 +451,10 @@ def pytree_to_str(spec: TreeSpec) -> str:
             return TreeSpecSchema(None, None, [])
         elif spec.type in SUPPORTED_NODES:
             child_schemas = [pytree_to_json(child) for child in spec.children_specs]
-            return SUPPORTED_NODES[spec.type].to_schema_fn(spec, child_schemas)
+            serialized_type, serialized_context = SUPPORTED_NODES[spec.type].serialize_fn(spec)
+            return TreeSpecSchema(serialized_type, serialized_context, child_schemas)
         else:
-            raise NotImplementedError(f"Serializing {spec.type} in pytree not supported yet")
+            raise NotImplementedError(f"Serializing {spec.type} in pytree is not registered.")
 
     json_spec = pytree_to_json(spec)
     str_spec = json.dumps(dataclasses.asdict(json_spec))
@@ -472,14 +472,14 @@ def str_to_pytree(str_json_spec: str) -> TreeSpec:
             return LeafSpec()
 
         for node_def in SUPPORTED_NODES.values():
-            res = node_def.maybe_from_schema_fn(json_schema["type"], json_schema["context"])
+            res = node_def.maybe_deserialize_fn(json_schema["type"], json_schema["context"])
             if res is not None:
                 type_, context = res
                 children_spec = []
                 for child_string in json_schema["children_spec"]:
                     children_spec.append(json_to_pytree(child_string))
                 return TreeSpec(type_, context, children_spec)
-        raise NotImplementedError(f'Deserializing {json_schema["type"]} in pytree not supported yet')
+        raise NotImplementedError(f'Deserializing {json_schema["type"]} in pytree not registered.')
 
     return json_to_pytree(json_schema)
 
