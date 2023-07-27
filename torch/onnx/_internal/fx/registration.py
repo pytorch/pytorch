@@ -31,7 +31,7 @@ class SymbolicFunction:
     op_full_name: The qualified name of the function. In the form of '<namespace>::<op_name>.<overload>'.
     onnx_function: The symbolic function from torchlib.
     is_custom: Whether the function is a custom function.
-    is_complex: is_complex: Whether the function is a function that handles complex valued inputs.
+    is_complex: Whether the function is a function that handles complex valued inputs.
 
     """
 
@@ -146,7 +146,7 @@ class OnnxRegistry:
             op_name: The name of the operator to register.
             overload: The overload of the operator to register. If it's default overload,
                 leave it to None.
-            is_complex: is_complex: Whether the function is a function that handles complex valued inputs.
+            is_complex: Whether the function is a function that handles complex valued inputs.
 
         Raises:
             ValueError: If the name is not in the form of 'namespace::op'.
