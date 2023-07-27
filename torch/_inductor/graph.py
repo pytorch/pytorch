@@ -189,6 +189,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.num_static_inputs = num_static_inputs
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
+        self.mutated_input_idxs: List[int] = []
         self.unaligned_buffers: Set[str] = set()
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
@@ -292,7 +293,7 @@ class GraphLowering(torch.fx.Interpreter):
             for n in conv_nodes
         ):
             log.debug(
-                "Skip layout optimization because some convoluttions have smaller out_channel"
+                "Skip layout optimization because some convolutions have smaller out_channel"
             )
             return False
 
