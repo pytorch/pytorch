@@ -82,7 +82,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         self.assertNotIsInstance(tensor_x, fake_tensor.FakeTensor)
         self.assertNotIsInstance(tensor_y, fake_tensor.FakeTensor)
 
-    def test_mnist(self):
+    def test_mnist_exported_with_no_warnings_on_get_attr_node_in_op_level_debug(self):
         class MNISTModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -105,7 +105,19 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-        _ = dynamo_export(MNISTModel(), tensor_x, export_options=self.export_options)
+        export_output = dynamo_export(
+            MNISTModel(), tensor_x, export_options=ExportOptions(op_level_debug=True)
+        )
+
+        # NOTE: This additional test makes sure that op level debug supports `get_attr`
+        # fx.Node, also known as weight in PyTorch. aten.convolution.default is one of
+        # the nodes that has weight attribute.
+        assert_has_diagnostics(
+            export_output.diagnostic_context,
+            diagnostics.rules.op_level_debugging,
+            diagnostics.levels.NONE,
+            expected_node="aten.convolution.default",
+        )
 
     def test_trace_only_op_with_evaluator(self):
         model_input = torch.tensor([[1.0, 2.0, 3.0], [1.0, 1.0, 2.0]])

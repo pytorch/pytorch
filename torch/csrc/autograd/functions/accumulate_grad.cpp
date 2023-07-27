@@ -5,6 +5,7 @@
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 
 #include <cstdint>
 #include <stdexcept>
@@ -58,6 +59,43 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
 
   return variable_list();
 }
+
+#ifdef TORCH_COMPILED_AUTOGRAD
+void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
+  if (args.cond(variable.defined() && variable.requires_grad())) {
+    args.collect(variable);
+    args.collect(variable.grad());
+    args.set_grad_target(variable);
+  }
+}
+variable_list AccumulateGrad::apply_with_saved(
+    const variable_list& grads,
+    SwapSavedVariables& saved) {
+  if (!(variable.defined() && variable.requires_grad())) {
+    return variable_list();
+  }
+  TORCH_INTERNAL_ASSERT(!variable.grad_fn() && grads.size() == 1);
+  TORCH_CHECK(grads[0].defined(), "not implemented for compiled autograd")
+  at::Tensor variable_copy = variable;
+  at::Tensor grad_copy = variable.grad();
+  saved.before(variable_copy);
+  saved.before(grad_copy);
+  int callback_count = 0;
+  accumulateGrad(
+      variable_copy,
+      grad_copy,
+      grads[0],
+      0 /* num_expected_refs, 0 disables in-place update */,
+      [&callback_count, &saved](const at::Tensor& grad_update) {
+        callback_count++;
+        saved.set_grad_value(grad_update);
+      });
+  TORCH_INTERNAL_ASSERT(callback_count == 1);
+  saved.after(variable_copy);
+  saved.after(grad_copy);
+  return variable_list();
+}
+#endif
 
 } // namespace autograd
 } // namespace torch
