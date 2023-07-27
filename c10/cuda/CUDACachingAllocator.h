@@ -126,6 +126,7 @@ struct SegmentInfo {
   bool is_expandable = false;
   MempoolId_t owner_private_pool_id = {0, 0};
   std::vector<BlockInfo> blocks;
+  std::shared_ptr<GatheredContext> context_when_allocated;
 };
 
 struct AllocatorState {

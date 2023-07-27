@@ -148,6 +148,16 @@ std::string _memory_snapshot_pickled() {
   std::vector<CapturedTraceback*> frame_tracebacks;
   std::vector<Dict<IValue, IValue>> frame_dict;
 
+  auto add_frame_key = [&](const c10::Dict<IValue, IValue>& d,
+                           const std::shared_ptr<c10::GatheredContext>& ctx) {
+    if (ctx) {
+      frame_tracebacks.push_back(getFromContext(ctx));
+      frame_dict.push_back(d);
+    } else {
+      d.insert(frames_s, empty_frames);
+    }
+  };
+
   const auto segmentInfoToDict = [&](const SegmentInfo& segmentInfo) {
     auto segmentDict = new_dict();
     segmentDict.insert(device_s, segmentInfo.device);
@@ -164,6 +174,8 @@ std::string _memory_snapshot_pickled() {
         std::tuple<int64_t, int64_t>(segmentInfo.owner_private_pool_id));
     segmentDict.insert(is_expandable_s, segmentInfo.is_expandable);
 
+    add_frame_key(segmentDict, segmentInfo.context_when_allocated);
+
     auto blocks = new_list();
     for (const auto& blockInfo : segmentInfo.blocks) {
       auto blockDict = new_dict();
@@ -174,13 +186,8 @@ std::string _memory_snapshot_pickled() {
           (blockInfo.allocated
                ? active_allocated_s
                : (blockInfo.active ? active_pending_free_s : inactive_s)));
-      if (blockInfo.context_when_allocated) {
-        frame_tracebacks.push_back(
-            getFromContext(blockInfo.context_when_allocated));
-        frame_dict.push_back(blockDict);
-      } else {
-        blockDict.insert(frames_s, empty_frames);
-      }
+      add_frame_key(blockDict, blockInfo.context_when_allocated);
+
       blocks.push_back(blockDict);
     }
     segmentDict.insert(blocks_s, blocks);

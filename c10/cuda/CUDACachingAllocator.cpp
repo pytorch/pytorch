@@ -208,6 +208,12 @@ struct Block {
   int gc_count{0}; // counter for prioritizing older / less useful blocks for
                    // garbage collection
   std::shared_ptr<GatheredContext> context_when_allocated;
+  // only set for the first block in the segment (when prev == null)
+  // this records the frame information when cudaMalloc was called
+  // whereas context_when_allocated records the last time we handed this
+  // memory out from our cache.
+  std::shared_ptr<GatheredContext> context_when_segment_allocated;
+
   ExpandableSegment* expandable_segment_{nullptr};
 
   Block(
@@ -1969,6 +1975,8 @@ class DeviceCachingAllocator {
       segment_info.stream = head_block->stream;
       segment_info.is_large = (!head_block->pool->is_small);
       segment_info.is_expandable = head_block->expandable_segment_;
+      segment_info.context_when_allocated =
+          head_block->context_when_segment_allocated;
       auto mempool_id = pool_to_id.find(head_block->pool->owner_PrivatePool);
       if (mempool_id != pool_to_id.end()) {
         segment_info.owner_private_pool_id = mempool_id->second;
@@ -2292,6 +2300,9 @@ class DeviceCachingAllocator {
           mapped_range.size,
           to_map->stream,
           ctx);
+      if (!to_map->prev && !to_map->context_when_segment_allocated) {
+        to_map->context_when_segment_allocated = ctx;
+      }
     }
 
     return true;
@@ -2414,6 +2425,8 @@ class DeviceCachingAllocator {
       if (dst->prev) {
         dst->prev->next = dst;
       }
+      dst->context_when_segment_allocated =
+          std::move(src->context_when_segment_allocated);
     } else { // [dest src]
       dst->next = src->next;
       if (dst->next) {
@@ -2688,6 +2701,7 @@ class DeviceCachingAllocator {
           p.block->size,
           p.stream(),
           ctx);
+      p.block->context_when_segment_allocated = ctx;
     }
     return true;
   }

@@ -210,7 +210,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
       continue;
     }
     sorted_segments.push(
-      Segment(seg.address, seg.total_size, seg.stream, [], seg.version),
+      Segment(seg.address, seg.total_size, seg.stream, seg.frames || [], seg.version),
     );
     for (const b of seg.blocks) {
       if (b.state !== 'active_pending_free' && b.state !== 'active_allocated') {
