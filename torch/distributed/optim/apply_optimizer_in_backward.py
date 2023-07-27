@@ -106,7 +106,7 @@ def _get_in_backward_optimizers(model: torch.nn.Module) -> List[torch.optim.Opti
         _apply_optimizer_in_backward(torch.optim.SGD, model.parameters(), {'lr': 0.01})
         optims = _get_optimizers_in_backward(model)
     """
-    optims = []
+    optims: List[torch.optim.Optimizer] = []
     for param in model.parameters():
         optims.extend(getattr(param, "_in_backward_optimizers", []))
 
