@@ -83,12 +83,10 @@ struct TORCH_API GraphRoot : public Node {
     return outputs;
   }
 
-#ifdef TORCH_COMPILED_AUTOGRAD
   void compiled_args(CompiledNodeArgs& args) override;
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
-#endif
 
   variable_list outputs;
 };
