@@ -178,30 +178,30 @@ def mps_ops_grad_modifier(ops):
 
     for op in ops:
         key = op.name + op.variant_test_name
-        if key in XFAILLIST_GRAD:
-            addDecorator(op, DecorateInfo(
-                         unittest.expectedFailure,
-                         dtypes=XFAILLIST_GRAD[key]))
+        # if key in XFAILLIST_GRAD:
+        #     addDecorator(op, DecorateInfo(
+        #                  unittest.expectedFailure,
+        #                  dtypes=XFAILLIST_GRAD[key]))
 
-        if key in XPASSLIST_GRAD:
+        if op.name != "cumprod":
             addDecorator(op, DecorateInfo(
                          unittest.skip,
-                         dtypes=XPASSLIST_GRAD[key]))
+                         dtypes=[torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.float32, torch.float64]))
 
-        if key in MACOS_12_3_XFAILLIST_GRAD and (not torch.backends.mps.is_macos13_or_newer()):
-            addDecorator(op, DecorateInfo(
-                         unittest.expectedFailure,
-                         dtypes=MACOS_12_3_XFAILLIST_GRAD[key]))
+        # if key in MACOS_12_3_XFAILLIST_GRAD and (not torch.backends.mps.is_macos13_or_newer()):
+        #     addDecorator(op, DecorateInfo(
+        #                  unittest.expectedFailure,
+        #                  dtypes=MACOS_12_3_XFAILLIST_GRAD[key]))
 
-        if key in MACOS_BEFORE_13_3_XFAILLIST_GRAD and (torch.backends.mps.is_macos13_or_newer() and product_version < 13.3):
-            addDecorator(op, DecorateInfo(
-                         unittest.expectedFailure,
-                         dtypes=MACOS_BEFORE_13_3_XFAILLIST_GRAD[key]))
+        # if key in MACOS_BEFORE_13_3_XFAILLIST_GRAD and (torch.backends.mps.is_macos13_or_newer() and product_version < 13.3):
+        #     addDecorator(op, DecorateInfo(
+        #                  unittest.expectedFailure,
+        #                  dtypes=MACOS_BEFORE_13_3_XFAILLIST_GRAD[key]))
 
-        if key in MACOS_13_3_XFAILLIST_GRAD and (product_version >= 13.3):
-            addDecorator(op, DecorateInfo(
-                         unittest.expectedFailure,
-                         dtypes=MACOS_13_3_XFAILLIST_GRAD[key]))
+        # if key in MACOS_13_3_XFAILLIST_GRAD and (product_version >= 13.3):
+        #     addDecorator(op, DecorateInfo(
+        #                  unittest.expectedFailure,
+        #                  dtypes=MACOS_13_3_XFAILLIST_GRAD[key]))
         yield op
 
 def mps_ops_modifier(ops):
