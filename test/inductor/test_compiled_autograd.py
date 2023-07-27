@@ -367,7 +367,6 @@ skips = {
     "test_to_sparse_backward",  # torch._dynamo.exc.BackendCompilerFailed: backend='inner_compiler' raised:
     "test_var_mean_differentiable",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/pytorch/torch/c
     "test_wrapped_number_saved_variable_hooks",  # RuntimeError: this hook should not be called
-    "test_grad_nonleaf_register_hook",  # segfault
     "test_accumulate_grad_with_zero_numel_grad",  # aten.sym_size
     "test_isolated_node",  # aten.sym_size
 }
