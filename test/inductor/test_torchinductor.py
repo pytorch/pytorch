@@ -6688,8 +6688,7 @@ class CommonTemplate:
         )
         offsets = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9]) - 0.01
 
-        self.common(fn, (input, offsets), check_lowp=False)
-
+        self.common(fn, (inp, offsets), check_lowp=False)
 
     @config.patch(implicit_fallbacks=True)
     def test_custom_op(self):
