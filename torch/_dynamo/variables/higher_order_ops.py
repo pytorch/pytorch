@@ -235,6 +235,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return MapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "executorch_call_delegate":
             return ExecutorchCallDelegateHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "out_dtype":
+            return OutDtypeHigherOrderVariable(value, source, **kwargs)
         elif value is torch._functorch.eager_transforms.grad_impl:
             return FunctorchGradHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
@@ -312,7 +314,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ):
             raise UserError(
                 UserErrorType.DYNAMIC_CONTROL_FLOW,
-                "Expected a list of tensors but got {actual_args}".format(
+                "Expected a list of tensors but got {actual_args}".format(  # noqa: UP032
                     actual_args=[
                         str(operand.python_type())
                         if isinstance(operand, VariableTracker)
