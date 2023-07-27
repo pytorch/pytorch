@@ -73,21 +73,21 @@ def try_to_reduce_precision(
                         if index_val.lower.is_real:
                             lower_val = float(index_val.lower)
                         else:
-                            return  # or handle this case appropriately
+                            return
                     elif isinstance(index_val.lower, (int, float)):
                         lower_val = float(index_val.lower)
                     else:
-                        return  # or handle this case appropriately
+                        return
 
                     if isinstance(index_val.upper, sympy.Expr):
                         if index_val.upper.is_real:
                             upper_val = float(index_val.upper)
                         else:
-                            return  # or handle this case appropriately
+                            return
                     elif isinstance(index_val.upper, (int, float)):
                         upper_val = float(index_val.upper)
                     else:
-                        return  # or handle this case appropriately
+                        return
 
                 if math.isinf(lower_val) or math.isinf(upper_val):
                     return
