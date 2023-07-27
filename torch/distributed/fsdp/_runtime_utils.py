@@ -163,6 +163,7 @@ def _lazy_init(
     state._is_root = True
     _assert_in_training_states(state, [TrainingState.IDLE])
     _check_flat_params_on_expected_device(state, root_module)
+    state._all_fsdp_states = traversal_utils._get_fsdp_states(root_module)
     _init_streams(state)
     buffers, buffer_dtypes = _get_buffers_and_dtypes_for_computation(state, root_module)
     _cast_buffers_to_dtype_and_device(buffers, buffer_dtypes, state.compute_device)
@@ -230,7 +231,6 @@ def _share_state_and_init_handle_attrs(
     attr_name_to_values: Dict[str, Set[Any]] = {}
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
-    root_state._all_fsdp_states = traversal_utils._get_fsdp_states(root_module)
     root_state._all_handles = root_state._exec_order_data.all_handles  # share reference
     root_state._device_mesh = _init_device_mesh(root_state)
     # Update _has_optim_in_backward for each handle.
@@ -243,7 +243,6 @@ def _share_state_and_init_handle_attrs(
         handle._has_optim_in_backward = flat_param._params is not None and any(
             hasattr(param, "_in_backward_optimizers") for param in flat_param._params
         )
-
     for fsdp_state in root_state._all_fsdp_states:
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             _p_assert(
@@ -265,6 +264,7 @@ def _share_state_and_init_handle_attrs(
         fsdp_state._unshard_stream = root_state._unshard_stream
         fsdp_state._post_backward_stream = root_state._post_backward_stream
         fsdp_state._pre_unshard_stream = root_state._pre_unshard_stream
+        fsdp_state._all_reduce_stream = root_state._all_reduce_stream
         fsdp_state._default_stream = root_state._default_stream
         fsdp_state._exec_order_data = root_state._exec_order_data
         fsdp_state._free_event_queue = root_state._free_event_queue
@@ -291,17 +291,27 @@ def _init_streams(
     """
     assert state._is_root
     assert state._device_handle.is_available()
-    # Prioritize all-gathers since they block computation
-    unshard_priority = -1 if state.limit_all_gathers else 0
+    # Prioritize all-gathers/reduce-scatters over all-reduce for HSDP
+    priority = (
+        -1
+        if state.limit_all_gathers
+        and any(
+            s.sharding_strategy in HYBRID_SHARDING_STRATEGIES
+            for s in state._all_fsdp_states
+        )
+        else 0
+    )
     # Stream for unshard logic, including allocating the all-gather destination
     # tensors and the all-gathers themselves.
-    state._unshard_stream = state._device_handle.Stream(priority=unshard_priority)
+    state._unshard_stream = state._device_handle.Stream(priority=priority)
     # Stream for overlapping gradient reduction with the backward pass gradient
     # computation.
-    state._post_backward_stream = state._device_handle.Stream()
+    state._post_backward_stream = state._device_handle.Stream(priority=priority)
     # Stream for pre-unshard logic, namely allocations and writes for CPU
     # offloading (H2D copy) and mixed precision (low precision cast).
-    state._pre_unshard_stream = state._device_handle.Stream(priority=unshard_priority)
+    state._pre_unshard_stream = state._device_handle.Stream(priority=priority)
+    # Stream to run HSDP's all-reduce as async
+    state._all_reduce_stream = state._device_handle.Stream()
     # Default stream for computation
     state._default_stream = state._device_handle.current_stream()
 
@@ -770,14 +780,16 @@ def _post_backward_hook(
                 grad_to_offload = _reduce_grad(state, handle)
             else:
                 grad_to_offload = _reduce_grad_no_shard(state, handle)
-            _offload_grad(state, handle, grad_to_offload)
+            already_ran_post_reduction_logic = grad_to_offload is None
+            if not already_ran_post_reduction_logic:
+                _offload_grad(state, handle, grad_to_offload)
+                _post_backward_use_sharded_grad_views(handle)
             # Since the unsharded gradient is produced in the computation
             # stream and consumed in the post-backward stream, inform the
             # caching allocator (before it goes out of scope)
             _no_dispatch_record_stream(
                 autograd_computed_grad, state._post_backward_stream
             )
-            _post_backward_use_sharded_grad_views(handle)
 
 
 @no_type_check
@@ -834,7 +846,12 @@ def _should_free_in_backward(
 
 
 @no_type_check
-def _reduce_grad(state: _FSDPState, handle: FlatParamHandle):
+def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> Optional[torch.Tensor]:
+    """
+    Returns ``None`` if running async all-reduce for HSDP since then the
+    post-reduction logic runs in this function in the all-reduce stream.
+    Otherwise, returns the gradient to offload (if offloading).
+    """
     flat_param = handle.flat_param
     uses_hybrid_sharded_strategy = handle._sharding_strategy in (
         HandleShardingStrategy.HYBRID_SHARD,
@@ -860,20 +877,23 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle):
         if not uses_hybrid_sharded_strategy:
             _div_if_needed(new_sharded_grad, state._gradient_postdivide_factor)
         if uses_hybrid_sharded_strategy:
-            if _can_run_all_reduce_as_async(state, handle):
-                _p_assert(
-                    handle._all_reduce_fut is None,
-                    "An all-reduce future already exists",
-                )
-                fut = dist.all_reduce(
-                    new_sharded_grad, group=state._inter_node_pg, async_op=True
-                ).get_future()
-                fut.then(
-                    functools.partial(
-                        _all_reduce_callback, state, handle, new_sharded_grad
+            if _run_all_reduce_as_async(state, handle):
+                state._all_reduce_stream.wait_stream(state._post_backward_stream)
+                with state._device_handle.stream(state._all_reduce_stream):
+                    # Since the new sharded gradient is produced in the post-
+                    # backward stream and consumed in the all-reduce stream,
+                    # inform the caching allocator
+                    _no_dispatch_record_stream(
+                        new_sharded_grad, state._all_reduce_stream
                     )
-                )
-                handle._all_reduce_fut = fut
+                    dist.all_reduce(new_sharded_grad, group=state._inter_node_pg)
+                    _div_if_needed(new_sharded_grad, state._gradient_postdivide_factor)
+                    grad_to_offload = _accumulate_sharded_grad(
+                        state, handle, new_sharded_grad
+                    )
+                    _offload_grad(state, handle, grad_to_offload)
+                    _post_backward_use_sharded_grad_views(handle)
+                    return None
             else:
                 dist.all_reduce(new_sharded_grad, group=state._inter_node_pg)
                 _div_if_needed(new_sharded_grad, state._gradient_postdivide_factor)
@@ -886,21 +906,8 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle):
     return grad_to_offload
 
 
-def _can_run_all_reduce_as_async(state: _FSDPState, handle: FlatParamHandle) -> bool:
-    return (
-        not hasattr(handle.flat_param, "_saved_grad_shard")
-        and not handle._offload_params
-    )
-
-
-def _all_reduce_callback(
-    state: _FSDPState,
-    handle: FlatParamHandle,
-    new_sharded_grad: torch.Tensor,
-):
-    _div_if_needed(new_sharded_grad, state._gradient_postdivide_factor)
-    _accumulate_sharded_grad(state, handle, new_sharded_grad)
-    _post_backward_use_sharded_grad_views(handle)
+def _run_all_reduce_as_async(state: _FSDPState, handle: FlatParamHandle) -> bool:
+    return True
 
 
 @no_type_check
@@ -1086,12 +1093,12 @@ def _post_backward_final_callback(
     root_state = state
 
     if root_state._sync_gradients:
+        current_stream = state._device_handle.current_stream()
         # TODO (rohan-varma): this also waits for the overlapped optimizer step to finish
         # since it currently runs in the post-backward stream. That can be
         # pushed to the next forward if run in a different stream
-        state._device_handle.current_stream().wait_stream(
-            root_state._post_backward_stream
-        )
+        current_stream.wait_stream(root_state._post_backward_stream)
+        current_stream.wait_stream(root_state._all_reduce_stream)
         if root_state.cpu_offload.offload_params:
             # Wait for non-blocking GPU -> CPU sharded gradient copies from the
             # post-backward hooks to finish explicitly since CPU gradients do
