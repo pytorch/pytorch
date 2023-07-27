@@ -342,6 +342,7 @@ def mps_ops_modifier(ops):
         'cumulative_trapezoid': [torch.int64],
         'masked.cumsum': [torch.int64],
         'masked.cumprod': [torch.int64],
+        'linalg.vander': [torch.int64],
     }
 
     MACOS_AFTER_13_1_XFAILLIST = {
