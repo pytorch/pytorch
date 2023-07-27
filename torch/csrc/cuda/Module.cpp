@@ -661,6 +661,17 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   std::vector<CapturedTraceback*> to_gather_frames;
   std::vector<py::dict> to_gather_dest;
 
+  auto add_frame_key = [&](const py::dict& d,
+                           const std::shared_ptr<c10::GatheredContext> ctx) {
+    if (ctx) {
+      auto sc = getFromContext(ctx);
+      to_gather_frames.emplace_back(sc);
+      to_gather_dest.emplace_back(d);
+    } else {
+      d[frames_s] = empty_frames;
+    }
+  };
+
   const auto segmentInfoToDict = [&](const SegmentInfo& segmentInfo) {
     py::dict segmentDict;
     segmentDict[device_s] = segmentInfo.device;
@@ -675,6 +686,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
     segmentDict[segment_type_s] = (segmentInfo.is_large ? large_s : small_s);
     segmentDict[segment_pool_id] = segmentInfo.owner_private_pool_id;
     segmentDict[is_expandable_s] = segmentInfo.is_expandable;
+    add_frame_key(segmentDict, segmentInfo.context_when_allocated);
 
     py::list blocks;
     for (const auto& blockInfo : segmentInfo.blocks) {
@@ -685,13 +697,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
           (blockInfo.allocated
                ? active_allocated_s
                : (blockInfo.active ? active_pending_free_s : inactive_s));
-      if (blockInfo.context_when_allocated) {
-        auto sc = getFromContext(blockInfo.context_when_allocated);
-        to_gather_frames.emplace_back(sc);
-        to_gather_dest.emplace_back(blockDict);
-      } else {
-        blockDict[frames_s] = empty_frames;
-      }
+      add_frame_key(blockDict, blockInfo.context_when_allocated);
       blocks.append(blockDict);
     }
     segmentDict[blocks_s] = blocks;
