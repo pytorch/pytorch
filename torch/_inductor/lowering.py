@@ -1599,6 +1599,11 @@ def _inductor_bucketize(
             input, boundaries, out_int32=out_int32, right=right
         )
 
+    # The entire boundaries tensor needs to be used by ops.bucketize, so we
+    # need to realize it into global memory; or in other words, we can't
+    # guarantee that boundaries.get_name() (used below) will exist unless
+    # we call boundaries.realize().
+    boundaries.realize()
     boundaries_size = boundaries.get_size()[0]
     boundaries_loader = boundaries.make_loader()
     device = input.get_device()
