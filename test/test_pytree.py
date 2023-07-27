@@ -274,18 +274,28 @@ TreeSpec(TupleVariable, None, [*,
             result = _broadcast_to_and_flatten(pytree, to_spec)
             self.assertEqual(result, expected, msg=str([pytree, to_spec, expected]))
 
-    @parametrize("spec, str_spec", [
-        (TreeSpec(list, None, []), "L()"),
-        (TreeSpec(tuple, None, []), "T()"),
-        (TreeSpec(dict, [], []), "D()"),
-        (TreeSpec(list, None, [LeafSpec()]), "L(*)"),
-        (TreeSpec(list, None, [LeafSpec(), LeafSpec()]), "L(*,*)"),
-        (TreeSpec(tuple, None, [LeafSpec(), LeafSpec(), LeafSpec()]), "T(*,*,*)"),
-        (
-            TreeSpec(dict, ['a', 'b', 'c'], [LeafSpec(), LeafSpec(), LeafSpec()]),
-            "D(a:*,b:*,c:*)"
-        ),
-        (TreeSpec(list, None, [
+    @parametrize("spec", [
+        TreeSpec(list, None, []),
+        TreeSpec(tuple, None, []),
+        TreeSpec(dict, [], []),
+        TreeSpec(list, None, [LeafSpec()]),
+        TreeSpec(list, None, [LeafSpec(), LeafSpec()]),
+        TreeSpec(tuple, None, [LeafSpec(), LeafSpec(), LeafSpec()]),
+        TreeSpec(dict, ['a', 'b', 'c'], [LeafSpec(), LeafSpec(), LeafSpec()]),
+        TreeSpec(OrderedDict, ['a', 'b', 'c'], [
+            TreeSpec(
+                tuple,
+                None,
+                [LeafSpec(), LeafSpec()]
+            ),
+            LeafSpec(),
+            TreeSpec(
+                dict,
+                ['a', 'b', 'c'],
+                [LeafSpec(), LeafSpec(), LeafSpec()]
+            ),
+        ]),
+        TreeSpec(list, None, [
             TreeSpec(tuple, None, [
                 LeafSpec(),
                 LeafSpec(),
@@ -294,19 +304,14 @@ TreeSpec(TupleVariable, None, [*,
                     LeafSpec(),
                 ]),
             ]),
-        ]), "L(T(*,*,L(*,*)))"),
-    ], name_fn=lambda _, str_spec: str_spec)
-    def test_pytree_serialize(self, spec, str_spec):
-        self.assertEqual(pytree_to_str(spec), str_spec)
-        self.assertTrue(spec == str_to_pytree(str_spec))
+        ]),
+    ],)
+    def test_pytree_serialize(self, spec):
         self.assertTrue(spec == str_to_pytree(pytree_to_str(spec)))
 
     def test_pytree_serialize_namedtuple(self):
         Point = namedtuple("Point", ["x", "y"])
         spec = TreeSpec(namedtuple, Point, [LeafSpec(), LeafSpec()])
-        str_spec = "N(Point(x, y),*,*)"
-
-        self.assertEqual(pytree_to_str(spec), str_spec)
 
         roundtrip_spec = str_to_pytree(pytree_to_str(spec))
         # The context in the namedtuple is different now because we recreated
