@@ -8122,8 +8122,6 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
             ("HIPSPARSE_MATRIX_TYPE_GENERAL", CONV_NUMERIC_LITERAL, API_SPECIAL),
         ),
         # SOLVER
-        #("cuComplex", ("hipComplex", CONV_TYPE, API_SPECIAL)),
-        #("cuDoubleComplex", ("hipDoubleComplex", CONV_TYPE, API_SPECIAL)),
         ("cublasOperation_t", ("hipsolverOperation_t", CONV_TYPE, API_SPECIAL)),
         ("CUBLAS_OP_N", ("HIPSOLVER_OP_N", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         (
