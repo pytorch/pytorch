@@ -69,7 +69,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         out_graph = exported[0]
 
         dynamo_result = out_graph()
-        self.assertTrue(torch._dynamo.utils.same(real_result)(dynamo_result))
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
     def test_export_mismatched_out(self):
         def func(x):
