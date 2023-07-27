@@ -123,10 +123,8 @@ def out_dtype_autograd(
     output_dtype: torch.dtype,
     *args
 ):
-    with torch._C._AutoDispatchBelowAutograd():
-        result = out_dtype(op, output_dtype, *args)
-        # TODO: maybe support autograd
-        return autograd_not_implemented(result, args, "out_dtype", delayed=False)
+    return autograd_not_implemented(lambda *args, **kwargs: out_dtype(op, output_dtype, *args),
+                                    "out_dtype", False, *args)
 
 
 @out_dtype.py_impl(ProxyTorchDispatchMode)
