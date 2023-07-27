@@ -410,7 +410,7 @@ class trace:
     output_code = True
 
     # SVG figure showing post-fusion graph
-    graph_diagram = False
+    graph_diagram = os.environ.get("INDUCTOR_GRAPH", "0") == "1"
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False
