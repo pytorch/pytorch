@@ -633,7 +633,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
 
   using c10::cuda::CUDACachingAllocator::BlockInfo;
-  using c10::cuda::CUDACachingAllocator::History;
   using c10::cuda::CUDACachingAllocator::SegmentInfo;
 
   py::str device_s = "device";
@@ -653,12 +652,12 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str active_pending_free_s = "active_pending_free";
   py::str inactive_s = "inactive";
   py::str addr_s = "addr";
-  py::str real_size_s = "real_size";
   py::str cpp_frames_s = "cpp_frames";
-  py::str history_s = "history";
   py::str blocks_s = "blocks";
   py::str is_expandable_s = "is_expandable";
+  py::str frames_s = "frames";
 
+  py::list empty_frames;
   std::vector<CapturedTraceback*> to_gather_frames;
   std::vector<py::dict> to_gather_dest;
 
@@ -686,20 +685,12 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
           (blockInfo.allocated
                ? active_allocated_s
                : (blockInfo.active ? active_pending_free_s : inactive_s));
-      if (blockInfo.history.size()) {
-        py::list history;
-        for (const History& h : blockInfo.history) {
-          py::dict history_entry;
-          history_entry[addr_s] = (int64_t)h.addr;
-          history_entry[real_size_s] = h.real_size;
-          if (h.context) {
-            auto sc = getFromContext(h.context);
-            to_gather_frames.emplace_back(sc);
-            to_gather_dest.emplace_back(history_entry);
-          }
-          history.append(std::move(history_entry));
-        }
-        blockDict[history_s] = std::move(history);
+      if (blockInfo.context_when_allocated) {
+        auto sc = getFromContext(blockInfo.context_when_allocated);
+        to_gather_frames.emplace_back(sc);
+        to_gather_dest.emplace_back(blockDict);
+      } else {
+        blockDict[frames_s] = empty_frames;
       }
       blocks.append(blockDict);
     }
@@ -780,7 +771,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   result["segments"] = segments;
   result["device_traces"] = traces;
 
-  py::str frames_s = "frames";
   auto frames = py_symbolize(to_gather_frames);
   for (auto i : c10::irange(frames.size())) {
     to_gather_dest.at(i)[frames_s] = frames.at(i);
