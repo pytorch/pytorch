@@ -1850,16 +1850,13 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 return self.net(x)
 
         model = ToyModel()
-        forward_handles = {}
-        activations = {}
+        activations = []
 
-        def save_activations(name, mod, inp, out):
-            activations[name] = inp
+        def save_activations(mod, inp, out):
+            activations.append(inp)
 
         for name, module in model.named_modules():
-            forward_handles[name] = module.register_forward_hook(
-                partial(save_activations, name)
-            )
+            module.register_forward_hook(save_activations)
 
         cnt = torch._dynamo.testing.CompileCounter()
         model = torch._dynamo.optimize(cnt, nopython=True)(model)
@@ -1871,7 +1868,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             pred = model(x)
             loss = pred.sum()
             loss.backward()
-        self.assertEqual(len(activations), 1)
+        self.assertEqual(len(activations), 5)
         self.assertEqual(cnt.frame_count, 1)
 
     def test_hooks_allowed_modules_compiles_self_contained(self):
@@ -1909,15 +1906,15 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         loss_bwd = loss.backward()
 
         self.assertEqual(eager_loss_bwd, loss_bwd)
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.frame_count, 2)
 
         # Ndim change, recompile
         pred = model(torch.randn([10, 10, 10]))
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 4)
 
         # Stable
         pred = model(torch.randn([10, 10, 10]))
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 4)
 
     def test_dunder_call_explicitly(self):
         # hooks should be triggered if explicit calling `__call__`

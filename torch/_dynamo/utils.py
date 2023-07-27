@@ -1633,26 +1633,7 @@ def nn_module_get_all_hooks(
         for hook_name in hooks:
             hook = hooks[hook_name]
 
-            if not hasattr(hook, "_inline_success_disable"):
-
-                def inline_disable(self):
-                    hook = torch._dynamo.decorators.disable(self)
-                    getattr(mod, hook_dict_name)[hook_name] = hook
-
-                def method_hook_trampoline(hook_):
-                    def wrapper(*args, **kwargs):
-                        return hook_(*args, **kwargs)
-
-                    return wrapper
-
-                if inspect.ismethod(hook):
-                    hook = method_hook_trampoline(hook)
-                    getattr(mod, hook_dict_name)[hook_name] = hook
-
-                hook._inline_success_disable = inline_disable
-
             all_hooks.append(hook)
-
     return all_hooks
 
 

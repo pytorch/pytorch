@@ -746,19 +746,7 @@ def _post_backward_hook(
     - Otherwise, the ``_saved_grad_shard`` attribute is the reduced sharded
     gradient (accumulating with any existing gradient).
     """
-    # Under TORCH_DISTRIBUTED_DEBUG=INFO, log the module names this hook fires for.
-    # Below logging of module names this post-bwd hook fires for can help debug certain
-    # cases where hooks don't fire, such as under certain activation checkpoint configs.
-    if state._use_orig_params and handle._debug_level == dist.DebugLevel.INFO:
-        param_to_fqn = state._exec_order_data.param_to_fqn
-        handle_params = handle.flat_param._params  # only populated for use_orig_params
-        param_fqns = [
-            param
-            for param_list in [param_to_fqn[p] for p in handle_params]
-            for param in param_list
-        ]
-        log.warning("FSDP firing post-backward hooks for parameters %s", param_fqns)
-
+    _log_post_backward_hook(state, handle)
     flat_param = handle.flat_param
     flat_param._post_backward_called = True
     with torch.autograd.profiler.record_function(
@@ -794,9 +782,7 @@ def _post_backward_hook(
         with state._device_handle.stream(state._post_backward_stream):
             autograd_computed_grad = flat_param.grad.data
             if state._exec_order_data.is_first_iter:  # only check once
-                _check_comm_hook(
-                    state._communication_hook, state._communication_hook_state
-                )
+                _check_comm_hook(state._comm_hook, state._comm_hook_state)
             if (
                 not _low_precision_hook_enabled(state)
                 and flat_param.grad.dtype != handle._reduce_dtype
@@ -824,8 +810,8 @@ def _post_backward_hook(
                     else unsharded_grad
                 )
                 new_sharded_grad = torch.empty_like(chunks[0])  # padded
-                state._communication_hook(
-                    state._communication_hook_state,
+                state._comm_hook(
+                    state._comm_hook_state,
                     padded_unsharded_grad,
                     new_sharded_grad,
                 )
@@ -851,9 +837,7 @@ def _post_backward_hook(
                     flat_param._saved_grad_shard = new_sharded_grad
                 grad_to_offload = flat_param._saved_grad_shard
             else:
-                state._communication_hook(
-                    state._communication_hook_state, flat_param.grad
-                )
+                state._comm_hook(state._comm_hook_state, flat_param.grad)
                 # For `NO_SHARD`, we can keep the low precision gradients by
                 # simply omitting the cast altogether
                 if not handle._keep_low_precision_grads:
@@ -917,6 +901,22 @@ def _post_backward_hook(
                     handle._reset_flat_param_grad_info_if_needed()
                     if handle._offload_params:
                         handle.flat_param._cpu_grad = None
+
+
+@no_type_check
+def _log_post_backward_hook(state: _FSDPState, handle: FlatParamHandle) -> None:
+    # Under TORCH_DISTRIBUTED_DEBUG=INFO, log the module names this hook fires for.
+    # Below logging of module names this post-bwd hook fires for can help debug certain
+    # cases where hooks don't fire, such as under certain activation checkpoint configs.
+    if state._use_orig_params and handle._debug_level == dist.DebugLevel.INFO:
+        param_to_fqn = state._exec_order_data.param_to_fqn
+        handle_params = handle.flat_param._params  # only populated for use_orig_params
+        param_fqns = [
+            param
+            for param_list in [param_to_fqn[p] for p in handle_params]
+            for param in param_list
+        ]
+        log.warning("FSDP firing post-backward hooks for parameters %s", param_fqns)
 
 
 def _post_backward_reshard(
@@ -1016,7 +1016,7 @@ def _check_grad_to_accumulate(
 
 @no_type_check
 def _low_precision_hook_enabled(state: _FSDPState) -> bool:
-    return state._communication_hook in LOW_PRECISION_HOOKS
+    return state._comm_hook in LOW_PRECISION_HOOKS
 
 
 @no_type_check
@@ -1397,6 +1397,10 @@ def _register_post_backward_reshard_only_hook(
     input activations to ensure that all gradients that may depend on the
     parameters have been computed before resharding.
     """
+    # If there is no gradient computation, then there is no need for
+    # post-backward logic
+    if not torch.is_grad_enabled():
+        return
     # Construct `inp_tensors` lazily to avoid CPU overhead in typical case
     # where each flat parameter requires gradient
     inp_tensors: Optional[List[torch.Tensor]] = None

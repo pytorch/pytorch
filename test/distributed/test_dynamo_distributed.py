@@ -512,7 +512,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         # ensure compatibilty with dynamo explain
 
-        explain_out = torch._dynamo.explain(ddp_m, inputs)
+        explain_out = torch._dynamo.explain(ddp_m)(inputs)
         break_reasons = explain_out.break_reasons
         self.assertEqual(len(break_reasons), 3)
         self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
@@ -862,7 +862,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             # Check for no recompiles, which could happen if incorrectly
             # passing args to the staticmethod (e.g. doubly passing `self`)
             # 3 is expected here for 1 forward.
-            # Graph 1 should be add and imul 
+            # Graph 1 should be add and imul
             # Graphs 2 and 3 are forward hooks on device mesh, and are fine to capture.
             self.assertEqual(cnt.frame_count, 3)
         for test_out in test_outs:
