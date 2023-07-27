@@ -20,6 +20,25 @@
 #include <functional>
 #include <iostream>
 
+/**
+* Note [SDPA Runtime Dispatch]
+* SDPA relies on a runtime dispatch mechanism to select the appropriate
+* kernel. This file contains exposes this through the `select_sdp_backend`
+* The basic structure of this function is to call `priority_order` to get a
+* list of backends to try, and then iterate through them until one succeeds.
+* Each backend defines a use_<backend> function that returns true if the
+* backend can be run with the given SDP parameters. The use_<backend> function
+* will iterate over a list of "filters" that check for specific properties of
+* the SDP parameters. If all filters pass, the backend can be used and use_<backend>
+* returns true. If any filter fails, then use_<backend> returns false.
+*
+* In order to aid in debugging, each filter takes sdp_params and a debug flag.
+* If the debug flag is set, the filter will print a warning message if it fails.
+* The behavior of select_sdp_backend is to return the first backend that
+* succeeds. If no backend is viable then it will run each use_<backend> function
+* with debug=true and return SDPBackend::error.
+*/
+
 namespace sdp {
 namespace {
 // This helper function creates a constexpr std::array
@@ -553,6 +572,11 @@ bool check_nonzero_sequence_lengths(sdp_params params, bool debug) {
 }
 
 bool check_last_dim_stride_equals_1(sdp_params params, bool debug) {
+  if (has_for_nested_inputs(params)){
+    // The stride checking for NestedTensors is done within the kernel
+    // And if contiguous will be called if the kernel is selected
+    return true;
+  }
   // This function checks that the last dimension of the inputs to
   // fused_attention have stride 1
   bool qkv_strides_equal_1 = params.query.sym_stride(-1) == 1 &&
@@ -568,7 +592,6 @@ bool check_last_dim_stride_equals_1(sdp_params params, bool debug) {
                          << params.attn_mask.value().sym_stride(-1);
       }
       epilogue_message << " instead.";
-
       TORCH_WARN(
           "Both fused kernels require the last dimension of the input to have stride 1. ",
           "Got Query.stride(-1): ",
