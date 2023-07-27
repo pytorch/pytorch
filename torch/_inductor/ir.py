@@ -4202,20 +4202,22 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         train: bool,
     ):
         x = cls.require_stride1(cls.realize_input(x))
-        # TODO: x should be contiguous before calling mkldnn_rnn_layer. Do other inputs need this as well?
+        # If batch_first, x has been permuted in lstm before entering the mkldnn_rnn_layer.
+        # Make sure x is contiguous in batch_first case.
         x.freeze_layout()
         w0 = cls.require_stride1(cls.realize_input(w0))
         w1 = cls.require_stride1(cls.realize_input(w1))
         w2 = cls.require_stride1(cls.realize_input(w2))
         w3 = cls.require_stride1(cls.realize_input(w3))
         hx = cls.require_stride1(cls.realize_input(hx))
+        hx.freeze_layout()
         cx = cls.require_stride1(cls.realize_input(cx))
+        cx.freeze_layout()
 
         input_size = x.get_size()
         assert len(input_size) == 3, "Expect lstm input to be 3D"
         # batch_first is handled in the lstm OP. When entering
         # rnn_layer here, we'll always have batch_first = False
-
         seq_length, mini_batch, input_size = input_size
         output_shape = [seq_length, mini_batch, hidden_size]
 

@@ -441,8 +441,6 @@ static std::vector<Tensor> mkldnn_reorder_mkldnn_rnn_layer_weight(
     batch_size = 10;
   }
 
-  std::vector<Tensor> result(2);
-
   ideep::tensor w1_, w2_;
   at::Tensor packed_w1, packed_w2;
 
@@ -477,10 +475,7 @@ static std::vector<Tensor> mkldnn_reorder_mkldnn_rnn_layer_weight(
   } else {
     packed_w2 = new_with_itensor_mkldnn(std::move(w2_), optTypeMetaToScalarType(weight1.options().dtype_opt()), weight1.options().device_opt());
   }
-
-  result[0] = packed_w1;
-  result[1] = packed_w2;
-  return result;
+  return {packed_w1, packed_w2};
 }
 
 TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {

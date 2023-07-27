@@ -282,7 +282,6 @@ class CPUReproTests(TestCase):
                     (v,),
                 )
 
-    # TODO: move to test_mkldnn_pattern_matcher and check match node num
     @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     @torch._dynamo.config.patch(dynamic_shapes=True)

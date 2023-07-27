@@ -2377,8 +2377,11 @@ def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
     batch_first = False
 
     train = False
-    # TODO: ensure other inputs are contiguous as well & freeze_layout in ir.py
+    # If batch_first, inp has been permuted in _rnn_helper. Convert to contiguous here.
+    # Same as aten/src/ATen/native/mkldnn/RNN.cpp: mkldnn_rnn: input = input.contiguous();
     inp = inp.contiguous()
+    hx = hx.contiguous()
+    cx = cx.contiguous()
     outputs = torch.ops.aten.mkldnn_rnn_layer.default(
         inp,
         w0,
@@ -2398,7 +2401,6 @@ def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
         train,
     )
     y, hy, cy = outputs[0], outputs[1], outputs[2]
-    # TODO: batch_first (squeeze(1)?) or not
     return y, (hy.squeeze(0), cy.squeeze(0))
 
 
@@ -2415,8 +2417,6 @@ def _rnn_helper(
     layer_fn,
 ):
     input = input.transpose(0, 1) if batch_first else input
-    # TODO: contiguous here will impact all decomposition; Make this inside layer func for now
-    # input = input.contiguous()
     final_hiddens = []
 
     for i in range(num_layers):
