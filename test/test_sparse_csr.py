@@ -2259,6 +2259,8 @@ class TestSparseCSR(TestCase):
     def test_sparse_triangular_solve(self, device, dtype):
 
         def run_test(n, k, upper, unitriangular, transpose, zero):
+            if torch.device(device).type == 'cuda':
+                torch.cuda.empty_cache()
             if not unitriangular:
                 triangle_function = torch.triu if upper else torch.tril
             else:
