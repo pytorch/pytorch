@@ -945,6 +945,10 @@ class TestCudaMultiGPU(TestCase):
         self.assertEqual(gpu_tensor1[0], 1)
         self.assertEqual(gpu_tensor0[0], 2)
 
+        # cleanup after `del t`
+        gc.collect()
+        torch.cuda.empty_cache()
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_get_set_rng_state_all(self):
         states = torch.cuda.get_rng_state_all()
