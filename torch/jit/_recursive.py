@@ -112,18 +112,43 @@ def _get_valid_constant(attr, v, owner_type):
     elif isinstance(v, (tuple, list)):
         return tuple(_get_valid_constant(attr, x, owner_type) for x in v)
     constants = ", ".join(torch.typename(typ) for typ in _constant_types)
-    raise TypeError(textwrap.dedent("""
-        '{}' object in attribute '{}.{}' is not a valid constant.
+    raise TypeError(textwrap.dedent(f"""
+        '{torch.typename(type(v))}' object in attribute '{owner_type}.{attr}' is not a valid constant.
         Valid constants are:
         1. a nn.ModuleList
-        2. a value of type {{{}}}
+        2. a value of type {{{constants}}}
         3. a list or tuple of (2)
-        """.format(torch.typename(type(v)), owner_type, attr, constants)))
+        """))
 
 
 class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
     def __init__(self, source, filename, file_lineno, leading_whitespace_len):
         super().__init__(source, filename, file_lineno, leading_whitespace_len)
+
+
+def get_annotations(obj):
+    if sys.version_info < (3, 10):
+        return getattr(obj, '__annotations__', {})
+    # In Python-3.10+ it is recommended to use inspect.get_annotations
+    # See https://docs.python.org/3.10/howto/annotations.html
+    # But also, in 3.10 annotations from base class are not inherited
+    # by unannotated derived one, so they must be manually extracted
+    annotations = inspect.get_annotations(obj)
+    if annotations:
+        return annotations
+
+    def get_cls_annotations(cls):
+        cls_annotations = inspect.get_annotations(cls)
+        if cls_annotations:
+            return cls_annotations
+        for base in cls.__bases__:
+            cls_annotations = get_cls_annotations(base)
+            if cls_annotations:
+                return cls_annotations
+        return {}
+
+    cls = obj if isinstance(obj, type) else type(obj)
+    return get_cls_annotations(cls)
 
 
 def infer_concrete_type_builder(nn_module, share_types=True):
@@ -141,30 +166,6 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         concrete_type_builder.set_parameter_list()
     if isinstance(nn_module, (torch.nn.ParameterDict)):
         concrete_type_builder.set_parameter_dict()
-
-    def get_annotations(obj):
-        if sys.version_info < (3, 10):
-            return getattr(obj, '__annotations__', {})
-        # In Python-3.10+ it is recommended to use inspect.get_annotations
-        # See https://docs.python.org/3.10/howto/annotations.html
-        # But also, in 3.10 annotations from base class are not inherited
-        # by unannotated derived one, so they must be manually extracted
-        annotations = inspect.get_annotations(obj)
-        if annotations:
-            return annotations
-
-        def get_cls_annotations(cls):
-            cls_annotations = inspect.get_annotations(cls)
-            if cls_annotations:
-                return cls_annotations
-            for base in cls.__bases__:
-                cls_annotations = get_cls_annotations(base)
-                if cls_annotations:
-                    return cls_annotations
-            return {}
-
-        cls = obj if isinstance(obj, type) else type(obj)
-        return get_cls_annotations(cls)
 
     class_annotations = get_annotations(nn_module)
     if isinstance(nn_module, (torch.ao.quantization.QuantWrapper)):
@@ -509,7 +510,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     def init_fn(script_module):
         # Initialize the ScriptModule:
         # 1. Copy the attributes/parameters/buffers from the original `nn_module` to the new ScriptModule.
-        for name, (attr_type, is_param) in concrete_type.get_attributes().items():
+        for name in concrete_type.get_attributes().keys():
             orig_value = getattr(nn_module, name)
             orig_value = orig_value.value if isinstance(orig_value, torch.jit.Attribute) else orig_value
             cpp_module.setattr(name, orig_value)

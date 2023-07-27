@@ -323,15 +323,19 @@ class SizeVarAllocator:
         return self.guard_lt(left, right + 1)
 
     def guard_lt(self, left: Expr, right: Expr) -> None:
-        expr = self.simplify(right - left)
-        assert self.size_hint(expr) > 0
-        if len(expr.free_symbols) == 0:
-            return
         assert self.shape_env.evaluate_expr(sympy.Lt(left, right))
 
     # The evaluate functions evaluate some symbolic sympy expression
     # (NB: not necessarily an Expr) and return what the concrete result
     # is, guarding on the expression being that result
+
+    # NB: write evaluate_expr(sympy.Lt(a, b)) rather than evaluate_expr(a < b)
+    # as this will ensure that you actually have a sympy'ified expression,
+    # and will prevent you from incorrectly writing evaluate_expr(a == b)
+    # which does the wrong thing if a or b is a sympy expression
+    def evaluate_expr(self, left: Union[Expr, sympy.logic.boolalg.Boolean]) -> bool:
+        assert isinstance(left, (Expr, sympy.logic.boolalg.Boolean)), type(left)
+        return self.shape_env.evaluate_expr(sympy.sympify(left))
 
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""

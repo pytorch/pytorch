@@ -185,15 +185,18 @@ def innermost_fn(fn):
 
 
 @contextlib.contextmanager
-def enable_dynamic(enable: bool = True, export: bool = False):
-    if not enable:
+def enable_dynamic(enable: Optional[bool] = None, export: bool = False):
+    if enable is None:
         yield
-        return
-    # dynamic=True used to mean fully dynamic. However, with automatic dynamic, the default flipped to
-    # deriving dynamism. For back compat, and forward compat for when dynamic=True is default, we take
-    # dynamic=True here to mean "fully dynamic from the start".
-    with config.patch(assume_static_by_default=False):
-        yield
+    elif enable:
+        # Assume everything is dynamic by deafult
+        with config.patch(assume_static_by_default=False):
+            yield
+    else:
+        with config.patch(
+            automatic_dynamic_shapes=False, assume_static_by_default=True
+        ):
+            yield
 
 
 class _TorchDynamoContext:
@@ -206,7 +209,7 @@ class _TorchDynamoContext:
         first_ctx=False,
         *,
         export=False,
-        dynamic=False,
+        dynamic=None,
         compiler_config=None,
     ):
         super().__init__()
@@ -379,7 +382,7 @@ class OptimizeContext(_TorchDynamoContext):
         first_ctx=False,
         *,
         export=False,
-        dynamic=False,
+        dynamic=None,
         compiler_config=None,
     ):
         def on_enter():
@@ -475,7 +478,7 @@ def _optimize_catch_errors(
     hooks: Hooks,
     backend_ctx_ctor=null_context,
     export=False,
-    dynamic=False,
+    dynamic=None,
     compiler_config=None,
 ):
     return OptimizeContext(
@@ -529,7 +532,7 @@ def optimize(
     guard_export_fn=None,
     guard_fail_fn=None,
     disable=False,
-    dynamic=False,
+    dynamic=None,
 ):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -547,7 +550,9 @@ def optimize(
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.
         disable: If True, turn this decorator into a no-op
-        dynamic: If True, turn on dynamic shapes support
+        dynamic: If True, upfront compile as dynamic a kernel as possible.  If False,
+            disable all dynamic shapes support (always specialize).  If None, automatically
+            detect when sizes vary and generate dynamic kernels upon recompile.
 
     Example Usage::
 
@@ -590,77 +595,90 @@ def optimize(
 
 # TODO(voz): Consider making "explain" output alongside a run / part of a run
 @patch("torch._dynamo.symbolic_convert.explain", True)
-def explain(f, *args, **kwargs):
-    # TODO(voz): Do we want a decorator for this?
-    from . import reset  # type: ignore[attr-defined]
+def explain(f, *extra_args, **extra_kwargs):
+    def inner(*args, **kwargs):
+        # TODO(voz): Do we want a decorator for this?
+        from . import reset  # type: ignore[attr-defined]
 
-    reset()
+        reset()
 
-    graphs: List[torch.fx.GraphModule] = []
-    break_reasons: List[Any] = []
-    op_count: int = 0
-    ops_per_graph: List[torch.fx.Node] = []
-    out_guards: List[_guards.Guard] = []
+        graphs: List[torch.fx.GraphModule] = []
+        break_reasons: List[Any] = []
+        op_count: int = 0
+        ops_per_graph: List[torch.fx.Node] = []
+        out_guards: List[_guards.Guard] = []
 
-    def dynamo_graph_accumulating_compiler(gm: torch.fx.GraphModule, example_inputs):
-        from .backends.debugging import _explain_graph_detail
+        def dynamo_graph_accumulating_compiler(
+            gm: torch.fx.GraphModule, example_inputs
+        ):
+            from .backends.debugging import _explain_graph_detail
 
-        nonlocal graphs
-        nonlocal op_count
-        nonlocal ops_per_graph
-        nonlocal break_reasons
+            nonlocal graphs
+            nonlocal op_count
+            nonlocal ops_per_graph
+            nonlocal break_reasons
 
-        gm, graphs, op_count, ops_per_graph, break_reasons = _explain_graph_detail(
-            gm, graphs, op_count, ops_per_graph, break_reasons
+            gm, graphs, op_count, ops_per_graph, break_reasons = _explain_graph_detail(
+                gm, graphs, op_count, ops_per_graph, break_reasons
+            )
+
+            return gm.forward
+
+        def guard_export_print(guards):
+            nonlocal out_guards
+            out_guards.extend(guards)
+
+        with patch(f"{__name__}.most_recent_backend", None):
+            opt_f = optimize(
+                dynamo_graph_accumulating_compiler,
+                nopython=False,
+                guard_export_fn=guard_export_print,
+            )(f)
+            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+            opt_f(*args, **kwargs)
+
+        graph_count = len(graphs)
+
+        # For the explanation summary, dedupe reasons by the innermost stack frame and dedupe by it.
+        deduped_reasons = {}
+        for reason in break_reasons:
+            innermost_frame = reason.user_stack[-1]
+            # __repr__ uniquely identifies a FrameSummary so we can use it for deduping
+            deduped_reasons[repr(innermost_frame)] = reason
+
+        formatted_list = ""
+        for idx, break_reason in enumerate(deduped_reasons.values()):
+            formatted_stack = "".join(traceback.format_list(break_reason.user_stack))
+            msg = f"{idx + 1}. Reason: {break_reason.reason}\n   User Stack: {formatted_stack}\n"
+            formatted_list += msg
+
+        graph_break_count = graph_count - 1
+        compile_time = compile_times(repr="str")
+
+        # TODO(voz): Do we want a decorator for this?
+        reset()
+        from .backends.debugging import ExplainOutput
+
+        return ExplainOutput(
+            graphs,
+            graph_count,
+            graph_break_count,
+            break_reasons,
+            op_count,
+            ops_per_graph,
+            out_guards,
+            compile_time,
         )
 
-        return gm.forward
-
-    def guard_export_print(guards):
-        nonlocal out_guards
-        out_guards.extend(guards)
-
-    with patch(f"{__name__}.most_recent_backend", None):
-        opt_f = optimize(
-            dynamo_graph_accumulating_compiler,
-            nopython=False,
-            guard_export_fn=guard_export_print,
-        )(f)
-        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
-        opt_f(*args, **kwargs)
-
-    graph_count = len(graphs)
-
-    # For the explanation summary, dedupe reasons by the innermost stack frame and dedupe by it.
-    deduped_reasons = {}
-    for reason in break_reasons:
-        innermost_frame = reason.user_stack[-1]
-        # __repr__ uniquely identifies a FrameSummary so we can use it for deduping
-        deduped_reasons[repr(innermost_frame)] = reason
-
-    formatted_list = ""
-    for idx, break_reason in enumerate(deduped_reasons.values()):
-        formatted_stack = "".join(traceback.format_list(break_reason.user_stack))
-        msg = f"{idx + 1}. Reason: {break_reason.reason}\n   User Stack: {formatted_stack}\n"
-        formatted_list += msg
-
-    graph_break_count = graph_count - 1
-    compile_time = compile_times(repr="str")
-
-    # TODO(voz): Do we want a decorator for this?
-    reset()
-    from .backends.debugging import ExplainOutput
-
-    return ExplainOutput(
-        graphs,
-        graph_count,
-        graph_break_count,
-        break_reasons,
-        op_count,
-        ops_per_graph,
-        out_guards,
-        compile_time,
-    )
+    if extra_args or extra_kwargs:
+        warnings.warn(
+            "explain(f, *args, **kwargs) is deprecated, use explain(f)(*args, **kwargs) instead.  "
+            "If you don't migrate, we may break your explain call in the future if your user defined kwargs "
+            "conflict with future kwargs added to explain(f)."
+        )
+        return inner(*extra_args, **extra_kwargs)
+    else:
+        return inner
 
 
 @dataclasses.dataclass
@@ -960,10 +978,11 @@ def export(
     if tracing_mode != "symbolic":
         assume_static_by_default = True
     with patch(f"{__name__}.most_recent_backend", None), config.patch(
-        summarize_dim_constraints=True,
         specialize_int=True,
         assume_static_by_default=assume_static_by_default,
         automatic_dynamic_shapes=False,
+        capture_dynamic_output_shape_ops=True,
+        capture_scalar_outputs=True,
     ), torch._guards.export_fake_mode(fake_mode):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
@@ -1169,7 +1188,7 @@ def optimize_assert(
     hooks=Hooks(None, None),
     export=False,
     export_constraints=None,
-    dynamic=False,
+    dynamic=None,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`

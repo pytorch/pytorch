@@ -31,7 +31,7 @@ ignore = [
     "B019", "B020",
     "B023", "B024", "B026",
     "B028", # No explicit `stacklevel` keyword argument found
-    "B904", "B905",
+    "B904",
     "E402",
     "C408", # C408 ignored because we like the dict keyword argument syntax
     "E501", # E501 is not flexible enough, we're using B950 instead
@@ -70,6 +70,7 @@ select = [
     # Not included in flake8
     "UP",
     "PERF",
+    "PGH004",
     "PLE",
     "TRY302",
 ]

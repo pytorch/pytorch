@@ -49,15 +49,6 @@ class Adam(Optimizer):
                                    f"supported devices: {fused_supported_devices}.")
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
-            # TODO(crcrpar): [low prec params & their higher prec copy]
-            # Support AMP with FP16/BF16 model params which would need
-            # higher prec copy of params to do update math in higher prec to
-            # alleviate the loss of information.
-            if not all(
-                p.is_cuda and torch.is_floating_point(p)
-                for pg in self.param_groups for p in pg['params']
-            ):
-                raise RuntimeError("`fused=True` requires all the params to be CUDA, floating point Tensor")
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -215,7 +206,7 @@ Adam.__doc__ = r"""Implements Adam algorithm.
        \end{aligned}
 
     For further details regarding the algorithm we refer to `Adam: A Method for Stochastic Optimization`_.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -228,18 +219,17 @@ Adam.__doc__ = r"""Implements Adam algorithm.
         amsgrad (bool, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_
             (default: False)
-        {foreach}
-        {maximize}
-        {capturable}
-        {differentiable}
-        {fused}
+        {_foreach_doc}
+        {_maximize_doc}
+        {_capturable_doc}
+        {_differentiable_doc}
+        {_fused_doc}
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
     .. _On the Convergence of Adam and Beyond:
         https://openreview.net/forum?id=ryQu7f-RZ
 
-    """.format(foreach=_foreach_doc, maximize=_maximize_doc, capturable=_capturable_doc,
-               differentiable=_differentiable_doc, fused=_fused_doc)
+    """
 
 
 def adam(params: List[Tensor],

@@ -1,3 +1,4 @@
+import abc
 import collections
 import contextlib
 import dataclasses
@@ -72,7 +73,11 @@ from .dicts import (
     DefaultDictVariable,
     HFPretrainedConfigVariable,
 )
-from .distributed import DeviceMeshVariable, PlacementClassVariable
+from .distributed import (
+    DeviceMeshVariable,
+    PlacementClassVariable,
+    ProcessGroupVariable,
+)
 from .functions import (
     CollectiveFunctionRewriteVariable,
     UserFunctionVariable,
@@ -80,6 +85,7 @@ from .functions import (
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import (
+    BaseListVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
@@ -113,11 +119,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
-from .user_defined import (
-    ProcessGroupVariable,
-    UserDefinedClassVariable,
-    UserDefinedObjectVariable,
-)
+from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 
 log = logging.getLogger(__name__)
@@ -177,16 +179,6 @@ class FrameStateSizeEntry:
     size: Optional[List[int]]
 
 
-def variable_builder_no_source(value):
-    if isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
-        return UserDefinedObjectVariable(value)
-    elif is_builtin_callable(value):
-        return BuiltinVariable(value)
-    elif ConstantVariable.is_literal(value):
-        return ConstantVariable(value)
-    unimplemented(f"{type(value)} is not supported")
-
-
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
@@ -195,7 +187,9 @@ class VariableBuilder:
         tx,
         source: Source,
     ):
-        assert source is not None
+        assert (
+            source is not None
+        ), "Consider SourcelessBuilder for ephemeral objects, usually objects created locally."
         assert TracingContext.get() is not None, "Expected active TracingContext"
         super().__init__()
         self.tx = tx
@@ -223,6 +217,7 @@ class VariableBuilder:
             TensorVariable,
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
+            NumpyNdarrayVariable,
         ]:
             return True
         return False
@@ -484,10 +479,14 @@ class VariableBuilder:
             )
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
+            new_fn, new_source = CollectiveFunctionRewriteVariable.rewrite(value)
+            old_source = self.source
+            self.source = new_source
             return CollectiveFunctionRewriteVariable(
-                CollectiveFunctionRewriteVariable.rewrite(value),
+                new_fn,
                 orig_fn=value,
-                source=self.source,
+                orig_source=old_source,
+                source=new_source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
@@ -1494,8 +1493,10 @@ def _automatic_dynamic(e, tx, name, static_shapes):
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
-    if type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor) or (
-        ignore_subclass and isinstance(e, torch.Tensor)
+    if (
+        type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
+        or (ignore_subclass and isinstance(e, torch.Tensor))
+        or is_traceable_wrapper_subclass(e)
     ):
         assert source is not None
         static_shapes, reason = tensor_always_has_static_shape(
@@ -1532,3 +1533,50 @@ def wrap_to_fake_tensor_and_record(
         return fake_e
     else:
         return e
+
+
+class SourcelessBuilder:
+    """
+    Like builder, but stateless and does not require a source. Useful for simple type->VT objects, or objects
+    that are being created/evaporated during inlining (ex: consider a locally made list of tensors we then iterate over
+    .), such a list should not show up as an artifact from inputs, nor in reconstruction, nor in the graph. However,
+    there may be reasons to represent it as a ListVariable internally.
+
+    NOTE - Objects produced here are born UNGUARDED due to the nature of sources!
+
+    NOTE - This class is very new! It will have some rough edges, but it was created to stem the bleeding of giant
+    if/else type->VariableTracker trees that were cropping up all over dynamo.
+    """
+
+    def __call__(self, tx, value) -> VariableTracker:
+        if isinstance(value, VariableTracker):
+            # This is always valid to call, and useful for recursive calls.
+            return value
+        if isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
+            return UserDefinedObjectVariable(value)
+        if ConstantVariable.is_literal(value):
+            return SourcelessBuilder.wrap_constant_literal(value)
+        elif is_builtin_callable(value):
+            return BuiltinVariable(value)
+        elif is_allowed(value):
+            return TorchVariable(value)
+        elif isinstance(value, types.FunctionType):
+            return UserFunctionVariable(value)
+        elif isinstance(value, enum.Enum):
+            return EnumVariable(value)
+        elif isinstance(value, (type, abc.ABCMeta)):
+            return UserDefinedClassVariable(value)
+        elif isinstance(value, dict):
+            return ConstDictVariable(
+                {k: self(tx, v) for k, v in value.items()},
+                dict,
+            )
+        elif isinstance(value, (tuple, list)):
+            cls = BaseListVariable.cls_for(type(value))
+            return cls([self(tx, x) for x in value])
+        unimplemented(f"Unexpected type in sourceless builder {type(value)}")
+
+    @staticmethod
+    def wrap_constant_literal(value):
+        assert ConstantVariable.is_literal(value)
+        return ConstantVariable(value=value)
