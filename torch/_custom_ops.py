@@ -50,6 +50,7 @@ def custom_op(qualname, func_or_schema=None):
             schema string.
 
     Example::
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> import torch
         >>> import numpy as np
         >>> from torch import Tensor
