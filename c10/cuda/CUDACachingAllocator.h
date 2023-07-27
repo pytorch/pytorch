@@ -109,7 +109,8 @@ struct BlockInfo {
   int32_t gc_counter = 0;
   bool allocated = false;
   bool active = false;
-  std::shared_ptr<GatheredContext> context_when_allocated; // per-watcher context
+  std::shared_ptr<GatheredContext>
+      context_when_allocated; // per-watcher context
 };
 
 // Struct containing info of a memory segment (i.e. one contiguous cudaMalloc).

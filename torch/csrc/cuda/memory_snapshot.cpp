@@ -174,10 +174,12 @@ std::string _memory_snapshot_pickled() {
           (blockInfo.allocated
                ? active_allocated_s
                : (blockInfo.active ? active_pending_free_s : inactive_s)));
-      blockDict.insert(frames_s, IValue());
       if (blockInfo.context_when_allocated) {
-        frame_tracebacks.push_back(getFromContext(blockInfo.context_when_allocated));
+        frame_tracebacks.push_back(
+            getFromContext(blockInfo.context_when_allocated));
         frame_dict.push_back(blockDict);
+      } else {
+        blockDict.insert(frames_s, empty_frames);
       }
       blocks.push_back(blockDict);
     }
@@ -257,7 +259,7 @@ std::string _memory_snapshot_pickled() {
 
   auto frames = ivalue_symbolize(frame_tracebacks);
   for (auto i : c10::irange(frames.size())) {
-    frame_dict.at(i).insert_or_assign(frames_s, frames.at(i));
+    frame_dict.at(i).insert(frames_s, frames.at(i));
   }
 
   return write_pickle(result);

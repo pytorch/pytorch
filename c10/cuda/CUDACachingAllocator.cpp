@@ -2244,7 +2244,8 @@ class DeviceCachingAllocator {
       const std::shared_ptr<GatheredContext>& ctx) {
     TORCH_INTERNAL_ASSERT(!to_map->mapped && size <= to_map->size);
     TORCH_INTERNAL_ASSERT(
-        !to_map->context_when_allocated); // unmapped blocks should not keep history
+        !to_map->context_when_allocated); // unmapped blocks should not keep
+                                          // history
     auto mapped_range =
         to_map->expandable_segment_->map(SegmentRange{to_map->ptr, size});
     // failed to map the memory

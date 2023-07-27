@@ -657,6 +657,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str is_expandable_s = "is_expandable";
   py::str frames_s = "frames";
 
+  py::list empty_frames;
   std::vector<CapturedTraceback*> to_gather_frames;
   std::vector<py::dict> to_gather_dest;
 
@@ -684,11 +685,12 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
           (blockInfo.allocated
                ? active_allocated_s
                : (blockInfo.active ? active_pending_free_s : inactive_s));
-      blockDict[frames_s] = py::none();
       if (blockInfo.context_when_allocated) {
         auto sc = getFromContext(blockInfo.context_when_allocated);
         to_gather_frames.emplace_back(sc);
         to_gather_dest.emplace_back(blockDict);
+      } else {
+        blockDict[frames_s] = empty_frames;
       }
       blocks.append(blockDict);
     }

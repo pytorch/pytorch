@@ -667,7 +667,6 @@ function annotate_snapshot(snapshot) {
           b.requested_size = b.requested_size || b.size;
         }
       }
-
       b.version = snapshot.block_version(b.addr, false);
       addr += b.size;
     }
