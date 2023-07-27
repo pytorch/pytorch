@@ -178,7 +178,7 @@ class ResolvedExportOptions(ExportOptions):
                 return fallback
 
             self.opset_version = resolve(options.opset_version, _DEFAULT_OPSET_VERSION)
-            self.dynamic_shapes = resolve(options.dynamic_shapes, False)
+            self.dynamic_shapes = resolve(options.dynamic_shapes, True)
             import torch.onnx._internal.fx.dynamo_graph_extractor as dynamo_graph_extractor  # TODO: Prevent circular dep
 
             self.fx_tracer = dynamo_graph_extractor.DynamoExport()
