@@ -1206,7 +1206,7 @@ class TestSDPAFailureModes(NNTestCase):
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86or89Device,
                      "Does not support fused SDPA or not SM86+ hardware")
-    @parametrize("head_dim", [72, 96, 128])
+    @parametrize("head_dim", [193, 204, 256])
     def test_flash_backward_failure_sm86plus(self, device, head_dim: int):
         dtype = torch.float16
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype)
@@ -2348,7 +2348,7 @@ class TestSDPACudaOnly(NNTestCase):
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
         # backward for flash attention on sm86 and sm89 for headdim > 64 currently disabled
-        if isSM86or89Device and head_dim in range(65, 129):
+        if isSM86or89Device and head_dim in range(193, 256):
             self.assertRaises(RuntimeError, lambda: out.backward(upstream_grad))
             return
         out.backward(upstream_grad)
