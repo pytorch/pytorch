@@ -13,7 +13,6 @@ using c10::IValue;
 using torch::jit::Pickler;
 
 using c10::cuda::CUDACachingAllocator::BlockInfo;
-using c10::cuda::CUDACachingAllocator::History;
 using c10::cuda::CUDACachingAllocator::SegmentInfo;
 
 namespace {
@@ -137,12 +136,10 @@ std::string _memory_snapshot_pickled() {
   IValue active_pending_free_s = "active_pending_free";
   IValue inactive_s = "inactive";
   IValue addr_s = "addr";
-  IValue real_size_s = "real_size";
   IValue filename_s = "filename";
   IValue name_s = "name";
   IValue line_s = "line";
   IValue frames_s = "frames";
-  IValue history_s = "history";
   IValue blocks_s = "blocks";
   IValue is_expandable_s = "is_expandable";
 
@@ -177,19 +174,12 @@ std::string _memory_snapshot_pickled() {
           (blockInfo.allocated
                ? active_allocated_s
                : (blockInfo.active ? active_pending_free_s : inactive_s)));
-      if (blockInfo.history.size()) {
-        auto history = new_list();
-        for (const History& h : blockInfo.history) {
-          auto history_entry = new_dict();
-          history_entry.insert(addr_s, (int64_t)h.addr);
-          history_entry.insert(real_size_s, (int64_t)h.real_size);
-          if (h.context) {
-            frame_tracebacks.push_back(getFromContext(h.context));
-            frame_dict.push_back(history_entry);
-          }
-          history.push_back(std::move(history_entry));
-        }
-        blockDict.insert(history_s, std::move(history));
+      if (blockInfo.context_when_allocated) {
+        frame_tracebacks.push_back(
+            getFromContext(blockInfo.context_when_allocated));
+        frame_dict.push_back(blockDict);
+      } else {
+        blockDict.insert(frames_s, empty_frames);
       }
       blocks.push_back(blockDict);
     }

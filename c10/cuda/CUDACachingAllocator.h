@@ -101,12 +101,6 @@ struct DeviceStats {
 
 typedef std::shared_ptr<GatheredContext> (*CreateContextFn)(void);
 
-struct History {
-  void* addr;
-  size_t real_size; // unrounded, actually requested size
-  std::shared_ptr<GatheredContext> context; // per-watcher context
-};
-
 // Struct containing info of an allocation block (i.e. a fractional part of a
 // cudaMalloc)..
 struct BlockInfo {
@@ -115,7 +109,8 @@ struct BlockInfo {
   int32_t gc_counter = 0;
   bool allocated = false;
   bool active = false;
-  std::vector<History> history;
+  std::shared_ptr<GatheredContext>
+      context_when_allocated; // per-watcher context
 };
 
 // Struct containing info of a memory segment (i.e. one contiguous cudaMalloc).
@@ -123,7 +118,7 @@ struct SegmentInfo {
   int64_t device = 0;
   int64_t address = 0;
   int64_t total_size = 0;
-  int64_t requested_size = 0;
+  int64_t requested_size = 0; // unrounded, actually requested size
   int64_t allocated_size = 0;
   int64_t active_size = 0;
   cudaStream_t stream = 0;
