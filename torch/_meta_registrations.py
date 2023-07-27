@@ -10,7 +10,6 @@ from torch._decomp import (
     global_decomposition_table,
     meta_table,
 )
-from torch._decomp.decompositions import Reduction
 from torch._ops import OpOverload
 from torch._prims import _elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
@@ -20,7 +19,6 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     IntLike,
     make_contiguous_strides_for,
-    NumberType,
     TensorLike,
 )
 
@@ -283,6 +281,13 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
 
 @register_meta(aten.copy_.default)
 def meta_copy_(self, src, non_blocking=False):
+    # This code simulates the original decomp from inductor,
+    # which runs most of the meta checks that we care about.
+    # In theory, we should make this more robust by carefully
+    # auditing our C++ copy_() kernel and copying the checks here.
+    intermediate = src.to(self, non_blocking)
+    if self.size() != intermediate.size():
+        aten.expand_copy.default(intermediate, self.size())
     return self
 
 
@@ -316,137 +321,6 @@ def meta_index_select(self, dim, index):
 def meta_index_select_out(self, dim, index, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.index_select(self, dim, index))
-
-
-def _multi_margin_loss_shape_check(ndims, input, target):
-    valid_inputs = (
-        (ndims == 2 and input.size(1) != 0)
-        or (ndims == 1 and input.size(0) != 0)
-        or ndims == 0
-    )
-    if ndims <= 1:
-        nframe = 1
-        dim = 1 if ndims == 0 else input.size(0)
-    else:
-        nframe = input.size(0)
-        dim = input.size(1)
-    torch._check(
-        valid_inputs,
-        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
-    )
-    torch._check(
-        valid_inputs and target.ndim <= 1 and target.numel() == nframe,
-        lambda: f"inconsistent target size, got: {target.shape}",
-    )
-    return nframe, dim
-
-
-@register_meta(aten.multi_margin_loss)
-@out_wrapper()
-def meta_multi_margin_loss(
-    input: Tensor,
-    target: Tensor,
-    p: NumberType = 1,
-    margin: NumberType = 1,
-    weight: Optional[Tensor] = None,
-    reduction: int = Reduction.MEAN.value,
-) -> Tensor:
-    ndims = input.ndim
-    torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
-    nframe, _ = _multi_margin_loss_shape_check(ndims, input, target)
-    if reduction == Reduction.NONE.value and target.ndim > 0:
-        return input.new_empty(nframe)
-    else:
-        return input.new_empty(())
-
-
-@register_meta(aten.multi_margin_loss_backward)
-@out_wrapper()
-def meta_multi_margin_loss_backward(
-    grad_output: Tensor,
-    input: Tensor,
-    target: Tensor,
-    p: NumberType,
-    margin: NumberType,
-    weight: Optional[Tensor] = None,
-    reduction: int = Reduction.MEAN.value,
-) -> Tensor:
-    ndims = input.ndim
-    torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
-    _multi_margin_loss_shape_check(ndims, input, target)
-    return input.new_empty(input.shape)
-
-
-def _multilabel_margin_loss_shape_check(ndims, target_arg, input, target):
-    valid_inputs = (
-        (ndims == 2 and input.size(1) != 0)
-        or (ndims == 1 and input.size(0) != 0)
-        or ndims == 0
-    )
-    torch._check(
-        valid_inputs,
-        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
-    )
-    if ndims <= 1:
-        nframe = 1
-        dim = 1 if ndims == 0 else input.size(0)
-        torch._check(
-            valid_inputs and target.ndim <= 1 and target.numel() == dim,
-            lambda: f"inconsistent size {target.shape} for {target_arg}",
-        )
-    else:
-        nframe = input.size(0)
-        dim = input.size(1)
-        torch._check(
-            valid_inputs
-            and target.ndim == 2
-            and target.size(0) == nframe
-            and target.size(1) == dim,
-            lambda: f"inconsistent size {target.shape} for {target_arg}",
-        )
-    return nframe, dim
-
-
-@register_meta(aten.multilabel_margin_loss_forward)
-@out_wrapper("output", "is_target")
-def meta_multilabel_margin_loss_forward(
-    input: Tensor,
-    target: Tensor,
-    reduction: int,
-) -> Tuple[Tensor, Tensor]:
-    target_arg = "argument #2 'target'"
-    ndims = input.ndim
-    nframe, _ = _multilabel_margin_loss_shape_check(ndims, target_arg, input, target)
-    if reduction != Reduction.NONE.value or target.ndim <= 1:
-        output = input.new_empty(())
-    else:
-        output = input.new_empty(nframe)
-    is_target = input.new_empty(target.shape)
-    return output, is_target
-
-
-@register_meta(aten.multilabel_margin_loss_backward)
-@out_wrapper()
-def meta_multilabel_margin_loss_backward(
-    grad_output: Tensor,
-    input: Tensor,
-    target: Tensor,
-    reduction: int,
-    is_target: Tensor,
-) -> Tensor:
-    target_arg = "argument #3 'target'"
-    is_target_arg = "argument #5 'is_target'"
-    ndims = input.ndim
-    _multilabel_margin_loss_shape_check(ndims, target_arg, input, target)
-    torch._check(
-        target.shape == is_target.shape,
-        lambda: (
-            f"Expected tensor for {target_arg} to have same size as tensor for {is_target_arg}"
-            f"; but {target.shape} does not equal {is_target.shape}"
-            f" (while checking arguments for multilabel_margin_loss_backward)"
-        ),
-    )
-    return input.new_empty(input.shape)
 
 
 @register_meta([aten.max.default, aten.max.unary_out])
@@ -672,6 +546,33 @@ def meta__linalg_eigh(
     vals = A.new_empty(shape, dtype=toRealValueType(A.dtype))
 
     return vals, vecs
+
+
+def cloneBatchedColumnMajor(src: Tensor) -> Tensor:
+    return src.mT.clone(memory_format=torch.contiguous_format).transpose(-2, -1)
+
+
+@register_meta(aten._cholesky_solve_helper)
+@out_wrapper()
+def _cholesky_solve_helper(self: Tensor, A: Tensor, upper: bool) -> Tensor:
+    return cloneBatchedColumnMajor(self)
+
+
+@register_meta(aten.cholesky_solve)
+@out_wrapper()
+def cholesky_solve(self: Tensor, A: Tensor, upper: bool = False) -> Tensor:
+    torch._check(
+        self.ndim >= 2,
+        lambda: f"b should have at least 2 dimensions, but has {self.ndim} dimensions instead",
+    )
+    torch._check(
+        A.ndim >= 2,
+        lambda: f"u should have at least 2 dimensions, but has {A.ndim} dimensions instead",
+    )
+    self_broadcasted, A_broadcasted = _linalg_broadcast_batch_dims_name(
+        self, A, "cholesky_solve"
+    )
+    return _cholesky_solve_helper(self_broadcasted, A_broadcasted, upper)
 
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
@@ -1057,7 +958,7 @@ def _linalg_svd_meta(
     A: Tensor,
     full_matrices: bool = False,
     compute_uv: bool = True,
-    driver: str = None,
+    driver: Optional[str] = None,
 ):
     checkIsMatrix(A, "linalg.svd")
     checkFloatingOrComplex(A, "linalg.svd")
@@ -1200,7 +1101,7 @@ def linalg_solve_triangular_meta(
     upper: bool,
     left: bool = True,
     unitriangular: bool = False,
-    out: Tensor = None,
+    out: Optional[Tensor] = None,
 ) -> Tensor:
     if out is None:
         out = A.new_empty([0])
@@ -2340,6 +2241,13 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
     return self.new_empty(self.shape).to(memory_format=memory_format)
 
 
+@register_meta(aten._adaptive_avg_pool3d_backward)
+@out_wrapper()
+def meta__adaptive_avg_pool3d_backward(grad_output, self):
+    _adaptive_pool_empty_output_check(grad_output, "adaptive_avg_pool3d_backward")
+    return torch.empty_like(self, memory_format=torch.legacy_contiguous_format)
+
+
 def _adaptive_pool_empty_output_check(grad_output: Tensor, arg_name: str):
     ndim = grad_output.ndim
     for i in range(1, ndim):
@@ -2674,6 +2582,7 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     [
         aten._foreach_neg_.default,
         aten._foreach_reciprocal_.default,
+        aten._foreach_sqrt_.default,
     ]
 )
 def meta__foreach_unaop_(self):
@@ -2715,43 +2624,33 @@ def _check_foreach_binop_tensor_lists(self, other):
     )
 
 
-@register_meta([aten._foreach_add.List])
-def meta__foreach_add(self, other, alpha=1):
-    _check_foreach_binop_tensor_lists(self, other)
-    return [torch.empty_like(s) for s in self]
-
-
-@register_meta([aten._foreach_sub.List])
-def meta__foreach_sub(self, other, alpha=1):
-    _check_foreach_binop_tensor_lists(self, other)
-    return [torch.empty_like(s) for s in self]
-
-
-@register_meta([aten._foreach_add_.List])
-def meta__foreach_add__list(self, other, alpha=1):
-    _check_foreach_binop_tensor_lists(self, other)
-
-
-@register_meta([aten._foreach_div_.List])
-def meta__foreach_binop__list(self, other):
-    _check_foreach_binop_tensor_lists(self, other)
-
-
-@register_meta([aten._foreach_maximum.List])
-def meta__foreach_maximum__list(self, other, alpha=1):
+@register_meta(
+    [
+        aten._foreach_add.List,
+        aten._foreach_sub.List,
+        aten._foreach_mul.List,
+        aten._foreach_div.List,
+        aten._foreach_maximum.List,
+        aten._foreach_minimum.List,
+    ]
+)
+def meta__foreach_binop_list(self, other, alpha=1):
     _check_foreach_binop_tensor_lists(self, other)
     return [torch.empty_like(s) for s in self]
 
 
 @register_meta(
     [
-        aten._foreach_div.List,
-        aten._foreach_mul.List,
+        aten._foreach_add_.List,
+        aten._foreach_sub_.List,
+        aten._foreach_mul_.List,
+        aten._foreach_div_.List,
+        aten._foreach_maximum_.List,
+        aten._foreach_minimum_.List,
     ]
 )
-def meta__foreach_binop_list(self, other):
+def meta__foreach_binop__list(self, other, alpha=1):
     _check_foreach_binop_tensor_lists(self, other)
-    return [torch.empty_like(s) for s in self]
 
 
 @register_meta(
@@ -2759,6 +2658,7 @@ def meta__foreach_binop_list(self, other):
         aten._foreach_add_.Scalar,
         aten._foreach_mul_.Scalar,
         aten._foreach_sub_.Scalar,
+        aten._foreach_div_.Scalar,
     ]
 )
 def meta__foreach_binop__scalar(self, scalar=1):
@@ -2803,6 +2703,15 @@ def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
         len(self) == len(tensor1) and len(self) == len(tensor2),
         lambda: "All input tensor lists must have the same length",
     )
+
+
+@register_meta(
+    [
+        aten._foreach_lerp_.Scalar,
+    ]
+)
+def meta__foreach_lerp__scalar(self, other, scalar=1):
+    _check_foreach_binop_tensor_lists(self, other)
 
 
 @register_meta(
@@ -2976,6 +2885,10 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     return x1.new_empty(output_shape)
 
 
+# NB: This meta function accepts non-meta arguments!  When this behavior
+# was originally introduced this was accidental, but it is now load bearing
+# as people are using this so that they can conveniently test code involving
+# embeddings (feeding CPU tensor inputs with meta device EmbeddingBag module)
 @register_meta(aten._embedding_bag.default)
 def meta_embedding_bag(
     weight,
@@ -4558,6 +4471,7 @@ def meta__scaled_dot_product_efficient(
     query: Tensor,
     key: Tensor,
     value: Tensor,
+    attn_bias: Optional[Tensor],
     compute_log_sumexp: bool,
     dropout_p=0.0,
     is_causal: bool = False,
@@ -4602,11 +4516,13 @@ def meta__scaled_dot_product_efficient_backward(
     query: Tensor,
     key: Tensor,
     value: Tensor,
+    attn_bias: Optional[Tensor],
     out: Tensor,
     logsumexp: Tensor,
     philox_seed: Tensor,
     philox_offset: Tensor,
     dropout_p: float,
+    grad_input_mask: List[bool],
     is_causal: bool = False,
     scale: Optional[float] = None,
 ):
@@ -4635,8 +4551,16 @@ def meta__scaled_dot_product_efficient_backward(
         dtype=value.dtype,
         device=value.device,
     )
+    grad_bias = None
+    if attn_bias is not None and grad_input_mask[3]:
+        grad_bias = torch.empty_strided(
+            attn_bias.size(),
+            attn_bias.stride(),
+            dtype=attn_bias.dtype,
+            device=attn_bias.device,
+        )
 
-    return grad_q, grad_k, grad_v
+    return grad_q, grad_k, grad_v, grad_bias
 
 
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
@@ -4737,8 +4661,8 @@ def upsample_nearest2d_backward(
     grad_output: Tensor,
     output_size: Sequence[Union[int, torch.types.SymInt]],
     input_size: Sequence[Union[int, torch.types.SymInt]],
-    scales_h: float = None,
-    scales_w: float = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
 ):
     full_output_size = upsample_common_check(
         input_size, output_size, num_spatial_dims=2
@@ -4801,6 +4725,11 @@ def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=
         _safe_copy_out(copy_from=i, copy_to=indices)  # type: ignore[arg-type]
         return values, indices
     return v, i
+
+
+@register_meta(aten.argsort.stable)
+def meta_argsort(self, *, stable, dim=-1, descending=False):
+    return meta_sort(self, stable=stable, dim=dim, descending=descending)[1]
 
 
 def rnn_cell_checkSizes(

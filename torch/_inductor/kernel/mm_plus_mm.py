@@ -7,20 +7,15 @@ from ..select_algorithm import (
     ExternKernelChoice,
     TritonTemplate,
 )
-from ..utils import use_triton_template
+from ..utils import use_aten_gemm_kernels, use_triton_template
 from ..virtualized import V
 from .mm_common import mm_args, mm_grid, mm_options
 
 aten = torch.ops.aten
 
-
-def ref_mm_plus_mm(a, b, c, d, out):
-    torch.mm(a, b, out=out)
-    out.addmm_(c, d)
-    return out
-
-
-aten_mm_plus_mm = ExternKernelChoice(ref_mm_plus_mm)
+aten_mm_plus_mm = ExternKernelChoice(
+    torch.ops.inductor._mm_plus_mm, "torch::inductor::_mm_plus_mm"
+)
 
 mm_plus_mm_template = TritonTemplate(
     name="mm_plus_mm",
@@ -163,7 +158,11 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
 
     assert layout1 == layout2
     # options to tune from
-    choices = [aten_mm_plus_mm.bind((mat1, mat2, mat3, mat4), layout1)]
+    choices = (
+        [aten_mm_plus_mm.bind((mat1, mat2, mat3, mat4), layout1)]
+        if use_aten_gemm_kernels()
+        else []
+    )
     if use_triton_template(layout1):
         for config in mm_configs():
             # see https://github.com/openai/triton/issues/1298

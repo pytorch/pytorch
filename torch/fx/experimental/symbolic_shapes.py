@@ -33,9 +33,8 @@ from torch import (  # noqa: F401
     SymInt,
 )
 from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
-from torch.utils._sympy.functions import FloorDiv, LShift, RShift
-from torch.utils._sympy.interp import sympy_interp
-from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges, ValueRangeError
+from torch.utils._sympy.functions import FloorDiv, LShift, Mod, RShift
+from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._traceback import format_frame
 from torch._utils_internal import signpost_event
 
@@ -472,6 +471,16 @@ def eval_guards(gm, *args, ignore_static=True):
 def bind_symbols(gm, *args):
     return gm.shape_env.bind_symbols(fx_placeholder_vals(gm), args)
 
+def _assert_bound_is_rational(expr: sympy.Expr, bound: ValueRanges):
+    """
+    We assert that the bounds are either Boolean, or not finite, or can be computed
+    in exact prevision via rational arithmetic.
+    The only exception to this is the rare case when the user calls `sqrt(s0)`
+    sqrt is turned into sympy.Pow so we just match for that (it matches more things, but still)
+    """
+    assert bound.lower.is_rational or bound.lower.is_Boolean or not bound.lower.is_finite or expr.has(sympy.Pow), (bound, expr)
+    assert bound.upper.is_rational or bound.upper.is_Boolean or not bound.upper.is_finite or expr.has(sympy.Pow), (bound, expr)
+
 class DimDynamic(Enum):
     """
     Controls how to perform symbol allocation for a dimension.  It is always
@@ -652,7 +661,7 @@ class SymNode:
         # Record the FX node of the current node if we are doing translation
         # validation. They will be used for building the input assertions for
         # the translation validation problem.
-        self.fx_node = fx_node if _translation_validator_enabled() else None
+        self.fx_node = fx_node if _translation_validation_enabled() else None
 
     @property
     def expr(self):
@@ -690,6 +699,12 @@ class SymNode:
                 return self._hint
         else:
             return self._hint
+
+    def maybe_as_int(self):
+        if self.expr.free_symbols:
+            return None
+        else:
+            return int(self.expr)
 
     def _update_expr(self):
         self._expr = self.shape_env.replace(self._expr)
@@ -940,7 +955,7 @@ reflectable_magic_methods = {
     'add': lambda a, b: a + b,
     'sub': lambda a, b: a - b,
     'mul': lambda a, b: a * b,
-    'mod': lambda a, b: a % b,
+    'mod': lambda a, b: Mod(a, b),
     'pow': lambda a, b: Pow(a, b),
     'and': lambda a, b: sympy.And(a, b),
     'or': lambda a, b: sympy.Or(a, b),
@@ -1387,9 +1402,9 @@ del method
 del func
 
 
-def _translation_validator_enabled() -> bool:
-    from torch.fx.experimental.validator import translation_validator_enabled
-    return translation_validator_enabled()
+def _translation_validation_enabled() -> bool:
+    from torch.fx.experimental.validator import translation_validation_enabled
+    return translation_validation_enabled()
 
 
 def _lru_cache(fn, maxsize=None):
@@ -1473,7 +1488,7 @@ class DynamicDimConstraintPrinter(StrPrinter):
         return self.print_source(self.symbol_to_source[expr][0])
 
     def _print_Relational(self, expr):
-        return '%s %s %s' % (
+        return '{} {} {}'.format(
             self.parenthesize(expr.lhs, precedence(expr)),
             expr.rel_op,
             self.parenthesize(expr.rhs, precedence(expr))
@@ -1581,8 +1596,8 @@ class DimConstraints:
                 self._congruences[s].add(congruence)
             return (base - mod_reduced) / divisor
 
-        if expr.has(sympy.Mod):
-            expr = expr.replace(sympy.Mod, mod_handler)
+        if expr.has(Mod):
+            expr = expr.replace(Mod, mod_handler)
         if expr.has(FloorDiv):
             expr = expr.replace(FloorDiv, floor_div_handler)
         return expr
@@ -1683,7 +1698,7 @@ class DimConstraints:
 
     def specialize_divisor_symbols(self):
         for expr in self._multivariate_inequalities:
-            for atom in expr.atoms(FloorDiv, sympy.Mod):
+            for atom in expr.atoms(FloorDiv, Mod):
                 _, divisor = atom.args
                 for s in divisor.free_symbols:
                     self._force_specialization(s)
@@ -1872,7 +1887,7 @@ TLS = threading.local()
 class ShapeEnvLoggerAdapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):
         # TODO: Maybe suppress the envid if not DEBUG?
-        return '%s: %s' % (self.extra['envid'], msg), kwargs
+        return f"{self.extra['envid']}: {msg}", kwargs
 
 
 ENV_COUNTER = collections.Counter()
@@ -1912,26 +1927,26 @@ class ShapeEnv:
         self.guards: List[ShapeGuard] = []
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
-        self.var_to_val: Dict["sympy.Symbol", "sympy.Integer"] = {}
+        self.var_to_val: Dict[sympy.Symbol, sympy.Integer] = {}
         # Maps symbolic ints to their min/max range.  These ranges
         # are conservative: the int MUST fall in the range, but the
         # range may contain ints which may not actually appear in
         # practice
-        self.var_to_range: Dict["sympy.Symbol", ValueRanges] = {}
-        self.var_to_sources: Dict["sympy.Symbol", List[Source]] = {}
-        self.var_to_stack: Dict["sympy.Symbol", traceback.StackSummary] = {}
+        self.var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
+        self.var_to_sources: Dict[sympy.Symbol, List[Source]] = {}
+        self.var_to_stack: Dict[sympy.Symbol, traceback.StackSummary] = {}
         # Maps symbolic ints to the guards that refine their lower/upper
         # bound. If one of them is None, it means that there are no guards
         # that refine that respective bound.
-        self.var_to_guards: Dict["sympy.Symbol", Tuple[Optional[ShapeGuard], Optional[ShapeGuard]]] = {}
+        self.var_to_guards: Dict[sympy.Symbol, Tuple[Optional[ShapeGuard], Optional[ShapeGuard]]] = {}
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
-        self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
+        self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}  #
         # Set holds a % b expressions that evaluate to 0.
-        self.divisible: Set["sympy.Expr"] = set()
+        self.divisible: Set[sympy.Expr] = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
-        self.val_to_var: Dict[int, "sympy.Expr"] = {}
+        self.val_to_var: Dict[int, sympy.Expr] = {}
         if specialize_zero_one:
             self.val_to_var = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
@@ -1963,7 +1978,7 @@ class ShapeEnv:
         self.fx_node_cache: Dict[Tuple[Callable, Tuple[Any, ...]], torch.fx.Node] = {}
         self.source_to_symbol: Dict[str, sympy.Symbol] = {}
 
-        if _translation_validator_enabled():
+        if _translation_validation_enabled():
             from torch.fx.experimental.validator import TranslationValidator
 
             self.validator = TranslationValidator()
@@ -1976,7 +1991,7 @@ class ShapeEnv:
         self.frozen = True
 
     def _create_symbol_for_source(self, source: Source) -> Optional[sympy.Symbol]:
-        if not _translation_validator_enabled():
+        if not _translation_validation_enabled():
             return None
         srcname = source.name()
         if source not in self.source_to_symbol:
@@ -1984,19 +1999,19 @@ class ShapeEnv:
         return self.source_to_symbol[srcname]
 
     def _add_z3var(self, symbol: sympy.Symbol, type: Type) -> None:
-        if _translation_validator_enabled():
+        if _translation_validation_enabled():
             self.validator.add_var(symbol, type)
 
     def _add_target_expr(self, expr) -> None:
-        if _translation_validator_enabled():
+        if _translation_validation_enabled():
             self.validator.add_target_expr(expr)
 
     def _add_assertion(self, expr) -> None:
-        if _translation_validator_enabled():
+        if _translation_validation_enabled():
             self.validator.add_assertion(expr)
 
     def _check_translation_validate(self) -> None:
-        if not _translation_validator_enabled():
+        if not _translation_validation_enabled():
             return
 
         result = self.validator.validate()
@@ -2038,7 +2053,7 @@ Target Guards:
         # Cache this tuple in order to avoid duplicated nodes.
         node_key = (op, args)
 
-        if _translation_validator_enabled() and node_key not in self.fx_node_cache:
+        if _translation_validation_enabled() and node_key not in self.fx_node_cache:
             from torch.fx.experimental.validator import z3op
 
             # Presence of None in the arguments implies that we should ignore this operation.
@@ -2061,7 +2076,7 @@ Target Guards:
             symbol: sympy.Symbol,
             type: Type,
     ) -> Optional[torch.fx.Node]:
-        if not _translation_validator_enabled():
+        if not _translation_validation_enabled():
             return None
 
         node_key = (self.graph.placeholder, (symbol,))
@@ -2226,7 +2241,7 @@ Target Guards:
             hint: Optional[int],
             source: Optional[Source] = None,
     ):
-        if _translation_validator_enabled() and source is not None:
+        if _translation_validation_enabled() and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
             assert symbol is not None
@@ -2245,13 +2260,9 @@ Target Guards:
             return int(sym)
         return SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
 
-    def create_symint_and_symbol(self, value, source, dynamic_dim):
-        # TODO: This is wrong wrong wrong, create_symbol will
-        # generate something that is non-negative, but this is
-        # not a sound assumption to make.
-        # Not fixing as this was a preexisting condition.
+    def create_unspecified_symint_and_symbol(self, value, source, dynamic_dim):
         return self.create_symintnode(
-            self.create_symbol(
+            self.create_unspecified_symbol(
                 value,
                 source=source,
                 dynamic_dim=dynamic_dim,
@@ -2280,7 +2291,7 @@ Target Guards:
         symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
-        self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
+        self.var_to_range[symbol] = self._default_unspecified_value_range()
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self.create_fx_placeholder_and_z3var(symbol, int)
@@ -2298,14 +2309,27 @@ Target Guards:
 
         return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None, fx_node=fx_node))
 
-    def create_symbol(
+    def create_unspecified_symbol(
         self,
         val: int,
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
     ) -> "sympy.Expr":
+        # 'positive' is None for unspecified symbols, since we can't
+        # assume that it will be neither positive nor negative.
+        return self.create_symbol(val, source, dynamic_dim, constraint_dim, positive=None)
+
+    def create_symbol(
+        self,
+        val: int,
+        source: Source,
+        dynamic_dim: DimDynamic = DimDynamic.DUCK,
+        constraint_dim: DimConstraint = None,  # NB: includes None
+        positive: Optional[bool] = True,
+    ) -> "sympy.Expr":
         assert isinstance(source, Source), f"{type(source)} {source}"
+        assert not (positive and val < 0), f"positive set for negative value: {val}"
         # It's always sound to allocate a symbol as DYNAMIC.  If the user
         # constrained the symbol, force the policy to DYNAMIC, because our
         # constraint code will do weird stuff if, e.g., it's duck shaped
@@ -2323,34 +2347,34 @@ Target Guards:
         else:
             raise AssertionError(f"unhandled dynamic_dim {dynamic_dim}")
 
-        if val < 0:
-            from torch._dynamo.source import NegateSource
-            assert constraint_dim is None, "constraints on negative unspec ints NYI"
-            return -self.create_symbol(-val, NegateSource(source), dynamic_dim, constraint_dim)
-
         if val in (0, 1) and self.specialize_zero_one:
             r = self.val_to_var[val]
         elif not duck or val not in self.val_to_var:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
-            sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
+            sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=positive, integer=True)
             self.log.info("create_symbol %s = %s for %s", sympy_expr, val, source.name())
             self.counter["create_symbol"] += 1
             # We always associate vars to vals
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             # Do the appending later, because we always want to populate this
             self.var_to_sources[sympy_expr] = []
-            # Add assertions for the newly created symbols
+            # Create a Z3 variable for the new symbol.
             self._add_z3var(sympy_expr, int)
-            self._add_assertion(sympy.And(sympy.Ne(sympy_expr, 0), sympy.Ne(sympy_expr, 1)))
 
             if duck:
                 # Make sure to reuse this symbol for subsequent duck shaping
                 self.val_to_var[val] = sympy_expr
 
-            # Apply default range, which assumes not zero-one
-            self.var_to_range[sympy_expr] = self._default_value_range()
+            if positive:
+                # Add assertions for the newly created symbols
+                self._add_assertion(sympy_expr > 1)
+
+                # Apply default range, which assumes not zero-one
+                self.var_to_range[sympy_expr] = self._default_value_range()
+            else:
+                self.var_to_range[sympy_expr] = self._default_unspecified_value_range()
 
             # Small performance optimization: if we have a min-max constraint,
             # we can proactively narrow to that range
@@ -2614,7 +2638,7 @@ Target Guards:
 
         if not _simplified:
             for source, expr in input_guards:
-                if _translation_validator_enabled():
+                if _translation_validation_enabled():
                     # Ignore sources that were not turned into SymInts.
                     srcname = source.name()
                     if srcname in self.source_to_symbol:
@@ -2797,7 +2821,7 @@ Target Guards:
             },
         )
 
-        if _translation_validator_enabled():
+        if _translation_validation_enabled():
             from torch.fx.experimental.validator import PopulateValidator
 
             # Add value range bound guards for all symbols with no trivial bounds.
@@ -2919,7 +2943,7 @@ Target Guards:
             s = sympy.Symbol(f"shape_{idx}", positive=True, integer=True)
             offset = vr.lower - 1
             new_shape_env[k] = s + offset
-            new_range_env[s] = ValueRangeAnalysis.sub(vr, offset)
+            new_range_env[s] = SymPyValueRangeAnalysis.add(vr, -offset)
 
         def replace(expr, repl):
             return expr.xreplace(repl)
@@ -2941,7 +2965,9 @@ Target Guards:
             return new_expr
 
         # Check if the range can solve it statically
-        out = sympy_interp(ValueRangeAnalysis, new_range_env, new_expr)
+        out = bound_sympy(new_expr, new_range_env)
+        _assert_bound_is_rational(new_expr, out)
+
         if out.is_singleton():
             return out.lower
 
@@ -3071,6 +3097,12 @@ Target Guards:
             raise self._make_data_dependent_error(result_expr, expr)
         return result_expr
 
+    # NB: keep in sync with size_hint
+    @lru_cache(256)
+    def has_hint(self, expr: "sympy.Expr"):
+        result_expr = safe_expand(expr).xreplace(self.var_to_val)
+        return len(result_expr.free_symbols) == 0 or self._maybe_evaluate_static(result_expr) is not None
+
     def _make_data_dependent_error(self, expr, unhinted_expr):
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
@@ -3149,7 +3181,7 @@ Target Guards:
         free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
         lhs = expr.lhs
         rhs = expr.rhs
-        if not expr.has(sympy.Mod):
+        if not expr.has(Mod):
             try:
                 floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
                 if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
@@ -3166,8 +3198,8 @@ Target Guards:
             except RecursionError:
                 self.counter["sympy_recursion_error"] += 1
                 self.log.warning("RecursionError in sympy.solve(%s - %s, %s)", lhs, rhs, free[0])
-        if expr.has(sympy.Mod):
-            mod_expr = tuple(expr.atoms(sympy.Mod))[0]
+        if expr.has(Mod):
+            mod_expr = tuple(expr.atoms(Mod))[0]
             try:
                 solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
                 if len(solutions) == 1 and solutions[0][mod_expr] == 0:
@@ -3184,6 +3216,9 @@ Target Guards:
         lower = 2 if self.specialize_zero_one else 0
         return ValueRanges(lower, sys.maxsize - 1)
 
+    def _default_unspecified_value_range(self) -> ValueRanges:
+        return ValueRanges(-sys.maxsize - 1, sys.maxsize)
+
     @_lru_cache
     def _simplify_floor_div(self, expr):
         floor_divs = tuple(expr.atoms(FloorDiv))
@@ -3192,7 +3227,7 @@ Target Guards:
         # even if tracing doesn't require them otherwise
         for fd in reversed(floor_divs):
             base, divisor = fd.args
-            mod_expr = sympy.Mod(base, divisor)
+            mod_expr = Mod(base, divisor)
             eq_expr = sympy.Eq(mod_expr, 0)
             # add necessary mod guards
             self.evaluate_expr(eq_expr)
@@ -3216,7 +3251,7 @@ Target Guards:
         # If all of the above check, we create an FX node representing the
         # actual expression to be guarded.
         if (
-                _translation_validator_enabled()
+                _translation_validation_enabled()
                 and fx_node is not None
                 and not self._suppress_guards_tls()
         ):
@@ -3231,6 +3266,9 @@ Target Guards:
 
         if len(orig_expr.free_symbols) == 0:
             self.log.debug("eval %s [trivial]", orig_expr)
+            # NB: don't test float as there may be precision issues
+            if isinstance(hint, (int, bool)):
+                assert orig_expr == hint, f"{orig_expr} != {hint}"
             return orig_expr
 
         expr = orig_expr
@@ -3238,6 +3276,9 @@ Target Guards:
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
             self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
+            # NB: don't test float as there may be precision issues
+            if isinstance(hint, (int, bool)):
+                assert static_expr == hint, f"{static_expr} != {hint}"
             return static_expr
 
         if not (expr.free_symbols <= self.var_to_val.keys()):
@@ -3256,6 +3297,9 @@ Target Guards:
                 {
                     **self.co_fields,
                     "ignored_guard": f"{expr} == {concrete_val}",
+                    # no version = original state (this signpost is expected)
+                    # version 2 = dynamic backwards is eagerly compiled
+                    "version": 2,
                 },
             )
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
@@ -3380,10 +3424,6 @@ Target Guards:
             ):
                 continue
 
-            # Use only univariate functions.
-            if len(expr.rhs.free_symbols) > 0:
-                continue
-
             # Update the value range of the left-hand side, if the
             # right-hand side provides a better range.
             symbol = expr.lhs
@@ -3391,7 +3431,8 @@ Target Guards:
             vr = self.var_to_range[symbol]
             lower, upper = vr.lower, vr.upper
 
-            rhs_vr = sympy_interp(ValueRangeAnalysis, self.var_to_range, expr.rhs)  # type: ignore[arg-type]
+            rhs_vr = bound_sympy(expr.rhs, self.var_to_range)
+            _assert_bound_is_rational(expr.rhs, rhs_vr)
             lower_guard, upper_guard = self.var_to_guards.get(symbol, (None, None))
 
             # Let's suppose that we have a preexisting range for x [0, 100].
