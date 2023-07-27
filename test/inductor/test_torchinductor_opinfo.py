@@ -163,8 +163,6 @@ inductor_expected_failures_single_sample = defaultdict(dict)
 inductor_expected_failures_single_sample["cpu"] = {
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "allclose": {f16, f32, f64},
-    "amax": {f16},
-    "amin": {f16},
     "angle": {f16, f32, f64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
     "bernoulli": {f32, f64},
@@ -175,7 +173,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "corrcoef": {f32, f64, i32, i64},
     "cov": {f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
-    "index_add": {f16},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
     # Unsupported: data dependent operator: aten._local_scalar_dense.default
@@ -197,6 +194,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
     "nn.functional.adaptive_avg_pool2d": {f16},
+    # f16 handling issue https://github.com/pytorch/pytorch/issues/105914
+    "nn.functional.cosine_similarity": {f16},
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.gaussian_nll_loss": {f16, f32, f64},
     "nn.functional.local_response_norm": {i64},
@@ -213,8 +212,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "randint": {f16, f32, f64, i32, i64},
     "randn_like": {f16, f32, f64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
-    "scatter_add": {f16},
-    ("scatter_reduce", "sum"): {f16},
     ("scatter_reduce", "prod"): {f16, f32, f64},
     ("_segment_reduce", "lengths"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
@@ -222,10 +219,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "stft": {f32, f64},
     "svd": {f32, f64},
     "svd_lowrank": {f32, f64},
-    "linalg.cond": {f32, f64},
-    "linalg.svd": {f32, f64},
-    "linalg.svdvals": {f32, f64},
-    "linalg.matrix_rank": {f32, f64},
     "pca_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
@@ -336,14 +329,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     # AssertionError: Tensor-likes are not close!
     "nn.functional.triplet_margin_loss": {f16},
-    # The following 3 tests fail on CUDA with AssertionError: expected size 5==5, stride 5==1 at dim=0
-    # linalg._svd's return value has different strides on CUDA vs CPU which causes this
-    # In test_meta.py there is a mechanism to skipping strides checks for some ops
-    # (including _linalg_svd), possibly we should have something similar here
-    "linalg.cond": {f32, f64},
-    "linalg.svdvals": {f32, f64},
-    "linalg.matrix_rank": {f32, f64},
-    "linalg.svd": {f32, f64},
     "pca_lowrank": {f32, f64},
     "svd_lowrank": {f32, f64},
     "svd": {f32, f64},
@@ -498,6 +483,7 @@ inductor_all_samples = {
     "scatter_reduce.sum",
     "select_scatter",
     "squeeze",
+    "unfold",
     "unsqueeze",
     "sum",
     "amax",

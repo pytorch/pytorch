@@ -68,6 +68,7 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
         torch.uint8,
         torch.bool,
         torch.bfloat16,
+        torch.complex64,
         # torch.float16, # TODO: implement this
     }
     if cuda:
@@ -208,6 +209,8 @@ class GraphLowering(torch.fx.Interpreter):
         ] = (
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
+        # Used if lowering encounters cases where cudagraphs are not supported
+        self.disable_cudagraphs = False
 
     @staticmethod
     def decide_layout_opt(gm) -> bool:
@@ -225,6 +228,18 @@ class GraphLowering(torch.fx.Interpreter):
 
         if nconv == 0:
             return False
+
+        # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
+        if (
+            all(
+                n.args[idx].meta["val"].device == torch.device("cpu")
+                for n in conv_nodes
+                for idx in [0, 1]
+            )
+            and torch.backends.mkldnn.enabled
+            and torch.backends.mkldnn.is_available()
+        ):
+            return True
 
         # Followering models are skipped due to this:
         # jx_nest_base
@@ -370,7 +385,7 @@ class GraphLowering(torch.fx.Interpreter):
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
             self._warned_fallback.add(name)
-            perf_hint_log.warning("Using FallbackKernel: %s", name)
+            perf_hint_log.info("Using FallbackKernel: %s", name)
 
     def add_device_idx(self, idx: Optional[int]):
         if idx is not None:
@@ -449,7 +464,7 @@ class GraphLowering(torch.fx.Interpreter):
                     value.realize()
             return value
 
-        for key, value in self.env.items():
+        for value in self.env.values():
             try:
                 visit(value)
             except Exception:
@@ -658,6 +673,13 @@ class GraphLowering(torch.fx.Interpreter):
             elif n.op == "call_function" and n.target in layout_constraints:
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
                 result = self.call_function(n.target, args, kwargs)
+            elif n.target == torch.ops.aten.sym_stride:
+                # inductor graphs can occasionally return sizes/strides,
+                # e.g. if we need to save symints for the backward graph.
+                if isinstance(n.meta["val"], torch.SymInt):
+                    result = n.meta["val"].node.expr
+                else:
+                    result = super().run_node(n)
             elif is_magic_method(n.target):
                 if isinstance(n.meta["val"], torch.SymInt):
                     result = n.meta["val"].node.expr
@@ -678,23 +700,26 @@ class GraphLowering(torch.fx.Interpreter):
                 torch.ops.aten.as_strided_.default,
                 torch.ops.aten.as_strided_scatter.default,
             ]
-            if any(
-                user.op == "output" or user.target in as_strided_ops for user in n.users
-            ) and isinstance(n.meta["val"], torch.Tensor):
+            is_output = any(user.op == "output" for user in n.users)
+            is_input_for_as_strided = any(
+                user.target in as_strided_ops for user in n.users
+            )
+            if (is_output or is_input_for_as_strided) and isinstance(
+                n.meta["val"], torch.Tensor
+            ):
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
                 if dense and len(strides):
                     stride_order = ir.get_stride_order(strides)
-
                     if (
                         len(result.get_size()) == 4
                         and n in self.nodes_prefer_channels_last
                         and n.name not in self.user_visible_outputs
+                        and not is_input_for_as_strided
                     ):
                         stride_order = ir.NHWC_STRIDE_ORDER
-
                     result = ir.ExternKernel.require_stride_order(result, stride_order)
 
             # Realize if (1) any user need inputs realized, or (2) there is
@@ -786,7 +811,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.disable_cpp_wrapper("platform not linux")
 
     def check_input_for_cpp_buffer(self):
-        for _, value in self.graph_inputs.items():
+        for value in self.graph_inputs.values():
             dtype = None
             if isinstance(value, TensorBox):
                 dtype = value.get_dtype()
@@ -903,11 +928,11 @@ class GraphLowering(torch.fx.Interpreter):
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
-        V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
+        V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
 
     def compile_to_fn(self):
-        if self.aot_mode:
+        if self.aot_mode and self.cpp_wrapper:
             from .codecache import AotCodeCache
 
             code, linemap = self.codegen()

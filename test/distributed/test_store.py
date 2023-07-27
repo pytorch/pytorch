@@ -354,7 +354,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
     def _create_client(self, index, addr, port, world_size):
         client_store = dist.TCPStore(addr, port, world_size=world_size, timeout=timedelta(seconds=10))
-        self.assertEqual("value".encode(), client_store.get("key"))
+        self.assertEqual(b"value", client_store.get("key"))
         client_store.set(f"new_key{index}", f"new_value{index}")
         self.assertEqual(f"next_value{index}".encode(),
                          client_store.compare_set(f"new_key{index}", f"new_value{index}", f"next_value{index}"))
@@ -580,6 +580,26 @@ class RendezvousTCPTest(TestCase):
         end = time.time()
         time_diff = end - start
         self.assertGreater(test_store_timeout.seconds * 10, time_diff)
+
+    def test_tcp_store_timeout_doest_break_client(self):
+        url = self.create_tcp_url()
+        test_store_timeout = timedelta(seconds=10)
+        gen0 = dist.rendezvous(url + "&rank=0", timeout=test_store_timeout)
+        store0, rank0, size0 = next(gen0)
+        # this should time out in 10s. If the timeout passed into rendezvous was
+        # not respected, it will take much longer to timeout.
+        start = time.time()
+        with self.assertRaisesRegex(RuntimeError, "Timeout"):
+            store0.get("the_key")
+
+        store0.set("the_key", "x")
+
+        self.assertEqual(b"x", store0.get("the_key"))
+
+        end = time.time()
+        time_diff = end - start
+        self.assertGreater(test_store_timeout.seconds * 10, time_diff)
+
 
 class DummyStore(dist.Store):
     def __init__(self):

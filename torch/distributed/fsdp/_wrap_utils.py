@@ -5,8 +5,10 @@ from functools import partial
 from typing import Any, Callable, Dict, Set, Type, Union
 
 import torch.nn as nn
-from torch.distributed.fsdp._common_utils import _get_module_fsdp_state
-from torch.distributed.fsdp._utils import _override_module_mixed_precision
+from torch.distributed.fsdp._common_utils import (
+    _get_module_fsdp_state,
+    _override_module_mixed_precision,
+)
 
 from torch.distributed.fsdp.wrap import (
     _construct_wrap_fn,
@@ -96,7 +98,7 @@ def _auto_wrap(
         )
         recursive_wrap_kwargs["auto_wrap_policy"] = policy
         _warn_on_overridden_mixed_precision(overridden_module_classes)
-    _recursive_wrap(**recursive_wrap_kwargs, **fsdp_kwargs)
+    _recursive_wrap(**recursive_wrap_kwargs, **fsdp_kwargs)  # type: ignore[arg-type]
 
 
 def _check_nested_wrapping(root_module: nn.Module):

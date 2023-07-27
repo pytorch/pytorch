@@ -1375,6 +1375,11 @@ Arguments:
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
           .def("name", &::c10d::ProcessGroup::getBackendName)
+          .def("_id", &::c10d::ProcessGroup::getID)
+          .def(
+              "_backend_id",
+              &::c10d::ProcessGroup::getBackendID,
+              py::arg("backend_type"))
           .def_property_readonly("options", &::c10d::ProcessGroup::getOptions)
           .def(
               "broadcast",
@@ -2179,7 +2184,15 @@ for details.
       .def_readwrite("cga_cluster_size", &ncclConfig_t::cgaClusterSize)
       .def_readwrite("min_ctas", &ncclConfig_t::minCTAs)
       .def_readwrite("max_ctas", &ncclConfig_t::maxCTAs)
-      .def_readwrite("net_name", &ncclConfig_t::netName);
+      .def_property(
+          "net_name",
+          [](const ncclConfig_t& self) { return self.netName; },
+          // Note: NCCL calls free on the netName pointer
+          // when destroying the communicator. So memory
+          // shouldn't leak because of allocation in strdup.
+          [](ncclConfig_t& self, const char* tmp) {
+            self.netName = strdup(tmp);
+          });
 #endif
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
