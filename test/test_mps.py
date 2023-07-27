@@ -156,6 +156,10 @@ def mps_ops_grad_modifier(ops):
         # fixed in macOS 13. We are not raising error.
         'pow': [torch.float32],
         '__rpow__': [torch.float32],
+
+        # See https://github.com/pytorch/pytorch/issues/106112 for more information
+        'cumprod': [torch.float32],
+        'masked.cumprod': [torch.float32],
     }
 
     XPASSLIST_GRAD = {
