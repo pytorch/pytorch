@@ -680,7 +680,9 @@ class Optimizer:
 
         # Validate the state_dict
         groups = self.param_groups
-        saved_groups = state_dict['param_groups']
+
+        # Deepcopy as we write into saved_groups later to update state
+        saved_groups = deepcopy(state_dict['param_groups'])
 
         if len(groups) != len(saved_groups):
             raise ValueError("loaded state dict has a different number of "
