@@ -47,11 +47,6 @@ if TYPE_CHECKING:
     import onnx
 
 
-_DEFAULT_OPSET_VERSION: Final[int] = 18
-"""The default ONNX opset version the exporter will use if one is not specified explicitly
-through ``ExportOptions``. This should NEVER be accessed outside of this module! Users
-should reference ``ExportOptions.opset_version``."""
-
 _PYTORCH_GITHUB_ISSUES_URL = "https://github.com/pytorch/pytorch/issues"
 """The URL to the PyTorch GitHub issues page."""
 
@@ -77,11 +72,6 @@ class ONNXFakeContext:
 
 class ExportOptions:
     """Options to influence the TorchDynamo ONNX exporter."""
-
-    opset_version: Optional[int] = None
-    """The ONNX opset version the exporter should target. Defaults to the latest
-    supported ONNX opset version. The default version will increment over time as
-    ONNX continues to evolve."""
 
     dynamic_shapes: Optional[bool] = None
     """Shape information hint for input/output tensors.
@@ -110,14 +100,12 @@ class ExportOptions:
     def __init__(
         self,
         *,
-        opset_version: Optional[int] = None,
         dynamic_shapes: Optional[bool] = None,
         op_level_debug: Optional[bool] = None,
         logger: Optional[logging.Logger] = None,
         fake_context: Optional[ONNXFakeContext] = None,
         onnx_registry: Optional[registration.OnnxRegistry] = None,
     ):
-        self.opset_version = opset_version
         self.dynamic_shapes = dynamic_shapes
         self.op_level_debug = op_level_debug
         self.logger = logger
@@ -132,7 +120,6 @@ class ResolvedExportOptions(ExportOptions):
     """
 
     # Public attributes MUST be redefined below without ``Optional[]`` from ``ExportOptions``
-    opset_version: int
     dynamic_shapes: bool
     op_level_debug: bool
     logger: logging.Logger
@@ -160,7 +147,6 @@ class ResolvedExportOptions(ExportOptions):
         if options is None:
             options = ExportOptions()
         if isinstance(options, ResolvedExportOptions):
-            self.opset_version = options.opset_version
             self.dynamic_shapes = options.dynamic_shapes
             self.op_level_debug = options.op_level_debug
             self.logger = options.logger
@@ -181,7 +167,6 @@ class ResolvedExportOptions(ExportOptions):
                     return fallback()
                 return fallback
 
-            self.opset_version = resolve(options.opset_version, _DEFAULT_OPSET_VERSION)
             self.dynamic_shapes = resolve(options.dynamic_shapes, False)
             import torch.onnx._internal.fx.dynamo_graph_extractor as dynamo_graph_extractor  # TODO: Prevent circular dep
 
@@ -201,7 +186,7 @@ class ResolvedExportOptions(ExportOptions):
             )
 
             self.onnx_registry = resolve(
-                options.onnx_registry, registration.OnnxRegistry(self.opset_version)
+                options.onnx_registry, registration.OnnxRegistry()
             )
             self.decomposition_table = (
                 decomposition_table.create_onnx_friendly_decomposition_table(
@@ -750,7 +735,7 @@ class OnnxExporterError(RuntimeError):
 @_beartype.beartype
 def _assert_dependencies(export_options: ResolvedExportOptions):
     logger = export_options.logger
-    opset_version = export_options.opset_version
+    opset_version = export_options.onnx_registry.opset_version
 
     def missing_package(package_name: str, exc_info: logging._ExcInfoType):
         message = (
@@ -911,6 +896,16 @@ def pre_export_passes(
     # NOTE: temp workaround for https://github.com/pytorch/pytorch/issues/99534
     # Dynamo doesn't support non-tensor inputs.
     options.fx_tracer.input_adapter.append_step(io_adapter.RemoveNonTensorInputStep())
+
+    # ONNX does not support complex inputs. During graph building, all complex inputs
+    # are converted to real representation inputs. Here we register this step to
+    # input/output adapter.
+    options.fx_tracer.input_adapter.append_step(
+        io_adapter.ConvertComplexToRealRepresentationInputStep()
+    )
+    options.fx_tracer.output_adapter.append_step(
+        io_adapter.ConvertComplexToRealRepresentationOutputStep()
+    )
 
     # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
     # tensor, etc), we flatten the collection and register each element as output.

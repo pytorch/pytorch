@@ -7,6 +7,7 @@ import onnx
 import pytorch_test_common
 import torch
 from torch import nn
+from torch._custom_op import impl as custom_op
 from torch._subclasses import fake_tensor
 from torch.nn import functional as F
 from torch.onnx import dynamo_export, ExportOptions
@@ -209,9 +210,15 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             expected_node="aten.convolution.default",
         )
 
-    # TODO: When registry is public, add a custom op cases to replace
-    # aten::add
     def test_dispatch_overload_fall_back_default_raise_diagnostic_warning(self):
+        @custom_op.custom_op("mylibrary::foo_op.Tensor")
+        def foo_op_tnsor(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @custom_op.custom_op("mylibrary::foo_op.default")
+        def foo_op(x: torch.Tensor) -> torch.Tensor:
+            ...
+
         class TraceModel(torch.nn.Module):
             def forward(self, input):
                 return torch.ops.aten.add(input, input)

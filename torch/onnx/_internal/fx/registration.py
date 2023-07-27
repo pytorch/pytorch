@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import dataclasses
+import warnings
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, TYPE_CHECKING, Union
+from typing import Dict, Final, List, Optional, Set, TYPE_CHECKING, Union
 
 import torch._ops
 from torch.onnx._internal import _beartype
@@ -16,7 +17,11 @@ if TYPE_CHECKING:
     import onnxscript  # type: ignore[import]
     from onnxscript.function_libs.torch_lib import registration  # type: ignore[import]
 
-OpsetVersion = int
+
+_DEFAULT_OPSET_VERSION: Final[int] = 18
+"""The default ONNX opset version the exporter will use if one is not specified explicitly
+through ``ExportOptions``. This should NEVER be accessed outside of this module! Users
+should reference ``ExportOptions.opset_version``."""
 
 
 @dataclasses.dataclass(frozen=True, eq=True)
@@ -50,7 +55,7 @@ class OnnxRegistry:
 
     """
 
-    def __init__(self, opset_version: int) -> None:
+    def __init__(self, opset_version: int = _DEFAULT_OPSET_VERSION) -> None:
         """Initializes the registry.
 
         Args:
@@ -64,8 +69,24 @@ class OnnxRegistry:
             registration,
         )
 
+        # opset_version is unused for now, since torchlib only supports opset18.
+        if opset_version != _DEFAULT_OPSET_VERSION:
+            warnings.warn(
+                "Torchlib only supports opset version 18 for now. If you need to use a \
+                different opset version, please register them with register_custom_op."
+            )
         self._opset_version = opset_version
+
+        # Initialize registry from torchlib
         self._initiate_registry_from_torchlib(registration.default_registry)
+
+    @property
+    def opset_version(self) -> int:
+        """The ONNX opset version the exporter should target. Defaults to the latest
+        supported ONNX opset version. The default version will increment over time as
+        ONNX continues to evolve."""
+
+        return self._opset_version
 
     # TODO(titaiwang): subject to change if multiple opset_version is supported in torchlib
     def _initiate_registry_from_torchlib(
