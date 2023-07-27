@@ -446,12 +446,12 @@ class ConvertComplexToRealRepresentationOutputStep:
         Returns:
             A tuple of the model output.
         """
-        return tuple(
+        return [
             torch.view_as_real(output)
             if isinstance(output, torch.Tensor) and torch.is_complex(output)
             else output
             for output in model_outputs
-        )
+        ]
 
 
 class FlattenOutputWithTreeSpecValidationStep:
