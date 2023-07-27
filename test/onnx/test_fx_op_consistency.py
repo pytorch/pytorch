@@ -109,6 +109,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "fmod",
         "full",
         "full_like",
+        "gather",
         "hstack",  # aten::cat is invoked instead
         "index_put",
         "logit",
@@ -121,6 +122,9 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.adaptive_avg_pool1d",
         "nn.functional.adaptive_avg_pool2d",
         "nn.functional.adaptive_avg_pool3d",
+        "nn.functional.avg_pool1d",
+        "nn.functional.avg_pool2d",
+        "nn.functional.avg_pool3d",
         "nn.functional.conv1d",
         # "nn.functional.conv2d",  AssertionError: The values for attribute 'shape' do not match in float32
         # "nn.functional.conv3d",  extra opinfo needed
@@ -172,6 +176,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Addmm")
     ),
     xfail(
+        "all",
+        reason="[PostInline][ORT][ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0"
+    ),
+    xfail(
         "allclose", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
         reason=onnx_test_common.reason_dynamo_does_not_support("Allclose")
     ),
@@ -183,6 +191,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "amin", dtypes=(torch.int16, *onnx_test_common.BOOL_TYPES),
         reason=onnx_test_common.reason_dynamo_does_not_support("ReduceMin", "bool, int16")
+    ),
+    xfail(
+        "any",
+        reason="[PostInline][ORT][ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0"
     ),
     xfail(
         "arange",
@@ -216,10 +228,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
             "ArgMin", "uint8, int8, int16, int64"
         ),
     ),
-    xfail(
+    skip(
         "as_strided",
         variant_name="partial_views",
-        reason="ONNX doesn't have partial view for tensor",
+        reason="ONNX doesn't have partial view for tensor; [PostInline][ORT] segfaults",
     ),
     xfail(
         "baddbmm",
@@ -331,16 +343,28 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
     ),
     xfail(
-        "nn.functional.adaptive_avg_pool1d",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.index.Tensor"),
-    ),
-    xfail(
         "nn.functional.adaptive_avg_pool2d",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.index.Tensor"),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("RecursionError: \
+            maximum recursion depth exceeded while calling a Python object"),
     ),
     xfail(
         "nn.functional.adaptive_avg_pool3d",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.index.Tensor"),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten._adaptive_avg_pool3d.default"),
+    ),
+    xfail(
+        "nn.functional.avg_pool1d",
+        dtypes=onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("AveragePool", "int"),
+    ),
+    xfail(
+        "nn.functional.avg_pool2d",
+        dtypes=onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("AveragePool", "int"),
+    ),
+    xfail(
+        "nn.functional.avg_pool3d",
+        dtypes=onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("AveragePool", "int"),
     ),
     xfail(
         "nn.functional.conv1d",
@@ -455,6 +479,38 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support(
             "https://github.com/pytorch/pytorch/issues/101150"
         ),
+    ),
+    xfail(
+        "nn.functional.avg_pool1d",
+        matcher=lambda sample: (sample.kwargs.get("ceil_mode") is True)
+        and (
+            sample.kwargs.get("count_include_pad") is True
+            or sample.input.shape[2]
+            % (
+                sample.args[0][0]
+                if isinstance(sample.args[0], tuple)
+                else sample.args[0]
+            )
+            != 0
+        ),
+        reason="fixme: ORT doesn't match PyTorch when ceil_mode=True until opset 19",
+    ),
+    xfail(
+        "nn.functional.avg_pool2d",
+        matcher=lambda sample: (len(sample.args) > 5 and sample.args[5] is not None)
+        or (sample.kwargs.get("divisor_override") is not None),
+        reason="ONNX doesn't support divisor_override argument",
+    ),
+    xfail(
+        "nn.functional.avg_pool3d",
+        matcher=lambda sample: sample.kwargs.get("ceil_mode") is True,
+        reason="fixme: ORT doesn't match PyTorch when ceil_mode=True until opset 19",
+    ),
+    xfail(
+        "nn.functional.avg_pool3d",
+        matcher=lambda sample: (len(sample.args) > 5 and sample.args[5] is not None)
+        or (sample.kwargs.get("divisor_override") is not None),
+        reason="ONNX doesn't support divisor_override argument",
     ),
     skip(
         "nn.functional.conv1d",
