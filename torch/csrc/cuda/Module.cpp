@@ -661,14 +661,15 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   std::vector<CapturedTraceback*> to_gather_frames;
   std::vector<py::dict> to_gather_dest;
 
-  auto add_frame_key = [&](const py::dict& d, const std::shared_ptr<c10::GatheredContext> ctx) {
+  auto add_frame_key = [&](const py::dict& d,
+                           const std::shared_ptr<c10::GatheredContext> ctx) {
     if (ctx) {
-        auto sc = getFromContext(ctx);
-        to_gather_frames.emplace_back(sc);
-        to_gather_dest.emplace_back(d);
-      } else {
-        d[frames_s] = empty_frames;
-      }
+      auto sc = getFromContext(ctx);
+      to_gather_frames.emplace_back(sc);
+      to_gather_dest.emplace_back(d);
+    } else {
+      d[frames_s] = empty_frames;
+    }
   };
 
   const auto segmentInfoToDict = [&](const SegmentInfo& segmentInfo) {

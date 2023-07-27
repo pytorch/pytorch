@@ -148,13 +148,14 @@ std::string _memory_snapshot_pickled() {
   std::vector<CapturedTraceback*> frame_tracebacks;
   std::vector<Dict<IValue, IValue>> frame_dict;
 
-  auto add_frame_key = [&](const c10::Dict<IValue, IValue>& d, const std::shared_ptr<c10::GatheredContext> & ctx) {
+  auto add_frame_key = [&](const c10::Dict<IValue, IValue>& d,
+                           const std::shared_ptr<c10::GatheredContext>& ctx) {
     if (ctx) {
-        frame_tracebacks.push_back(getFromContext(ctx));
-        frame_dict.push_back(d);
-      } else {
-        d.insert(frames_s, empty_frames);
-      }
+      frame_tracebacks.push_back(getFromContext(ctx));
+      frame_dict.push_back(d);
+    } else {
+      d.insert(frames_s, empty_frames);
+    }
   };
 
   const auto segmentInfoToDict = [&](const SegmentInfo& segmentInfo) {
