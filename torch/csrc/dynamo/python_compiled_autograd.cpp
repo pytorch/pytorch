@@ -104,6 +104,7 @@ struct CacheNode {
     next.clear();
     key_storage.clear();
     expected_sizes.clear();
+    output_grad_targets.clear();
     compiled_fn = nullptr;
   }
 
@@ -202,11 +203,14 @@ struct CacheNode {
     return result;
   }
 
-  // TODO(jansel): benchmark map vs unordered_map
   std::unordered_map<CacheKey, std::unique_ptr<CacheNode>> next;
   std::vector<CacheKeyBuffer> key_storage;
   std::vector<SizeInput> expected_sizes;
+
   THPObjectPtr compiled_fn;
+  // Maps each return value of compiled_fn to an input index.  After the graph
+  // runs we do: `inputs[output_grad_targets[i]].mutable_grad() = outputs[i]`
+  std::vector<size_t> output_grad_targets;
 };
 
 struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
@@ -257,18 +261,24 @@ static TraceState call_begin_capture(
     AutogradCompilerCall& compiler_call,
     size_t num_outputs) {
   static PyObject* method_name = PyUnicode_InternFromString("begin_capture");
-  THPObjectPtr pyinput(THPVariable_WrapList(compiler_call.inputs));
+  THPObjectPtr pyinput(THPVariable_WrapList(compiler_call.tensor_args.inputs));
   THPObjectPtr pysizeinput(cache.wrap_dynamic_inputs());
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
       self, method_name, pyinput.get(), pysizeinput.get(), NULL)));
 
   PyObject *fake_inputs, *fake_sizes;
   check(PyArg_ParseTuple(pyresult.get(), "OO", &fake_inputs, &fake_sizes));
-  return TraceState(
-      THPVariable_UnpackList(fake_inputs),
-      cache.unwrap_dynamic_inputs(fake_sizes),
-      compiler_call.accumulate_grad,
-      num_outputs);
+
+  variable_list proxy_inputs = THPVariable_UnpackList(fake_inputs);
+  TORCH_INTERNAL_ASSERT(
+      proxy_inputs.size() == compiler_call.tensor_args.inputs.size());
+  for (const auto i : c10::irange(proxy_inputs.size())) {
+    TensorArg& arg =
+        compiler_call.tensor_args.lookup(compiler_call.tensor_args.inputs[i]);
+    arg.proxy_tensor = proxy_inputs[i];
+  }
+
+  return TraceState(cache.unwrap_dynamic_inputs(fake_sizes), num_outputs);
 }
 
 static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
@@ -296,9 +306,10 @@ variable_list compiled_autograd(
   static std::mutex lock;
   std::lock_guard<std::mutex> lock_guard(lock);
   pybind11::gil_scoped_acquire gil;
+  at::ThreadLocalStateGuard tls_guard(graph_task.thread_locals_);
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
-  AutogradCompilerCall compiler_call(accumulate_grad);
+  AutogradCompilerCall compiler_call;
   for (const auto i : c10::irange(output_edges.size())) {
     compiler_call.node_calls.lookup(output_edges[i].function)
         .mark_output(output_edges[i].input_nr, i);
@@ -401,7 +412,7 @@ variable_list compiled_autograd(
         inputs = THPVariable_UnpackList(pyinputs);
       }
 
-      SwapSavedVariables saved(compiler_call, state, call.node);
+      SwapSavedVariables saved(compiler_call, state);
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
       saved.before(call.node->next_edges());
       validate_outputs(
@@ -439,6 +450,7 @@ variable_list compiled_autograd(
     }
 
     cache->compiled_fn = check(call_end_capture(py_compiler, state.outputs));
+    cache->output_grad_targets = std::move(state.output_grad_targets);
     state.debug_asserts();
   }
 
@@ -449,20 +461,21 @@ variable_list compiled_autograd(
     call->node->release_variables();
   }
 
-  THPObjectPtr inputs(THPVariable_WrapList(compiler_call.inputs));
+  THPObjectPtr inputs(THPVariable_WrapList(compiler_call.tensor_args.inputs));
   THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
   THPObjectPtr hooks(convert_hook_list(compiler_call.hooks));
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
   if (accumulate_grad) {
-    TORCH_INTERNAL_ASSERT(
-        outputs.size() == compiler_call.set_grad_targets.size());
+    TORCH_INTERNAL_ASSERT(outputs.size() == cache->output_grad_targets.size());
     for (const auto i : c10::irange(outputs.size())) {
-      // TODO(jansel): does this one need to be an inplace copy?  if so it
-      // should go in the graph
-      at::Tensor& grad = compiler_call.set_grad_targets[i].mutable_grad();
-      grad = outputs[i];
+      // Here we set the `var.grad = ...` for each call to
+      // `saved.assign_mutable_grad(var, ...)`.  For the case on inplace grad
+      // accumuation there will be an `add_` op in the graph and no return
+      // value.
+      compiler_call.tensor_args.inputs[cache->output_grad_targets[i]]
+          .mutable_grad() = outputs[i];
     }
     return variable_list();
   } else {
