@@ -230,13 +230,36 @@ class TestCompiledAutograd(TestCase):
                 x = torch.randn([10, 4])
                 result = opt_model(x).sum()
                 result.backward()
-                # Note we change aliasing relationships of gradients with respect to eager
                 yield model[0].weight.grad.clone()
                 yield model[0].bias.grad.clone()
                 yield model[2].weight.grad.clone()
                 yield model[2].bias.grad.clone()
 
         self.check_output_and_recompiles(fn, count=2)
+
+    def test_inplace_grad_update(self):
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+            )
+            opt_model = torch.compile(model, dynamic=True)
+
+            for _ in range(10):
+                w_grad = torch.rand_like(model[0].weight)
+                b_grad = torch.rand_like(model[0].bias)
+                model[0].weight.grad = w_grad
+                model[0].bias.grad = b_grad
+
+                x = torch.randn([10, 4])
+                result = opt_model(x).sum()
+                result.backward()
+                assert model[0].weight.grad is w_grad
+                assert model[0].bias.grad is b_grad
+                yield w_grad.clone()
+                yield b_grad.clone()
+
+        self.check_output_and_recompiles(fn, count=1)
 
 
 if __name__ == "__main__":

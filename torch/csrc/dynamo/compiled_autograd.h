@@ -94,19 +94,72 @@ struct NodeCalls : public std::unordered_map<Node*, NodeCall> {
   uint32_t _next_id = 0;
 };
 
+struct TensorArg {
+  // Represents a de-duplicated tensor that will be passed into the graph
+  TensorArg(uint32_t i = 0) : id(i) {}
+  uint32_t index() const {
+    TORCH_INTERNAL_ASSERT(defined());
+    return id - 1;
+  }
+  bool defined() const {
+    return id != 0;
+  }
+  uint32_t id;
+  at::Tensor proxy_tensor;
+};
+
+struct TensorArgs {
+  // Manages a collection of TensorArgs and mappings from Tensors/SavedVariables
+  // to them.  This also allows us to unpack SavedVariable exactly once and
+  // store the unpacked Tensor.
+
+  TensorArg& lookup(const at::Tensor& tensor, bool create = false) {
+    if (!tensor.defined()) {
+      return _undefined;
+    }
+    auto impl = tensor.unsafeGetTensorImpl();
+    auto it = _args.find(impl);
+    if (it == _args.end()) {
+      TORCH_INTERNAL_ASSERT(create && inputs.size() == _next_id - 1);
+      it = _args.emplace(impl, TensorArg(_next_id++)).first;
+      inputs.emplace_back(tensor);
+    }
+    return it->second;
+  }
+
+  TensorArg& lookup(const SavedVariable& sv) {
+    auto it = _saved_variables.find(&sv);
+    TORCH_INTERNAL_ASSERT(it != _saved_variables.end());
+    return *it->second;
+  }
+
+  TensorArg& add(const at::Tensor& tensor) {
+    return lookup(tensor, true);
+  }
+
+  TensorArg& add(const SavedVariable& sv, const std::shared_ptr<Node>& node) {
+    // TODO(jansel): Here we unpack the SavedVariable exactly once.  This might
+    // fire SavedTensor hooks.  In the future we should try to put saved tensor
+    // hooks into the graph.
+    at::Tensor tensor = sv.unpack(node);
+    TensorArg& arg = add(tensor);
+    _saved_variables.emplace(&sv, &arg);
+    return arg;
+  }
+
+  // the concrete tensors that will get passed into the graph as inputs
+  std::vector<at::Tensor> inputs;
+
+ private:
+  std::unordered_map<const c10::TensorImpl*, TensorArg> _args;
+  // Every TensorArg from this is actually owned by _args (or _undefined) and
+  // that's why we have an un-owned pointer here.
+  std::unordered_map<const SavedVariable*, TensorArg*> _saved_variables;
+  TensorArg _undefined;
+  uint32_t _next_id = 1; // id=0 used by _undefined
+};
+
 struct AutogradCompilerCall {
-  AutogradCompilerCall(bool accumulate_grad_)
-      : accumulate_grad(accumulate_grad_),
-        default_dyn_type(SizeInput::STATIC) {}
-
-  void add_tensor_input(const at::Tensor& tensor) {
-    inputs.emplace_back(tensor);
-  }
-
-  void add_set_grad_target(const at::Tensor& tensor) {
-    set_grad_targets.emplace_back(tensor);
-  }
-
   void add_size_input(const c10::SymInt& s) {
     all_size_inputs.emplace_back(SizeInput(default_dyn_type, s.expect_int()));
   }
@@ -116,14 +169,12 @@ struct AutogradCompilerCall {
     return hooks.size() - 1;
   }
 
+  TensorArgs tensor_args;
   std::vector<SizeInput> all_size_inputs;
   std::vector<int64_t> dyn_size_inputs;
-  std::vector<at::Tensor> inputs;
-  std::vector<at::Tensor> set_grad_targets;
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
-  bool accumulate_grad;
-  SizeInput::DynType default_dyn_type;
+  SizeInput::DynType default_dyn_type = SizeInput::STATIC;
 };
 
 class CompiledNodeArgs {
@@ -134,16 +185,23 @@ class CompiledNodeArgs {
   // than specialized on) are forwarded to the compiler and not included in the
   // key.
  public:
-  void collect(const at::Tensor& t) {
-    if (cond(t.defined())) {
-      _compiler.add_tensor_input(t);
+  void collect(const TensorArg& t) {
+    collect_size(t.id);
+    if (t.defined()) {
+      const at::Tensor& tensor = _compiler.tensor_args.inputs[t.index()];
+      // including these in the cache key means dynamo-level tensor guards can
+      // be skipped
+      collect(tensor.device());
+      collect(tensor.dtype());
+      collect(tensor.requires_grad());
     }
   }
+
+  void collect(const at::Tensor& t) {
+    collect(_compiler.tensor_args.add(t));
+  }
   void collect(const SavedVariable& t) {
-    TORCH_CHECK(
-        !t.has_hooks(),
-        "SavedVariable hooks not implemented in compiled autograd")
-    collect(t.unpack(_node_call.node));
+    collect(_compiler.tensor_args.add(t, _node_call.node));
   }
   void collect(const c10::SymInt& t) {
     _compiler.add_size_input(t);
@@ -276,12 +334,6 @@ class CompiledNodeArgs {
   COLLECT_AS_BYTES(double);
 #undef COLLECT_AS_BYTES
 
-  void set_grad_target(const at::Tensor& tensor) {
-    collect(_compiler.accumulate_grad);
-    if (_compiler.accumulate_grad)
-      _compiler.add_set_grad_target(tensor);
-  }
-
   void collect_hooks_from(Node* fn) {
     TORCH_CHECK(
         fn->retains_grad_hooks().empty(),
@@ -391,40 +443,28 @@ class CompiledNodeArgs {
 
 struct TraceState {
   TraceState(
-      const variable_list& proxy_inputs_,
       const std::vector<c10::optional<c10::SymInt>>& ss,
-      bool accumulate_grad_,
       size_t num_outputs)
-      : proxy_inputs_index(0),
-        sym_sizes_index(0),
-        proxy_inputs(proxy_inputs_),
-        sym_sizes(ss),
-        outputs(num_outputs),
-        accumulate_grad(accumulate_grad_) {}
+      : sym_sizes_index(0), sym_sizes(ss), outputs(num_outputs) {}
+
   void debug_asserts() {
-    TORCH_INTERNAL_ASSERT(proxy_inputs_index == proxy_inputs.size());
     TORCH_INTERNAL_ASSERT(sym_sizes_index == sym_sizes.size());
-  }
-  const at::Tensor& next_proxy_input() {
-    TORCH_INTERNAL_ASSERT(proxy_inputs_index < proxy_inputs.size());
-    return proxy_inputs[proxy_inputs_index++];
   }
   c10::optional<c10::SymInt> next_sym_size() {
     TORCH_INTERNAL_ASSERT(sym_sizes_index < sym_sizes.size());
     return sym_sizes[sym_sizes_index++];
   }
 
-  size_t proxy_inputs_index;
   size_t sym_sizes_index;
-  variable_list proxy_inputs;
   std::vector<c10::optional<c10::SymInt>> sym_sizes;
   variable_list outputs;
-  bool accumulate_grad;
+  std::vector<size_t> output_grad_targets;
 };
 
 #define SWAP_SAVED_VARIABLES_SAVE(mapping, var, move) \
   bool inserted = mapping.emplace(&var, move).second; \
   TORCH_INTERNAL_ASSERT(inserted, "duplicate before()");
+
 #define SWAP_SAVED_VARIABLES_RESTORE(mapping, var)                 \
   auto it = mapping.find(&var);                                    \
   TORCH_INTERNAL_ASSERT(it != mapping.end(), "duplicate after()"); \
@@ -437,9 +477,11 @@ class SwapSavedVariables {
   // allows tracing to happen, then swaps them back afterwards.
  public:
   void before(at::Tensor& t) {
-    SWAP_SAVED_VARIABLES_SAVE(stashed_tensors, t, t);
-    if (t.defined()) {
-      t = state.next_proxy_input();
+    TensorArg& arg = compiler.tensor_args.lookup(t);
+    SWAP_SAVED_VARIABLES_SAVE(stashed_tensors, t, std::move(t));
+    if (arg.defined()) {
+      TORCH_INTERNAL_ASSERT(arg.proxy_tensor.defined());
+      t = arg.proxy_tensor;
     }
   }
   void after(at::Tensor& t) {
@@ -447,12 +489,11 @@ class SwapSavedVariables {
   }
 
   void before(SavedVariable& t) {
-    torch::torch_dispatch_mode::StashTorchDispatchStackGuard
-        no_modes; // for unpack
-    bool defined = t.unpack(node).defined();
+    TensorArg& arg = compiler.tensor_args.lookup(t);
     SWAP_SAVED_VARIABLES_SAVE(stashed_variables, t, std::move(t));
-    if (defined) {
-      t = SavedVariable(state.next_proxy_input(), false);
+    if (arg.defined()) {
+      TORCH_INTERNAL_ASSERT(arg.proxy_tensor.defined());
+      t = SavedVariable(arg.proxy_tensor, false);
     }
   }
   void after(SavedVariable& t) {
@@ -578,23 +619,29 @@ class SwapSavedVariables {
   NO_OP_VISIT(double);
 #undef NO_OP_VISIT
 
-  void set_grad_value(const at::Tensor& tensor) {
-    if (state.accumulate_grad)
-      state.outputs.emplace_back(tensor);
+  // record the need to run `dst.mutable_grad() = src` after the graph
+  // dst is a real tensor, src is a fake tensor
+  void assign_mutable_grad(const at::Tensor& dst, const at::Tensor& src) {
+    const TensorArg& arg = compiler.tensor_args.lookup(dst);
+    TORCH_INTERNAL_ASSERT(arg.defined());
+    TORCH_INTERNAL_ASSERT(
+        state.outputs.size() == state.output_grad_targets.size());
+    state.outputs.emplace_back(src);
+    state.output_grad_targets.emplace_back(arg.index());
   }
 
-  SwapSavedVariables(
-      AutogradCompilerCall& c,
-      TraceState& s,
-      std::shared_ptr<Node> n)
-      : compiler(c), state(s), node(std::move(n)) {}
+  SwapSavedVariables(AutogradCompilerCall& c, TraceState& s)
+      : compiler(c), state(s) {}
 
+ private:
   AutogradCompilerCall& compiler;
   TraceState& state;
-  std::unordered_map<SavedVariable*, SavedVariable> stashed_variables;
-  std::unordered_map<at::Tensor*, at::Tensor> stashed_tensors;
-  std::unordered_map<c10::SymInt*, c10::SymInt> stashed_symints;
-  std::shared_ptr<Node> node;
+
+  // These mappings are used to save the prior values when we overwrite things
+  // in before(). In after(), we use these to cleanup after ourselves.
+  std::unordered_map<const SavedVariable*, SavedVariable> stashed_variables;
+  std::unordered_map<const at::Tensor*, at::Tensor> stashed_tensors;
+  std::unordered_map<const c10::SymInt*, c10::SymInt> stashed_symints;
 };
 
 } // namespace torch::dynamo::autograd
