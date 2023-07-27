@@ -143,6 +143,7 @@ inductor_skips["cpu"] = {
 
 if IS_MACOS and IS_X86:
     inductor_skips["cpu"]["rsqrt"] = {b8, i32}
+    inductor_skips["cpu"]["nn.functional.multi_margin_loss"] = {b8, f16, f32, f64, i32, i64}
 
 inductor_skips["cuda"] = {
     # Jiterator kernel is not expected to work with inductor
