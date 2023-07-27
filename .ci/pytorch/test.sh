@@ -678,30 +678,30 @@ test_distributed() {
     python test/run_test.py --cpp --verbose -i cpp/HashStoreTest
     python test/run_test.py --cpp --verbose -i cpp/TCPStoreTest
 
-    MPIEXEC=$(command -v mpiexec)
-    if [[ -n "$MPIEXEC" ]]; then
-      # NB: mpiexec only works directly with the C++ test binary here
-      MPICMD="${MPIEXEC} -np 2 $TORCH_BIN_DIR/ProcessGroupMPITest"
-      eval "$MPICMD"
-    fi
+    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+      MPIEXEC=$(command -v mpiexec)
+      if [[ -n "$MPIEXEC" ]]; then
+        # NB: mpiexec only works directly with the C++ test binary here
+        MPICMD="${MPIEXEC} -np 2 $TORCH_BIN_DIR/ProcessGroupMPITest"
+        eval "$MPICMD"
+      fi
 
-    python test/run_test.py --cpp --verbose -i cpp/ProcessGroupGlooTest
-    python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLTest
-    python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLErrorsTest
+      python test/run_test.py --cpp --verbose -i cpp/ProcessGroupGlooTest
+      python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLTest
+      python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLErrorsTest
+    fi
   fi
 }
 
 test_rpc() {
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    echo "Testing RPC C++ tests"
-    # NB: the ending test_rpc must match the current function name for the current
-    # test reporting process to function as expected.
-    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
+  echo "Testing RPC C++ tests"
+  # NB: the ending test_rpc must match the current function name for the current
+  # test reporting process to function as expected.
+  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
 
-    CPP_TESTS_DIR="${TORCH_BIN_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_cpp_rpc
-  fi
+  CPP_TESTS_DIR="${TORCH_BIN_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_cpp_rpc
 }
 
 test_custom_backend() {
