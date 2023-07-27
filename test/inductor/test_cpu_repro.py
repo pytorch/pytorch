@@ -291,6 +291,7 @@ class CPUReproTests(TestCase):
     @config.patch(freezing=True)
     def test_lstm_packed(self):
         from torch._dynamo.utils import counters
+
         def _lstm_params_list():
             params_dict = {
                 "unbatched": [True, False],
@@ -378,7 +379,9 @@ class CPUReproTests(TestCase):
                     self.assertTrue("aten.mkldnn_rnn_layer" in code)
                     self.assertEqual(fn_opt(*inps), mod(*inps))
                     self.assertEqual(
-                        counters["inductor"]["pattern_matcher_count"], num_layers * num_directions + 2 # num of mkldnn_rnn_layer call + 2 view call on the concatenated hy, cy.
+                        counters["inductor"]["pattern_matcher_count"],
+                        num_layers * num_directions
+                        + 2,  # num of mkldnn_rnn_layer call + 2 view call on the concatenated hy, cy.
                     )
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
