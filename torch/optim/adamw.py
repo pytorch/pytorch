@@ -67,15 +67,6 @@ class AdamW(Optimizer):
                                    f"supported devices: {fused_supported_devices}.")
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
-            # TODO(crcrpar): [low prec params & their higher prec copy]
-            # Suppor AMP with FP16/BF16 model params which would need
-            # higher prec copy of params to do update math in higher prec to
-            # alleviate the loss of information.
-            if not all(
-                p.is_cuda and torch.is_floating_point(p)
-                for pg in self.param_groups for p in pg['params']
-            ):
-                raise RuntimeError("`fused=True` requires all the params to be CUDA, floating point Tensor")
 
     def __setstate__(self, state):
         super().__setstate__(state)
