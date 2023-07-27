@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import copy
 import itertools
 import math
 import sys
@@ -364,6 +365,14 @@ class CPUReproTests(TestCase):
 
                     fn_opt = torch._dynamo.optimize("inductor")(mod)
                     code = run_and_get_cpp_code(fn_opt, *inps)
+
+                    # Check that _flat_weights are not functional_tensor, otherwise
+                    # deepcopy will fail during recompilation.
+                    fn_opt_copy = copy.deepcopy(fn_opt)
+                    _flat_weights = fn_opt_copy.lstm._flat_weights
+                    for _flat_weight in _flat_weights:
+                        self.assertFalse(torch._is_functional_tensor(_flat_weight))
+
                     self.assertTrue("aten.mkldnn_rnn_layer" in code)
                     self.assertEqual(fn_opt(*inps), mod(*inps))
 
