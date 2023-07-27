@@ -2,7 +2,6 @@ name: BC Lint
 
 on:
   # Copied from check-labels.yml to get around needing approval for first time contributors
-  # We need pull_request_target to be able to post comments on PRs from forks.
   # See https://docs.github.com/en/actions/managing-workflow-runs/approving-workflow-runs-from-public-forks
   # Only allow pull_request_target when merging to main, not some historical branch.
   #
@@ -11,13 +10,13 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened, labeled, unlabeled]
     branches: [main]
-    paths-ignore: [.github/workflows/lint-bc.yaml]
+    paths-ignore: [.github/workflows/lint-bc.yml]
 
   # To allow testing PRs that change workflows.
   # May be triggered together with pull_request_target, it's OK.
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
-    paths: [.github/workflows/lint-bc.yaml]
+    paths: [.github/workflows/lint-bc.yml]
     branches-ignore: [nightly]
 
   workflow_dispatch:
