@@ -123,11 +123,6 @@ class OnnxFunctionDispatcher:
             node, diagnostic_context
         )
 
-        # If the input has complex dtype, we will only dispatch to the complex functions.
-        default_and_custom_functions = self._filter_or_keep_complex(
-            node, default_and_custom_functions, onnx_args, diagnostic_context
-        )
-
         # If there are overloaded functions available, we will find one that perfect or
         # nearest matches the given arguments and keyword arguments
         return self._find_the_perfect_or_nearest_match_onnxfunction(
@@ -139,17 +134,10 @@ class OnnxFunctionDispatcher:
         )
 
     @_beartype.beartype
-    @diagnostics.diagnose_call(
-        diagnostics.rules.find_operator_overloads_in_onnx_registry,
-        diagnostic_message_formatter=_find_operator_overloads_in_onnx_registry_disagnostic_message_formatter,
-    )
     def _filter_or_keep_complex(
         self,
         node,
         default_and_custom_functions: List[registration.SymbolicFunction],
-        onnx_args: Sequence[
-            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
-        ],
         diagnostic_context: diagnostics.DiagnosticContext,
     ) -> List[registration.SymbolicFunction]:
         if any(
@@ -394,7 +382,11 @@ class OnnxFunctionDispatcher:
 
         # NOTE: If the ATen/Custom operators are not registered, the group will be None.
         if function_group is not None:
-            return function_group
+            # If the input has complex dtype, we will only dispatch to the complex functions.
+            function_group = self._filter_or_keep_complex(
+                node, function_group, diagnostic_context
+            )
+            return function_group  # type: ignore[return-value]
 
         # If we can't find the function group, raise error.
         op_full_name = internal_opname.qualified_name()
