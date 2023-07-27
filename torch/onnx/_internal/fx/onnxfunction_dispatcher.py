@@ -153,11 +153,11 @@ class OnnxFunctionDispatcher:
         diagnostic_context: diagnostics.DiagnosticContext,
     ) -> List[registration.SymbolicFunction]:
         if any(
-            torch.is_complex(args.meta["val"])
-            for args in node.args
-            if isinstance(args, torch.fx.Node)
-            and args.meta["val"] is not None
-            and isinstance(args.meta["val"], torch.Tensor)
+            torch.is_complex(arg.meta["val"])
+            for arg in node.args
+            if isinstance(arg, torch.fx.Node)
+            and "val" in arg.meta
+            and isinstance(arg.meta["val"], torch.Tensor)
         ):
             default_and_custom_functions = [
                 func for func in default_and_custom_functions if func.is_complex

@@ -692,7 +692,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         allowed_dtypes=onnx_test_common.COMPLEX_TYPES,
     )
     def test_output_match_complex(self, device: str, dtype: torch.dtype, op):
-        """Test the ONNX exporter."""
+        """Test the ONNX exporter with complex dtype."""
         _run_test_output_match(self, device, dtype, op)
 
 
