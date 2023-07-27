@@ -923,9 +923,11 @@ class Scheduler:
                 add_user(name, OutputNode(StarDep(name)))
                 V.graph.mutated_inputs.add(name)
 
-        inp_names = list(V.graph.graph_inputs.keys())
+        inp_names = {
+            name: index for index, name in enumerate(V.graph.graph_inputs.keys())
+        }
         V.graph.mutated_input_idxs = [
-            inp_names.index(name) for name in V.graph.mutated_inputs
+            inp_names[name] for name in V.graph.mutated_inputs
         ]
 
         # copy users information onto the nodes

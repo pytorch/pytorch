@@ -327,6 +327,7 @@ def compile_fx_inner(
 
         # doesnt work for non-trees because the warmup run would apply mutation twice
         if config.triton.cudagraph_trees:
+            # checking if mutation is only on paramameters/static inputs
             has_mutation = not all(
                 idx < num_fixed for idx in compiled_graph.mutated_input_idxs
             )
