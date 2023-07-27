@@ -196,7 +196,7 @@ std::string enforceFailMsgImpl(const T1& x, const T2& y, const Args&... args) {
   return c10::str(x, " vs ", y, ". ", args...);
 }
 
-template <typename Pred, typename T1, typename T2, typename... Args>
+template <typename Pred, typename T1, typename T2, typename GetFailMsgFunc>
 void enforceThatImpl(
     Pred p,
     const T1& lhs,
@@ -205,23 +205,39 @@ void enforceThatImpl(
     int line,
     const char* expr,
     const void* caller,
-    const Args&... args) {
+    GetFailMsgFunc getFailMsg) {
   if (C10_UNLIKELY(!(p(lhs, rhs)))) {
-    ::c10::ThrowEnforceNotMet(
-        file,
-        line,
-        expr,
-        ::c10::enforce_detail::enforceFailMsgImpl(lhs, rhs, args...),
-        caller);
+    ::c10::ThrowEnforceNotMet(file, line, expr, getFailMsg(lhs, rhs), caller);
   }
 }
-#define CAFFE_ENFORCE_THAT_IMPL(op, lhs, rhs, expr, ...) \
-  ::c10::enforce_detail::enforceThatImpl(                \
-      op, lhs, rhs, __FILE__, __LINE__, expr, nullptr, ##__VA_ARGS__)
+
+#define CAFFE_ENFORCE_THAT_IMPL(op, lhs, rhs, expr, ...)  \
+  ::c10::enforce_detail::enforceThatImpl(                 \
+      op,                                                 \
+      (lhs),                                              \
+      (rhs),                                              \
+      __FILE__,                                           \
+      __LINE__,                                           \
+      expr,                                               \
+      nullptr,                                            \
+      [&](const auto& arg1, const auto& arg2) {           \
+        return ::c10::enforce_detail::enforceFailMsgImpl( \
+            arg1, arg2, ##__VA_ARGS__);                   \
+      })
 
 #define CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(op, lhs, rhs, expr, ...) \
   ::c10::enforce_detail::enforceThatImpl(                            \
-      op, (lhs), (rhs), __FILE__, __LINE__, expr, this, ##__VA_ARGS__)
+      op,                                                            \
+      (lhs),                                                         \
+      (rhs),                                                         \
+      __FILE__,                                                      \
+      __LINE__,                                                      \
+      expr,                                                          \
+      this,                                                          \
+      [&](const auto& arg1, const auto& arg2) {                      \
+        return ::c10::enforce_detail::enforceFailMsgImpl(            \
+            arg1, arg2, ##__VA_ARGS__);                              \
+      })
 
 } // namespace enforce_detail
 
