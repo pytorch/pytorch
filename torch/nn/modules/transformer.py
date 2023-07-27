@@ -884,7 +884,7 @@ def _detect_is_causal_mask(
        hardware SKU, etc influence the decision whether to use a mask or
        rely on the hint.
     ``size`` if not None, check whether the mask is a causal mask of the provided size
-       Otherwhise, checks for any causal mask.
+       Otherwise, checks for any causal mask.
     """
     # Prevent type refinement
     make_causal = (is_causal is True)
