@@ -66,7 +66,7 @@ class LstmModule(torch.nn.Module):
         bidirectional=False,
         batch_first=False,
     ):
-        super(LstmModule, self).__init__()
+        super().__init__()
         self.lstm = torch.nn.LSTM(
             input_size=input_size,
             hidden_size=hidden_size,
@@ -311,7 +311,7 @@ class CPUReproTests(TestCase):
             }
 
             params_list = []
-            for key, value in params_dict.items():
+            for value in params_dict.values():
                 params_list.append(value)
             return params_list
 
