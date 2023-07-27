@@ -6665,7 +6665,6 @@ class CommonTemplate:
         """
         Causes a @pointwise(size_hints) where size_hints is 2D
         """
-
         def fn(input, offsets, add_value):
             return torch.ops.prims._inductor_bucketize(input, offsets) + add_value
 
@@ -6677,7 +6676,9 @@ class CommonTemplate:
 
         self.common(fn, (input, boundaries, add_value), check_lowp=False)
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        if self.device == "cuda":
+            # Bucketize doesn't have CPU lowerings, so we shouldn't check this on CPU.
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @config.patch(implicit_fallbacks=True)
     def test_custom_op(self):
