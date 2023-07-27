@@ -4425,7 +4425,7 @@ Padding size:
     :math:`\text{padding\_front}, \text{padding\_back})`.
 
 Padding mode:
-    See :class: `torch.nn.CircularPad2d`, :class:`torch.nn.ConstantPad2d`,
+    See :class:`torch.nn.CircularPad2d`, :class:`torch.nn.ConstantPad2d`,
     :class:`torch.nn.ReflectionPad2d`, and :class:`torch.nn.ReplicationPad2d`
     for concrete examples on how each of the padding modes works. Constant
     padding is implemented for arbitrary dimensions. Circular, replicate and

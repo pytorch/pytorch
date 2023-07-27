@@ -2225,17 +2225,17 @@ def module_inputs_torch_nn_CircularPad1d(module_info, device, dtype, requires_gr
         ModuleInput(
             constructor_input=FunctionInput((1, 2)),
             forward_input=FunctionInput(make_input((1, 2, 3))),
-            reference_fn=lambda m, p, i: padding1d_circular_ref(i, (1, 2)),
+            reference_fn=lambda m, p, i: padding1d_circular_ref(i, m.padding),
         ),
         ModuleInput(
             constructor_input=FunctionInput((3, 1)),
             forward_input=FunctionInput(make_input((1, 2, 3))),
-            reference_fn=lambda m, p, i: padding1d_circular_ref(i, (3, 1)),
+            reference_fn=lambda m, p, i: padding1d_circular_ref(i, m.padding),
         ),
         ModuleInput(
             constructor_input=FunctionInput((3, 3)),
             forward_input=FunctionInput(make_input((1, 2, 3))),
-            reference_fn=lambda m, p, i: padding1d_circular_ref(i, (3, 3)),
+            reference_fn=lambda m, p, i: padding1d_circular_ref(i, m.padding),
         ),
     ]
 
@@ -2266,17 +2266,17 @@ def module_inputs_torch_nn_CircularPad2d(module_info, device, dtype, requires_gr
         ModuleInput(
             constructor_input=FunctionInput((1, 2, 2, 1)),
             forward_input=FunctionInput(make_input((1, 1, 2, 3))),
-            reference_fn=lambda m, p, i: padding2d_circular_ref(i, (1, 2, 2, 1)),
+            reference_fn=lambda m, p, i: padding2d_circular_ref(i, m.padding),
         ),
         ModuleInput(
             constructor_input=FunctionInput((2, 3, 2, 2)),
             forward_input=FunctionInput(make_input((1, 1, 2, 3))),
-            reference_fn=lambda m, p, i: padding2d_circular_ref(i, (2, 3, 2, 2)),
+            reference_fn=lambda m, p, i: padding2d_circular_ref(i, m.padding),
         ),
         ModuleInput(
             constructor_input=FunctionInput((3, 3, 3, 1)),
             forward_input=FunctionInput(make_input((1, 1, 3, 3))),
-            reference_fn=lambda m, p, i: padding2d_circular_ref(i, (3, 3, 3, 1)),
+            reference_fn=lambda m, p, i: padding2d_circular_ref(i, m.padding),
         ),
     ]
 
@@ -2334,17 +2334,17 @@ def module_inputs_torch_nn_CircularPad3d(module_info, device, dtype, requires_gr
         ModuleInput(
             constructor_input=FunctionInput((1, 2, 1, 2, 1, 2)),
             forward_input=FunctionInput(make_input((1, 1, 2, 2, 3))),
-            reference_fn=lambda m, p, i: padding3d_circular_ref(i, (1, 2, 1, 2, 1, 2))
+            reference_fn=lambda m, p, i: padding3d_circular_ref(i, m.padding)
         ),
         ModuleInput(
             constructor_input=FunctionInput((3, 2, 2, 1, 1, 2)),
             forward_input=FunctionInput(make_input((1, 1, 2, 2, 3))),
-            reference_fn=lambda m, p, i: padding3d_circular_ref(i, (3, 2, 2, 1, 1, 2))
+            reference_fn=lambda m, p, i: padding3d_circular_ref(i, m.padding)
         ),
         ModuleInput(
             constructor_input=FunctionInput((3, 3, 2, 1, 2, 2)),
             forward_input=FunctionInput(make_input((1, 1, 2, 2, 3))),
-            reference_fn=lambda m, p, i: padding3d_circular_ref(i, (3, 3, 2, 1, 2, 2))
+            reference_fn=lambda m, p, i: padding3d_circular_ref(i, m.padding)
         ),
     ]
 

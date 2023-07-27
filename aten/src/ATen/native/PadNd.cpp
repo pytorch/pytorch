@@ -117,11 +117,11 @@ Tensor _pad_circular_symint(const Tensor &self, c10::SymIntArrayRef padding) {
 
   TORCH_CHECK(ndim_nonpadded == 1 || ndim_nonpadded == 2,
               "Invalid padding size, expected 1 or 2 non-padded dimensions, ",
-              "which would be equivalent to padding of shape ",
+              "which would be equivalent to padding of length ",
               (self_ndim - 1) * 2,
               " or ",
               (self_ndim - 2) * 2,
-              " but got ",
+              " respectively but got ",
               padding.size());
 
   c10::SymDimVector out_shape(in_shape.size());

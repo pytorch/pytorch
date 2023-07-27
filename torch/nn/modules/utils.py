@@ -8,10 +8,7 @@ __all__ = ['consume_prefix_in_state_dict_if_present']
 def _ntuple(n, name="parse"):
     def parse(x):
         if isinstance(x, collections.abc.Iterable):
-            output = tuple(x)
-            if len(output) != n:
-                raise ValueError(f"Expected {n} elements in the iterable, got {len(output)}")
-            return output
+            return tuple(x)
         return tuple(repeat(x, n))
 
     parse.__name__ = name
