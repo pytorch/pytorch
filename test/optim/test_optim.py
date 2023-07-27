@@ -1929,8 +1929,12 @@ class TestOptim(TestCase):
         state_dict["param_groups"][0]["lr"] = 0.002
 
     @staticmethod
-    def _load_state_dict_pre_hook2(optimizer: Optimizer, state_dict: Dict[str, Any]) -> None:
-        state_dict["param_groups"][0]["lr"] = 0.003
+    def _load_state_dict_pre_hook2(optimizer: Optimizer, state_dict: Dict[str, Any]) -> Dict[str, Any]:
+        # The typical use case for returning a state dict is to drastically modify the state dict.
+        # I will simulate by simply making a deep copy and ensuring that my_state_dict still gets used
+        my_state_dict = deepcopy(state_dict)
+        my_state_dict["param_groups"][0]["lr"] = 0.003
+        return my_state_dict
 
     @staticmethod
     def _load_state_dict_post_hook(optimizer: Optimizer) -> None:
