@@ -82,7 +82,7 @@ def from_torch_dtype_to_abbr(dtype: Optional[torch.dtype]) -> str:
     return _TORCH_DTYPE_TO_ABBREVIATION.get(dtype, "")
 
 
-def from_scalar_type_to_torch_dtype(scalar_type: type) -> Optional[torch.dtype]:
+def from_scalar_type_to_torch_dtype(scalar_type: type) -> torch.dtype:
     return _SCALAR_TYPE_TO_TORCH_DTYPE[scalar_type]
 
 
