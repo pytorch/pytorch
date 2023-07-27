@@ -2819,6 +2819,12 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         _warn_not_in_group("all_gather_into_tensor")
         return
 
+    group = group or _get_default_group()
+    if get_backend(group) == "gloo":
+        tensor_list = list(torch.chunk(output_tensor, get_world_size(group)))
+        return all_gather(tensor_list, input_tensor, group, async_op)
+
+
     output_tensor = (
         output_tensor
         if not output_tensor.is_complex()
@@ -2829,8 +2835,6 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         if not input_tensor.is_complex()
         else torch.view_as_real(input_tensor)
     )
-
-    group = group or _get_default_group()
 
     if group in _world.pg_coalesce_state.keys():
         # We are in coalescing context, do not issue single operation, just append a collective representation
@@ -3308,6 +3312,16 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
     opts.reduceOp = op
 
     group = group or _get_default_group()
+    if get_backend(group) == "gloo":
+        if async_op:
+            raise RuntimeError(f"Gloo RS fallback not supported with async_op=True")
+        # first reduce input
+        all_reduce(tensor=input, op=op, group=group, async_op=False)
+        # then scatter the result. Since we all_reduced to all ranks,
+        # we can arbitrarily scatter from 0.
+        input_list = list(torch.chunk(input, get_world_size(group)))
+        return scatter(tensor=output, scatter_list=(input_list if get_rank(group) == 0 else None), group=group)
+
 
     # Check if we are in coalescing context
     # If we are, do not issue single operation, just append a collective representation

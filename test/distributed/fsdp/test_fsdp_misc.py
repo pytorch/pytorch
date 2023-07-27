@@ -28,7 +28,7 @@ from torch.distributed.fsdp.wrap import (
 )
 from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu, skip_if_win32
 from torch.testing._internal.common_fsdp import (
     _assert_module_states,
     CUDAInitMode,
@@ -397,6 +397,16 @@ class TestFSDPMiscMultiProcess(FSDPTest):
                     fsdp_overlap_prev_params = [
                         (n, p.clone()) for n, p in fsdp_overlap.named_parameters()
                     ]
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_cpu_training(self):
+        """Tests FSDP training on CPU."""
+        torch.manual_seed(0)
+        model = MyModel()
+        gloo_pg = dist.new_group(backend="gloo")
+        fsdp = FSDP(model, auto_wrap_policy=always_wrap_policy, process_group=gloo_pg, device_id=torch.device("cpu"))
+        inp = torch.randn(2, 2)
+        fsdp(inp, inp).sum().backward()
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_cpu_init_stays_on_cpu(self):

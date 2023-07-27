@@ -34,6 +34,7 @@ def is_available() -> bool:
     """
     return True
 
+
 def synchronize(device: _device_t = None) -> None:
     r"""Waits for all kernels in all streams on the CPU device to complete.
 
@@ -48,7 +49,24 @@ class Stream:
     """
     N.B. This class only exists to facilitate device-agnostic code
     """
-    pass
+    def wait_stream(self, stream) -> None:
+        r""" TODO: doc"""
+        pass
+
+class Event:
+    def query(self) -> bool:
+        return True
+
+    def record(self,stream=None):
+        pass
+
+    def synchronize(self):
+        pass
+
+    def wait(self,stream=None):
+        pass
+
+
 
 _default_cpu_stream = Stream()
 _current_stream = _default_cpu_stream
