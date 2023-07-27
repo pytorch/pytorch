@@ -688,14 +688,35 @@ if torch._C._has_mkldnn:
             match.erase_nodes(graph)
 
     def _is_packable_mkldnn_rnn_layer(match):
-        # TODO: do we need more check here?
         lstm_node = match.output_node()
-        POS_WEIGHT_IH = 1
-        POS_WEIGHT_HH = 2
-        if lstm_node.args[POS_WEIGHT_IH].op != "get_attr":
+        POS_WEIGHTS = [1, 2]
+        POS_INPUTS = [0, 5, 6]
+        POS_ARGS = POS_WEIGHTS + POS_INPUTS
+        # Weights should be Constant
+        if any(
+            lstm_node.args[POS_WEIGHT].op != "get_attr" for POS_WEIGHT in POS_WEIGHTS
+        ):
             return False
-        if lstm_node.args[POS_WEIGHT_HH].op != "get_attr":
+
+        # Meta info for weights and inputs should be available
+        if any(lstm_node.args[POS_ARG].meta.get("val") is None for POS_ARG in POS_ARGS):
             return False
+
+        # Check device
+        if any(
+            lstm_node.args[POS_ARG].meta.get("val").device.type != "cpu"
+            for POS_ARG in POS_ARGS
+        ):
+            return False
+
+        # Check dtype
+        if any(
+            lstm_node.args[POS_ARG].meta.get("val").dtype == torch.bfloat16
+            and not mkldnn._is_mkldnn_bf16_supported()
+            for POS_ARG in POS_ARGS
+        ):
+            return False
+
         return True
 
     def _is_packable_convolution(match):
