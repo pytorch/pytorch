@@ -329,6 +329,7 @@ CHECK_STRIDES_SKIPS = {
     aten.prelu.default,
     aten.special_xlog1py.default,
     aten.xlogy.Tensor,
+    aten.nll_loss2d_forward.default,
 
     # channel_last and channel_last_3d related failures
     aten.convolution.default,
@@ -839,7 +840,6 @@ meta_dispatch_expected_failures = {
     aten.median.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.median.dim : {i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.mode.default : {f16, i8, f64, i64, bf16, f32, i32, b8, i16, u8},
-    aten.nll_loss2d_forward.default : {bf16, f32, f64},
     aten.rrelu_with_noise.default : {bf16, f32, f64},
     aten.segment_reduce.default : {bf16, f32, f16, f64},
     aten.unique_consecutive.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
@@ -895,7 +895,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.log_sigmoid_forward.output : {bf16, f16, f64, f32},  # aten::log_sigmoid_forward.output
     aten.median.default: {f16},  # aten::median
     aten.median.dim: {f16},  # aten::median.dim_values
-    aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
     aten.rrelu_with_noise.default: {f16},  # aten::rrelu_with_noise
