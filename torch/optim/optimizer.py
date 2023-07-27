@@ -452,6 +452,7 @@ class Optimizer:
         A returned state dict might look something like:
 
         .. code-block:: text
+
             {
                 'state': {
                     0: {'momentum_buffer': tensor(...), ...},
