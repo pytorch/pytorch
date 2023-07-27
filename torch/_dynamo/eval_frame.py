@@ -595,77 +595,90 @@ def optimize(
 
 # TODO(voz): Consider making "explain" output alongside a run / part of a run
 @patch("torch._dynamo.symbolic_convert.explain", True)
-def explain(f, *args, **kwargs):
-    # TODO(voz): Do we want a decorator for this?
-    from . import reset  # type: ignore[attr-defined]
+def explain(f, *extra_args, **extra_kwargs):
+    def inner(*args, **kwargs):
+        # TODO(voz): Do we want a decorator for this?
+        from . import reset  # type: ignore[attr-defined]
 
-    reset()
+        reset()
 
-    graphs: List[torch.fx.GraphModule] = []
-    break_reasons: List[Any] = []
-    op_count: int = 0
-    ops_per_graph: List[torch.fx.Node] = []
-    out_guards: List[_guards.Guard] = []
+        graphs: List[torch.fx.GraphModule] = []
+        break_reasons: List[Any] = []
+        op_count: int = 0
+        ops_per_graph: List[torch.fx.Node] = []
+        out_guards: List[_guards.Guard] = []
 
-    def dynamo_graph_accumulating_compiler(gm: torch.fx.GraphModule, example_inputs):
-        from .backends.debugging import _explain_graph_detail
+        def dynamo_graph_accumulating_compiler(
+            gm: torch.fx.GraphModule, example_inputs
+        ):
+            from .backends.debugging import _explain_graph_detail
 
-        nonlocal graphs
-        nonlocal op_count
-        nonlocal ops_per_graph
-        nonlocal break_reasons
+            nonlocal graphs
+            nonlocal op_count
+            nonlocal ops_per_graph
+            nonlocal break_reasons
 
-        gm, graphs, op_count, ops_per_graph, break_reasons = _explain_graph_detail(
-            gm, graphs, op_count, ops_per_graph, break_reasons
+            gm, graphs, op_count, ops_per_graph, break_reasons = _explain_graph_detail(
+                gm, graphs, op_count, ops_per_graph, break_reasons
+            )
+
+            return gm.forward
+
+        def guard_export_print(guards):
+            nonlocal out_guards
+            out_guards.extend(guards)
+
+        with patch(f"{__name__}.most_recent_backend", None):
+            opt_f = optimize(
+                dynamo_graph_accumulating_compiler,
+                nopython=False,
+                guard_export_fn=guard_export_print,
+            )(f)
+            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+            opt_f(*args, **kwargs)
+
+        graph_count = len(graphs)
+
+        # For the explanation summary, dedupe reasons by the innermost stack frame and dedupe by it.
+        deduped_reasons = {}
+        for reason in break_reasons:
+            innermost_frame = reason.user_stack[-1]
+            # __repr__ uniquely identifies a FrameSummary so we can use it for deduping
+            deduped_reasons[repr(innermost_frame)] = reason
+
+        formatted_list = ""
+        for idx, break_reason in enumerate(deduped_reasons.values()):
+            formatted_stack = "".join(traceback.format_list(break_reason.user_stack))
+            msg = f"{idx + 1}. Reason: {break_reason.reason}\n   User Stack: {formatted_stack}\n"
+            formatted_list += msg
+
+        graph_break_count = graph_count - 1
+        compile_time = compile_times(repr="str")
+
+        # TODO(voz): Do we want a decorator for this?
+        reset()
+        from .backends.debugging import ExplainOutput
+
+        return ExplainOutput(
+            graphs,
+            graph_count,
+            graph_break_count,
+            break_reasons,
+            op_count,
+            ops_per_graph,
+            out_guards,
+            compile_time,
         )
 
-        return gm.forward
-
-    def guard_export_print(guards):
-        nonlocal out_guards
-        out_guards.extend(guards)
-
-    with patch(f"{__name__}.most_recent_backend", None):
-        opt_f = optimize(
-            dynamo_graph_accumulating_compiler,
-            nopython=False,
-            guard_export_fn=guard_export_print,
-        )(f)
-        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
-        opt_f(*args, **kwargs)
-
-    graph_count = len(graphs)
-
-    # For the explanation summary, dedupe reasons by the innermost stack frame and dedupe by it.
-    deduped_reasons = {}
-    for reason in break_reasons:
-        innermost_frame = reason.user_stack[-1]
-        # __repr__ uniquely identifies a FrameSummary so we can use it for deduping
-        deduped_reasons[repr(innermost_frame)] = reason
-
-    formatted_list = ""
-    for idx, break_reason in enumerate(deduped_reasons.values()):
-        formatted_stack = "".join(traceback.format_list(break_reason.user_stack))
-        msg = f"{idx + 1}. Reason: {break_reason.reason}\n   User Stack: {formatted_stack}\n"
-        formatted_list += msg
-
-    graph_break_count = graph_count - 1
-    compile_time = compile_times(repr="str")
-
-    # TODO(voz): Do we want a decorator for this?
-    reset()
-    from .backends.debugging import ExplainOutput
-
-    return ExplainOutput(
-        graphs,
-        graph_count,
-        graph_break_count,
-        break_reasons,
-        op_count,
-        ops_per_graph,
-        out_guards,
-        compile_time,
-    )
+    if extra_args or extra_kwargs:
+        warnings.warn(
+            "explain(f, *args, **kwargs) is deprecated, use explain(f)(*args, **kwargs) instead.  "
+            "If you don't migrate, we may break your explain call in the future if your user defined kwargs "
+            "conflict with future kwargs added to explain(f)."
+        )
+        return inner(*extra_args, **extra_kwargs)
+    else:
+        return inner
 
 
 @dataclasses.dataclass
@@ -890,7 +903,6 @@ def export(
         f = innermost_fn(f)
         call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
         original_signature = inspect.signature(call_to_inspect)
-
         assert (
             not fake_mode or fake_mode.shape_env is not None
         ), "The specified fake_mode must contain a valid shape_env"
@@ -934,9 +946,7 @@ def export(
 
         def guard_export_print(guards: Set[_guards.Guard]):
             nonlocal out_guards
-            assert (
-                out_guards is None
-            ), "whole graph export entails exactly one guard export"
+            assert out_guards is None, "whole graph export entails exactly one guard export"
             out_guards = guards
 
         example_inputs = []
@@ -972,10 +982,11 @@ def export(
         if tracing_mode != "symbolic":
             assume_static_by_default = True
         with patch(f"{__name__}.most_recent_backend", None), config.patch(
-            summarize_dim_constraints=True,
             specialize_int=True,
             assume_static_by_default=assume_static_by_default,
             automatic_dynamic_shapes=False,
+            capture_dynamic_output_shape_ops=True,
+            capture_scalar_outputs=True,
         ), torch._guards.export_fake_mode(fake_mode):
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
@@ -1038,9 +1049,7 @@ def export(
         assert out_guards is not None, "Failed to produce guards during tracing"
         assert fake_mode is not None
 
-        matched_input_elements_positions = produce_matching(
-            flat_args, graph_captured_input
-        )
+        matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
         # NB: This is mostly hitting the cache; Dynamo already converted these
         example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
@@ -1048,9 +1057,7 @@ def export(
 
         assert graph_captured_result is not None
         flat_both = list(graph_captured_result) + flat_args
-        matched_output_elements_positions = produce_matching(
-            flat_both, flat_results_traced
-        )
+        matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
 
         if aten_graph:
             # Running graph with interpreter is needed for propagating the stack_trace
@@ -1093,20 +1100,16 @@ def export(
             params = list(sig.parameters.values())
             # Separate positional arguments, keyword-only arguments and varargs/varkw
             args = [
-                p.name
-                for p in params
-                if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+                p.name for p in params if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
             ]
             kwonlyargs = [
                 p.name for p in params if p.kind == inspect.Parameter.KEYWORD_ONLY
             ]
             varargs = next(
-                (p.name for p in params if p.kind == inspect.Parameter.VAR_POSITIONAL),
-                None,
+                (p.name for p in params if p.kind == inspect.Parameter.VAR_POSITIONAL), None
             )
             varkw = next(
-                (p.name for p in params if p.kind == inspect.Parameter.VAR_KEYWORD),
-                None,
+                (p.name for p in params if p.kind == inspect.Parameter.VAR_KEYWORD), None
             )
             # Get default values for positional arguments and keyword-only arguments
             defaults = tuple(
@@ -1156,9 +1159,7 @@ def export(
                 for unprovided_arg in fullargspec.args[
                     len(args) : -len(fullargspec.defaults or [])
                 ]:
-                    assert (
-                        unprovided_arg in kwargs
-                    ), f"Missing argument {unprovided_arg}"
+                    assert unprovided_arg in kwargs, f"Missing argument {unprovided_arg}"
 
             # 4. Keyword arguments provided in `kwargs`.
             input_strs += list(kwargs.keys())
