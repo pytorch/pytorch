@@ -168,11 +168,13 @@ def rebase_ghstack_onto(
             post_already_uptodate(pr, repo, onto_branch, dry_run)
 
 
-def additional_rebase_failure_info(e):
+def additional_rebase_failure_info(e: Exception) -> str:
     print(str(e))
-    if re.search("remote: Permission to .* denied to .*\.\nfatal: unable to access", str(e)):
+    if re.search(
+        r"remote: Permission to .* denied to .*\\.\nfatal: unable to access", str(e)
+    ):
         return (
-            "\nThis is likely because the PR author does not allow edits from maintainers on the PR or because the "
+            "\nThis is likely because the author did not allow edits from maintainers on the PR or because the "
             "repo has additional permissions settings that mergebot does not qualify."
         )
     return ""
