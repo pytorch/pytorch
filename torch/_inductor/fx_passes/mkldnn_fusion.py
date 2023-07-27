@@ -846,14 +846,19 @@ if torch._C._has_mkldnn:
                 transpose_weight_node = graph.create_node(
                     "call_function", aten.permute.default, (weight, (1, 0))
                 )
-                is_bf16_weight = weight.meta.get("val").dtype == torch.bfloat16
+                weight_dtype = weight.meta.get("val").dtype
+                is_bf16_weight = weight_dtype == torch.bfloat16
                 batch_size = input.meta.get("val").shape[0]
-                if not is_bf16_weight:
-                    assert not free_symbols(batch_size)
+                if free_symbols(batch_size):
+                    assert (
+                        is_bf16_weight
+                    ), f"only bf16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
                 # For bfloat dynamic shape path, using a dummy input to pack weight for a better performance.
                 packed_weight_inputs = (
                     transpose_weight_node,
-                    None if free_symbols(batch_size) else batch_size,
+                    batch_size.node.shape_env.size_hint(batch_size.node.expr)
+                    if free_symbols(batch_size)
+                    else batch_size,
                 )
                 packed_weight_inputs = (transpose_weight_node, batch_size)
                 packed_weight_op = (

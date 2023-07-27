@@ -559,7 +559,7 @@ class VecAVX512(VecISA):
     _bit_width = 512
     _macro = "CPU_CAPABILITY_AVX512"
     _arch_flags = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
-    _dtype_nelements = {torch.float: 16, torch.bfloat16: 32}
+    _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
 
     def __str__(self) -> str:
         return "avx512"
@@ -572,7 +572,7 @@ class VecAVX2(VecISA):
     _bit_width = 256
     _macro = "CPU_CAPABILITY_AVX2"
     _arch_flags = "-mavx2 -mfma"
-    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16}
+    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
         return "avx2"
