@@ -6532,6 +6532,28 @@ def ___make_guard_fn():
         # Nothing to compile here
         self.assertEqual(counter.frame_count, 0)
 
+    def test_intermediate_mutation(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.vals = [torch.zeros(5)]
+
+            def forward(self, x):
+                self.vals[0] = self.vals[0] + x
+                return x * x
+
+        mod = Foo()
+        mod(torch.ones(5))
+        mod(torch.ones(5))
+        eager_val = mod.vals[0]
+        counter = CompileCounter()
+        mod2 = torch._dynamo.optimize(counter)(Foo())
+        mod2(torch.ones(5))
+        mod2(torch.ones(5))
+        compiled_val = mod2.vals[0]
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(eager_val, compiled_val)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
