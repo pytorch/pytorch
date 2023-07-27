@@ -444,6 +444,9 @@ class GraphLowering(torch.fx.Interpreter):
                 for x in value:
                     register(x)
             if isinstance(value, ir.IRNode):
+                if value.data is None or value.data.data is None:
+                    return
+
                 for read_name in value.get_read_names():
                     self.name_to_users[read_name].append(value)
 
