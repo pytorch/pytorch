@@ -325,12 +325,13 @@ def compile_fx_inner(
             if isinstance(t, torch.Tensor)
         )
 
-
+        # doesnt work for non-trees because the warmup run would apply mutation twice
         if config.triton.cudagraph_trees:
-            has_mutation = not all(idx < num_fixed for idx in compiled_graph.mutated_input_idxs)
+            has_mutation = not all(
+                idx < num_fixed for idx in compiled_graph.mutated_input_idxs
+            )
         else:
             has_mutation = len(compiled_graph.mutated_inputs) != 0
-
 
         cudagraph_tests = [
             (set(compiled_graph.device_types) == {"cuda"}, "non-cuda device in graph"),
