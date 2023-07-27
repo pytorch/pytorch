@@ -1124,8 +1124,12 @@ class FakeTensor(torch.Tensor):
                 f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
             )
 
-        tree_map(merge_devices, args)
-        tree_map(merge_devices, kwargs)
+        if func is aten.copy_.default and args and isinstance(args[0], FakeTensor):
+            # copy_ allows different device between args[0]/args[1]
+            tree_map(merge_devices, args[0])
+        else:
+            tree_map(merge_devices, args)
+            tree_map(merge_devices, kwargs)
 
         # some functions that allow Python numbers to bind to Tensors
         # if we have failed to find a device, and we're running one of these operators,

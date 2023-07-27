@@ -179,6 +179,14 @@ class FakeTensorTest(TestCase):
                 x = torch.rand([16, 1], device=device)
                 x[..., 0] = 0
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_device_inplace_copy(self):
+        with FakeTensorMode():
+            x = torch.rand([8, 8], device="cpu")
+            y = torch.rand([8, 8], device="cuda")
+            assert x.copy_(y).device.type == "cpu"
+            assert y.copy_(x).device.type == "cuda"
+
     def test_fake_dispatch_keys(self):
         with FakeTensorMode():
             x = torch.rand([4])
