@@ -3623,6 +3623,7 @@ class TestLinalg(TestCase):
                                     "The QR decomposition is not differentiable when mode='complete' and nrows > ncols"):
             b.backward()
 
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_qr_batched(self, device, dtype):
