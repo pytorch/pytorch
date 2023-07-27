@@ -598,10 +598,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         """
         Whether a low precision hook is registered or not.
         """
-        return (
-            self._communication_hook is not None
-            and self._communication_hook in LOW_PRECISION_HOOKS
-        )
+        return self._comm_hook is not None and self._comm_hook in LOW_PRECISION_HOOKS
 
     def _reset_lazy_init(self) -> None:
         """
@@ -1950,11 +1947,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 not submodule._hook_registered
             ), "communication hook can be only registered once"
             submodule._hook_registered = True
-            assert submodule._communication_hook == _get_default_comm_hook(
+            assert submodule._comm_hook == _get_default_comm_hook(
                 self.sharding_strategy
-            ), f"communication hook should be default, but it is {submodule._communication_hook.__name__} instead"
-            submodule._communication_hook_state = state
-            submodule._communication_hook = hook
+            ), f"communication hook should be default, but it is {submodule._comm_hook.__name__} instead"
+            submodule._comm_hook_state = state
+            submodule._comm_hook = hook
 
 
 def _get_grad_norm(
