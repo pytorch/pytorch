@@ -1,7 +1,7 @@
 from typing import Callable
 
 import torch
-from torch.ao.quantization.pt2e.quantizer import (
+from torch.ao.quantization.quantizer import (
     QuantizationAnnotation,
     SharedQuantizationSpec,
 )
@@ -9,7 +9,7 @@ from torch.fx import Node
 
 
 def _is_share_obs_or_fq_op(op: Callable) -> bool:
-    # TODO: remove some of these ops in qnnpack_quantizer
+    # TODO: remove some of these ops in xnnpack_quantizer
     return op in [
         torch.ops.aten.hardtanh.default,
         torch.ops.aten.mean.default,
@@ -19,6 +19,7 @@ def _is_share_obs_or_fq_op(op: Callable) -> bool:
         torch.ops.aten.adaptive_avg_pool2d.default,
         torch.ops.aten.view_copy.default,
         torch.ops.aten.view.default,
+        torch.ops.aten.slice_copy.Tensor,
     ]
 
 
