@@ -433,12 +433,12 @@ class Optimizer:
 
         It contains two entries:
 
-        * ``state`` - a Dict holding current optimization state. Its content
+        * ``state``: a Dict holding current optimization state. Its content
             differs between optimizer classes, but some common characteristics
             hold. For example, state is saved per parameter, and the parameter
             itself is NOT saved. ``state`` is a Dictionary mapping parameter ids
             to a Dict with state corresponding to each parameter.
-        * ``param_groups`` - a List containing all parameter groups where each
+        * ``param_groups``: a List containing all parameter groups where each
             parameter group is a Dict. Each parameter group contains metadata
             specific to the optimizer, such as learning rate and weight decay,
             as well as a List of parameter IDs of the parameters in the group.
@@ -451,9 +451,7 @@ class Optimizer:
 
         A returned state dict might look something like:
 
-        Example::
-
-            >>> optimizer.state_dict()
+        .. code-block:: text
             {
                 'state': {
                     0: {'momentum_buffer': tensor(...), ...},
