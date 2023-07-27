@@ -78,6 +78,7 @@ class CPUReproTests(TestCase):
                     kwargs = kwargs if kwargs else {}
                     if func == torch.ops.aten.convolution.default:
                         # For CPU and mkldnn enable, we always using channles last
+                        nonlocal fmt
                         if (
                             torch.backends.mkldnn.enabled
                             and torch.backends.mkldnn.is_available()

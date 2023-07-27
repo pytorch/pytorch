@@ -27,7 +27,6 @@ from torch.onnx._internal.fx import (
 )
 
 if TYPE_CHECKING:
-    import onnx.defs.OpSchema  # type: ignore[import]
     import onnxscript  # type: ignore[import]
 
 
@@ -419,7 +418,11 @@ class _OnnxSchemaChecker:
         """
         self.onnxfunction = onnxfunction
         self.param_schema = self.onnxfunction.param_schemas()
-        self.op_schema: onnx.defs.OpSchema = self.onnxfunction.op_schema
+        op_schema = self.onnxfunction.op_schema
+        # Both `OnnxFunction` and `TracedOnnxFunction` never return None for `op_schema`.
+        # However their base class would. Hence return type is annotated as Optional[OpSchema].
+        assert op_schema is not None
+        self.op_schema = op_schema
         self.type_constraints = {
             # "T": {"tensor(int64)"}
             constraint.type_param_str: set(constraint.allowed_type_strs)
@@ -498,7 +501,7 @@ class _OnnxSchemaChecker:
                 # of this input defined in the OpSchema, we know the function
                 # and the input are not compatible
                 diagnostic.with_additional_message(
-                    f"#### Failed: input type mismatch! \n"
+                    f"#### Failed: input type mismatch for input '{schema_input.name}'! \n"
                     f"Actual {torch_input_compatible_types} vs\n"
                     f"expected {allowed_types}\n"
                 )
