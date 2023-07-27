@@ -168,6 +168,15 @@ def rebase_ghstack_onto(
             post_already_uptodate(pr, repo, onto_branch, dry_run)
 
 
+def additional_rebase_failure_info(e):
+    if re.search("remote: Permission to .* denied to pytorchmergebot\.\nfatal: unable to access", str(e)):
+        return (
+            "\nThis is likely because the PR author does not allow edits from maintainers on the PR or because the "
+            "repo has additional permissions settings that mergebot does not qualify."
+        )
+    return ""
+
+
 @contextlib.contextmanager
 def git_config_guard(repo: GitRepo) -> Generator[None, None, None]:
     """Restores user.name and user.email global properties after context is finished"""
@@ -217,6 +226,7 @@ def main() -> None:
 
     except Exception as e:
         msg = f"Rebase failed due to {e}"
+        msg += additional_rebase_failure_info(e)
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
             msg += f"\nRaised by {run_url}"
