@@ -90,7 +90,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   std::vector<int> tensorlist_args_indices;
 
   // save converted cpu tensor for TensorList
-  std::vector<c10::IValue> cpu_ivalues;
+  std::vector<c10::IValue> tensorlist_cpu_args;
 
   // Step 1: Convert all non-CPU tensor inputs into CPU tensors
   // and put them on the stack at the correct indices.
@@ -106,7 +106,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
       tensorlist_args.push_back(ivalue.toTensorList());
       tensorlist_args_indices.push_back(idx);
       auto cpu_ivalue = c10::IValue(c10::List<at::Tensor>(to_cpu(ivalue.toTensorList().vec())));
-      cpu_ivalues.push_back(cpu_ivalue);
+      tensorlist_cpu_args.push_back(cpu_ivalue);
       (*stack)[arguments_begin + idx] = std::move(cpu_ivalue);
     }
   }
@@ -132,11 +132,13 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
     }
   }
 
+  // We also need to explicit reapply input mutations to inputs that are lists
+  // of tensors
   for (const auto i : c10::irange(tensorlist_args_indices.size())) {
     auto tensorlist_idx = tensorlist_args_indices[i];
     const AliasInfo* alias_info = schema_args[tensorlist_idx].alias_info();
     if (alias_info != nullptr && alias_info->isWrite()) {
-      const auto& cpu_tensors = cpu_ivalues[i].toTensorList().vec();
+      const auto& cpu_tensors = tensorlist_cpu_args[i].toTensorList().vec();
       for (const auto idx : c10::irange(tensorlist_args[i].size())) {
         at::_copy_from_and_resize(cpu_tensors[idx], tensorlist_args[i][idx]);
       }
@@ -278,6 +280,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
             validate_tensor_list(returns[idx].toTensorList())) {
           const auto& cpu_tensors = returns[idx].toTensorList().vec();
           std::vector<at::Tensor> tensors;
+          tensors.reserve(cpu_tensors.size());
 
           for (const auto& tensor : cpu_tensors) {
             tensors.push_back(tensor.to(*tgt_device));
