@@ -1,7 +1,7 @@
 import copy
 import dataclasses
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Iterator, Tuple, Union
 
 import sympy
 
@@ -193,6 +193,14 @@ class ExportedProgram:
     @property
     def graph(self):
         return self.graph_module.graph
+
+    def named_parameters(self) -> Iterator[Tuple[str, torch.nn.Parameter]]:
+        for param_name in self.graph_signature.parameters:
+            yield param_name, self.state_dict[param_name]
+
+    def named_buffers(self) -> Iterator[Tuple[str, torch.Tensor]]:
+        for buffer_name in self.graph_signature.buffers:
+            yield buffer_name, self.state_dict[buffer_name]
 
     def transform(self, *passes: PassType) -> "ExportedProgram":
         pm = PassManager(list(passes))
