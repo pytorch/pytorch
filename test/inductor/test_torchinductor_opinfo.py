@@ -143,7 +143,14 @@ inductor_skips["cpu"] = {
 
 if IS_MACOS and IS_X86:
     inductor_skips["cpu"]["rsqrt"] = {b8, i32}
-    inductor_skips["cpu"]["nn.functional.multi_margin_loss"] = {b8, f16, f32, f64, i32, i64}
+    inductor_skips["cpu"]["nn.functional.multi_margin_loss"] = {
+        b8,
+        f16,
+        f32,
+        f64,
+        i32,
+        i64,
+    }
 
 inductor_skips["cuda"] = {
     # Jiterator kernel is not expected to work with inductor
@@ -169,15 +176,14 @@ inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
     "__getitem__": {b8, f16, f32, f64, i32, i64},
-    "amax": {f16},
-    "amin": {f16},
+    "allclose": {f16, f32, f64},
     "angle": {f16, f32, f64},
     "bernoulli": {f32, f64},
     "bucketize": {b8, f16, f32, f64, i32, i64},
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
     "cov": {f32, f64, i32, i64},
-    "index_add": {f16},
+    "equal": {b8, f16, f32, f64, i32, i64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
     "linalg.eig": {f32, f64},
@@ -195,6 +201,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
     "nn.functional.adaptive_avg_pool2d": {f16},
+    # f16 handling issue https://github.com/pytorch/pytorch/issues/105914
+    "nn.functional.cosine_similarity": {f16},
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.one_hot": {i64},
@@ -209,8 +217,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "randint": {f16, f32, f64, i32, i64},
     "randn_like": {f16, f32, f64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
-    "scatter_add": {f16},
-    ("scatter_reduce", "sum"): {f16},
     ("scatter_reduce", "prod"): {f16, f32, f64},
     ("_segment_reduce", "lengths"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
