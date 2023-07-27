@@ -344,14 +344,6 @@ def run_ort(
             f"Expected {len(input_names)} inputs, got {len(pytorch_inputs)}"
         )
 
-    # NOTE: ONNX doesn't support tensor of complex64/complex128, so we
-    # convert them to float32/float64.
-    pytorch_inputs = [
-        torch.view_as_real(input)
-        if isinstance(input, torch.Tensor) and torch.is_complex(input)
-        else input
-        for input in pytorch_inputs
-    ]
     ort_input = {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
     return session.run(None, ort_input)
 
@@ -408,11 +400,6 @@ def _compare_pytorch_onnx_with_ort(
             f"Expected {len(ref_outputs)} outputs, got {len(ort_outputs)}"
         )
     for ref_output, ort_output in zip(ref_outputs, ort_outputs):
-        # NOTE: ONNX Runtime doesn't support tensor of complex64/complex128, so we
-        # convert them to float32/float64.
-        # TODO: Need stft enabled to test complex64/complex128
-        if isinstance(ref_output, torch.Tensor) and torch.is_complex(ref_output):
-            ref_output = torch.view_as_real(ref_output)
         torch.testing.assert_close(
             ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
         )
