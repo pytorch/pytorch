@@ -642,11 +642,6 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 for l, r in zip(producer.snodes, consumer.snodes)
             )
         elif consumer.is_foreach():
-            # the == 1 check is overly conservative, but this is meant purely for epilogue copy fusion
-            # at the moment
-            if len(producer.users) != 1:
-                return False
-
             consumer_subnode = consumer.get_consumer_subnode_for(producer)
             if consumer_subnode is not None:
                 return consumer.scheduler.can_fuse(producer, consumer_subnode)
@@ -654,9 +649,6 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             return False
 
         elif producer.is_foreach():
-            if len(consumer.inverse_users) != 1:
-                return False
-
             producer_subnode = producer.get_producer_subnode_for(consumer)
             if producer_subnode is not None:
                 return producer.scheduler.can_fuse(producer_subnode, consumer)
@@ -780,6 +772,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def get_nodes(self):
         """Returns all nodes contained in this kernel, unpacking fused nodes into their constituent scheduler nodes."""
         return list(itertools.chain(*[x.get_nodes() for x in self.snodes]))
+
+    def get_first_name(self):
+        return self.snodes[0].get_first_name()
 
 
 def pick_loop_order(stride_lengths, sizes, priority_idx=()):
