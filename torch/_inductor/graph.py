@@ -444,7 +444,11 @@ class GraphLowering(torch.fx.Interpreter):
                 for x in value:
                     register(x)
             if isinstance(value, ir.IRNode):
-                if value.data is None or value.data.data is None:
+                if (
+                    not hasattr(value, "data")
+                    or value.data is None
+                    or value.data.data is None
+                ):
                     return
 
                 for read_name in value.get_read_names():
@@ -684,8 +688,6 @@ class GraphLowering(torch.fx.Interpreter):
             else:
                 result = super().run_node(n)
 
-            self.register_users_of(result)
-
             # require the same stride order for dense outputs,
             # 1. user-land view() will not throw because inductor
             # output different strides than eager
@@ -797,6 +799,8 @@ class GraphLowering(torch.fx.Interpreter):
                 ):
                     if isinstance(result.data.data.inputs[0], ir.Buffer):
                         result.data.data.inputs[0].origin_node = n
+
+        self.register_users_of(result)
 
         return result
 
