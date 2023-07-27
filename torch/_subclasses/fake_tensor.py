@@ -3,6 +3,7 @@ import functools
 import itertools
 import logging
 import os
+import traceback
 import weakref
 from dataclasses import dataclass
 from functools import partial
@@ -579,6 +580,16 @@ def index_tensor(fake_mode, func, *args, **kwargs):
     with fake_mode:
         out = meta_index_Tensor(*args, **kwargs)
         return out.to(out_device)
+
+
+# Can take mixed meta/non-meta arguments; the meta registration
+# will roughly do the right thing even when given real devices
+@register_op_impl(aten._embedding_bag.default)
+def embedding_bag(fake_mode, func, *args, **kwargs):
+    from torch._meta_registrations import meta_embedding_bag
+
+    with fake_mode:
+        return meta_embedding_bag(*args, **kwargs)
 
 
 # takes in multiple-devices, dont default to default device handling
@@ -1178,6 +1189,8 @@ class FakeTensorMode(TorchDispatchMode):
         self.enter_stack: List[bool] = []
 
         self.shape_env = shape_env
+
+        self.stack = "".join(traceback.format_stack())
 
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
