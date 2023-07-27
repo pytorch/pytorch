@@ -299,17 +299,19 @@ bool ConcatOp<Context>::RunOnDevice() {
       1, at::IntArrayRef({InputSize()}), at::dtype<int>().device(CPU));
   int *const axis_data = split->template mutable_data<int>();
   auto& input_zero = Input(0);
+  const auto input_zero_dtype = input_zero.dtype();
   int adj_size = input_zero.dim() + (add_axis_ ? 1 : 0);
   int canonical_axis = canonical_axis_index_(axis_, adj_size);
   CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
   for (const auto i : c10::irange(1, InputSize())) {
+    const auto input_dtype = Input(i).dtype();
     CAFFE_ENFORCE_EQ(
-        Input(i).dtype(),
-        input_zero.dtype(),
+        input_dtype,
+        input_zero_dtype,
         "All inputs must have the same type, expected: ",
-        input_zero.dtype().name(),
+        input_zero_dtype.name(),
         " but got: ",
-        Input(i).dtype().name(),
+        input_dtype.name(),
         " for input: ",
         i);
   }
