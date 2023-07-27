@@ -1,11 +1,8 @@
 import torch
 import torchvision
 
-from torch.backends._coreml.preprocess import (
-    CompileSpec,
-    TensorSpec,
-    CoreMLComputeUnit,
-)
+from torch.backends._coreml.preprocess import CompileSpec, CoreMLComputeUnit, TensorSpec
+
 
 def mobilenetv2_spec():
     return {
