@@ -873,10 +873,12 @@ def export(
     # Deal with "local variable referenced before assignment"
     _fake_mode = fake_mode
     _f = f
+    _assume_static_by_default = assume_static_by_default
 
     def inner(*args, **kwargs):
         fake_mode = _fake_mode
         f = _f
+        assume_static_by_default = _assume_static_by_default
         check_if_dynamo_supported()
         torch._C._log_api_usage_once("torch._dynamo.export")
         if decomposition_table is not None:
