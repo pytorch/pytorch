@@ -163,8 +163,6 @@ inductor_expected_failures_single_sample = defaultdict(dict)
 inductor_expected_failures_single_sample["cpu"] = {
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "allclose": {f16, f32, f64},
-    "amax": {f16},
-    "amin": {f16},
     "angle": {f16, f32, f64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
     "bernoulli": {f32, f64},
@@ -175,7 +173,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "corrcoef": {f32, f64, i32, i64},
     "cov": {f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
-    "index_add": {f16},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
     # Unsupported: data dependent operator: aten._local_scalar_dense.default
@@ -215,8 +212,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "randint": {f16, f32, f64, i32, i64},
     "randn_like": {f16, f32, f64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
-    "scatter_add": {f16},
-    ("scatter_reduce", "sum"): {f16},
     ("scatter_reduce", "prod"): {f16, f32, f64},
     ("_segment_reduce", "lengths"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},

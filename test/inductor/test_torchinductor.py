@@ -76,7 +76,7 @@ requires_multigpu = functools.partial(
 skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
-vec_dtypes = [torch.float, torch.bfloat16]
+vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
 libfoo = None
 
@@ -295,7 +295,7 @@ def check_model(
     torch.manual_seed(0)
     actual = run(*example_inputs, **kwargs)
     # if not called:
-    #     exp = torch._dynamo.explain(run, *example_inputs)
+    #     exp = torch._dynamo.explain(run)(*example_inputs)
     #     print("Explain:", exp[0])
     #     for graph in exp[2]:
     #         print("Graph", graph)
@@ -6592,14 +6592,15 @@ class CommonTemplate:
 
         # The first two values should be the same, attention output
         # and logsumexp since dropout is not being set
-        def fn(q, k, v, compute_log_sumexp):
+        def fn(q, k, v, attn_bias, compute_log_sumexp):
             return aten._scaled_dot_product_efficient_attention(
-                q, k, v, compute_log_sumexp
+                q, k, v, attn_bias, compute_log_sumexp
             )[:2]
 
         self.common(
             fn,
             (
+                torch.randn(4, 4, 36, 36),
                 torch.randn(4, 4, 36, 36),
                 torch.randn(4, 4, 36, 36),
                 torch.randn(4, 4, 36, 36),
