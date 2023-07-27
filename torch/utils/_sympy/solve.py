@@ -1,7 +1,9 @@
 import logging
+
+from typing import Dict, Optional, Tuple, Type
+
 import sympy
 
-from typing import Dict, Optional, Tuple, Type, Union
 from torch.utils._sympy.functions import FloorDiv
 
 log = logging.getLogger(__name__)
@@ -96,7 +98,7 @@ def _try_isolate_lhs(
             if isinstance(e.lhs, sympy.Add)
             else 0
         )
-        e = op(expr.lhs - lhs_not_thing, expr.rhs - lhs_not_thing)  # type: ignore[arg-type]
+        e = op(expr.lhs - lhs_not_thing, expr.rhs - lhs_not_thing)  # type: ignore[attr-defined]
 
     # Divide both sides by the factors that don't contain thing.
     if isinstance(e, sympy.Rel) and isinstance(e.lhs, sympy.Mul):
@@ -110,11 +112,10 @@ def _try_isolate_lhs(
         # If we can't tell whether 'other' is negative or positive, we do nothing.
         # That is because we don't know whether we have mirror the operation or not.
         if not (isinstance(e, INEQUALITY_TYPES) and other.is_negative is None):
-
             # If 'e' is an inequality and 'other' is negative, we have to
             # mirror the expression.
             if isinstance(e, INEQUALITY_TYPES) and other.is_negative:
-                op = mirror_rel_op(op)
+                op = mirror_rel_op(op)  # type: ignore[assignment]
 
             assert op is not None
             e = op(lhs, rhs)
@@ -149,7 +150,7 @@ def _try_isolate_lhs(
             return sympy.Or(
                 sympy.Lt(numerator, (e.rhs * denominator)),  # type: ignore[arg-type]
                 sympy.Ge(numerator, ((e.rhs + 1) * denominator)),  # type: ignore[arg-type]
-           )
+            )
         # The transformations below only work if b is positive.
         # Note: we only have this information for constants.
         # a // b > expr  => a >= b * (expr + 1)

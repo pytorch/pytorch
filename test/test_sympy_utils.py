@@ -349,10 +349,10 @@ class TestSympySolve(TestCase):
         for source, expected in cases:
             r = try_solve(source, thing, **kwargs)
 
-            self.assertTrue((
+            self.assertTrue(
                 (r is None and expected is None)
                 or (r is not None and expected is not None)
-            ))
+            )
 
             if r is not None:
                 r_expr, r_rhs = r
@@ -377,7 +377,7 @@ class TestSympySolve(TestCase):
         a, b, c = self._create_integer_symbols()
 
         cases = [
-            (op(a * b, 1), 1/b),
+            (op(a * b, 1), 1 / b),
             (op(a * 5, b - 5), (b - 5) / 5),
             (op(a * b, c), c / b),
         ]
@@ -392,7 +392,7 @@ class TestSympySolve(TestCase):
 
         cases = [
             # Divide/multiply both sides by positive number.
-            (op(a * intpos, 1), 1/intpos),
+            (op(a * intpos, 1), 1 / intpos),
             (op(a / (5 * intpos), 1), 5 * intpos),
             (op(a * 5, b - 5), (b - 5) / 5),
             # 'b' is not strictly positive nor negative, so we can't
@@ -404,7 +404,7 @@ class TestSympySolve(TestCase):
 
         mirror_cases = [
             # Divide/multiply both sides by negative number.
-            (op(a * intneg, 1), 1/intneg),
+            (op(a * intneg, 1), 1 / intneg),
             (op(a / (5 * intneg), 1), 5 * intneg),
             (op(a * -5, b - 5), -(b - 5) / 5),
         ]
@@ -416,7 +416,7 @@ class TestSympySolve(TestCase):
 
     @parametrize_relational_types()
     def test_floordiv(self, op):
-        from sympy import Eq, Ne, Gt, Ge, Lt, Le, And, Or
+        from sympy import Eq, Ne, Gt, Ge, Lt, Le
 
         a, b, c = sympy.symbols("a b c")
         pos = sympy.Symbol("pos", positive=True)
@@ -484,7 +484,7 @@ class TestSympySolve(TestCase):
     @skipIf(not TEST_Z3, "Z3 not installed")
     def test_z3_proof_floordiv_eq_simplify(self):
         import z3
-        from sympy import Eq, Lt, Le
+        from sympy import Eq, Lt
 
         a = sympy.Symbol("a", positive=True, integer=True)
         a_ = z3.Int("a")
