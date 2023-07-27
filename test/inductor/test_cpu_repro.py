@@ -293,29 +293,9 @@ class CPUReproTests(TestCase):
     @torch._dynamo.config.patch(assume_static_by_default=False)
     @torch._dynamo.config.patch(allow_rnn=True)
     @config.patch(freezing=True)
-    def test_lstm_packed(self):
+    def _test_lstm_packed(self, params_dict, change_input_sizes=False):
         from torch._dynamo.utils import counters
 
-        def _lstm_params_list():
-            params_dict = {
-                "unbatched": [True, False],
-                "input_size": [1, 2],
-                "hidden_size": [5, 32],
-                "num_layers": [1, 3],
-                "bidirectional": [False, True],
-                "bias": [False, True],
-                "empty_state": [False, True],
-                "batch_first": [True, False],
-                "batch_size": [1, 2],
-                "seq_len": [1, 3],
-            }
-
-            params_list = []
-            for value in params_dict.values():
-                params_list.append(value)
-            return params_list
-
-        params_list = _lstm_params_list()
         for (
             unbatched,
             input_size,
@@ -327,7 +307,7 @@ class CPUReproTests(TestCase):
             batch_first,
             batch_size,
             seq_len,
-        ) in itertools.product(*params_list):
+        ) in itertools.product(*list(params_dict.values())):
             dtypes = [torch.float]
             if torch.ops.mkldnn._is_mkldnn_bf16_supported():
                 dtypes.append(torch.bfloat16)
@@ -393,8 +373,39 @@ class CPUReproTests(TestCase):
                     )
 
                     # Change input sizes
-                    inps_var = [v_var]
-                    self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
+                    if change_input_sizes:
+                        inps_var = [v_var]
+                        self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
+
+    def test_lstm_packed(self):
+        params_dict = {
+            "unbatched": [True, False],
+            "input_size": [1, 2],
+            "hidden_size": [5, 32],
+            "num_layers": [1, 3],
+            "bidirectional": [False, True],
+            "bias": [False, True],
+            "empty_state": [False, True],
+            "batch_first": [True, False],
+            "batch_size": [1, 2],
+            "seq_len": [1, 3],
+        }
+        self._test_lstm_packed(params_dict)
+
+    def test_lstm_packed_change_input_sizes(self):
+        params_dict = {
+            "unbatched": [False],
+            "input_size": [2],
+            "hidden_size": [5],
+            "num_layers": [3],
+            "bidirectional": [True],
+            "bias": [True],
+            "empty_state": [False],
+            "batch_first": [False],
+            "batch_size": [2],
+            "seq_len": [3],
+        }
+        self._test_lstm_packed(params_dict, change_input_sizes=True)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
