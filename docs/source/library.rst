@@ -40,3 +40,7 @@ We have also added some function decorators to make it convenient to register fu
 
 * :func:`torch.library.impl`
 * :func:`torch.library.define`
+
+To register a fallthrough, one can use the following function:
+
+* :func:`torch.library.fallthrough_kernel`

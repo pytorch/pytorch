@@ -313,9 +313,8 @@ void initDispatchBindings(PyObject* module) {
              py::object func) {
             HANDLE_TH_ERRORS
             auto& lib = self.cast<torch::Library&>();
-            if (py::isinstance(
-                    func,
-                    py::module::import("torch.library").attr("Fallthrough"))) {
+            if (func.is(py::module::import("torch.library")
+                            .attr("fallthrough_kernel"))) {
               lib.impl(
                   name,
                   torch::dispatch(dispatch, CppFunction::makeFallthrough()),

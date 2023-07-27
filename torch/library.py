@@ -4,7 +4,7 @@ import traceback
 import torch
 import weakref
 
-__all__ = ['Library', 'impl', 'define', 'Fallthrough']
+__all__ = ['Library', 'impl', 'define', 'fallthrough_kernel']
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
@@ -15,9 +15,11 @@ _impls: Set[str] = set()
 # prim is reserved by TorchScript interpreter
 _reserved_namespaces = ['prim']
 
-# dummy class to pass to Library.impl in order to register fallthroughs
-class Fallthrough:
-    pass
+def fallthrough_kernel():
+    """
+    A dummy function to pass to Library.impl in order to register a fallthrough.
+    """
+    return
 
 class Library:
     """
@@ -86,7 +88,8 @@ class Library:
 
         Args:
             op_name: operator name (along with the overload) or OpOverload object.
-            fn: function that's the operator implementation for the input dispatch key or :meth:`~Fallthrough`.
+            fn: function that's the operator implementation for the input dispatch key or :func:`~fallthrough_kernel`
+                to register a fallthrough.
             dispatch_key: dispatch key that the input function should be registered for. By default, it uses
                           the dispatch key that the library was created with.
 
@@ -96,9 +99,8 @@ class Library:
             >>>     return self * (1 / other)
             >>> my_lib.impl("div.Tensor", div_cpu, "CPU")
         '''
-        if not (callable(fn) or isinstance(fn, Fallthrough)):
-            raise TypeError("Input function is required to be a callable or a "
-                            f"torch.library.Fallthrough object but found type {type(fn)}")
+        if not (callable(fn)):
+            raise TypeError(f"Input function is required to be a callable but found type {type(fn)}")
         if dispatch_key == '':
             dispatch_key = self.dispatch_key
 

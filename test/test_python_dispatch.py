@@ -3,7 +3,7 @@
 import tempfile
 import torch
 from copy import deepcopy
-from torch.library import Library, impl
+from torch.library import Library, impl, fallthrough_kernel
 from torch.fx.experimental.proxy_tensor import ShapeEnv
 from torch import SymInt
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -552,18 +552,19 @@ class TestPythonRegistration(TestCase):
             getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, w))
 
     def test_register_fallthrough(self):
-        my_lib = Library('aten', 'IMPL')
-        my_lib.impl("mm", torch.library.Fallthrough(), "AutocastCPU")
+        try:
+            my_lib = Library('aten', 'IMPL')
+            my_lib.impl("mm", fallthrough_kernel, "AutocastCPU")
 
-        a = torch.randn(2, 3, device='cpu', dtype=torch.float32)
-        b = torch.randn(3, 2, device='cpu', dtype=torch.float32)
-        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
-            # dtype for mm should be float32 since we registered a fallthrough
-            self.assertTrue(torch.mm(a, b).dtype == torch.float32)
-            # ops that don't have a fallthrough registered should not be affected
-            self.assertTrue(torch.matmul(a, b).dtype == torch.bfloat16)
-
-        del my_lib
+            a = torch.randn(2, 3, device='cpu', dtype=torch.float32)
+            b = torch.randn(3, 2, device='cpu', dtype=torch.float32)
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                # dtype for mm should be float32 since we registered a fallthrough
+                self.assertTrue(torch.mm(a, b).dtype == torch.float32)
+                # ops that don't have a fallthrough registered should not be affected
+                self.assertTrue(torch.matmul(a, b).dtype == torch.bfloat16)
+        finally:
+            del my_lib
 
         with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
             # default behavior should have been restored
