@@ -750,7 +750,7 @@ for mapping in CUDA_TO_HIP_MAPPINGS:
                 PYTORCH_SPECIAL_MAP[src] = dst
             else:
                 PYTORCH_MAP[src] = dst
-        if constants.API_PYTORCH not in meta_data:
+        if constants.API_PYTORCH not in meta_data and constants.API_SPECIAL not in meta_data:
             CAFFE2_TRIE.add(src)
             CAFFE2_MAP[src] = dst
 RE_CAFFE2_PREPROCESSOR = re.compile(CAFFE2_TRIE.pattern())

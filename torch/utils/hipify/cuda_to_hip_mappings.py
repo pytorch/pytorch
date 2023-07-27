@@ -6973,6 +6973,14 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ),
         ("cublasGemmEx", ("hipblasGemmEx", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
         (
+            "cublasGemmBatchedEx",
+            ("hipblasGemmBatchedEx", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+        ),
+        (
+            "cublasGemmStridedBatchedEx",
+            ("hipblasGemmStridedBatchedEx", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+        ),
+        (
             "cublasCgemmEx",
             ("hipblasCgemmEx", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
