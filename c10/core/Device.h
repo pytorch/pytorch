@@ -27,6 +27,7 @@ using DeviceIndex = int8_t;
 /// 1. A negative index represents the current device, a non-negative index
 /// represents a specific, concrete device,
 /// 2. When the device type is CPU, the device index must be zero.
+/// 3. When the device type is MPS, the device index is forced to be zero.
 struct C10_API Device final {
   using Type = DeviceType;
 
@@ -169,6 +170,9 @@ struct C10_API Device final {
   DeviceType type_;
   DeviceIndex index_ = -1;
   void validate() {
+    if (is_mps()) {
+      index_ = 0;
+    }
     // Removing these checks in release builds noticeably improves
     // performance in micro-benchmarks.
     // This is safe to do, because backends that use the DeviceIndex
