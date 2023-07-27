@@ -1322,6 +1322,42 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
             TYPE, NAME, __VA_ARGS__)
 #endif
 
+
+#ifdef __aarch64__
+static inline int64_t get_mkldnn_matmul_min_dim() {
+  static auto value = [&] {
+    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_DIM");
+    return ptr != nullptr ? std::atoi(ptr) : 8;
+  }();
+  return value;
+}
+
+static inline int64_t get_mkldnn_matmul_min_size() {
+  static auto value = [&] {
+    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_SIZE");
+    return ptr != nullptr ? std::atoi(ptr) : 8 * 1024;
+  }();
+  return value;
+}
+
+static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n, int64_t min_dim, int64_t min_size) {
+  return m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
+}
+#else // __aarch64__
+static constexpr int64_t get_mkldnn_matmul_min_dim() {
+  return 0;
+}
+
+static constexpr int64_t get_mkldnn_matmul_min_size() {
+  return 0;
+}
+
+static constexpr bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n, int64_t min_dim, int64_t min_size) {
+  return true;
+}
+#endif // __aarch64__
+
+
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
@@ -1440,7 +1476,8 @@ static void addmm_impl_cpu_(
   // it is faster to call oneDNN matrix multiplication primitive with RHS*LHS
   // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
   // additionally have support for running kernel with BF16 instructions
-  if(transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
+  if (transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float &&
+      apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1], get_mkldnn_matmul_min_dim(), get_mkldnn_matmul_min_size())) {
       mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
       // We have dispatched to ACL GEMM for single precision float
       // so do not need to dispatch to BLAS GEMM below
@@ -1689,9 +1726,10 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
             || (strides[1] == 1 && strides[2] >= sizes[1]);
   };
 
-  if (use_mkldnn_bf16_matmul(batch1, batch2, self_or_result)){
-    mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
-    return;
+  if (use_mkldnn_bf16_matmul(batch1, batch2, self_or_result) &&
+      apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2], get_mkldnn_matmul_min_dim(), get_mkldnn_matmul_min_size())) {
+      mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
+      return;
   }
 
   if (contraction_size * res_rows * res_cols < 400) {
