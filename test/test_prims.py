@@ -1212,6 +1212,16 @@ class TestRefs(TestCase):
         expect = torch.unbind(a, 1)
         self.assertEqual(actual, expect)
 
+    def test_logspace_with_complex_input(self):
+        actual = refs.logspace(2, 10 + 5j, steps=5)
+        expect = torch.logspace(2, 10 + 5j, steps=5)
+        self.assertEqual(actual, expect)
+
+    def test_linspace_with_complex_input(self):
+        actual = refs.linspace(2, 10 + 5j, steps=5)
+        expect = torch.linspace(2, 10 + 5j, steps=5)
+        self.assertEqual(actual, expect)
+
 
 instantiate_device_type_tests(TestRefs, globals())
 
