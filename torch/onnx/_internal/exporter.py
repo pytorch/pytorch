@@ -102,6 +102,10 @@ class ExportOptions:
     fake_context: Optional[ONNXFakeContext] = None
     """The fake context used for symbolic tracing."""
 
+    onnx_registry: Optional[registration.OnnxRegistry] = None
+    """The ONNX registry used to register ATen operators to ONNX functions. Defaults to
+    torchlib supported by PyTorch-ONNX converter team."""
+
     @_beartype.beartype
     def __init__(
         self,
@@ -111,12 +115,14 @@ class ExportOptions:
         op_level_debug: Optional[bool] = None,
         logger: Optional[logging.Logger] = None,
         fake_context: Optional[ONNXFakeContext] = None,
+        onnx_registry: Optional[registration.OnnxRegistry] = None,
     ):
         self.opset_version = opset_version
         self.dynamic_shapes = dynamic_shapes
         self.op_level_debug = op_level_debug
         self.logger = logger
         self.fake_context = fake_context
+        self.onnx_registry = onnx_registry
 
 
 class ResolvedExportOptions(ExportOptions):
@@ -131,13 +137,11 @@ class ResolvedExportOptions(ExportOptions):
     op_level_debug: bool
     logger: logging.Logger
     fake_context: ONNXFakeContext
+    onnx_registry: registration.OnnxRegistry
 
     # Private only attributes
     decomposition_table: Dict[torch._ops.OpOverload, Callable]
     """A dictionary that maps operators to their decomposition functions."""
-
-    onnx_registry: registration.OnnxRegistry
-    """The ONNX registry used to register ATen operators to ONNX functions."""
 
     onnxfunction_dispatcher: torch.onnx._internal.fx.onnxfunction_dispatcher.OnnxFunctionDispatcher
     """The ONNX dispatcher used to dispatch ATen operators to ONNX functions."""
@@ -196,9 +200,9 @@ class ResolvedExportOptions(ExportOptions):
                 "torch.onnx.dynamo_export", torch.__version__, logger=self.logger
             )
 
-            # TODO(titaiwang): When OnnxRegistry is exposed, users should only control
-            # the opset_version with registry, instead of ExportOptions.
-            self.onnx_registry = registration.OnnxRegistry(self.opset_version)
+            self.onnx_registry = resolve(
+                options.onnx_registry, registration.OnnxRegistry(self.opset_version)
+            )
             self.decomposition_table = (
                 decomposition_table.create_onnx_friendly_decomposition_table(
                     self.onnx_registry
