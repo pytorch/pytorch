@@ -38,11 +38,11 @@ def range_expressable_in_32_bits(range: ValueRanges) -> bool:
 
 
 def try_to_reduce_precision(
-    node: Any,
-    bounds: Dict[Any, Any],
-    indirect_vars: List[Any],
+    node: torch.fx.Node,
+    bounds: Dict[torch.fx.Node, ValueRanges],
+    indirect_vars: List[sympy.Symbol],
     indices: Dict[Any, Any],
-    replacement_vals: Dict[Any, Any],
+    replacement_vals: Dict[Union[str, sympy.Symbol], ValueRanges],
 ) -> None:
     # if a downstream use of a node explicitly converts to int32, or float16/float32/float64,
     # then it's precision is set for that chain of uses, and we don't need to consider those
@@ -69,20 +69,35 @@ def try_to_reduce_precision(
             for index, expr in indices.items():
                 if indirect_var in expr.free_symbols:
                     index_val = replacement_vals[index]
+                    if isinstance(index_val.lower, sympy.Expr):
+                        if index_val.lower.is_real:
+                            lower_val = float(index_val.lower)
+                        else:
+                            return  # or handle this case appropriately
+                    elif isinstance(index_val.lower, (int, float)):
+                        lower_val = float(index_val.lower)
+                    else:
+                        return  # or handle this case appropriately
 
-                    if math.isinf(index_val.lower) or math.isinf(index_val.upper):
-                        return
+                    if isinstance(index_val.upper, sympy.Expr):
+                        if index_val.upper.is_real:
+                            upper_val = float(index_val.upper)
+                        else:
+                            return  # or handle this case appropriately
+                    elif isinstance(index_val.upper, (int, float)):
+                        upper_val = float(index_val.upper)
+                    else:
+                        return  # or handle this case appropriately
 
-                    # all indices are integers, so make sure that we
-                    # use the bounds of integers instead of floats.
-                    # TODO - not sure if we should be doing int/float casts while tracing,
-                    # might interfere with sympy.
+                if math.isinf(lower_val) or math.isinf(upper_val):
+                    return
 
-                    index_val_int = ValueRanges(
-                        int(index_val.lower), int(index_val.upper)
-                    )
-                    if not range_expressable_in_32_bits(index_val_int):
-                        return
+                # all indices are integers, so make sure that we
+                # use the bounds of integers instead of floats.
+                # TODO - not sure if we should be doing int/float casts while tracing,
+                # might interfere with sympy.
+
+                index_val_int = ValueRanges(int(lower_val), int(upper_val))
 
         if not range_expressable_in_32_bits(bounds[dominated]):
             return
