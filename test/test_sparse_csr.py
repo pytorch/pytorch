@@ -2259,8 +2259,12 @@ class TestSparseCSR(TestCase):
     def test_sparse_triangular_solve(self, device, dtype):
 
         def run_test(n, k, upper, unitriangular, transpose, zero):
+            # Weird interactions with other tests can happen and cause `discontiguous strides` output be partially NaN.
+            # The cuda test passes if run by itself but may fail with flakiness if run together with the full test suite in CI.
+            # We need to clean those caches as a workaround and further investigations may be needed.
             if torch.device(device).type == 'cuda':
                 torch.cuda.empty_cache()
+
             if not unitriangular:
                 triangle_function = torch.triu if upper else torch.tril
             else:
