@@ -171,7 +171,7 @@ def rebase_ghstack_onto(
 def additional_rebase_failure_info(e: Exception) -> str:
     print(str(e))
     if re.search(
-        r"remote: Permission to .* denied to .*\\.\nfatal: unable to access", str(e)
+        r"remote: Permission to .* denied to .*\.\nfatal: unable to access", str(e)
     ):
         return (
             "\nThis is likely because the author did not allow edits from maintainers on the PR or because the "
