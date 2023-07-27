@@ -492,7 +492,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeStreams() {
     (*ncclEndEvents_)[i].block(currentStream);
   }
 
-  if (avoidRecordStreams_ && stashed_for_allocator_safety_) {
+  if (avoidRecordStreams_) {
     stashed_for_allocator_safety_->clear();
   }
 }
