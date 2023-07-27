@@ -335,15 +335,19 @@ class CPUReproTests(TestCase):
                 counters.clear()
                 num_directions = 2 if bidirectional else 1
 
+                seq_len_var = seq_len + 3
                 if unbatched:
                     v = torch.randn(seq_len, input_size)
+                    v_var = torch.randn(seq_len_var, input_size)
                     h = torch.randn(num_layers * num_directions, hidden_size)
                     c = torch.randn(num_layers * num_directions, hidden_size)
                 else:
                     if batch_first:
                         v = torch.randn(batch_size, seq_len, input_size)
+                        v_var = torch.randn(batch_size, seq_len_var, input_size)
                     else:
                         v = torch.randn(seq_len, batch_size, input_size)
+                        v_var = torch.randn(seq_len_var, batch_size, input_size)
                     h = torch.randn(
                         num_layers * num_directions, batch_size, hidden_size
                     )
@@ -387,6 +391,10 @@ class CPUReproTests(TestCase):
                         num_layers * num_directions
                         + 2,  # num of mkldnn_rnn_layer call + 2 view call on the concatenated hy, cy.
                     )
+
+                    # Change input sizes
+                    inps_var = [v_var]
+                    self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
