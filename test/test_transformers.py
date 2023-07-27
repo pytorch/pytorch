@@ -1284,6 +1284,38 @@ class TestSDPAFailureModes(NNTestCase):
                 q, k, v, None, 0.0, False))
 
     @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
+    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
+                 SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION])
+    def test_invalid_sequence_lengths(self, device, kernel: SDPBackend):
+        with sdp_kernel(**backend_map[kernel]):
+            # Passing in a q,k,v with 0 length sequences will error
+            dtype = torch.float16
+            make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype)
+            size = (2, 2, 0, 8)
+            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+
+            with self.assertWarnsRegex(UserWarning, "Both fused kernels do not support zero seq_len_q or seq_len_kv."):
+                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, None, 0.0, False))
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
+    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
+                 SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION])
+    def test_invalid_last_dim_stride(self, device, kernel: SDPBackend):
+        with sdp_kernel(**backend_map[kernel]):
+            # Passing in a q,k,v with 0 length sequences will error
+            dtype = torch.float16
+            make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype)
+            size = (2, 2, 8, 8)
+            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+            q.as_strided_(size, [2, 2, 2, 2])
+            with self.assertWarnsRegex(UserWarning, "Both fused kernels require the last dimension of the input to have stride 1."):
+                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, None, 0.0, False))
+
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support fused scaled dot product attention")
     @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_fused_inputs_head_dim(self, device, kernel: SDPBackend):
