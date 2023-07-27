@@ -151,7 +151,7 @@ class TestCommunicationHooks(FSDPTest):
         )
 
         for entry in FSDP.fsdp_modules(net_default_hook):
-            self.assertEqual(entry._communication_hook, default_hook)
+            self.assertEqual(entry._comm_hook, default_hook)
 
         for _ in range(4):
             # Clear gradients
@@ -223,7 +223,7 @@ class TestCommunicationHooks(FSDPTest):
         )
 
         for fsdp_module in FSDP.fsdp_modules(fsdp_model_with_hook):
-            self.assertEqual(fsdp_module._communication_hook, default_hook)
+            self.assertEqual(fsdp_module._comm_hook, default_hook)
 
         dummy_state = DummyState(process_group=None, noise=1234)
         dummy_hook = (
@@ -242,11 +242,11 @@ class TestCommunicationHooks(FSDPTest):
 
         # Check dummy hook was registered for the root and all submodules if any
         for fsdp_module in FSDP.fsdp_modules(fsdp_model_with_hook):
-            self.assertEqual(fsdp_module._communication_hook, dummy_hook)
-            self.assertEqual(fsdp_module._communication_hook_state, dummy_state)
+            self.assertEqual(fsdp_module._comm_hook, dummy_hook)
+            self.assertEqual(fsdp_module._comm_hook_state, dummy_state)
 
         for fsdp_module in FSDP.fsdp_modules(fsdp_model_with_hook):
-            fsdp_module._communication_hook = None
+            fsdp_module._comm_hook = None
 
         in_data = torch.rand(16, 8).cuda()
         loss = fsdp_model_with_hook(in_data).sum()
@@ -256,8 +256,8 @@ class TestCommunicationHooks(FSDPTest):
             loss.backward()
 
         for fsdp_module in FSDP.fsdp_modules(fsdp_model_with_hook):
-            fsdp_module._communication_hook = dummy_hook
-            fsdp_module._communication_hook_state = None
+            fsdp_module._comm_hook = dummy_hook
+            fsdp_module._comm_hook_state = None
         # Same as above
         loss = fsdp_model_with_hook(in_data).sum()
         with self.assertRaises(AssertionError):
@@ -350,12 +350,12 @@ class TestCommunicationHooks(FSDPTest):
             sharding_strategy=sharding_strategy,
         )
         submodules = self._get_submodules(fsdp_model_with_hook)
-        submodules[1]._communication_hook = dummy_hook
+        submodules[1]._comm_hook = dummy_hook
 
         # Check that an error is raised when some of submodules have a non-default hook assigned
         with self.assertRaisesRegex(
             AssertionError,
-            f"^communication hook should be default, but it is {submodules[1]._communication_hook.__name__} instead$",
+            f"^communication hook should be default, but it is {submodules[1]._comm_hook.__name__} instead$",
         ):
             fsdp_model_with_hook.register_comm_hook(dummy_state, dummy_hook)
 
