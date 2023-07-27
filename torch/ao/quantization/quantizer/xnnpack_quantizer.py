@@ -226,7 +226,10 @@ def _is_annotated(nodes: List[Node]):
 
 def _get_module_name_filter(name: str):
     def module_name_filter(n: Node) -> bool:
-        # example: {'L__self___sub': ("L['self'].sub", <class '....Sub'>), 'L__self___sub_linear': ("L['self'].sub.linear", <class 'torch.nn.modules.linear.Linear'>)}
+        # example: {
+        #    'L__self___sub': ("L['self'].sub", <class '....Sub'>),
+        #    'L__self___sub_linear': ("L['self'].sub.linear", <class 'torch.nn.modules.linear.Linear'>)
+        # }
         nn_module_stack = n.meta["nn_module_stack"]
         names = [
             n[len("L__self___") :].replace("_", ".") for n in nn_module_stack.keys()
@@ -283,8 +286,11 @@ class XNNPACKQuantizer(Quantizer):
         return self
 
     def set_module_name(
-        self, module_name: str, quantization_config: QuantizationConfig
+        self, module_name: str, quantization_config: Optional[QuantizationConfig]
     ):
+        assert (
+            quantization_config is not None
+        ), " quantization_config == None is not supported yet"
         self.module_name_config[module_name] = quantization_config
         return self
 
@@ -305,7 +311,9 @@ class XNNPACKQuantizer(Quantizer):
     ) -> torch.fx.GraphModule:
         # TODO: implement the support for None to be canceling out previous annotations
         if config is None:
-            return
+            return model
+
+        assert config is not None
 
         self._annotate_linear(model, config, filter_fn)
         self._annotate_conv2d_patterns(model, config, filter_fn)
@@ -562,7 +570,7 @@ class XNNPACKQuantizer(Quantizer):
     def _annotate_linear(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
+        quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         module_partitions = get_source_partitions(

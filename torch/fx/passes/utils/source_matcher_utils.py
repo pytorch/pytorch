@@ -114,7 +114,11 @@ def get_source_partitions(
         # filter condition
         filtered_modules = {}
         for tp, name_to_partition in modules.items():
-            filtered_name_to_partition = {name: partition for name, partition in name_to_partition.items() if all(map(filter_fn, partition))}
+            filtered_name_to_partition = {
+                name: partition
+                for name, partition in name_to_partition.items()
+                if all(map(filter_fn, partition))
+            }
             filtered_modules[tp] = filtered_name_to_partition
         modules = filtered_modules
 

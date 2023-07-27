@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import \
      skipCPUIfNoMklSparse,
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
-    SM53OrLater, SM60OrLater, with_tf32_off, TEST_CUDNN,
+    SM53OrLater, SM60OrLater, SM80OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version, _get_torch_rocm_version, PLATFORM_SUPPORTS_FUSED_SDPA
 )
 from torch.testing._internal.common_utils import (
@@ -13409,7 +13409,10 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
             DecorateInfo(unittest.skip('output is non-deterministic (when dropout_p > 0)'), 'TestCommon', 'test_compare_cpu'),
             # TODO skip this for now since we can't skip on runtime arch support
-            DecorateInfo(unittest.skip('This is '), 'TestInductorOpInfo', 'test_comprehensive'),),
+            DecorateInfo(unittest.skip('This is '), 'TestInductorOpInfo', 'test_comprehensive'),
+            # skip for sm < 80
+            DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),),
     ),
     UnaryUfuncInfo(
         'nn.functional.silu',
