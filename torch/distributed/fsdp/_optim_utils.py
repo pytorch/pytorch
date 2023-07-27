@@ -993,15 +993,16 @@ def _get_param_id_to_param_from_optim_input(
 
 def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[FlatParameter, str]:
     """
-    Constructs a mapping from ``FlatParameter`` to a \"non-canonical\" fully
-    qualified name (FQN) as opposed to the FQNs returned for ``FlatParameter`` s
-    in ``_common_utils._get_param_to_fqns(...)``. We refer to these FQNs as
-    non-canonical because these parameters are not from the original module
-    but are rather swapped in by some parallelism construct, like FSDP.
+    Constructs a mapping from ``FlatParameter`` to a cleaned (devoid of prefixes
+    from wrappers) fully qualified name (FQN). Note that this FQN is "non-canonical"
+    because ``FlatParameter``  s do not come from the original module but are
+    registered only after FSDP has been applied. This function returns the FSDP-given
+    name for the ``FlatParameter`` (usually module._flat_param) as opposed to the
+    canonical FQNs returned for ``FlatParameter`` s in ``_common_utils._get_param_to_fqns(...)``).
 
-    Consequently, this function will only return a non-empty mapping
-    if FSDP was applied with ``use_orig_params=False`` as there would be no
-    ``FlatParameter`` s in the module otherwise.
+    Consequently, this function will only return a non-empty mapping if FSDP was
+    applied with ``use_orig_params=False`` as, otherwise, the original parameters
+    are used within the module and there would be no ``FlatParameter`` s in the module.
 
     """
 
