@@ -3301,11 +3301,9 @@ class TestCudaMallocAsync(TestCase):
             found_it = False
             for seg in ss['segments']:
                 for b in seg['blocks']:
-                    if 'history' in b:
-                        for h in b['history']:
-                            if h['real_size'] == 311 * 411 * 4:
-                                self.assertTrue('test_cuda' in h['frames'][0]['filename'])
-                                found_it = True
+                    if b['requested_size'] == 311 * 411 * 4:
+                        self.assertTrue('test_cuda' in b['frames'][0]['filename'])
+                        found_it = True
             self.assertTrue(found_it)
 
             if not IS_WINDOWS:
@@ -3343,11 +3341,9 @@ class TestCudaMallocAsync(TestCase):
             found_it = False
             for seg in ss:
                 for b in seg['blocks']:
-                    if 'history' in b:
-                        for h in b['history']:
-                            if h['real_size'] == 311 * 411 * 4:
-                                self.assertTrue('::rand' in str(h['frames']))
-                                found_it = True
+                    if b['requested_size'] == 311 * 411 * 4:
+                        self.assertTrue('::rand' in str(b['frames']))
+                        found_it = True
             self.assertTrue(found_it)
 
         finally:
@@ -3450,11 +3446,9 @@ class TestCudaMallocAsync(TestCase):
             found_it = False
             for seg in ss:
                 for b in seg['blocks']:
-                    if 'history' in b:
-                        for h in b['history']:
-                            if h['real_size'] == 311 * 411 * 4:
-                                self.assertTrue(h['frames'][0]['name'] == 'foo')
-                                found_it = True
+                    if b['requested_size'] == 311 * 411 * 4:
+                        self.assertTrue(b['frames'][0]['name'] == 'foo')
+                        found_it = True
             self.assertTrue(found_it)
 
         finally:
@@ -3578,11 +3572,10 @@ class TestCudaMallocAsync(TestCase):
                 found = False
                 for s in mem['segments']:
                     for b in s['blocks']:
-                        if b['state'] == 'active_allocated' and 'history' in b:
-                            history = b['history']
-                            if history and history[0]['real_size'] == 311 * 411 * 4:
+                        if b['state'] == 'active_allocated':
+                            if b['requested_size'] == 311 * 411 * 4:
                                 if ctx:
-                                    frame_text = str(history[0]['frames'])
+                                    frame_text = str(b['frames'])
                                     # C++ frame
                                     self.assertTrue('::rand' in frame_text)
                                     # script frame

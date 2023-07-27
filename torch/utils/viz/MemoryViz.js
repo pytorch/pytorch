@@ -37,8 +37,8 @@ function Segment(addr, size, stream, frames, version) {
   return {addr, size, stream, version, frames};
 }
 
-function Block(addr, size, real_size, frames, free_requested, version) {
-  return {addr, size, real_size, frames, free_requested, version};
+function Block(addr, size, requested_size, frames, free_requested, version) {
+  return {addr, size, requested_size, frames, free_requested, version};
 }
 
 function EventSelector(outer, events, stack_info, memory_view) {
@@ -219,7 +219,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
       block_map[b.addr] = Block(
         b.addr,
         b.size,
-        b.real_size,
+        b.requested_size,
         b.frames,
         b.state === 'active_pending_free',
         b.version,
@@ -457,8 +457,8 @@ function MemoryView(outer, stack_info, snapshot, device) {
 
       for (const b of blocks) {
         b.segment = find_segment(b.addr);
-        b.segment.occupied += b.real_size;
-        b.segment.internal_free += b.size - b.real_size;
+        b.segment.occupied += b.requested_size;
+        b.segment.internal_free += b.size - b.requested_size;
       }
 
       const block_selection = block_g
@@ -468,7 +468,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
         .append('rect')
         .attr('x', x => xScale(x.segment.offset + (x.addr - x.segment.addr)))
         .attr('y', x => yScale(x.segment.row))
-        .attr('width', x => xScale(x.real_size))
+        .attr('width', x => xScale(x.requested_size))
         .attr('height', yScale(4 / 5))
         .attr('fill', (x, _i) =>
           x.free_requested
@@ -489,7 +489,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
           }
           return (
             `b${t.addr.toString(16)}_${t.version} ` +
-            `${formatSize(t.real_size)} allocation${requested} (stream ${
+            `${formatSize(t.requested_size)} allocation${requested} (stream ${
               t.segment.stream
             })\n` +
             format_frames(t.frames)
@@ -504,10 +504,10 @@ function MemoryView(outer, stack_info, snapshot, device) {
         .enter()
         .append('rect')
         .attr('x', x =>
-          xScale(x.segment.offset + (x.addr - x.segment.addr) + x.real_size),
+          xScale(x.segment.offset + (x.addr - x.segment.addr) + x.requested_size),
         )
         .attr('y', x => yScale(x.segment.row))
-        .attr('width', x => xScale(x.size - x.real_size))
+        .attr('width', x => xScale(x.size - x.requested_size))
         .attr('height', yScale(4 / 5))
         .attr('fill', (_x, _i) => 'red');
 
@@ -518,7 +518,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
           const t = d.datum();
           return (
             `Free space lost due to rounding ${formatSize(
-              t.size - t.real_size,
+              t.size - t.requested_size,
             )}` +
             ` (stream ${t.segment.stream})\n` +
             format_frames(t.frames)
@@ -528,7 +528,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
       );
 
       const reserved = segments.reduce((x, y) => x + y.size, 0);
-      const allocated = blocks.reduce((x, y) => x + y.real_size, 0);
+      const allocated = blocks.reduce((x, y) => x + y.requested_size, 0);
       return [reserved, allocated];
     },
   };
@@ -656,12 +656,16 @@ function annotate_snapshot(snapshot) {
     let addr = seg.address;
     for (const b of seg.blocks) {
       b.addr = addr;
-      if ('history' in b) {
-        b.frames = b.history[0].frames || empty_list;
-        b.real_size = b.history[0].real_size;
-      } else {
-        b.frames = empty_list;
-        b.real_size = b.requested_size || b.size;
+      if (!('frames' in b)) {
+        // legacy format where 'requested_size' may be missing
+        // and frames might be in history rather than directly on block
+        if ('history' in b) {
+          b.frames = b.history[0].frames || empty_list;
+          b.requested_size = b.requested_size || b.history[0].real_size;
+        } else {
+          b.frames = empty_list;
+          b.requested_size = b.requested_size || b.size;
+        }
       }
       b.version = snapshot.block_version(b.addr, false);
       addr += b.size;
@@ -802,7 +806,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
           const element = {
             action: 'alloc',
             addr: b.addr,
-            size: b.real_size,
+            size: b.requested_size,
             frames: b.frames,
             stream: seg.stream,
             version: b.version,
