@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Set
 import sympy
 
 import torch
-from torch._dynamo.utils import dynamo_profiled, dynamo_timed
+from torch._dynamo.utils import dynamo_timed
 
 from . import config, dependencies, ir, metrics
 from .dependencies import StarDep, WeakDep
@@ -832,7 +832,7 @@ class NodeUser:
 
 
 class Scheduler:
-    @dynamo_profiled
+    @dynamo_timed
     def __init__(self, nodes):
         super().__init__()
         self.backends = {}
@@ -1101,7 +1101,6 @@ class Scheduler:
             if len(self.nodes) == old_len:
                 break
 
-    @dynamo_timed
     def fuse_nodes_once(self):
         """
         Mutates self.nodes to combine nodes into FusedSchedulerNodes.
@@ -1232,7 +1231,6 @@ class Scheduler:
         )
         return proximity_score > 64
 
-    @functools.lru_cache
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """
         Determine if it is possible to combine node1 and node2 into a
