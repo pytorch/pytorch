@@ -1281,6 +1281,8 @@ t2.start()
 
     @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
     def test_cuda_device_memory_allocated(self):
+        gc.collect()
+        torch.cuda.empty_cache()
         from torch.cuda import memory_allocated
         device_count = torch.cuda.device_count()
         current_alloc = [memory_allocated(idx) for idx in range(device_count)]
