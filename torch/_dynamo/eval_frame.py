@@ -946,7 +946,9 @@ def export(
 
         def guard_export_print(guards: Set[_guards.Guard]):
             nonlocal out_guards
-            assert out_guards is None, "whole graph export entails exactly one guard export"
+            assert (
+                out_guards is None
+            ), "whole graph export entails exactly one guard export"
             out_guards = guards
 
         example_inputs = []
@@ -1049,7 +1051,9 @@ def export(
         assert out_guards is not None, "Failed to produce guards during tracing"
         assert fake_mode is not None
 
-        matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
+        matched_input_elements_positions = produce_matching(
+            flat_args, graph_captured_input
+        )
 
         # NB: This is mostly hitting the cache; Dynamo already converted these
         example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
@@ -1057,7 +1061,9 @@ def export(
 
         assert graph_captured_result is not None
         flat_both = list(graph_captured_result) + flat_args
-        matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
+        matched_output_elements_positions = produce_matching(
+            flat_both, flat_results_traced
+        )
 
         if aten_graph:
             # Running graph with interpreter is needed for propagating the stack_trace
@@ -1100,16 +1106,20 @@ def export(
             params = list(sig.parameters.values())
             # Separate positional arguments, keyword-only arguments and varargs/varkw
             args = [
-                p.name for p in params if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+                p.name
+                for p in params
+                if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
             ]
             kwonlyargs = [
                 p.name for p in params if p.kind == inspect.Parameter.KEYWORD_ONLY
             ]
             varargs = next(
-                (p.name for p in params if p.kind == inspect.Parameter.VAR_POSITIONAL), None
+                (p.name for p in params if p.kind == inspect.Parameter.VAR_POSITIONAL),
+                None,
             )
             varkw = next(
-                (p.name for p in params if p.kind == inspect.Parameter.VAR_KEYWORD), None
+                (p.name for p in params if p.kind == inspect.Parameter.VAR_KEYWORD),
+                None,
             )
             # Get default values for positional arguments and keyword-only arguments
             defaults = tuple(
@@ -1159,7 +1169,9 @@ def export(
                 for unprovided_arg in fullargspec.args[
                     len(args) : -len(fullargspec.defaults or [])
                 ]:
-                    assert unprovided_arg in kwargs, f"Missing argument {unprovided_arg}"
+                    assert (
+                        unprovided_arg in kwargs
+                    ), f"Missing argument {unprovided_arg}"
 
             # 4. Keyword arguments provided in `kwargs`.
             input_strs += list(kwargs.keys())
