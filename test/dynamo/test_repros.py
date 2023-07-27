@@ -1188,7 +1188,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 3)  # rand, rand
         try:
-            graph, _ = torch._dynamo.export(fn)
+            graph, _ = torch._dynamo.export(fn)()
             # See https://github.com/pytorch/pytorch/pull/87490
             self.fail("unexpected export success")
         except torch._dynamo.exc.Unsupported:

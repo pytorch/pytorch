@@ -195,7 +195,7 @@ def do_not_use_experimental_export(f: Callable, args: Tuple, training=False):
     original_flat_args = tuple(flattened_args)
     flat_args = tuple(flattened_args)
 
-    graph_module, guards = torchdynamo.export(f, *args, aten_graph=False)
+    graph_module, guards = torchdynamo.export(f, aten_graph=False)(*args)
     # TODO (tmanlaibaatar) do sth with guards?
     graph_module, _, out_spec = _aot_capture(graph_module, flat_args)
     return ExportedProgram(fw_module=graph_module, example_inputs=original_flat_args, in_spec=in_spec, out_spec=out_spec)
