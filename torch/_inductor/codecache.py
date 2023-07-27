@@ -364,6 +364,8 @@ class CompiledFxGraph:
     device_types: Set[str] = field(default_factory=set)
     device_idxs: Set[int] = field(default_factory=set)
     mutated_inputs: Set[str] = field(default_factory=set)
+    mutated_input_idxs: Set[int] = field(default_factory=list)
+
     _boxed_call: bool = None
 
     def __call__(self, inputs) -> Any:
