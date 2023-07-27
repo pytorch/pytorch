@@ -197,6 +197,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
     "nn.functional.adaptive_avg_pool2d": {f16},
+    # f16 handling issue https://github.com/pytorch/pytorch/issues/105914
+    "nn.functional.cosine_similarity": {f16},
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.gaussian_nll_loss": {f16, f32, f64},
     "nn.functional.local_response_norm": {i64},
