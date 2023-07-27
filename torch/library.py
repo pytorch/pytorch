@@ -15,7 +15,7 @@ _impls: Set[str] = set()
 # prim is reserved by TorchScript interpreter
 _reserved_namespaces = ['prim']
 
-# dummy class to pass to library in order to register fallthroughs
+# dummy class to pass to Library.impl in order to register fallthroughs
 class Fallthrough:
     pass
 
@@ -86,7 +86,7 @@ class Library:
 
         Args:
             op_name: operator name (along with the overload) or OpOverload object.
-            fn: function that's the operator implementation for the input dispatch key or :meth:`Fallthrough`.
+            fn: function that's the operator implementation for the input dispatch key or :meth:`~Fallthrough`.
             dispatch_key: dispatch key that the input function should be registered for. By default, it uses
                           the dispatch key that the library was created with.
 
