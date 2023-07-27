@@ -231,10 +231,10 @@ class Optimizer:
 
     _optimizer_step_pre_hooks: Dict[int, OptimizerPreHook]
     _optimizer_step_post_hooks: Dict[int, OptimizerPostHook]
-    _optimizer_state_dict_pre_hooks: Dict[int, Callable[[Self], None]]
-    _optimizer_state_dict_post_hooks: Dict[int, Callable[[Self, StateDict], Optional[StateDict]]]
-    _optimizer_load_state_dict_pre_hooks: Dict[int, Callable[[Self, StateDict], None]]
-    _optimizer_load_state_dict_post_hooks: Dict[int, Callable[[Self], None]]
+    _optimizer_state_dict_pre_hooks: Dict[int, Callable[["Optimizer"], None]]
+    _optimizer_state_dict_post_hooks: Dict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]
+    _optimizer_load_state_dict_pre_hooks: Dict[int, Callable[["Optimizer", StateDict], None]]
+    _optimizer_load_state_dict_post_hooks: Dict[int, Callable[["Optimizer"], None]]
 
     def __init__(self, params: params_t, defaults: Dict[str, Any]) -> None:
         torch._C._log_api_usage_once("python.optimizer")
@@ -445,17 +445,17 @@ class Optimizer:
         self._optimizer_step_post_hooks[handle.id] = hook
         return handle
 
-    
+
     def register_state_dict_pre_hook(
-            self, hook: Callable[[Self], None], prepend: bool = False
-            ) -> RemovableHandle:
+        self, hook: Callable[["Optimizer"], None], prepend: bool = False
+    ) -> RemovableHandle:
         r"""Register a state dict pre-hook which will be called before
         :meth:`~torch.optim.Optimizer.state_dict` is called. It should have the
         following signature::
 
             hook(optimizer) -> None
 
-        The ``optimizer`` argument is the optimizer instance being used. 
+        The ``optimizer`` argument is the optimizer instance being used.
         The hook will be called with argument ``self`` before calling ``state_dict`` on ``self``.
         The registered hook can be used to perform pre-processing before the ``state_dict``
         call is made.
@@ -478,10 +478,10 @@ class Optimizer:
             self._optimizer_state_dict_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
 
-    
+
     def register_state_dict_post_hook(
         self,
-        hook: Callable[[Self, StateDict], Optional[StateDict]],
+        hook: Callable[["Optimizer", StateDict], Optional[StateDict]],
         prepend: bool = False,
     ) -> RemovableHandle:
         r"""Register a state dict post-hook which will be called after
@@ -489,19 +489,19 @@ class Optimizer:
         following signature::
 
             hook(optimizer, state_dict) -> state_dict or None
-        
+
         The hook will be called with arguments ``self`` and ``state_dict`` after generating
         a ``state_dict`` on ``self``. The hook may modify the state_dict inplace or optionally
         return a new one. The registered hook can be used to perform post-processing
         on the ``state_dict`` before it is returned.
-        
+
         Args:
             hook (Callable): The user defined hook to be registered.
             prepend (bool): If True, the provided post ``hook`` will be fired before
                 all the existing registered post-hooks on ``state_dict``. Otherwise,
                 the provided ``hook`` will be fired after all the existing registered
                 post-hooks. (default: False)
-            
+
         Returns:
             :class:`torch.utils.hooks.RemoveableHandle`:
                 a handle that can be used to remove the added hook by calling
@@ -512,7 +512,7 @@ class Optimizer:
         if prepend:
             self._optimizer_state_dict_post_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
-        
+
 
     @torch._disable_dynamo
     def state_dict(self) -> StateDict:
@@ -526,8 +526,8 @@ class Optimizer:
             parameter group is a dict
         """
 
-        for hook in self._optimizer_state_dict_pre_hooks.values():
-            hook(self)
+        for pre_hook in self._optimizer_state_dict_pre_hooks.values():
+            pre_hook(self)
 
         # Save order indices instead of Tensors
         param_mappings: Dict[int, int] = {}
@@ -551,8 +551,8 @@ class Optimizer:
             'param_groups': param_groups,
         }
 
-        for hook in self._optimizer_state_dict_post_hooks.values():
-            hook_result = hook(self, state_dict)
+        for post_hook in self._optimizer_state_dict_post_hooks.values():
+            hook_result = post_hook(self, state_dict)
             if hook_result is not None:
                 state_dict = hook_result
         return state_dict
@@ -589,10 +589,10 @@ class Optimizer:
             else:
                 return value.to(device=param.device)
 
-    
-    def register_optimizer_load_state_dict_pre_hook(
+
+    def register_load_state_dict_pre_hook(
         self,
-        hook: Callable[[Self, StateDict], None],
+        hook: Callable[["Optimizer", StateDict], None],
         prepend: bool = False,
     ) -> RemovableHandle:
         r"""Register a load_state_dict pre-hook which will be called before
@@ -629,8 +629,8 @@ class Optimizer:
         return handle
 
 
-    def register_optimizer_load_state_dict_post_hook(
-        self, hook: Callable[[Self], None], prepend: bool = False
+    def register_load_state_dict_post_hook(
+        self, hook: Callable[["Optimizer"], None], prepend: bool = False
     ) -> RemovableHandle:
         r"""Register a load_state_dict post-hook which will be called after
         :meth:`~torch.optim.Optimizer.load_state_dict` is called. It should have the
@@ -675,8 +675,8 @@ class Optimizer:
         # shallow copy, to be consistent with module API
         state_dict = state_dict.copy()
 
-        for hook in self._optimizer_load_state_dict_pre_hooks.values():
-            hook(self, state_dict)
+        for pre_hook in self._optimizer_load_state_dict_pre_hooks.values():
+            pre_hook(self, state_dict)
 
         # Validate the state_dict
         groups = self.param_groups
@@ -727,8 +727,8 @@ class Optimizer:
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
-        for hook in self._optimizer_load_state_dict_post_hooks.values():
-            out = hook(self)
+        for post_hook in self._optimizer_load_state_dict_post_hooks.values():
+            out = post_hook(self)
             assert out is None, (
                 "Hooks registered with ``register_optimizer_load_state_dict_post_hook`` are not"
                 "expected to return new values."
