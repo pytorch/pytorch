@@ -1,6 +1,9 @@
 import functools
 
 import torch
+from torch._inductor.compile_fx import fake_tensor_prop
+from ..._dynamo.utils import counters
+
 from .. import config
 from ..pattern_matcher import (
     _return_true,
@@ -24,15 +27,32 @@ pass_patterns = [
 binary_folding_pass = PatternMatcherPass()
 
 
-def freezing_passes(gm: torch.fx.GraphModule):
+def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     """
     Passes that are applied to the graph to freeze pass.
     """
 
+    from ..freezing import constant_fold
+
     lazy_init()
-    binary_folding_pass.apply(gm.graph)
-    for patterns in pass_patterns:
-        patterns.apply(gm.graph)
+    # We need a few rounds of binary folding to get rid of all the
+    # unnecessary nodes, but may need a good method to chose the rounds number.
+    # works like: conv+binary+binary.
+    binary_folding = counters["inductor"]["binary_folding"]
+    for _ in range(4):
+        constant_fold(gm)
+        # Make sure meta['val'] is properly set for all nodes
+        fake_tensor_prop(gm, aot_example_inputs, True)
+        binary_folding_pass.apply(gm.graph)
+        # If we don't have binary folding, we don't need to run the pass again.
+        # TODO: remove the need to run fake_tensor_prop on the whole model.
+        if counters["inductor"]["binary_folding"] == binary_folding:
+            break
+        binary_folding += counters["inductor"]["binary_folding"]
+
+    constant_fold(gm)
+    for pattern in pass_patterns:
+        pattern.apply(gm.graph)
 
     if torch._C._has_mkldnn and config.cpp.weight_prepack:
         from .mkldnn_fusion import _eliminate_duplicate_packed_nodes
