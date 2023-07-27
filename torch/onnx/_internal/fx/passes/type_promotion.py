@@ -1502,7 +1502,6 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                         return self._create_node(
                             graph,
                             "call_function",
-                            # target,
                             torch.ops.aten.scalar_tensor.default,
                             (fx_arg,),
                             {"dtype": dtype},
@@ -1522,7 +1521,6 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                 # the type promotion rule should not suggest promoting this arg.
                 graph = node.graph
                 with graph.inserting_before(node):
-                    target = getattr(torch.ops.aten.tensor, type(fx_arg).__name__)
                     diagnostic.with_additional_message(
                         f"Argument {fx_arg}(Scalar of equivalent dtype: {equivalent_dtype}) "
                         f"is promoted to {dtype}."
