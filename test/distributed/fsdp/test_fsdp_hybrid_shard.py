@@ -18,7 +18,10 @@ from torch.distributed.fsdp import (
     ShardingStrategy,
     StateDictType,
 )
-from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
+from torch.distributed.fsdp._init_utils import (
+    _init_intra_and_inter_node_groups,
+    HYBRID_SHARDING_STRATEGIES,
+)
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -331,11 +334,17 @@ class TestFSDPHybridShard(FSDPTest):
         self, hsdp_sharding_strategy: ShardingStrategy, use_orig_params: bool
     ):
         fsdp_model = self._init_fsdp_model(use_orig_params)
+        global_pg = dist.distributed_c10d._get_default_group()
+        hsdp_pgs = _init_intra_and_inter_node_groups(global_pg, 2)
         hsdp_model = self._init_hsdp_model(
             hsdp_sharding_strategy,
             ShardingStrategyMode.ALL_HYBRID_SHARD,
             use_orig_params,
+            hsdp_process_groups=hsdp_pgs,
         )
+        assert (
+            hsdp_model._inter_node_pg.size() > 1
+        ), "HSDP model initialized without replication"
         fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-2)
         hsdp_optim = torch.optim.Adam(hsdp_model.parameters(), lr=1e-2)
         for _ in range(5):

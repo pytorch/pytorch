@@ -861,7 +861,7 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle):
             if _can_run_all_reduce_as_async(state, handle):
                 _p_assert(
                     handle._all_reduce_fut is None,
-                    f"An all-reduce future already exists",
+                    "An all-reduce future already exists",
                 )
                 fut = dist.all_reduce(
                     new_sharded_grad, group=state._inter_node_pg, async_op=True
