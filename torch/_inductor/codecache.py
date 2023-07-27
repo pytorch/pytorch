@@ -539,15 +539,14 @@ cdll.LoadLibrary("__lib_path__")
             try:
                 # Check build result
                 compile_file(input_path, output_path, build_cmd)
-                # TODO: get vectorization working in fbcode.
-                # For now, this always fails, so we fall back to generating non-vectorized cpu code.
                 subprocess.check_call(
                     [
-                        "python",
+                        sys.executable,
                         "-c",
                         VecISA._avx_py_load.replace("__lib_path__", output_path),
                     ],
                     stderr=subprocess.DEVNULL,
+                    env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
                 )
             except Exception as e:
                 return False
@@ -560,7 +559,7 @@ class VecAVX512(VecISA):
     _bit_width = 512
     _macro = "CPU_CAPABILITY_AVX512"
     _arch_flags = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
-    _dtype_nelements = {torch.float: 16, torch.bfloat16: 32}
+    _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
 
     def __str__(self) -> str:
         return "avx512"
@@ -573,7 +572,7 @@ class VecAVX2(VecISA):
     _bit_width = 256
     _macro = "CPU_CAPABILITY_AVX2"
     _arch_flags = "-mavx2 -mfma"
-    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16}
+    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
         return "avx2"
@@ -676,7 +675,8 @@ def use_custom_generated_macros():
 
 def use_fb_internal_macros():
     if config.is_fbcode():
-        return "-D C10_USE_GLOG -D C10_USE_MINIMAL_GLOG"
+        openmp_lib = build_paths.openmp_lib()
+        return f"-Wp,-fopenmp {openmp_lib} -D C10_USE_GLOG -D C10_USE_MINIMAL_GLOG"
     else:
         return ""
 
@@ -712,7 +712,18 @@ def get_include_and_linking_paths(
             libs += ["omp"]
         macros = vec_isa.build_macro()
         if macros:
-            macros = f"-D{macros}"
+            if config.is_fbcode() and vec_isa != invalid_vec_isa:
+                cap = str(vec_isa).upper()
+                macros = " ".join(
+                    [
+                        vec_isa.build_arch_flags(),
+                        f"-D CPU_CAPABILITY={cap}",
+                        f"-D CPU_CAPABILITY_{cap}",
+                        f"-D HAVE_{cap}_CPU_DEFINITION",
+                    ]
+                )
+            else:
+                macros = f"-D{macros}"
         if cuda:
             if config.is_fbcode():
                 libs += ["cuda"]

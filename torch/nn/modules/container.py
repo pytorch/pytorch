@@ -15,7 +15,7 @@ __all__ = ['Container', 'Sequential', 'ModuleList', 'ModuleDict', 'ParameterList
 T = TypeVar('T', bound=Module)
 
 
-# Copied from torch.nn.modules.module, required for a cusom __repr__ for ModuleList
+# Copied from torch.nn.modules.module, required for a custom __repr__ for ModuleList
 def _addindent(s_, numSpaces):
     s = s_.split('\n')
     # don't do anything for single-line stuff
