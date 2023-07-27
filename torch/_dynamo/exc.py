@@ -236,6 +236,9 @@ def format_error_msg_verbose(exc, code, record_filename=None, frame=None):
             code,
         )
     )
+    line_loc = msg.find("\n")
+    header = msg[:line_loc]
+    msg = msg[line_loc + 1 :]
     msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
     msg += format_exc()
     if hasattr(exc, "real_stack"):
@@ -256,16 +259,16 @@ def format_error_msg_verbose(exc, code, record_filename=None, frame=None):
         msg += "\n"
         msg += "=" * 10
 
-    return msg
+    return header, msg
 
 
 def format_error_msg(exc, code, record_filename=None, frame=None):
     msg = os.linesep * 2
 
     if config.verbose:
-        msg = format_error_msg_verbose(exec, code, record_filename, frame)
+        header, msg = format_error_msg_verbose(exc, code, record_filename, frame)
     else:
-        msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
- line {code.co_firstlineno} \ndue to: \n{format_exc(limit=-1)}"
+        header = f"WON'T CONVERT {code.co_name} {code.co_filename} line {code.co_firstlineno}"
+        msg = f"due to: \n{format_exc(limit=-1)}"
 
-    return msg
+    return header, msg
