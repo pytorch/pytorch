@@ -45,9 +45,7 @@ Notes:
   - We require non-hook autograd nodes to be tracable.
 */
 
-namespace torch {
-namespace dynamo {
-using namespace torch::autograd;
+namespace torch::dynamo::autograd {
 using c10::SymInt;
 
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
@@ -225,15 +223,19 @@ static PyObject* the_autograd_compiler = nullptr;
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args);
 
 static PyObject* clear_cache(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
   CacheNode::root()->clear();
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS;
 }
 
 static PyObject* is_cache_empty(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
   if (CacheNode::root()->is_empty()) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS;
 }
 
 static PyMethodDef _methods[] = {
@@ -470,6 +472,7 @@ variable_list compiled_autograd(
 }
 
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
   PyObject* obj;
   if (!PyArg_ParseTuple(args, "O", &obj)) {
     return nullptr;
@@ -490,11 +493,11 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
   } else {
     return prior;
   }
+  END_HANDLE_TH_ERRORS;
 }
 
 PyObject* torch_c_dynamo_compiled_autograd_init() {
   return PyModule_Create(&_module);
 }
 
-} // namespace dynamo
-} // namespace torch
+} // namespace torch::dynamo::autograd

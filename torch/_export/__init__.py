@@ -40,7 +40,7 @@ from .exported_program import (
     ExportGraphSignature,
 )
 from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
-
+from .passes.add_runtime_assertions_for_constraints_pass import _AddRuntimeAssertionsForInlineConstraintsPass
 
 # Note - [On Export Dynamic Dimension UX]
 #
@@ -127,9 +127,6 @@ def export(
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
-    *,
-    _add_runtime_assertions=True,
-    _functionalize_runtime_assertions=False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -324,11 +321,9 @@ def export(
                 equality_constraints,
             )
 
-            if _add_runtime_assertions:
-                exported_program = exported_program._add_runtime_assertions(
-                    functionalize=_functionalize_runtime_assertions,
-                )
-
+            exported_program = exported_program.transform(
+                _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
+            )
             return exported_program.transform(_ReplaceSymSizeOpPass())
 
         except (ConstraintViolationError, ValueRangeError) as e:

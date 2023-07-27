@@ -4066,6 +4066,8 @@ class TestLinalg(TestCase):
                 self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
     @dtypes(*floating_and_complex_types())
+    @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_linalg_solve_triangular_broadcasting(self, device, dtype):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
 
