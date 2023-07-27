@@ -54,13 +54,9 @@ template<typename index_t_ptr = int64_t*>
 int64_t _csr_matmult_maxnnz(
     const int64_t n_row,
     const int64_t n_col,
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const index_t_ptr Ap,
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const index_t_ptr Aj,
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const index_t_ptr Bp,
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const index_t_ptr Bj) {
   /*
     Compute needed buffer size for matrix `C` in `C = A@B` operation.
@@ -93,17 +89,11 @@ template<typename index_t_ptr, typename scalar_t_ptr>
 void _csr_matmult(
     const int64_t n_row,
     const int64_t n_col,
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const index_t_ptr Ap,
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const index_t_ptr Aj,
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const scalar_t_ptr Ax,
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const index_t_ptr Bp,
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const index_t_ptr Bj,
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const scalar_t_ptr Bx,
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     typename index_t_ptr::value_type Cp[],
