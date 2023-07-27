@@ -1157,7 +1157,7 @@ class BuiltinVariable(VariableTracker):
                     existing_fake_attr is assigning_fake_val
                     and mod_setattr is torch.nn.Module.__setattr__
                 ):
-                    return
+                    return getattr_var
 
             obj.convert_to_unspecialized(tx)
 

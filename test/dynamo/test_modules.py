@@ -2000,6 +2000,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
             def forward(self, x):
                 # should be a no-op, but causes dynamo to lose the static input
+                x = x + 1
                 self.buffer = self.buffer.to(x)
                 return self.buffer + x
 
