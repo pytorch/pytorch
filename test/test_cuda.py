@@ -3300,6 +3300,7 @@ class TestCudaMallocAsync(TestCase):
             ss = torch.cuda.memory._snapshot()
             found_it = False
             for seg in ss['segments']:
+                self.assertTrue('frames' in seg)
                 for b in seg['blocks']:
                     if b['requested_size'] == 311 * 411 * 4:
                         self.assertTrue('test_cuda' in b['frames'][0]['filename'])
