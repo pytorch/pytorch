@@ -1208,7 +1208,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: logical_xor
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: logical_xor_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1919,6 +1919,7 @@
   structured_delegate: cumsum.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  tags: core
 
 - func: cumsum_(Tensor(a!) self, int dim, *, ScalarType? dtype=None) -> Tensor(a!)
   structured_delegate: cumsum.out
@@ -2194,6 +2195,7 @@
     CompositeExplicitAutograd: embedding_symint
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_embedding
   autogen: embedding.out
+  tags: core
 
 - func: embedding_backward(Tensor grad, Tensor indices, SymInt num_weights, SymInt padding_idx, bool scale_grad_by_freq, bool sparse) -> Tensor
   dispatch:
@@ -2944,7 +2946,7 @@
   variants: function, method
   dispatch:
     QuantizedCPU: quantized_index
-  tags: dynamic_output_shape
+  tags: [core, dynamic_output_shape]
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
   # NB: The following functions are declared in aten/src/ATen/templates/TensorBody.h and defined in aten/src/ATen/TensorIndexing.cpp:
   # - Tensor Tensor::index(ArrayRef<TensorIndex> indices)
@@ -3005,6 +3007,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: index_put
+  tags: core
 
 - func: _unsafe_index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
   device_check: NoCheck   # delegate to _index_put_impl_ after clone, which leverages TensorIterator
@@ -7866,7 +7869,7 @@
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: bitwise_and
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: bitwise_and.Scalar_Tensor(Scalar self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -7929,7 +7932,7 @@
 - func: bitwise_or.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: bitwise_or.Scalar_Tensor(Scalar self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -7992,7 +7995,7 @@
 - func: bitwise_xor.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: bitwise_xor.Scalar_Tensor(Scalar self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -9325,7 +9328,7 @@
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: fmod
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: fmod_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -9433,7 +9436,7 @@
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: remainder
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: remainder_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
@@ -9682,6 +9685,7 @@
   variants: method, function
   dispatch:
     SparseCPU, SparseCUDA: any_sparse
+  tags: core
 
 - func: any.all_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
