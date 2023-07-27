@@ -132,9 +132,6 @@ void CUDAPluggableAllocator::raw_delete(void* ptr) {
   size_t size;
   {
     const std::lock_guard<std::mutex> lock(allocator_mutex_);
-    TORCH_CHECK(
-        allocation_metadata_.count(ptr),
-        "Trying to free a pointer not allocated here");
     _AllocationMetadata& metadata = allocation_metadata_[ptr];
     size = metadata.size;
     device_idx = metadata.device_idx;
