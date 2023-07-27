@@ -1,4 +1,6 @@
 # Owner(s): ["module: mps"]
+import os
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
 import io
 import platform
@@ -9,7 +11,6 @@ import unittest
 import warnings
 import subprocess
 import tempfile
-import os
 import copy
 import gc
 import torch
@@ -404,7 +405,6 @@ def mps_ops_modifier(ops):
         'cholesky_solve': None,
         'cummax': None,
         'cummin': None,
-        'cumprod': None,
         'digamma': None,
         'erfc': None,
         'frexp': None,
@@ -1462,6 +1462,23 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(output_cpu, output_mps)
         self.assertEqual(output_cpu.size(), output_mps.size())
+
+    def test_cumprod_backwards_mps(self, np_features, negative_slope, device):
+        # TODO PETER
+        cpu_x = torch.from_numpy(np_features).requires_grad_()
+        mps_x = torch.from_numpy(np_features).to('mps').requires_grad_()
+        relu_op = torch.nn.LeakyReLU(negative_slope)
+
+        cpu_leaky_relu = relu_op(cpu_x)
+        mps_leaky_relu = relu_op(mps_x)
+        torch.testing.assert_close(cpu_leaky_relu, mps_leaky_relu.to('cpu'))
+
+        # test backward pass
+        cpu_grad = torch.ones_like(cpu_leaky_relu)
+        mps_grad = cpu_grad.to('mps')
+        cpu_leaky_relu.backward(gradient=cpu_grad)
+        mps_leaky_relu.backward(gradient=mps_grad)
+        torch.testing.assert_close(cpu_x.grad, mps_x.grad.to('cpu'))
 
     def test_baddbmm(self):
         def helper(input_shape, batch1_shape, batch2_shape):
@@ -10374,7 +10391,6 @@ if len(w) != 1:
             else:
                 self.assertTrue(False, "Running a not implemented op failed even though PYTORCH_ENABLE_MPS_FALLBACK is set. " +
                                        e.output.decode("utf-8"))
-
 class TestNoRegression(TestCase):
     def test_assert_close(self):
         a = torch.ones(1, device="mps")
@@ -10556,6 +10572,8 @@ class TestConsistency(TestCaseMPS):
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 
+    import os
+
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
     def test_output_grad_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
@@ -10649,11 +10667,14 @@ class TestConsistency(TestCaseMPS):
             cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
             mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
 
+
             if op.name in ["nn.functional.gelu", "nn.functional.glu"] and dtype == torch.float16:
                 atol = 1e-3
                 rtol = 1e-3
 
+            print("got hereeee2")
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
+            print("got hereeee3")
 
 
 class TestErrorInputs(TestCase):
