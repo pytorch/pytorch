@@ -320,9 +320,6 @@ void initDispatchBindings(PyObject* module) {
                   name,
                   torch::dispatch(dispatch, CppFunction::makeFallthrough()),
                   register_or_verify());
-              // FIXME: does fallthrough ned to be added to
-              // python_registrations_
-              // TODO: what does the trampoline do?
             } else {
               lib.impl(
                   name,
