@@ -389,15 +389,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout jithunnair-amd/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: add_triton_dependency_for_rocm_wheels
           submodules: recursive
-          repository: pytorch/builder
+          repository: jithunnair-amd/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean jithunnair-amd/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -490,15 +490,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout jithunnair-amd/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: add_triton_dependency_for_rocm_wheels
           submodules: recursive
-          repository: pytorch/builder
+          repository: jithunnair-amd/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean jithunnair-amd/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -889,15 +889,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout jithunnair-amd/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: add_triton_dependency_for_rocm_wheels
           submodules: recursive
-          repository: pytorch/builder
+          repository: jithunnair-amd/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean jithunnair-amd/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -990,15 +990,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout jithunnair-amd/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: add_triton_dependency_for_rocm_wheels
           submodules: recursive
-          repository: pytorch/builder
+          repository: jithunnair-amd/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean jithunnair-amd/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1389,15 +1389,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout jithunnair-amd/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: add_triton_dependency_for_rocm_wheels
           submodules: recursive
-          repository: pytorch/builder
+          repository: jithunnair-amd/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean jithunnair-amd/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1490,15 +1490,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout jithunnair-amd/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: add_triton_dependency_for_rocm_wheels
           submodules: recursive
-          repository: pytorch/builder
+          repository: jithunnair-amd/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean jithunnair-amd/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1889,15 +1889,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout jithunnair-amd/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: add_triton_dependency_for_rocm_wheels
           submodules: recursive
-          repository: pytorch/builder
+          repository: jithunnair-amd/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean jithunnair-amd/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1990,15 +1990,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout jithunnair-amd/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: add_triton_dependency_for_rocm_wheels
           submodules: recursive
-          repository: pytorch/builder
+          repository: jithunnair-amd/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean jithunnair-amd/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
