@@ -318,13 +318,13 @@ def _init_streams(
     assert state._device_handle.is_available()
     # Stream for unshard logic, including allocating the all-gather destination
     # tensors and the all-gathers themselves.
-    state._unshard_stream = state._device_handle.Stream()
+    state._unshard_stream = state._device_handle.Stream(priority=-1)
     # Stream for overlapping gradient reduction with the backward pass gradient
     # computation.
     state._post_backward_stream = state._device_handle.Stream()
     # Stream for pre-unshard logic, namely allocations and writes for CPU
     # offloading (H2D copy) and mixed precision (low precision cast).
-    state._pre_unshard_stream = state._device_handle.Stream()
+    state._pre_unshard_stream = state._device_handle.Stream(priority=-1)
     # Default stream for computation
     state._default_stream = state._device_handle.current_stream()
 
