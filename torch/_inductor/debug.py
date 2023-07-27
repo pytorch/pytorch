@@ -122,7 +122,9 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         else:
             raise RuntimeError("Unknown node type")
 
-        fused_name = torch._inductor.utils.get_fused_kernel_name(snode.get_nodes(), "original_aten")
+        fused_name = torch._inductor.utils.get_fused_kernel_name(
+            snode.get_nodes(), "original_aten"
+        )
         func_name = f"{node_type}: {fused_name}"
         node_func = get_fake_func(func_name)
         fx_node = graph.call_function(node_func, args=(), kwargs=None)
