@@ -452,7 +452,7 @@ class GraphLowering(torch.fx.Interpreter):
                     value.realize()
             return value
 
-        for key, value in self.env.items():
+        for value in self.env.values():
             try:
                 visit(value)
             except Exception:
@@ -921,7 +921,7 @@ class GraphLowering(torch.fx.Interpreter):
         return mod
 
     def compile_to_fn(self):
-        if self.aot_mode:
+        if self.aot_mode and self.cpp_wrapper:
             from .codecache import AotCodeCache
 
             code, linemap = self.codegen()

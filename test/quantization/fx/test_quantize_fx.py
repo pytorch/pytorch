@@ -3916,9 +3916,7 @@ class TestQuantizeFx(QuantizationTestCase):
             elif arg_node.op == "call_module":
                 self.assertTrue(
                     not _is_activation_post_process(getattr(model, arg_node.target)),
-                    "Arg: {} of node: {} is observed but is not a float tensor".format(
-                        arg_node, node
-                    ),
+                    f"Arg: {arg_node} of node: {node} is observed but is not a float tensor",
                 )
 
         for node in model.graph.nodes:
@@ -6086,8 +6084,8 @@ class TestQuantizeFx(QuantizationTestCase):
         m_ref = convert_to_reference_fx(m_ref)
         m = _convert_to_reference_decomposed_fx(m)
         expected_occurrence = {
-            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 2,
-            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 2,
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.tensor): 2,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor): 2,
         }
         self.checkGraphModuleNodes(
             m,
@@ -6147,8 +6145,8 @@ class TestQuantizeFx(QuantizationTestCase):
         m = _convert_to_reference_decomposed_fx(m)
         expected_occurrence = {
             # for input and output activations
-            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 2,
-            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 2,
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.tensor): 2,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor): 2,
             # for weight
             ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel.default): 1,
             ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel.default): 1,

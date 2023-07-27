@@ -157,8 +157,8 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 "_dtype_": dtype_
             }
         else:
-            quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor.default
-            dequantize_op = torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor.tensor
+            dequantize_op = torch.ops.quantized_decomposed.dequantize_per_tensor.tensor
             scale = float(scale)
             zero_point = int(zero_point)
             quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
@@ -179,7 +179,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             for key, value_or_node in qparams.items():
                 # TODO: we can add the information of whether a value needs to
                 # be registered as an attribute in qparams dict itself
-                if key in ['_scale_', '_zero_point_'] and (not isinstance(value_or_node, (float, int))):
+                if key in ['_scale_', '_zero_point_']:
                     # For scale and zero_point values we register them as buffers in the root module.
                     # However, note that when the values are not tensors, as in the case of
                     # per_tensor quantization, they will be treated as literals.
@@ -379,6 +379,7 @@ def _replace_observer_with_quantize_dequantize_node(
                 # be registered as an attribute in qparams dict itself
                 if key in ['_scale_', '_zero_point_']:
                     # For scale and zero_point values we register them as buffers in the root module.
+                    # this is needed to support serialization and deserialization for scale/zero_point
                     # TODO: maybe need more complex attr name here
                     qparam_node = create_getattr_from_value(
                         model, graph, module_path + prefix + key, value_or_node)

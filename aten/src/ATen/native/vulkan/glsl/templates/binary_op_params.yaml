@@ -5,6 +5,8 @@ binary_op_scalar:
   parameter_values:
       - NAME: mul_scalar
         OPERATOR: X * Y
+      - NAME: pow_tensor_scalar
+        OPERATOR: pow (X, Y)
 
 binary_op_scalar_inplace:
   parameter_names_with_default_values:
@@ -13,6 +15,8 @@ binary_op_scalar_inplace:
   parameter_values:
       - NAME: mul_scalar_
         OPERATOR: X * Y
+      - NAME: pow_tensor_scalar_
+        OPERATOR: pow (X, Y)
 
 binary_op_tensor:
   parameter_names_with_default_values:
@@ -29,6 +33,9 @@ binary_op_tensor:
       - NAME: div
         IS_DIV: 1
         OPERATOR: X / Y
+      - NAME: pow
+        IS_DIV: 0
+        OPERATOR: pow(X, Y)
 
 binary_op_tensor_inplace:
   parameter_names_with_default_values:
@@ -45,3 +52,6 @@ binary_op_tensor_inplace:
       - NAME: div_
         IS_DIV: 1
         OPERATOR: X / Y
+      - NAME: pow_
+        IS_DIV: 0
+        OPERATOR: pow(X, Y)
