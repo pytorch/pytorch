@@ -117,7 +117,7 @@ TypePtr resolveTypeNameMobile(
 
 c10::StrongTypePtr typeResolverMobile(
     const c10::QualifiedName& qn,
-    std::shared_ptr<CompilationUnit> compilation_unit) {
+    const std::shared_ptr<CompilationUnit>& compilation_unit) {
   return c10::StrongTypePtr(
       compilation_unit, resolveTypeNameMobile(qn, compilation_unit));
 }
@@ -426,9 +426,7 @@ void BytecodeDeserializer::deserialize_only_extra(
   for (const auto& kv : extra_files) {
     const std::string& key = "extra/" + kv.first;
     if (reader_->hasRecord(key)) {
-      at::DataPtr meta_ptr;
-      size_t meta_size = 0;
-      std::tie(meta_ptr, meta_size) = reader_->getRecord(key);
+      auto [meta_ptr, meta_size] = reader_->getRecord(key);
       extra_files[kv.first] =
           std::string(static_cast<char*>(meta_ptr.get()), meta_size);
     }
@@ -486,7 +484,7 @@ c10::IValue BytecodeDeserializer::readArchive(
     return typeResolverMobile(qn, compilation_unit_);
   };
 
-  auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
+  auto obj_loader = [&](const at::StrongTypePtr& type, const IValue& input) {
     return objLoaderMobile(type, input, *mcu);
   };
 
@@ -505,128 +503,6 @@ c10::IValue BytecodeDeserializer::readArchive(
       *reader_.get(),
       nullptr);
   return ivalues;
-}
-
-} // namespace
-
-// Forward declare so that _load_for_mobile() overloads can
-// call this method directly.
-mobile::Module _load_for_mobile_impl(
-    std::unique_ptr<ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files,
-    uint64_t module_load_options);
-
-mobile::Module _load_mobile_from_bytes(
-    std::shared_ptr<char> data,
-    size_t size,
-    c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files,
-    uint64_t module_load_options);
-
-mobile::Module _load_for_mobile(
-    std::istream& in,
-    c10::optional<at::Device> device) {
-  ExtraFilesMap extra_files;
-  return _load_for_mobile(in, device, extra_files);
-}
-
-mobile::Module _load_for_mobile(
-    const std::string& filename,
-    c10::optional<at::Device> device) {
-  ExtraFilesMap extra_files;
-  return _load_for_mobile(filename, device, extra_files);
-}
-
-mobile::Module _load_for_mobile(
-    std::unique_ptr<ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device) {
-  ExtraFilesMap extra_files;
-  return _load_for_mobile(std::move(rai), device, extra_files);
-}
-
-mobile::Module _load_for_mobile(
-    std::istream& in,
-    c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files,
-    uint64_t module_load_options) {
-  if (getFileFormat(in) == FileFormat::FlatbufferFileFormat) {
-    std::shared_ptr<char> data;
-    size_t size = 0;
-    std::tie(data, size) = get_stream_content(in);
-    return _load_mobile_from_bytes(
-        data, size, device, extra_files, module_load_options);
-  }
-  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  auto module = _load_for_mobile_impl(
-      std::move(rai), device, extra_files, module_load_options);
-  return module;
-}
-
-mobile::Module _load_for_mobile(
-    const std::string& filename,
-    c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
-  return _load_for_mobile(
-      filename, device, extra_files, kDefaultMobileLoadOptions);
-}
-
-mobile::Module _load_for_mobile(
-    const std::string& filename,
-    c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files,
-    uint64_t module_load_options) {
-  auto format = getFileFormat(filename);
-
-  if (format == FileFormat::FlatbufferFileFormat) {
-    std::shared_ptr<char> data;
-    size_t size = 0;
-    std::tie(data, size) = get_file_content(filename.c_str());
-    return _load_mobile_from_bytes(
-        data, size, device, extra_files, module_load_options);
-  }
-
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  return _load_for_mobile_impl(
-      std::move(rai), device, extra_files, module_load_options);
-}
-
-TORCH_API mobile::Module _load_for_mobile(
-    std::unique_ptr<ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files,
-    uint64_t module_load_options) {
-  // TODO optimize file read for non-flatbuffer models
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_rai_content(rai.get());
-  return _load_mobile_from_bytes(
-      data, size, device, extra_files, module_load_options);
-}
-
-mobile::Module _load_mobile_from_bytes(
-    std::shared_ptr<char> data,
-    size_t size,
-    c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files,
-    uint64_t module_load_options) {
-  TORCH_CHECK(size >= kFileFormatHeaderSize, "Format error");
-  auto format = getFileFormat(data.get());
-  switch (format) {
-    case FileFormat::ZipFileFormat: {
-      std::unique_ptr<ReadAdapterInterface> rai =
-          std::make_unique<MemoryReadAdapter>(data.get(), size);
-      return _load_for_mobile_impl(
-          std::move(rai), device, extra_files, module_load_options);
-    }
-    case FileFormat::FlatbufferFileFormat: {
-      return parse_and_initialize_mobile_module(
-          data, size, device, &extra_files);
-    }
-    default: {
-      TORCH_CHECK(false, "Format error");
-    }
-  }
 }
 
 mobile::Module _load_for_mobile_impl(
@@ -699,6 +575,107 @@ mobile::Module _load_for_mobile_impl(
     error_message = error.what();
     TORCH_RETHROW(error);
   }
+}
+
+mobile::Module _load_mobile_from_bytes(
+    const std::shared_ptr<char>& data,
+    size_t size,
+    c10::optional<c10::Device> device,
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options) {
+  TORCH_CHECK(size >= kFileFormatHeaderSize, "Format error");
+  auto format = getFileFormat(data.get());
+  switch (format) {
+    case FileFormat::ZipFileFormat: {
+      std::unique_ptr<ReadAdapterInterface> rai =
+          std::make_unique<MemoryReadAdapter>(data.get(), size);
+      return _load_for_mobile_impl(
+          std::move(rai), device, extra_files, module_load_options);
+    }
+    case FileFormat::FlatbufferFileFormat: {
+      return parse_and_initialize_mobile_module(
+          data, size, device, &extra_files);
+    }
+    default: {
+      TORCH_CHECK(false, "Format error");
+    }
+  }
+}
+
+} // namespace
+
+mobile::Module _load_for_mobile(
+    std::istream& in,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(in, device, extra_files);
+}
+
+mobile::Module _load_for_mobile(
+    const std::string& filename,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(filename, device, extra_files);
+}
+
+mobile::Module _load_for_mobile(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device) {
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(std::move(rai), device, extra_files);
+}
+
+mobile::Module _load_for_mobile(
+    std::istream& in,
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options) {
+  if (getFileFormat(in) == FileFormat::FlatbufferFileFormat) {
+    auto [data, size] = get_stream_content(in);
+    return _load_mobile_from_bytes(
+        data, size, device, extra_files, module_load_options);
+  }
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  auto module = _load_for_mobile_impl(
+      std::move(rai), device, extra_files, module_load_options);
+  return module;
+}
+
+mobile::Module _load_for_mobile(
+    const std::string& filename,
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files) {
+  return _load_for_mobile(
+      filename, device, extra_files, kDefaultMobileLoadOptions);
+}
+
+mobile::Module _load_for_mobile(
+    const std::string& filename,
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options) {
+  auto format = getFileFormat(filename);
+
+  if (format == FileFormat::FlatbufferFileFormat) {
+    auto [data, size] = get_file_content(filename.c_str());
+    return _load_mobile_from_bytes(
+        data, size, device, extra_files, module_load_options);
+  }
+
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  return _load_for_mobile_impl(
+      std::move(rai), device, extra_files, module_load_options);
+}
+
+TORCH_API mobile::Module _load_for_mobile(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device,
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options) {
+  // TODO optimize file read for non-flatbuffer models
+  auto [data, size] = get_rai_content(rai.get());
+  return _load_mobile_from_bytes(
+      data, size, device, extra_files, module_load_options);
 }
 
 void _load_extra_only_for_mobile(

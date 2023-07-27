@@ -60,7 +60,6 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   return variable_list();
 }
 
-#ifdef TORCH_COMPILED_AUTOGRAD
 void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
   if (args.cond(variable.defined() && variable.requires_grad())) {
     args.collect(variable);
@@ -95,7 +94,6 @@ variable_list AccumulateGrad::apply_with_saved(
   saved.after(grad_copy);
   return variable_list();
 }
-#endif
 
 } // namespace autograd
 } // namespace torch
