@@ -914,13 +914,16 @@ def pre_export_passes(
     options.fx_tracer.input_adapter.append_step(
         io_adapter.ConvertComplexToRealRepresentationInputStep()
     )
-    options.fx_tracer.output_adapter.append_step(
-        io_adapter.ConvertComplexToRealRepresentationOutputStep()
-    )
 
     # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
     # tensor, etc), we flatten the collection and register each element as output.
     options.fx_tracer.output_adapter.append_step(io_adapter.FlattenOutputStep())
+
+    # Output post-processing steps should happen after `FlattenOutputStep`.
+    options.fx_tracer.output_adapter.append_step(
+        io_adapter.ConvertComplexToRealRepresentationOutputStep()
+    )
+
     return module
 
 
