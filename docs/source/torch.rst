@@ -662,6 +662,29 @@ Foreach Operations
     _foreach_trunc
     _foreach_trunc_
     _foreach_zero_
+    _foreach_add
+    _foreach_add_
+    _foreach_sub
+    _foreach_sub_
+    _foreach_mul
+    _foreach_mul_
+    _foreach_div
+    _foreach_div_
+    _foreach_clamp_min
+    _foreach_clamp_min_
+    _foreach_clamp_max
+    _foreach_clamp_max_
+    _foreach_minimum
+    _foreach_minimum_
+    _foreach_pow
+    _foreach_pow_
+    _foreach_addcmul
+    _foreach_addcmul_
+    _foreach_addcdiv
+    _foreach_addcdiv_
+    _foreach_lerp
+    _foreach_lerp_
+    _foreach_norm
 
 Utilities
 ----------------------------------

@@ -14069,3 +14069,107 @@ Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
 Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
         """,
         )
+
+for (foreach_binary_func_name, supports_alpha) in (
+    ("_foreach_add", True),
+    ("_foreach_sub", True),
+    ("_foreach_mul", False),
+    ("_foreach_div", False),
+    ("_foreach_clamp_min", False),
+    ("_foreach_clamp_max", False),
+    ("_foreach_minimum", False),
+    ("_foreach_maximum", False),
+    ("_foreach_pow", False),
+):
+    base_name = foreach_binary_func_name.split("_")[-1]
+    if hasattr(torch, foreach_binary_func_name):
+        add_docstr(
+            getattr(torch, foreach_binary_func_name),
+            r"""
+{}(self: List[Tensor], other: Union[List[Tensor], List[Number], Number]{}) -> List[Tensor]
+
+Apply :func:`torch.{}` to each pair of Tensors of the input lists.{}
+Input lists are supposed to have the same number of Tensors or Numbers.
+            """.format(
+                foreach_binary_func_name,
+                ", alpha=1" if supports_alpha else "",
+                base_name,
+                (
+                    "\n``alpha`` is available only when ``other`` is a list of :class:`Tensor`."
+                    if supports_alpha else ""
+                ),
+            ),
+        )
+    if hasattr(torch, f"{foreach_binary_func_name}_"):
+        add_docstr(
+            getattr(torch, foreach_binary_func_name + "_"),
+            r"""
+{}(self: List[Tensor], other: Union[List[Tensor], List[Number], Number]{})
+
+Apply :func:`torch.{}` to each pair of Tensors of the input lists.{}
+Input lists are supposed to have the same number of Tensors or Numbers.
+            """.format(
+                foreach_binary_func_name + "_",
+                ", alpha=1" if supports_alpha else "",
+                base_name,
+                (
+                    "\n``alpha`` is available only when ``other`` is a list of :class:`Tensor`."
+                    if supports_alpha else ""
+                ),
+            ),
+        )
+for foreach_pointwise_func_name in ("_foreach_addcmul", "_foreach_addcdiv"):
+    base_name = foreach_pointwise_func_name.split("_")[-1]
+    if hasattr(torch, foreach_pointwise_func_name):
+        add_docstr(
+            getattr(torch, foreach_pointwise_func_name),
+            r"""
+{}(self: List[Tensor], tensor1: List[Tensor], tensor2: List[Tensor], scalers: Union[List[Number], Number, Tensor]) -> List[Tensor]
+
+Apply :func:`torch.{}` to each pair of Tensors of the input lists.
+Input lists are supposed to have the same number of Tensors or Numbers.
+            """.format(
+                foreach_pointwise_func_name,
+                base_name,
+            ),
+        )
+    if hasattr(torch, f"{foreach_pointwise_func_name}_"):
+        add_docstr(
+            getattr(torch, f"{foreach_pointwise_func_name}_"),
+            r"""
+{}(self: List[Tensor], tensor1: List[Tensor], tensor2: List[Tensor], scalers: Union[List[Number], Number, Tensor])
+
+Apply :func:`torch.{}` to each pair of Tensors of the input lists.
+Inputs lists are supposed to have the same number of Tensor or Numbers.
+            """.format(
+                foreach_pointwise_func_name + "_",
+                base_name,
+            ),
+        )
+add_docstr(
+    torch._foreach_lerp,
+    r"""
+_foreach_lerp(self: List[Tensor], tensors1: List[Tensor], weights: Union[List[Tensor], Number]) -> List[Tensor]
+
+Apply :func:`torch.lerp` to each pair of Tensors of the input lists.
+Input lists are supposed to have the same number of Tensor or Numbers.
+    """,
+)
+add_docstr(
+    torch._foreach_lerp_,
+    r"""
+_foreach_lerp_(self: List[Tensor], tensors1: List[Tensor], weights: Union[List[Tensor], Number])
+
+Apply :func:`torch.lerp` to each pair of Tensors of the input lists.
+Input lists are supposed to have the same number of Tensor or Numbers.
+    """,
+)
+add_docstr(
+    torch._foreach_norm,
+    r"""
+_foreach_norm(self: List[Tensor], ord=2: Number) -> List[Tensor]
+
+Apply :func:`torch.linalg.vector_norm` to each Tensor of the input list.
+Input lists are supposed to have the same number of Tensor or Numbers.
+    """,
+)
