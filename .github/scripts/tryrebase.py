@@ -169,6 +169,7 @@ def rebase_ghstack_onto(
 
 
 def additional_rebase_failure_info(e):
+    print(str(e))
     if re.search("remote: Permission to .* denied to pytorchmergebot\.\nfatal: unable to access", str(e)):
         return (
             "\nThis is likely because the PR author does not allow edits from maintainers on the PR or because the "
