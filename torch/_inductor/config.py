@@ -190,9 +190,12 @@ if is_fbcode():
     from libfb.py import parutil
 
     try:
-        global_cache_dir = parutil.get_dir_path(
-            os.path.join(__package__.replace(".", os.sep), "fb/cache")
-        )
+        if __package__:
+            global_cache_dir = parutil.get_dir_path(
+                os.path.join(__package__.replace(".", os.sep), "fb/cache")
+            )
+        else:
+            global_cache_dir = parutil.get_dir_path("fb/cache")
     except ValueError:
         global_cache_dir = None
 else:
