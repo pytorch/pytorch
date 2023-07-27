@@ -35,13 +35,13 @@ class Pong:
 @dataclasses.dataclass
 class TuningProcess:
     process: Optional[BaseProcess] = None
-    request_queue: Optional[Queue[Any]] = None
-    response_queue: Optional[Queue[Any]] = None
+    request_queue: "Optional[Queue[Any]]" = None
+    response_queue: "Optional[Queue[Any]]" = None
 
     @staticmethod
     def process_main(
-        request_queue: Queue[Any],
-        response_queue: Queue[Any],
+        request_queue: "Queue[Any]",
+        response_queue: "Queue[Any]",
     ) -> None:
         print("enter child process main")
         while True:
@@ -97,13 +97,13 @@ class TuningProcess:
             atexit.register(lambda: self.terminate())
 
         # wait for the initialization to be done
-        cast(Queue[Any], self.request_queue).put(Ping())
-        resp = cast(Queue[Any], self.response_queue).get()
+        cast("Queue[Any]", self.request_queue).put(Ping())
+        resp = cast("Queue[Any]", self.response_queue).get()
         assert isinstance(resp, Pong)
 
     def terminate(self) -> None:
         if self.valid():
-            cast(Queue[Any], self.request_queue).put(None)
+            cast("Queue[Any]", self.request_queue).put(None)
             cast(BaseProcess, self.process).join()
 
 
@@ -231,11 +231,11 @@ def benchmark_in_sub_process(
     tuning_process.initialize()
     assert tuning_process.valid()
 
-    cast(Queue[Any], tuning_process.request_queue).put(choice.bmreq)
+    cast("Queue[Any]", tuning_process.request_queue).put(choice.bmreq)
 
     while True:
         try:
-            timing = cast(Queue[Any], tuning_process.response_queue).get(timeout=1.0)
+            timing = cast("Queue[Any]", tuning_process.response_queue).get(timeout=1.0)
         except queue.Empty:
             status = cast(BaseProcess, tuning_process.process).exitcode
             if status is None:
