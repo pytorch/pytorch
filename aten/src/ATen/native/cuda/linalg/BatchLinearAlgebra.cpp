@@ -2487,11 +2487,13 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
     }
   };
 
+#if defined(USE_LINALG_SOLVER)
   auto lu_solve_batched_cublas_fn = [](const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
     auto LU_ = maybe_expand_lu(B, LU);
     auto pivots_ = maybe_expand_pivots(B, pivots);
     lu_solve_batched_cublas(*LU_, *pivots_, B, trans);
   };
+#endif
 
   auto lu_solve_batched_magma_fn = [](const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
     auto LU_ = maybe_expand_lu(B, LU);

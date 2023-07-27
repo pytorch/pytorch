@@ -59,6 +59,9 @@ static Tensor get_device_pointers(const Tensor& input) {
 
 template <typename scalar_t>
 void apply_geqrf_batched(const Tensor& input, const Tensor& tau) {
+#ifndef USE_LINALG_SOLVER
+  TORCH_CHECK(false, "geqrf: Batched version is only supported with cuSOLVER/hipSOLVER");
+#else
   auto batch_size = cuda_int_cast(batchCount(input), "batch_size");
   auto m = cuda_int_cast(input.size(-2), "m");
   auto n = cuda_int_cast(input.size(-1), "n");
@@ -77,6 +80,7 @@ void apply_geqrf_batched(const Tensor& input, const Tensor& tau) {
   // info only indicates wrong arguments to geqrfBatched call
   // info is a host variable, we can check it without device synchronization
   TORCH_INTERNAL_ASSERT(info == 0);
+#endif
 }
 
 void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
@@ -87,6 +91,9 @@ void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
 
 template <typename scalar_t>
 static void apply_lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
+#ifndef USE_LINALG_SOLVER
+  TORCH_CHECK(false, "linalg.lu_factor: cuSOLVER/hipSOLVER backend for linalg.lu_factor is not available.");
+#else
   // This function just works with square matrices
   TORCH_INTERNAL_ASSERT(A.size(-2) == A.size(-1));
 
@@ -100,6 +107,7 @@ static void apply_lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots
   auto a_ptr_array_data = reinterpret_cast<scalar_t**>(a_ptr_array.data_ptr());
 
   at::cuda::blas::getrfBatched(n, a_ptr_array_data, lda, pivots_data, infos_data, batch_size);
+#endif
 }
 
 void lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
@@ -110,7 +118,9 @@ void lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots, const Tenso
 
 template <typename scalar_t>
 static void apply_lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
-
+#ifndef USE_LINALG_SOLVER
+  TORCH_CHECK(false, "linalg.lu_solve: cuSOLVER/hipSOLVER backend for linalg.lu_solve is not available.")
+#else
   TORCH_INTERNAL_ASSERT(batchCount(B) == batchCount(LU), "batch_size of b and lu must be the same");
   TORCH_INTERNAL_ASSERT(batchCount(LU) == batchCount(pivots.unsqueeze(-1)), "batch_size of lu and pivots must be the same");
 #ifdef USE_ROCM
@@ -134,6 +144,7 @@ static void apply_lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots
   at::cuda::blas::getrsBatched(handle, trans, m, nrhs, lu_ptr_array_data,
     lda, pivots_data, b_ptr_array_data, lda, &info, batch_size);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
+#endif
 }
 
 void lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
@@ -366,7 +377,7 @@ void triangular_solve_cublas(const Tensor& A, const Tensor& B, bool left, bool u
 template <typename scalar_t>
 static void apply_triangular_solve_batched(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
 #ifdef ROCM_VERSION
-  // Cannot auto-hipifiy this piece of code, because in other functions the uplo
+  // Cannot auto-hipify this piece of code, because in other functions the uplo
   // and other variables need to be hipSOLVER's type.
   auto uplo = upper ? HIPBLAS_FILL_MODE_UPPER : HIPBLAS_FILL_MODE_LOWER;
   const auto trans = (hipblasOperation_t)to_cublas(transpose);
@@ -416,7 +427,7 @@ inline void apply_gels_batched(const Tensor& A, Tensor& B, Tensor& infos) {
   auto trans = CUBLAS_OP_N;
 #endif
 
-#if defined(CUDART_VERSION) || (defined(ROCM_VERSION) && (ROCM_VERSION >= 50400))
+#if !defined(ROCM_VERSION) || (ROCM_VERSION >= 50400)
   auto m = cuda_int_cast(A.size(-2), "m");
   auto n = cuda_int_cast(A.size(-1), "n");
 
