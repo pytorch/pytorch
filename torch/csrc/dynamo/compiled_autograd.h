@@ -21,6 +21,52 @@ struct SizeInput {
   int64_t value;
 };
 
+struct SizeArgs {
+  // manage a collection of SizeInput args corresponding to all SymInt in the
+  // autograd graph
+
+  size_t add(const c10::SymInt* s) {
+    // add a symint and return its index
+    // if we have already seen this one before, de-duplicate it
+    auto it = symint_to_index.find(s);
+    if (it != symint_to_index.end()) {
+      return it->second;
+    } else {
+      auto index = all_size_inputs.size();
+      all_size_inputs.emplace_back(
+          SizeInput(default_dyn_type, s->expect_int()));
+      symint_to_index.emplace(s, index);
+      return index;
+    }
+  }
+
+  size_t get_index(const c10::SymInt* key) {
+    // lookup something we already inserted and return index in all_size_inputs
+    auto it = symint_to_index.find(key);
+    TORCH_INTERNAL_ASSERT(it != symint_to_index.end());
+    return it->second;
+  }
+
+  SizeInput::DynType set_default_dyn_type(SizeInput::DynType value) {
+    return std::exchange(default_dyn_type, value);
+  }
+
+  // populated by collect, this tracks all of the SymInts we visited
+  std::vector<SizeInput> all_size_inputs;
+
+  // Populated after a cache lookup. The concrete sizes we must pass to the
+  // compiled graph.
+  std::vector<int64_t> dyn_size_inputs;
+
+ private:
+  // allows de-duplicating SymInts we visit multiple times and out-of-order
+  // swapping
+  std::unordered_map<const c10::SymInt*, size_t> symint_to_index;
+
+  // We use this for AotAutograd SymInt to make them default to dynamic handing.
+  SizeInput::DynType default_dyn_type = SizeInput::STATIC;
+};
+
 struct CacheKeyBuffer {
   CacheKeyBuffer(const uint8_t* key, uint16_t len) : data(new uint8_t[len]) {
     std::memcpy(data.get(), key, len);
@@ -160,21 +206,15 @@ struct TensorArgs {
 };
 
 struct AutogradCompilerCall {
-  void add_size_input(const c10::SymInt& s) {
-    all_size_inputs.emplace_back(SizeInput(default_dyn_type, s.expect_int()));
-  }
-
   int emplace_hook(c10::SafePyObject&& fn) {
     hooks.emplace_back(std::move(fn));
     return hooks.size() - 1;
   }
 
   TensorArgs tensor_args;
-  std::vector<SizeInput> all_size_inputs;
-  std::vector<int64_t> dyn_size_inputs;
+  SizeArgs size_args;
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
-  SizeInput::DynType default_dyn_type = SizeInput::STATIC;
 };
 
 class CompiledNodeArgs {
@@ -204,7 +244,7 @@ class CompiledNodeArgs {
     collect(_compiler.tensor_args.add(t, _node_call.node));
   }
   void collect(const c10::SymInt& t) {
-    _compiler.add_size_input(t);
+    collect_size(_compiler.size_args.add(&t));
   }
   template <typename T>
   void collect(const std::vector<T>& t) {
@@ -414,8 +454,8 @@ class CompiledNodeArgs {
     }
   }
 
-  SizeInput::DynType set_default_dyn_type(SizeInput::DynType default_dyn_type) {
-    return std::exchange(_compiler.default_dyn_type, default_dyn_type);
+  SizeInput::DynType set_default_dyn_type(SizeInput::DynType value) {
+    return _compiler.size_args.set_default_dyn_type(value);
   }
 
   CompiledNodeArgs(AutogradCompilerCall& compiler, NodeCall& node_call)
@@ -451,21 +491,10 @@ class CompiledNodeArgs {
 };
 
 struct TraceState {
-  TraceState(
-      const std::vector<c10::optional<c10::SymInt>>& ss,
-      size_t num_outputs)
-      : sym_sizes_index(0), sym_sizes(ss), outputs(num_outputs) {}
+  TraceState(std::unordered_map<size_t, c10::SymInt>&& ss, size_t num_outputs)
+      : sym_sizes(std::move(ss)), outputs(num_outputs) {}
 
-  void debug_asserts() {
-    TORCH_INTERNAL_ASSERT(sym_sizes_index == sym_sizes.size());
-  }
-  c10::optional<c10::SymInt> next_sym_size() {
-    TORCH_INTERNAL_ASSERT(sym_sizes_index < sym_sizes.size());
-    return sym_sizes[sym_sizes_index++];
-  }
-
-  size_t sym_sizes_index;
-  std::vector<c10::optional<c10::SymInt>> sym_sizes;
+  std::unordered_map<size_t, c10::SymInt> sym_sizes;
   variable_list outputs;
   std::vector<size_t> output_grad_targets;
 };
@@ -500,10 +529,10 @@ class SwapSavedVariables {
   }
 
   void before(c10::SymInt& t) {
+    auto it = state.sym_sizes.find(compiler.size_args.get_index(&t));
     stashed_symints.save(&t, c10::SymInt(t));
-    auto opt_value = state.next_sym_size();
-    if (opt_value.has_value()) {
-      t = *opt_value; // dynamic shape
+    if (it != state.sym_sizes.end()) {
+      t = it->second; // dynamic shape
     }
   }
   void after(c10::SymInt& t) {

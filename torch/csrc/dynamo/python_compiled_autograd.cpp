@@ -129,11 +129,11 @@ struct CacheNode {
     as dynamic when we see them change.  This function:
       1) Checks for a cache hit
       2) Updates expected_sizes to track what is dynamic
-      3) Populates call.dyn_size_inputs by filtering call.all_size_inputs
+      3) Populates dyn_size_inputs by filtering all_size_inputs
     */
     bool cache_hit = compiled_fn.get() != nullptr;
-    auto len = call.all_size_inputs.size();
-    const SizeInput* data = call.all_size_inputs.data();
+    auto len = call.size_args.all_size_inputs.size();
+    const SizeInput* data = call.size_args.all_size_inputs.data();
     if (expected_sizes.empty()) {
       expected_sizes.reserve(len);
       for (const auto i : c10::irange(len)) {
@@ -141,7 +141,8 @@ struct CacheNode {
       }
     }
 
-    TORCH_INTERNAL_ASSERT(expected_sizes.size() == call.all_size_inputs.size());
+    TORCH_INTERNAL_ASSERT(
+        expected_sizes.size() == call.size_args.all_size_inputs.size());
     for (const auto i : c10::irange(len)) {
       auto& expected = expected_sizes[i];
       if (expected.dyn_type == SizeInput::DYNAMIC ||
@@ -150,10 +151,10 @@ struct CacheNode {
         if (expected.value != data[i].value) {
           expected = SizeInput(SizeInput::DYNAMIC, data[i].value);
         }
-        if (call.dyn_size_inputs.empty()) {
-          call.dyn_size_inputs.reserve(len);
+        if (call.size_args.dyn_size_inputs.empty()) {
+          call.size_args.dyn_size_inputs.reserve(len);
         }
-        call.dyn_size_inputs.emplace_back(data[i].value);
+        call.size_args.dyn_size_inputs.emplace_back(data[i].value);
       }
     }
 
@@ -183,23 +184,20 @@ struct CacheNode {
     return pyinput;
   }
 
-  std::vector<c10::optional<SymInt>> unwrap_dynamic_inputs(PyObject* pyresult) {
+  std::unordered_map<size_t, SymInt> unwrap_dynamic_inputs(PyObject* pyresult) {
+    // create a mapping from index in all_size_inputs to proxy SymInt if dynamic
     TORCH_INTERNAL_ASSERT(PyList_CheckExact(pyresult));
-    size_t idx = 0;
     size_t result_len = PyList_GET_SIZE(pyresult);
-    std::vector<c10::optional<SymInt>> result;
+    std::unordered_map<size_t, SymInt> result;
     result.reserve(expected_sizes.size());
-    for (const auto& i : expected_sizes) {
-      if (i.dyn_type == SizeInput::DYNAMIC) {
-        TORCH_INTERNAL_ASSERT(idx < result_len);
-        result.emplace_back(
-            py::cast<c10::SymInt>(PyList_GET_ITEM(pyresult, idx++)));
-      } else {
-        result.emplace_back();
+    for (const auto& idx : c10::irange(expected_sizes.size())) {
+      if (expected_sizes[idx].dyn_type == SizeInput::DYNAMIC) {
+        TORCH_INTERNAL_ASSERT(result.size() < result_len);
+        result.emplace(
+            idx, py::cast<SymInt>(PyList_GET_ITEM(pyresult, result.size())));
       }
     }
-    TORCH_INTERNAL_ASSERT(
-        idx == result_len && result.size() == expected_sizes.size());
+    TORCH_INTERNAL_ASSERT(result.size() == result_len);
     return result;
   }
 
@@ -455,7 +453,6 @@ variable_list compiled_autograd(
 
     cache->compiled_fn = check(call_end_capture(py_compiler, state.outputs));
     cache->output_grad_targets = std::move(state.output_grad_targets);
-    state.debug_asserts();
   }
 
   // TODO(jansel): we should release all the variables and then use a
@@ -466,7 +463,7 @@ variable_list compiled_autograd(
   }
 
   THPObjectPtr inputs(THPVariable_WrapList(compiler_call.tensor_args.inputs));
-  THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
+  THPObjectPtr sizes(wrap_int_list(compiler_call.size_args.dyn_size_inputs));
   THPObjectPtr hooks(convert_hook_list(compiler_call.hooks));
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));

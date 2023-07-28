@@ -269,6 +269,29 @@ class TestCompiledAutograd(TestCase):
 
         self.check_output_and_recompiles(fn, count=1)
 
+    def test_duplicate_symint_args(self):
+        count = 0
+
+        def compiler(gm):
+            nonlocal count
+            count += 1
+            num_sizes = len(re.findall(r"sizes\[\d+\]", gm.code))
+            if count == 1:
+                self.assertEqual(num_sizes, 0)  # fist run nothing is dynamic
+            else:
+                self.assertEqual(num_sizes, 6)
+            return gm
+
+        with compiled_autograd.enable(compiler):
+            for size in (5, 10, 15, 20):
+                a = torch.randn(size, 2 * size, requires_grad=True)
+                b = torch.randn(size, 2 * size, requires_grad=True)
+                x = a * b
+                grad_output = torch.randn_like(x)
+                torch.autograd.backward([x, x], [grad_output, grad_output])
+
+        self.assertEqual(count, 2)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
