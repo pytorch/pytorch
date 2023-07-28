@@ -842,6 +842,11 @@ class TestOptim(TestCase):
             (optim.NAdam, dict(weight_decay=1.0, momentum_decay=6e-3)),
             (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3)),
             (optim.NAdam, dict(weight_decay=0.01, momentum_decay=4e-3)),
+            (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3, decoupled_weight_decay=True)),
+            (
+                optim.NAdam,
+                dict(weight_decay=0.01, momentum_decay=4e-3, decoupled_weight_decay=True),
+            ),
             (
                 optim.SGD,
                 dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True),
@@ -1252,6 +1257,30 @@ class TestOptim(TestCase):
                 lr=1e-3,
                 weight_decay=0.1,
                 momentum_decay=6e-3,
+                foreach=foreach,
+            ),
+            [lambda opt: ExponentialLR(opt, gamma=0.9)],
+            constructor_accepts_foreach=True,
+        )
+        # NAdamW tests
+        self._test_basic_cases(
+            lambda weight, bias, foreach: optim.NAdam(
+                [weight, bias],
+                lr=1e-3,
+                weight_decay=0.1,
+                momentum_decay=6e-3,
+                decoupled_weight_decay=True,
+                foreach=foreach,
+            ),
+            constructor_accepts_foreach=True,
+        )
+        self._test_basic_cases(
+            lambda weight, bias, foreach: optim.NAdam(
+                [weight, bias],
+                lr=1e-3,
+                weight_decay=0.1,
+                momentum_decay=6e-3,
+                decoupled_weight_decay=True,
                 foreach=foreach,
             ),
             [lambda opt: ExponentialLR(opt, gamma=0.9)],
@@ -2142,6 +2171,18 @@ class TestDifferentiableOptimizer(TestCase):
                 state,
                 torch.optim.NAdam,
                 {"lr": 0.9, "differentiable": True},
+                *state.values(),
+            ),
+        )
+
+        gradcheck(
+            _diff_fn,
+            (
+                p,
+                grad,
+                state,
+                torch.optim.NAdam,
+                {"lr": 0.9, "decoupled_weight_decay": True, "differentiable": True},
                 *state.values(),
             ),
         )
