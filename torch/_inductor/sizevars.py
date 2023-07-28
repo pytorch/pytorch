@@ -323,10 +323,6 @@ class SizeVarAllocator:
         return self.guard_lt(left, right + 1)
 
     def guard_lt(self, left: Expr, right: Expr) -> None:
-        expr = self.simplify(right - left)
-        assert self.size_hint(expr) > 0
-        if len(expr.free_symbols) == 0:
-            return
         assert self.shape_env.evaluate_expr(sympy.Lt(left, right))
 
     # The evaluate functions evaluate some symbolic sympy expression
