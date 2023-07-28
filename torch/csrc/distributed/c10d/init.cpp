@@ -1301,7 +1301,8 @@ Example::
                       std::chrono::milliseconds timeout,
                       bool waitWorkers,
                       bool multiTenant,
-                      c10::optional<int> masterListenFd) {
+                      c10::optional<int> masterListenFd,
+                      bool useLibUV) {
             c10::optional<std::size_t> numWorkers = c10::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
               numWorkers = static_cast<std::size_t>(worldSize.value());
@@ -1314,7 +1315,8 @@ Example::
                 waitWorkers,
                 timeout,
                 multiTenant,
-                masterListenFd};
+                masterListenFd,
+                useLibUV};
 
             return c10::make_intrusive<::c10d::TCPStore>(host, opts);
           }),
@@ -1329,6 +1331,7 @@ Example::
           py::arg("wait_for_workers") = true,
           py::arg("multi_tenant") = false,
           py::arg("master_listen_fd") = py::none(),
+          py::arg("use_libuv") = false,
           py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "host",
