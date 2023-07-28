@@ -91,6 +91,11 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install magma-cuda$(TMP=${CUDA_VERSION/./};echo ${TMP%.*[0-9]}) -c pytorch
   fi
 
+  # Install required libstdc++.so.6 version
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.10" ]; then
+    conda_install_through_forge libstdcxx-ng=12
+  fi
+
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
 

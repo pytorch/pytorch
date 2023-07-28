@@ -1238,7 +1238,7 @@ if(USE_ROCM)
   # Currently only active for Ubuntu 20.04 and greater versions.
   if(UNIX AND EXISTS "/etc/os-release")
     file(STRINGS /etc/os-release OS_RELEASE)
-    string(REGEX REPLACE "NAME=\"([A-Za-z]+).*" "\\1" OS_DISTRO ${OS_RELEASE})
+    string(REGEX REPLACE ".*NAME=\"([A-Za-z]+).*" "\\1" OS_DISTRO ${OS_RELEASE})
     string(REGEX REPLACE ".*VERSION_ID=\"([0-9\.]+).*" "\\1" OS_VERSION ${OS_RELEASE})
     if(OS_DISTRO STREQUAL "Ubuntu" AND OS_VERSION VERSION_GREATER_EQUAL "20.04")
       find_library(LIBTINFO_LOC tinfo NO_CMAKE_PATH NO_CMAKE_ENVIRONMENT_PATH)
