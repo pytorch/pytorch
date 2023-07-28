@@ -64,8 +64,8 @@ NNAPI_FUNCTIONS = [
     (
         "int",
         "ANeuralNetworksCompilation_createForDevices",
-        "ANeuralNetworksModel* model, const ANeuralNetworksDevice* const* devices, uint32_t numDevices, ANeuralNetworksCompilation** compilation",
-    ),  # noqa: B950
+        "ANeuralNetworksModel* model, const ANeuralNetworksDevice* const* devices, uint32_t numDevices, ANeuralNetworksCompilation** compilation",  # noqa: B950
+    ),
     (
         "int",
         "ANeuralNetworksExecution_compute",
@@ -106,8 +106,8 @@ NNAPI_FUNCTIONS = [
     (
         "int",
         "ANeuralNetworksModel_addOperation",
-        "ANeuralNetworksModel* model, ANeuralNetworksOperationType type, uint32_t inputCount, const uint32_t* inputs, uint32_t outputCount, const uint32_t* outputs",
-    ),  # noqa: B950
+        "ANeuralNetworksModel* model, ANeuralNetworksOperationType type, uint32_t inputCount, const uint32_t* inputs, uint32_t outputCount, const uint32_t* outputs",  # noqa: B950
+    ),
     (
         "int",
         "ANeuralNetworksModel_identifyInputsAndOutputs",
@@ -151,13 +151,13 @@ NNAPI_FUNCTIONS = [
     (
         "int",
         "ANeuralNetworksExecution_setInput",
-        "ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const void* buffer, size_t length",
-    ),  # noqa: B950
+        "ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const void* buffer, size_t length",  # noqa: B950
+    ),
     (
         "int",
         "ANeuralNetworksExecution_setInputFromMemory",
-        "ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const ANeuralNetworksMemory* memory, size_t offset, size_t length",
-    ),  # noqa: B950
+        "ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const ANeuralNetworksMemory* memory, size_t offset, size_t length",  # noqa: B950
+    ),
     (
         "int",
         "ANeuralNetworksExecution_setOutput",
@@ -166,8 +166,8 @@ NNAPI_FUNCTIONS = [
     (
         "int",
         "ANeuralNetworksExecution_setOutputFromMemory",
-        "ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const ANeuralNetworksMemory* memory, size_t offset, size_t length",
-    ),  # noqa: B950
+        "ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const ANeuralNetworksMemory* memory, size_t offset, size_t length",  # noqa: B950
+    ),
     (
         "int",
         "ANeuralNetworksExecution_startCompute",
