@@ -52,6 +52,7 @@ from ._internal.exporter import (  # usort:skip. needs to be last to avoid circu
     dynamo_export,
     OnnxExporterError,
     enable_fake_mode,
+    OnnxRegistry,
 )
 
 __all__ = [
@@ -97,6 +98,7 @@ __all__ = [
     "dynamo_export",
     "OnnxExporterError",
     "enable_fake_mode",
+    "OnnxRegistry",
 ]
 
 # Set namespace for exposed private names
@@ -108,6 +110,7 @@ ExportOutputSerializer.__module__ = "torch.onnx"
 dynamo_export.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
 enable_fake_mode.__module__ = "torch.onnx"
+OnnxRegistry.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION

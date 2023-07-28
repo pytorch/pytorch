@@ -215,12 +215,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return torch.ops.aten.add.Tensor(input, input)
 
         # _DEFAULT_OPSET_VERSION = 18
-        onnx_registry = registration.OnnxRegistry()
-        assert (
+        onnx_registry = torch.onnx.OnnxRegistry()
+        self.assertTrue(
             onnx_registry.is_registered_op(
                 namespace="aten", op_name="add", overload="Tensor"
             )
-            is True
         )
         # TODO: Replace this example with a torch custom op when overload is supported
         # Currently, torch only supports custom op with namespace and op_name

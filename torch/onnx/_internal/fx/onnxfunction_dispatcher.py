@@ -30,6 +30,8 @@ if TYPE_CHECKING:
     import onnx.defs.OpSchema  # type: ignore[import]
     import onnxscript  # type: ignore[import]
 
+    from torch.onnx import OnnxRegistry
+
 
 @_beartype.beartype
 def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
@@ -84,7 +86,7 @@ class OnnxFunctionDispatcher:
 
     def __init__(
         self,
-        onnx_registry: registration.OnnxRegistry,
+        onnx_registry: "OnnxRegistry",
         diagnostic_context: diagnostics.DiagnosticContext,
     ):
         """Initialize the ONNX Function dispatcher.
