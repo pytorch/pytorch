@@ -488,9 +488,9 @@ template <class T>
 std::ostream& printList(
     std::ostream& out,
     const T& list,
-    const std::string start,
-    const std::string finish,
-    IValueFormatter formatter) {
+    const std::string& start,
+    const std::string& finish,
+    const IValueFormatter& formatter) {
   out << start;
   for (const auto i : c10::irange(list.size())) {
     if (i > 0) {
@@ -506,16 +506,16 @@ std::ostream& printList(
 std::ostream& printMaybeAnnotatedList(
     std::ostream& out,
     const IValue& the_list,
-    IValueFormatter formatter) {
+    const IValueFormatter& formatter) {
   auto list_elem_type = the_list.type()->containedType(0);
   if (the_list.toListRef().empty() ||
       !elementTypeCanBeInferredFromMembers(list_elem_type)) {
     out << "annotate(" << the_list.type<c10::Type>()->annotation_str() << ", ";
-    printList(out, the_list.toListRef(), "[", "]", std::move(formatter));
+    printList(out, the_list.toListRef(), "[", "]", formatter);
     out << ")";
     return out;
   } else {
-    return printList(out, the_list.toListRef(), "[", "]", std::move(formatter));
+    return printList(out, the_list.toListRef(), "[", "]", formatter);
   }
 }
 
@@ -523,7 +523,7 @@ template <typename Dict>
 std::ostream& printDict(
     std::ostream& out,
     const Dict& v,
-    IValueFormatter formatter) {
+    const IValueFormatter& formatter) {
   out << "{";
 
   bool first = true;
@@ -547,14 +547,14 @@ std::ostream& printDict(
 static std::ostream& printMaybeAnnotatedDict(
     std::ostream& out,
     const IValue& the_dict,
-    IValueFormatter formatter) {
+    const IValueFormatter& formatter) {
   auto value_type = the_dict.type()->castRaw<DictType>()->getValueType();
   if (the_dict.toGenericDict().empty() ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
     out << "annotate(" << the_dict.type<c10::Type>()->annotation_str() << ",";
-    printDict(out, the_dict.toGenericDict(), std::move(formatter)) << ")";
+    printDict(out, the_dict.toGenericDict(), formatter) << ")";
   } else {
-    return printDict(out, the_dict.toGenericDict(), std::move(formatter));
+    return printDict(out, the_dict.toGenericDict(), formatter);
   }
   return out;
 }
