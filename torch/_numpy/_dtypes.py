@@ -5,10 +5,7 @@ import builtins
 
 import torch
 
-from . import _dtypes_impl, _util
-
-# more __all__ manipulations at the bottom
-__all__ = ["dtype", "DType", "typecodes", "issubdtype", "set_default_dtype"]
+from . import _dtypes_impl
 
 
 # ### Scalar types ###
@@ -19,38 +16,24 @@ class generic:
     def name(self):
         return self.__class__.__name__
 
-    def __new__(self, value):
-        #
-        # Yes, a call to np.float32(4) produces a zero-dim array.
-        #
-        from . import _ndarray
+    def __new__(cls, value):
+        # NumPy scalars are modelled as 0-D arrays
+        # so a call to np.float32(4) produces a 0-D array.
+
+        from ._ndarray import asarray, ndarray
 
         if isinstance(value, str) and value in ["inf", "nan"]:
             value = {"inf": torch.inf, "nan": torch.nan}[value]
 
-        if isinstance(value, _ndarray.ndarray):
-            tensor = value.tensor
+        if isinstance(value, ndarray):
+            return value.astype(cls)
         else:
-            try:
-                tensor = _util._coerce_to_tensor(value, dtype=self.torch_dtype)
-            except RuntimeError as e:
-                if "Overflow" in str(e):
-                    raise OverflowError(e.args)
-                raise e
-        #
-        # With numpy:
-        # >>> a = np.ones(3)
-        # >>> np.float64(a) is a        # True
-        # >>> np.float64(a[0]) is a[0]  # False
-        #
-        # A reasonable assumption is that the second case is more common,
-        # and here we follow the second approach and create a new object
-        # *for all inputs*.
-        #
-        return _ndarray.ndarray(tensor)
+            return asarray(value, dtype=cls)
 
 
-##### these are abstract types
+##################
+# abstract types #
+##################
 
 
 class number(generic):
@@ -158,7 +141,7 @@ class bool_(generic):
     torch_dtype = torch.bool
 
 
-# name aliases : FIXME (OS, bitness)
+# name aliases
 _name_aliases = {
     "intp": int64,
     "int_": int64,
@@ -177,8 +160,9 @@ _name_aliases = {
     "cfloat": complex128,
     "complex_": complex128,
 }
+# We register float_ = float32 and so on
 for name, obj in _name_aliases.items():
-    globals()[name] = obj
+    vars()[name] = obj
 
 
 # Replicate this NumPy-defined way of grouping scalar types,
@@ -422,25 +406,11 @@ def issubdtype(arg1, arg2):
     return issubclass(arg1, arg2)
 
 
-__all__ += list(_names.keys())
-__all__ += [
-    "intp",
-    "int_",
-    "intc",
-    "byte",
-    "short",
-    "longlong",
-    "ubyte",
-    "half",
-    "single",
-    "double",
-    "csingle",
-    "cdouble",
-    "float_",
-    "complex_",
-]
-__all__ += ["sctypes"]
-__all__ += [
+__all__ = ["dtype", "DType", "typecodes", "issubdtype", "set_default_dtype"]
+__all__ += list(_names.keys())  # noqa: PLE0605
+__all__ += list(_name_aliases.keys())  # noqa: PLE0605
+__all__ += [  # noqa: PLE0605
+    "sctypes",
     "generic",
     "number",
     "integer",
