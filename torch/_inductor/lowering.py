@@ -1897,7 +1897,7 @@ def copy(self, src, non_blocking=False):
 
 
 @register_lowering(aten.clone)
-def clone(x, *, memory_format=0):
+def clone(x, *, memory_format=None):
     # TODO(jansel): memory format
     return Pointwise.create(
         device=x.get_device(),
@@ -2044,7 +2044,7 @@ def _unwrap(x):
 
 @register_lowering([torch.tensor, aten.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
-    assert_nyi(layout in (None, torch.strided), f"torch.tensor(..., layout={layout})")
+    assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     assert_nyi(not pin_memory, "pin_memory")
     if isinstance(_unwrap(data), int):
         dtype = dtype or torch.int64
@@ -2167,14 +2167,8 @@ def tensor_constructor(fill_value):
         memory_format=None,
     ):
         assert_nyi(names is None, "named tensors")
-        assert_nyi(
-            layout in (None, torch.strided), f"torch.tensor(..., layout={layout})"
-        )
+        assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         assert_nyi(not pin_memory, "pin_memory")
-        assert_nyi(
-            memory_format in (None, torch.contiguous_format),
-            f"torch.tensor(..., memory_format={memory_format})",
-        )
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
@@ -2196,10 +2190,6 @@ def empty(
     memory_format=None,
 ):
     assert_nyi(names is None, "named tensors")
-    assert_nyi(
-        memory_format in (None, torch.contiguous_format),
-        f"torch.empty(..., memory_format={memory_format})",
-    )
     device = decode_device(device)
     if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
         size = tuple(size[0])
@@ -2217,9 +2207,7 @@ def create_tensor_like(creation_fn):
         x, *, dtype=None, device=None, layout=None, pin_memory=False, memory_format=None
     ):
         assert_nyi(not pin_memory, "pin_memory")
-        assert_nyi(
-            layout in (None, torch.strided), f"torch.empty_like(..., layout={layout})"
-        )
+        assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         if dtype is None:
             dtype = x.get_dtype()
         else:
@@ -2248,7 +2236,7 @@ def new_constant(fill_value):
     ):
         assert isinstance(size, (list, tuple))
         assert_nyi(not pin_memory, "pin_memory")
-        assert_nyi(layout in (None, torch.strided), f"torch.full(..., layout={layout})")
+        assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         dtype = decode_dtype(dtype) or x.get_dtype()
         device = device or x.get_device()
         size = [sympy.Integer(s) for s in size]
@@ -2275,9 +2263,7 @@ def empty_strided(
     assert isinstance(size, (list, tuple))
     assert isinstance(stride, (list, tuple, type(None)))
     assert_nyi(not pin_memory, "pin_memory")
-    assert_nyi(
-        layout in (None, torch.strided), f"torch.empty_strided(..., layout={layout})"
-    )
+    assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
     pointwise = _full(fill_value=0, device=device, dtype=dtype, size=size)
