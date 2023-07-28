@@ -311,8 +311,31 @@ def run_ort(
         ort_model = buffer.getvalue()
     else:
         ort_model = onnx_model
+
+    # NOTE: Inline model before running in onnxruntime.
+    # This is a workaround since onnxruntime crashes or segfaults when loading model
+    # with nested functions.
+    # Ref: https://github.com/microsoft/onnxruntime/issues/15849
+    try:
+        import onnx.inliner
+    except ImportError:
+        warnings.warn("Cannot import onnx.inliner. Skip inlining model.")
+    else:
+        if isinstance(ort_model, bytes):
+            buffer = io.BytesIO(ort_model)
+        else:
+            assert isinstance(ort_model, str)
+            buffer = ort_model
+
+        model_proto = onnx.load(buffer)
+        inlined_model_proto = onnx.inliner.inline_local_functions(model_proto)
+        ort_model = inlined_model_proto.SerializeToString()
+
+    # Suppress floods of warnings from ONNX Runtime
+    session_options = onnxruntime.SessionOptions()
+    session_options.log_severity_level = 3  # Error
     session = onnxruntime.InferenceSession(
-        ort_model, providers=["CPUExecutionProvider"]
+        ort_model, providers=["CPUExecutionProvider"], sess_options=session_options
     )
     input_names = [ort_input.name for ort_input in session.get_inputs()]
 
@@ -321,9 +344,8 @@ def run_ort(
             f"Expected {len(input_names)} inputs, got {len(pytorch_inputs)}"
         )
 
-    return session.run(
-        None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
-    )
+    ort_input = {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
+    return session.run(None, ort_input)
 
 
 @_beartype.beartype
@@ -372,6 +394,7 @@ def _compare_pytorch_onnx_with_ort(
         ref_model(*ref_input_args, **ref_input_kwargs)
     )
     ort_outputs = run_ort(export_output, onnx_format_args)
+
     if len(ref_outputs) != len(ort_outputs):
         raise AssertionError(
             f"Expected {len(ref_outputs)} outputs, got {len(ort_outputs)}"
@@ -417,9 +440,9 @@ FLOAT_TYPES = (
 )
 
 COMPLEX_TYPES = (
-    torch.complex32,
+    # torch.complex32,  NOTE: torch.complex32 is experimental in torch
     torch.complex64,
-    torch.complex128,
+    # torch.complex128,  ORT doesn't support
 )
 
 TESTED_DTYPES = (
