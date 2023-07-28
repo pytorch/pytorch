@@ -9,6 +9,7 @@ import logging
 import math
 import operator
 import os
+import random
 import sys
 import traceback
 import typing
@@ -1348,10 +1349,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(mandelbrot_numpy)
         for _ in range(10):
-            x = torch.randint(100, (1,))
-            ref = mandelbrot_numpy(x.item())
-            res = opt_fn(x.item())
+            x = random.randint(2, 30)
+            ref = mandelbrot_numpy(x)
+            res = opt_fn(x)
             self.assertEqual(ref, res)
+        # We need to specialise the number as it's in a forloop
+        self.assertEqual(cnts.frame_count, 10)
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_numpy_on_cuda(self):
