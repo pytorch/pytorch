@@ -38,6 +38,7 @@ from torch.testing._internal import (
     common_methods_invocations,
     common_utils,
 )
+from torch.testing._internal.opinfo import core as opinfo_core
 
 # Modify this section ##########################################################
 # NOTE: Modify this section as more ops are supported. The list should be sorted
@@ -142,10 +143,18 @@ TESTED_OPS: frozenset[str] = frozenset(
         "scatter_add",
         "scatter_reduce",
         "square",
+        "stft",
         "sum",
         "unflatten",
         # "var_mean",  # Segfault during onnx shape inference. Need to bump onnx version.
         "vstack",  # aten::cat is invoked instead
+    ]
+)
+
+COMPLEX_TESTED_OPS = frozenset(
+    [
+        "abs",
+        "stft",
     ]
 )
 
@@ -429,6 +438,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Pow", "int8, uint8, int16"),
     ),
     xfail(
+        "stft",
+        reason=onnx_test_common.reason_dynamo_does_not_support("aten._fft_r2c.default"),
+    ),
+    xfail(
         "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Unflatten")
     ),
@@ -595,6 +608,51 @@ def _should_skip_xfail_test_sample(
     return None, None
 
 
+def _run_test_output_match(
+    test_suite: onnx_test_common._TestONNXRuntime,
+    device: str,
+    dtype: torch.dtype,
+    op: opinfo_core.OpInfo,
+):
+    # device is provided by instantiate_device_type_tests, but we only want to run in cpu.
+    assert device == "cpu"
+
+    samples = op.sample_inputs(
+        device,
+        dtype,
+        requires_grad=False,
+    )
+
+    for i, cpu_sample in enumerate(samples):
+        inputs = (cpu_sample.input, *cpu_sample.args)
+        # Provide the repr to subtest because tensors are not serializable in parallel test runs
+
+        with test_suite.subTest(
+            opset=test_suite.opset_version,
+            sample_num=i,
+            inputs=repr(inputs),
+            kwargs=repr(cpu_sample.kwargs),
+        ):
+            test_behavior, reason = _should_skip_xfail_test_sample(op.name, cpu_sample)
+            with onnx_test_common.normal_xfail_skip_test_behaviors(
+                test_behavior, reason
+            ):
+                model = SingleOpModel(op.op, cpu_sample.kwargs)
+                model.eval()
+
+                if dtype == torch.float32:
+                    # Relax atol and rtol for float32 based on empirical results
+                    rtol = 1e-5
+                    atol = 2e-5
+                else:
+                    rtol = None
+                    atol = None
+                # Run the test
+                test_suite.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+                    model, inputs, rtol=rtol, atol=atol
+                )
+
+
 def _get_test_class_name(cls, num, params_dict) -> str:
     del cls  # unused
     del num  # unused
@@ -627,46 +685,15 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     )
     def test_output_match(self, device: str, dtype: torch.dtype, op):
         """Test the ONNX exporter."""
-        # device is provided by instantiate_device_type_tests, but we only want to run in cpu.
-        assert device == "cpu"
+        _run_test_output_match(self, device, dtype, op)
 
-        samples = op.sample_inputs(
-            device,
-            dtype,
-            requires_grad=False,
-        )
-
-        for i, cpu_sample in enumerate(samples):
-            inputs = (cpu_sample.input, *cpu_sample.args)
-            # Provide the repr to subtest because tensors are not serializable in parallel test runs
-
-            with self.subTest(
-                opset=self.opset_version,
-                sample_num=i,
-                inputs=repr(inputs),
-                kwargs=repr(cpu_sample.kwargs),
-            ):
-                test_behavior, reason = _should_skip_xfail_test_sample(
-                    op.name, cpu_sample
-                )
-                with onnx_test_common.normal_xfail_skip_test_behaviors(
-                    test_behavior, reason
-                ):
-                    model = SingleOpModel(op.op, cpu_sample.kwargs)
-                    model.eval()
-
-                    if dtype == torch.float32:
-                        # Relax atol and rtol for float32 based on empirical results
-                        # The current most relaxed values are for aten::stft
-                        rtol = 1e-5
-                        atol = 2e-5
-                    else:
-                        rtol = None
-                        atol = None
-                    # Run the test
-                    self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-                        model, inputs, rtol=rtol, atol=atol
-                    )
+    @common_device_type.ops(
+        [op for op in OPS_DB if op.name in COMPLEX_TESTED_OPS],
+        allowed_dtypes=onnx_test_common.COMPLEX_TYPES,
+    )
+    def test_output_match_complex(self, device: str, dtype: torch.dtype, op):
+        """Test the ONNX exporter with complex dtype."""
+        _run_test_output_match(self, device, dtype, op)
 
 
 for opset in onnx_test_common.FX_TESTED_OPSETS:
@@ -679,10 +706,18 @@ for opset in onnx_test_common.FX_TESTED_OPSETS:
         opset=opset,
         skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
     )
+
+    onnx_test_common.add_decorate_info(
+        OPS_DB,
+        test_class_name,
+        "test_output_match_complex",
+        opset=opset,
+        skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
+    )
+
     common_device_type.instantiate_device_type_tests(
         globals()[test_class_name], globals(), only_for="cpu"
     )
-
 
 if __name__ == "__main__":
     common_utils.run_tests()
