@@ -38,9 +38,9 @@ def _load_for_lite_interpreter(f, map_location=None):
     """
     if isinstance(f, str):
         if not os.path.exists(f):
-            raise ValueError("The provided filename {} does not exist".format(f))
+            raise ValueError(f"The provided filename {f} does not exist")
         if os.path.isdir(f):
-            raise ValueError("The provided filename {} is a directory".format(f))
+            raise ValueError(f"The provided filename {f} is a directory")
 
     map_location = validate_map_location(map_location)
 
