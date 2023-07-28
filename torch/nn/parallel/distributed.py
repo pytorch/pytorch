@@ -217,7 +217,7 @@ def _dump_DDP_relevant_env_vars():
     formatted_output = ""
     for var in relevant_env_vars:
         value = os.environ[var] if var in os.environ else "N/A"
-        formatted_output += "env:%s=%s\n" % (var, value)
+        formatted_output += f"env:{var}={value}\n"
     print(formatted_output)
 
 
@@ -671,7 +671,7 @@ class DistributedDataParallel(Module, Joinable):
             for n, p in module.named_parameters()
             if n not in self.parameters_to_ignore
         ]
-        if not any((p.requires_grad for p in self._module_parameters)):
+        if not any(p.requires_grad for p in self._module_parameters):
             if len(self._delay_all_reduce_params):
                 logger.info("Delay the AllReduce of all parameters.")
             else:

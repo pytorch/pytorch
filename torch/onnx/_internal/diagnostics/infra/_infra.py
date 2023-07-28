@@ -323,3 +323,5 @@ class DiagnosticOptions:
 
     log_verbose: bool = dataclasses.field(default=False)
     log_level: Level = dataclasses.field(default=Level.ERROR)
+    warnings_as_errors: bool = dataclasses.field(default=False)
+    """If True, warnings are treated as errors."""

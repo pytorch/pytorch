@@ -654,10 +654,7 @@ class DistributedTest:
                 lines = out.getvalue().splitlines()
 
             def format_line(var):
-                return "env:{}={}".format(
-                    var,
-                    os.environ[var] if var in os.environ else "N/A",
-                )
+                return f"env:{var}={os.environ[var] if var in os.environ else 'N/A'}"
 
             # Check relevant env vars
             vars = [
