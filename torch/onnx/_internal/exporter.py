@@ -887,14 +887,6 @@ def pre_export_passes(
     # Insert type casts explicitly where needed.
     module = passes.InsertTypePromotion(diagnostic_context, module).run()
 
-    # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes
-    # The pass added nodes with static shape into original node metadata:
-    # node.meta["static_shape"]: FakeTensor/int/float/SymInt/SynFloat
-    if options.op_level_debug:
-        module = passes.ShapeInferenceWithFakeTensor(diagnostic_context, module).run(
-            *fx_module_args
-        )
-
     analysis.UnsupportedFxNodesAnalysis(
         diagnostic_context, module, options.onnxfunction_dispatcher
     ).analyze(infra.levels.ERROR)
@@ -904,6 +896,10 @@ def pre_export_passes(
             diagnostic_context, module, original_model
         ).run()
 
+    # This operation should be invoked as the last pre export pass.
+    # See [NOTE: Modularize pass ordering]
+    module = passes.Modularize(diagnostic_context, module).run()
+
     # ONNX does not support None inputs. During graph building, all None inputs
     # are removed. Here we register this step to input adapter.
     options.fx_tracer.input_adapter.append_step(io_adapter.RemoveNoneInputStep())
@@ -912,9 +908,22 @@ def pre_export_passes(
     # Dynamo doesn't support non-tensor inputs.
     options.fx_tracer.input_adapter.append_step(io_adapter.RemoveNonTensorInputStep())
 
+    # ONNX does not support complex inputs. During graph building, all complex inputs
+    # are converted to real representation inputs. Here we register this step to
+    # input/output adapter.
+    options.fx_tracer.input_adapter.append_step(
+        io_adapter.ConvertComplexToRealRepresentationInputStep()
+    )
+
     # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
     # tensor, etc), we flatten the collection and register each element as output.
     options.fx_tracer.output_adapter.append_step(io_adapter.FlattenOutputStep())
+
+    # Output post-processing steps should happen after `FlattenOutputStep`.
+    options.fx_tracer.output_adapter.append_step(
+        io_adapter.ConvertComplexToRealRepresentationOutputStep()
+    )
+
     return module
 
 

@@ -12,8 +12,12 @@ pip_install \
   mock==5.0.1 \
   ninja==1.10.2 \
   networkx==2.0 \
-  numpy==1.22.4 \
-  onnx==1.14.0
+  numpy==1.22.4
+
+# Using 1.15dev branch for the following not yet released features and fixes.
+# - Segfault fix for shape inference.
+# - Inliner to workaround ORT segfault.
+pip_install onnx-weekly==1.15.0.dev20230717
 
 pip_install \
   onnxruntime==1.15.0 \
@@ -24,8 +28,8 @@ pip_install \
   transformers==4.25.1
 
 # TODO: change this when onnx-script is on testPypi
-# TODO: PR branch for embedding bag, switch back to main when merged.
-pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@294bfd6dfa023d96259863113bc156b46c9ad832"
+# TODO: PR branch for embedding bag, switch back to onnxscript-preview when merged.
+pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@d751ee204a552913146ca896f3eccf035dcd8bcc" --no-deps
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
