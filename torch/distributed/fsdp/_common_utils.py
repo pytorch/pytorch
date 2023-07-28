@@ -134,6 +134,10 @@ class _FSDPState(_State):
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
         self._all_handles: List[flat_param_file.FlatParamHandle] = []
+        self._gradient_predivide_factor: int = 0
+        self._gradient_postdivide_factor: int = 0
+        self._comm_hook: Optional[Callable] = None
+        self._comm_hook_state: Optional[Any] = None
         self._device_mesh: Optional[DeviceMesh] = None
 
 

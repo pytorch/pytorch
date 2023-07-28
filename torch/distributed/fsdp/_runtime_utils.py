@@ -13,12 +13,11 @@ from torch.autograd import Variable
 from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed import get_backend, get_world_size
 from torch.distributed._tensor import DeviceMesh
-from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
+from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _assert_in_training_states,
     _FSDPState,
     _get_module_fsdp_state,
-    _get_sharding_strategy,
     _is_composable,
     _no_dispatch_record_stream,
     TrainingState,
@@ -107,33 +106,25 @@ def _is_fsdp_root(state: _FSDPState, module: nn.Module) -> bool:
 
 
 @no_type_check
-def _validate_and_get_hybrid_shard_state(
-    root_module: nn.Module,
-) -> default_hooks.DefaultState:
+def _validate_and_get_hybrid_shard_state(root_module: nn.Module) -> None:
     """
     Precondition: ``root_module`` is a ``FullyShardedDataParallel`` instance.
 
     This checks that all instances using a hybrid sharding strategy have the
     same intra- and inter-node process groups.
-
-    Returns:
-        DefaultState: One of the instances' inter-node state (does not
-        matter which since they will share the same one).
     """
-    intra_node_pgs = set()
-    inter_node_pgs = set()
-    inter_node_states = set()
-    for fsdp_module in traversal_utils._get_fsdp_states(root_module):
+    intra_node_pgs: Set[dist.ProcessGroup] = set()
+    inter_node_pgs: Set[dist.ProcessGroup] = set()
+    for fsdp_state in traversal_utils._get_fsdp_states(root_module):
         # TODO: Change this to handle's sharding strategy if we deprecate
         # `ShardingStrategy` internally.
         # https://github.com/pytorch/pytorch/issues/90857
-        if fsdp_module.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
-            intra_node_pgs.add(fsdp_module.process_group)
-            inter_node_pgs.add(fsdp_module._inter_node_pg)
-            inter_node_states.add(fsdp_module._inter_node_state)
+        if fsdp_state.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+            intra_node_pgs.add(fsdp_state.process_group)
+            inter_node_pgs.add(fsdp_state._inter_node_pg)
     if len(intra_node_pgs) == 0 and len(inter_node_pgs) == 0:
         # No instances use a hybrid sharding strategy
-        return None
+        return
     error_prefix = "At least one instance uses a hybrid sharding strategy but has no "
     if len(intra_node_pgs) > 0 and len(inter_node_pgs) == 0:
         raise AssertionError(error_prefix + "inter-node process group set")
@@ -144,7 +135,6 @@ def _validate_and_get_hybrid_shard_state(
         raise ValueError(error_prefix + "intra-node process groups do not match")
     if len(inter_node_pgs) != 1:
         raise ValueError(error_prefix + "inter-node process groups do not match")
-    return next(iter(inter_node_states))
 
 
 @no_type_check
@@ -236,7 +226,7 @@ def _share_state_and_init_handle_attrs(
     handle = root_state._handle
     if handle:
         handle.init_flat_param_attributes()
-    inter_node_state = _validate_and_get_hybrid_shard_state(root_module)
+    _validate_and_get_hybrid_shard_state(root_module)
     attr_name_to_values: Dict[str, Set[Any]] = {}
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
@@ -263,21 +253,6 @@ def _share_state_and_init_handle_attrs(
             attr_name_to_values[attr_name].add(getattr(fsdp_state, attr_name))
         if fsdp_state is root_state:
             continue
-        handle_sharding_strategy = _get_sharding_strategy(fsdp_state._handle)
-        if handle_sharding_strategy in (
-            HandleShardingStrategy.HYBRID_SHARD,
-            HandleShardingStrategy._HYBRID_SHARD_ZERO2,
-        ):
-            # Share the all-reduce state across FSDP units. This is not strictly necessary
-            # as each one already uses the same process group, but can slightly save memory
-            # since other FSDP units allreduce state can be garbage collected.
-            assert inter_node_state is not None, (
-                "`_validate_and_get_hybrid_shard_state()` should have returned "
-                "a valid inter-node state if there exists an FSDP instance "
-                "using a hybrid sharding strategy"
-            )
-            fsdp_state._inter_node_state = inter_node_state
-
         # Relax the assert for non-root FSDP instances in case the nested
         # initialized module is wrapped again in FSDP later (e.g. after
         # training to run inference)
@@ -781,8 +756,6 @@ def _post_backward_hook(
 
         with state._device_handle.stream(state._post_backward_stream):
             autograd_computed_grad = flat_param.grad.data
-            if state._exec_order_data.is_first_iter:  # only check once
-                _check_comm_hook(state._comm_hook, state._comm_hook_state)
             if (
                 not _low_precision_hook_enabled(state)
                 and flat_param.grad.dtype != handle._reduce_dtype
@@ -792,7 +765,13 @@ def _post_backward_hook(
             ):
                 flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
 
+            prediv_factor = state._gradient_predivide_factor
+            postdiv_factor = state._gradient_postdivide_factor
             if handle.uses_sharded_strategy:
+                uses_hybrid_sharded_strategy = handle._sharding_strategy in (
+                    HandleShardingStrategy.HYBRID_SHARD,
+                    HandleShardingStrategy._HYBRID_SHARD_ZERO2,
+                )
                 # We clear `.grad` to permit multiple backwards. This avoids a
                 # race where the second backward pass computation precedes
                 # ahead of the first backward pass reduction, which is possible
@@ -810,19 +789,23 @@ def _post_backward_hook(
                     else unsharded_grad
                 )
                 new_sharded_grad = torch.empty_like(chunks[0])  # padded
-                state._comm_hook(
-                    state._comm_hook_state,
-                    padded_unsharded_grad,
-                    new_sharded_grad,
-                )
-                if handle._sharding_strategy in (
-                    HandleShardingStrategy.HYBRID_SHARD,
-                    HandleShardingStrategy._HYBRID_SHARD_ZERO2,
-                ):
-                    default_hooks.allreduce_hook(
-                        state=state._inter_node_state,
-                        grad=new_sharded_grad,
+
+                if state._comm_hook is None:  # default path
+                    _div_if_needed(padded_unsharded_grad, prediv_factor)
+                    dist.reduce_scatter_tensor(
+                        new_sharded_grad,
+                        padded_unsharded_grad,
+                        group=state.process_group,
                     )
+                    if uses_hybrid_sharded_strategy:
+                        dist.all_reduce(new_sharded_grad, group=state._inter_node_pg)
+                    _div_if_needed(new_sharded_grad, postdiv_factor)
+                else:
+                    state._comm_hook(
+                        state._comm_hook_state, padded_unsharded_grad, new_sharded_grad
+                    )
+                    # NOTE: HSDP variants do not support communication hook.
+
                 _cast_grad_to_param_dtype(state, new_sharded_grad, flat_param)
                 # Save the sharded gradient in `_saved_grad_shard` to support
                 # gradient accumulation -- for multiple backwards, the gradient
@@ -837,7 +820,12 @@ def _post_backward_hook(
                     flat_param._saved_grad_shard = new_sharded_grad
                 grad_to_offload = flat_param._saved_grad_shard
             else:
-                state._comm_hook(state._comm_hook_state, flat_param.grad)
+                if state._comm_hook is None:  # default path
+                    _div_if_needed(flat_param.grad, prediv_factor)
+                    dist.all_reduce(flat_param.grad, group=state.process_group)
+                    _div_if_needed(flat_param.grad, postdiv_factor)
+                else:
+                    state._comm_hook(state._comm_hook_state, flat_param.grad)
                 # For `NO_SHARD`, we can keep the low precision gradients by
                 # simply omitting the cast altogether
                 if not handle._keep_low_precision_grads:
@@ -919,6 +907,11 @@ def _log_post_backward_hook(state: _FSDPState, handle: FlatParamHandle) -> None:
         log.warning("FSDP firing post-backward hooks for parameters %s", param_fqns)
 
 
+def _div_if_needed(tensor: torch.Tensor, div_factor: float) -> None:
+    if div_factor > 1:
+        tensor.div_(div_factor)
+
+
 def _post_backward_reshard(
     state: _FSDPState,
     handle: FlatParamHandle,
@@ -984,16 +977,6 @@ def _cast_grad_to_param_dtype(
         _no_dispatch_record_stream(
             low_prec_grad_data, state._device_handle.current_stream()
         )
-
-
-def _check_comm_hook(
-    comm_hook: Any,
-    comm_hook_state: Any,
-) -> None:
-    _p_assert(comm_hook is not None, "Communication hook should not be `None`")
-    _p_assert(
-        comm_hook_state is not None, "Communication hook state should not be `None`"
-    )
 
 
 def _check_grad_to_accumulate(

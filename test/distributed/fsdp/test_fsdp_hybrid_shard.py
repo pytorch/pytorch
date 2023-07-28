@@ -191,7 +191,7 @@ class TestFSDPHybridShard(FSDPTest):
         model(torch.randn(2, 10)).sum().backward()
         optim.step()
         shard_g = model.process_group
-        replicate_g = model._inter_node_state.process_group
+        replicate_g = model._inter_node_pg
         assert shard_g == my_shard_group
         assert replicate_g == my_replicate_group
         with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT):
