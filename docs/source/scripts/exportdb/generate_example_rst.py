@@ -31,7 +31,7 @@ def generate_example_rst(example_case: ExportCase):
         if isinstance(model, torch.nn.Module)
         else inspect.getfile(model)
     )
-    with open(source_file, "r") as file:
+    with open(source_file) as file:
         source_code = file.read()
     source_code = re.sub(r"from torch\._export\.db\.case import .*\n", "", source_code)
     source_code = re.sub(r"@export_case\((.|\n)*?\)\n", "", source_code)
@@ -72,6 +72,7 @@ Result:
         exported_program = export(
             model,
             inputs.args,
+            inputs.kwargs,
             constraints=example_case.constraints,
         )
         graph_output = str(exported_program)
@@ -114,7 +115,7 @@ def generate_index_rst(example_cases, tag_to_modules, support_level_to_modules):
 
     tag_names = "\n    ".join(t for t in tag_to_modules.keys())
 
-    with open(os.path.join(PWD, "blurb.txt"), "r") as file:
+    with open(os.path.join(PWD, "blurb.txt")) as file:
         blurb = file.read()
 
     # Generate contents of the .rst file
@@ -158,13 +159,14 @@ def generate_rst():
     tag_to_modules = {}
     support_level_to_modules = {}
     for example_case in example_cases.values():
-
         doc_contents = generate_example_rst(example_case)
 
         for tag in example_case.tags:
             tag_to_modules.setdefault(tag, []).append(doc_contents)
 
-        support_level_to_modules.setdefault(example_case.support_level, []).append(doc_contents)
+        support_level_to_modules.setdefault(example_case.support_level, []).append(
+            doc_contents
+        )
 
     generate_tag_rst(tag_to_modules)
     generate_index_rst(example_cases, tag_to_modules, support_level_to_modules)
