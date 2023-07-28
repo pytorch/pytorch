@@ -504,11 +504,12 @@ class FlatParamHandle:
         self._training_state = HandleTrainingState.IDLE
         self._debug_level = dist.get_debug_level()
         self._fully_sharded_module = fully_sharded_module
-        # NOTE: For the code path using this flag, we only skip calling
-        # `_use_sharded_views()` and do not skip switching to the sharded flat
-        # parameter since whether `self.flat_param` uses the sharded or
-        # unsharded flat parameter parameterizes behavior.
-        self._skipped_use_sharded_views = False
+        # For strategies that do not free after forward, we skip using sharded
+        # views after forward since the unsharded data exists. We still switch
+        # `self.flat_param` to point to the sharded flat parameter since what
+        # it points to parameterizes behavior. We use the following attribute
+        # to track which tensor data the parameters are unsharded views into.
+        self._unsharded_flat_param_for_skipped_views: Optional[Tensor] = None
         # Optimistically assume a valid input `params` and set dtype attributes
         # before `_init_flat_param()`, which performs the actual validation
         self._orig_param_dtype = params[0].dtype
@@ -1166,6 +1167,14 @@ class FlatParamHandle:
         communication and is what should be all-gathered. This means that it
         matches the dtype of the expected unsharded parameter.
         """
+        if (
+            self._training_state == HandleTrainingState.SUMMON_FULL_PARAMS
+            and self._skipped_use_sharded_views
+        ):
+            # Since this path imposes special semantics for the unsharded flat
+            # parameter (e.g. forcing full precision), use sharded views to
+            # reuse the existing logic for that special handling
+            self._use_sharded_views()
         ret = False
         if self._use_orig_params and not self._skip_writeback_check:
             ret = self._writeback_orig_params()
@@ -1505,7 +1514,7 @@ class FlatParamHandle:
         def cast_grad_to_param_dtype_if_needed(flat_param):
             # TODO (rohan-varma): test for full precision with keep_low_precision_grads
             if not self._force_full_precision and self._keep_low_precision_grads:
-                assert flat_param.grad is not None  # mypy
+                _p_assert(flat_param.grad is not None, "Unexpected None grad!")
                 if flat_param.grad.dtype != self._fwd_bwd_param_dtype:
                     flat_param.grad.data = flat_param.grad.to(self._fwd_bwd_param_dtype)
                     if self._use_orig_params:
@@ -1523,12 +1532,14 @@ class FlatParamHandle:
         elif hasattr(flat_param, "_saved_grad_shard"):
             self._check_sharded(flat_param)
             self._check_on_compute_device(flat_param)
-            self._check_on_compute_device(flat_param._saved_grad_shard)  # type: ignore[attr-defined]
+            if flat_param._saved_grad_shard is not None:
+                self._check_on_compute_device(flat_param._saved_grad_shard)  # type: ignore[attr-defined]
             # If no sharded gradient was computed this iteration, then there is
             # no need to forward `_saved_grad_shard` to `grad`
             if flat_param._post_backward_called:  # type: ignore[attr-defined]
                 flat_param.grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
-                cast_grad_to_param_dtype_if_needed(flat_param)
+                if flat_param.grad is not None:
+                    cast_grad_to_param_dtype_if_needed(flat_param)
         else:
             _p_assert(
                 not self.uses_sharded_strategy
@@ -1643,6 +1654,17 @@ class FlatParamHandle:
     def _use_sharded_flat_param(self) -> None:
         """Switches to using the sharded flat parameter."""
         flat_param = self.flat_param
+        if self._use_orig_params:
+            in_forward = self._training_state == HandleTrainingState.FORWARD
+            skip_use_sharded_views = (
+                torch.is_grad_enabled()
+                and in_forward
+                and self._sharding_strategy
+                in NO_RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES
+            )
+            # Only incur the extra `.data` call if needed
+            if skip_use_sharded_views:
+                unsharded_flat_param = flat_param.data
         if self._offload_params:
             device = flat_param._local_shard.device  # type: ignore[attr-defined]
             _p_assert(
@@ -1651,13 +1673,8 @@ class FlatParamHandle:
             )
         flat_param.data = flat_param._local_shard  # type: ignore[attr-defined]
         if self._use_orig_params:
-            in_forward = self._training_state == HandleTrainingState.FORWARD
-            if (
-                in_forward
-                and self._sharding_strategy
-                in NO_RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES
-            ):
-                self._skipped_use_sharded_views = True
+            if skip_use_sharded_views:
+                self._unsharded_flat_param_for_skipped_views = unsharded_flat_param
             else:
                 self._use_sharded_views()
             # For the post-forward reshard, we may try to use sharded gradient
@@ -1917,7 +1934,7 @@ class FlatParamHandle:
         printability. Parameters whose data is present must preserve their
         variables to be passable to an optimizer.
         """
-        self._skipped_use_sharded_views = False
+        self._unsharded_flat_param_for_skipped_views = None
         if not self.uses_sharded_strategy:
             # For `NO_SHARD`, use the *unflattened* unsharded views since we
             # have the unsharded parameter
@@ -2042,8 +2059,17 @@ class FlatParamHandle:
         flat_param = self.flat_param
         wroteback = False
         if self._skipped_use_sharded_views and self.uses_sharded_strategy:
+            # NOTE: We must use the unsharded flat parameter from which the
+            # unsharded views were computed, not the one from the current
+            # calling context (`_get_padded_unsharded_flat_param()`) since that
+            # may be different (e.g. the model changed from train to eval).
             flat_param_data_ptr = (
-                self._get_padded_unsharded_flat_param().untyped_storage().data_ptr()
+                self._unsharded_flat_param_for_skipped_views.untyped_storage().data_ptr()
+            )
+            _p_assert(
+                flat_param_data_ptr > 0,
+                "If skipped using sharded views, the unsharded flat parameter "
+                "should be allocated",
             )
         else:
             flat_param_data_ptr = flat_param.untyped_storage().data_ptr()
@@ -2475,6 +2501,16 @@ class FlatParamHandle:
             (not self._fully_sharded_module.training and self._use_full_prec_in_eval)
         )
 
+    @property
+    def _skipped_use_sharded_views(self) -> bool:
+        """
+        This property is used for sharding strategies that do not free after
+        forward with ``use_orig_params=True``. This returns if this handle is
+        currently in a state where it has skipped using sharded views, in which
+        case it can restore view invariants via ``_use_sharded_views()``.
+        """
+        return self._unsharded_flat_param_for_skipped_views is not None
+
 
 # NOTE: These are hacks to bypass `nn.Module.__setattr__` checks.
 def _unsafe_setattr_param(
@@ -2547,9 +2583,3 @@ def _construct_padding_tensor(
 @functools.lru_cache(1)
 def _warn_skip_writeback_check(log: logging.Logger, warning: str):
     log.warning(warning)
-
-
-# A handles key represents the group of `FlatParamHandle`s involved in a given
-# module's forward. These will be all-gathered together in the pre-forward and
-# pre-backward.
-_HandlesKey = Tuple[FlatParamHandle, ...]

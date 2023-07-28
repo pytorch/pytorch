@@ -504,7 +504,7 @@ class _DenseBlock(torch.nn.ModuleDict):
 
     def forward(self, init_features):
         features = [init_features]
-        for name, layer in self.items():
+        for layer in self.values():
             new_features = layer(features)
             features.append(new_features)
         return torch.cat(features, 1)
@@ -762,7 +762,7 @@ class ConvTransposeCallForwardDirectly(torch.nn.Module):
 
 class ConvCallSuperForwardDirectly(torch.nn.Conv1d):
     def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
-        super(ConvCallSuperForwardDirectly, self).__init__(
+        super().__init__(
             in_channels=in_channels,
             out_channels=out_channels,
             kernel_size=kernel_size,
@@ -770,13 +770,13 @@ class ConvCallSuperForwardDirectly(torch.nn.Conv1d):
         )
 
     def forward(self, inputs, mask=None):
-        outputs = super(ConvCallSuperForwardDirectly, self).forward(inputs)
+        outputs = super().forward(inputs)
         return outputs
 
 
 class ConvTransposeCallSuperForwardDirectly(torch.nn.ConvTranspose2d):
     def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
-        super(ConvTransposeCallSuperForwardDirectly, self).__init__(
+        super().__init__(
             in_channels=in_channels,
             out_channels=out_channels,
             kernel_size=kernel_size,
@@ -785,7 +785,7 @@ class ConvTransposeCallSuperForwardDirectly(torch.nn.ConvTranspose2d):
 
     def forward(self, x):
         if x.numel() > 0:
-            return super(ConvTransposeCallSuperForwardDirectly, self).forward(x)
+            return super().forward(x)
         output_shape = [
             ((i - 1) * d - 2 * p + (di * (k - 1) + 1) + op)
             for i, p, di, k, d, op in zip(
@@ -923,7 +923,7 @@ class ModuleGuardNameIsValid(torch.nn.ModuleDict):
 class SequentialWithDuplicatedModule(torch.nn.Module):
     # Sequential module(self.layer) contains three duplicated ReLU module.
     def __init__(self):
-        super(SequentialWithDuplicatedModule, self).__init__()
+        super().__init__()
         self.relu = torch.nn.ReLU()
         self.layer = torch.nn.Sequential(
             torch.nn.Linear(10, 20),
@@ -940,7 +940,7 @@ class SequentialWithDuplicatedModule(torch.nn.Module):
 
 class SequentialWithDuplicatedModule2(torch.nn.Module):
     def __init__(self):
-        super(SequentialWithDuplicatedModule2, self).__init__()
+        super().__init__()
         self.relu = torch.nn.ReLU()
         self.layer = torch.nn.Sequential(
             collections.OrderedDict(
@@ -1410,7 +1410,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         mod = ModuleSpecialFwd()
         rx = torch.randn([3, 10, 10])
         real = mod(rx)
-        graph, _ = torch._dynamo.export(mod, rx)
+        graph, _ = torch._dynamo.export(mod)(rx)
         self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
 
     def test_conv_call_forward_directly(self):
