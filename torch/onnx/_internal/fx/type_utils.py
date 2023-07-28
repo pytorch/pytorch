@@ -15,6 +15,7 @@ from typing import (
 )
 
 import torch
+from torch._subclasses import fake_tensor
 
 if TYPE_CHECKING:
     import onnx.defs.OpSchema.AttrType  # type: ignore[import]
@@ -29,13 +30,17 @@ class TensorLike(Protocol):
         ...
 
 
-def is_torch_complex_dtype(tensor: TensorLike) -> bool:
+def is_torch_complex_dtype(tensor_dtype: torch.dtype) -> bool:
     # NOTE: This is needed as TorchScriptTensor is nor supported by torch.is_complex()
-    return tensor.dtype in _COMPLEX_TO_FLOAT
+    return tensor_dtype in _COMPLEX_TO_FLOAT
 
 
 def from_complex_to_float(dtype: torch.dtype) -> torch.dtype:
     return _COMPLEX_TO_FLOAT[dtype]
+
+
+def from_sym_value_to_torch_dtype(sym_value: SYM_VALUE_TYPE) -> torch.dtype:
+    return _SYM_TYPE_TO_TORCH_DTYPE[type(sym_value)]
 
 
 def from_torch_dtype_to_onnx_dtype_str(dtype: Union[torch.dtype, type]) -> Set[str]:
@@ -95,12 +100,20 @@ _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: Dict[
     int: {"tensor(int16)", "tensor(int32)", "tensor(int64)"},
     float: {"tensor(float16)", "tensor(float)", "tensor(double)"},
     bool: {"tensor(int32)", "tensor(int64)", "tensor(bool)"},
+    torch.complex32: {"tensor(float16)"},
+    torch.complex64: {"tensor(float)"},
+    torch.complex128: {"tensor(double)"},
 }
 
 _COMPLEX_TO_FLOAT: Dict[torch.dtype, torch.dtype] = {
     torch.complex32: torch.float16,
     torch.complex64: torch.float32,
     torch.complex128: torch.float64,  # NOTE: ORT doesn't support torch.float64
+}
+_SYM_TYPE_TO_TORCH_DTYPE = {
+    torch.SymInt: torch.int64,
+    torch.SymFloat: torch.float32,
+    torch.SymBool: torch.bool,
 }
 
 _TORCH_DTYPE_TO_ABBREVIATION = {
@@ -119,6 +132,8 @@ _TORCH_DTYPE_TO_ABBREVIATION = {
     torch.uint8: "u8",
 }
 
+SYM_VALUE_TYPE = Union[torch.SymInt, torch.SymFloat, torch.SymBool]
+META_VALUE_TYPE = Union[fake_tensor.FakeTensor, SYM_VALUE_TYPE]
 # NOTE: Belows are from torch/fx/node.py
 BaseArgumentTypes = Union[
     str,

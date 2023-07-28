@@ -191,11 +191,10 @@ class DynamoExport(exporter.FXGraphExtractor):
         fx_mode = "symbolic" if options.dynamic_shapes else "fake"
         graph_module, graph_guard = torch._dynamo.export(
             wrapped_model,
-            *model_args,
             tracing_mode=fx_mode,
             fake_mode=fake_mode,  # type: ignore[arg-type]
-            aten_graph=fake_mode
-            is not None,  # TODO: Tracked by https://github.com/pytorch/pytorch/issues/105467
+        )(
+            *model_args,
             **model_kwargs,
         )
         del graph_guard  # Unused
