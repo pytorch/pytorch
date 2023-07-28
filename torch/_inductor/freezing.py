@@ -2,7 +2,7 @@ import collections
 import itertools
 
 import weakref
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -72,13 +72,27 @@ def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
     return preserved_arg_indices
 
 
+def return_true(*args, **kwargs):
+    return True
+
+
 class ConstantFolder(torch.fx.Interpreter):
-    def __init__(self, gm, skip_constructors=False):
+    def __init__(
+        self,
+        gm,
+        skip_constructors=False,
+        insertable_tensor_check: Optional[Callable[[torch.Tensor], bool]] = None,
+    ):
         super().__init__(gm)
         self.node_replacements = {}
         self.replaced_uses = collections.Counter()
         self.unknown_value = object()
         self.skip_constructors = skip_constructors
+        self.insertable_tensor_check = (
+            insertable_tensor_check
+            if insertable_tensor_check is not None
+            else return_true
+        )
 
     def run_node(self, node):
         aten = torch.ops.aten
@@ -119,6 +133,9 @@ class ConstantFolder(torch.fx.Interpreter):
         out = super().run_node(node)
 
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
+            if not self.insertable_tensor_check(out):
+                return out
+
             self.node_replacements[node] = out
 
             flattened_node_inps = pytree.tree_flatten((node.args, node.kwargs))[0]

@@ -112,7 +112,10 @@ def constant_fold_uniform_value(gm):
     aten = torch.ops.aten
     from torch._inductor.freezing import ConstantFolder
 
-    cf = ConstantFolder(gm)
+    def is_uniform_valued_tensor(t):
+        return t.numel() != 0 and (t == t.flatten()[0]).all()
+
+    cf = ConstantFolder(gm, insertable_tensor_check=is_uniform_valued_tensor)
     cf.run()
 
     node_replacements = cf.node_replacements
@@ -138,7 +141,7 @@ def constant_fold_uniform_value(gm):
         # remove constants which can be replaced with a constructor.
 
         # TODO - we could also Tensors which get replaced with arange here
-        if constant.numel() == 0 or not (constant == constant.flatten()[0]).all():
+        if not is_uniform_valued_tensor(constant):
             continue
 
         # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
