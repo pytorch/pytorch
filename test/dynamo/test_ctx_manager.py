@@ -238,7 +238,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -263,7 +263,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, _ = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -347,7 +347,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -521,7 +521,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -547,7 +547,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)

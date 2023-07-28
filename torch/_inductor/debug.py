@@ -96,7 +96,6 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
     FusionMeta = collections.namedtuple("FusionMeta", ["group", "snode", "type"])
 
-    func_dict = {s: get_fake_func(s) for s in ["extern", "nop", "compute", "fused"]}
     buf_to_fx_node = {}
     graph = torch.fx.Graph()
     first_node = None
@@ -122,7 +121,12 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
             group = snode.group
         else:
             raise RuntimeError("Unknown node type")
-        node_func = func_dict[node_type]
+
+        fused_name = torch._inductor.utils.get_fused_kernel_name(
+            snode.get_nodes(), "original_aten"
+        )
+        func_name = f"{node_type}: {fused_name}"
+        node_func = get_fake_func(func_name)
         fx_node = graph.call_function(node_func, args=(), kwargs=None)
 
         def in_output(snode):
