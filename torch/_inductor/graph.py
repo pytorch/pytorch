@@ -459,8 +459,8 @@ class GraphLowering(torch.fx.Interpreter):
             if isinstance(value, ir.IRNode):
                 if (
                     not hasattr(value, "data")
-                    or value.data is not ir.IRNode
-                    or value.data.data is not ir.IRNode
+                    or not isinstance(value.data, ir.IRNode)
+                    or not isinstance(value.data.data, ir.IRNode)
                 ):
                     return
 
