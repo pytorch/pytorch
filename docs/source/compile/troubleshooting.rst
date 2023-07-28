@@ -54,7 +54,7 @@ tools and their typical usage. For additional help see
      - ``TORCHDYNAMO_REPRO_AFTER="aot" TORCHDYNAMO_REPRO_LEVEL=4``
    * - ``torch._dynamo.explain``
      - Find graph breaks and display reasoning for them
-     - ``torch._dynamo.explain(fn, *inputs)``
+     - ``torch._dynamo.explain(fn)(*inputs)``
    * - Record/Replay
      - Record and replay frames which to reproduce errors during graph capture
      - ``torch._dynamo.config.replay_record_enabled = True``

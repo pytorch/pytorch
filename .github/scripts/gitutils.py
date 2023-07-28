@@ -53,6 +53,9 @@ def _check_output(items: List[str], encoding: str = "utf-8") -> str:
         msg = f"Command `{' '.join(e.cmd)}` returned non-zero exit code {e.returncode}"
         stdout = e.stdout.decode(encoding) if e.stdout is not None else ""
         stderr = e.stderr.decode(encoding) if e.stderr is not None else ""
+        # These get swallowed up, so print them here for debugging
+        print(f"stdout: \n{stdout}")
+        print(f"stderr: \n{stderr}")
         if len(stderr) == 0:
             msg += f"\n```\n{stdout}```"
         else:
