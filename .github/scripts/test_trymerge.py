@@ -836,73 +836,33 @@ class TestBypassFailures(TestCase):
         )
 
 
-class TestGitHubPRGhstackDependencies(TestCase):
-    @mock.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
-    def setUp(self, mock_gh_get_pr_info: mock.MagicMock) -> None:
-        self.pr = self.mock_pr(123, "Mock title", "Mock body text", closed=False)
-        pass
-
-    @staticmethod
-    def mock_pr(num: int, title: str, body: str, closed: bool) -> GitHubPR:
-        pr = GitHubPR("pytorch", "pytorch", num)
-
-        # mypy is not happy about mocking methods this way
-        # unfortunately, alternatives are very verbose
-        # see: https://github.com/python/mypy/issues/6713
-        pr.get_body = mock.Mock(return_value=body)  # type: ignore[assignment]
-        pr.get_title = mock.Mock(return_value=title)  # type: ignore[assignment]
-        pr.is_closed = mock.Mock(return_value=closed)  # type: ignore[assignment]
-        pr.get_approved_by = mock.Mock(return_value=["Approver1", "Approver2"])  # type: ignore[assignment]
-        pr.get_pr_url = mock.Mock(  # type: ignore[assignment]
-            return_value=f"https://github.com/pytorch/pytorch/pull/{num}"
-        )
-        pr.is_ghstack_pr = mock.Mock(return_value=True)  # type: ignore[assignment]
-
-        return pr
-
-    @mock.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
-    def test_gen_commit_message(self, mock_gh_get_pr_info: mock.MagicMock) -> None:
-        """
-        Test that the commit message for non-ghstack PR is generated correctly
-        """
-        expected_message = (
-            "Mock title (#123)\n\n"
-            "Mock body text\n"
-            "Pull Request resolved: https://github.com/pytorch/pytorch/pull/123\n"
-            "Approved by: https://github.com/Approver1, https://github.com/Approver2\n"
+@mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
+@mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+@mock.patch("trymerge.gh_fetch_merge_base", return_value="")
+class TestGitHubPRGhstackDependencies2(TestCase):
+    def test_pr_dependencies(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 106068)
+        msg = pr.gen_commit_message(filter_ghstack=True)
+        assert msg == (
+            "[FSDP] Break up `_post_backward_hook` into smaller funcs (#106068)\n\n\nDifferential Revision: ["
+            "D47852461](https://our.internmc.facebook.com/intern/diff/D47852461)\nPull Request resolved: "
+            "https://github.com/pytorch/pytorch/pull/106068\nApproved by: \n"
         )
 
-        actual_message = self.pr.gen_commit_message(filter_ghstack=False)
-        self.assertEqual(actual_message, expected_message)
+    def test_pr_dependencies_ghstack(self, *args: Any) -> None:
+        pr0 = GitHubPR("pytorch", "pytorch", 106032)
+        pr1 = GitHubPR("pytorch", "pytorch", 106033)
+        pr2 = GitHubPR("pytorch", "pytorch", 106034)
+        pr = GitHubPR("pytorch", "pytorch", 106068)
 
-    @mock.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
-    def test_gen_commit_message_with_ghstack_deps(
-        self, mock_gh_get_pr_info: mock.MagicMock
-    ) -> None:
-        """
-        Test that the commit message for ghstack PR is generated correctly
-        """
-        mock_pr_dep = self.mock_pr(456, "Mock title", "Mock body text", closed=False)
-        mock_pr_dep_2 = self.mock_pr(789, "Mock title", "Mock body text", closed=False)
-        mock_pr_dep_3 = self.mock_pr(
-            1011, "Mock title", "Mock body text", closed=True
-        )  # closed!
-
-        expected_message = (
-            "Mock title (#123)\n\n"
-            "Mock body text\n"
-            "Pull Request resolved: https://github.com/pytorch/pytorch/pull/123\n"
-            "Approved by: https://github.com/Approver1, https://github.com/Approver2\n"
-            "ghstack dependencies: #456, #789, #1011\n"
+        msg = pr.gen_commit_message(filter_ghstack=True, ghstack_deps=[pr0, pr1, pr2])
+        assert msg == (
+            "[FSDP] Break up `_post_backward_hook` into smaller funcs (#106068)\n\n\nDifferential Revision: ["
+            "D47852461](https://our.internmc.facebook.com/intern/diff/D47852461)\nPull Request resolved: "
+            "https://github.com/pytorch/pytorch/pull/106068\nApproved by: \n"
+            "ghstack dependencies: #106032, #106033, #106034\n"
         )
 
-        actual_message = self.pr.gen_commit_message(
-            filter_ghstack=False,
-            ghstack_deps=[mock_pr_dep, mock_pr_dep_2, mock_pr_dep_3],
-        )
-        self.assertEqual(actual_message, expected_message)
-
-    @mock.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
     @mock.patch("trymerge.read_merge_rules")
     @mock.patch("trymerge.GitRepo")
     @mock.patch("trymerge.get_ghstack_prs")
@@ -911,30 +871,22 @@ class TestGitHubPRGhstackDependencies(TestCase):
         mock_get_ghstack_prs: mock.MagicMock,
         mock_repo: mock.MagicMock,
         mock_merge_rules: mock.MagicMock,
-        mock_gh_get_pr_info: mock.MagicMock,
+        *args: Any,
     ) -> None:
         """
         Test that the merge_ghstack_into method works correctly
         """
-        pr1 = self.mock_pr(1, "Pr1", "Pr1 Body", closed=True)  # !!! closed
-        pr1.last_commit = mock.Mock(return_value={"oid": "rev1"})  # type: ignore[assignment]
-        pr1.get_merge_base = mock.Mock(return_value="merge_base")  # type: ignore[assignment]
-        pr1.get_checkrun_conclusions = mock.Mock(return_value=dict())  # type: ignore[assignment]
-
-        pr2 = self.mock_pr(2, "Pr2", "Pr2 Body", closed=False)
-        pr2.last_commit = mock.Mock(return_value={"oid": "rev2"})  # type: ignore[assignment]
-        pr2.get_merge_base = mock.Mock(return_value="merge_base")  # type: ignore[assignment]
-        pr2.get_checkrun_conclusions = mock.Mock(return_value=dict())  # type: ignore[assignment]
-
-        self.pr.last_commit = mock.Mock(return_value={"oid": "rev123"})  # type: ignore[assignment]
-        self.pr.get_merge_base = mock.Mock(return_value="merge_base")  # type: ignore[assignment]
-        self.pr.get_checkrun_conclusions = mock.Mock(return_value=dict())  # type: ignore[assignment]
+        pr0 = GitHubPR("pytorch", "pytorch", 106032)
+        pr1 = GitHubPR("pytorch", "pytorch", 106033)
+        pr2 = GitHubPR("pytorch", "pytorch", 106034)
+        pr = GitHubPR("pytorch", "pytorch", 106068)
 
         # note: in reverse order (e.g. self.pr is the last commit, top of the stack)
         mock_get_ghstack_prs.return_value = [
+            (pr0, "rev0"),
             (pr1, "rev1"),
             (pr2, "rev2"),
-            (self.pr, "rev123"),
+            (pr, "rev123"),
         ]
 
         mock_merge_rules.return_value = [
@@ -947,30 +899,38 @@ class TestGitHubPRGhstackDependencies(TestCase):
         mock_repo.amend_commit_message.return_value = None
 
         # Call the method under test
-        res = self.pr.merge_ghstack_into(mock_repo, True)
+        res = pr.merge_ghstack_into(mock_repo, True)
 
-        # Check the return value
-        self.assertEqual(res, [pr2, self.pr])
+        self.assertEqual(res, [pr2, pr])
 
         mock_repo.cherry_pick.assert_any_call("rev2")
         mock_repo.cherry_pick.assert_any_call("rev123")
 
         assert mock.call("rev1") not in mock_repo.cherry_pick.call_args_list
 
-        mock_repo.amend_commit_message.assert_any_call(
-            "Pr2 (#2)\n\n"
-            "Pr2 Body\n"
-            "Pull Request resolved: https://github.com/pytorch/pytorch/pull/2\n"
-            "Approved by: https://github.com/Approver1, https://github.com/Approver2\n"
-            "ghstack dependencies: #1\n"
+        # Verify the first call
+        message = mock_repo.amend_commit_message.call_args_list[0].args[0]
+        prefix = (
+            "[FSDP] Optimize away intermediate `div_` for HSDP (#106034)\n\n\r\n"
+            "### Background: Gradient Pre-Divide"
+        )
+        suffix = (
+            "\nPull Request resolved: https://github.com/pytorch/pytorch/pull/106034\nApproved by: \nghstack "
+            "dependencies: #106032, #106033\n"
         )
 
+        assert message.startswith(prefix)
+        assert message.endswith(suffix)
+
+        # Verify the second call
         mock_repo.amend_commit_message.assert_any_call(
-            "Mock title (#123)\n\n"
-            "Mock body text\n"
-            "Pull Request resolved: https://github.com/pytorch/pytorch/pull/123\n"
-            "Approved by: https://github.com/Approver1, https://github.com/Approver2\n"
-            "ghstack dependencies: #1, #2\n"
+            "[FSDP] Break up `_post_backward_hook` into smaller funcs (#106068)\n\n\n"
+            "Differential Revision: ["
+            "D47852461](https://our.internmc.facebook.com/intern/diff/D47852461)\n"
+            "Pull Request resolved: "
+            "https://github.com/pytorch/pytorch/pull/106068\n"
+            "Approved by: \n"
+            "ghstack dependencies: #106032, #106033, #106034\n"
         )
 
 
