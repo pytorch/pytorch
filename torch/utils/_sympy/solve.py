@@ -53,23 +53,31 @@ def try_solve(
         log.debug("expression with unsupported type: %s", type(expr))
         return None
 
+    lhs_has_thing = expr.lhs.has(thing)
+    rhs_has_thing = expr.rhs.has(thing)
+
     # Give up when 'thing' appears on both sides of the relational expression.
     # That is because, as is, we assume the thing we are trying to isolate is
     # only on the right-hand side.
-    if expr.lhs.has(thing) and expr.rhs.has(thing):
+    if lhs_has_thing and rhs_has_thing:
         log.debug("thing (%s) found in both sides of expression: %s", thing, expr)
         return None
 
-    # Here, we try considering both LHS and RHS by mirroring the
-    # original expression: a < b ==> b > a
-    for e in (expr, mirror(expr.rhs, expr.lhs)):
+    # Try considering both LHS and RHS by mirroring the original expression:
+    # a < b ==> b > a
+    expressions = []
+
+    # Add each version of 'expr' if 'thing' is in its left-hand side.
+    if lhs_has_thing:
+        expressions.append(expr)
+    if rhs_has_thing:
+        expressions.append(mirror(expr.rhs, expr.lhs))
+
+    for e in expressions:
         if e is None:
             continue
 
         assert isinstance(e, sympy.Rel)
-
-        if not e.lhs.has(thing):
-            continue
 
         for _ in range(trials):
             trial = _try_isolate_lhs(e, thing, floordiv_inequality=floordiv_inequality)
@@ -105,13 +113,13 @@ def _try_isolate_lhs(
         lhs, rhs = e.args
         other = sympy.Mul(*[a for a in lhs.args if not a.has(thing)])
 
-        # Divide both sides by 'other'.
-        lhs = lhs / other
-        rhs = rhs / other
-
         # If we can't tell whether 'other' is negative or positive, we do nothing.
         # That is because we don't know whether we have mirror the operation or not.
         if not (isinstance(e, INEQUALITY_TYPES) and other.is_negative is None):
+            # Divide both sides by 'other'.
+            lhs = lhs / other
+            rhs = rhs / other
+
             # If 'e' is an inequality and 'other' is negative, we have to
             # mirror the expression.
             if isinstance(e, INEQUALITY_TYPES) and other.is_negative:
