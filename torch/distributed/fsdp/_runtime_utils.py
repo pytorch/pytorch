@@ -797,12 +797,9 @@ def _post_backward_hook(
                         padded_unsharded_grad,
                         group=state.process_group,
                     )
-                    if not uses_hybrid_sharded_strategy:
-                        _div_if_needed(new_sharded_grad, postdiv_factor)
                     if uses_hybrid_sharded_strategy:
                         dist.all_reduce(new_sharded_grad, group=state._inter_node_pg)
-                        # TODO: Refactor this if we make the all-reduce async
-                        _div_if_needed(new_sharded_grad, postdiv_factor)
+                    _div_if_needed(new_sharded_grad, postdiv_factor)
                 else:
                     state._comm_hook(
                         state._comm_hook_state, padded_unsharded_grad, new_sharded_grad
