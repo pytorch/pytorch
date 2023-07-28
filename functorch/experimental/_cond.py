@@ -131,11 +131,7 @@ def cond_dense(pred, true_fn, false_fn, operands):
         return false_fn(*operands)
 
 
-@cond.py_impl(DispatchKey.Autograd)
-def cond_autograd(pred, true_fn, false_fn, *operands):
-    # TODO: support autograd
-    return autograd_not_implemented(
-        lambda *operands: cond(pred, true_fn, false_fn, *operands), "cond", True, *operands)
+cond.py_impl(DispatchKey.Autograd)(autograd_not_implemented(cond, deferred_error=True))
 
 
 @cond.py_impl(ProxyTorchDispatchMode)

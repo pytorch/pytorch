@@ -117,14 +117,7 @@ def out_dtype_dense(
     return res
 
 
-@out_dtype.py_impl(DispatchKey.Autograd)
-def out_dtype_autograd(
-    op: torch._ops.OpOverload,
-    output_dtype: torch.dtype,
-    *args
-):
-    return autograd_not_implemented(lambda *args, **kwargs: out_dtype(op, output_dtype, *args),
-                                    "out_dtype", False, *args)
+out_dtype.py_impl(DispatchKey.Autograd)(autograd_not_implemented(out_dtype, deferred_error=False))
 
 
 @out_dtype.py_impl(ProxyTorchDispatchMode)
