@@ -154,7 +154,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         real = mod(rx)
 
         # Run it in export
-        graph, _ = torch._dynamo.export(mod, rx)
+        graph, _ = torch._dynamo.export(mod)(rx)
 
         # Run exported graph with AOT
         self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
@@ -185,7 +185,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         real = mod(x, y)
 
         # Run it in export
-        graph, _ = torch._dynamo.export(mod, x, y)
+        graph, _ = torch._dynamo.export(mod)(x, y)
 
         # Assert equal
         self.assertTrue(torch._dynamo.testing.same(real, graph(x, y)))
