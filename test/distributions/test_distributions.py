@@ -44,7 +44,7 @@ torch.set_default_dtype(torch.double)
 
 from torch import inf, nan
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests,
+    (TestCase, run_tests, set_rng_seed, load_tests,
      gradcheck, skipIfTorchDynamo)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad
@@ -5003,7 +5003,6 @@ class TestValidation(DistributionsTestCase):
                         fail_string.format(Dist.__name__, i + 1, len(params))
                     ) from e
 
-    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_invalid(self):
         for Dist, params in BAD_EXAMPLES:
             for i, param in enumerate(params):
