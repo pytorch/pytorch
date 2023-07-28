@@ -853,7 +853,7 @@ if torch._C._has_mkldnn:
                     assert (
                         is_bf16_weight
                     ), f"only bf16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
-                # For bfloat dynamic shape path, using a dummy input to pack weight for a better performance.
+                # For bfloat16 dynamic shape path, using input size hint to pack weight for a better performance.
                 packed_weight_inputs = (
                     transpose_weight_node,
                     batch_size.node.shape_env.size_hint(batch_size.node.expr)
