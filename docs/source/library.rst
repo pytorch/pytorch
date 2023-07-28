@@ -36,11 +36,9 @@ A tutorial that walks you through some examples on how to use this API is availa
 .. autoclass:: torch.library.Library
   :members:
 
+.. autofunction:: fallthrough_kernel
+
 We have also added some function decorators to make it convenient to register functions for operators:
 
 * :func:`torch.library.impl`
 * :func:`torch.library.define`
-
-To register a fallthrough, one can use the following function:
-
-* :func:`torch.library.fallthrough_kernel`

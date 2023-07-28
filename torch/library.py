@@ -19,7 +19,7 @@ def fallthrough_kernel():
     """
     A dummy function to pass to ``Library.impl`` in order to register a fallthrough.
     """
-    return
+    raise NotImplementedError("fallthrough_kernel() should never be called.")
 
 class Library:
     """
@@ -99,7 +99,7 @@ class Library:
             >>>     return self * (1 / other)
             >>> my_lib.impl("div.Tensor", div_cpu, "CPU")
         '''
-        if not (callable(fn)):
+        if not callable(fn):
             raise TypeError(f"Input function is required to be a callable but found type {type(fn)}")
         if dispatch_key == '':
             dispatch_key = self.dispatch_key

@@ -560,15 +560,15 @@ class TestPythonRegistration(TestCase):
             b = torch.randn(3, 2, device='cpu', dtype=torch.float32)
             with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
                 # dtype for mm should be float32 since we registered a fallthrough
-                self.assertTrue(torch.mm(a, b).dtype == torch.float32)
+                self.assertEqual(torch.mm(a, b).dtype, torch.float32)
                 # ops that don't have a fallthrough registered should not be affected
-                self.assertTrue(torch.matmul(a, b).dtype == torch.bfloat16)
+                self.assertEqual(torch.matmul(a, b).dtype, torch.bfloat16)
         finally:
             del my_lib
 
         with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
             # default behavior should have been restored
-            self.assertTrue(torch.mm(a, b).dtype == torch.bfloat16)
+            self.assertEqual(torch.mm(a, b).dtype, torch.bfloat16)
 
 
 class TestCustomOp(TestCase):
