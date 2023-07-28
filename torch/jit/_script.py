@@ -1319,6 +1319,8 @@ def script(
                 "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. "
             )
 
+    obj = obj.__prepare_scriptable__() if hasattr(obj, '__prepare_scriptable__') else obj  # type: ignore[operator]
+
     if isinstance(obj, torch.nn.Module):
         obj = call_prepare_scriptable_func(obj)
         return torch.jit._recursive.create_script_module(
