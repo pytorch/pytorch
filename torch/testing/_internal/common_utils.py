@@ -144,7 +144,7 @@ class TestEnvironment:
         implied = implied_by_fn()
         enabled = enabled or implied
         if include_in_repro and (env_var is not None) and (enabled != default) and not implied:
-            TestEnvironment.repro_env_vars[name] = env_var_val
+            TestEnvironment.repro_env_vars[env_var] = env_var_val
 
         # export flag globally for convenience
         assert name not in globals(), f"duplicate definition of flag '{name}'"
