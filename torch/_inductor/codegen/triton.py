@@ -2004,13 +2004,10 @@ class TritonScheduling:
         can fuse node1 and node2.  These nodes might already be
         FusedSchedulerNodes.
         """
-        if isinstance(node1, scheduler.ForeachKernelSchedulerNode):
-            return node1.can_fuse(node2)
-
         if isinstance(node1, scheduler.ForeachKernelSchedulerNode) or isinstance(
             node2, scheduler.ForeachKernelSchedulerNode
         ):
-            return False
+            return scheduler.ForeachKernelSchedulerNode.can_fuse(node1, node2)
 
         _, (numel1, rnumel1) = node1.group
         _, (numel2, rnumel2) = node2.group
