@@ -282,6 +282,15 @@ class CompiledNodeArgs {
   void collect(const caffe2::TypeMeta& t) {
     specialize_on_bytes(t.id());
   }
+  void collect(const std::shared_ptr<Node>& t) {
+    // Note: this is only capturing the ID of the node not everything
+    // contained inside it.  This is used for tracking connections between
+    // nodes and the actual details of the node itself must be handled by
+    // a seperate call to `node->compiled_args()`.
+    if (cond((bool)t)) {
+      collect(_compiler.node_calls.lookup(t));
+    }
+  }
   void collect(const NodeCall& t) {
     collect_size(t.id);
     collect(t.graph_output);
