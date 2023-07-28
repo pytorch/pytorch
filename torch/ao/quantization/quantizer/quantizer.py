@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from torch.fx import Node
-from typing import Callable, List, NamedTuple, Optional, Dict, Union, Tuple
-from torch.ao.quantization import ObserverOrFakeQuantize
-from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
-from torch import Tensor
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import torch
+from torch import Tensor
+from torch.ao.quantization import ObserverOrFakeQuantize
+from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
+from torch.fx import Node
 
 __all__ = [
     "Quantizer",
@@ -32,17 +32,21 @@ SUPPORTED_QSCHEMES = [
     torch.per_channel_affine_float_qparams,
 ]
 
+
 class QuantizationSpecBase(ABC):
-    """ Base class for different types of quantization specs that allows users to
+    """Base class for different types of quantization specs that allows users to
     specify how to quantize a Tensor (input/output of a Node) in the model
     """
+
     pass
+
 
 @dataclass(eq=True, frozen=True)
 class QuantizationSpec(QuantizationSpecBase):
-    """ Quantization spec for common operators that allows user to specify how to
+    """Quantization spec for common operators that allows user to specify how to
     quantize a Tensor, this includes dtype, quant_min, quant_max etc.
     """
+
     dtype: torch.dtype
     # observer or fake_quantize constructor such as
     # MinMaxObserver, PerChannelHistogramObserver etc.
@@ -79,6 +83,7 @@ class QuantizationSpec(QuantizationSpecBase):
         if self.ch_axis is not None and self.ch_axis < 0:
             raise ValueError("Ch_axis is < 0.")
 
+
 @dataclass(eq=True, frozen=True)
 class FixedQParamsQuantizationSpec(QuantizationSpecBase):
     dtype: torch.dtype
@@ -88,6 +93,7 @@ class FixedQParamsQuantizationSpec(QuantizationSpecBase):
     quant_max: Optional[int] = None
     qscheme: Optional[torch.qscheme] = None
 
+
 """
 The way we refer to other points of quantization in the graph will be either
 an input edge or an output value
@@ -95,25 +101,29 @@ input edge is the connection between input node and the node consuming the input
 output value is an fx Node
 """
 EdgeOrNode = Union[Tuple[Node, Node], Node]
-EdgeOrNode.__module__ = "torch.ao.quantization.pt2e.quantizer.quantizer"
+EdgeOrNode.__module__ = "torch.ao.quantization.quantizer.quantizer"
+
 
 @dataclass(eq=True, frozen=True)
 class SharedQuantizationSpec(QuantizationSpecBase):
     """
     Quantization spec for the Tensors whose quantization parameters are shared with other Tensors
     """
+
     edge_or_node: EdgeOrNode
+
 
 @dataclass(eq=True, frozen=True)
 class DerivedQuantizationSpec(QuantizationSpecBase):
-    """ quantization spec for the Tensors whose quantization parameters are derived from other Tensors
-    """
+    """Quantization spec for the Tensors whose quantization parameters are derived from other Tensors"""
+
     derived_from: List[EdgeOrNode]
     derive_qparams_fn: Callable[[List[ObserverOrFakeQuantize]], Tuple[Tensor, Tensor]]
     dtype: torch.dtype
     quant_min: Optional[int] = None
     quant_max: Optional[int] = None
     qscheme: Optional[torch.qscheme] = None
+
 
 # In the absence of better name, just winging it with QuantizationConfig
 @dataclass(eq=True, frozen=True)
@@ -125,8 +135,10 @@ class QuantizationConfig:
     # TODO: remove, since we can use observer_or_fake_quant_ctr to express this
     is_qat: bool = False
 
+
 OperatorPatternType = List[Callable]
-OperatorPatternType.__module__ = "torch.ao.quantization.pt2e.quantizer.quantizer"
+OperatorPatternType.__module__ = "torch.ao.quantization.quantizer.quantizer"
+
 
 class OperatorConfig(NamedTuple):
     # fix List[str] with List[List[Union[nn.Module, FunctionType, BuiltinFunctionType]]]
@@ -140,9 +152,10 @@ class OperatorConfig(NamedTuple):
     config: QuantizationConfig
     operators: List[OperatorPatternType]
 
+
 @dataclass
 class QuantizationAnnotation:
-    """ How are input arguemnt or output should be quantized,
+    """How are input arguemnt or output should be quantized,
     expressed as QuantizationSpec, this corresponds to how a Tensor in the
     operator Graph is observed (PTQ) or fake quantized (QAT)
     """
@@ -157,8 +170,8 @@ class QuantizationAnnotation:
     # whether the node is annotated or not
     _annotated: bool = False
 
-class Quantizer(ABC):
 
+class Quantizer(ABC):
     # annotate nodes in the graph with observer or fake quant constructors
     # to convey the desired way of quantization
     @abstractmethod
