@@ -344,9 +344,8 @@ def run_ort(
             f"Expected {len(input_names)} inputs, got {len(pytorch_inputs)}"
         )
 
-    return session.run(
-        None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
-    )
+    ort_input = {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
+    return session.run(None, ort_input)
 
 
 @_beartype.beartype
@@ -395,6 +394,7 @@ def _compare_pytorch_onnx_with_ort(
         ref_model(*ref_input_args, **ref_input_kwargs)
     )
     ort_outputs = run_ort(export_output, onnx_format_args)
+
     if len(ref_outputs) != len(ort_outputs):
         raise AssertionError(
             f"Expected {len(ref_outputs)} outputs, got {len(ort_outputs)}"
@@ -440,9 +440,9 @@ FLOAT_TYPES = (
 )
 
 COMPLEX_TYPES = (
-    torch.complex32,
+    # torch.complex32,  NOTE: torch.complex32 is experimental in torch
     torch.complex64,
-    torch.complex128,
+    # torch.complex128,  ORT doesn't support
 )
 
 TESTED_DTYPES = (

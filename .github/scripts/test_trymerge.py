@@ -649,7 +649,8 @@ class TestTryMerge(TestCase):
 class TestBypassFailures(TestCase):
     def test_get_classifications(self, *args: Any) -> None:
         flaky_rules = [
-            FlakyRule("distributed", ["##[error]The operation was canceled."])
+            # Try a regex rule
+            FlakyRule("distributed", ["##\\[error\\]The operation [wW]as .+"])
         ]
         pr = GitHubPR("pytorch", "pytorch", 92863)
         checks = pr.get_checkrun_conclusions()
@@ -668,16 +669,28 @@ class TestBypassFailures(TestCase):
             ].classification
             == "FLAKY"
         )
-        pending, failed = categorize_checks(
+        pending, failed, ignorable = categorize_checks(
             checks, list(checks.keys()), ok_failed_checks_threshold=2
         )
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 0)
-        pending, failed = categorize_checks(
+        self.assertTrue(len(ignorable["FLAKY"]) == 1)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
+
+        # Not set any threshold, defaults to -1 to ignore all flaky and broken trunk failures
+        pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 1)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
+
+        pending, failed, ignorable = categorize_checks(
             checks, list(checks.keys()), ok_failed_checks_threshold=1
         )
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 2)
+        self.assertTrue(len(ignorable["FLAKY"]) == 1)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
 
     def test_get_classifications_unstable(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 104312)
@@ -690,11 +703,25 @@ class TestBypassFailures(TestCase):
         self.assertTrue(
             checks[f"pull / {workflow_name} / {job_name}"].classification == "UNSTABLE"
         )
-        pending, failed = categorize_checks(
+        pending, failed, ignorable = categorize_checks(
             checks, list(checks.keys()), ok_failed_checks_threshold=1
         )
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["UNSTABLE"]) == 1)
+
+    def test_get_classifications_pending_unstable(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 105998)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
+        )
+        pending, failed, ignorable = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=1
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 3)
+        self.assertTrue(len(ignorable["UNSTABLE"]) == 3)
 
     def test_get_classifications_broken_trunk(self, *args: Any) -> None:
         # The mock merge base is the actual value returned by gh_fetch_merge_base
@@ -725,13 +752,13 @@ class TestBypassFailures(TestCase):
                     checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
                 )
 
-                pending, failed = categorize_checks(checks, list(checks.keys()))
+                pending, failed, _ = categorize_checks(checks, list(checks.keys()))
                 self.assertTrue(len(pending) == 0)
                 self.assertTrue(len(failed) == 0)
 
                 # When the ok_failed_checks_threshold is set to 0, the broken trunk failure
                 # won't be ignored
-                pending, failed = categorize_checks(
+                pending, failed, _ = categorize_checks(
                     checks, list(checks.keys()), ok_failed_checks_threshold=0
                 )
                 self.assertTrue(len(pending) == 0)
@@ -743,7 +770,7 @@ class TestBypassFailures(TestCase):
         # or broken trunk
 
         flaky_rules = [
-            FlakyRule("distributed", ["##[error]The operation was canceled."])
+            FlakyRule("distributed", ["##\\[error\\]The operation was canceled."])
         ]
         flaky = (
             "pull / linux-focal-py3.7-gcc7 / test (distributed, 1, 2, linux.2xlarge)"
@@ -759,10 +786,11 @@ class TestBypassFailures(TestCase):
         checks = get_classifications(checks, pr.last_commit()["oid"], None, [], [flaky])
         self.assertTrue(checks[flaky].classification == "IGNORE_CURRENT_CHECK")
         self.assertTrue(checks[broken_trunk].classification is None)
-        _, failed = categorize_checks(
+        _, failed, ignorable = categorize_checks(
             checks, list(checks.keys()), ok_failed_checks_threshold=0
         )
         self.assertTrue(len(failed) == 1)
+        self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 1)
 
         # No flaky rules
         checks = get_classifications(
@@ -770,10 +798,11 @@ class TestBypassFailures(TestCase):
         )
         self.assertTrue(checks[flaky].classification == "IGNORE_CURRENT_CHECK")
         self.assertTrue(checks[broken_trunk].classification == "BROKEN_TRUNK")
-        _, failed = categorize_checks(
+        _, failed, ignorable = categorize_checks(
             checks, list(checks.keys()), ok_failed_checks_threshold=1
         )
         self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 1)
 
         # No broken_trunk
         checks = get_classifications(
@@ -785,10 +814,11 @@ class TestBypassFailures(TestCase):
         )
         self.assertTrue(checks[flaky].classification == "FLAKY")
         self.assertTrue(checks[broken_trunk].classification == "IGNORE_CURRENT_CHECK")
-        _, failed = categorize_checks(
+        _, failed, ignorable = categorize_checks(
             checks, list(checks.keys()), ok_failed_checks_threshold=1
         )
         self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 1)
 
     @mock.patch("trymerge.read_flaky_rules", side_effect=xla_is_flaky_rules)
     @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)

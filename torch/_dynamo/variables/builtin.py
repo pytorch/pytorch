@@ -27,6 +27,7 @@ from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
     check_unspec_python_args,
+    get_fake_value,
     guard_if_dyn,
     is_utils_checkpoint,
     istype,
@@ -1137,6 +1138,27 @@ class BuiltinVariable(VariableTracker):
                 raise AttributeMutationError(
                     "Can't inplace modify module params/buffers inside HigherOrderOp"
                 )
+            if name_var.is_python_constant() and isinstance(
+                val, variables.TensorVariable
+            ):
+                assigning_fake_val = get_fake_value(val.as_proxy().node, tx)
+
+                getattr_var = obj.var_getattr(tx, name_var.as_python_constant())
+
+                # get_fake_val will return a real tensor here because it's an attribute on the module (get_attr node)
+                existing_attr = get_fake_value(getattr_var.as_proxy().node, tx)
+                existing_fake_attr = variables.builder.wrap_to_fake_tensor_and_record(
+                    existing_attr, tx, source=getattr_var.source, is_tensor=True
+                )
+
+                # same tensor identiy, setattr is a no-op
+                mod_setattr = inspect.getattr_static(obj.module_type, "__setattr__")
+                if (
+                    existing_fake_attr is assigning_fake_val
+                    and mod_setattr is torch.nn.Module.__setattr__
+                ):
+                    return getattr_var
+
             obj.convert_to_unspecialized(tx)
 
     def call_delattr(self, tx, obj: VariableTracker, name_var: VariableTracker):
