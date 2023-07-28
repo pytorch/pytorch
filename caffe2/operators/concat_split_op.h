@@ -330,7 +330,8 @@ bool ConcatOp<Context>::RunOnDevice() {
     }
     // check the input dims are compatible.
     for (const auto j : c10::irange(1, InputSize())) {
-      int dim_j = Input(j).dim32(i);
+      const auto& input_j = Input(j);
+      int dim_j = input_j.dim32(i);
       CAFFE_ENFORCE_EQ(
           dim,
           dim_j,
@@ -346,9 +347,9 @@ bool ConcatOp<Context>::RunOnDevice() {
           "when arg 'add_axis' = 0 and along the axis = ",
           canonical_axis,
           " <",
-          Input(0).sizes(),
+          input_zero.sizes(),
           "> vs <",
-          Input(j).sizes(),
+          input_j.sizes(),
           ">.");
     }
   }
