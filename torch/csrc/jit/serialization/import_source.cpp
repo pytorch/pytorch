@@ -549,7 +549,9 @@ void SourceImporterImpl::importClass(
       case TK_VAR: {
         const auto name = Var(assign.lhs()).name().name();
         TORCH_INTERNAL_ASSERT(name != "__parameters__");
-        const auto type = type_parser.parseTypeFromExpr(assign.type().get());
+        const auto type = assign.type().present()
+            ? type_parser.parseTypeFromExpr(assign.type().get())
+            : type_parser.parseTypeFromExpr(assign.rhs().get());
         const bool is_parameter = parameter_names.count(name);
         const bool is_buffer = buffer_names.count(name);
         class_type->addAttribute(name, type, is_parameter, is_buffer);
@@ -557,7 +559,9 @@ void SourceImporterImpl::importClass(
       case TK_SUBSCRIPT: {
         const auto name =
             StringLiteral(Subscript(assign.lhs()).subscript_exprs()[0]).text();
-        const auto type = type_parser.parseTypeFromExpr(assign.rhs().get());
+        const auto type = assign.type().present()
+            ? type_parser.parseTypeFromExpr(assign.type().get())
+            : type_parser.parseTypeFromExpr(assign.rhs().get());
         const bool is_parameter = parameter_names.count(name);
         const bool is_buffer = buffer_names.count(name);
         class_type->addAttribute(name, type, is_parameter, is_buffer);
