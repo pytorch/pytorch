@@ -1766,7 +1766,10 @@ def categorize_checks(
         classification = check_runs[checkname].classification
         job_id = check_runs[checkname].job_id
 
-        if status is None:
+        if status is None and classification != "UNSTABLE":
+            # NB: No need to wait if the job classification is unstable as it would be
+            # ignored anyway. This is useful to not need to wait for scarce resources
+            # like ROCm, which is also frequently in unstable mode
             pending_checks.append((checkname, url, job_id))
         elif not is_passing_status(check_runs[checkname].status):
             if classification == "IGNORE_CURRENT_CHECK":
