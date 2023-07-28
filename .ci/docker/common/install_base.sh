@@ -15,6 +15,9 @@ install_ubuntu() {
   elif [[ "$UBUNTU_VERSION" == "22.04"* ]]; then
     cmake3="cmake=3.22*"
     maybe_libiomp_dev=""
+  elif [[ "$UBUNTU_VERSION" == "24.04"* ]]; then
+    cmake3="cmake=3.28*"
+    maybe_libiomp_dev=""
   else
     cmake3="cmake=3.5*"
     maybe_libiomp_dev="libiomp-dev"
@@ -83,6 +86,12 @@ install_ubuntu() {
   # see: https://github.com/pytorch/pytorch/issues/65931
   apt-get install -y libgnutls30
 
+  # Required to install the fortran after gcc update
+  if [[ "$UBUNTU_VERSION" == "22.04"* ]]; then
+    apt autoremove -y gfortran
+    apt-get update -y
+    apt-get install -y gfortran
+  fi
   # Cleanup package manager
   apt-get autoclean && apt-get clean
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
