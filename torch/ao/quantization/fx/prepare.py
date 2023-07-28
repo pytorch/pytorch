@@ -106,7 +106,7 @@ from .custom_config import (
     PrepareCustomConfig,
     StandaloneModuleConfigEntry,
 )
-from torch.ao.quantization.pt2e.quantizer import (
+from torch.ao.quantization.quantizer import (
     EdgeOrNode,
     QuantizationSpec,
     FixedQParamsQuantizationSpec,
