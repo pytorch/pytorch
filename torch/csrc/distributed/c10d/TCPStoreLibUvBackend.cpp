@@ -6,7 +6,6 @@
 #include <vector>
 
 #include <fmt/format.h>
-#include <sys/socket.h>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
