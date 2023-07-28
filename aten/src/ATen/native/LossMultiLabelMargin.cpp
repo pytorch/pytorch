@@ -120,15 +120,7 @@ static void multilabel_margin_loss_forward_out_cpu_template(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t nframe, dim;
   const int64_t ndims = input.dim();
-  if (ndims <= 1) {
-    nframe = 1;
-    dim = ndims == 0 ? 1 : input.size(0);
-  }
-  else {
-    nframe = input.size(0);
-    dim = input.size(1);
-  }
-  multilabel_margin_loss_shape_check(nframe, dim, ndims, target_arg, input, target);
+  multilabel_margin_loss_shape_check(nframe, dim, ndims, input, target);
 
   // special case target.dim() <= 1: produce scalar output for scalar inputs
   // even if reduction == Reduction::None
@@ -244,7 +236,7 @@ static void multilabel_margin_loss_backward_out_cpu_template(
   auto is_target_arg = TensorArg(is_target, "is_target", 5);
   const int64_t ndims = input.dim();
 
-  multilabel_margin_loss_shape_check(nframe, dim, ndims, target_arg, input, target);
+  multilabel_margin_loss_shape_check(nframe, dim, ndims, input, target);
   checkSameSize(c, target_arg, is_target_arg);
 
   grad_input.resize_as_(input);

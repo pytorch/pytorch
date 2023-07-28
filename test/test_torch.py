@@ -714,23 +714,6 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual((), torch.nn.functional.nll_loss(input, target, reduction='mean').shape)
             self.assertEqual((), torch.nn.functional.nll_loss(input, target, reduction='sum').shape)
 
-        # multilabel_margin_loss
-        for input in (zero_d, one_d, torch.randn(1, 1, device=device)):
-            for target in (torch.tensor(0, device=device), torch.tensor([0], device=device), torch.tensor([[0]], device=device)):
-                if (input.dim() <= 1 and target.dim() <= 1) or (input.dim() == 2 and target.dim() == 2):
-                    output_shape = (target.shape[0],) if target.dim() == 2 else ()
-                    self.assertEqual(output_shape,
-                                     torch.nn.functional.multilabel_margin_loss(input, target, reduction='none').shape)
-                    self.assertEqual((), torch.nn.functional.multilabel_margin_loss(input, target, reduction='mean').shape)
-                    self.assertEqual((), torch.nn.functional.multilabel_margin_loss(input, target, reduction='sum').shape)
-                else:
-                    self.assertRaises(RuntimeError,
-                                      lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='none'))
-                    self.assertRaises(RuntimeError,
-                                      lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='mean'))
-                    self.assertRaises(RuntimeError,
-                                      lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='sum'))
-
     # Test that `torch._check_tensor_all` raises errors in the correct cases
     def test_check_tensor_all(self, device):
         default_message = 'Expected cond to be True'
@@ -8589,8 +8572,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         def get_expected_device_repr(device):
             if device.index is not None:
-                return "device(type='{type}', index={index})".format(
-                    type=device.type, index=device.index)
+                return f"device(type='{device.type}', index={device.index})"
 
             return f"device(type='{device.type}')"
 
@@ -9125,6 +9107,18 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         c = a.where(a != 0, not_zero)
 
         self.assertEqual(b, c)
+
+    def test_data_ptr_of_empty_tensor_with_storage(self):
+        t = torch.empty((2, 2))
+        self.assertNotEqual(t.data_ptr(), 0)
+        t.resize_((0, 2))
+        self.assertEqual(t.data_ptr(), 0)
+
+    def test_data_ptr_of_empty_view_with_storage(self):
+        t = torch.empty((2, 2))
+        self.assertNotEqual(t.data_ptr(), 0)
+        t2 = t[0:0].view(0, 1)
+        self.assertEqual(t2.data_ptr(), 0)
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests

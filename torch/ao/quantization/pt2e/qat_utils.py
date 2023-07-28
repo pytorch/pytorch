@@ -8,7 +8,7 @@ from torch.fx import Graph, GraphModule, Node
 from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 import torch.nn.functional as F
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
-from .quantizer import (
+from torch.ao.quantization.quantizer import (
     DerivedQuantizationSpec,
     EdgeOrNode,
     SharedQuantizationSpec,
@@ -556,7 +556,7 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
             _get_conv_bn_getitem_nodes(r.replacements)
 
         # Step (3a): Copy over metadata for all three nodes in [conv - bn - getitem]
-        for match_pattern_node, original_node in _filter_nodes_map(r.nodes_map).items():
+        for original_node in _filter_nodes_map(r.nodes_map).values():
             if original_node.target == torch.ops.aten.convolution.default:
                 replacement_conv_node.meta = original_node.meta
                 original_to_replacement_node[original_node] = replacement_conv_node
