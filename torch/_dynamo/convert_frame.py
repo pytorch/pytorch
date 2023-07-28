@@ -221,20 +221,24 @@ def exception_handler(e, code, frame=None, export=False):
                 log_dynamo_suppress_errors,
             )
 
-            error_header, error_msg = format_error_msg_verbose(
+            error_header, error_msg, error_stack_trace = format_error_msg_verbose(
                 e, code, record_filename, frame
             )
             log_dynamo_suppress_errors(
                 code.co_name,
                 code.co_filename,
                 code.co_firstlineno,
-                error_header + "\n" + error_msg,
+                error_header + "\n" + error_msg + "\n" + error_stack_trace,
             )
         else:
-            error_header, error_msg = format_error_msg(e, code, record_filename, frame)
+            error_header, error_msg, error_stack_trace = format_error_msg(
+                e, code, record_filename, frame
+            )
 
         log.warning(error_header)
         log.debug(error_msg)
+        if error_stack_trace:
+            log.warning(error_stack_trace)
 
 
 FRAME_COUNTER = 0

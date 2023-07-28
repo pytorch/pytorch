@@ -239,10 +239,10 @@ def format_error_msg_verbose(exc, code, record_filename=None, frame=None):
     line_loc = msg.find("\n")
     header = msg[:line_loc]
     msg = msg[line_loc + 1 :]
-    msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
-    msg += format_exc()
+    stack_trace = "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
+    stack_trace += format_exc()
     if hasattr(exc, "real_stack"):
-        msg += (
+        stack_trace += (
             "\n"
             + "=" * 10
             + " The above exception occurred while processing the following code "
@@ -253,22 +253,23 @@ def format_error_msg_verbose(exc, code, record_filename=None, frame=None):
         if frame is not None:
             stack_above_dynamo = filter_stack(extract_stack(frame))
 
-        msg += "".join(
+        stack_trace += "".join(
             format_list(stack_above_dynamo + list(reversed(get_real_stack(exc))))
         )
-        msg += "\n"
-        msg += "=" * 10
+        stack_trace += "\n"
+        stack_trace += "=" * 10
 
-    return header, msg
+    return header, msg, stack_trace
 
 
 def format_error_msg(exc, code, record_filename=None, frame=None):
-    msg = os.linesep * 2
-
     if config.verbose:
-        header, msg = format_error_msg_verbose(exc, code, record_filename, frame)
+        header, msg, stack_trace = format_error_msg_verbose(
+            exc, code, record_filename, frame
+        )
     else:
         header = f"WON'T CONVERT {code.co_name} {code.co_filename} line {code.co_firstlineno}"
         msg = f"due to: \n{format_exc(limit=-1)}"
+        stack_trace = ""
 
-    return header, msg
+    return header, msg, stack_trace
