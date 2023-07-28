@@ -30,7 +30,7 @@ from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater, TEST_CUDNN
 from torch.testing._internal.common_device_type import _has_sufficient_memory
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
@@ -76,7 +76,7 @@ requires_multigpu = functools.partial(
 skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
-vec_dtypes = [torch.float, torch.bfloat16]
+vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
 libfoo = None
 
@@ -237,6 +237,7 @@ def check_model(
     reference_in_float=True,
     assert_equal=True,
     check_gradient=False,
+    check_has_compiled=True,
 ):
     kwargs = kwargs or {}
     torch._dynamo.reset()
@@ -295,11 +296,12 @@ def check_model(
     torch.manual_seed(0)
     actual = run(*example_inputs, **kwargs)
     # if not called:
-    #     exp = torch._dynamo.explain(run, *example_inputs)
+    #     exp = torch._dynamo.explain(run)(*example_inputs)
     #     print("Explain:", exp[0])
     #     for graph in exp[2]:
     #         print("Graph", graph)
-    assert called, "Ran graph without calling compile_fx"
+    if check_has_compiled:
+        assert called, "Ran graph without calling compile_fx"
     assert type(actual) == type(correct)
 
     correct_flat, correct_spec = tree_flatten(correct)
@@ -399,6 +401,7 @@ def check_model_cuda(
     reference_in_float=True,
     assert_equal=True,
     check_gradient=False,
+    check_has_compiled=True,
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
@@ -421,6 +424,7 @@ def check_model_cuda(
         reference_in_float=reference_in_float,
         assert_equal=assert_equal,
         check_gradient=check_gradient,
+        check_has_compiled=check_has_compiled,
     )
 
     if check_lowp:
@@ -449,6 +453,7 @@ def check_model_cuda(
             reference_in_float=reference_in_float,
             assert_equal=assert_equal,
             check_gradient=check_gradient,
+            check_has_compiled=check_has_compiled,
         )
 
 
@@ -3680,6 +3685,7 @@ class CommonTemplate:
                 ),
             )
 
+    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfRocm
     def test_cudnn_rnn(self):
         if self.device == "cpu":
@@ -6591,14 +6597,15 @@ class CommonTemplate:
 
         # The first two values should be the same, attention output
         # and logsumexp since dropout is not being set
-        def fn(q, k, v, compute_log_sumexp):
+        def fn(q, k, v, attn_bias, compute_log_sumexp):
             return aten._scaled_dot_product_efficient_attention(
-                q, k, v, compute_log_sumexp
+                q, k, v, attn_bias, compute_log_sumexp
             )[:2]
 
         self.common(
             fn,
             (
+                torch.randn(4, 4, 36, 36),
                 torch.randn(4, 4, 36, 36),
                 torch.randn(4, 4, 36, 36),
                 torch.randn(4, 4, 36, 36),
@@ -6663,6 +6670,7 @@ class CommonTemplate:
         """
         Causes a @pointwise(size_hints) where size_hints is 2D
         """
+        torch._inductor.metrics.generated_kernel_count = 0
 
         def fn(input, offsets, add_value):
             return torch.ops.prims._inductor_bucketize(input, offsets) + add_value
