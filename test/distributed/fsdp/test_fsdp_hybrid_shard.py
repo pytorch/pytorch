@@ -347,6 +347,7 @@ class TestFSDPHybridShard(FSDPTest):
         ), "HSDP model initialized without replication"
         fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-2)
         hsdp_optim = torch.optim.Adam(hsdp_model.parameters(), lr=1e-2)
+        torch.manual_seed(global_pg.rank() + 1)
         for _ in range(5):
             inp = fsdp_model.module.get_input(torch.device("cuda"))
             losses: List[torch.Tensor] = []
