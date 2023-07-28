@@ -43,7 +43,9 @@ CUDAPluggableAllocator::CUDAPluggableAllocator(CUDAPluggableAllocator& other)
       begin_allocate_stream_to_pool_fn_(
           other.begin_allocate_stream_to_pool_fn_),
       end_allocate_stream_to_pool_fn_(other.end_allocate_stream_to_pool_fn_),
-      relase_pool_fn_(other.relase_pool_fn_) {}
+      relase_pool_fn_(other.relase_pool_fn_),
+      inc_ongoing_captures_fn_(other.inc_ongoing_captures_fn_),
+      dec_ongoing_captures_fn_(other.dec_ongoing_captures_fn_) {}
 
 void CUDAPluggableAllocator::set_init_fn(std::function<void(int)> init_fn) {
   init_fn_ = init_fn;
@@ -77,6 +79,16 @@ void CUDAPluggableAllocator::set_begin_allocate_stream_to_pool(
 void CUDAPluggableAllocator::set_end_allocate_stream_to_pool_fn(
     std::function<void(int, cudaStream_t)> capture_about_to_end_fn) {
   end_allocate_stream_to_pool_fn_ = capture_about_to_end_fn;
+}
+
+void CUDAPluggableAllocator::set_inc_ongoing_captures_fn(
+     std::function<void(int)> inc_ongoing_captures_fn) {
+  inc_ongoing_captures_fn_ = inc_ongoing_captures_fn;
+}
+
+void CUDAPluggableAllocator::set_dec_ongoing_captures_fn(
+    std::function<void(int)> dec_ongoing_captures_fn) {
+  dec_ongoing_captures_fn_ = dec_ongoing_captures_fn;
 }
 
 void CUDAPluggableAllocator::set_release_pool(
@@ -242,6 +254,20 @@ void CUDAPluggableAllocator::endAllocateStreamToPool(
     cudaStream_t stream) {
   if (end_allocate_stream_to_pool_fn_) {
     end_allocate_stream_to_pool_fn_(device, stream);
+  }
+}
+
+void CUDAPluggableAllocator::incOngoingCaptures(
+    int device) {
+  if (inc_ongoing_captures_fn_) {
+    inc_ongoing_captures_fn_(device);
+  }
+}
+
+void CUDAPluggableAllocator::decOngoingCaptures(
+    int device) {
+  if (dec_ongoing_captures_fn_) {
+    dec_ongoing_captures_fn_(device);
   }
 }
 

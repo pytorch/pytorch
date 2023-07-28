@@ -758,10 +758,6 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     std::lock_guard<std::mutex> lk(general_mutex);
 
     TORCH_INTERNAL_ASSERT(capture_free_streams.empty());
-    TORCH_CHECK(
-        !capture_underway,
-        "Only one capture at a time is allowed in a process.")
-    capture_underway = true;
   }
 
   void endAllocateStreamToPool(int device, cudaStream_t) override {
@@ -791,6 +787,18 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
 
     capture_free_streams.clear();
+  }
+
+  void incOngoingCaptures(int device) {
+    std::lock_guard<std::mutex> lk(general_mutex);
+    TORCH_CHECK(
+        !capture_underway,
+        "Only one capture at a time is allowed in a process.")
+    capture_underway = true;
+  }
+
+  void decOngoingCaptures(int device) {
+    std::lock_guard<std::mutex> lk(general_mutex);
     TORCH_CHECK(
         capture_underway,
         "CudaMallocAsync::notifyCaptureEnded called, "

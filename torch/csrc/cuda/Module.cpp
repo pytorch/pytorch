@@ -1054,6 +1054,24 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             self.set_end_allocate_stream_to_pool_fn(func);
           })
       .def(
+          "set_inc_ongoing_captures_fn",
+          [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
+             uint64_t func_ptr) {
+            using FuncType = void(int);
+            std::function<FuncType> func =
+                reinterpret_cast<FuncType*>(func_ptr);
+            self.set_inc_ongoing_captures_fn(func);
+          })
+      .def(
+          "set_dec_ongoing_captures_fn",
+          [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
+             uint64_t func_ptr) {
+            using FuncType = void(int);
+            std::function<FuncType> func =
+                reinterpret_cast<FuncType*>(func_ptr);
+            self.set_dec_ongoing_captures_fn(func);
+          })
+      .def(
           "set_release_pool",
           [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
              uint64_t func_ptr) {
@@ -1156,6 +1174,14 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     auto stream = at::cuda::getCurrentCUDAStream(device);
     TORCH_CHECK(stream, "Expected stream capture to be under way");
     c10::cuda::CUDACachingAllocator::endAllocateStreamToPool(device, stream);
+  });
+
+  m.def("_cuda_incOngoingCaptures", [](int device) {
+    c10::cuda::CUDACachingAllocator::incOngoingCaptures(device);
+  });
+
+  m.def("_cuda_decOngoingCaptures", [](int device) {
+    c10::cuda::CUDACachingAllocator::decOngoingCaptures(device);
   });
 
   m.def("_cuda_releasePool", [](int device, at::cuda::MempoolId_t mempool_id) {

@@ -66,6 +66,13 @@ struct CUDAPluggableAllocator
   void set_end_allocate_stream_to_pool_fn(
       std::function<void(int, cudaStream_t)> capture_about_to_end_fn);
 
+  void set_inc_ongoing_captures_fn(
+      std::function<void(int)>
+          inc_ongoing_captures_fn);
+
+  void set_dec_ongoing_captures_fn(
+      std::function<void(int)> dec_ongoing_captures_fn);
+
   void set_release_pool(
       std::function<void(int, c10::cuda::MempoolId_t)> capture_destroy_fn);
 
@@ -98,6 +105,8 @@ struct CUDAPluggableAllocator
       c10::cuda::MempoolId_t mempool_id) override;
   virtual void endAllocateStreamToPool(int device, cudaStream_t stream)
       override;
+  virtual void incOngoingCaptures(int device) override;
+  virtual void decOngoingCaptures(int device) override;
   virtual void releasePool(int device, c10::cuda::MempoolId_t mempool_id)
       override;
   virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) override;
@@ -137,6 +146,8 @@ struct CUDAPluggableAllocator
   std::function<void(int, cudaStream_t, c10::cuda::MempoolId_t)>
       begin_allocate_stream_to_pool_fn_;
   std::function<void(int, cudaStream_t)> end_allocate_stream_to_pool_fn_;
+  std::function<void(int)> inc_ongoing_captures_fn_;
+  std::function<void(int)> dec_ongoing_captures_fn_;
   std::function<void(int, c10::cuda::MempoolId_t)> relase_pool_fn_;
   std::mutex allocator_mutex_;
   // We do the bookeeping here in order to simplify custom allocators

@@ -84,6 +84,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
   capture_gen_ = gen;
   capture_dev_ = c10::cuda::current_device();
 
+  c10::cuda::CUDACachingAllocator::incOngoingCaptures(capture_dev_);
   // cudaStreamCaptureModeGlobal is the most conservative option to
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
@@ -139,6 +140,7 @@ void CUDAGraph::capture_end() {
   c10::cuda::CUDACachingAllocator::endAllocateStreamToPool(capture_dev_, capture_stream_);
 
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
+  c10::cuda::CUDACachingAllocator::decOngoingCaptures(capture_dev_);
   TORCH_CHECK(graph_ != NULL, "Invalid capture.");
   has_graph_ = true;
 

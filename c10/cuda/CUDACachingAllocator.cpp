@@ -2080,7 +2080,6 @@ class DeviceCachingAllocator {
   // Called by CUDAGraph::capture_begin
   void beginAllocateStreamToPool(cudaStream_t stream, MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    captures_underway++;
     auto it = graph_pools.find(mempool_id);
     if (it == graph_pools.end()) {
       // mempool_id does not reference an existing pool. Make a new pool for
@@ -2104,10 +2103,22 @@ class DeviceCachingAllocator {
   // Called by CUDAGraph::capture_end
   void endAllocateStreamToPool(cudaStream_t stream) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    captures_underway--;
     auto it = stream_to_pool_map.find(stream);
     TORCH_INTERNAL_ASSERT(it != stream_to_pool_map.end());
     stream_to_pool_map.erase(it);
+  }
+
+  // Called by CUDAGraph::capture_begin
+  void incOngoingCaptures() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    captures_underway++;
+  }
+
+  // Called by CUDAGraph::capture_end
+  void decOngoingCaptures() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    TORCH_INTERNAL_ASSERT(captures_underway > 0, "Attempted to decrement the number of graph captures when it was already 0. Please report a bug to PyTorch");
+    captures_underway--;
   }
 
   // Called by CUDAGraph::reset
@@ -3352,6 +3363,16 @@ class NativeCachingAllocator : public CUDAAllocator {
   void endAllocateStreamToPool(int device, cudaStream_t stream) override {
     assertValidDevice(device);
     device_allocator[device]->endAllocateStreamToPool(stream);
+  }
+
+  void incOngoingCaptures(int device) {
+    assertValidDevice(device);
+    device_allocator[device]->incOngoingCaptures();
+  }
+
+  void decOngoingCaptures(int device) {
+    assertValidDevice(device);
+    device_allocator[device]->decOngoingCaptures();
   }
 
   void releasePool(int device, MempoolId_t mempool_id) override {
