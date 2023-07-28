@@ -690,7 +690,7 @@ class Optimizer:
             prepend (bool): If True, the provided post ``hook`` will be fired before
                 all the already registered post-hooks on ``load_state_dict``. Otherwise,
                 the provided ``hook`` will be fired after all the already registered
-                pre-hooks. (default: False)
+                post-hooks. (default: False)
 
         Returns:
             :class:`torch.utils.hooks.RemoveableHandle`:
