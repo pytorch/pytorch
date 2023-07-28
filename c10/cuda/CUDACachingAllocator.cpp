@@ -772,24 +772,6 @@ struct MempoolIdHash {
   }
 };
 
-cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
-  if (at::cuda::currentStreamCaptureStatusMayInitCtx() ==
-      at::cuda::CaptureStatus::None) {
-#endif
-    return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
-  } else {
-    // It's ok to capture cudaMallocs, as long as we never cudaFree those
-    // addresses before replay.
-    // Capturing cudaMalloc behaves nicely: it gives the graph new VA,
-    // but is ignored (won't leakily allocate new memory) in replays.
-    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
-    return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
-  }
-#endif
-}
-
 } // anonymous namespace
 } // namespace Native
 
@@ -815,6 +797,10 @@ class CachingAllocatorConfig {
 #else
     return instance().m_expandable_segments;
 #endif
+  }
+
+  static bool use_uvm() {
+    return instance().m_use_uvm;
   }
 
   // This is used to round-up allocation size to nearest power of 2 divisions.
@@ -857,7 +843,8 @@ class CachingAllocatorConfig {
   CachingAllocatorConfig()
       : m_max_split_size(std::numeric_limits<size_t>::max()),
         m_garbage_collection_threshold(0),
-        m_expandable_segments(false) {
+        m_expandable_segments(false),
+        m_use_uvm(false) {
     m_roundup_power2_divisions.assign(Native::kRoundUpPowerOfTwoIntervals, 0);
   }
 
@@ -882,6 +869,7 @@ class CachingAllocatorConfig {
   std::vector<size_t> m_roundup_power2_divisions;
   std::atomic<double> m_garbage_collection_threshold;
   std::atomic<bool> m_expandable_segments;
+  std::atomic<bool> m_use_uvm;
 };
 
 void CachingAllocatorConfig::lexArgs(
@@ -1089,6 +1077,15 @@ void CachingAllocatorConfig::parseArgs(const char* env) {
   std::vector<std::string> config;
   lexArgs(env, config);
 
+  auto parse_bool = [&](auto value_idx, auto&& name) {
+    TORCH_CHECK(
+        value_idx < config.size() &&
+            (config[value_idx] == "True" || config[value_idx] == "False"),
+        "Expected a single True/False argument for ",
+        name);
+    return config[value_idx] == "True";
+  };
+
   for (size_t i = 0; i < config.size(); i++) {
     if (config[i].compare("max_split_size_mb") == 0) {
       i = parseMaxSplitSize(config, i);
@@ -1104,11 +1101,11 @@ void CachingAllocatorConfig::parseArgs(const char* env) {
     } else if (config[i] == "expandable_segments") {
       used_native_specific_option = true;
       consumeToken(config, ++i, ':');
-      ++i;
-      TORCH_CHECK(
-          i < config.size() && (config[i] == "True" || config[i] == "False"),
-          "Expected a single True/False argument for expandable_segments");
-      m_expandable_segments = (config[i] == "True");
+      m_expandable_segments = parse_bool(++i, "expandable_segments");
+    } else if (config[i] == "use_uvm") {
+      used_native_specific_option = true;
+      consumeToken(config, ++i, ':');
+      m_use_uvm = parse_bool(++i, "use_uvm");
     } else {
       TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", config[i]);
     }
@@ -1178,6 +1175,36 @@ static std::string reportProcessMemoryInfo(int device) {
 }
 
 namespace Native {
+
+namespace {
+
+cudaError_t cudaMallocMaybeUsingUvm(void** p, size_t size) {
+  if (CachingAllocatorConfig::use_uvm()) {
+    return cudaMallocManaged(p, size);
+  } else {
+    return cudaMalloc(p, size);
+  }
+}
+
+cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
+#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
+  if (at::cuda::currentStreamCaptureStatusMayInitCtx() ==
+      at::cuda::CaptureStatus::None) {
+#endif
+    return C10_CUDA_ERROR_HANDLED(cudaMallocMaybeUsingUvm(p, size));
+#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
+  } else {
+    // It's ok to capture cudaMallocs, as long as we never cudaFree those
+    // addresses before replay.
+    // Capturing cudaMalloc behaves nicely: it gives the graph new VA,
+    // but is ignored (won't leakily allocate new memory) in replays.
+    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+    return C10_CUDA_ERROR_HANDLED(cudaMallocMaybeUsingUvm(p, size));
+  }
+#endif
+}
+
+} // namespace
 
 class DeviceCachingAllocator {
  private:
@@ -1355,6 +1382,28 @@ class DeviceCachingAllocator {
               CachingAllocatorConfig::garbage_collection_threshold() > 0.0)) {
         garbage_collect_cached_blocks();
       }
+
+      // Usually we only trigger memory reclaimation on allocation failure.
+      // However, if UVM is in use, we never get allocation failure from CUDA,
+      // so we have to free memory proactively.
+      if (CachingAllocatorConfig::use_uvm()) {
+        auto allocated_bytes =
+            stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+                .current;
+        auto reserved_bytes =
+            stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+                .current;
+        // Unless we've reserved sufficient large chunk of memory, there's no
+        // point in empting the cache.
+        constexpr auto one_gigabytes = 1024 * 1024 * 1024;
+        // Allow a maximum of 1.25x over-allocation.
+        if (C10_LIKELY(captures_underway == 0) &&
+            reserved_bytes > one_gigabytes &&
+            reserved_bytes > allocated_bytes * 5 / 4) {
+          release_cached_blocks();
+        }
+      }
+
       // Attempt allocate
       block_found = alloc_block(params, false, context)
           // Free enough available cached blocks to satisfy alloc and retry
@@ -3326,7 +3375,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     if (forceUncachedAllocator()) {
       // Deliberately don't use cudaMallocMaybeCapturing here, to force an error
       // if someone tries to use forceUncachedAllocator while capturing.
-      C10_CUDA_CHECK(cudaMalloc(&r, size));
+      C10_CUDA_CHECK(cudaMallocMaybeUsingUvm(&r, size));
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_memory_allocation(reinterpret_cast<uintptr_t>(r));

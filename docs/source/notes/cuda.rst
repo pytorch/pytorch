@@ -440,6 +440,9 @@ Available options:
   reused. The threshold value should be between greater than 0.0 and less than 1.0.
   ``garbage_collection_threshold`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``garbage_collection_threshold`` is ignored.
+* ``use_uvm`` enables CUDA Unified Memory when set to ``True``. Using CUDA Unified
+  Memory reduces OOM possibility, but may slow down the training. We advise you
+  profile before enabling it.
 
 .. note::
 
