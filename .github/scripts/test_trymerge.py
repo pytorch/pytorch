@@ -649,7 +649,8 @@ class TestTryMerge(TestCase):
 class TestBypassFailures(TestCase):
     def test_get_classifications(self, *args: Any) -> None:
         flaky_rules = [
-            FlakyRule("distributed", ["##[error]The operation was canceled."])
+            # Try a regex rule
+            FlakyRule("distributed", ["##\\[error\\]The operation [wW]as .+"])
         ]
         pr = GitHubPR("pytorch", "pytorch", 92863)
         checks = pr.get_checkrun_conclusions()
@@ -749,7 +750,7 @@ class TestBypassFailures(TestCase):
         # or broken trunk
 
         flaky_rules = [
-            FlakyRule("distributed", ["##[error]The operation was canceled."])
+            FlakyRule("distributed", ["##\\[error\\]The operation was canceled."])
         ]
         flaky = (
             "pull / linux-focal-py3.7-gcc7 / test (distributed, 1, 2, linux.2xlarge)"
