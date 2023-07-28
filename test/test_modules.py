@@ -1,15 +1,17 @@
 # Owner(s): ["module: nn"]
 
-from itertools import product
+from itertools import chain, product
 from inspect import signature, isgenerator
 from copy import deepcopy
 import tempfile
 from operator import methodcaller
 
 import torch
+
+from torch._subclasses.meta_utils import assert_metadata_eq
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol, skipMeta)
+    instantiate_device_type_tests, onlyCPU, onlyCUDA, toleranceOverride, tol, skipMeta)
 from torch.testing._internal.common_modules import module_db, modules, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
@@ -732,6 +734,36 @@ class TestModule(TestCase):
                                     "for this ModuleInfo entry.")
                 else:
                     raise e
+
+
+    @onlyCPU
+    @modules(module_db)
+    def test_device_ctx_init(self, device, dtype, module_info, training):
+        module_cls = module_info.module_cls
+        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
+                                                       requires_grad=False, training=training)
+        with torch.device('meta'):
+            module_inputs_meta = module_info.module_inputs_func(module_info, device=None, dtype=dtype,
+                                                                requires_grad=False, training=training)
+
+        for module_input, module_input_meta in zip(module_inputs, module_inputs_meta):
+            c_args, c_kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            fw_args, fw_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+
+            c_args_meta, c_kwargs_meta = module_input_meta.constructor_input.args, module_input_meta.constructor_input.kwargs
+            fw_args_meta, fw_kwargs_meta = module_input_meta.forward_input.args, module_input_meta.forward_input.kwargs
+
+            m_cpu = module_cls(*c_args, **c_kwargs)
+
+            with torch.device('meta'):
+                m = module_cls(*c_args_meta, **c_kwargs_meta)
+
+            for (p_meta, p_cpu) in chain(zip(m.parameters(), m_cpu.parameters()),
+                                         zip(m.buffers(), m_cpu.buffers())):
+                if torch.nn.parameter.is_lazy(p_meta):
+                    continue
+                self.assertTrue(p_meta.is_meta)
+                assert_metadata_eq(self.assertEqual, p_meta, p_cpu)
 
 
 instantiate_device_type_tests(TestModule, globals(), allow_mps=True)
