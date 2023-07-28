@@ -1354,6 +1354,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         del x
 
     def test_graph_break_correctly_when_passing_numpy_ndarray_to_torch_function(self):
+        # FIXME: This test does not test what it says it's testing
+        # FIXME: Using torch.tensor(ndarray) in torchdynamo emits a warning. It shouldn't
+
         # from transformers/models/big_bird/modeling_big_bird.py
         def fn(x: int, y: torch.Tensor):
             ndarray_list = [np.ones([2, x])]
@@ -1362,16 +1365,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             tensor.unsqueeze_(0)
             return tensor + y
 
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
-        for x in range(1, 10):
-            y = torch.randn([1, 2, x])
-            ref = fn(x, y)
-            res = opt_fn(x, y)
-            self.assertEqual(ref, res)
-        # Graph break: call_function args: NumpyVariable() ConstantVariable(dtype) from user code at ...
-        #     tensor = torch.tensor(ndarray, dtype=torch.long)
-        self.assertEqual(cnts.frame_count, 2)
+        opt_fn = torch.compile(fullgraph=True, dynamic=True)(fn)
+        x = 8
+        y = torch.randn([1, 2, x])
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
 
     def test_inplace_view_on_graph_input(self):
         # graph break when calling methods with inplace_view tag on graph input
@@ -3152,9 +3151,8 @@ def fn():
 
         x = torch.tensor([2.3])
         m = np.array([1, 2, 3])
+        opt_fn = torch.compile(fn)
         ref = fn(x, m)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
         res = opt_fn(x, m)
         self.assertEqual(ref, res)
 
