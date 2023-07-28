@@ -3271,7 +3271,7 @@ def fn():
         def f(x):
             return 1 + torch._shape_as_tensor(x)[0]
 
-        gm, _ = torch._dynamo.export(f, torch.ones(6))
+        gm, _ = torch._dynamo.export(f)(torch.ones(6))
 
         input_one_dim = torch.ones(6)
         input_two_dims = torch.ones(7, 4)
@@ -3611,8 +3611,8 @@ def fn():
         def f(pred, pred2, x):
             return cond(pred, true_fn, false_fn, [pred2, x])
 
-        graph, guard = torch._dynamo.export(
-            f, torch.tensor(False), torch.tensor(True), torch.tensor([0.25, 0.25])
+        graph, guard = torch._dynamo.export(f)(
+            torch.tensor(False), torch.tensor(True), torch.tensor([0.25, 0.25])
         )
         true_true_sin = graph(
             torch.tensor(True), torch.tensor(True), torch.tensor([0.25, 0.25])
@@ -3650,8 +3650,8 @@ def fn():
         def f(pred, x):
             return cond(pred, true_fn, false_fn, [x])
 
-        graph, guard = torch._dynamo.export(
-            f, torch.tensor(False), torch.tensor([0.25, 0.25])
+        graph, guard = torch._dynamo.export(f)(
+            torch.tensor(False), torch.tensor([0.25, 0.25])
         )
         true_mirror = graph(torch.tensor(True), torch.tensor([0.25, 0.25]))
         self.assertTrue(same(torch.tensor([0.25, 0.25]), true_mirror))
@@ -3919,7 +3919,7 @@ def fn():
                 return self.mod[0](x)
 
         m = Mod()
-        graph, _ = torch._dynamo.export(m, torch.randn(3, 3))
+        graph, _ = torch._dynamo.export(m)(torch.randn(3, 3))
 
     def test_nn_sequential_invocation(self):
         with freeze_rng_state():
@@ -3941,7 +3941,7 @@ def fn():
             m = TestModel()
             x = torch.rand((2, 2))
             real = m(x)
-            graph, _ = torch._dynamo.export(m, x)
+            graph, _ = torch._dynamo.export(m)(x)
             dynamo_result = graph(x)
             self.assertTrue(same(real, dynamo_result))
 
@@ -3965,7 +3965,7 @@ def fn():
             m = TestModel()
             x = torch.rand((2, 2))
             real = m(x)
-            graph, _ = torch._dynamo.export(m, x)
+            graph, _ = torch._dynamo.export(m)(x)
             dynamo_result = graph(x)
             self.assertTrue(same(real, dynamo_result))
 
@@ -4752,7 +4752,7 @@ def fn():
         b.tag = "b"
         b.frog = "ribbit"
 
-        exported = torch._dynamo.export(foo, a, b)
+        exported = torch._dynamo.export(foo)(a, b)
         out_graph = exported[0]
 
         nodes = list(out_graph.graph.nodes)
@@ -4800,7 +4800,7 @@ def fn():
         state[0].tag = "STATE_0"
         state[1].tag = "HMMM"
 
-        exported = torch._dynamo.export(pre_attention_state_ops, i, mems, state)
+        exported = torch._dynamo.export(pre_attention_state_ops)(i, mems, state)
         out_graph = exported[0]
 
         nodes = list(out_graph.graph.nodes)

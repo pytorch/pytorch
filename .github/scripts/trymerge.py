@@ -77,16 +77,20 @@ class WorkflowCheckState:
 
 class FlakyRule:
     def __init__(self, name: str, captures: List[str]):
-        self.name = name
-        self.captures = captures
+        self.name = re.compile(name)
+        self.captures = [re.compile(r) for r in captures]
 
     def matches(self, job: Optional[Dict[str, Any]]) -> bool:
         return (
             job is not None
-            and self.name in job.get("name", "")
+            and self.name.search(job.get("name", "")) is not None
             and job.get("failure_captures") is not None
             and all(
-                capture in job.get("failure_captures", []) for capture in self.captures
+                any(
+                    r.search(capture) is not None
+                    for capture in job.get("failure_captures", [])
+                )
+                for r in self.captures
             )
         )
 
@@ -1762,7 +1766,10 @@ def categorize_checks(
         classification = check_runs[checkname].classification
         job_id = check_runs[checkname].job_id
 
-        if status is None:
+        if status is None and classification != "UNSTABLE":
+            # NB: No need to wait if the job classification is unstable as it would be
+            # ignored anyway. This is useful to not need to wait for scarce resources
+            # like ROCm, which is also frequently in unstable mode
             pending_checks.append((checkname, url, job_id))
         elif not is_passing_status(check_runs[checkname].status):
             if classification == "IGNORE_CURRENT_CHECK":
