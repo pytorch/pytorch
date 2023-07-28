@@ -5,6 +5,8 @@ from typing import Dict, List
 
 import sympy
 
+import torch._numpy as tnp
+
 import torch.fx
 import torch.random
 
@@ -21,7 +23,6 @@ from ..utils import (
     get_fake_value,
     get_real_value,
     guard_if_dyn,
-    HAS_NUMPY_TORCH_INTEROP,
     object_has_getattribute,
     product,
     proxy_args_kwargs,
@@ -476,11 +477,6 @@ class TensorVariable(VariableTracker):
                 )
             return constant_result
         elif name == "numpy":
-            if not config.numpy_ndarray_as_tensor or not HAS_NUMPY_TORCH_INTEROP:
-                unimplemented(
-                    f"Tensor.{name}. Turn on config.numpy_ndarray_as_tensor and install torch_np to support "
-                    f"tensor.numpy(). "
-                )
             from .builder import wrap_fx_proxy_cls
 
             assert not args, "Tensor.numpy() doesn't take args."
@@ -869,7 +865,8 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
 class NumpyNdarrayVariable(TensorVariable):
     """
-    Represents a torch_np.ndarray, but backed by torch Tensor. Use this for Tensor.numpy() call.
+    Represents an np.ndarray, but backed by torch Tensor via torch._numpy.ndarray.
+    Use this for Tensor.numpy() call.
     """
 
     def __init__(
@@ -890,10 +887,8 @@ class NumpyNdarrayVariable(TensorVariable):
         result = None
         options = VariableTracker.propagate(self)
 
-        import torch_np
-
         example_value = self.proxy.node.meta["example_value"]
-        example_ndarray = torch_np.ndarray(example_value)
+        example_ndarray = tnp.ndarray(example_value)
 
         def insert_into_graph():
             return wrap_fx_proxy(
@@ -916,8 +911,8 @@ class NumpyNdarrayVariable(TensorVariable):
                 ),
                 **options,
             )
-        # These are awkward to implement.  The standard playbook for torch_np
-        # interop is to trace a call into the torch_np wrapper which works for
+        # These are awkward to implement.  The standard playbook for torch._numpy
+        # interop is to trace a call into the torch._numpy wrapper which works for
         # Tensor operations.  However, we don't want to do this for calls
         # that don't return Tensors, because in those cases we may not want
         # to trace the attribute access into the graph at all (it is sort
