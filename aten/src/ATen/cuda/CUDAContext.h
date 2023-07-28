@@ -74,6 +74,8 @@ TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle();
 
 TORCH_CUDA_CPP_API void clearCublasWorkspaces();
 
+TORCH_CUDA_CPP_API void eraseCublasWorkspace();
+
 #ifdef CUDART_VERSION
 TORCH_CUDA_CPP_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
 #endif

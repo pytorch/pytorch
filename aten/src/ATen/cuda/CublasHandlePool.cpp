@@ -35,6 +35,13 @@ using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle
 
 } // namespace
 
+void eraseCublasWorkspace(std::tuple<void *, void *> workspace_key) {
+  auto workspace_it = cublas_handle_stream_to_workspace().find(workspace_key);
+  if (workspace_it != cublas_handle_stream_to_workspace().end()) {
+    cublas_handle_stream_to_workspace().erase(workspace_it);
+  }
+}
+
 void clearCublasWorkspaces() {
   cublas_handle_stream_to_workspace().clear();
 }
