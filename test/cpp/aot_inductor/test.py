@@ -23,7 +23,7 @@ with torch._dynamo.config.patch(dynamic_shapes=False):
     torch._dynamo.reset()
 
     with torch.no_grad():
-        module, _ = torch._dynamo.export(Net().cuda(), x, y)
+        module, _ = torch._dynamo.export(Net().cuda())(x, y)
         lib_path = torch._inductor.aot_compile(module, [x, y])
 
 shutil.copy(lib_path, "libaot_inductor_output.so")
