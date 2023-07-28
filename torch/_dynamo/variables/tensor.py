@@ -3,6 +3,8 @@ import operator
 import types
 from typing import Dict, List
 
+import numpy as np
+
 import sympy
 
 import torch._numpy as tnp
@@ -967,6 +969,9 @@ class NumpyNdarrayVariable(TensorVariable):
         )
 
         return result
+
+    def python_type(self):
+        return np.ndarray
 
 
 class UnspecializedPythonVariable(TensorVariable):
