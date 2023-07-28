@@ -670,7 +670,7 @@ class SwapSavedVariables {
       }
     }
     void debug_assert() {
-      TORCH_CHECK(this->empty(), "missing call to after()");
+      TORCH_INTERNAL_ASSERT(this->empty(), "missing call to after()");
     }
   };
 
