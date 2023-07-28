@@ -73,7 +73,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
         group_batch_fusion_post_grad_passes(gm.graph)
 
-    reinplace_index_put(gm.graph)
+    reinplace_scatters(gm.graph)
 
     stable_topological_sort(gm.graph)
     gm.recompile()
@@ -456,7 +456,7 @@ def is_valid_splitwithsizes_cat(match):
 
 
 
-def reinplace_index_put(graph):
+def reinplace_scatters(graph):
     """
     Reinplaces scatter operations in easy cases where the node being mutated
     is only used by the scatter (users == 1)

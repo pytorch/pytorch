@@ -155,6 +155,12 @@ def slice(self, dim=0, start=None, end=None, step=1):
         return self
     return NotImplemented
 
+@register_decomposition(aten.mm)
+def mm(a, b):
+    if a.shape[0] == 1 or b.shape[1] == 1:
+        return (a.unsqueeze(2) * b.unsqueeze(0)).sum(dim=1)
+    return NotImplemented
+
 @register_decomposition([aten.log2])
 def log2(x):
     return torch.log(x) * (1.0 / math.log(2.0))
