@@ -378,6 +378,7 @@ if not HAS_CUDA:
 for name, fn in test_autograd.TestAutograd.__dict__.items():
     EagerAutogradTests.add_test(name, fn)
 
+
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
     with mock.patch("sys.path", [*sys.path, str(testdir)]):
