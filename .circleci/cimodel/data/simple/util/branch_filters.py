@@ -15,10 +15,7 @@ RC_PATTERN = r"/v[0-9]+(\.[0-9]+)*-rc[0-9]+/"
 MAC_IOS_EXCLUSION_LIST = ["nightly", "postnightly"]
 
 
-def gen_filter_dict(
-        branches_list=NON_PR_BRANCH_LIST,
-        tags_list=None
-):
+def gen_filter_dict(branches_list=NON_PR_BRANCH_LIST, tags_list=None):
     """Generates a filter dictionary for use with CircleCI's job filter"""
     filter_dict = {
         "branches": {
