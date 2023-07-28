@@ -1395,9 +1395,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             ref = fn(x, y)
             res = opt_fn(x, y)
             self.assertEqual(ref, res)
-        # Graph break: call_function args: NumpyVariable() ConstantVariable(dtype) from user code at ...
-        #     tensor = torch.tensor(ndarray, dtype=torch.long)
-        self.assertEqual(cnts.frame_count, 2)
+        # It's all traced once with x = 1, x = 2 and then x = ks0
+        # For dynamic it's x=1 and x=ks0
+        self.assertEqual(cnts.frame_count, ifdynstaticdefault(3, 2))
 
     def test_numpy_with_builtin_type(self):
         x = np.random.rand(5)
