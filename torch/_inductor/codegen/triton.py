@@ -27,7 +27,6 @@ from ..triton_heuristics import AutotuneHint
 from ..utils import (
     DeferredLineBase,
     get_fused_kernel_name,
-    get_kernel_category_by_source_code,
     get_kernel_metadata,
     green_text,
     next_power_of_2,
@@ -38,6 +37,7 @@ from ..utils import (
     yellow_text,
 )
 from ..virtualized import ops, V
+from ..wrapper_benchmark import get_kernel_category_by_source_code
 
 from .common import (
     CSEVariable,
@@ -1631,6 +1631,12 @@ class TritonKernel(Kernel):
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.size_hint(arg_sig.expr)
+
+                    # Force the seed_offset to be 0 so calls to the same kernel
+                    # using different seed offset will have the same benchmark harness.
+                    # We can dedup kernel definitions in this case.
+                    if "seed_offset" in arg_sig.name:
+                        symval_hint = 0
                     result.writeline(f"{var_name} = {symval_hint}")
                 else:
                     raise KeyError(
@@ -2220,11 +2226,21 @@ class TritonScheduling:
     def can_use_32bit_indexing(numel: sympy.Expr, buffers: Iterable[ir.Buffer]) -> bool:
         int_max = torch.iinfo(torch.int32).max
         size_hint = V.graph.sizevars.size_hint
-        if size_hint(numel) > int_max:
+        has_hint = V.graph.sizevars.shape_env.has_hint
+
+        def within_32bit(e):
+            # Allow for unhinted e as long as we can still statically prove
+            # (e.g., via ValueRanges) that it is still in bounds
+            if V.graph.sizevars.is_expr_static_and_true(e <= int_max):
+                return True
+            # Otherwise, the hint MUST exist and be in range
+            return has_hint(e) and size_hint(e) <= int_max
+
+        if not within_32bit(numel):
             return False
 
         buf_sizes = [buf.get_layout().storage_size() for buf in buffers]
-        if any(size_hint(size) > int_max for size in buf_sizes):
+        if not all(within_32bit(size) for size in buf_sizes):
             return False
 
         # Only install guards for 32-bit indexing as there is no correctness
@@ -2284,6 +2300,12 @@ class TritonScheduling:
 
         return tiled_groups, mutations, index_dtype
 
+    def codegen_comment(self, node_schedule):
+        wrapper = V.graph.wrapper_code
+        origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
+        if origins:
+            wrapper.writeline(origins)
+
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
         tiled_groups, mutations, index_dtype = self.get_kernel_args(
             node_schedule, numel, reduction_numel
@@ -2300,7 +2322,7 @@ class TritonScheduling:
 
         src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule)
-
+        self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
 
         if config.warn_mix_layout:
@@ -2381,7 +2403,8 @@ class TritonScheduling:
             compile_wrapper.writeline("''')")
 
             metadata_comment = f"# kernel path: {kernel_path}"
-            metadata_comment += "\n" + get_kernel_metadata(node_schedule)
+            origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
+            metadata_comment += "\n" + origins + "\n" + detailed_origins
             wrapper.define_kernel(
                 kernel_name, compile_wrapper.getvalue(), metadata_comment
             )
@@ -2402,7 +2425,9 @@ class TritonScheduling:
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         src_code = render()
-        kernel_name = self.define_kernel(src_code, [template_node, *epilogue_nodes])
+        node_schedule = [template_node, *epilogue_nodes]
+        kernel_name = self.define_kernel(src_code, node_schedule)
+        self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
         self.scheduler.free_buffers()
 
@@ -2440,6 +2465,7 @@ class TritonScheduling:
 
             src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, [foreach_node])
+            self.codegen_comment([foreach_node])
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
         self.scheduler.free_buffers()
@@ -2458,11 +2484,14 @@ class TritonScheduling:
         # that need to access the entire tensor; they don't contribute read indexing
         # information (and practically, they don't have dep.index so they can't be used
         # for stride_hints below
-        all_deps = [*rw.reads_and_writes()]
-        assert all(isinstance(dep, (MemoryDep, StarDep)) for dep in all_deps)
+        dep_sources = [*rw.reads_and_writes()]
+        assert all(
+            isinstance(dep, (MemoryDep, StarDep))
+            for dep in dep_sources
+        )
         deps = [
             dep
-            for dep in all_deps
+            for dep in dep_sources
             if dep.name not in V.graph.removed_buffers and isinstance(dep, MemoryDep)
         ]
         write_names = {dep.name for dep in rw.writes}
