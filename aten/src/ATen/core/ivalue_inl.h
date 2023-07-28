@@ -1919,7 +1919,7 @@ template <
             std::is_lvalue_reference<Args>...,
             guts::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t> = nullptr>
-std::tuple<Args...> generic_to(IValue ivalue, _fake_type<std::tuple<Args...>>) {
+std::tuple<Args...> generic_to(const IValue& ivalue, _fake_type<std::tuple<Args...>>) {
   const auto& vals = ivalue.toTupleRef().elements();
   TORCH_CHECK(vals.size() == sizeof...(Args));
   return detail::generic_to_tuple_impl<std::tuple<Args...>>(vals, Indices{});
