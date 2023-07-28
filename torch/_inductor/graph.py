@@ -229,6 +229,18 @@ class GraphLowering(torch.fx.Interpreter):
         if nconv == 0:
             return False
 
+        # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
+        if (
+            all(
+                n.args[idx].meta["val"].device == torch.device("cpu")
+                for n in conv_nodes
+                for idx in [0, 1]
+            )
+            and torch.backends.mkldnn.enabled
+            and torch.backends.mkldnn.is_available()
+        ):
+            return True
+
         # Followering models are skipped due to this:
         # jx_nest_base
         # volo_d1_224
@@ -452,7 +464,7 @@ class GraphLowering(torch.fx.Interpreter):
                     value.realize()
             return value
 
-        for key, value in self.env.items():
+        for value in self.env.values():
             try:
                 visit(value)
             except Exception:
@@ -920,7 +932,7 @@ class GraphLowering(torch.fx.Interpreter):
         return mod
 
     def compile_to_fn(self):
-        if self.aot_mode:
+        if self.aot_mode and self.cpp_wrapper:
             from .codecache import AotCodeCache
 
             code, linemap = self.codegen()

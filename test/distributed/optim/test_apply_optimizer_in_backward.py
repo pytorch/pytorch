@@ -153,8 +153,10 @@ class ApplyOverlappedOptimizerTest(unittest.TestCase):
 
         # Apply optimizers in backward
         _apply_optimizer_in_backward(torch.optim.SGD, model.parameters(), {"lr": 0.01})
-        result = set(_get_in_backward_optimizers(model))
-        expected = set(
-            [optim for p in model.parameters() for optim in p._in_backward_optimizers]
-        )
+        in_backward_optims = _get_in_backward_optimizers(model)
+        self.assertEqual(len(list(model.parameters())), len(in_backward_optims))
+        result = set(in_backward_optims)
+        expected = {
+            optim for p in model.parameters() for optim in p._in_backward_optimizers
+        }
         self.assertEqual(result, expected)

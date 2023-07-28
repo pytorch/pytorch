@@ -90,14 +90,14 @@ def _apply_optimizer_in_backward(
         _apply_optimizer_in_backward_to_param(param)
 
 
-def _get_in_backward_optimizers(model: torch.nn.Module) -> List[torch.optim.Optimizer]:
+def _get_in_backward_optimizers(module: torch.nn.Module) -> List[torch.optim.Optimizer]:
     """
     Return a list of in-backward optimizers applied to ``model``'s parameters. Note that these
     optimizers are not intended to directly have their ``step`` or ``zero_grad`` methods called
     by the user and are intended to be used for things like checkpointing.
 
     Args:
-        model: (torch.nn.Module): model to retrieve in-backward optimizers for
+        module: (torch.nn.Module): model to retrieve in-backward optimizers for
 
     Returns:
         List[torch.optim.Optimizer]: the in-backward optimizers.
@@ -107,7 +107,7 @@ def _get_in_backward_optimizers(model: torch.nn.Module) -> List[torch.optim.Opti
         optims = _get_optimizers_in_backward(model)
     """
     optims: List[torch.optim.Optimizer] = []
-    for param in model.parameters():
+    for param in module.parameters():
         optims.extend(getattr(param, "_in_backward_optimizers", []))
 
     return optims
