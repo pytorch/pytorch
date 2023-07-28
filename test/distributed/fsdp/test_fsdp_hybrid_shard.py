@@ -236,6 +236,7 @@ class TestFSDPHybridShard(FSDPTest):
                     ShardingStrategyMode.ALL_HYBRID_SHARD,
                     ShardingStrategyMode.MIXED_HYBRID_FULL_SHARD,
                 ],
+                "use_orig_params": [False, True],
             },
             self._test_fsdp_hybrid_shard_basic_setup,
         )
@@ -244,30 +245,17 @@ class TestFSDPHybridShard(FSDPTest):
         self,
         hsdp_sharding_strategy: ShardingStrategy,
         sharding_strategy_mode: ShardingStrategyMode,
+        use_orig_params: bool,
     ):
-        auto_wrap_policy = ModuleWrapPolicy(
-            {TransformerEncoderLayer, TransformerDecoderLayer},
-        )
-        fsdp_kwargs = {
-            "auto_wrap_policy": auto_wrap_policy,
-            "device_id": torch.cuda.current_device(),
-            "sharding_strategy": hsdp_sharding_strategy,
-        }
-        fsdp_model = TransformerWithSharedParams.init(
-            self.process_group,
-            FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
-            fsdp_kwargs,
-        )
-        fsdp_model = self._init_hsdp_model(
-            hsdp_sharding_strategy, sharding_strategy_mode
+        hsdp_model = self._init_hsdp_model(
+            hsdp_sharding_strategy, sharding_strategy_mode, use_orig_params
         )
         # All FSDP modules should have state.process_group as the process group over which to
         # shard (default process group), and state._inter_node_pg (process group containing only
         # this rank)
         intra_node_pgs = set()
         inter_node_pgs = set()
-        for fsdp_module in fsdp_model.fsdp_modules(fsdp_model):
+        for fsdp_module in hsdp_model.fsdp_modules(hsdp_model):
             # TODO: This needs to be replaced if we deprecate
             # `FSDP.sharding_strategy` to only use the handle one.
             # https://github.com/pytorch/pytorch/issues/90857
@@ -308,20 +296,20 @@ class TestFSDPHybridShard(FSDPTest):
         with patch_allreduce(patched_allreduce), patch_reduce_scatter(
             patched_reduce_scatter
         ):
-            inp = fsdp_model.get_input(device=torch.cuda.current_device())
-            out = fsdp_model(inp[0], inp[1])
-            loss = fsdp_model.get_loss(inp, out)
+            inp = hsdp_model.get_input(device=torch.cuda.current_device())
+            out = hsdp_model(inp[0], inp[1])
+            loss = hsdp_model.get_loss(inp, out)
             loss.backward()
 
         if sharding_strategy_mode == ShardingStrategyMode.ALL_HYBRID_SHARD:
-            num_flat_params = len(list(traversal_utils._get_fsdp_handles(fsdp_model)))
+            num_flat_params = len(list(traversal_utils._get_fsdp_handles(hsdp_model)))
             self.assertEqual(num_flat_params, cntr[orig_ar])
             self.assertEqual(num_flat_params, cntr[orig_rs])
         elif sharding_strategy_mode == ShardingStrategyMode.MIXED_HYBRID_FULL_SHARD:
             num_hsdp_flat_params = len(
-                list(traversal_utils._get_fsdp_handles(fsdp_model.transformer))
+                list(traversal_utils._get_fsdp_handles(hsdp_model.transformer))
             )
-            num_flat_params = len(list(traversal_utils._get_fsdp_handles(fsdp_model)))
+            num_flat_params = len(list(traversal_utils._get_fsdp_handles(hsdp_model)))
             self.assertEqual(num_hsdp_flat_params, cntr[orig_ar])
             self.assertEqual(num_flat_params, cntr[orig_rs])
 
@@ -329,21 +317,23 @@ class TestFSDPHybridShard(FSDPTest):
         self,
         hsdp_sharding_strategy: ShardingStrategy,
         sharding_strategy_mode: str,
+        use_orig_params: bool,
     ):
+        auto_wrap_policy = ModuleWrapPolicy(
+            {TransformerEncoderLayer, TransformerDecoderLayer},
+        )
+        hsdp_kwargs = {
+            "device_id": torch.cuda.current_device(),
+            "auto_wrap_policy": auto_wrap_policy,
+            "sharding_strategy": hsdp_sharding_strategy,
+            "use_orig_params": use_orig_params,
+        }
         if sharding_strategy_mode == ShardingStrategyMode.ALL_HYBRID_SHARD:
-            auto_wrap_policy = ModuleWrapPolicy(
-                {TransformerEncoderLayer, TransformerDecoderLayer},
-            )
-            fsdp_kwargs = {
-                "auto_wrap_policy": auto_wrap_policy,
-                "device_id": torch.cuda.current_device(),
-                "sharding_strategy": hsdp_sharding_strategy,
-            }
-            fsdp_model = TransformerWithSharedParams.init(
+            hsdp_model = TransformerWithSharedParams.init(
                 self.process_group,
                 FSDPInitMode.RECURSIVE,
                 CUDAInitMode.CUDA_BEFORE,
-                fsdp_kwargs,
+                hsdp_kwargs,
             )
         elif sharding_strategy_mode == ShardingStrategyMode.MIXED_HYBRID_FULL_SHARD:
             model = TransformerWithSharedParams.init(
@@ -352,23 +342,16 @@ class TestFSDPHybridShard(FSDPTest):
                 CUDAInitMode.CUDA_BEFORE,
                 {},
             )
-            transformer_auto_wrap_policy = ModuleWrapPolicy(
-                {TransformerEncoderLayer, TransformerDecoderLayer},
-            )
             # Use the HSDP strategy for the transformer module
-            model.transformer = FSDP(
-                model.transformer,
-                auto_wrap_policy=transformer_auto_wrap_policy,
-                device_id=torch.cuda.current_device(),
-                sharding_strategy=hsdp_sharding_strategy,
-            )
+            model.transformer = FSDP(model.transformer, **hsdp_kwargs)
             # Use `FULL_SHARD` for the embedding and output projection
-            fsdp_model = FSDP(
+            hsdp_model = FSDP(
                 model,
                 device_id=torch.cuda.current_device(),
                 sharding_strategy=ShardingStrategy.FULL_SHARD,
+                use_orig_params=use_orig_params,
             )
-        return fsdp_model
+        return hsdp_model
 
 
 instantiate_parametrized_tests(TestFSDPHybridShard)
