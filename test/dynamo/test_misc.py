@@ -3181,6 +3181,11 @@ def fn():
         ref = fn(x, m)
         res = opt_fn(x, m)
         self.assertEqual(ref, res)
+        # FIXME: Dynamo does not install guards saying that
+        #        that the input should be an ndarray
+        # ref = fn(x, x)
+        # res = opt_fn(x, x)
+        # self.assertEqual(ref, res)
 
     def test_tensor_dot_grad_no_graph_break(self):
         def fn(a, b):
