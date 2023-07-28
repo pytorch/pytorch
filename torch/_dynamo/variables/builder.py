@@ -11,6 +11,8 @@ import re
 import types
 from typing import List, NamedTuple, Optional, Union
 
+import numpy as np
+
 import torch
 
 from torch import SymInt
@@ -48,12 +50,10 @@ from ..utils import (
     get_fake_value,
     getfile,
     global_key_name,
-    HAS_NUMPY,
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
     istype,
-    np,
     odict_values,
     preserve_rng_state,
     tensor_always_has_static_shape,
@@ -295,8 +295,7 @@ class VariableBuilder:
                 cls.wrap_literal,
             ),
         ]
-        if config.numpy_ndarray_as_tensor:
-            entries.append((np.ndarray, cls.wrap_numpy_ndarray))
+        entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
         result = {}
         for ts, fn in entries:
@@ -540,7 +539,7 @@ class VariableBuilder:
                 ),
                 "apply",
             )
-        elif HAS_NUMPY and isinstance(value, np.number):
+        elif isinstance(value, np.number):
             return self.wrap_unspecialized_primitive(value)
         elif DataClassVariable.is_matching_object(value):
             return DataClassVariable.wrap(self, value).add_guards(

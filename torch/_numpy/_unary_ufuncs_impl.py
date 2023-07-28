@@ -1,5 +1,5 @@
 """Export torch work functions for unary ufuncs, rename/tweak to match numpy.
-This listing is further exported to public symbols in the `torch_np/_ufuncs.py` module.
+This listing is further exported to public symbols in the `_numpy/_ufuncs.py` module.
 """
 
 import torch
