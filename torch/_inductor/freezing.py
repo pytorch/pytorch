@@ -1,3 +1,4 @@
+import collections
 import itertools
 
 import weakref
@@ -75,6 +76,7 @@ class ConstantFolder(torch.fx.Interpreter):
     def __init__(self, gm, skip_constructors=False):
         super().__init__(gm)
         self.node_replacements = {}
+        self.replaced_uses = collections.Counter()
         self.unknown_value = object()
         self.skip_constructors = skip_constructors
 
@@ -86,6 +88,7 @@ class ConstantFolder(torch.fx.Interpreter):
             return super().run_node(node)
 
         flattened_inputs = pytree.tree_flatten((args, kwargs))[0]
+
         if self.unknown_value in flattened_inputs:
             return self.unknown_value
 
@@ -115,9 +118,22 @@ class ConstantFolder(torch.fx.Interpreter):
 
         out = super().run_node(node)
 
+        # check inputs and remove if they are constants and have no more uses
+
         # TODO - remove constant from node_replacement when it has no uses
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
             self.node_replacements[node] = out
+
+            flattened_node_inps = pytree.tree_flatten((node.args, node.kwargs)[0])
+            for n in flattened_node_inps:
+                if not isinstance(n, torch.fx.Node):
+                    continue
+
+                self.replaced_uses[n] += 1
+
+            for to_delete in self.user_to_last_uses.get(node, []):
+                if self.replaced_uses[to_delete] == len(to_delete.users):
+                    self.node_replacements.pop(to_delete, None)
 
         return out
 
