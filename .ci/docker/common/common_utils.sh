@@ -23,6 +23,10 @@ conda_install() {
   as_jenkins conda install -q -n py_$ANACONDA_PYTHON_VERSION -y python="$ANACONDA_PYTHON_VERSION" $*
 }
 
+conda_install_through_forge() {
+  as_jenkins conda install -c conda-forge -q -n py_$ANACONDA_PYTHON_VERSION -y python="$ANACONDA_PYTHON_VERSION" $*
+}
+
 conda_run() {
   as_jenkins conda run -n py_$ANACONDA_PYTHON_VERSION --no-capture-output $*
 }

@@ -83,9 +83,37 @@ install_ubuntu() {
   # see: https://github.com/pytorch/pytorch/issues/65931
   apt-get install -y libgnutls30
 
+  if [[ "$UBUNTU_VERSION" == "22.04"* ]]; then
+    apt-get install -y libopenblas-dev
+  fi
+
   # Cleanup package manager
   apt-get autoclean && apt-get clean
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+}
+
+build_libpng() {
+  # install few packages
+  yum install -y zlib zlib-devel
+
+  LIBPNG_VERSION=1.6.37
+
+  mkdir -p libpng
+  pushd libpng
+
+  wget http://download.sourceforge.net/libpng/libpng-$LIBPNG_VERSION.tar.gz
+  tar -xvzf libpng-$LIBPNG_VERSION.tar.gz
+
+  pushd libpng-$LIBPNG_VERSION
+
+  ./configure
+  make
+  make install
+
+  popd
+
+  popd
+  rm -rf libpng
 }
 
 install_centos() {
@@ -138,6 +166,11 @@ install_centos() {
             opencv-devel \
 	    libsndfile-devel
   fi
+
+  # CentOS7 doesnt have support for higher version of libpng,
+  # so it is built from source.
+  # Libpng is required for torchvision build.
+  build_libpng
 
   # Cleanup
   yum clean all
