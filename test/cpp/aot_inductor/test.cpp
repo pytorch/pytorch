@@ -29,8 +29,11 @@ TEST(AotInductorTest, BasicTest) {
       at::randn({32, 64}, at::dtype(at::kFloat).device(at::kCUDA));
   torch::Tensor results_ref = net.forward(x, y);
 
-  // args and weights have been constantified
+  // TODO: we need to provide an API to concatenate args and weights
   std::vector<torch::Tensor> inputs;
+  for (const auto& pair : net.named_parameters()) {
+    inputs.push_back(pair.value());
+  }
   inputs.push_back(x);
   inputs.push_back(y);
 

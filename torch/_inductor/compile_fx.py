@@ -781,9 +781,9 @@ def compile_fx_aot(
     config_patches: Optional[Dict[str, Any]] = None,
 ):
     config_patches = (
-        {"cpp_wrapper": True, "freezing": True}
+        {"cpp_wrapper": True}
         if config_patches is None
-        else {**config_patches, "cpp_wrapper": True, "freezing": True}
+        else {**config_patches, "cpp_wrapper": True}
     )
     if (
         "aot_inductor_output_path" not in config_patches
