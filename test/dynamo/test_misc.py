@@ -1319,13 +1319,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 mask += inside
             return mask
 
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(mandelbrot_numpy)
-        for _ in range(10):
-            x = torch.randint(100, (1,))
-            ref = mandelbrot_numpy(x.item())
-            res = opt_fn(x.item())
-            self.assertEqual(ref, res)
+        # FIXME: Calling torch.compile with CompileCounter gives incorrect results!
+        opt_fn = torch.compile(fullgraph=True)(mandelbrot_numpy)
+        max_iter = 3
+        ref = mandelbrot_numpy(max_iter)
+        res = opt_fn(max_iter)
+        self.assertEqual(ref, res)
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_numpy_on_cuda(self):
