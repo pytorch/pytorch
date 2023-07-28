@@ -14,23 +14,10 @@ import torch.library as library
 from .autograd import autograd_kernel_indirection, construct_autograd_kernel
 
 """
-There are various APIs for defining custom-operator-like things in PyTorch:
-- [user-facing] autograd.Function (Python)
-- [user-facing] custom_op (Python)
-- [for power users] torch.library (Python)
-- [for power users] TORCH_LIBRARY (C++)
+For a detailed guide on custom ops, please see
+https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
 
-This file contains the implementation for a Simple Custom Operator API (CustomOp).
-Using CustomOp, you are able to define a custom operator and implement interactions
-between the CustomOp and various PyTorch subsystems, including all the subsystems
-that are necessary for a custom operator to work with torch.compile (i.e.,
-autograd, FakeTensor, functionalization).
-
-CustomOp is positioned as being safer and easier to use than
-torch.library/TORCH_LIBRARY, which require deep understanding of PyTorch internals.
-In additional, it supports torch.compile better than and is in general more
-comprehensive than autograd.Function, which only supports implementing gradient
-computation and vmap rules.
+This file includes pieces of the implementation of our custom operator API.
 """
 
 __all__ = ["custom_op", "CustomOp", "get_ctx", "AbstractImplCtx"]
@@ -57,6 +44,11 @@ def custom_op(
     qualname: str, manual_schema: typing.Optional[str] = None
 ) -> typing.Callable:
     r"""Creates a new CustomOp object.
+
+    WARNING: if you're a user, please do not use this directly
+    (instead use the torch._custom_ops APIs).
+    Also please see the following for a detailed guide on custom ops.
+    https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
 
     In PyTorch, defining an op (short for "operator") is a two step-process:
     - we need to define (create) the op
@@ -254,9 +246,14 @@ class CustomOp:
         return result
 
     def impl(
-        self, device_types: typing.Union[str, typing.Iterable[str]]
+        self, device_types: typing.Union[str, typing.Iterable[str]], _stacklevel=2,
     ) -> typing.Callable:
         r"""Register an implementation for a device type for this CustomOp object.
+
+        WARNING: if you're a user, please do not use this directly
+        (instead use the torch._custom_ops APIs).
+        Also please see the following for a detailed guide on custom ops.
+        https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
 
         If the CustomOp is passed multiple Tensor inputs with different device
         types, it will dispatch to the registered implementation for the highest
@@ -300,7 +297,7 @@ class CustomOp:
 
         def inner(f):
             for device_type in set(device_types):
-                self._register_impl(device_type, f)
+                self._register_impl(device_type, f, stacklevel=_stacklevel)
                 dispatch_key = SUPPORTED_DEVICE_TYPE_TO_KEY[device_type]
                 library.impl(self._lib, self._opname, dispatch_key)(f)
             return f
@@ -317,8 +314,12 @@ class CustomOp:
 
         return inner
 
-    def impl_abstract(self) -> typing.Callable:
+    def impl_abstract(self, _stacklevel=2) -> typing.Callable:
         r"""Register an abstract implementation for this operator.
+
+        WARNING: please do not use this directly (and instead use the torch._custom_ops
+        APIs). Also please see the following for a detailed guide on custom ops.
+        https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
 
         An "abstract implementation" specifies the behavior of this operator on
         Tensors that carry no data. Given some input Tensors with certain properties
@@ -387,7 +388,7 @@ class CustomOp:
 
         def inner(f):
             frame = inspect.stack()[1]
-            self._register_impl("abstract", f)
+            self._register_impl("abstract", f, stacklevel=_stacklevel)
             location = self._get_impl("abstract").location
 
             qualname = self._qualname
@@ -431,19 +432,24 @@ class CustomOp:
             self._get_impl("backward").func)
         self._register_impl("autograd", kernel)
 
-    def impl_save_for_backward(self):
+    def impl_save_for_backward(self, _stacklevel=2):
         r"""Register a function that tells us what to save for backward.
 
         Please see impl_backward for more details.
         """
         def inner(f):
-            self._register_impl("save_for_backward", f)
+            self._register_impl("save_for_backward", f, stacklevel=_stacklevel)
             if self._has_impl("backward"):
                 self._register_autograd_kernel()
         return inner
 
-    def impl_backward(self, output_differentiability=None):
+    def impl_backward(self, output_differentiability=None, _stacklevel=2):
         r"""Registers a backward formula.
+
+        WARNING: if you're a user, please do not use this directly
+        (instead use the torch._custom_ops APIs).
+        Also please see the following for a detailed guide on custom ops.
+        https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
 
         In order for the CustomOp to work with autograd, you need to register
         a backward formula. There are two pieces to this:
@@ -473,8 +479,6 @@ class CustomOp:
         were declared to be Tensors in the CustomOp definition must be accounted
         for in the dict. The gradient may be a Tensor or None.
 
-        TODO(rzou): Add example when this PR is closer to landing.
-
         """
         if output_differentiability is not None:
             def yell():
@@ -493,7 +497,7 @@ class CustomOp:
                 yell()
 
         def inner(f):
-            self._register_impl("backward", f)
+            self._register_impl("backward", f, stacklevel=_stacklevel)
             self._output_differentiability = output_differentiability
             if self._has_impl("save_for_backward"):
                 self._register_autograd_kernel()
@@ -887,3 +891,37 @@ def report_error_callback(custom_op: typing.Any, key: str) -> None:
         f"issue or if you're feeling adventurous, use the low-level "
         f"torch.library API"
     )
+
+
+def get_op(qualname):
+    ns, name = qualname.split("::")
+    return getattr(getattr(torch.ops, ns), name)
+
+
+def _find_custom_op(qualname):
+    if qualname in global_registry:
+        return global_registry[qualname]
+    raise RuntimeError(
+        f"Could not find custom op \"{qualname}\". Did you register it via "
+        f"the torch._custom_ops API?")
+
+
+def _custom_op_with_schema(qualname, schema):
+    ns, name = qualname.split("::")
+    schema_str = f"{name}{schema}"
+    function_schema = FunctionSchema.parse(schema_str)
+    validate_schema(function_schema)
+
+    lib = library.Library(ns, "FRAGMENT")
+    lib.define(schema_str)
+    ophandle = find_ophandle_or_throw(ns, function_schema.name)
+    result = CustomOp(lib, ns, function_schema, function_schema.name, ophandle, _private_access=True)
+
+    library.impl(lib, result._opname, "Autograd")(
+        autograd_kernel_indirection(weakref.proxy(result))
+    )
+
+    torch._C._dispatch_set_report_error_callback(
+        ophandle, functools.partial(report_error_callback, weakref.proxy(result))
+    )
+    return get_op(qualname)
