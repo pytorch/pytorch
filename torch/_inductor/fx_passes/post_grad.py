@@ -487,6 +487,7 @@ def reinplace_scatters(graph):
                 if not (copy_node := copy_nodes.get((mutated_arg, node), False)):
                     continue
 
+                # Check for any uses other than current node and copy_ epilogue
                 if len(mutated_arg.users) > 2:
                     continue
 
