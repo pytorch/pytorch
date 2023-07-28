@@ -320,8 +320,9 @@ def _multi_tensor_rprop(
 
         # for dir<0, dfdx=0
         # for dir>=0 dfdx=dfdx
+        grouped_grads = list(grouped_grads)
         for i in range(len(grouped_grads)):
-            grouped_grads[i] = grouped_grads[i].clone(memory_format=torch.preserve_format)
+            grouped_grads[i].copy_(grouped_grads[i].clone(memory_format=torch.preserve_format))
             grouped_grads[i][signs[i].eq(etaminus)] = 0
 
         # reuse signs as an intermediate
@@ -334,4 +335,3 @@ def _multi_tensor_rprop(
         # Logically, you may expect grouped_prevs to get updated to grouped_grads, but that's
         # basically already happened since we've been using grouped_prevs' memory to store
         # updated grouped_grads!
-
