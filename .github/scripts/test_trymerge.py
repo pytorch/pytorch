@@ -673,6 +673,12 @@ class TestBypassFailures(TestCase):
         )
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 0)
+
+        # Not set any threshold, defaults to -1 to ignore all flaky and broken trunk failures
+        pending, failed = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+
         pending, failed = categorize_checks(
             checks, list(checks.keys()), ok_failed_checks_threshold=1
         )
