@@ -1074,7 +1074,7 @@ pip3 install lintrunner
 3. Run lintrunner
 ```bash
 # Run lintrunner on the entire codebase
-lintrunner
+lintrunner --take CLANG-TIDY --all-files
 # Run lintrunner on your changes only
 lintrunner CHANGED_ONLY=--changed-only
 ```
