@@ -71,8 +71,8 @@ template <class Input, class Output, class Model>
 class BenchmarkHelper {
  public:
   BenchmarkHelper();
-  // NOLINTNEXTLINE(modernize-pass-by-value)
-  explicit BenchmarkHelper(Model model) : model_(model), initialized_(true) {}
+  explicit BenchmarkHelper(Model model)
+      : model_(std::move(model)), initialized_(true) {}
 
   // This method to be used in benchmark() method
   // Note that there is no result. This way we don't have to call this under GIL
