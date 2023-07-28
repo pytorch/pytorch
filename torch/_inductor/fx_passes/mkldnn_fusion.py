@@ -746,8 +746,8 @@ if torch._C._has_mkldnn:
             return False
         batch_size = input_meta_value.shape[0]
         is_bf16_weight = weight_meta_value.dtype == torch.bfloat16
-        # for fp32, batch_size should not be a free symbol.
-        if not is_bf16_weight and free_symbols(batch_size):
+        # for fp32, mkl should be enabled and batch_size should not be a free symbol.
+        if not is_bf16_weight and (free_symbols(batch_size) or (not torch._C.has_mkl)):
             return False
         for meta_value in [input_meta_value, weight_meta_value]:
             if (
@@ -900,12 +900,15 @@ if torch._C._has_mkldnn:
         """
         if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
             return gm
+
         packed_weight_ops = [
             torch._C._nn.mkldnn_reorder_conv2d_weight,
             mkldnn._reorder_convolution_transpose_weight,
             mkldnn._reorder_linear_weight,
-            torch.ops.mkl._mkl_reorder_linear_weight,
         ]
+        if torch._C.has_mkl:
+            packed_weight_ops.append(torch.ops.mkl._mkl_reorder_linear_weight)
+
         for node in gm.graph.nodes:
             if node.target in packed_weight_ops and len(node.args[0].users) > 1:
                 for user_node in list(node.args[0].users.keys()):

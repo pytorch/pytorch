@@ -164,7 +164,8 @@ class _AddRuntimeAssertionsForConstraintsPass(_AddRuntimeAssertionsForInlineCons
             if node.op != "placeholder":
                 continue
             insert_loc = node
-        assert insert_loc is not None
+        if insert_loc is None:
+            return super().call(graph_module)
 
         # Add runtime asserts for input shape constraints. We do this after all
         # placeholder nodes so that we can handle both (unary) predicates and
