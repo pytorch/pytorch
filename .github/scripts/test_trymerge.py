@@ -716,11 +716,12 @@ class TestBypassFailures(TestCase):
         checks = get_classifications(
             checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
         )
-        pending, failed = categorize_checks(
+        pending, failed, ignorable = categorize_checks(
             checks, list(checks.keys()), ok_failed_checks_threshold=1
         )
         self.assertTrue(len(pending) == 0)
-        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(failed) == 3)
+        self.assertTrue(len(ignorable["UNSTABLE"]) == 3)
 
     def test_get_classifications_broken_trunk(self, *args: Any) -> None:
         # The mock merge base is the actual value returned by gh_fetch_merge_base
