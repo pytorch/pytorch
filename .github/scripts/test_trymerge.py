@@ -703,6 +703,18 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 0)
 
+    def test_get_classifications_pending_unstable(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 105998)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
+        )
+        pending, failed = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=1
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+
     def test_get_classifications_broken_trunk(self, *args: Any) -> None:
         # The mock merge base is the actual value returned by gh_fetch_merge_base
         test_cases = [
