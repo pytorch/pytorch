@@ -512,7 +512,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         # ensure compatibilty with dynamo explain
 
-        explain_out = torch._dynamo.explain(ddp_m, inputs)
+        explain_out = torch._dynamo.explain(ddp_m)(inputs)
         break_reasons = explain_out.break_reasons
         self.assertEqual(len(break_reasons), 3)
         self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))

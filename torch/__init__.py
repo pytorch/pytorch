@@ -16,8 +16,6 @@ import platform
 import textwrap
 import ctypes
 import inspect
-if sys.version_info < (3,):
-    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -743,7 +741,8 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.histc` when called on a CUDA tensor
-        * :func:`torch.bincount` when called on a CUDA tensor
+        * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
+          tensor is given
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
@@ -1547,6 +1546,10 @@ class _TorchCompileInductorWrapper:
 
         return compile_fx(model_, inputs_, config_patches=self.config)
 
+    def get_compiler_config(self):
+        from torch._inductor.compile_fx import get_patched_config_dict
+        return get_patched_config_dict(config_patches=self.config)
+
     def reset(self):
         from torch._inductor import config
         if "triton.cudagraphs" in self.config or config.triton.cudagraphs:
@@ -1585,7 +1588,7 @@ class _TorchCompileWrapper:
 
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,
-            dynamic: builtins.bool = False,
+            dynamic: Optional[builtins.bool] = None,
             backend: Union[str, Callable] = "inductor",
             mode: Union[str, None] = None,
             options: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
@@ -1607,18 +1610,19 @@ def compile(model: Optional[Callable] = None, *,
     Args:
        model (Callable): Module/function to optimize
        fullgraph (bool): Whether it is ok to break model into several subgraphs
-       dynamic (bool): Use dynamic shape tracing.  When this is True, we will up-front attempt
+       dynamic (bool or None): Use dynamic shape tracing.  When this is True, we will up-front attempt
         to generate a kernel that is as dynamic as possible to avoid recompilations when
         sizes change.  This may not always work as some operations/optimizations will
         force specialization; use TORCH_LOGS=dynamic to debug overspecialization.
-        In particular, if you use "reduce-overhead", this will force sizes to be static
-        even with dynamic=True.
+        When this is False, we will NEVER generate dynamic kernels, we will always specialize.
+        By default (None), we automatically detect if dynamism has occurred and compile a more
+        dynamic kernel upon recompile.
        backend (str or Callable): backend to be used
         - "inductor" is the default backend, which is a good balance between performance and overhead
         - Non experimental in-tree backends can be seen with `torch._dynamo.list_backends()`
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
         - To register an out-of-tree custom backend: https://pytorch.org/docs/main/compile/custom-backends.html
-       mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
+       mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
         - "default" is the default mode, which is a good balance between performance and overhead
 
         - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs,
@@ -1630,6 +1634,9 @@ def compile(model: Optional[Callable] = None, *,
           to debug.
 
         - "max-autotune" is a mode that that leverages Triton based matrix multiplications and convolutions
+          It enables CUDA graphs by default.
+
+        - "max-autotune-no-cudagraphs" is a mode similar to "max-autotune" but without CUDA graphs
 
         - To see the exact configs that each mode sets you can call `torch._inductor.list_mode_options()`
 
@@ -1731,7 +1738,7 @@ torch.backends.mps._init()
 if not _running_with_deploy():
     from torch import compiler as compiler
 
-    class _TritonLibrary(object):
+    class _TritonLibrary:
         lib = torch.library.Library("triton", "DEF")
         ops_table: Dict[Tuple[str, str], Callable] = {}
 
@@ -1752,6 +1759,14 @@ _deprecated_attrs = {
     "has_cudnn": torch.backends.cudnn.is_available,
     "has_mkldnn": torch.backends.mkldnn.is_available,
 }
+
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # such as auto-completion in tools like pylance, even when these modules are not explicitly
+    # imported in user code.
+    from torch import _dynamo as _dynamo
+    from torch import _inductor as _inductor
+    from torch import onnx as onnx
 
 _lazy_modules = {
     "_dynamo",
