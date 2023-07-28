@@ -209,6 +209,8 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             expected_node="aten.convolution.default",
         )
 
+    # TODO: When registry is public, add a custom op cases to replace
+    # aten::add
     def test_dispatch_overload_fall_back_default_raise_diagnostic_warning(self):
         class TraceModel(torch.nn.Module):
             def forward(self, input):
