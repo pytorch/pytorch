@@ -222,13 +222,14 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
     length_data = lengths_host_.template data<int32_t>();
   }
 
+  const auto output_size = OutputSize();
   CAFFE_ENFORCE_EQ(
-      lengths_length % OutputSize(),
+      lengths_length % output_size,
       0,
       "len(Lengths) ",
       lengths_length,
       "should be divisible by OutputSize() ",
-      OutputSize(),
+      output_size,
       ".");
   int canonical_axis = input.canonical_axis_index(axis_);
   CAFFE_ENFORCE_LT(
