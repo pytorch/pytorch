@@ -77,16 +77,20 @@ class WorkflowCheckState:
 
 class FlakyRule:
     def __init__(self, name: str, captures: List[str]):
-        self.name = name
-        self.captures = captures
+        self.name = re.compile(name)
+        self.captures = [re.compile(r) for r in captures]
 
     def matches(self, job: Optional[Dict[str, Any]]) -> bool:
         return (
             job is not None
-            and self.name in job.get("name", "")
+            and self.name.search(job.get("name", "")) is not None
             and job.get("failure_captures") is not None
             and all(
-                capture in job.get("failure_captures", []) for capture in self.captures
+                any(
+                    r.search(capture) is not None
+                    for capture in job.get("failure_captures", [])
+                )
+                for r in self.captures
             )
         )
 
