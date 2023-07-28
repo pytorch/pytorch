@@ -901,12 +901,6 @@ class VariableBuilder:
         # the subgraph.
         # See NOTE [HigherOrderOperator tracing design] for more details.
 
-        if not self.tx.output.export:
-            # Export has (supposedly) valid cases for fake tensors as inputs here.
-            # I am not convinced, atm, but out of scope for what this assert was added for (protecting value checks
-            # in real_value_tensor_positive_aliases in the common case)
-            assert not isinstance(value, torch._subclasses.fake_tensor.FakeTensor)
-
         if value in self.tx.output.real_value_tensor_positive_aliases:
             stored_value = self.tx.output.real_value_tensor_positive_aliases[value]
             # TODO(voz): Decently common pattern, refactor at some point.
