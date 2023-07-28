@@ -222,14 +222,13 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
     length_data = lengths_host_.template data<int32_t>();
   }
 
-  const auto output_size = OutputSize();
   CAFFE_ENFORCE_EQ(
-      lengths_length % output_size,
+      lengths_length % OutputSize(),
       0,
       "len(Lengths) ",
       lengths_length,
       "should be divisible by OutputSize() ",
-      output_size,
+      OutputSize(),
       ".");
   int canonical_axis = input.canonical_axis_index(axis_);
   CAFFE_ENFORCE_LT(
@@ -300,19 +299,17 @@ bool ConcatOp<Context>::RunOnDevice() {
       1, at::IntArrayRef({InputSize()}), at::dtype<int>().device(CPU));
   int *const axis_data = split->template mutable_data<int>();
   auto& input_zero = Input(0);
-  const auto input_zero_dtype = input_zero.dtype();
   int adj_size = input_zero.dim() + (add_axis_ ? 1 : 0);
   int canonical_axis = canonical_axis_index_(axis_, adj_size);
   CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
   for (const auto i : c10::irange(1, InputSize())) {
-    const auto input_dtype = Input(i).dtype();
     CAFFE_ENFORCE_EQ(
-        input_dtype,
-        input_zero_dtype,
+        Input(i).dtype(),
+        input_zero.dtype(),
         "All inputs must have the same type, expected: ",
-        input_zero_dtype.name(),
+        input_zero.dtype().name(),
         " but got: ",
-        input_dtype.name(),
+        Input(i).dtype().name(),
         " for input: ",
         i);
   }
@@ -331,8 +328,7 @@ bool ConcatOp<Context>::RunOnDevice() {
     }
     // check the input dims are compatible.
     for (const auto j : c10::irange(1, InputSize())) {
-      const auto& input_j = Input(j);
-      int dim_j = input_j.dim32(i);
+      int dim_j = Input(j).dim32(i);
       CAFFE_ENFORCE_EQ(
           dim,
           dim_j,
@@ -348,9 +344,9 @@ bool ConcatOp<Context>::RunOnDevice() {
           "when arg 'add_axis' = 0 and along the axis = ",
           canonical_axis,
           " <",
-          input_zero.sizes(),
+          Input(0).sizes(),
           "> vs <",
-          input_j.sizes(),
+          Input(j).sizes(),
           ">.");
     }
   }
