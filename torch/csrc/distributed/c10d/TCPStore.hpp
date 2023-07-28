@@ -37,6 +37,9 @@ struct TCPStoreOptions {
   // over the bound socket associated to this fd. This option is useful to avoid
   // port assignment races in certain scenarios.
   c10::optional<int> masterListenFd = c10::nullopt;
+
+  // A boolean value indicating whether to use the experimental libUV backend.
+  bool useLibUV = false;
 };
 
 class TORCH_API TCPStore : public Store {
