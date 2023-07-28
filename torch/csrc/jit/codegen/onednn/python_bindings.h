@@ -1,7 +1,6 @@
 #pragma once
 
-#include "pybind11/pybind11.h"
-#include "pybind11/stl.h"
+#include <torch/csrc/utils/pybind.h>
 
 void bind_cpartition(pybind11::module& m);
 void bind_engine(pybind11::module& m);

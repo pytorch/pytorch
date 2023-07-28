@@ -1,10 +1,10 @@
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
+#include <torch/csrc/jit/codegen/onednn/python_bindings.h>
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
 
-#include "oneapi/dnnl/dnnl_graph.hpp"
-#include "python_bindings.h"
+#include <oneapi/dnnl/dnnl_graph.hpp>
 
 using cpartition = dnnl::graph::compiled_partition;
 using engine = dnnl::graph::engine;
