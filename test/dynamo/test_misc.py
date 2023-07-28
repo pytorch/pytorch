@@ -3210,6 +3210,11 @@ def fn():
         res = opt_fn(x, m)
         self.assertEqual(ref, res)
 
+        # Test now the other path
+        ref = fn(x, x)
+        res = opt_fn(x, x)
+        self.assertEqual(ref, res)
+
     def test_tensor_dot_grad_no_graph_break(self):
         def fn(a, b):
             y = 3 * a**3 - b**2
