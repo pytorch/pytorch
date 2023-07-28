@@ -311,7 +311,7 @@ that are encountered. Here is an example usage:
        if b.sum() < 0:
            b = b * -1
        return x * b
-   explanation, out_guards, graphs, ops_per_graph = dynamo.explain(toy_example, torch.randn(10), torch.randn(10))
+   explanation, out_guards, graphs, ops_per_graph = dynamo.explain(toy_example)(torch.randn(10), torch.randn(10))
    print(explanation)
    """
    Dynamo produced 3 graphs, with 2 graph break and 6 ops.
