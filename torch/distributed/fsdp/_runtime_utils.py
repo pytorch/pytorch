@@ -874,8 +874,6 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> Optional[torch.T
             padded_unsharded_grad,
             group=state.process_group,
         )
-        if not uses_hybrid_sharded_strategy:
-            _div_if_needed(new_sharded_grad, state._gradient_postdivide_factor)
         if uses_hybrid_sharded_strategy:
             if _run_all_reduce_as_async(state, handle):
                 state._all_reduce_stream.wait_stream(state._post_backward_stream)
@@ -896,7 +894,7 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> Optional[torch.T
                     return None
             else:
                 dist.all_reduce(new_sharded_grad, group=state._inter_node_pg)
-                _div_if_needed(new_sharded_grad, state._gradient_postdivide_factor)
+        _div_if_needed(new_sharded_grad, state._gradient_postdivide_factor)
     else:
         state._comm_hook(
             state._comm_hook_state, padded_unsharded_grad, new_sharded_grad
