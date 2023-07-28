@@ -1061,24 +1061,22 @@ for the simple commands we use for this.
 
 To run clang-tidy locally, follow these steps:
 
-1. Install clang-tidy.
-We provide custom built binaries which have additional checks enabled. You can install it by running:
-```bash
-pip3 install clang-tidy
-```
 We currently only support Linux and MacOS (x86).
-2. Install lintrunner:
+
+1. Install lintrunner:
 ```bash
 pip3 install lintrunner
 ```
-3. Run lintrunner
+2. Run lintrunner
 ```bash
 # Run lintrunner on the entire codebase
 lintrunner
 # Run lintrunner on your changes only
-lintrunner CHANGED_ONLY=--changed-only
+lintrunner --changed-only
 ```
-This will run clang-tidy on the entire codebase or on your changes only, respectively.
+This will run a variety of linters on the entire codebase or on your changes only, respectively. 
+One of the linters that lintrunner runs is clang-tidy.
+
 The reason why LLVM 8 is needed is because it is the version of LLVM that clang-tidy was tested with.
 This means that any new checks that are added to clang-tidy in future releases may not work with older versions of LLVM.
 However, you can use a newer version of LLVM if you want.
