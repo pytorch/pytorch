@@ -127,9 +127,7 @@ def _bool(obj: bool) -> str:
 @_format_argument.register
 def _registration_symbolic_function(obj: registration.SymbolicFunction) -> str:
     # TODO: Compact display of `param_schema`.
-    return (
-        f"registration.SymbolicFunction({obj.op_full_name}, is_custom={obj.is_custom})"
-    )
+    return f"registration.SymbolicFunction({obj.op_full_name}, is_custom={obj.is_custom}, is_complex={obj.is_complex})"
 
 
 @_format_argument.register

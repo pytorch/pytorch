@@ -649,7 +649,8 @@ class TestTryMerge(TestCase):
 class TestBypassFailures(TestCase):
     def test_get_classifications(self, *args: Any) -> None:
         flaky_rules = [
-            FlakyRule("distributed", ["##[error]The operation was canceled."])
+            # Try a regex rule
+            FlakyRule("distributed", ["##\\[error\\]The operation [wW]as .+"])
         ]
         pr = GitHubPR("pytorch", "pytorch", 92863)
         checks = pr.get_checkrun_conclusions()
@@ -695,6 +696,18 @@ class TestBypassFailures(TestCase):
         job_name = "build-and-test (default, 1, 1, linux.4xlarge.nvidia.gpu, unstable)"
         self.assertTrue(
             checks[f"pull / {workflow_name} / {job_name}"].classification == "UNSTABLE"
+        )
+        pending, failed = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=1
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+
+    def test_get_classifications_pending_unstable(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 105998)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
         )
         pending, failed = categorize_checks(
             checks, list(checks.keys()), ok_failed_checks_threshold=1
@@ -749,7 +762,7 @@ class TestBypassFailures(TestCase):
         # or broken trunk
 
         flaky_rules = [
-            FlakyRule("distributed", ["##[error]The operation was canceled."])
+            FlakyRule("distributed", ["##\\[error\\]The operation was canceled."])
         ]
         flaky = (
             "pull / linux-focal-py3.7-gcc7 / test (distributed, 1, 2, linux.2xlarge)"
