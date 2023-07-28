@@ -50,7 +50,6 @@ from .utils import (
     dict_const_keys_repr,
     dict_param_key_ids,
     guard_failures,
-    HAS_NUMPY,
     is_guard_failure_reporting_enabled,
     istype,
     np,
@@ -285,21 +284,17 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         t = type(val)
         np_types = (
-            (
-                np.int8,
-                np.int16,
-                np.int32,
-                np.int64,
-                np.uint8,
-                np.uint16,
-                np.uint32,
-                np.uint64,
-                np.float16,
-                np.float32,
-                np.float64,
-            )
-            if HAS_NUMPY
-            else ()
+            np.int8,
+            np.int16,
+            np.int32,
+            np.int64,
+            np.uint8,
+            np.uint16,
+            np.uint32,
+            np.uint64,
+            np.float16,
+            np.float32,
+            np.float64,
         )
         ok_types = (
             int,

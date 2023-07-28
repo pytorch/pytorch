@@ -32,7 +32,6 @@ from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
     expectedFailureDynamic,
-    requires_numpy_pytorch_interop,
     same,
     skipIfNotPy311,
     unsupported,
@@ -1225,7 +1224,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
-    @requires_numpy_pytorch_interop
     def test_numpy_ndarray_graph_break(self):
         def fn(x):
             a = x.numpy()
@@ -1243,7 +1241,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
-    @requires_numpy_pytorch_interop
     def test_numpy_ndarray_graph_break_with_multiple_outputs(self):
         def fn(x, y):
             a = x.numpy()
@@ -1261,7 +1258,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
-    @requires_numpy_pytorch_interop
     def test_tensor_interacts_with_numpy_ndarray(self):
         def fn(x, y):
             a = x.numpy()
@@ -1281,7 +1277,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
-    @requires_numpy_pytorch_interop
     def test_numpy_ndarray_works_with_builtin_function(self):
         def fn(x):
             v = x.sum() / len(x)
@@ -1296,7 +1291,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 1)
 
-    @requires_numpy_pytorch_interop
     def test_mandelbrot_numpy(self):
         def mandelbrot_numpy(max_iter):
             # Define the boundaries of the complex plane
@@ -1330,11 +1324,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             x = torch.randint(100, (1,))
             ref = mandelbrot_numpy(x.item())
             res = opt_fn(x.item())
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    @requires_numpy_pytorch_interop
-    @torch._dynamo.config.patch(numpy_ndarray_as_tensor=True)
     def test_numpy_on_cuda(self):
         x = np.arange(10)
 
@@ -1348,8 +1340,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(type(r), np.ndarray)
         self.assertEqual(r, x**2)
 
-    @requires_numpy_pytorch_interop
-    @torch._dynamo.config.patch(numpy_ndarray_as_tensor=True)
     def test_numpy_as_global(self):
         global x
         x = np.arange(10)
@@ -1378,7 +1368,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             y = torch.randn([1, 2, x])
             ref = fn(x, y)
             res = opt_fn(x, y)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
         # Graph break: call_function args: NumpyVariable() ConstantVariable(dtype) from user code at ...
         #     tensor = torch.tensor(ndarray, dtype=torch.long)
         self.assertEqual(cnts.frame_count, 2)
@@ -3771,7 +3761,7 @@ def fn():
         ref = fn()
         opt_fn = torch._dynamo.optimize("eager")(fn)
         res = opt_fn()
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
 
     def test_object_classmethod(self):
         class C:
