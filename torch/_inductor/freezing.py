@@ -121,7 +121,8 @@ class ConstantFolder(torch.fx.Interpreter):
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
             self.node_replacements[node] = out
 
-            flattened_node_inps = pytree.tree_flatten((node.args, node.kwargs)[0])
+            flattened_node_inps = pytree.tree_flatten((node.args, node.kwargs))[0]
+
             for n in flattened_node_inps:
                 if not isinstance(n, torch.fx.Node):
                     continue
