@@ -8,9 +8,11 @@ ver() {
 
 install_ubuntu() {
     apt-get update
-    if [[ $UBUNTU_VERSION == 20.04 ]]; then
-      # gpg-agent is not available by default on 20.04
-      apt-get install -y --no-install-recommends gpg-agent
+    # gpg-agent is not available by default
+    apt-get install -y --no-install-recommends gpg-agent
+    if [[ $(ver $UBUNTU_VERSION) -ge $(ver 22.04) ]]; then
+        echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' \
+            | sudo tee /etc/apt/preferences.d/rocm-pin-600
     fi
     apt-get install -y kmod
     apt-get install -y wget
@@ -37,10 +39,6 @@ install_ubuntu() {
                    rocprofiler-dev \
                    roctracer-dev \
                    amd-smi-lib
-
-    if [[ $(ver $ROCM_VERSION) -ge $(ver 6.1) ]]; then
-        DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated rocm-llvm-dev
-    fi
 
     # precompiled miopen kernels added in ROCm 3.5, renamed in ROCm 5.5
     # search for all unversioned packages
@@ -141,7 +139,7 @@ install_centos() {
                    rocprofiler-dev \
                    roctracer-dev \
                    amd-smi-lib
-
+  fi
   # precompiled miopen kernels; search for all unversioned packages
   # if search fails it will abort this script; use true to avoid case where search fails
   MIOPENHIPGFX=$(yum -q search miopen-hip-gfx | grep miopen-hip-gfx | awk '{print $1}'| grep -F kdb. || true)
