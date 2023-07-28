@@ -229,6 +229,18 @@ class GraphLowering(torch.fx.Interpreter):
         if nconv == 0:
             return False
 
+        # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
+        if (
+            all(
+                n.args[idx].meta["val"].device == torch.device("cpu")
+                for n in conv_nodes
+                for idx in [0, 1]
+            )
+            and torch.backends.mkldnn.enabled
+            and torch.backends.mkldnn.is_available()
+        ):
+            return True
+
         # Followering models are skipped due to this:
         # jx_nest_base
         # volo_d1_224

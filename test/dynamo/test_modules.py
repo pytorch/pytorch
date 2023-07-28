@@ -1410,7 +1410,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         mod = ModuleSpecialFwd()
         rx = torch.randn([3, 10, 10])
         real = mod(rx)
-        graph, _ = torch._dynamo.export(mod, rx)
+        graph, _ = torch._dynamo.export(mod)(rx)
         self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
 
     def test_conv_call_forward_directly(self):
