@@ -5,15 +5,15 @@ import itertools
 
 import torch
 import torch._dynamo as torchdynamo
-import torch.ao.quantization.pt2e.quantizer.x86_inductor_quantizer as xiq
+import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
-from torch.ao.quantization.pt2e.quantizer import X86InductorQuantizer
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
+from torch.ao.quantization.quantizer import X86InductorQuantizer
 from torch.nn import functional as F
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
@@ -381,19 +381,18 @@ class TestPatternMatcher(TestPatternMatcherBase):
             v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
                 1
             )
-            # Totally 3 pattern_matcher_count, 9 or 10 pattern_matcher_nodes
+            # Totally 3 pattern_matcher_count, 10 pattern_matcher_nodes
             # 1. pair of to_int8 and to_fp32 at conv input matched in pointless_convert pass
             #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
             # 2. dequant-conv pattern matched in quantization weight prepack
-            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, convolution]
-            #    auto_insert_channel_last_node: [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
             # 3. pair of to_int8 and to_fp32 at conv output matched in pointless_convert pass
             #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
             self._test_common(
                 mod,
                 (v,),
                 3,
-                10 if auto_insert_channel_last_node else 9,
+                10,
                 check_quantization=True,
             )
 

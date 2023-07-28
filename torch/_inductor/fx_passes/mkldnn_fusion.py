@@ -852,7 +852,7 @@ if torch._C._has_mkldnn:
                     packed_weight_inputs = (transpose_weight_node, batch_size)
                     packed_weight_op = (
                         mkldnn._reorder_linear_weight
-                        if is_bf16_weight
+                        if is_bf16_weight or (not torch._C.has_mkl)
                         else torch.ops.mkl._mkl_reorder_linear_weight
                     )
                     packed_weight_node = graph.create_node(
@@ -863,7 +863,7 @@ if torch._C._has_mkldnn:
                     # For dynamic shape case, we need to pack weight in runtime.
                     packed_weight_node = transpose_weight_node
                 packed_linear_inputs = (input, packed_weight_node)
-                if is_bf16_weight:
+                if is_bf16_weight or (not torch._C.has_mkl):
                     packed_linear_inputs += (bias, "none", [], "")
                     packed_linear_op = mkldnn._linear_pointwise.default
                 else:
@@ -892,12 +892,15 @@ if torch._C._has_mkldnn:
         """
         if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
             return gm
+
         packed_weight_ops = [
             torch._C._nn.mkldnn_reorder_conv2d_weight,
             mkldnn._reorder_convolution_transpose_weight,
             mkldnn._reorder_linear_weight,
-            torch.ops.mkl._mkl_reorder_linear_weight,
         ]
+        if torch._C.has_mkl:
+            packed_weight_ops.append(torch.ops.mkl._mkl_reorder_linear_weight)
+
         for node in gm.graph.nodes:
             if node.target in packed_weight_ops and len(node.args[0].users) > 1:
                 for user_node in list(node.args[0].users.keys()):
