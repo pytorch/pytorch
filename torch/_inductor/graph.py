@@ -7,7 +7,7 @@ import sys
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import DefaultDict, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple
 
 import sympy
 
@@ -221,7 +221,7 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self._warned_fallback = {"aten.convolution_backward"}
         self.user_visible_outputs = user_visible_outputs
-        self.opaque_ops: Dict[str, Callable] = {}
+        self.opaque_ops: Dict[str, Callable[..., Any]] = {}
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: List[

@@ -1139,7 +1139,6 @@ def compile_fx(
         for op in onednn_graph_lowerings.keys() & decompositions.keys():
             del decompositions[op]
 
-
         # TODO: disable this pass for onednn_graph fusion for MHA pattern
         # it removes the add op before softmax
         # will re-enable after onednn graph update the MHA pattern
