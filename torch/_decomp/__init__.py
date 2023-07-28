@@ -139,6 +139,8 @@ def register_decomposition(aten_op, registry=None, *, type="post_autograd"):
 def get_decompositions(
     aten_ops: Sequence[Union[OpOverload, OpOverloadPacket]],
     type: str = "post_autograd",
+    *,
+    prefer_cpp_composites: bool = False,
 ) -> Dict[OpOverload, Callable]:
     """
     Retrieve a dictionary of decompositions corresponding to the list of
@@ -179,14 +181,13 @@ def get_decompositions(
                 overloads.append(overload)
         for overload in overloads:
             # Maybe use a cpp decomp if one exists, and we haven't already found a python decomp
-            if (
-                has_composite_implicit_kernel(overload)
-                and overload not in decompositions
+            if has_composite_implicit_kernel(overload) and (
+                overload not in decompositions or prefer_cpp_composites
             ):
                 # Our synthetic cpp decomp: uses OpOverload.decompose to call
                 # a CompositeImplicitAutograd kernel, if it exists.
-                def cpp_decomp(*args, **kwargs):
-                    return overload.decompose(*args, **kwargs)
+                def cpp_decomp(*args, curr_overload=overload, **kwargs):
+                    return curr_overload.decompose(*args, **kwargs)
 
                 decompositions[overload] = cpp_decomp
 
