@@ -5,6 +5,7 @@ import sys
 from collections import Counter
 from enum import auto, Enum
 from functools import partial
+from typing import List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
@@ -17,7 +18,10 @@ from torch.distributed.fsdp import (
     ShardingStrategy,
     StateDictType,
 )
-from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
+from torch.distributed.fsdp._init_utils import (
+    _init_intra_and_inter_node_groups,
+    HYBRID_SHARDING_STRATEGIES,
+)
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -313,11 +317,74 @@ class TestFSDPHybridShard(FSDPTest):
             self.assertEqual(num_hsdp_flat_params, cntr[orig_ar])
             self.assertEqual(num_flat_params, cntr[orig_rs])
 
+    @skip_if_lt_x_gpu(4)
+    def test_fsdp_hybrid_shard_parity(self):
+        self.run_subtests(
+            {
+                "hsdp_sharding_strategy": [
+                    ShardingStrategy.HYBRID_SHARD,
+                    ShardingStrategy._HYBRID_SHARD_ZERO2,
+                ],
+                "use_orig_params": [False, True],
+            },
+            self._test_fsdp_hybrid_shard_parity,
+        )
+
+    def _test_fsdp_hybrid_shard_parity(
+        self, hsdp_sharding_strategy: ShardingStrategy, use_orig_params: bool
+    ):
+        fsdp_model = self._init_fsdp_model(use_orig_params)
+        global_pg = dist.distributed_c10d._get_default_group()
+        hsdp_pgs = _init_intra_and_inter_node_groups(global_pg, 2)
+        hsdp_model = self._init_hsdp_model(
+            hsdp_sharding_strategy,
+            ShardingStrategyMode.ALL_HYBRID_SHARD,
+            use_orig_params,
+            hsdp_process_groups=hsdp_pgs,
+        )
+        assert (
+            hsdp_model._inter_node_pg.size() > 1
+        ), "HSDP model initialized without replication"
+        fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-2)
+        hsdp_optim = torch.optim.Adam(hsdp_model.parameters(), lr=1e-2)
+        torch.manual_seed(global_pg.rank() + 1)
+        for _ in range(5):
+            inp = fsdp_model.module.get_input(torch.device("cuda"))
+            losses: List[torch.Tensor] = []
+            for model, optim in ((fsdp_model, fsdp_optim), (hsdp_model, hsdp_optim)):
+                optim.zero_grad()
+                loss = model(*inp).sum()
+                losses.append(loss)
+                loss.backward()
+                optim.step()
+            self.assertEqual(losses[0], losses[1])
+
+    def _init_fsdp_model(self, use_orig_params: bool) -> nn.Module:
+        auto_wrap_policy = ModuleWrapPolicy(
+            {TransformerEncoderLayer, TransformerDecoderLayer},
+        )
+        hsdp_kwargs = {
+            "auto_wrap_policy": auto_wrap_policy,
+            "device_id": torch.cuda.current_device(),
+            "use_orig_params": use_orig_params,
+        }
+        fsdp_model = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.RECURSIVE,
+            CUDAInitMode.CUDA_BEFORE,
+            hsdp_kwargs,
+            deterministic=True,
+        )
+        return fsdp_model
+
     def _init_hsdp_model(
         self,
         hsdp_sharding_strategy: ShardingStrategy,
         sharding_strategy_mode: str,
         use_orig_params: bool,
+        hsdp_process_groups: Optional[
+            Tuple[dist.ProcessGroup, dist.ProcessGroup]
+        ] = None,
     ):
         auto_wrap_policy = ModuleWrapPolicy(
             {TransformerEncoderLayer, TransformerDecoderLayer},
@@ -330,17 +397,19 @@ class TestFSDPHybridShard(FSDPTest):
         }
         if sharding_strategy_mode == ShardingStrategyMode.ALL_HYBRID_SHARD:
             hsdp_model = TransformerWithSharedParams.init(
-                self.process_group,
+                hsdp_process_groups or self.process_group,
                 FSDPInitMode.RECURSIVE,
                 CUDAInitMode.CUDA_BEFORE,
                 hsdp_kwargs,
+                deterministic=True,
             )
         elif sharding_strategy_mode == ShardingStrategyMode.MIXED_HYBRID_FULL_SHARD:
             model = TransformerWithSharedParams.init(
-                self.process_group,
+                hsdp_process_groups or self.process_group,
                 FSDPInitMode.NO_FSDP,
                 CUDAInitMode.CUDA_BEFORE,
                 {},
+                deterministic=True,
             )
             # Use the HSDP strategy for the transformer module
             model.transformer = FSDP(model.transformer, **hsdp_kwargs)
