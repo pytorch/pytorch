@@ -1468,7 +1468,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   work->store_ = store_;
   if (avoidRecordStreams_) {
     // other functions expect an initialized ptr if avoidRecordStreams_ is set
-    work->stashed_for_allocator_safety_ = std::make_shared<std::vector<at::Tensor>>();
+    work->stashed_for_allocator_safety_ =
+        std::make_shared<std::vector<at::Tensor>>();
   }
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
