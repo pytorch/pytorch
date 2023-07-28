@@ -45,7 +45,7 @@ Basics of using torch.profiler and viewing traces
 
 **Viewing chrome traces**: In the Chrome browser, open chrome://tracing and load the json file. Use the “w” and “s” keys to zoom in and out, and use “a” and “d” to scroll left and right. “?” will show a “help” screen with a list of shortcuts.
 
-.. figure:: ../_static/img/profiling_torch_compile/basic_chrome_trace.png
+.. figure:: _static/img/profiling_torch_compile/basic_chrome_trace.png
     :alt: Example of a basic chrome trace, visualized in the chrome://tracing viewer
 
 Here, we observe:
@@ -58,7 +58,7 @@ Every kernel on the GPU occurs after being launched by code running on the CPU. 
 
 To view a flow connection, click on a GPU kernel and click “ac2g”:
 
-.. figure:: ../_static/img/profiling_torch_compile/ac2g.png
+.. figure:: _static/img/profiling_torch_compile/ac2g.png
     :alt: Visualization in the chrome://trace viewer, showing an async flow between a kernel and its launching location.
 
 Alternatively, turn on *all* flows with the “Flow events” dropdown at the top.
@@ -117,7 +117,7 @@ See an example below:
 
     prof.export_chrome_trace("trace_compile.json")
 
-.. figure:: ../_static/img/profiling_torch_compile/compilation_profiling.png
+.. figure:: _static/img/profiling_torch_compile/compilation_profiling.png
     :alt: A visualization in the chrome://trace viewer, showing dynamo and inductor compilation steps
 
 Note a few things:
@@ -184,7 +184,7 @@ See the synthetic example below for a demonstration:
 
     prof.export_chrome_trace("trace_break.json")
 
-.. figure:: ../_static/img/profiling_torch_compile/graph_breaks.png
+.. figure:: _static/img/profiling_torch_compile/graph_breaks.png
     :alt: Visualization in the chrome://trace viewer, showing multiple CompiledFunction events - indicating graph breaks.
 
 Launch overhead
@@ -192,7 +192,7 @@ Launch overhead
 
 One common issue is bad GPU utilization. A quick way to identify this is if there are large gaps between kernels on the GPU:
 
-.. figure:: ../_static/img/profiling_torch_compile/cpu_bound.png
+.. figure:: _static/img/profiling_torch_compile/cpu_bound.png
     :alt: Visualization in the chrome://trace viewer, showing large gaps between GPU kernels. This indicates that the model is CPU bound, likely due to overhead during kernel launches.
 
 This is often the result of CPU overhead, e.g. if the amount of time spent on the CPU between kernel launches is larger than the amount of time spent by the GPU to process the kernels. The issue is more common for small batch sizes.
