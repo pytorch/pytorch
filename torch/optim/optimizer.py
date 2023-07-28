@@ -464,8 +464,8 @@ class Optimizer:
             hook (Callable): The user defined hook to be registered.
             prepend (bool): If True, the provided pre ``hook`` will be fired before
                 all the already registered pre-hooks on ``state_dict``. Otherwise,
-                the provided ``hook`` will be fired after all the pre-hooks registered
-                before. (default: False)
+                the provided ``hook`` will be fired after all the already registered
+                pre-hooks. (default: False)
 
         Returns:
             :class:`torch.utils.hooks.RemoveableHandle`:
@@ -499,8 +499,8 @@ class Optimizer:
             hook (Callable): The user defined hook to be registered.
             prepend (bool): If True, the provided post ``hook`` will be fired before
                 all the already registered post-hooks on ``state_dict``. Otherwise,
-                the provided ``hook`` will be fired after all the post-hooks registered
-                before. (default: False)
+                the provided ``hook`` will be fired after all the already registered
+                post-hooks. (default: False)
 
         Returns:
             :class:`torch.utils.hooks.RemoveableHandle`:
@@ -654,8 +654,8 @@ class Optimizer:
             hook (Callable): The user defined hook to be registered.
             prepend (bool): If True, the provided pre ``hook`` will be fired before
                 all the already registered pre-hooks on ``load_state_dict``. Otherwise,
-                the provided ``hook`` will be fired after all the pre-hooks registered
-                before. (default: False)
+                the provided ``hook`` will be fired after all the already registered
+                pre-hooks. (default: False)
 
         Returns:
             :class:`torch.utils.hooks.RemoveableHandle`:
@@ -689,8 +689,8 @@ class Optimizer:
             hook (Callable): The user defined hook to be registered.
             prepend (bool): If True, the provided post ``hook`` will be fired before
                 all the already registered post-hooks on ``load_state_dict``. Otherwise,
-                the provided ``hook`` will be fired after all the pre-hooks registered
-                before. (default: False)
+                the provided ``hook`` will be fired after all the already registered
+                pre-hooks. (default: False)
 
         Returns:
             :class:`torch.utils.hooks.RemoveableHandle`:
