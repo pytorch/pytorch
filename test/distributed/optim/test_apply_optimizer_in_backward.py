@@ -145,7 +145,7 @@ class ApplyOverlappedOptimizerTest(unittest.TestCase):
         # Create a simple test model
         class TestModel(torch.nn.Module):
             def __init__(self):
-                super(TestModel, self).__init__()
+                super().__init__()
                 self.linear1 = torch.nn.Linear(10, 5)
                 self.linear2 = torch.nn.Linear(5, 2)
 
