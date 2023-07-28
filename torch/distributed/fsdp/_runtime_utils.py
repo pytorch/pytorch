@@ -20,10 +20,10 @@ from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state,
     _get_sharding_strategy,
     _is_composable,
+    _no_dispatch_record_stream,
     TrainingState,
 )
 from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
-from torch.distributed.fsdp._utils import _no_dispatch_record_stream
 from torch.distributed.fsdp.api import BackwardPrefetch
 from torch.distributed.fsdp.flat_param import (
     FlatParameter,
