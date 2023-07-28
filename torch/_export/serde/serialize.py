@@ -855,7 +855,6 @@ class GraphModuleDeserializer:
         output_node.meta["val"] = tuple(
             arg.meta["val"] for arg in output_node.args[0]
         )
-        self.graph.eliminate_dead_code()
         return output_node
 
     def deserialize_node(self, serialized_node: Node, target: Callable) -> None:
