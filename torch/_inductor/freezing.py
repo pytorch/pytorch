@@ -118,9 +118,6 @@ class ConstantFolder(torch.fx.Interpreter):
 
         out = super().run_node(node)
 
-        # check inputs and remove if they are constants and have no more uses
-
-        # TODO - remove constant from node_replacement when it has no uses
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
             self.node_replacements[node] = out
 
