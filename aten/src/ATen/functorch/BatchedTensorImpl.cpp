@@ -34,40 +34,23 @@ void BatchedTensorImpl::refreshTensorMetadata() {
   const auto public_dims = value_.dim() - 1;
 
   // update size, strides and storage_offset
-  if (value_.unsafeGetTensorImpl()->has_symbolic_sizes_strides()){
-    // for tensor with symbolic size and strides
-    const auto value_sizes = value_.sym_sizes();
-    const auto value_strides = value_.sym_strides();
+  // for tensor with symbolic size and strides
+  const auto value_sizes = value_.sym_sizes();
+  const auto value_strides = value_.sym_strides();
 
-    c10::SymDimVector new_sizes;
-    c10::SymDimVector new_strides;
-    new_sizes.reserve(public_dims);
-    new_strides.reserve(public_dims);
-    for (const auto dim : c10::irange(0, public_dims)) {
-      auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
-      new_sizes.push_back(value_sizes.at(actual_dim));
-      new_strides.push_back(value_strides.at(actual_dim));
-    }
-
-    // `set_sizes_and_strides` takes care of calling `refresh_numel` and
-    // `refresh_contiguous`
-    set_sizes_and_strides(new_sizes, new_strides, value_.sym_storage_offset());
-    return;
-  } else {
-    // for tensor with regular size and strides
-    const auto value_sizes = value_.sizes();
-    const auto value_strides = value_.strides();
-    sizes_and_strides_.resize(public_dims);
-    for (const auto dim : c10::irange(0, public_dims)) {
-      auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
-      sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);
-      sizes_and_strides_.stride_at_unchecked(dim) = value_strides.at(actual_dim);
-    }
-    storage_offset_ = value_.storage_offset();
+  c10::SymDimVector new_sizes;
+  c10::SymDimVector new_strides;
+  new_sizes.reserve(public_dims);
+  new_strides.reserve(public_dims);
+  for (const auto dim : c10::irange(0, public_dims)) {
+    auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
+    new_sizes.push_back(value_sizes.at(actual_dim));
+    new_strides.push_back(value_strides.at(actual_dim));
   }
 
-  refresh_numel();
-  refresh_contiguous();
+  // `set_sizes_and_strides` takes care of calling `refresh_numel` and
+  // `refresh_contiguous`
+  set_sizes_and_strides(new_sizes, new_strides, value_.sym_storage_offset());
 }
 
 int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
