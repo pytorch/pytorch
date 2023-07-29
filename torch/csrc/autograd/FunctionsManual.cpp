@@ -6823,7 +6823,12 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
         (grad * masked_src_result).index_select(dim, index),
         (grad * result).index_select(dim, index) /
             source.masked_fill(src_zero, 1));
-    if ((src_num_zeros > 1).any().item<bool>()) {
+    // is_meta(): meta tensors don't support .item(), so we can't do this check.
+    // The usual use case is for PT2, where we don't support double backward
+    // anyway - so if we can't verify src_num_zeros <= 0, then don't support
+    // double backward.
+    if (src_num_zeros.is_meta() || at::isTensorSubclassLike(src_num_zeros) ||
+        (src_num_zeros > 1).any().item<bool>()) {
       auto node = std::make_shared<DelayedError>(
           "index_reduce(): Double backward is unsupported for source when >1 zeros in source are scattered to the same position in self",
           /* num inputs */ 1);
