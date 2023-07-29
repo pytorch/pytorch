@@ -5,8 +5,9 @@ import os
 import re
 import sys
 import time
+from collections import defaultdict
 from contextlib import contextmanager
-from typing import Dict, List, Optional, Set, Tuple
+from typing import DefaultDict, Dict, List, Optional, Set, Tuple
 
 import sympy
 
@@ -192,6 +193,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_input_idxs: List[int] = []
         self.unaligned_buffers: Set[str] = set()
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
+        self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
         self.creation_time = time.time()
         self.name = "GraphLowering"
         self.cpp_wrapper = cpp_wrapper
@@ -449,6 +451,24 @@ class GraphLowering(torch.fx.Interpreter):
         self.lists[name] = buffer_names
         return name
 
+    def register_users_of(self, node_output):
+        def register(value):
+            if isinstance(value, (list, tuple)):
+                for x in value:
+                    register(x)
+            if isinstance(value, ir.IRNode):
+                if (
+                    not hasattr(value, "data")
+                    or not isinstance(value.data, ir.IRNode)
+                    or not isinstance(value.data.data, ir.IRNode)
+                ):
+                    return
+
+                for read_name in value.get_read_names():
+                    self.name_to_users[read_name].append(value)
+
+        register(node_output)
+
     def mark_buffer_mutated(self, name: str):
         """
         When a buffer is mutated we need to make sure all the reads to
@@ -457,19 +477,11 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(name, str)
         self.mutated_buffers.add(name)
 
-        def visit(value):
-            if isinstance(value, (list, tuple)):
-                return [visit(x) for x in value]
-            if isinstance(value, ir.IRNode):
-                if value.is_user_of(name):
-                    value.realize()
-            return value
+        if name not in self.name_to_users:
+            return
 
-        for value in self.env.values():
-            try:
-                visit(value)
-            except Exception:
-                log.warning("error in mark_buffer_mutated", exc_info=True)
+        for user in self.name_to_users[name]:
+            user.realize()
 
     def add_tensor_constant(self, data):
         def allocate():
@@ -801,6 +813,8 @@ class GraphLowering(torch.fx.Interpreter):
                 ):
                     if isinstance(result.data.data.inputs[0], ir.Buffer):
                         result.data.data.inputs[0].origin_node = n
+
+        self.register_users_of(result)
 
         return result
 
