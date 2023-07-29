@@ -1,12 +1,14 @@
-torch.compiler
-========================
-
 .. currentmodule:: torch.compiler
 
 .. automodule:: torch.compiler
 
+.. _torch.compiler_api:
+
 torch.compiler API reference
-------------------------------
+============================
+
+For a quick overview of ``torch.compiler``, see :ref:`torch.compiler_overview`.
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
