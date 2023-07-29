@@ -22,10 +22,10 @@ class ObjectAttributeError : public std::runtime_error {
   ObjectAttributeError(const std::string& what) : std::runtime_error(what) {}
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TORCH_API Object {
   Object() = default;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  Object(const Object&) = default;
+  Object& operator=(const Object&) = default;
   Object(ObjectPtr _ivalue) : _ivalue_(std::move(_ivalue)) {}
   Object(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
   Object(
@@ -146,7 +146,9 @@ struct TORCH_API Object {
         setter = Method(_ivalue(), prop.setter);
       }
       return Property{
-          prop.name, Method(_ivalue(), prop.getter), std::move(setter)};
+          std::move(prop.name),
+          Method(_ivalue(), prop.getter),
+          std::move(setter)};
     });
   }
 
