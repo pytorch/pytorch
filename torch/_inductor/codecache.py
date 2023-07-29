@@ -876,6 +876,10 @@ class AotCodeCache:
                         subprocess.check_call(cmd)
                     except subprocess.CalledProcessError as e:
                         raise exc.CppCompileError(cmd, e.output) from e
+                else:
+                    log.debug(
+                        "aot_inductor dynamic library already exist: %s", output_so
+                    )
 
                 cls.cache[key] = output_so
 
