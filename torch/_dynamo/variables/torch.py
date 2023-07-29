@@ -516,6 +516,21 @@ class TorchVariable(VariableTracker):
                 **options,
             )
         elif (
+            self.value is torch.ops.aten.sym_size
+            and len(args) == 2
+            and len(kwargs) == 0
+            and isinstance(args[0], TensorVariable)
+        ):
+            # we see this when retracing already traced code
+            return args[0].call_method(tx, "size", [args[1]], {})
+        elif (
+            self.value is torch.ops.aten.sym_stride
+            and len(args) == 2
+            and len(kwargs) == 0
+            and isinstance(args[0], TensorVariable)
+        ):
+            return args[0].call_method(tx, "stride", [args[1]], {})
+        elif (
             self.value == torch.addcdiv
             and len(args) == 3
             and "value" in kwargs
