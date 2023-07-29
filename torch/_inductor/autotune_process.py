@@ -4,7 +4,7 @@ import time
 import warnings
 from multiprocessing.process import BaseProcess
 from multiprocessing.queues import Queue
-from typing import Any, cast, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch import multiprocessing
@@ -75,17 +75,17 @@ class TuningProcess:
 
         # cuda runtime does not work with "fork", use "spawn" to start processes.
         ctx = multiprocessing.get_context("spawn")
-        self.request_queue = ctx.Queue()
-        self.response_queue = ctx.Queue()
+        request_queue = self.request_queue = ctx.Queue()
+        response_queue = self.response_queue = ctx.Queue()
 
-        self.process = ctx.Process(
+        process = self.process = ctx.Process(
             target=self.process_main,
             args=(
                 self.request_queue,
                 self.response_queue,
             ),
         )
-        cast(BaseProcess, self.process).start()
+        process.start()
 
         # register the exit handler for the parent process so it will terminate
         # the child processes
@@ -97,14 +97,18 @@ class TuningProcess:
             atexit.register(lambda: self.terminate())
 
         # wait for the initialization to be done
-        cast("Queue[Any]", self.request_queue).put(Ping())
-        resp = cast("Queue[Any]", self.response_queue).get()
+        request_queue.put(Ping())
+        resp = response_queue.get()
         assert isinstance(resp, Pong)
 
     def terminate(self) -> None:
         if self.valid():
-            cast("Queue[Any]", self.request_queue).put(None)
-            cast(BaseProcess, self.process).join()
+            request_queue = self.request_queue
+            assert request_queue is not None
+            request_queue.put(None)
+            process = self.process
+            assert process is not None
+            process.join()
 
 
 tuning_process = TuningProcess()
@@ -126,7 +130,9 @@ class TensorMeta:
         cls, irnodes: Union[LayoutOrBuffer, Tuple[LayoutOrBuffer], List[LayoutOrBuffer]]
     ) -> Union["TensorMeta", List["TensorMeta"]]:
         if isinstance(irnodes, (tuple, list)):
-            return [cast("TensorMeta", cls.from_irnodes(x)) for x in irnodes]
+            result: List[Any] = [cls.from_irnodes(x) for x in irnodes]
+            assert all(isinstance(x, TensorMeta) for x in result)
+            return result
 
         node = irnodes
         if isinstance(node, ir.Layout):
@@ -230,14 +236,21 @@ def benchmark_in_sub_process(
     assert choice.bmreq is not None
     tuning_process.initialize()
     assert tuning_process.valid()
+    process, request_queue, response_queue = (
+        tuning_process.process,
+        tuning_process.request_queue,
+        tuning_process.response_queue,
+    )
+    assert (
+        process is not None and request_queue is not None and response_queue is not None
+    )
 
-    cast("Queue[Any]", tuning_process.request_queue).put(choice.bmreq)
-
+    request_queue.put(choice.bmreq)
     while True:
         try:
-            timing = cast("Queue[Any]", tuning_process.response_queue).get(timeout=1.0)
+            timing = response_queue.get(timeout=1.0)
         except queue.Empty:
-            status = cast(BaseProcess, tuning_process.process).exitcode
+            status = process.exitcode
             if status is None:
                 # child process is still running
                 continue
