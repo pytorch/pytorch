@@ -17,6 +17,17 @@ auto Error::apply(variable_list&& inputs) -> variable_list {
   throw std::runtime_error(msg);
 }
 
+void Error::compiled_args(CompiledNodeArgs& args) {
+  // throw the error durring collect, the graph won't get compiled
+  apply(variable_list());
+}
+
+variable_list Error::apply_with_saved(
+    const variable_list& inputs,
+    SwapSavedVariables& saved) {
+  TORCH_INTERNAL_ASSERT(false, "unreachable");
+}
+
 auto DelayedError::apply(variable_list&& inputs) -> variable_list {
   tensor_list outputs;
   outputs.reserve(inputs.size());
