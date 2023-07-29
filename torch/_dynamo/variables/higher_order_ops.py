@@ -601,7 +601,11 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # TODO: Support `fn` with kwargs.
         if not torch._dynamo.config.capture_func_transforms:
-            unimplemented("torch.func.grad capture is disabled")
+            unimplemented(
+                "torch.func.grad capture is disabled, "
+                "it can be turned on by setting "
+                "`dynamo.config.capture_func_transforms=True`"
+            )
         # [NOTE] Here we are (roughly) modelling the following
         #
         #   grad_fn = torch.func.grad(fn, argnums=.., has_aux=..)
@@ -741,7 +745,11 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from .builder import wrap_fx_proxy
 
         if not torch._dynamo.config.capture_func_transforms:
-            unimplemented("torch.func.vmap capture is disabled")
+            unimplemented(
+                "torch.func.vmap capture is disabled, "
+                "it can be turned on by setting "
+                "`dynamo.config.capture_func_transforms=True`"
+            )
 
         checkpoint = tx.copy_graphstate()
         graph_checkpoint = tx.output.graph

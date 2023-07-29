@@ -2103,7 +2103,10 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(len(counters["graph_break"]), 1)
             self.assertEqual(
                 dict(counters["graph_break"]),
-                {"torch.func.grad capture is disabled": 2},
+                {
+                    "torch.func.grad capture is disabled, it can be turned "
+                    "on by setting `dynamo.config.capture_func_transforms=True`": 2
+                },
             )
             self.assertEqual(actual, expected)
 
@@ -2516,7 +2519,10 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(len(counters["graph_break"]), 1)
             self.assertEqual(
                 dict(counters["graph_break"]),
-                {"torch.func.vmap capture is disabled": 2},
+                {
+                    "torch.func.vmap capture is disabled, it can be "
+                    "turned on by setting `dynamo.config.capture_func_transforms=True`": 2
+                },
             )
             self.assertEqual(actual, expected)
 
