@@ -217,29 +217,6 @@ immutable_dict.__hash__ = lambda self: hash(tuple(self.items()))
 immutable_list.__hash__ = lambda self: hash(tuple(self))
 
 
-def freeze_inputs(f):
-    """
-    Useful for wrapping lists in tuples for caching purposes
-    """
-
-    def freeze_value(x):
-        if isinstance(x, (immutable_dict, immutable_list)):
-            return x
-        if isinstance(x, list):
-            return immutable_list(x)
-        if isinstance(x, dict):
-            return immutable_dict(x)
-        return x
-
-    @functools.wraps(f)
-    def wrapped(*args):
-        args = [freeze_value(x) for x in args]
-        return f(*args)
-
-    wrapped.cache_info = f.cache_info
-    return wrapped
-
-
 def precompute_method(obj: Any, method: str):
     """Replace obj.method() with a new method that returns a precomputed constant."""
     result = getattr(obj, method)()
@@ -607,7 +584,7 @@ class IndentedBuffer:
                 if isinstance(line, LineContext):
                     self._lines.append(line)
                 else:
-                    IndentedBuffer.writeline(self, line[dedent:])
+                    IndentedBuffer.writeline(self, line[int(dedent) :])
         else:
             other_code = textwrap.dedent(other_code)
             if strip:
@@ -661,9 +638,9 @@ def is_big_gpu(index):
 
 
 def use_triton_template(layout, *, enable_int32=False):
-    layout_dtypes = (torch.float16, torch.bfloat16, torch.float32)
+    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:
-        layout_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.int32)
+        layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     return (
         (
             config.max_autotune
