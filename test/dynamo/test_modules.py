@@ -1410,7 +1410,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         mod = ModuleSpecialFwd()
         rx = torch.randn([3, 10, 10])
         real = mod(rx)
-        graph, _ = torch._dynamo.export(mod, rx)
+        graph, _ = torch._dynamo.export(mod)(rx)
         self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
 
     def test_conv_call_forward_directly(self):
@@ -1991,6 +1991,44 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         ref = fn(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_no_op_assignment(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.rand([4])
+
+            def forward(self, x):
+                # should be a no-op, but causes dynamo to lose the static input
+                x = x + 1
+                self.buffer = self.buffer.to(x)
+                return self.buffer + x
+
+        compiles_without_buffers = 0
+
+        def debug_compile(gm, *args, **kwargs):
+            nonlocal compiles_without_buffers
+            compiles_without_buffers += len(list(gm.buffers())) == 0
+            return gm
+
+        @torch.compile(backend=debug_compile)
+        def foo(mod, x):
+            return mod(x)
+
+        mod = Mod()
+        foo(mod, torch.rand([4]))
+        self.assertEqual(compiles_without_buffers, 0)
+
+        foo(mod, torch.rand([4], dtype=torch.half))
+        self.assertEqual(compiles_without_buffers, 1)
+
+        class Mod2(Mod):
+            def __setattr__(self, name, value):
+                return super().__setattr__(name, value)
+
+        foo(Mod2(), torch.rand([4]))
+        # causes two compilations, bc unimplemented custom setattr
+        self.assertTrue(compiles_without_buffers >= 2)
 
 
 if __name__ == "__main__":
