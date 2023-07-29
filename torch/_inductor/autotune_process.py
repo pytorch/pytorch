@@ -35,8 +35,8 @@ class Pong:
 @dataclasses.dataclass
 class TuningProcess:
     process: Optional[BaseProcess] = None
-    request_queue: "Optional[Queue[Any]]" = None
-    response_queue: "Optional[Queue[Any]]" = None
+    request_queue: Optional["Queue[Any]"] = None
+    response_queue: Optional["Queue[Any]"] = None
 
     @staticmethod
     def process_main(
