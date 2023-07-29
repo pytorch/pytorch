@@ -307,7 +307,7 @@ class TORCH_API Context {
   bool allow_fp16_reduction_cublas = true;
   bool allow_bf16_reduction_cublas = true;
   bool enabled_mkldnn = true;
-  at::LinalgBackend linalg_preferred_backend = 
+  at::LinalgBackend linalg_preferred_backend =
       c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true
       ? at::LinalgBackend::Cusolver
       : at::LinalgBackend::Default;
