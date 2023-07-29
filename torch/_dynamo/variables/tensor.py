@@ -230,8 +230,7 @@ class TensorVariable(VariableTracker):
         elif name == "is_sparse" and self.is_sparse is not None:
             result = ConstantVariable(self.is_sparse, **options)
         elif name == "shape" and self.size is None:
-            sizes = [variables.ConstantVariable(x.evaluate_expr()) for x in self.call_method(tx, "size", [], {})]
-            result = ShapeVariable(sizes, **options)
+            result = self.call_method(tx, "size", [], {})
         elif name == "ndim" and self.ndim is None:
             result = self.call_method(tx, "dim", [], {})
         elif name == "data":
