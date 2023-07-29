@@ -1,6 +1,10 @@
+from __future__ import annotations
+
 import functools
 import logging
-from typing import List
+from typing import Callable, Iterator, List, TypedDict
+
+import triton
 
 import torch
 from .. import config, ir
@@ -42,7 +46,7 @@ def conv_grid(n, c, h, w, meta):
     )
 
 
-conv_configs = functools.partial(
+conv_configs: Callable[[int, int, int], Iterator[triton.Config]] = functools.partial(
     filtered_configs,
     configs=(
         # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
@@ -197,15 +201,24 @@ def conv1x1_via_mm(x, w, *, out):
 aten_conv1x1_via_mm = ExternKernelChoice(conv1x1_via_mm, None)
 
 
+class ConvLayoutParams(TypedDict):
+    stride: tuple[int, ...]
+    padding: tuple[int, ...]
+    dilation: tuple[int, ...]
+    transposed: bool
+    output_padding: tuple[int, ...]
+    groups: int
+
+
 def conv_layout(
-    x: "TensorBox",
-    weight: "TensorBox",
-    bias: "TensorBox",
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    x: TensorBox,
+    weight: TensorBox,
+    bias: TensorBox,
+    stride: tuple[int, ...],
+    padding: tuple[int, ...],
+    dilation: tuple[int, ...],
     transposed: bool,
-    output_padding: List[int],
+    output_padding: tuple[int, ...],
     groups: int,
 ) -> ir.Layout:
     """Determine output layout for a convolution"""
@@ -283,7 +296,7 @@ def convolution(
     dilation = tuple(dilation)
     output_padding = tuple(output_padding)
     assert isinstance(groups, int)
-    kwargs = {
+    kwargs: ConvLayoutParams = {
         "stride": stride,
         "padding": padding,
         "dilation": dilation,
@@ -357,11 +370,11 @@ def convolution(
         "groups",
     ]
     if bias is None:
-        args = (x, weight)
-        kwargs["bias"] = None
+        args = [x, weight]
+        kwargs["bias"] = None  # type: ignore[typeddict-unknown-key]
         ordered_kwargs_for_cpp_kernel.insert(0, "bias")
     else:
-        args = (x, weight, bias)
+        args = [x, weight, bias]
         bias.realize()
         bias.freeze_layout()
         V.graph.sizevars.evaluate_static_shapes(bias.get_size())
