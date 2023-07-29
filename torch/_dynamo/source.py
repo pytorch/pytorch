@@ -435,6 +435,17 @@ class NNModuleSource(ChainedSource):
     def name(self):
         return self.base.name()
 
+    def find_module(self, tx):
+        scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
+        module = None
+        source = self
+        import torch
+
+        while not isinstance(module, torch.nn.Module):
+            source = source.base
+            module = eval(source.name(), scope)
+        return module
+
 
 @dataclasses.dataclass(frozen=True)
 class NotNNModuleSource(NNModuleSource):
@@ -490,3 +501,12 @@ def is_from_local_source(source: Source):
     if isinstance(source, ChainedSource):
         return is_from_local_source(source.base)
     return isinstance(source, LocalSource)
+
+
+def get_nn_module_source(source: Source):
+    assert source.guard_source().is_nn_module(), breakpoint()
+    if isinstance(source, NNModuleSource):
+        return source
+    if isinstance(source, ChainedSource):
+        return get_nn_module_source(source.base)
+    raise RuntimeError("Root source without NNModuleSource")

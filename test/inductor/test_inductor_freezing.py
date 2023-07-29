@@ -70,7 +70,7 @@ class TestCase(TorchTestCase):
                     "triton.autotune_pointwise": False,  # too slow
                     "implicit_fallbacks": False,
                     "freezing": True,
-                    "freezing_discard_parameters": False,
+                    "freezing_discard_parameters": True,
                 }
             )
         )
@@ -217,10 +217,6 @@ class OptimizeForInferenceTemplate(TestCase):
                 ).run(code[0])
                 self.assertEqual(out_eager, out)
 
-    # freezing_discard_parameters is an unsound optimization, and it does not work with the attribute
-    # lifting strategy in dynamo. Dynamo needs this strategy to preserve correctness, which trumps speed
-    # in our tradeoff calculus. To re-enable, fix parameter freezing logic to account for lifting.
-    @unittest.expectedFailure
     def test_error_on_eager(self):
         mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
 
@@ -303,10 +299,6 @@ class OptimizeForInferenceTemplate(TestCase):
 
         self.assertEqual(out_optimized_for_infernece, out_eager)
 
-    # freezing_discard_parameters is an unsound optimization, and it does not work with the attribute
-    # lifting strategy in dynamo. Dynamo needs this strategy to preserve correctness, which trumps speed
-    # in our tradeoff calculus. To re-enable, fix parameter freezing logic to account for lifting.
-    @unittest.expectedFailure
     def test_param_deallocated(self):
         # TODO: cpu path keeps an extra copy of graph around somewhere,
         # memory not as important for cpu
@@ -458,7 +450,6 @@ class OptimizeForInferenceTemplate(TestCase):
         # Currently we only handle aten.convolution.default in layout
         # optimization. That's why the count may be 0 here for CPU.
         if self.device == "cuda":
-            breakpoint()
             self.assertTrue(nconv == 1)
 
     def test_redundant_clone_for_layout_convert(self):

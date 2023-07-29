@@ -842,8 +842,7 @@ class VariableBuilder:
         source = self.get_source()
 
         if (
-            self.tx.output.export
-            and source.guard_source().is_nn_module()
+            source.guard_source().is_nn_module()
             and not source.guard_source().is_fsdp_module()
         ):
             # Note - we bypass this registration for all tensors so that we get proper mutation tracking,

@@ -130,6 +130,10 @@ class NNModuleVariable(VariableTracker):
     def convert_to_unspecialized(self, tx):
         """Restart analysis treating this module as an UnspecializedNNModuleVariable"""
         mod = tx.output.get_submodule(self.module_key)
+        NNModuleVariable.convert_module_to_unspecialized(tx, mod)
+
+    @staticmethod
+    def convert_module_to_unspecialized(tx, mod):
         GenerationTracker.tag(mod)
 
         # Mark the class dynamic unless its module initialization

@@ -51,6 +51,7 @@ from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import ContinueExecutionCache, ReenterWith
 from .source import (
     AttrSource,
+    get_nn_module_source,
     GetItemSource,
     GlobalSource,
     GlobalWeakRefSource,
@@ -1251,6 +1252,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     @break_graph_if_unsupported(push=0)
     def STORE_SUBSCR(self, inst):
         val, obj, key = self.popn(3)
+        if obj.source and obj.source.guard_source().is_nn_module():
+            module_source = get_nn_module_source(obj.source)
+            module = module_source.find_module(self)
+            NNModuleVariable.convert_module_to_unspecialized(self, module)
+
         result = obj.call_method(self, "__setitem__", [key, val], {})
         # no result is pushed, so need to lift the guards to global
         self.output.guards.update(result.guards)
