@@ -688,6 +688,9 @@ class SymNodeVariable(VariableTracker):
         # TODO: Should we allow non SymTypes here?  Today it is allowed
         self.sym_num = sym_num
 
+    def __str__(self):
+        return str(self.evaluate_expr())
+
     def python_type(self):
         if isinstance(self.sym_num, SymTypes):
             return self.sym_num.node.pytype
