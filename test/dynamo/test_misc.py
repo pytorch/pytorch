@@ -6008,8 +6008,8 @@ def ___make_guard_fn():
                 self.jitter_val = jitter_val
 
             def roll_tensor(self, input):
-                h_shift = np.int_(self.jitter_val - 1)
-                w_shift = np.int_(self.jitter_val + 1)
+                h_shift = self.jitter_val - 1
+                w_shift = self.jitter_val + 1
                 return torch.roll(
                     torch.roll(input, shifts=h_shift, dims=2), shifts=w_shift, dims=3
                 )
