@@ -3,9 +3,7 @@ import unittest
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._export import export, dynamic_dim
-from torch._export.utils import register_dataclass_as_pytree_node
-from torch._export.constraints import constrain_as_size, constrain_as_value
+from torch.export_utils import dynamic_dim, constrain_as_size, constrain_as_value, register_dataclass_as_pytree_node
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils._pytree import tree_flatten, tree_unflatten, LeafSpec, TreeSpec
@@ -25,7 +23,7 @@ class TestDynamismExpression(TestCase):
         inp = (torch.tensor([3]),)
         ref = f(*inp)
 
-        gm = export(f, inp)
+        gm = torch.export(f, inp)
         res = gm(*inp)
 
         self.assertTrue(torchdynamo.utils.same(ref, res))
@@ -42,7 +40,7 @@ class TestDynamismExpression(TestCase):
 
         inp = (torch.tensor([3]),)
         with self.assertRaisesRegex(torchdynamo.exc.UserError, "Unable to set min size"):
-            export(invalid_size, inp)
+            torch.export(invalid_size, inp)
 
         def invalid_input_conflict_with_inline_constraints(x):
             b = x.item()
@@ -51,7 +49,7 @@ class TestDynamismExpression(TestCase):
 
         inp = (torch.tensor([6]),)
         with self.assertRaisesRegex(torchdynamo.exc.UserError, "Invalid value 6 for range"):
-            export(invalid_input_conflict_with_inline_constraints, inp)
+            torch.export(invalid_input_conflict_with_inline_constraints, inp)
 
         def invalid_input_conflict_with_input_constraints(x):
             return x + 1
@@ -61,7 +59,7 @@ class TestDynamismExpression(TestCase):
             dynamic_dim(inp, 0) > 5,
         ]
         with self.assertRaisesRegex(torchdynamo.exc.UserError, "not in range"):
-            export(
+            torch.export(
                 invalid_input_conflict_with_input_constraints,
                 (inp,),
                 constraints=inp_constraints,
@@ -77,7 +75,7 @@ class TestDynamismExpression(TestCase):
         inp = (torch.tensor([3]),)
 
         with self.assertRaisesRegex(torchdynamo.exc.UserError, "Invalid ranges"):
-            export(conflicting_constraints, inp)
+            torch.export(conflicting_constraints, inp)
 
     def test_export_assume_static_by_default(self):
         def branch_on_shape(x: torch.Tensor):
@@ -89,7 +87,7 @@ class TestDynamismExpression(TestCase):
         inp = (torch.rand(4, 5),)
 
         # Being able to export means shape is preserved as static
-        export(branch_on_shape, inp)
+        torch.export(branch_on_shape, inp)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -97,7 +95,7 @@ class TestExport(TestCase):
 
     def _test_export_same_as_eager(self, f, args, kwargs=None):
         kwargs = kwargs or {}
-        exported_program = export(f, args, kwargs)
+        exported_program = torch.export(f, args, kwargs)
         reversed_kwargs = {key: kwargs[key] for key in reversed(kwargs)}
         self.assertEqual(exported_program(*args, **kwargs), f(*args, **kwargs))
         self.assertEqual(exported_program(*args, **reversed_kwargs), f(*args, **reversed_kwargs))
@@ -122,7 +120,7 @@ class TestExport(TestCase):
             torchdynamo.exc.UserError,
             "trying to get a value out of symbolic int"
         ):
-            _ = export(fn_ddo, (torch.tensor([2, 3, 5]),), constraints=None)
+            _ = torch.export(fn_ddo, (torch.tensor([2, 3, 5]),), constraints=None)
 
     def test_if_functional(self):
         def foo(x):
@@ -131,7 +129,7 @@ class TestExport(TestCase):
             y = z.view(x.shape)
             return x.cos() + y.cos()
 
-        gm = export(foo, (torch.tensor([2, 3, 5]),), constraints=None)
+        gm = torch.export(foo, (torch.tensor([2, 3, 5]),), constraints=None)
 
         view_count = 0
         for node in gm.graph.nodes:
@@ -165,8 +163,8 @@ class TestExport(TestCase):
                 ".*\n.*\\[1\\], which was marked dynamic, must be specialized to 4"
             ),
         ):
-            torch._export.export(m, (a,), constraints=constraints)
-        em = torch._export.export(m, (a,))
+            torch.export(m, (a,), constraints=constraints)
+        em = torch.export(m, (a,))
         x = torch.randn(3, 5)
         with self.assertRaisesRegex(RuntimeError, "\\[1\\] is specialized at 4"):
             em(x)
@@ -188,7 +186,7 @@ class TestExport(TestCase):
             torchdynamo.exc.UserError, "It appears that you're trying to set a constraint " +
             "on a value which we evaluated to have a static value of 3. "
         ):
-            export(f, example_inputs, {}, constraints)
+            torch.export(f, example_inputs, {}, constraints)
 
     def test_not_correct_dim(self):
         def f(x):
@@ -308,7 +306,7 @@ class TestExport(TestCase):
                 x_linear = self.linear(x_conv)
                 return x_linear.cos()
 
-        ep = export(Foo(), (torch.randn(20, 16, 50, 100),))
+        ep = torch.export(Foo(), (torch.randn(20, 16, 50, 100),))
         for node in ep.graph.nodes:
             if (
                 node.op == "placeholder" and
@@ -331,7 +329,7 @@ class TestExport(TestCase):
             torchdynamo.exc.UserError,
             r"^(?!.*fall back to eager).*"
         ):
-            _ = export(fn_ddo, (torch.tensor([2, 3, 5]),), constraints=None)
+            _ = torch.export(fn_ddo, (torch.tensor([2, 3, 5]),), constraints=None)
 
     def test_pytree_regster_data_class(self):
 

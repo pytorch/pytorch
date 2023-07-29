@@ -2,8 +2,8 @@
 
 import unittest
 
+from torch import export
 import torch._dynamo as torchdynamo
-from torch._export import export
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import (
     filter_examples_by_support_level,

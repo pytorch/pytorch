@@ -18,8 +18,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
-from torch._export import dynamic_dim
-from torch._export.constraints import constrain_as_size, constrain_as_value
+from torch.export_utils import constrain_as_size, constrain_as_value, dynamic_dim
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.testing import FileCheck

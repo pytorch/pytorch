@@ -1,5 +1,10 @@
 from enum import Enum
 
+__all__ = [
+    "InternalError",
+    "ExportError",
+]
+
 
 class ExportErrorType(Enum):
     # User providing invalid inputs to either tracer, or other public facing APIs

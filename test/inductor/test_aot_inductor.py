@@ -4,7 +4,6 @@
 import copy
 
 import torch
-import torch._export
 import torch._inductor
 
 import torch.fx._pytree as fx_pytree
@@ -28,7 +27,7 @@ class AOTInductorModelRunner:
             output_tensors.append(torch.empty_like(output))
 
         # The exact API is subject to change
-        exported = torch._export.export(model, example_inputs)
+        exported = torch.export(model, example_inputs)
         param_buffer_values = list(exported.state_dict.values())
         flat_example_inputs = fx_pytree.tree_flatten_spec(
             example_inputs, exported.call_spec.in_spec

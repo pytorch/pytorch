@@ -3,7 +3,6 @@ from collections import defaultdict
 from typing import Tuple, Dict, Optional, List
 
 import torch
-from torch._export import export
 from torch._export.pass_base import ExportPassBase
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
@@ -196,7 +195,7 @@ class GraphModuleOpUpgrader:
             upgraded_program = exported_program.transform(_pass)
             # NB: we have to retrace the graph_module instead of ep because of some failure. Also, we need to turn of
             # _add_runtime_assertions because dynamo is not happy with sym_size.int.
-            exported_program = export(upgraded_program.graph_module, inputs, {})
+            exported_program = torch.export(upgraded_program.graph_module, inputs, {})
             exported_program._call_spec = upgraded_program.call_spec
 
         return exported_program

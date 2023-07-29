@@ -3,7 +3,7 @@ import unittest
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._export import dynamic_dim, export
+from torch.export_utils import dynamic_dim
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
@@ -59,7 +59,7 @@ class TestSerialize(TestCase):
                     eps=1e-5,
                 )
 
-        exported_module = export(
+        exported_module = torch.export(
             MyModule(),
             (
                 torch.ones([512, 512], requires_grad=True),
@@ -91,7 +91,7 @@ class TestSerialize(TestCase):
 
         input = torch.arange(10.0).reshape(5, 2)
         input.requires_grad = True
-        exported_module = export(MyModule(), (input,))
+        exported_module = torch.export(MyModule(), (input,))
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
@@ -131,7 +131,7 @@ class TestSerialize(TestCase):
             def forward(self, x):
                 return torch.ops.aten.var_mean.correction(x, [1])[0]
 
-        exported_module = export(
+        exported_module = torch.export(
             MyModule(),
             (torch.ones([512, 512], requires_grad=True),),
         )
@@ -159,7 +159,7 @@ class TestSerialize(TestCase):
             return torch.searchsorted(x, values, side="right", right=True)
 
         x, _ = torch.sort(torch.randn(3, 4))
-        exported_module = export(f, (x,))
+        exported_module = torch.export(f, (x,))
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
 
         node = serialized.graph_module.graph.nodes[-1]
@@ -177,7 +177,7 @@ class TestDeserialize(TestCase):
         """Export a graph, serialize it, deserialize it, and compare the results."""
         # TODO(angelayi): test better with some sort of wrapper
         constraints = [] if constraints is None else constraints
-        ep = export(fn, inputs, {}, constraints)
+        ep = torch.export(fn, inputs, {}, constraints)
         ep.graph.eliminate_dead_code()
 
         serialized_struct, state_dict = serialize(ep, opset_version={"aten": 0})

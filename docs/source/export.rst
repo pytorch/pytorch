@@ -1,4 +1,4 @@
-torch._export.export
+torch.export
 =====================
 
 .. warning::

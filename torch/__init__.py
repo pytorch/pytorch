@@ -33,7 +33,8 @@ if _running_with_deploy():
 else:
     from .torch_version import __version__ as __version__
 
-from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, TYPE_CHECKING, Union
+from collections import namedtuple
 import builtins
 
 __all__ = [
@@ -55,6 +56,7 @@ __all__ = [
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap',
+    'export',
 ]
 
 ################################################################################
@@ -1491,6 +1493,7 @@ from ._linalg_utils import (  # type: ignore[misc]
 )
 from ._linalg_utils import _symeig as symeig  # type: ignore[misc]
 
+
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
@@ -1584,6 +1587,37 @@ class _TorchCompileWrapper:
 
     def __call__(self, model_, inputs_):
         return self.compiler_fn(model_, inputs_, **self.kwargs)
+
+
+################################################################################
+# Exposing torch.export() and related support APIs
+################################################################################
+from ._constraint import Constraint
+
+def export(
+    f: Callable,
+    args: Tuple[Any],
+    kwargs: Optional[Dict[str, Any]] = None,
+    constraints: Optional[List[Constraint]] = None,
+) -> "torch.export_utils.ExportedProgram":
+    """
+    Traces either an nn.Module's forward function or just a callable with PyTorch
+    operations inside and produce a ExportedProgram.
+
+    Args:
+        m: the `nn.Module` or callable to trace.
+
+        args: example positional inputs.
+
+        kwargs: optional example keyword inputs.
+
+        constraints: An optional list of constraints on the dynamic arguments specifying
+            their possible range of their shapes
+
+    Returns:
+        An ExportedProgram containing the traced method.
+    """
+    return torch._export.export(f, args, kwargs, constraints)
 
 
 def compile(model: Optional[Callable] = None, *,
@@ -1771,6 +1805,8 @@ if TYPE_CHECKING:
 _lazy_modules = {
     "_dynamo",
     "_inductor",
+    "_export",
+    "export_utils",
     # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
     "onnx",
 }

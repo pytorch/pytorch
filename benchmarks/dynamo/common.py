@@ -30,7 +30,6 @@ import torch
 
 import torch._dynamo
 import torch._dynamo.utils
-import torch._export
 import torch.distributed
 import torch.fx._pytree as fx_pytree
 from scipy.stats import gmean, ttest_ind
@@ -1109,7 +1108,7 @@ class AOTInductorModelCache:
                 output_tensors.append(torch.empty_like(output))
 
             # The exact API is subject to change
-            exported = torch._export.export(model, example_inputs)
+            exported = torch.export(model, example_inputs)
             param_buffer_values = list(exported.state_dict.values())
             flat_example_inputs = fx_pytree.tree_flatten_spec(
                 example_inputs, exported.call_spec.in_spec
@@ -2058,7 +2057,7 @@ class BenchmarkRunner:
                     # HF use dict example_inputs
                     if isinstance(example_inputs, dict):
                         raise RuntimeError(
-                            "expect example_inputs as list/tuple, but got dict. need to support kwargs in torch._export.export"
+                            "expect example_inputs as list/tuple, but got dict. need to support kwargs in torch.export"
                         )
                     # apply export on module directly
                     # no need for n iterations
@@ -3103,7 +3102,7 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment
         output_filename = "inductor.csv"
     elif args.export:
-        optimize_ctx = torch._export.export
+        optimize_ctx = torch.export
         experiment = speedup_experiment
         output_filename = "export.csv"
     elif args.xla:

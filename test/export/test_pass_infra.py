@@ -5,7 +5,6 @@ import unittest
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import export
 from torch._export.pass_base import ExportPassBase
 from torch._export.constraints import constrain_as_value
 from functorch.experimental import control_flow
@@ -21,7 +20,7 @@ class TestPassInfra(TestCase):
         class NullPass(ExportPassBase):
             pass
 
-        ep = export(f, (torch.ones(3, 2),))
+        ep = torch.export(f, (torch.ones(3, 2),))
         old_nodes = ep.graph.nodes
 
         ep = ep.transform(NullPass())
@@ -60,7 +59,7 @@ class TestPassInfra(TestCase):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        _ = export(mod, (torch.tensor(True), x, y)).transform(ExportPassBase())
+        _ = torch.export(mod, (torch.tensor(True), x, y)).transform(ExportPassBase())
 
 
 if __name__ == '__main__':

@@ -5,7 +5,6 @@ from pathlib import Path
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._export import export
 
 from torch._export.db.case import ExportCase, normalize_inputs
 from torch._export.db.examples import all_examples
@@ -69,7 +68,7 @@ Result:
     # Get resulting graph from dynamo trace
     try:
         inputs = normalize_inputs(example_case.example_inputs)
-        exported_program = export(
+        exported_program = torch.export(
             model,
             inputs.args,
             inputs.kwargs,

@@ -12,8 +12,7 @@ import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing import FileCheck
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import export, dynamic_dim
-from torch._export.constraints import constrain_as_value, constrain_as_size
+from torch.export_utils import dynamic_dim, constrain_as_value, constrain_as_size
 from torch._export.passes import (
     ReplaceViewOpsWithViewCopyOpsPass,
 )
@@ -71,7 +70,7 @@ class TestPasses(TestCase):
         def f(inp: torch.Tensor) -> torch.Tensor:
             return model(inp)
 
-        ep = export(f, (x,)).transform(ReplaceViewOpsWithViewCopyOpsPass())
+        ep = torch.export(f, (x,)).transform(ReplaceViewOpsWithViewCopyOpsPass())
 
         count_after = 0
         for node in ep.graph.nodes:
@@ -90,7 +89,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(2, 2, 3)
 
-        ep = export(M(), (x,), constraints=[dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6])
+        ep = torch.export(M(), (x,), constraints=[dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6])
 
         with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(2, 7, 3))
@@ -115,7 +114,7 @@ class TestPasses(TestCase):
             dynamic_dim(x, 0) >= 3
         ]
 
-        ep = export(M(), (x, y), constraints=constraints)
+        ep = torch.export(M(), (x, y), constraints=constraints)
 
         with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
@@ -140,7 +139,7 @@ class TestPasses(TestCase):
             dynamic_dim(x, 0) >= 3
         ]
 
-        ep = export(M(), (x, y), constraints=constraints)
+        ep = torch.export(M(), (x, y), constraints=constraints)
 
         with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
@@ -171,7 +170,7 @@ class TestPasses(TestCase):
             dynamic_dim(y, 1) <= 6,
         ]
 
-        ep = export(M(), (x, y), constraints=constraints)
+        ep = torch.export(M(), (x, y), constraints=constraints)
 
         with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
@@ -197,7 +196,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
 
-        ep = export(M(), (x,))
+        ep = torch.export(M(), (x,))
         self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 1)
 
         ep = ep.transform(ReplaceViewOpsWithViewCopyOpsPass())
@@ -212,7 +211,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
 
-        ep = export(foo, (x,)).transform(ReplaceViewOpsWithViewCopyOpsPass())
+        ep = torch.export(foo, (x,)).transform(ReplaceViewOpsWithViewCopyOpsPass())
         # After this pass, there shouldn't be any view nodes in the graph
         self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view.default) == 0)
         self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view_copy.default) > 0)
@@ -248,7 +247,7 @@ class TestPasses(TestCase):
 
         x = torch.tensor([2])
         mod = M()
-        ep = export(mod, (x,))
+        ep = torch.export(mod, (x,))
 
         with self.assertRaisesRegex(RuntimeError, r"_local_scalar_dense_default is outside of inline constraint \[2, 5\]."):
             ep(torch.tensor([6]))
@@ -269,7 +268,7 @@ class TestPasses(TestCase):
         x = torch.tensor([2, 1, 2, 3, 5, 0])
 
         mod = M()
-        ep = export(mod, (x,), constraints=[dynamic_dim(x, 0) >= 2])
+        ep = torch.export(mod, (x,), constraints=[dynamic_dim(x, 0) >= 2])
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -309,7 +308,7 @@ class TestPasses(TestCase):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        ep = export(mod, (torch.tensor(True), x, y))
+        ep = torch.export(mod, (torch.tensor(True), x, y))
 
 
         with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint \\[2, 5\\]."):
@@ -326,7 +325,7 @@ class TestPasses(TestCase):
         m = Adder()
         x = torch.rand(3, 4)
         y = torch.rand(3, 4)
-        exported = torch._export.export(
+        exported = torch.export(
             m, (x, y), constraints=[dynamic_dim(x, 1) == dynamic_dim(y, 1)]
         )
 
@@ -349,7 +348,7 @@ class TestPasses(TestCase):
             constrain_as_size(a, 4, 7)
             return torch.empty((a, 4))
 
-        ep = torch._export.export(f, (torch.tensor([7]),))
+        ep = torch.export(f, (torch.tensor([7]),))
         gm = ep.graph_module
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default",
