@@ -293,7 +293,11 @@ class IRNode:
         return f"{type(self).__name__}(\n{lines}\n)"
 
     def is_user_of(self, name):
-        return any(name == dep.name for dep in self.get_reads())
+        return name in self.get_read_names()
+
+    @cache_on_self
+    def get_read_names(self):
+        return {dep.name for dep in self.get_reads()}
 
     def get_numel(self):
         return sympy_product(self.get_size())
