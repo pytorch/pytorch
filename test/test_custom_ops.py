@@ -605,7 +605,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         with self.assertRaisesRegex(ValueError, "default value"):
 
             @custom_op(f"{TestCustomOp.test_ns}::foo")
-            def foo(x: Optional[Tensor] = None):
+            def foo(x: Optional[Tensor] = None):  # noqa: RUF013
                 raise NotImplementedError()
 
             del foo
@@ -613,7 +613,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         with self.assertRaisesRegex(ValueError, "default value"):
 
             @custom_op(f"{TestCustomOp.test_ns}::foo")
-            def foo(x: Optional[Tensor] = None):
+            def foo(x: Optional[Tensor] = None):  # noqa: RUF013
                 raise NotImplementedError()
 
             del foo
