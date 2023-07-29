@@ -37,6 +37,13 @@ kernel void lerp<float>(constant float* self [[buffer(0)]],
                         device float* output [[buffer(3)]],
                         uint index [[thread_position_in_grid]]);
 
+template
+[[host_name("lerp_half")]]
+kernel void lerp<half>(constant half* self [[buffer(0)]],
+                       constant half* end  [[buffer(1)]],
+                       constant half* weight [[buffer(2)]],
+                       device half* output [[buffer(3)]],
+                       uint index [[thread_position_in_grid]]);
 )LERP_TENSOR_MTL";
 
 static id<MTLLibrary> compileLerpTensorLibrary(id<MTLDevice> device) {
@@ -90,7 +97,7 @@ void lerp_tensor_mps(const Tensor& self, const Tensor& end, const Tensor& weight
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
 
-      const std::string kernel = "lerp_tensor_" + scalarToMetalTypeString(self.scalar_type());
+      const std::string kernel = "lerp_" + scalarToMetalTypeString(self.scalar_type());
       id<MTLComputePipelineState> lerpTensorPSO = lerpTensorPipelineState(device, kernel);
       [computeEncoder setComputePipelineState:lerpTensorPSO];
       [computeEncoder setBuffer:selfBuffer offset:self.storage_offset() * self.element_size() atIndex:0];
@@ -107,8 +114,6 @@ void lerp_tensor_mps(const Tensor& self, const Tensor& end, const Tensor& weight
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
 
       getMPSProfiler().endProfileKernel(lerpTensorPSO);
-
-      [computeEncoder endEncoding];
     }
   });
 }
