@@ -632,11 +632,11 @@ def box_iou(boxes1, boxes2):
     return iou, union
 
 
-def is_dist_avail_and_initialized():
+def is_dist_avail_and_initialized() -> bool:
     return False
 
 
-def get_world_size():
+def get_world_size() -> int:
     if not is_dist_avail_and_initialized():
         return 1
 
