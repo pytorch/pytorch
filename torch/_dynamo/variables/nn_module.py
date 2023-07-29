@@ -344,7 +344,7 @@ class NNModuleVariable(VariableTracker):
             # If we are tracing the higher order op, we want Dynamo to step
             # inside the module call so that Dynamo can see the underlying
             # parameters and buffers and raise them as inputs to the graph.
-            if tx.output.is_root_tracer() or is_allowed(mod.__class__):
+            if tx.output.is_root_tracer() and is_allowed(mod.__class__):
                 if torch._dynamo.config.inline_nn_modules:
                     try:
                         return inline(args)
