@@ -205,6 +205,42 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_rng_non_trees(self):
             self.check_rng()
 
+        def test_mutation(self):
+            @torch.compile()
+            def foo(x):
+                x.add_(2)
+                return x
+
+            def inp():
+                return torch.ones([10], device="cuda")
+
+            foo(inp())
+
+            # mutation on inp doesnt hit cudagraphs
+            self.assertIsNone(self.get_manager())
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.buf = torch.ones([10], device="cuda")
+
+                def forward(self, x):
+                    self.buf.add_(x)
+                    return self.buf + x
+
+            @torch.compile()
+            def foo(mod, x):
+                return mod(x)
+
+            mod = Mod()
+            mod2 = Mod()
+
+            for _ in range(3):
+                self.assertEqual(foo(mod, inp()), mod2(inp()))
+                self.assertEqual(mod.buf, mod2.buf)
+
+            self.assertIsNotNone(self.get_manager())
+
         def test_function_compiled_multiple_times(self):
             def foo(x):
                 y = foo2(x)
