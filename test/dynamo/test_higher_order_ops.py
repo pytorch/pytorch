@@ -96,6 +96,16 @@ def op_count(gm):
     return result
 
 
+@contextlib.contextmanager
+def disable_functorch_capture():
+    org_val = torch._dynamo.config.capture_func_transforms
+    torch._dynamo.config.capture_func_transforms = False
+    try:
+        yield
+    finally:
+        torch._dynamo.config.capture_func_transforms = org_val
+
+
 class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def _assert_wrap_fallback(self, func, args, setup=lambda: None):
         counters.clear()
@@ -2076,16 +2086,7 @@ class GraphModule(torch.nn.Module):
     def test_grad_disable_capture(self):
         counters.clear()
 
-        @contextlib.contextmanager
-        def disable_grad_capture():
-            org_val = torch._dynamo.config.capture_func_transforms
-            torch._dynamo.config.capture_func_transforms = False
-            try:
-                yield
-            finally:
-                torch._dynamo.config.capture_func_transforms = org_val
-
-        with disable_grad_capture():
+        with disable_functorch_capture():
             # We have verified above that this
             # function compiles
             def fn(x):
@@ -2501,16 +2502,7 @@ class GraphModule(torch.nn.Module):
     def test_vmap_disable_capture(self):
         counters.clear()
 
-        @contextlib.contextmanager
-        def disable_grad_capture():
-            org_val = torch._dynamo.config.capture_func_transforms
-            torch._dynamo.config.capture_func_transforms = False
-            try:
-                yield
-            finally:
-                torch._dynamo.config.capture_func_transforms = org_val
-
-        with disable_grad_capture():
+        with disable_functorch_capture():
             # We have verified above that this
             # function compiles
             def wrapper_fn(x):
