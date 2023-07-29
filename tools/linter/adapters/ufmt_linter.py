@@ -115,7 +115,7 @@ def main() -> None:
     args = parser.parse_args()
 
     logging.basicConfig(
-        format="<%(threadName)s:%(levelname)s> %(message)s",
+        format="<%(processName)s:%(levelname)s> %(message)s",
         level=logging.NOTSET
         if args.verbose
         else logging.DEBUG
