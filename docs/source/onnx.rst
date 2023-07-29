@@ -730,7 +730,6 @@ Preview: torch.onnx TorchDynamo Exporter
 
 .. autofunction:: torch.onnx.dynamo_export
 .. autofunction:: torch.onnx.enable_fake_mode
-.. autofunction:: torch.onnx.OnnxRegistry
 
 .. autosummary::
     :toctree: generated
@@ -741,3 +740,4 @@ Preview: torch.onnx TorchDynamo Exporter
     torch.onnx.ExportOutput
     torch.onnx.ExportOutputSerializer
     torch.onnx.OnnxExporterError
+    torch.onnx.OnnxRegistry
