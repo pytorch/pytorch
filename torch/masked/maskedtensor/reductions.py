@@ -159,7 +159,6 @@ NATIVE_REDUCE_FNS = list(NATIVE_REDUCE_MAP.keys())
 TORCH_REDUCE_FNS = list(TORCH_REDUCE_MAP.keys())
 TENSOR_REDUCE_FNS = list(TENSOR_REDUCE_MAP.keys())
 
-
 def _is_reduction(fn):
     return fn in NATIVE_REDUCE_MAP or fn in TORCH_REDUCE_MAP or fn in TENSOR_REDUCE_MAP
 

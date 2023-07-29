@@ -1,13 +1,15 @@
+
 import warnings
 
 # A workaround to support both TorchScript and MyPy:
 from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-from torch import sym_float, Tensor
-from torch._prims_common import corresponding_real_dtype
+from torch import Tensor
 from torch.masked import as_masked_tensor, is_masked_tensor, MaskedTensor
 from . import _docs
+from torch._prims_common import corresponding_real_dtype
+from torch import sym_float
 
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
@@ -1418,6 +1420,7 @@ def median(
     dtype: Optional[DType] = None,
     mask: Optional[Tensor] = None,
 ) -> Tensor:
+
     """\
 {reduction_signature}
 {reduction_descr}
@@ -1542,9 +1545,7 @@ def _std_var(
     mask: Optional[Tensor],
     take_sqrt: Optional[bool],
 ) -> Tensor:
-    assert (
-        unbiased is None or correction_opt is None
-    ), "Only one of unbiased and correction may be given"
+    assert (unbiased is None or correction_opt is None), "Only one of unbiased and correction may be given"
     correction = 1.0
     if unbiased is not None:
         correction = 1.0 if unbiased else 0.0
@@ -1590,11 +1591,8 @@ def _std_var(
         if not keepdim:
             count = count.reshape(total.shape)
         if correction != 0:
-            real_dtype = (
-                corresponding_real_dtype(compute_dtype)
-                if compute_dtype.is_complex
-                else compute_dtype
-            )
+            real_dtype = (corresponding_real_dtype(compute_dtype)
+                          if compute_dtype.is_complex else compute_dtype)
             count = count.to(real_dtype)
             count = torch.subtract(count, correction)
             count = torch.maximum(count, count.new_zeros([]))

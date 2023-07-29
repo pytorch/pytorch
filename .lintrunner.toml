@@ -1820,6 +1820,7 @@ exclude_patterns = [
     'torch/compiler/__init__.py',
     'torch/contrib/__init__.py',
     'torch/contrib/_tensorboard_vis.py',
+    'torch/cuda/_memory_viz.py',  # mypy: Value of type "object" is not indexable
     'torch/distributed/__init__.py',
     'torch/distributed/_composable_state.py',
     'torch/distributed/_functional_collectives.py',
@@ -2118,8 +2119,22 @@ exclude_patterns = [
     'torch/fx/tensor_type.py',
     'torch/fx/traceback.py',
     'torch/hub.py',
+    'torch/jit/_script.py',  # "Callable[[], Any]" has no attribute "__func__"
+    'torch/jit/frontend.py',  # "expr" has no attribute "id"
     'torch/library.py',
     'torch/linalg/__init__.py',
+    # UFMT causes import cycle on masked
+    'torch/masked/__init__.py',
+    'torch/masked/_docs.py',
+    'torch/masked/_ops.py',
+    'torch/masked/maskedtensor/__init__.py',
+    'torch/masked/maskedtensor/_ops_refs.py',
+    'torch/masked/maskedtensor/binary.py',
+    'torch/masked/maskedtensor/core.py',
+    'torch/masked/maskedtensor/creation.py',
+    'torch/masked/maskedtensor/passthrough.py',
+    'torch/masked/maskedtensor/reductions.py',
+    'torch/masked/maskedtensor/unary.py',
     'torch/monitor/__init__.py',
     'torch/nested/__init__.py',
     'torch/nn/__init__.py',
