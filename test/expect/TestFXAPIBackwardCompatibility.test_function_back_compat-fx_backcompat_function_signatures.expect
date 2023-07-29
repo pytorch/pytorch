@@ -67,7 +67,7 @@ torch.fx.proxy.Proxy.__init__(self, node: torch.fx.node.Node, tracer: 'Optional[
 torch.fx.proxy.Proxy.keys(self)
 torch.fx.proxy.TracerBase.create_arg(self, a: Any) -> torch.fx.node.Argument
 torch.fx.proxy.TracerBase.create_node(self, kind: str, target: torch.fx.node.Target, args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, torch.fx.node.Argument], name: Optional[str] = None, type_expr: Optional[Any] = None) -> torch.fx.node.Node
-torch.fx.proxy.TracerBase.create_proxy(self, kind: str, target: torch.fx.node.Target, args: Tuple[Any, ...], kwargs: Dict[str, Any], name: Optional[str] = None, type_expr: Optional[Any] = None, proxy_factory_fn: Callable[[torch.fx.node.Node], Proxy] = None)
+torch.fx.proxy.TracerBase.create_proxy(self, kind: str, target: torch.fx.node.Target, args: Tuple[Any, ...], kwargs: Dict[str, Any], name: Optional[str] = None, type_expr: Optional[Any] = None, proxy_factory_fn: Optional[Callable[[torch.fx.node.Node], Proxy]] = None)
 torch.fx.proxy.TracerBase.iter(self, obj: 'Proxy') -> Iterator
 torch.fx.proxy.TracerBase.keys(self, obj: 'Proxy') -> Any
 torch.fx.proxy.TracerBase.proxy(self, node: torch.fx.node.Node) -> 'Proxy'
