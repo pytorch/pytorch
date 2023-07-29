@@ -13,7 +13,6 @@ from .ctx_manager import (
 from .dicts import ConstDictVariable, DataClassVariable, DefaultDictVariable
 from .functions import (
     NestedUserFunctionVariable,
-    PartialInvocationFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
