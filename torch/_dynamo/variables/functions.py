@@ -310,11 +310,6 @@ class UserMethodVariable(UserFunctionVariable):
         return super().num_parameters() - 1
 
 
-class PartialInvocationFunctionVariable(UserMethodVariable):
-    def self_args(self):
-        return []
-
-
 class WrappedUserMethodVariable(UserMethodVariable):
     def __init__(self, wrapped, context, **kwargs):
         kwargs.pop("fn", None)

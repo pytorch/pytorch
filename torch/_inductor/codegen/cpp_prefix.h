@@ -192,13 +192,15 @@ template <> struct AsIntegerType<double> { typedef uint64_t type; };
 template <> struct AsIntegerType<bfloat16> { typedef uint16_t type; };
 
 template <typename T>
-inline T fetch_value(volatile T *addr) {
+typename std::enable_if<!std::is_reduced_floating_point<T>::value, T>::type
+inline fetch_value(volatile T *addr) {
   return *addr;
 }
 
-template <>
-inline bfloat16 fetch_value<bfloat16>(volatile bfloat16 *addr) {
-  return bfloat16(addr->x);
+template <typename T>
+typename std::enable_if<std::is_reduced_floating_point<T>::value, T>::type
+inline fetch_value(volatile T *addr) {
+  return T(addr->x, T::from_bits());
 }
 
 template <typename T>
