@@ -21,7 +21,8 @@ inline Tensor batch_norm(
     double eps) {
   TORCH_CHECK(
       input.dim() >= 2,
-      "Expected at least 2 input dimensions, but got ", input.dim());
+      "Expected at least 2 input dimensions, but got ",
+      input.dim());
   if (training) {
     auto size = input.sizes();
     int64_t size_prods = size[0];
