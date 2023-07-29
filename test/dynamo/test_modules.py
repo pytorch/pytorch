@@ -18,10 +18,12 @@ import torch.nn.functional as F
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.testing import expectedFailureDynamic, same
-from torch.distributed._tensor import DeviceMesh
-from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
+
+if torch.distributed.is_available():
+    from torch.distributed._tensor import DeviceMesh
+    from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
 
 try:
     from . import test_functions
@@ -2112,41 +2114,41 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertTrue(compiles_without_buffers >= 2)
 
 
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
-    with_comms,
-)
+if torch.distributed.is_available():
+    from torch.testing._internal.distributed._tensor.common_dtensor import (
+        DTensorTestBase,
+        with_comms,
+    )
 
+    class TestDTensorCompile(DTensorTestBase):
+        def setUp(self):
+            super().setUp()
 
-class TestDTensorCompile(DTensorTestBase):
-    def setUp(self):
-        super().setUp()
+        @property
+        def world_size(self) -> int:
+            return 2
 
-    @property
-    def world_size(self) -> int:
-        return 2
+        @with_comms
+        def test_dtensor_fullgraph(self):
+            class SimpleMLP(torch.nn.Module):
+                def __init__(self, device):
+                    super().__init__()
+                    self.net1 = torch.nn.Linear(5, 1024, device=device)
+                    self.relu = torch.nn.ReLU()
+                    self.net2 = torch.nn.Linear(1024, 4, device=device)
 
-    @with_comms
-    def test_dtensor_fullgraph(self):
-        class SimpleMLP(torch.nn.Module):
-            def __init__(self, device):
-                super().__init__()
-                self.net1 = torch.nn.Linear(5, 1024, device=device)
-                self.relu = torch.nn.ReLU()
-                self.net2 = torch.nn.Linear(1024, 4, device=device)
+                def forward(self, x):
+                    return self.net2(F.relu(self.net1(x)))
 
-            def forward(self, x):
-                return self.net2(F.relu(self.net1(x)))
+            mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-
-        model = SimpleMLP(self.device_type)
-        model = parallelize_module(model, mesh, PairwiseParallel())
-        inp = torch.rand(20, 5, device=self.device_type)
-        out = model(inp)
-        compiled_mod = torch.compile(model, backend="eager", fullgraph=True)
-        compiled_out = compiled_mod(inp)
-        self.assertEqual(compiled_out, out)
+            model = SimpleMLP(self.device_type)
+            model = parallelize_module(model, mesh, PairwiseParallel())
+            inp = torch.rand(20, 5, device=self.device_type)
+            out = model(inp)
+            compiled_mod = torch.compile(model, backend="eager", fullgraph=True)
+            compiled_out = compiled_mod(inp)
+            self.assertEqual(compiled_out, out)
 
 
 if __name__ == "__main__":
