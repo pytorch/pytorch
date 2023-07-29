@@ -1,6 +1,6 @@
 import functools
 import logging
-from typing import Iterator, List, Tuple
+from typing import List, Tuple
 
 import sympy
 
@@ -20,7 +20,7 @@ def triton_config(num_stages, num_warps, **kwargs):
 
 def filtered_configs(
     m: int, n: int, k: int, configs: List[Tuple[int, int, int, int, int]]
-) -> Iterator[Config]:
+):
     """Heuristic to shrink configs when they are bigger than the input size"""
     m = max(next_power_of_2(V.graph.sizevars.size_hint(m)), 16)
     n = max(next_power_of_2(V.graph.sizevars.size_hint(n)), 16)
