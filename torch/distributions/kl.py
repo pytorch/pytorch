@@ -186,9 +186,7 @@ def kl_divergence(p: Distribution, q: Distribution) -> torch.Tensor:
         _KL_MEMOIZE[type(p), type(q)] = fun
     if fun is NotImplemented:
         raise NotImplementedError(
-            "No KL(p || q) is implemented for p type {} and q type {}".format(
-                p.__class__.__name__, q.__class__.__name__
-            )
+            f"No KL(p || q) is implemented for p type {p.__class__.__name__} and q type {q.__class__.__name__}"
         )
     return fun(p, q)
 

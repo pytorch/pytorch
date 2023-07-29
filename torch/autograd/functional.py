@@ -568,7 +568,7 @@ def _jacfwd(func, inputs, strict=False, vectorize=False):
                 # We need to transpose the Jacobian because in forward AD, the
                 # batch dimension represents that of the inputs
                 jacobian_input_i_output_j = jac.permute(*range(1, jac.ndim), 0).reshape(
-                    tuple([*output_i.shape, *input_j.shape])
+                    (*output_i.shape, *input_j.shape)
                 )  # noqa: C409
 
                 jacobian_output_i_output.append(jacobian_input_i_output_j)

@@ -112,9 +112,7 @@ class LowRankMultivariateNormal(Distribution):
             )
         except RuntimeError as e:
             raise ValueError(
-                "Incompatible batch shapes: loc {}, cov_factor {}, cov_diag {}".format(
-                    loc.shape, cov_factor.shape, cov_diag.shape
-                )
+                f"Incompatible batch shapes: loc {loc.shape}, cov_factor {cov_factor.shape}, cov_diag {cov_diag.shape}"
             ) from e
         self.loc = loc_[..., 0]
         self.cov_diag = cov_diag_[..., 0]

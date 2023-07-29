@@ -142,9 +142,7 @@ def is_function_or_method(the_callable):
 
 
 def is_vararg(the_callable):
-    if not is_function_or_method(the_callable) and hasattr(
-        the_callable, "__call__"
-    ):  # noqa: B004
+    if not is_function_or_method(the_callable) and callable(the_callable):  # noqa: B004
         # If `the_callable` is a class, de-sugar the call so we can still get
         # the signature
         the_callable = the_callable.__call__
@@ -161,7 +159,7 @@ def get_param_names(fn, n_args):
 
     if (
         not is_function_or_method(fn)
-        and hasattr(fn, "__call__")
+        and callable(fn)
         and is_function_or_method(fn.__call__)
     ):  # noqa: B004
         # De-sugar calls to classes
