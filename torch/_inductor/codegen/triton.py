@@ -2004,13 +2004,10 @@ class TritonScheduling:
         can fuse node1 and node2.  These nodes might already be
         FusedSchedulerNodes.
         """
-        if isinstance(node1, scheduler.ForeachKernelSchedulerNode):
-            return node1.can_fuse(node2)
-
         if isinstance(node1, scheduler.ForeachKernelSchedulerNode) or isinstance(
             node2, scheduler.ForeachKernelSchedulerNode
         ):
-            return False
+            return scheduler.ForeachKernelSchedulerNode.can_fuse(node1, node2)
 
         _, (numel1, rnumel1) = node1.group
         _, (numel2, rnumel2) = node2.group
@@ -2380,11 +2377,12 @@ class TritonScheduling:
         with kernel:
             for node in [template_node, *epilogue_nodes]:
                 node.mark_run()
-            render()  # warmup run to get the args right
+            partial_code = render()
             for node in epilogue_nodes:
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
-        src_code = render()
+        # finalize must be called after adding epilogue above
+        src_code = partial_code.finalize()
         node_schedule = [template_node, *epilogue_nodes]
         kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)

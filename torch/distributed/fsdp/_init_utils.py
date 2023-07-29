@@ -99,7 +99,8 @@ def _init_process_group_state(
     sharding_strategy: ShardingStrategy,
     policy: Optional[_FSDPPolicy],
 ) -> _FSDPState:
-    if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+    is_hybrid_strategy = sharding_strategy in HYBRID_SHARDING_STRATEGIES
+    if is_hybrid_strategy:
         if process_group is None and policy is None:
             # Raise an error here, since this is manual wrapping with no process group
             # passed in, there is no way to ensure all wrapped FSDP instances use the same
@@ -107,16 +108,24 @@ def _init_process_group_state(
             raise ValueError(
                 f"Manual wrapping with {sharding_strategy} requires explicit specification of process group."
             )
-        else:
-            state = _init_process_group_state_for_hybrid_shard(state, process_group)
+        state = _init_process_group_state_for_hybrid_shard(state, process_group)
     else:
         state.process_group = (
             process_group if process_group is not None else _get_default_group()
         )
-
     state.rank = state.process_group.rank()
     state.world_size = state.process_group.size()
-
+    data_parallel_world_size = state.world_size
+    if is_hybrid_strategy:
+        data_parallel_world_size *= state._inter_node_pg.size()
+    state._gradient_predivide_factor = (
+        default_hooks.DefaultState._get_gradient_predivide_factor(
+            data_parallel_world_size
+        )
+    )
+    state._gradient_postdivide_factor = (
+        data_parallel_world_size / state._gradient_predivide_factor
+    )
     return state
 
 
@@ -433,9 +442,8 @@ def _init_runtime_state(
     _post_forward_handles: List[RemovableHandle] = []
     state._post_forward_handles = _post_forward_handles
     state._sync_gradients = True
-    state._comm_hook = _get_default_comm_hook(state.sharding_strategy)
-    state._comm_hook_state = _get_default_comm_hook_state(state.process_group)
-    state._hook_registered = False
+    state._comm_hook = None
+    state._comm_hook_state = None
     # Used to prevent running the pre-backward hook multiple times
     _ran_pre_backward_hook: Dict[FlatParamHandle, bool] = {}
     state._ran_pre_backward_hook = _ran_pre_backward_hook
