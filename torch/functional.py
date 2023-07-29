@@ -41,7 +41,7 @@ __all__ = [
 ]
 
 
-def broadcast_tensors(*tensors):
+def broadcast_tensors(*tensors: Tensor) -> List[Tensor]:
     r"""broadcast_tensors(*tensors) -> List of Tensors
 
     Broadcasts the given tensors according to :ref:`broadcasting-semantics`.
@@ -489,7 +489,7 @@ else:
         return _meshgrid(*tensors, indexing=indexing)
 
 
-def _meshgrid(*tensors, indexing: Optional[str]):
+def _meshgrid(*tensors: Tensor, indexing: Optional[str]):
     if has_torch_function(tensors):
         return handle_torch_function(meshgrid, tensors, *tensors, indexing=indexing)
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
@@ -1157,7 +1157,7 @@ def cartesian_prod(*tensors: Tensor) -> Tensor:
     return _VF.cartesian_prod(tensors)  # type: ignore[attr-defined]
 
 
-def block_diag(*tensors):
+def block_diag(*tensors: Tensor) -> Tensor:
     """Create a block diagonal matrix from provided tensors.
 
     Args:
@@ -1804,5 +1804,5 @@ lu = boolean_dispatch(
 lu.__doc__ = _lu_impl.__doc__
 
 
-def align_tensors(*tensors):
+def align_tensors(*tensors: Tensor):
     raise RuntimeError('`align_tensors` not yet implemented.')
