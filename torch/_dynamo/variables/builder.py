@@ -845,11 +845,6 @@ class VariableBuilder:
             source.guard_source().is_nn_module()
             and not source.guard_source().is_fsdp_module()
         ):
-            # Note - we bypass this registration for all tensors so that we get proper mutation tracking,
-            # even for intermediate mutations (not output affecting) on params and buffers.
-            # Export does not need this, and furthermore this messes with export contract rewrite at the moment.
-            # This is sound to do for export, but ideally, we would rewrite the calling convention preservation to
-            # work better, and not need this.
             return self.tx.output.register_attr_or_module(
                 value,
                 self.name,
