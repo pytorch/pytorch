@@ -191,7 +191,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return y[0] + y[1]
 
         inp = [torch.tensor([1.3, 3.77, 0.1]), torch.tensor([8.7, 6.23, 9.9])]
-        gm, _ = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(inp)
+        gm = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(
+            inp
+        ).graph_module
         self.assertTrue(torch._dynamo.utils.same(gm(inp), f(inp)))
 
     def test_export_with_shallow_list_copy_with_side_effects(self):
@@ -202,7 +204,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return x[0] + x[1], y[0] + y[1], y[2]
 
         inp = [torch.tensor([1.3, 3.77, 0.1]), torch.tensor([8.7, 6.23, 9.9])]
-        gm, _ = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(inp)
+        gm = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(
+            inp
+        ).graph_module
         res = gm(inp)
         ref = f(inp)
         self.assertTrue(torch._dynamo.utils.same(res, ref))
