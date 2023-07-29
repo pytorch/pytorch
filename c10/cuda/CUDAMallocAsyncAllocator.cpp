@@ -801,7 +801,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     std::lock_guard<std::mutex> lk(general_mutex);
     TORCH_CHECK(
         capture_underway,
-        "CudaMallocAsync::notifyCaptureEnded called, "
+        "decOngoingCaptures called, "
         "but CudaMallocAsync::capture_underway is false.");
     capture_underway = false;
   }

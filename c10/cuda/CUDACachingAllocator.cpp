@@ -2117,7 +2117,9 @@ class DeviceCachingAllocator {
   // Called by CUDAGraph::capture_end
   void decOngoingCaptures() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    TORCH_INTERNAL_ASSERT(captures_underway > 0, "Attempted to decrement the number of graph captures when it was already 0. Please report a bug to PyTorch");
+    TORCH_INTERNAL_ASSERT(
+        captures_underway > 0,
+        "Attempted to decrement the number of graph captures when it was already 0. Please report a bug to PyTorch");
     captures_underway--;
   }
 

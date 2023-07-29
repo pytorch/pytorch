@@ -82,7 +82,7 @@ void CUDAPluggableAllocator::set_end_allocate_stream_to_pool_fn(
 }
 
 void CUDAPluggableAllocator::set_inc_ongoing_captures_fn(
-     std::function<void(int)> inc_ongoing_captures_fn) {
+    std::function<void(int)> inc_ongoing_captures_fn) {
   inc_ongoing_captures_fn_ = inc_ongoing_captures_fn;
 }
 
@@ -257,17 +257,23 @@ void CUDAPluggableAllocator::endAllocateStreamToPool(
   }
 }
 
-void CUDAPluggableAllocator::incOngoingCaptures(
-    int device) {
+void CUDAPluggableAllocator::incOngoingCaptures(int device) {
   if (inc_ongoing_captures_fn_) {
     inc_ongoing_captures_fn_(device);
+  } else {
+    TORCH_WARN(
+        "incOngoingCaptures called but no function was set. This is"
+        "dangerous and can cause a crash due to invalid event recording.");
   }
 }
 
-void CUDAPluggableAllocator::decOngoingCaptures(
-    int device) {
+void CUDAPluggableAllocator::decOngoingCaptures(int device) {
   if (dec_ongoing_captures_fn_) {
     dec_ongoing_captures_fn_(device);
+  } else {
+    TORCH_WARN(
+        "decOngoingCaptures called but no function was set. This is"
+        "dangerous and can cause a crash due to invalid event recording.");
   }
 }
 

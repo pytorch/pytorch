@@ -67,8 +67,7 @@ struct CUDAPluggableAllocator
       std::function<void(int, cudaStream_t)> capture_about_to_end_fn);
 
   void set_inc_ongoing_captures_fn(
-      std::function<void(int)>
-          inc_ongoing_captures_fn);
+      std::function<void(int)> inc_ongoing_captures_fn);
 
   void set_dec_ongoing_captures_fn(
       std::function<void(int)> dec_ongoing_captures_fn);
@@ -146,9 +145,9 @@ struct CUDAPluggableAllocator
   std::function<void(int, cudaStream_t, c10::cuda::MempoolId_t)>
       begin_allocate_stream_to_pool_fn_;
   std::function<void(int, cudaStream_t)> end_allocate_stream_to_pool_fn_;
+  std::function<void(int, c10::cuda::MempoolId_t)> relase_pool_fn_;
   std::function<void(int)> inc_ongoing_captures_fn_;
   std::function<void(int)> dec_ongoing_captures_fn_;
-  std::function<void(int, c10::cuda::MempoolId_t)> relase_pool_fn_;
   std::mutex allocator_mutex_;
   // We do the bookeeping here in order to simplify custom allocators
   std::unordered_map<void*, _AllocationMetadata> allocation_metadata_;

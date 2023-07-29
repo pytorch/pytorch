@@ -123,6 +123,13 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
   // The user has no business launching kernels on capture_stream_ from another thread
   // while calling capture_begin. They'll have no idea if their side thread's
   // kernel will end up as part of the capture or not.
+  // Addendum: the notification to CUDACachingAllocator that we are in a capture region has been moved
+  // from beginAllocateStreamToPool to the incOngoingCaptures call above.
+  // This change was made as we observed that a race condition exists where e.g., a free() call to the
+  // allocator in an autograd side-thread may see an out-of-date captures_underway value and
+  // incorrectly record an event while a capture is still ongoing (disallowed by the CUDA runtime API).
+  // For more details see #106235.
+  // This change should also address the situation described above.
   c10::cuda::CUDACachingAllocator::beginAllocateStreamToPool(capture_dev_, capture_stream_, mempool_id_);
 
 #else
