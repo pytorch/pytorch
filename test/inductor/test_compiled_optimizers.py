@@ -9,8 +9,8 @@ import torch
 
 import torch._inductor
 
-# The rest of the optimizers not yet imported: Adamax, ASGD, LBFGS, NAdam, RAdam, SGD, SparseAdam
-from torch.optim import Adadelta, Adagrad, Adam, AdamW, RMSprop, Rprop
+# The rest of the optimizers not yet imported: Adamax, ASGD, LBFGS, RAdam, SGD, SparseAdam
+from torch.optim import Adadelta, Adagrad, Adam, AdamW, NAdam, RMSprop, Rprop
 
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
 
@@ -160,7 +160,7 @@ class CompiledOptimizerTests(TestCase):
     test_adamw = make_test(AdamW, lr=0.01)
     # Need to an impl which does not use python scalars
     # test_adamax = make_test(Adamax, lr=0.01)
-    # test_nadam = make_test(NAdam, lr=0.01)
+    test_nadam = make_test(NAdam, lr=0.01)
     test_rprop = make_test(Rprop, kernel_count=1, lr=0.01)
     test_rmsprop = make_test(RMSprop, kernel_count=1, lr=0.01)
     test_adadelta = make_test(Adadelta, kernel_count=1, lr=0.01)
@@ -171,7 +171,7 @@ class CompiledOptimizerTests(TestCase):
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
     # Need an impl which does not use python scalars
     # test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
-    # test_nadam_recompile = make_recompile_test(NAdam, lr=0.01)
+    test_nadam_recompile = make_recompile_test(NAdam, lr=0.01)
     test_rprop_recompile = make_recompile_test(Rprop, kernel_count=1, lr=0.01)
     test_rmsprop_recompile = make_recompile_test(RMSprop, kernel_count=1, lr=0.01)
     test_adadelta_recompile = make_recompile_test(Adadelta, kernel_count=1, lr=0.01)
