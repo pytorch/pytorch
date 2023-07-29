@@ -174,6 +174,7 @@ class TestDoBench(TestCase):
                 ],
                 1,
             )
+
         args = [
             torch.randn(4, 4, device="cuda"),
             torch.randn(4, 4, device="cuda"),
