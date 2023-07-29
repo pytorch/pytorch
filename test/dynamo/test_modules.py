@@ -2121,11 +2121,10 @@ class TestDynamoInlineNNModules(torch._dynamo.test_case.TestCase):
                 torch._dynamo.allow_in_graph(Mod)
             if in_torch_nn:
                 Mod._call_impl.__module__ = "torch.nn.blah"
+                Mod.forward.__module__ = "torch.nn.blah"
             else:
-                # Make sure it does not start with "torch.nn" since logic
-                # in torch/_dynamo/variables/functions.py depends on that.
-                # TODO: Figure out why Modules defined here have the torch.nn
-                # prefix
+                # _call_impl starts with __module__ by default since we always
+                # inherit the one from torch.nn.Module
                 Mod._call_impl.__module__ = "blah"
             return Mod
 
@@ -2157,8 +2156,8 @@ class TestDynamoInlineNNModules(torch._dynamo.test_case.TestCase):
 
             eager_res = fn(torch.ones(10, 10))
 
-            if torch._dynamo.config.inline_nn_modules:
-                # setUp, tearDown cleans up for us
+            if inline:
+                # tearDown cleans up for us
                 torch._dynamo.config.inline_nn_modules = True
             else:
                 torch._dynamo.config.inline_nn_modules = False
@@ -2167,12 +2166,12 @@ class TestDynamoInlineNNModules(torch._dynamo.test_case.TestCase):
             optim_res = torch._dynamo.optimize(cnt)(fn)(torch.ones(10, 10))
 
             if method is None:
-                if is_allowed:
+                if is_allowed or in_torch_nn:
                     self.assertEqual(cnt.frame_count, 1)
                 else:
                     self.assertEqual(cnt.frame_count, 2)
             elif method == "_call_impl":
-                if is_allowed and in_torch_nn:
+                if in_torch_nn:
                     self.assertEqual(cnt.frame_count, 1)
                 else:
                     # In this case, we do call_function in
@@ -2184,7 +2183,10 @@ class TestDynamoInlineNNModules(torch._dynamo.test_case.TestCase):
                     # caught.
                     self.assertEqual(cnt.frame_count, 2)
             elif method == "forward":
-                self.assertEqual(cnt.frame_count, 2)
+                if in_torch_nn:
+                    self.assertEqual(cnt.frame_count, 1)
+                else:
+                    self.assertEqual(cnt.frame_count, 2)
 
             self.assertEqual(eager_res, optim_res)
             torch._dynamo.reset()
