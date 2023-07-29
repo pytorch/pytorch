@@ -116,6 +116,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
                 torch._register_device_module('xxx', DummyModule)
             # check generator registered before using
+            torch.utils.rename_privateuse1_backend('foo')
             with self.assertRaisesRegex(RuntimeError, "torch has no module of"):
                 with torch.random.fork_rng(device_type="foo"):
                     pass
@@ -155,7 +156,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             with self.assertRaisesRegex(RuntimeError, "The custom device module of"):
                 torch.utils.generate_methods_for_privateuse1_backend()
 
-        def test_generator_registration():
+        def test_open_device_generator_registration_and_hooks():
             device = self.module.custom_device()
             # None of our CPU operations should call the custom add function.
             self.assertFalse(self.module.custom_add_called())
@@ -170,6 +171,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             with self.assertRaisesRegex(RuntimeError,
                                         "Only can register a generator to the PrivateUse1 dispatch key once"):
                 self.module.register_generator()
+            self.module.register_hook()
+            default_gen = self.module.default_generator(0)
+            self.assertTrue(default_gen.device.type == torch._C._get_privateuse1_backend_name())
 
         def test_open_device_dispatchstub():
             # test kernels could be reused by privateuse1 backend through dispatchstub
@@ -411,7 +415,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_before_common_registration()
         test_common_registration()
         test_after_common_registration()
-        test_generator_registration()
+        test_open_device_generator_registration_and_hooks()
         test_open_device_dispatchstub()
         test_open_device_random()
         test_open_device_tensor()
