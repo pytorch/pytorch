@@ -191,9 +191,9 @@ case "$image" in
     GRADLE_VERSION=6.8.3
     NINJA_VERSION=1.9.0
     ;;
-  pytorch-linux-focal-py3.8-clang9)
+  pytorch-linux-focal-py3.8-clang10)
     ANACONDA_PYTHON_VERSION=3.8
-    CLANG_VERSION=9
+    CLANG_VERSION=10
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -202,9 +202,9 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-py3.11-clang9)
+  pytorch-linux-focal-py3.11-clang10)
     ANACONDA_PYTHON_VERSION=3.11
-    CLANG_VERSION=9
+    CLANG_VERSION=10
     PROTOBUF=yes
     DB=yes
     VISION=yes

@@ -38,8 +38,8 @@ jobs:
           - docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9
           - docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc7
           - docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc7-inductor-benchmarks
-          - docker-image-name: pytorch-linux-focal-py3.8-clang9
-          - docker-image-name: pytorch-linux-focal-py3.11-clang9
+          - docker-image-name: pytorch-linux-focal-py3.8-clang10
+          - docker-image-name: pytorch-linux-focal-py3.11-clang10
           - docker-image-name: pytorch-linux-focal-rocm-n-1-py3
           - docker-image-name: pytorch-linux-focal-rocm-n-py3
           - docker-image-name: pytorch-linux-jammy-cuda11.8-cudnn8-py3.8-clang12

@@ -123,12 +123,12 @@ jobs:
       docker-image: ${{ needs.linux-focal-py3_8-clang10-onnx-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_8-clang10-onnx-build.outputs.test-matrix }}
 
-  linux-focal-py3_8-clang9-build:
-    name: linux-focal-py3.8-clang9
+  linux-focal-py3_8-clang10-build:
+    name: linux-focal-py3.8-clang10
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-py3.8-clang9
-      docker-image-name: pytorch-linux-focal-py3.8-clang9
+      build-environment: linux-focal-py3.8-clang10
+      docker-image-name: pytorch-linux-focal-py3.8-clang10
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
@@ -140,21 +140,21 @@ jobs:
           { config: "dynamo", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
         ]}
 
-  linux-focal-py3_8-clang9-test:
-    name: linux-focal-py3.8-clang9
+  linux-focal-py3_8-clang10-test:
+    name: linux-focal-py3.8-clang10
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-py3_8-clang9-build
+    needs: linux-focal-py3_8-clang10-build
     with:
-      build-environment: linux-focal-py3.8-clang9
-      docker-image: ${{ needs.linux-focal-py3_8-clang9-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-py3_8-clang9-build.outputs.test-matrix }}
+      build-environment: linux-focal-py3.8-clang10
+      docker-image: ${{ needs.linux-focal-py3_8-clang10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_8-clang10-build.outputs.test-matrix }}
 
-  linux-focal-py3_11-clang9-build:
-    name: linux-focal-py3.11-clang9
+  linux-focal-py3_11-clang10-build:
+    name: linux-focal-py3.11-clang10
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-py3.11-clang9
-      docker-image-name: pytorch-linux-focal-py3.11-clang9
+      build-environment: linux-focal-py3.11-clang10
+      docker-image-name: pytorch-linux-focal-py3.11-clang10
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
@@ -166,14 +166,14 @@ jobs:
           { config: "dynamo", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
         ]}
 
-  linux-focal-py3_11-clang9-test:
-    name: linux-focal-py3.11-clang9
+  linux-focal-py3_11-clang10-test:
+    name: linux-focal-py3.11-clang10
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-py3_11-clang9-build
+    needs: linux-focal-py3_11-clang10-build
     with:
-      build-environment: linux-focal-py3.11-clang9
-      docker-image: ${{ needs.linux-focal-py3_11-clang9-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-py3_11-clang9-build.outputs.test-matrix }}
+      build-environment: linux-focal-py3.11-clang10
+      docker-image: ${{ needs.linux-focal-py3_11-clang10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_11-clang10-build.outputs.test-matrix }}
 
   linux-focal-cuda11_8-py3_10-gcc9-build:
     name: linux-focal-cuda11.8-py3.10-gcc9
