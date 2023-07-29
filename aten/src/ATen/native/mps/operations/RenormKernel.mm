@@ -99,8 +99,7 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
   id<MTLBuffer> normBuffer = getMTLBufferStorage(norm);
   id<MTLBuffer> factorBuffer = getMTLBufferStorage(factor);
 
-  string key = "renorm_mps:" + getTensorsStringKey({self}) + std::to_string(p.toDouble()) + std::to_string(dim) +
-      std::to_string(maxnorm.toDouble());
+  string key = "renorm_" + scalarToMetalTypeString(self.scalar_type());
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
   id<MTLComputePipelineState> renormPSO = renormPipelineState(device, key);
@@ -124,8 +123,7 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
       MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
 
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
-      [computeEncoder endEncoding];
-
+      
       getMPSProfiler().endProfileKernel(renormPSO);
     }
   });
