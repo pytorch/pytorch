@@ -5,7 +5,8 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
-__all__ = ['Gamma']
+__all__ = ["Gamma"]
+
 
 def _standard_gamma(concentration):
     return torch._standard_gamma(concentration)
@@ -28,7 +29,10 @@ class Gamma(ExponentialFamily):
         rate (float or Tensor): rate = 1 / scale of the distribution
             (often referred to as beta)
     """
-    arg_constraints = {'concentration': constraints.positive, 'rate': constraints.positive}
+    arg_constraints = {
+        "concentration": constraints.positive,
+        "rate": constraints.positive,
+    }
     support = constraints.nonnegative
     has_rsample = True
     _mean_carrier_measure = 0
@@ -64,21 +68,32 @@ class Gamma(ExponentialFamily):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        value = _standard_gamma(self.concentration.expand(shape)) / self.rate.expand(shape)
-        value.detach().clamp_(min=torch.finfo(value.dtype).tiny)  # do not record in autograd graph
+        value = _standard_gamma(self.concentration.expand(shape)) / self.rate.expand(
+            shape
+        )
+        value.detach().clamp_(
+            min=torch.finfo(value.dtype).tiny
+        )  # do not record in autograd graph
         return value
 
     def log_prob(self, value):
         value = torch.as_tensor(value, dtype=self.rate.dtype, device=self.rate.device)
         if self._validate_args:
             self._validate_sample(value)
-        return (torch.xlogy(self.concentration, self.rate) +
-                torch.xlogy(self.concentration - 1, value) -
-                self.rate * value - torch.lgamma(self.concentration))
+        return (
+            torch.xlogy(self.concentration, self.rate)
+            + torch.xlogy(self.concentration - 1, value)
+            - self.rate * value
+            - torch.lgamma(self.concentration)
+        )
 
     def entropy(self):
-        return (self.concentration - torch.log(self.rate) + torch.lgamma(self.concentration) +
-                (1.0 - self.concentration) * torch.digamma(self.concentration))
+        return (
+            self.concentration
+            - torch.log(self.rate)
+            + torch.lgamma(self.concentration)
+            + (1.0 - self.concentration) * torch.digamma(self.concentration)
+        )
 
     @property
     def _natural_params(self):

@@ -3,11 +3,12 @@ This package implements abstractions found in ``torch.cuda``
 to facilitate writing device-agnostic code.
 """
 
-from typing import Any, Optional, Union
 from contextlib import AbstractContextManager
-from . import amp
-from .. import device as _device
+from typing import Any, Optional, Union
+
 import torch
+from .. import device as _device
+from . import amp
 
 __all__ = [
     "is_available",
@@ -16,10 +17,11 @@ __all__ = [
     "stream",
     "device_count",
     "Stream",
-    "StreamContext"
+    "StreamContext",
 ]
 
 _device_t = Union[_device, str, int, None]
+
 
 def _is_cpu_support_vnni() -> bool:
     r"""Returns a bool indicating if CPU supports VNNI."""
@@ -34,6 +36,7 @@ def is_available() -> bool:
     """
     return True
 
+
 def synchronize(device: _device_t = None) -> None:
     r"""Waits for all kernels in all streams on the CPU device to complete.
 
@@ -44,14 +47,18 @@ def synchronize(device: _device_t = None) -> None:
     """
     pass
 
+
 class Stream:
     """
     N.B. This class only exists to facilitate device-agnostic code
     """
+
     pass
+
 
 _default_cpu_stream = Stream()
 _current_stream = _default_cpu_stream
+
 
 def current_stream(device: _device_t = None) -> Stream:
     r"""Returns the currently selected :class:`Stream` for a given device.
@@ -64,13 +71,14 @@ def current_stream(device: _device_t = None) -> Stream:
     """
     return _current_stream
 
+
 class StreamContext(AbstractContextManager):
     r"""Context-manager that selects a given stream.
 
     N.B. This class only exists to facilitate device-agnostic code
 
     """
-    cur_stream : Optional[Stream]
+    cur_stream: Optional[Stream]
 
     def __init__(self, stream):
         self.stream = stream
@@ -93,6 +101,7 @@ class StreamContext(AbstractContextManager):
         global _current_stream
         _current_stream = self.prev_stream
 
+
 def stream(stream: Stream) -> AbstractContextManager:
     r"""Wrapper around the Context-manager StreamContext that
     selects a given stream.
@@ -100,6 +109,7 @@ def stream(stream: Stream) -> AbstractContextManager:
     N.B. This function only exists to facilitate device-agnostic code
     """
     return StreamContext(stream)
+
 
 def device_count() -> int:
     r"""Returns number of CPU devices (not cores). Always 1.

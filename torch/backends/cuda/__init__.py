@@ -1,14 +1,30 @@
-import sys
-import torch
 import contextlib
+import sys
 from enum import IntEnum
 
 from typing import Union
 
-__all__ = ["is_built", "cuFFTPlanCacheAttrContextProp", "cuFFTPlanCache", "cuFFTPlanCacheManager",
-           "cuBLASModule", "preferred_linalg_library", "cufft_plan_cache", "matmul", "SDPBackend", "enable_flash_sdp",
-           "flash_sdp_enabled", "enable_mem_efficient_sdp", "mem_efficient_sdp_enabled",
-           "math_sdp_enabled", "enable_math_sdp", "sdp_kernel"]
+import torch
+
+__all__ = [
+    "is_built",
+    "cuFFTPlanCacheAttrContextProp",
+    "cuFFTPlanCache",
+    "cuFFTPlanCacheManager",
+    "cuBLASModule",
+    "preferred_linalg_library",
+    "cufft_plan_cache",
+    "matmul",
+    "SDPBackend",
+    "enable_flash_sdp",
+    "flash_sdp_enabled",
+    "enable_mem_efficient_sdp",
+    "mem_efficient_sdp_enabled",
+    "math_sdp_enabled",
+    "enable_math_sdp",
+    "sdp_kernel",
+]
+
 
 def is_built():
     r"""Returns whether PyTorch is built with CUDA support.  Note that this
@@ -40,16 +56,19 @@ class cuFFTPlanCache:
     attributes `size` and `max_size`, and method `clear`, can fetch and/ or
     change properties of the C++ cuFFT plan cache.
     """
+
     def __init__(self, device_index):
         self.device_index = device_index
 
     size = cuFFTPlanCacheAttrContextProp(
         torch._cufft_get_plan_cache_size,
-        '.size is a read-only property showing the number of plans currently in the '
-        'cache. To change the cache capacity, set cufft_plan_cache.max_size.')
+        ".size is a read-only property showing the number of plans currently in the "
+        "cache. To change the cache capacity, set cufft_plan_cache.max_size.",
+    )
 
-    max_size = cuFFTPlanCacheAttrContextProp(torch._cufft_get_plan_cache_max_size,
-                                             torch._cufft_set_plan_cache_max_size)
+    max_size = cuFFTPlanCacheAttrContextProp(
+        torch._cufft_get_plan_cache_max_size, torch._cufft_set_plan_cache_max_size
+    )
 
     def clear(self):
         return torch._cufft_clear_plan_cache(self.device_index)
@@ -75,10 +94,15 @@ class cuFFTPlanCacheManager:
         index = torch.cuda._utils._get_device_index(device)
         if index < 0 or index >= torch.cuda.device_count():
             raise RuntimeError(
-                ("cufft_plan_cache: expected 0 <= device index < {}, but got "
-                 "device with index {}").format(torch.cuda.device_count(), index))
+                (
+                    "cufft_plan_cache: expected 0 <= device index < {}, but got "
+                    "device with index {}"
+                ).format(torch.cuda.device_count(), index)
+            )
         if len(self.caches) == 0:
-            self.caches.extend(cuFFTPlanCache(index) for index in range(torch.cuda.device_count()))
+            self.caches.extend(
+                cuFFTPlanCache(index) for index in range(torch.cuda.device_count())
+            )
         return self.caches[index]
 
     def __getattr__(self, name):
@@ -110,15 +134,19 @@ class cuBLASModule:
             return torch._C._set_cublas_allow_bf16_reduced_precision_reduction(value)
         raise AssertionError("Unknown attribute " + name)
 
-_LinalgBackends = {
-    'default': torch._C._LinalgBackend.Default,
-    'cusolver': torch._C._LinalgBackend.Cusolver,
-    'magma': torch._C._LinalgBackend.Magma,
-}
-_LinalgBackends_str = ', '.join(_LinalgBackends.keys())
 
-def preferred_linalg_library(backend: Union[None, str, torch._C._LinalgBackend] = None) -> torch._C._LinalgBackend:
-    r'''
+_LinalgBackends = {
+    "default": torch._C._LinalgBackend.Default,
+    "cusolver": torch._C._LinalgBackend.Cusolver,
+    "magma": torch._C._LinalgBackend.Magma,
+}
+_LinalgBackends_str = ", ".join(_LinalgBackends.keys())
+
+
+def preferred_linalg_library(
+    backend: Union[None, str, torch._C._LinalgBackend] = None
+) -> torch._C._LinalgBackend:
+    r"""
     .. warning:: This flag is experimental and subject to change.
 
     When PyTorch runs a CUDA linear algebra operation it often uses the cuSOLVER or MAGMA libraries,
@@ -152,14 +180,15 @@ def preferred_linalg_library(backend: Union[None, str, torch._C._LinalgBackend] 
     * :func:`torch.linalg.eighvals`
     * :func:`torch.linalg.svd`
     * :func:`torch.linalg.svdvals`
-    '''
+    """
 
     if backend is None:
         pass
     elif isinstance(backend, str):
         if backend not in _LinalgBackends:
-            raise RuntimeError("Unknown input value. "
-                               f"Choose from: {_LinalgBackends_str}.")
+            raise RuntimeError(
+                "Unknown input value. " f"Choose from: {_LinalgBackends_str}."
+            )
         torch._C._set_linalg_preferred_backend(_LinalgBackends[backend])
     elif isinstance(backend, torch._C._LinalgBackend):
         torch._C._set_linalg_preferred_backend(backend)
@@ -200,6 +229,7 @@ def enable_flash_sdp(enabled: bool):
     """
     torch._C._set_sdp_use_flash(enabled)
 
+
 def mem_efficient_sdp_enabled():
     r"""
     .. warning:: This flag is beta and subject to change.
@@ -216,6 +246,7 @@ def enable_mem_efficient_sdp(enabled: bool):
     Enables or disables memory efficient scaled dot product attention.
     """
     torch._C._set_sdp_use_mem_efficient(enabled)
+
 
 def math_sdp_enabled():
     r"""
@@ -236,7 +267,11 @@ def enable_math_sdp(enabled: bool):
 
 
 @contextlib.contextmanager
-def sdp_kernel(enable_flash: bool = True, enable_math: bool = True, enable_mem_efficient: bool = True):
+def sdp_kernel(
+    enable_flash: bool = True,
+    enable_math: bool = True,
+    enable_mem_efficient: bool = True,
+):
     r"""
     .. warning:: This flag is beta and subject to change.
 
@@ -250,11 +285,12 @@ def sdp_kernel(enable_flash: bool = True, enable_math: bool = True, enable_mem_e
         enable_flash_sdp(enable_flash)
         enable_mem_efficient_sdp(enable_mem_efficient)
         enable_math_sdp(enable_math)
-        yield{}
+        yield {}
     finally:
         enable_flash_sdp(previous_flash)
         enable_mem_efficient_sdp(previous_mem_efficient)
         enable_math_sdp(previous_math)
+
 
 cufft_plan_cache = cuFFTPlanCacheManager()
 matmul = cuBLASModule()

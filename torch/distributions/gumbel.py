@@ -1,13 +1,15 @@
-from numbers import Number
 import math
+from numbers import Number
+
 import torch
 from torch.distributions import constraints
-from torch.distributions.uniform import Uniform
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, ExpTransform
+from torch.distributions.uniform import Uniform
 from torch.distributions.utils import broadcast_all, euler_constant
 
-__all__ = ['Gumbel']
+__all__ = ["Gumbel"]
+
 
 class Gumbel(TransformedDistribution):
     r"""
@@ -24,7 +26,7 @@ class Gumbel(TransformedDistribution):
         loc (float or Tensor): Location parameter of the distribution
         scale (float or Tensor): Scale parameter of the distribution
     """
-    arg_constraints = {'loc': constraints.real, 'scale': constraints.positive}
+    arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
     support = constraints.real
 
     def __init__(self, loc, scale, validate_args=None):
@@ -33,11 +35,17 @@ class Gumbel(TransformedDistribution):
         if isinstance(loc, Number) and isinstance(scale, Number):
             base_dist = Uniform(finfo.tiny, 1 - finfo.eps, validate_args=validate_args)
         else:
-            base_dist = Uniform(torch.full_like(self.loc, finfo.tiny),
-                                torch.full_like(self.loc, 1 - finfo.eps),
-                                validate_args=validate_args)
-        transforms = [ExpTransform().inv, AffineTransform(loc=0, scale=-torch.ones_like(self.scale)),
-                      ExpTransform().inv, AffineTransform(loc=loc, scale=-self.scale)]
+            base_dist = Uniform(
+                torch.full_like(self.loc, finfo.tiny),
+                torch.full_like(self.loc, 1 - finfo.eps),
+                validate_args=validate_args,
+            )
+        transforms = [
+            ExpTransform().inv,
+            AffineTransform(loc=0, scale=-torch.ones_like(self.scale)),
+            ExpTransform().inv,
+            AffineTransform(loc=loc, scale=-self.scale),
+        ]
         super().__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

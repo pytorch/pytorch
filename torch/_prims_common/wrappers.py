@@ -1,36 +1,42 @@
+import inspect
+import warnings
+from functools import wraps
+from itertools import chain
+
+from typing import Callable, NamedTuple, Optional, overload, Sequence, Tuple
+
 import torch
+import torch._prims_common as utils
 from torch._prims_common import (
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
     Number,
     NumberType,
+    ShapeType,
     TensorLike,
     TensorLikeType,
-    ShapeType,
-    ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
-import torch._prims_common as utils
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
-from typing import Callable, Sequence, Tuple, NamedTuple, Optional, overload
-import inspect
-from functools import wraps
-import warnings
-from itertools import chain
 
 @overload
 def _maybe_convert_to_dtype(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
     pass
 
+
 @overload
 def _maybe_convert_to_dtype(a: NumberType, dtype: torch.dtype) -> NumberType:
     pass
+
 
 @overload
 def _maybe_convert_to_dtype(a: Sequence, dtype: torch.dtype) -> Sequence:
     pass
 
+
 @overload
 def _maybe_convert_to_dtype(a: None, dtype: torch.dtype) -> None:
     pass
+
 
 # TODO: implement ref.cast with an option to enforce safe casting
 def _maybe_convert_to_dtype(a, dtype):
@@ -47,9 +53,7 @@ def _maybe_convert_to_dtype(a, dtype):
     if a is None:
         return None
 
-    raise ValueError(
-        f"Received type {type(a)} that is neither a tensor or a number!"
-    )
+    raise ValueError(f"Received type {type(a)} that is neither a tensor or a number!")
 
 
 def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
@@ -289,7 +293,9 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
 def backwards_not_supported(prim):
     def redispatch_prim(args, kwargs):
         with torch._C._AutoDispatchBelowAutograd():
-            old = torch._C._dispatch_tls_is_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView)
+            old = torch._C._dispatch_tls_is_dispatch_key_excluded(
+                torch._C.DispatchKey.ADInplaceOrView
+            )
             return prim(*args, **kwargs)
 
     class BackwardsNotSupported(torch.autograd.Function):
@@ -305,7 +311,9 @@ def backwards_not_supported(prim):
     @wraps(prim)
     def _autograd_impl(*args, **kwargs):
         flat_args, args_spec = tree_flatten((args, kwargs))
-        if torch.is_grad_enabled() and any(a.requires_grad for a in flat_args if isinstance(a, torch.Tensor)):
+        if torch.is_grad_enabled() and any(
+            a.requires_grad for a in flat_args if isinstance(a, torch.Tensor)
+        ):
             # TODO: There is a subtle bug here: prims like copy_to
             # return their input argument after mutating it; and custom
             # autograd function will incorrectly turn the result into

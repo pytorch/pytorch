@@ -1,24 +1,34 @@
+import bisect
 import itertools
-import torch
-from torch.autograd import DeviceType
+import math
 
 from collections import defaultdict, namedtuple
 from operator import attrgetter
 
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-import bisect
-import math
+import torch
+from torch.autograd import DeviceType
 
-__all__ = ["EventList", "FormattedTimesMixin", "Interval", "Kernel", "FunctionEvent", "FunctionEventAvg",
-           "StringTable", "MemRecordsAcc"]
+__all__ = [
+    "EventList",
+    "FormattedTimesMixin",
+    "Interval",
+    "Kernel",
+    "FunctionEvent",
+    "FunctionEventAvg",
+    "StringTable",
+    "MemRecordsAcc",
+]
+
 
 class EventList(list):
     """A list of Events (for pretty printing)"""
+
     def __init__(self, *args, **kwargs):
-        use_cuda = kwargs.pop('use_cuda', True)
-        profile_memory = kwargs.pop('profile_memory', False)
-        with_flops = kwargs.pop('with_flops', False)
+        use_cuda = kwargs.pop("use_cuda", True)
+        profile_memory = kwargs.pop("profile_memory", False)
+        with_flops = kwargs.pop("with_flops", False)
         super().__init__(*args, **kwargs)
         self._use_cuda = use_cuda
         self._profile_memory = profile_memory
@@ -38,9 +48,11 @@ class EventList(list):
         while True:
             to_delete = set()
             for idx in range(len(self)):
-                if (self[idx].cpu_parent is not None and
-                        self[idx].cpu_parent.name == self[idx].name and
-                        len(self[idx].cpu_parent.cpu_children) == 1):
+                if (
+                    self[idx].cpu_parent is not None
+                    and self[idx].cpu_parent.name == self[idx].name
+                    and len(self[idx].cpu_parent.cpu_children) == 1
+                ):
                     self[idx].cpu_parent.cpu_children = self[idx].cpu_children
                     self[idx].cpu_parent.kernels = self[idx].kernels  # lift kernels up
                     for ch in self[idx].cpu_children:
@@ -68,7 +80,11 @@ class EventList(list):
         # Some events can be async (i.e. start and end on different threads),
         # since it's generally undefined how to attribute children ranges to
         # async ranges, we do not use them when calculating nested ranges and stats
-        sync_events = [evt for evt in self if not evt.is_async and evt.device_type == DeviceType.CPU]
+        sync_events = [
+            evt
+            for evt in self
+            if not evt.is_async and evt.device_type == DeviceType.CPU
+        ]
         events = sorted(
             sync_events,
             key=attrgetter("thread"),
@@ -102,8 +118,10 @@ class EventList(list):
             for event in thread_events_:
                 while len(current_events) > 0:
                     parent = current_events[-1]
-                    if event.time_range.start >= parent.time_range.end or \
-                            event.time_range.end > parent.time_range.end:
+                    if (
+                        event.time_range.start >= parent.time_range.end
+                        or event.time_range.end > parent.time_range.end
+                    ):
                         # this can't be a parent
                         current_events.pop()
                     else:
@@ -147,14 +165,14 @@ class EventList(list):
         return sum([event.self_cpu_time_total for event in self])
 
     def table(
-            self,
-            sort_by=None,
-            row_limit=100,
-            max_src_column_width=75,
-            max_name_column_width=55,
-            max_shapes_column_width=80,
-            header=None,
-            top_level_events_only=False
+        self,
+        sort_by=None,
+        row_limit=100,
+        max_src_column_width=75,
+        max_name_column_width=55,
+        max_shapes_column_width=80,
+        header=None,
+        top_level_events_only=False,
     ):
         """Prints an EventList as a nicely formatted table.
 
@@ -183,7 +201,8 @@ class EventList(list):
             header=header,
             profile_memory=self._profile_memory,
             with_flops=self._with_flops,
-            top_level_events_only=top_level_events_only)
+            top_level_events_only=top_level_events_only,
+        )
 
     def export_chrome_trace(self, path):
         """Exports an EventList as a Chrome tracing tools file.
@@ -194,7 +213,8 @@ class EventList(list):
             path (str): Path where the trace will be written.
         """
         import os
-        with open(path, 'w') as f:
+
+        with open(path, "w") as f:
             chrome_events = []
             next_id = 0
             # Use file IO over using json.dump since JSON dumping is very slow and
@@ -222,15 +242,18 @@ class EventList(list):
                 for k in evt.kernels:
                     # 's' and 'f' draw Flow arrows from
                     # the CPU launch to the GPU kernel
-                    f.write('{{"name": "{}", '
-                            '"ph": "s", '
-                            '"ts": {}, '
-                            '"tid": {}, '
-                            '"pid": "CPU functions", '
-                            '"id": {}, '
-                            '"cat": "cpu_to_cuda", '
-                            '"args": {{}}}}, '.format(evt.trace_name, evt.time_range.start,
-                                                      evt.thread, next_id))
+                    f.write(
+                        '{{"name": "{}", '
+                        '"ph": "s", '
+                        '"ts": {}, '
+                        '"tid": {}, '
+                        '"pid": "CPU functions", '
+                        '"id": {}, '
+                        '"cat": "cpu_to_cuda", '
+                        '"args": {{}}}}, '.format(
+                            evt.trace_name, evt.time_range.start, evt.thread, next_id
+                        )
+                    )
                     # Note: use torch.profiler to get device kernel trace
                     next_id += 1
             if len(self) > 0:
@@ -244,9 +267,12 @@ class EventList(list):
 
     def export_stacks(self, path: str, metric: str):
         if metric not in self.supported_export_stacks_metrics():
-            raise ValueError("metric should be one of: " + str(self.supported_export_stacks_metrics()))
+            raise ValueError(
+                "metric should be one of: "
+                + str(self.supported_export_stacks_metrics())
+            )
         translate_table = str.maketrans(" ;\t\n", "____")
-        with open(path, 'w') as f:
+        with open(path, "w") as f:
             for evt in self:
                 if evt.stack and len(evt.stack) > 0:
                     metric_value = getattr(evt, metric)
@@ -277,12 +303,18 @@ class EventList(list):
         stats: Dict[Tuple[str, ...], FunctionEventAvg] = defaultdict(FunctionEventAvg)
 
         def get_key(event, group_by_input_shapes, group_by_stack_n) -> Tuple[str, ...]:
-            key = [str(event.key), str(event.node_id), str(event.device_type), str(event.is_legacy)]
+            key = [
+                str(event.key),
+                str(event.node_id),
+                str(event.device_type),
+                str(event.is_legacy),
+            ]
             if group_by_input_shapes:
                 key.append(str(event.input_shapes))
             if group_by_stack_n > 0:
                 key += event.stack[:group_by_stack_n]
             return tuple(key)
+
         for evt in self:
             stats[get_key(evt, group_by_input_shapes, group_by_stack_n)].add(evt)
 
@@ -290,7 +322,8 @@ class EventList(list):
             stats.values(),
             use_cuda=self._use_cuda,
             profile_memory=self._profile_memory,
-            with_flops=self._with_flops)
+            with_flops=self._with_flops,
+        )
         for evt in avg_list:
             evt.stack = evt.stack[:group_by_stack_n]
             if not group_by_input_shapes:
@@ -307,7 +340,7 @@ class EventList(list):
         for evt in self:
             total_stat += evt
             total_stat.key = None
-        total_stat.key = 'Total'
+        total_stat.key = "Total"
         return total_stat
 
 
@@ -316,31 +349,34 @@ def _format_time(time_us):
     US_IN_SECOND = 1000.0 * 1000.0
     US_IN_MS = 1000.0
     if time_us >= US_IN_SECOND:
-        return f'{time_us / US_IN_SECOND:.3f}s'
+        return f"{time_us / US_IN_SECOND:.3f}s"
     if time_us >= US_IN_MS:
-        return f'{time_us / US_IN_MS:.3f}ms'
-    return f'{time_us:.3f}us'
+        return f"{time_us / US_IN_MS:.3f}ms"
+    return f"{time_us:.3f}us"
+
 
 def _format_time_share(time_us, total_time_us):
     """Defines how to format time in FunctionEvent"""
     if total_time_us == 0:
         assert time_us == 0, f"Expected time_us == 0 but got {time_us}"
         return "NaN"
-    return f'{time_us * 100.0 / total_time_us:.2f}%'
+    return f"{time_us * 100.0 / total_time_us:.2f}%"
+
 
 def _format_memory(nbytes):
     """Returns a formatted memory size string"""
     KB = 1024
     MB = 1024 * KB
     GB = 1024 * MB
-    if (abs(nbytes) >= GB):
-        return f'{nbytes * 1.0 / GB:.2f} Gb'
-    elif (abs(nbytes) >= MB):
-        return f'{nbytes * 1.0 / MB:.2f} Mb'
-    elif (abs(nbytes) >= KB):
-        return f'{nbytes * 1.0 / KB:.2f} Kb'
+    if abs(nbytes) >= GB:
+        return f"{nbytes * 1.0 / GB:.2f} Gb"
+    elif abs(nbytes) >= MB:
+        return f"{nbytes * 1.0 / MB:.2f} Mb"
+    elif abs(nbytes) >= KB:
+        return f"{nbytes * 1.0 / KB:.2f} Kb"
     else:
-        return str(nbytes) + ' b'
+        return str(nbytes) + " b"
+
 
 def _attr_formatter(name):
     return property(lambda self: _format_time(getattr(self, name)))
@@ -351,12 +387,13 @@ class FormattedTimesMixin:
 
     The subclass should define `*_time_total` and `count` attributes.
     """
-    cpu_time_str = _attr_formatter('cpu_time')
-    cuda_time_str = _attr_formatter('cuda_time')
-    cpu_time_total_str = _attr_formatter('cpu_time_total')
-    cuda_time_total_str = _attr_formatter('cuda_time_total')
-    self_cpu_time_total_str = _attr_formatter('self_cpu_time_total')
-    self_cuda_time_total_str = _attr_formatter('self_cuda_time_total')
+
+    cpu_time_str = _attr_formatter("cpu_time")
+    cuda_time_str = _attr_formatter("cuda_time")
+    cpu_time_total_str = _attr_formatter("cpu_time_total")
+    cuda_time_total_str = _attr_formatter("cuda_time_total")
+    self_cpu_time_total_str = _attr_formatter("self_cpu_time_total")
+    self_cuda_time_total_str = _attr_formatter("self_cuda_time_total")
 
     @property
     def cpu_time(self):
@@ -376,16 +413,36 @@ class Interval:
         return self.end - self.start
 
 
-Kernel = namedtuple('Kernel', ['name', 'device', 'duration'])
+Kernel = namedtuple("Kernel", ["name", "device", "duration"])
 
 
 class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
+
     def __init__(
-            self, id, name, thread, start_us, end_us, fwd_thread=None, input_shapes=None,
-            stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
-            is_remote=False, sequence_nr=-1, node_id=-1, device_type=DeviceType.CPU, device_index=0,
-            is_legacy=False, flops=None, trace_name=None, concrete_inputs=None):
+        self,
+        id,
+        name,
+        thread,
+        start_us,
+        end_us,
+        fwd_thread=None,
+        input_shapes=None,
+        stack=None,
+        scope=0,
+        cpu_memory_usage=0,
+        cuda_memory_usage=0,
+        is_async=False,
+        is_remote=False,
+        sequence_nr=-1,
+        node_id=-1,
+        device_type=DeviceType.CPU,
+        device_index=0,
+        is_legacy=False,
+        flops=None,
+        trace_name=None,
+        concrete_inputs=None,
+    ):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
@@ -421,9 +478,9 @@ class FunctionEvent(FormattedTimesMixin):
         One is supposed to append only direct children to the event to have
         correct self cpu time being reported.
         """
-        assert(self.device_type == DeviceType.CPU)
-        assert(isinstance(child, FunctionEvent))
-        assert(child.device_type == DeviceType.CPU)
+        assert self.device_type == DeviceType.CPU
+        assert isinstance(child, FunctionEvent)
+        assert child.device_type == DeviceType.CPU
         self.cpu_children.append(child)
 
     def set_cpu_parent(self, parent):
@@ -433,9 +490,9 @@ class FunctionEvent(FormattedTimesMixin):
         the child's range interval is completely inside the parent's. We use
         this connection to determine the event is from top-level op or not.
         """
-        assert(self.device_type == DeviceType.CPU)
-        assert(isinstance(parent, FunctionEvent))
-        assert(parent.device_type == DeviceType.CPU)
+        assert self.device_type == DeviceType.CPU
+        assert isinstance(parent, FunctionEvent)
+        assert parent.device_type == DeviceType.CPU
         self.cpu_parent = parent
 
     # Note: async events don't have children, are not used when computing 'self'
@@ -471,8 +528,9 @@ class FunctionEvent(FormattedTimesMixin):
         if self.device_type == DeviceType.CPU:
             if not self.is_legacy:
                 # account for the kernels in the children ops
-                return (sum(kinfo.duration for kinfo in self.kernels) +
-                        sum(ch.cuda_time_total for ch in self.cpu_children))
+                return sum(kinfo.duration for kinfo in self.kernels) + sum(
+                    ch.cuda_time_total for ch in self.cpu_children
+                )
             else:
                 # each legacy cpu events has a single (fake) kernel
                 return sum(kinfo.duration for kinfo in self.kernels)
@@ -485,10 +543,11 @@ class FunctionEvent(FormattedTimesMixin):
         if self.is_async:
             return 0
         if self.device_type == DeviceType.CPU:
-            return self.cuda_time_total - \
-                sum([child.cuda_time_total for child in self.cpu_children])
+            return self.cuda_time_total - sum(
+                [child.cuda_time_total for child in self.cpu_children]
+            )
         else:
-            assert(self.device_type == DeviceType.CUDA)
+            assert self.device_type == DeviceType.CUDA
             return self.cuda_time_total
 
     @property
@@ -504,9 +563,9 @@ class FunctionEvent(FormattedTimesMixin):
 
     def __repr__(self):
         return (
-            '<FunctionEvent id={} name={} device_type={} node_id={} cpu_time={} start_us={} end_us={} '
-            'cpu_children={} cuda_time={} name={} thread={} input_shapes={} '
-            'cpu_memory_usage={} cuda_memory_usage={} is_async={} is_remote={} seq_nr={} is_legacy={}>'.format(
+            "<FunctionEvent id={} name={} device_type={} node_id={} cpu_time={} start_us={} end_us={} "
+            "cpu_children={} cuda_time={} name={} thread={} input_shapes={} "
+            "cpu_memory_usage={} cuda_memory_usage={} is_async={} is_remote={} seq_nr={} is_legacy={}>".format(
                 self.id,
                 self.name,
                 self.device_type,
@@ -531,6 +590,7 @@ class FunctionEvent(FormattedTimesMixin):
 
 class FunctionEventAvg(FormattedTimesMixin):
     """Used to average stats over multiple FunctionEvent objects."""
+
     def __init__(self):
         self.key: Optional[str] = None
         self.count: int = 0
@@ -593,9 +653,9 @@ class FunctionEventAvg(FormattedTimesMixin):
 
     def __repr__(self):
         return (
-            '<FunctionEventAvg key={} self_cpu_time={} cpu_time={} '
-            ' self_cuda_time={} cuda_time={} input_shapes={} '
-            'cpu_memory_usage={} cuda_memory_usage={}>'.format(
+            "<FunctionEventAvg key={} self_cpu_time={} cpu_time={} "
+            " self_cuda_time={} cuda_time={} input_shapes={} "
+            "cpu_memory_usage={} cuda_memory_usage={}>".format(
                 self.key,
                 self.self_cpu_time_total_str,
                 self.cpu_time_str,
@@ -646,8 +706,10 @@ def _filter_stack_entry(entry):
     ]
     return all(not (f[0] in entry and f[1] in entry) for f in filtered_entries)
 
+
 MEMORY_EVENT_NAME = "[memory]"
 OUT_OF_MEMORY_EVENT_NAME = "[OutOfMemory]"
+
 
 def _filter_name(name):
     # ignoring the following utility ops
@@ -663,6 +725,7 @@ def _filter_name(name):
     ]
     return name in filtered_out_names
 
+
 # Demangles and optionally rewrites the provided event name,
 # with_wildcard - whether to replace certain numbered event names
 # with a wildcard name to aggregate them together in the profiler table
@@ -675,17 +738,19 @@ def _rewrite_name(name, with_wildcard=False):
             name = "ProfilerStep*"
     return name
 
+
 def _build_table(
-        events,
-        sort_by=None,
-        header=None,
-        row_limit=100,
-        max_src_column_width=75,
-        max_name_column_width=55,
-        max_shapes_column_width=80,
-        with_flops=False,
-        profile_memory=False,
-        top_level_events_only=False):
+    events,
+    sort_by=None,
+    header=None,
+    row_limit=100,
+    max_src_column_width=75,
+    max_name_column_width=55,
+    max_shapes_column_width=80,
+    with_flops=False,
+    profile_memory=False,
+    top_level_events_only=False,
+):
     """Prints a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
     if len(events) == 0:
         return ""
@@ -693,12 +758,17 @@ def _build_table(
     has_cuda_time = any(event.self_cuda_time_total > 0 for event in events)
     has_cuda_mem = any(event.self_cuda_memory_usage > 0 for event in events)
     has_input_shapes = any(
-        (event.input_shapes is not None and len(event.input_shapes) > 0) for event in events)
+        (event.input_shapes is not None and len(event.input_shapes) > 0)
+        for event in events
+    )
 
     if sort_by is not None:
-        events = EventList(sorted(
-            events, key=lambda evt: getattr(evt, sort_by), reverse=True
-        ), use_cuda=has_cuda_time, profile_memory=profile_memory, with_flops=with_flops)
+        events = EventList(
+            sorted(events, key=lambda evt: getattr(evt, sort_by), reverse=True),
+            use_cuda=has_cuda_time,
+            profile_memory=profile_memory,
+            with_flops=with_flops,
+        )
 
     name_column_width = max([len(evt.key) for evt in events]) + 4
     if max_name_column_width is not None:
@@ -718,42 +788,48 @@ def _build_table(
             stacks.append(evt.stack)
     has_stack = len(stacks) > 0
     if has_stack:
-        src_column_width = max([max([len(entry) for entry in stack]) for stack in stacks]) + 4
+        src_column_width = (
+            max([max([len(entry) for entry in stack]) for stack in stacks]) + 4
+        )
         if max_src_column_width is not None:
             src_column_width = min(src_column_width, max_src_column_width)
 
     headers = [
-        'Name',
-        'Self CPU %',
-        'Self CPU',
-        'CPU total %',
-        'CPU total',
-        'CPU time avg',
+        "Name",
+        "Self CPU %",
+        "Self CPU",
+        "CPU total %",
+        "CPU total",
+        "CPU time avg",
     ]
     if has_cuda_time:
-        headers.extend([
-            'Self CUDA',
-            'Self CUDA %',
-            'CUDA total',
-            'CUDA time avg',
-        ])
+        headers.extend(
+            [
+                "Self CUDA",
+                "Self CUDA %",
+                "CUDA total",
+                "CUDA time avg",
+            ]
+        )
     if profile_memory:
-        headers.extend([
-            'CPU Mem',
-            'Self CPU Mem',
-        ])
+        headers.extend(
+            [
+                "CPU Mem",
+                "Self CPU Mem",
+            ]
+        )
         if has_cuda_mem:
-            headers.extend([
-                'CUDA Mem',
-                'Self CUDA Mem',
-            ])
-    headers.append(
-        '# of Calls'
-    )
+            headers.extend(
+                [
+                    "CUDA Mem",
+                    "Self CUDA Mem",
+                ]
+            )
+    headers.append("# of Calls")
     # Only append Node ID if any event has a valid (>= 0) Node ID
     append_node_id = any(evt.node_id != -1 for evt in events)
     if append_node_id:
-        headers.append('Node ID')
+        headers.append("Node ID")
 
     # Have to use a list because nonlocal is Py3 only...
     SPACING_SIZE = 2
@@ -762,19 +838,21 @@ def _build_table(
     line_length_lst = [-SPACING_SIZE]
     MAX_STACK_ENTRY = 5
 
-    def add_column(padding, text_dir='>'):
-        row_format_lst[0] += '{: ' + text_dir + str(padding) + '}' + (' ' * SPACING_SIZE)
-        header_sep_lst[0] += '-' * padding + (' ' * SPACING_SIZE)
+    def add_column(padding, text_dir=">"):
+        row_format_lst[0] += (
+            "{: " + text_dir + str(padding) + "}" + (" " * SPACING_SIZE)
+        )
+        header_sep_lst[0] += "-" * padding + (" " * SPACING_SIZE)
         line_length_lst[0] += padding + SPACING_SIZE
 
     def auto_scale_flops(flops):
         flop_headers = [
-            'FLOPs',
-            'KFLOPs',
-            'MFLOPs',
-            'GFLOPs',
-            'TFLOPs',
-            'PFLOPs',
+            "FLOPs",
+            "KFLOPs",
+            "MFLOPs",
+            "GFLOPs",
+            "TFLOPs",
+            "PFLOPs",
         ]
         assert flops > 0
         log_flops = max(0, min(math.log10(flops) / 3, float(len(flop_headers) - 1)))
@@ -786,12 +864,12 @@ def _build_table(
         add_column(DEFAULT_COLUMN_WIDTH)
 
     if has_input_shapes:
-        headers.append('Input Shapes')
+        headers.append("Input Shapes")
         add_column(shapes_column_width)
 
     if has_stack:
-        headers.append('Source Location')
-        add_column(src_column_width, text_dir='<')
+        headers.append("Source Location")
+        add_column(src_column_width, text_dir="<")
 
     if with_flops:
         # Auto-scaling of flops header
@@ -801,7 +879,7 @@ def _build_table(
                 raw_flops.append(evt.flops)
         if len(raw_flops) != 0:
             (flops_scale, flops_header) = auto_scale_flops(min(raw_flops))
-            headers.append(f'Total {flops_header}')
+            headers.append(f"Total {flops_header}")
             add_column(flops_column_width)
         else:
             with_flops = False  # can't find any valid flops
@@ -816,7 +894,7 @@ def _build_table(
 
     def append(s):
         result.append(s)
-        result.append('\n')  # Yes, newline after the end as well
+        result.append("\n")  # Yes, newline after the end as well
 
     sum_self_cpu_time_total = sum([event.self_cpu_time_total for event in events])
     sum_self_cuda_time_total = 0
@@ -831,11 +909,11 @@ def _build_table(
 
     # Actual printing
     if header is not None:
-        append('=' * line_length)
+        append("=" * line_length)
         append(header)
     if top_level_events_only:
-        append('=' * line_length)
-        append('This report only display top-level ops statistics')
+        append("=" * line_length)
+        append("This report only display top-level ops statistics")
     append(header_sep)
     append(row_format.format(*headers))
 
@@ -859,39 +937,49 @@ def _build_table(
             event_limit += 1
         name = evt.key
         if max_name_column_width is not None and len(name) >= max_name_column_width - 3:
-            name = name[:(max_name_column_width - 3)] + "..."
+            name = name[: (max_name_column_width - 3)] + "..."
         row_values = [
             name,
             # Self CPU total %, 0 for async events.
             _format_time_share(evt.self_cpu_time_total, sum_self_cpu_time_total),
             evt.self_cpu_time_total_str,  # Self CPU total
             # CPU total %, 0 for async events.
-            _format_time_share(evt.cpu_time_total, sum_self_cpu_time_total) if not evt.is_async else 0,
+            _format_time_share(evt.cpu_time_total, sum_self_cpu_time_total)
+            if not evt.is_async
+            else 0,
             evt.cpu_time_total_str,  # CPU total
             evt.cpu_time_str,  # CPU time avg
         ]
         if has_cuda_time:
-            row_values.extend([
-                evt.self_cuda_time_total_str,
-                # CUDA time total %
-                _format_time_share(evt.self_cuda_time_total, sum_self_cuda_time_total),
-                evt.cuda_time_total_str,
-                evt.cuda_time_str,  # Cuda time avg
-            ])
+            row_values.extend(
+                [
+                    evt.self_cuda_time_total_str,
+                    # CUDA time total %
+                    _format_time_share(
+                        evt.self_cuda_time_total, sum_self_cuda_time_total
+                    ),
+                    evt.cuda_time_total_str,
+                    evt.cuda_time_str,  # Cuda time avg
+                ]
+            )
         if profile_memory:
-            row_values.extend([
-                # CPU Mem Total
-                _format_memory(evt.cpu_memory_usage),
-                # Self CPU Mem Total
-                _format_memory(evt.self_cpu_memory_usage),
-            ])
+            row_values.extend(
+                [
+                    # CPU Mem Total
+                    _format_memory(evt.cpu_memory_usage),
+                    # Self CPU Mem Total
+                    _format_memory(evt.self_cpu_memory_usage),
+                ]
+            )
             if has_cuda_mem:
-                row_values.extend([
-                    # CUDA Mem Total
-                    _format_memory(evt.cuda_memory_usage),
-                    # Self CUDA Mem Total
-                    _format_memory(evt.self_cuda_memory_usage),
-                ])
+                row_values.extend(
+                    [
+                        # CUDA Mem Total
+                        _format_memory(evt.cuda_memory_usage),
+                        # Self CUDA Mem Total
+                        _format_memory(evt.self_cuda_memory_usage),
+                    ]
+                )
         row_values.append(
             evt.count,  # Number of calls
         )
@@ -904,7 +992,7 @@ def _build_table(
             if evt.flops <= 0:
                 row_values.append("--")
             else:
-                row_values.append(f'{evt.flops * flops_scale:8.3f}')
+                row_values.append(f"{evt.flops * flops_scale:8.3f}")
         if has_stack:
             src_field = ""
             if len(evt.stack) > 0:
@@ -915,7 +1003,11 @@ def _build_table(
         if has_stack:
             empty_headers = [""] * (len(headers) - 1)
             for entry in evt.stack[1:MAX_STACK_ENTRY]:
-                append(row_format.format(*(empty_headers + [trim_path(entry, src_column_width)])))
+                append(
+                    row_format.format(
+                        *(empty_headers + [trim_path(entry, src_column_width)])
+                    )
+                )
             empty_headers.append("")
             append(row_format.format(*empty_headers))
 
@@ -923,4 +1015,4 @@ def _build_table(
     append(f"Self CPU time total: {_format_time(sum_self_cpu_time_total)}")
     if has_cuda_time:
         append(f"Self CUDA time total: {_format_time(sum_self_cuda_time_total)}")
-    return ''.join(result)
+    return "".join(result)
