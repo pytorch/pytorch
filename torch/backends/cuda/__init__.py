@@ -130,7 +130,7 @@ def preferred_linalg_library(backend: Union[None, str, torch._C._LinalgBackend] 
     * If `"default"` (the default) is set then heuristics will be used to pick between
       cuSOLVER and MAGMA if both are available.
     * When no input is given, this function returns the currently preferred library.
-    * User may use environment variable TORCH_LINALG_PREFER_CUSOLVER=1 to set the preferred library to cuSOLVER
+    * User may use the environment variable TORCH_LINALG_PREFER_CUSOLVER=1 to set the preferred library to cuSOLVER
       globally.
       This flag only sets the initial value of the preferred library and the preferred library
       may still be overridden by this function call later in your script.
