@@ -2,6 +2,9 @@
 
 --------------------------------------------------------------------------------
 
+[![PyPI](https://img.shields.io/pypi/v/torch.svg)](https://pypi.org/project/torch)
+[![Supported Python Versions](https://img.shields.io/pypi/pyversions/torch.svg)](https://pypi.org/project/torch/)
+
 PyTorch is a Python package that provides two high-level features:
 - Tensor computation (like NumPy) with strong GPU acceleration
 - Deep neural networks built on a tape-based autograd system
