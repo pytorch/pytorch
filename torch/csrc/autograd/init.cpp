@@ -266,7 +266,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);
   m.def("_get_sequence_nr", &at::sequence_number::peek);
-  m.def("_get_thread_id", &at::RecordFunction::currentThreadId);
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
       .def("trace_start_us", &ProfilerResult::trace_start_us)

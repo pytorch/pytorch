@@ -146,18 +146,14 @@ class TracerBase:
             # Here we decrement to account for the sequence_nr having
             # just been incremented while tracing this lowered aten op.
             new_seq_nr = torch.autograd._get_sequence_nr() - 1
-            thread_id = torch.autograd._get_thread_id()
             # In the FWD pass the new_seq_nr number maintained by
             # torch.autograd.get_sequence_nr() keeps increasing.
             # During the bwd pass the seq_nr for bwd ops is maintained
             # in the torch::autograd::Node class see NOTE [ Sequence Number ].
             # The seq_nr decrements during the bwd pass.
-            saved_th_id = current_meta.get("thread_id", -1)
-            if current_meta.get("fwd_trace_complete", False) and\
-                    thread_id == saved_th_id:
+            if current_meta.get("in_bwd", False):
                 new_seq_nr = current_meta["seq_nr"]
             node.meta["seq_nr"] = new_seq_nr
-            node.meta["thread_id"] = thread_id
 
         elif self.module_stack:
             node.meta['nn_module_stack'] = copy.copy(self.module_stack)

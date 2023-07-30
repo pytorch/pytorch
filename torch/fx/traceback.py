@@ -33,7 +33,7 @@ def set_stack_trace(stack : List[str]):
 
 
 @compatibility(is_backward_compatible=False)
-def set_seq_nr(seq_nr, thread_id, bwd=False):
+def set_seq_nr(seq_nr, bwd=False):
     global current_meta
 
     if should_preserve_node_meta:
@@ -41,8 +41,7 @@ def set_seq_nr(seq_nr, thread_id, bwd=False):
         # in the autograd::Node data structure
         # while the network is being traced.
         current_meta["seq_nr"] = seq_nr
-        current_meta["fwd_trace_complete"] = bwd
-        current_meta["thread_id"] = thread_id
+        current_meta["in_bwd"] = bwd
 
 
 @compatibility(is_backward_compatible=False)
