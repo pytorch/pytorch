@@ -51,7 +51,7 @@ class AOTInductorModelRunner:
         # Use a utility function for easier testing
         if config.aot_inductor.abi_compatible:
             source = """
-            #include <torch/csrc/inductor/aot_inductor_model.h>
+            #include <torch/csrc/aot_inductor/model.h>
             #include <c10/cuda/CUDAStream.h>
 
             torch::aot_inductor::AOTInductorModel model;
@@ -61,12 +61,12 @@ class AOTInductorModelRunner:
                     std::vector<at::Tensor>& output_tensors) {
                 aot_inductor_initialize();
 
-                std::vector<AotInductorTensor> inputs;
-                for (at::Tensor& input : input_tensors) {
+                std::vector<AOTInductorTensorHandle> inputs;
+                for (auto& input : input_tensors) {
                     inputs.push_back(convert_input_output_to_aot_tensor(&input));
                 }
-                std::vector<AotInductorTensor> outputs;
-                for (at::Tensor& output : output_tensors) {
+                std::vector<AOTInductorTensorHandle> outputs;
+                for (auto& output : output_tensors) {
                     outputs.push_back(convert_input_output_to_aot_tensor(&output));
                 }
                 model.run(inputs, outputs, at::cuda::getCurrentCUDAStream());
@@ -75,13 +75,13 @@ class AOTInductorModelRunner:
             """
         else:
             source = """
-            #include <torch/csrc/inductor/aot_inductor_model.h>
+            #include <torch/csrc/aot_inductor/model.h>
             #include <c10/cuda/CUDAStream.h>
 
             torch::aot_inductor::AOTInductorModel model;
 
             void run(
-                    std::vector<at::Tensor>& input_tensors,
+                    const std::vector<at::Tensor>& input_tensors,
                     std::vector<at::Tensor>& output_tensors) {
                 model.run(input_tensors, output_tensors, at::cuda::getCurrentCUDAStream());
             }
@@ -116,7 +116,18 @@ class AOTInductorModelRunner:
         return pytree.tree_unflatten(output_tensors, output_spec)
 
 
-class AotInductorTestsTemplate:
+def check_model(
+    self: TestCase,
+    model,
+    example_inputs,
+):
+    expected = model(*example_inputs)
+    with config.patch("aot_inductor.abi_compatible", self.abi_compatible):
+        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
+    self.assertTrue(same(actual, expected))
+
+
+class AOTInductorTestsTemplate:
     def test_missing_output(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -133,10 +144,7 @@ class AotInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, 10, device=self.device),
         ]
-        expected = model(*example_inputs)
-        with config.patch("aot_inductor.abi_compatible", self.abi_compatible):
-            actual = AOTInductorModelRunner.run(model, example_inputs, expected)
-        self.assertTrue(same(actual, expected))
+        self.check_model(model, example_inputs)
 
     def test_output_misaligned(self):
         class Repro(torch.nn.Module):
@@ -157,10 +165,7 @@ class AotInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, 10, device=self.device),
         ]
-        expected = model(*example_inputs)
-        with config.patch("aot_inductor.abi_compatible", self.abi_compatible):
-            actual = AOTInductorModelRunner.run(model, example_inputs, expected)
-        self.assertTrue(same(actual, expected))
+        self.check_model(model, example_inputs)
 
     def test_addmm_activation(self):
         class Repro(torch.nn.Module):
@@ -177,29 +182,70 @@ class AotInductorTestsTemplate:
             torch.randn(32, 10, device=self.device),
             torch.randn(10, 32, device=self.device),
         ]
-        expected = model(*example_inputs)
-        with config.patch("aot_inductor.abi_compatible", self.abi_compatible):
-            actual = AOTInductorModelRunner.run(model, example_inputs, expected)
-        self.assertTrue(same(actual, expected))
+        self.check_model(model, example_inputs)
+
+    def test_aliased_buffer_reuse(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                x = 2 * x
+                y = 2 * y
+                c = torch.cat([x, y], dim=-1)
+                d = 1 + c
+                m = torch.mm(d, d)
+                return m[:, :2] + x
+
+        model = Repro()
+        example_inputs = [
+            torch.randn(4, 2, device=self.device),
+            torch.randn(4, 2, device=self.device),
+        ]
+        self.check_model(model, example_inputs)
+
+    def test_buffer_reuse(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                a = torch.sin(x)
+                b = torch.cos(y)
+                c = torch.mm(a, b)
+                d = torch.relu(c)
+                e = torch.sigmoid(d)
+                f = torch.mm(x, y)
+                g = e + f
+                return g
+
+        model = Repro()
+        example_inputs = [
+            torch.randn(4, 4, device=self.device),
+            torch.randn(4, 4, device=self.device),
+        ]
+        self.check_model(model, example_inputs)
 
 
-class AotInductorAbiCompatibile(TestCase):
+class AOTInductorAbiCompatibile(TestCase):
     abi_compatible = True
     device = "cuda"
+    check_model = check_model
 
 
 test_torchinductor.copy_tests(
-    AotInductorTestsTemplate, AotInductorAbiCompatibile, "abi_compatible"
+    AOTInductorTestsTemplate, AOTInductorAbiCompatibile, "abi_compatible"
 )
 
 
-class AotInductorNotAbiCompatibile(TestCase):
+class AOTInductorNotAbiCompatibile(TestCase):
     abi_compatible = False
     device = "cuda"
+    check_model = check_model
 
 
 test_torchinductor.copy_tests(
-    AotInductorTestsTemplate, AotInductorNotAbiCompatibile, "not_abi_compatible"
+    AOTInductorTestsTemplate, AOTInductorNotAbiCompatibile, "not_abi_compatible"
 )
 
 

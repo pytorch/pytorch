@@ -3,8 +3,7 @@
 #include <vector>
 
 #include <c10/cuda/CUDAStream.h>
-#include <torch/csrc/inductor/aot_inductor_interface.h>
-#include <torch/csrc/inductor/aot_inductor_tensor.h>
+#include <torch/csrc/aot_inductor/c/model_interface.h>
 #include <torch/torch.h>
 
 namespace torch {
@@ -31,13 +30,12 @@ TEST(AotInductorTest, BasicTest) {
   torch::Tensor results_ref = net.forward(x, y);
 
   // TODO: we need to provide an API to concatenate args and weights
-  std::vector<AotInductorTensor> inputs;
+  std::vector<torch::Tensor> inputs;
   for (const auto& pair : net.named_parameters()) {
-    auto tensor = pair.value();
-    inputs.push_back(convert_input_output_to_aot_tensor(&tensor));
+    inputs.push_back(pair.value());
   }
-  inputs.push_back(convert_input_output_to_aot_tensor(&x));
-  inputs.push_back(convert_input_output_to_aot_tensor(&y));
+  inputs.push_back(x);
+  inputs.push_back(y);
 
   AOTInductorModelContainerHandle container_handle;
   AOT_INDUCTOR_ERROR_CHECK(
@@ -49,23 +47,26 @@ TEST(AotInductorTest, BasicTest) {
   c10::IntArrayRef array_size(output_shape.shape_data, output_shape.ndim);
   torch::Tensor output_tensor =
       at::zeros(array_size, at::dtype(at::kFloat).device(at::kCUDA));
-  std::vector<AotInductorTensor> outputs;
-  outputs.push_back(convert_input_output_to_aot_tensor(&output_tensor));
 
   const auto& cuda_stream = at::cuda::getCurrentCUDAStream(0 /*device_index*/);
   const auto stream_id = cuda_stream.stream();
   AOTInductorStreamHandle stream_handle =
       reinterpret_cast<AOTInductorStreamHandle>(stream_id);
-  AOTInductorTensorHandle inputs_handle =
-      reinterpret_cast<AOTInductorTensorHandle>(inputs.data());
-  AOTInductorTensorHandle outputs_handle =
-      reinterpret_cast<AOTInductorTensorHandle>(outputs.data());
+
+  std::vector<AOTInductorTensorHandle> inputs_handle;
+  for (auto& input : inputs) {
+    inputs_handle.emplace_back(&input);
+  }
+
+  std::vector<AOTInductorTensorHandle> outputs_handle;
+  outputs_handle.push_back(&output_tensor);
+
   AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerRun(
       container_handle,
-      inputs_handle,
-      inputs.size(),
-      outputs_handle,
-      outputs.size(),
+      inputs_handle.data(),
+      inputs_handle.size(),
+      outputs_handle.data(),
+      outputs_handle.size(),
       stream_handle));
 
   ASSERT_TRUE(torch::allclose(results_ref, output_tensor));

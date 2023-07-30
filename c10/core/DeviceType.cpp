@@ -134,7 +134,7 @@ std::string get_privateuse1_backend(bool lower_case) {
   return backend_name;
 }
 
-void register_privateuse1_backend(std::string backend_name) {
+void register_privateuse1_backend(const std::string& backend_name) {
   std::lock_guard<std::mutex> guard(privateuse1_lock);
   TORCH_CHECK(
       !privateuse1_backend_name_set.load() ||

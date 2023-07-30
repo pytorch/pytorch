@@ -146,9 +146,23 @@ class EnterCudaDeviceContextManagerLine:
 
     def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
         if V.graph.cpp_wrapper:
-            if not V.graph.aot_mode:
-                # Device is managed by runtime in the aot mode
-                code.writeline("\n")
+            code.writeline("\n")
+            if V.graph.aot_mode:
+                # In AOT mode, we have a stream provided as a param. A stream is
+                # associated with a device, so we never expect the device to change.
+                assert self.first_time
+                if config.aot_inductor.abi_compatible:
+                    code.writeline(
+                        "aot_inductor_set_current_cuda_stream("
+                        f"stream,  {self.device_idx});"
+                    )
+                else:
+                    # CUDAStreamGuard sets the stream and the device.
+                    code.writeline(
+                        f"at::cuda::CUDAStreamGuard stream_guard("
+                        f"at::cuda::getStreamFromExternal(stream, {self.device_idx}));"
+                    )
+            else:
                 if self.first_time:
                     code.writeline(
                         f"at::cuda::CUDAGuard device_guard({self.device_idx});"
@@ -275,6 +289,8 @@ class WrapperCodeGen(CodeGen):
         self.first_device_guard = True
         self.supports_intermediate_hooks = True
         self.expr_printer = pexpr
+        # abi_compatible only matters in the aot_mode
+        self.abi_compatible = V.graph.aot_mode and config.aot_inductor.abi_compatible
 
         self.write_header()
         self.write_prefix()
@@ -782,11 +798,15 @@ class WrapperCodeGen(CodeGen):
 
     def make_buffer_reuse(self, old, new):
         assert old.get_dtype() == new.get_dtype()
-        del_line = ""
         old_name = old.get_name()
         new_name = new.get_name()
+        del_line = ""
         if old_name not in V.graph.get_output_names():
             del_line = f"; {self.make_buffer_free(old)}"
+        if self.abi_compatible:
+            # no RC in the abi_compatible mode; buffer frees are planned
+            del_line = ";"
+
         if old.get_size() == new.get_size() and old.get_stride() == new.get_stride():
             return f"{self.declare}{new_name} = {old.get_name()}{del_line}  {self.comment} reuse"
 
@@ -858,7 +878,9 @@ class WrapperCodeGen(CodeGen):
 
         layout = buffer.get_layout()
         if isinstance(layout, (ir.AliasedLayout, ir.MultiOutputLayout)):
-            self.writeline(self.make_buffer_free(buffer))
+            if not self.abi_compatible:
+                # no RC in the abi_compatible mode; buffer frees are planned on the root buffer
+                self.writeline(self.make_buffer_free(buffer))
             return
 
         self.writeline(FreeIfNotReusedLine(self, buffer))
@@ -899,8 +921,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
     """
 
     def __init__(self):
-        # abi_compatible only matters in the aot_mode
-        self.abi_compatible = V.graph.aot_mode and config.aot_inductor.abi_compatible
         super().__init__()
         self.declare = "auto "
         self.ending = ";"
@@ -928,7 +948,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def write_header(self):
         if V.graph.aot_mode:
             with open(
-                os.path.join(os.path.dirname(__file__), "aot_inductor_interface.cpp")
+                os.path.join(
+                    os.path.dirname(__file__), "aot_inductor_model_interface.cpp"
+                )
             ) as f:
                 self.header.splice(f.read())
         else:
@@ -1251,9 +1273,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         from .cpp import DEVICE_TO_AOT, DEVICE_TO_ATEN
 
         if self.abi_compatible:
-            return (
-                f"{DEVICE_TO_AOT[device.type]}, {device.index if device.index else 0}"
-            )
+            return f"{DEVICE_TO_AOT[device.type]},{device.index if device.index else 0}"
         else:
             return (
                 f"c10::Device({DEVICE_TO_ATEN[device.type]}, {device.index})"
@@ -1268,6 +1288,18 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return DTYPE_TO_AOT[dtype]
         else:
             return DTYPE_TO_ATEN[dtype]
+
+    @functools.lru_cache(None)
+    def codegen_size_var(self, size):
+        size_var = f"size_{next(self.arg_var_id)}"
+        self.wrapper_call.splice(f"int64_t {size_var}[] = {size};")
+        return size_var
+
+    @functools.lru_cache(None)
+    def codegen_stride_var(self, stride):
+        stride_var = f"stride_{next(self.arg_var_id)}"
+        self.wrapper_call.splice(f"int64_t {stride_var}[] = {stride};")
+        return stride_var
 
     def make_buffer_allocation(self, buffer):
         name = buffer.get_name()
@@ -1296,24 +1328,17 @@ class CppWrapperCodeGen(WrapperCodeGen):
         size = self.codegen_shape_tuple(tuple(buffer.get_size()))
         stride = self.codegen_shape_tuple(tuple(buffer.get_stride()))
         if self.abi_compatible:
-            size_var = f"var_{next(self.arg_var_id)}"
-            stride_var = f"var_{next(self.arg_var_id)}"
-            device_var = f"var_{next(self.arg_var_id)}"
+            device_type, device_id = device.split(",")
             args = [
                 str(len(buffer.get_size())),
-                size_var,
-                stride_var,
-                device_var,
+                self.codegen_size_var(size),
+                self.codegen_stride_var(stride),
+                device_type,
+                device_id,
                 dtype,
             ]
-            self.wrapper_call.splice(
-                f"""
-                int64_t {size_var}[] = {size};
-                int64_t {stride_var}[] = {stride};
-                AotInductorDevice {device_var} = {{{device}}};
-                """
-            )
-            return f"AotInductorTensor {buffer.get_name()} = aot_inductor_empty_strided({', '.join(args)}); "
+
+            return f"auto {buffer.get_name()} = aot_inductor_empty_strided({', '.join(args)}); "
         else:
             # TODO: map layout here.
             return (
@@ -1328,11 +1353,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
         offset = self.codegen_sizevar(offset)
 
         if self.abi_compatible:
-            size_var = f"var_{next(self.arg_var_id)}"
-            stride_var = f"var_{next(self.arg_var_id)}"
-            args = [name, dim, size_var, stride_var, offset]
-            self.wrapper_call.writeline(f"int64_t {size_var}[] = {size};")
-            self.wrapper_call.writeline(f"int64_t {stride_var}[] = {stride};")
+            args = [
+                name,
+                dim,
+                self.codegen_size_var(size),
+                self.codegen_stride_var(stride),
+                offset,
+            ]
             return f"aot_inductor_as_strided({', '.join(args)})"
         else:
             args = [name, size, stride]
@@ -1404,7 +1431,6 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             self.header.splice(
                 """
                 #include <ATen/ATen.h>
-                #include <ATen/native/BinaryOps.h>
                 #include <c10/cuda/CUDAGuard.h>
                 #include <c10/cuda/CUDAStream.h>
                 """
@@ -1441,11 +1467,17 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                     void* args[],
                     cudaStream_t stream) {
                 CUDA_DRIVER_CHECK(cuLaunchKernel(
-                    func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes,
-                    stream, args, nullptr));
+                    func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes, stream, args, nullptr));
             }
             """
         )
+
+    def write_get_cuda_stream(self, index):
+        name = f"stream{index}"
+        self.writeline(
+            f"cudaStream_t {name} = at::cuda::getCurrentCUDAStream({index});"
+        )
+        return name
 
     def write_wrapper_decl(self):
         if V.graph.aot_mode:
@@ -1453,8 +1485,8 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 self.prefix.splice(
                     """
                     void AOTInductorModel::run_impl(
-                        std::vector<AotInductorTensor>& args,
-                        std::vector<AotInductorTensor>& outputs,
+                        std::vector<AOTInductorTensorHandle>& args,
+                        std::vector<AOTInductorTensorHandle>& outputs,
                         cudaStream_t stream) {
                     """
                 )
@@ -1469,9 +1501,6 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 )
 
         super().write_wrapper_decl()
-
-        if not V.graph.aot_mode:
-            self.prefix.writeline("auto stream = at::cuda::getCurrentCUDAStream(0);")
 
     def define_kernel(
         self, name: str, kernel: str, metadata: Optional[str] = None, cuda=True
@@ -1504,7 +1533,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         # TODO: only works for constant now, need type info
         new_args = []
         for arg in call_args:
-            var_name = f"var_{next(self.arg_var_id)}"
+            var_name = f"arg_{next(self.arg_var_id)}"
             if isinstance(
                 arg,
                 (
@@ -1547,8 +1576,11 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self.generate_load_kernel(name, params)
 
         call_args = self.generate_args_decl(call_args)
-        kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
+        kernel_args_var = f"kernel_args_{next(self.kernel_callsite_id)}"
         self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
+        stream = (
+            "stream" if V.graph.aot_mode else self.write_get_cuda_stream(device_index)
+        )
         self.writeline(
             "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
                 name,
@@ -1558,6 +1590,6 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 params["num_warps"],
                 params["shared_mem"],
                 kernel_args_var,
-                "stream",
+                stream,
             )
         )

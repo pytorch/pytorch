@@ -126,6 +126,31 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
         super().__init__(source, filename, file_lineno, leading_whitespace_len)
 
 
+def get_annotations(obj):
+    if sys.version_info < (3, 10):
+        return getattr(obj, '__annotations__', {})
+    # In Python-3.10+ it is recommended to use inspect.get_annotations
+    # See https://docs.python.org/3.10/howto/annotations.html
+    # But also, in 3.10 annotations from base class are not inherited
+    # by unannotated derived one, so they must be manually extracted
+    annotations = inspect.get_annotations(obj)
+    if annotations:
+        return annotations
+
+    def get_cls_annotations(cls):
+        cls_annotations = inspect.get_annotations(cls)
+        if cls_annotations:
+            return cls_annotations
+        for base in cls.__bases__:
+            cls_annotations = get_cls_annotations(base)
+            if cls_annotations:
+                return cls_annotations
+        return {}
+
+    cls = obj if isinstance(obj, type) else type(obj)
+    return get_cls_annotations(cls)
+
+
 def infer_concrete_type_builder(nn_module, share_types=True):
     """
     Build a ConcreteModuleTypeBuilder from an nn.Module. This
@@ -141,30 +166,6 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         concrete_type_builder.set_parameter_list()
     if isinstance(nn_module, (torch.nn.ParameterDict)):
         concrete_type_builder.set_parameter_dict()
-
-    def get_annotations(obj):
-        if sys.version_info < (3, 10):
-            return getattr(obj, '__annotations__', {})
-        # In Python-3.10+ it is recommended to use inspect.get_annotations
-        # See https://docs.python.org/3.10/howto/annotations.html
-        # But also, in 3.10 annotations from base class are not inherited
-        # by unannotated derived one, so they must be manually extracted
-        annotations = inspect.get_annotations(obj)
-        if annotations:
-            return annotations
-
-        def get_cls_annotations(cls):
-            cls_annotations = inspect.get_annotations(cls)
-            if cls_annotations:
-                return cls_annotations
-            for base in cls.__bases__:
-                cls_annotations = get_cls_annotations(base)
-                if cls_annotations:
-                    return cls_annotations
-            return {}
-
-        cls = obj if isinstance(obj, type) else type(obj)
-        return get_cls_annotations(cls)
 
     class_annotations = get_annotations(nn_module)
     if isinstance(nn_module, (torch.ao.quantization.QuantWrapper)):

@@ -184,9 +184,12 @@ if is_fbcode():
     from libfb.py import parutil
 
     try:
-        global_cache_dir = parutil.get_dir_path(
-            os.path.join(__package__.replace(".", os.sep), "fb/cache")
-        )
+        if __package__:
+            global_cache_dir = parutil.get_dir_path(
+                os.path.join(__package__.replace(".", os.sep), "fb/cache")
+            )
+        else:
+            global_cache_dir = parutil.get_dir_path("fb/cache")
     except ValueError:
         global_cache_dir = None
 else:
@@ -415,7 +418,7 @@ class trace:
     output_code = True
 
     # SVG figure showing post-fusion graph
-    graph_diagram = False
+    graph_diagram = os.environ.get("INDUCTOR_POST_FUSION_SVG", "0") == "1"
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False
