@@ -2746,14 +2746,10 @@ aot_autograd_failures = {
     skip('as_strided_scatter'),
     skip('as_strided', 'partial_views'),  # flaky
 
-    # Too annoying to generate random inputs
-    xfail('cholesky'),
-
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip('max_pool2d_with_indices_backward'),
 
     # Worked with real but not with fake
-    xfail('cholesky_inverse'),
     xfail('_segment_reduce', 'lengths'),
     skip('nn.functional.nll_loss', ''),  # UBSAN failure!
 
@@ -2797,7 +2793,6 @@ aot_autograd_failures = {
 symbolic_aot_autograd_failures = {
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cdist', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('cholesky_inverse', ''),  # could not find kernel
     xfail('combinations', ''),  # aten.masked_select.default
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
