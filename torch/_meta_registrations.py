@@ -3056,10 +3056,12 @@ def meta_median(input):
         aten.median.dim_values,
         aten.nanmedian.dim,
         aten.nanmedian.dim_values,
+        aten.mode.default,
+        aten.mode.values,
     ]
 )
 @out_wrapper("values", "indices")
-def meta_median_dim(input, dim=-1, keepdim=False):
+def meta_median_mode_dim(input, dim=-1, keepdim=False):
     dim = utils.reduction_dims(input.shape, (dim,))
     output_shape = _compute_reduction_shape(input, dim, keepdim)
     return (
