@@ -2119,7 +2119,6 @@ exclude_patterns = [
     'torch/fx/tensor_type.py',
     'torch/fx/traceback.py',
     'torch/hub.py',
-    'torch/jit/_script.py',  # "Callable[[], Any]" has no attribute "__func__"
     'torch/jit/frontend.py',  # "expr" has no attribute "id"
     'torch/library.py',
     'torch/linalg/__init__.py',
