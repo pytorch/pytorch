@@ -31,7 +31,7 @@ def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tens
 
 class RNNBase(Module):
     r"""Base class for RNN modules (RNN, LSTM, GRU).
-    
+
     Implements aspects of RNNs shared by the RNN, LSTM, and GRU classes, such as module initialization
     and utility methods for parameter storage management.
 
@@ -464,7 +464,7 @@ class RNN(RNNBase):
         >>> output, hn = rnn(input, h0)
     """
 
-    def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1, 
+    def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1,
                  non_linearity: str = 'tanh', bias: bool = True, batch_first: bool = False,
                  dropout: float = 0., bidirectional: bool = False, device=None, dtype=None):
         self.nonlinearity = non_linearity
@@ -744,11 +744,11 @@ class LSTM(RNNBase):
         >>> output, (hn, cn) = rnn(input, (h0, c0))
     """
 
-    def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1, bias: bool = True, 
-                 batch_first: bool = False, dropout: float = 0., bidirectional: bool = False, 
+    def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1, bias: bool = True,
+                 batch_first: bool = False, dropout: float = 0., bidirectional: bool = False,
                  proj_size: int = 0, device=None, dtype=None):
         super().__init__('LSTM', input_size=input_size, hidden_size=hidden_size, num_layers=num_layers,
-                         bias=bias, batch_first=batch_first, dropout=dropout, bidirectional=bidirectional, 
+                         bias=bias, batch_first=batch_first, dropout=dropout, bidirectional=bidirectional,
                          proj_size=proj_size, device=device, dtype=dtype)
 
     def get_expected_cell_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:
@@ -1005,11 +1005,11 @@ class GRU(RNNBase):
         >>> output, hn = rnn(input, h0)
     """
 
-    def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1, bias: bool = True, 
-                 batch_first: bool = False, dropout: float = 0., bidirectional: bool = False, 
+    def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1, bias: bool = True,
+                 batch_first: bool = False, dropout: float = 0., bidirectional: bool = False,
                  device=None, dtype=None):
         super().__init__('GRU', input_size=input_size, hidden_size=hidden_size, num_layers=num_layers,
-                         bias=bias, batch_first=batch_first, dropout=dropout, bidirectional=bidirectional, 
+                         bias=bias, batch_first=batch_first, dropout=dropout, bidirectional=bidirectional,
                          device=device, dtype=dtype)
 
     @overload  # type: ignore[override]
