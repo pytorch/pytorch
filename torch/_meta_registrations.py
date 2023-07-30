@@ -1824,8 +1824,8 @@ if torch._C._has_mkldnn:
         "onednn", "IMPL", "Meta"
     )
 
-    @register_meta(torch.ops.onednn.qconv2d_pointwise.default)
-    def meta_qconv2d_pointwise(
+    @register_meta(torch.ops.onednn.qconv2d_pointwise.tensor)
+    def meta_qconv2d_pointwise_tensor(
         x,
         x_scale,
         x_zp,

@@ -1258,7 +1258,9 @@ def register_onednn_fusion_ops():
                 )
             )
 
-        @register_lowering(torch.ops.onednn.qconv2d_pointwise, type_promotion_kind=None)
+        @register_lowering(
+            torch.ops.onednn.qconv2d_pointwise.tensor, type_promotion_kind=None
+        )
         def qconvolution_unary(
             x: TensorBox,
             x_scale,

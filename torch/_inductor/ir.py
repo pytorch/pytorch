@@ -2758,9 +2758,10 @@ class ExternKernel(InputsKernel):
         if isinstance(x, (sympy.Expr, sympy.logic.boolalg.Boolean, int)):
             return ShapeAsConstantBuffer(x)
         if isinstance(x, Constant):
-            return V.graph.add_tensor_constant(
-                torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
-            )
+            with torch.utils._mode_utils.no_dispatch():
+                return V.graph.add_tensor_constant(
+                    torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
+                )
         if isinstance(x, ConstantBuffer):
             return x
         if isinstance(x, TensorBox):
@@ -4154,18 +4155,33 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
+        extra_flags=(),
     ):
         """
         if bias is not None
-            - inputs = [x, w, b, weight_scale, weight_zp]
-            - const_args is: [stride, padding, dilation, groups, x_scale, x_zp, o_inv_scale, o_zp,
-              fp32_output, unary_attr, unary_scalars, unary_algorithm]
+            if fp32 output:
+                - inputs = [x, w, b, x_scale, x_zp, weight_scale, weight_zp]
+                - const_args is: [stride, padding, dilation, groups, o_inv_scale, o_zp,
+                fp32_output, unary_attr, unary_scalars, unary_algorithm]
+            else:
+                - inputs = [x, w, b, x_scale, x_zp, weight_scale, weight_zp, o_inv_scale, o_zp]
+                - const_args is: [stride, padding, dilation, groups,
+                fp32_output, unary_attr, unary_scalars, unary_algorithm]
         else
-            - inputs = [x, w, weight_scale, weight_zp]
-            - const_args is: [bias, stride, padding, dilation, groups, x_scale, x_zp, o_inv_scale, o_zp,
-              fp32_output, unary_attr, unary_scalars, unary_algorithm]
+            if fp32 output:
+                - inputs = [x, w, x_scale, x_zp, weight_scale, weight_zp]
+                - const_args is: [bias, stride, padding, dilation, groups, o_inv_scale, o_zp,
+                fp32_output, unary_attr, unary_scalars, unary_algorithm]
+            else:
+                - inputs = [x, w, x_scale, x_zp, weight_scale, weight_zp, o_inv_scale, o_zp]
+                - const_args is: [bias, stride, padding, dilation, groups,
+                fp32_output, unary_attr, unary_scalars, unary_algorithm]
         """
-        self.has_bias = len(inputs) == 5
+        (
+            self.has_bias,
+            self.fp32_output,
+        ) = extra_flags
+
         super().__init__(layout, inputs, constant_args)
 
     def codegen(self, wrapper):
@@ -4177,23 +4193,47 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         x = args[0]
         packed_weight = args[1]
         bias = args[2] if self.has_bias else const_args[0]
-        w_scale, w_zp = args[-2], args[-1]
-        (
-            stride,
-            padding,
-            dilation,
-            groups,
-            x_scale,
-            x_zp,
-            o_inv_scale,
-            o_zp,
-            fp32_output,
-            unary_attr,
-            unary_scalars,
-            unary_algorithm,
-        ) = const_args[-12:]
 
-        self.kernel = "torch.ops.onednn.qconv2d_pointwise"
+        if self.fp32_output:
+            (
+                x_scale,
+                x_zp,
+                w_scale,
+                w_zp,
+            ) = args[-4:]
+            (
+                stride,
+                padding,
+                dilation,
+                groups,
+                o_inv_scale,
+                o_zp,
+                fp32_output,
+                unary_attr,
+                unary_scalars,
+                unary_algorithm,
+            ) = const_args[-10:]
+        else:
+            (
+                x_scale,
+                x_zp,
+                w_scale,
+                w_zp,
+                o_inv_scale,
+                o_zp,
+            ) = args[-6:]
+            (
+                stride,
+                padding,
+                dilation,
+                groups,
+                fp32_output,
+                unary_attr,
+                unary_scalars,
+                unary_algorithm,
+            ) = const_args[-8:]
+
+        self.kernel = "torch.ops.onednn.qconv2d_pointwise.tensor"
         codegen_args = (
             f"{x}"
             + f", {x_scale}"
@@ -4221,8 +4261,8 @@ class QConvPointWisePT2E(ExternKernelAlloc):
     def create(
         cls,
         x: "TensorBox",
-        x_scale: float,
-        x_zp: int,
+        x_scale: "TensorBox",
+        x_zp: "TensorBox",
         weight: "TensorBox",  # packed_weight
         w_scale: "TensorBox",
         w_zp: "TensorBox",
@@ -4231,8 +4271,8 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         padding_: List[int],
         dilation_: List[int],
         groups: int,
-        o_inv_scale: float,
-        output_zero_point: int,
+        o_inv_scale: "TensorBox",
+        output_zero_point: "TensorBox",
         fp32_output,
         unary_attr,
         unary_scalars,
@@ -4240,6 +4280,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
     ):
         transposed = False
         output_padding = None
+
         (inputs, constant_args, kernel_layout, _) = _prepare_convolution_fusion_create(
             cls,
             x,
@@ -4252,6 +4293,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             transposed,
             output_padding,
         )
+
         # swap padding and stride to align with functional conv arg order
         if bias is None:
             constant_args[1], constant_args[2] = constant_args[2], constant_args[1]
@@ -4260,19 +4302,42 @@ class QConvPointWisePT2E(ExternKernelAlloc):
 
         w_scale.realize()
         w_zp.realize()
-        inputs = inputs + [w_scale, w_zp]
-        constant_args = constant_args + [
-            x_scale,
-            x_zp,
-            o_inv_scale,
-            output_zero_point,
-            fp32_output,
-            unary_attr,
-            unary_scalars,
-            unary_algorithm,
-        ]
 
-        if fp32_output:
+        assert isinstance(x_scale, Constant)
+        assert isinstance(x_zp, Constant)
+        x_scale = cls.realize_input(x_scale)
+        x_zp = cls.realize_input(x_zp)
+
+        if not fp32_output:
+            assert isinstance(o_inv_scale, Constant)
+            assert isinstance(output_zero_point, Constant)
+            o_inv_scale = cls.realize_input(o_inv_scale)
+            output_zero_point = cls.realize_input(output_zero_point)
+            # o_inv_scale, output_zero_point is TensorBox(StorageBox(ConstantBuffer)) instead of None
+            inputs = inputs + [
+                x_scale,
+                x_zp,
+                w_scale,
+                w_zp,
+                o_inv_scale,
+                output_zero_point,
+            ]
+            constant_args = constant_args + [
+                fp32_output,
+                unary_attr,
+                unary_scalars,
+                unary_algorithm,
+            ]
+        else:
+            inputs = inputs + [x_scale, x_zp, w_scale, w_zp]
+            constant_args = constant_args + [
+                o_inv_scale,
+                output_zero_point,
+                fp32_output,
+                unary_attr,
+                unary_scalars,
+                unary_algorithm,
+            ]
             # in _prepare_convolution_fusion_create, we use x.dtype (uint8) to create kernel_layout
             # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
             kernel_layout.dtype = torch.float32
@@ -4281,6 +4346,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             layout=kernel_layout,
             inputs=inputs,
             constant_args=constant_args,
+            extra_flags=(bias is not None, fp32_output),
         )
 
 
@@ -4294,15 +4360,15 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         """
         Needs input/weight/output qparams
         if bias is not None
-            - inputs = [x, w, b, accum, w_scale, w_zp]
-            - const_args = [stride, padding, dilation, groups, x_scale, x_zp, accum_scale, accum_zp, o_inv_scale, o_zp,
+            - inputs = [x, w, b, accum, x_scale, x_zp, w_scale, w_zp, accum_scale, accum_zp, o_inv_scale, o_zp]
+            - const_args = [stride, padding, dilation, groups,
             fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
         else
-            - inputs = [x, w, accum, w_scale, w_zp]
-            - const_args = const_args is: [bias, stride, padding, dilation, groups, x_scale, x_zp, accum_scale,
-            accum_zp, o_inv_scale, o_zp, fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
+            - inputs = [x, w, accum, x_scale, x_zp, w_scale, w_zp, accum_scale, accum_zp, o_inv_scale, o_zp]
+            - const_args = const_args is: [bias, stride, padding, dilation, groups, fp32_output, binary_attr,
+            aplha, unary_attr, unary_scalars, unary_algorithm]
         """
-        self.has_bias = len(inputs) == 6
+        self.has_bias = len(inputs) == 12
         super().__init__(layout, inputs, constant_args)
 
     def codegen(self, wrapper):
@@ -4314,25 +4380,30 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         x = args[0]
         packed_weight = args[1]
         bias = args[2] if self.has_bias else const_args[0]
-        accum, w_scale, w_zp = args[-3], args[-2], args[-1]
+
+        (
+            accum,
+            x_scale,
+            x_zp,
+            w_scale,
+            w_zp,
+            accum_scale,
+            accum_zp,
+            o_inv_scale,
+            o_zp,
+        ) = args[-9:]
         (
             stride,
             padding,
             dilation,
             groups,
-            x_scale,
-            x_zp,
-            accum_scale,
-            accum_zp,
-            o_inv_scale,
-            o_zp,
             fp32_output,
             binary_attr,
             alpha,
             unary_attr,
             unary_scalars,
             unary_algorithm,
-        ) = const_args[-16:]
+        ) = const_args[-10:]
         self.kernel = "torch.ops.onednn.qconv2d_pointwise.binary"
         conv_args = (
             f"{x}"
@@ -4419,14 +4490,44 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
 
         w_scale.realize()
         w_zp.realize()
-        inputs = inputs + [w_scale, w_zp]
-        constant_args = constant_args + [
+
+        assert isinstance(x_scale, Constant)
+        assert isinstance(x_zp, Constant)
+        assert isinstance(accum_scale, Constant)
+        assert isinstance(accum_zp, Constant)
+        assert isinstance(o_inv_scale, Constant)
+        assert isinstance(output_zero_point, Constant)
+
+        (
             x_scale,
             x_zp,
             accum_scale,
             accum_zp,
             o_inv_scale,
             output_zero_point,
+        ) = (
+            cls.realize_input(x)
+            for x in (
+                x_scale,
+                x_zp,
+                accum_scale,
+                accum_zp,
+                o_inv_scale,
+                output_zero_point,
+            )
+        )
+
+        inputs = inputs + [
+            x_scale,
+            x_zp,
+            w_scale,
+            w_zp,
+            accum_scale,
+            accum_zp,
+            o_inv_scale,
+            output_zero_point,
+        ]
+        constant_args = constant_args + [
             fp32_output,
             binary_attr,
             alpha,
