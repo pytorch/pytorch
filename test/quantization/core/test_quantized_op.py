@@ -6464,6 +6464,10 @@ class TestQuantizedConv(TestCase):
             elif W_q_cpu_tensor.dim() == 4:
                 W_q_cpu_tensor = W_q_cpu_tensor.to(memory_format=torch.channels_last)
 
+        X_scale = torch.tensor(X_scale, dtype=torch.double, device=device)
+        X_zero_point = torch.tensor(X_zero_point, dtype=torch.int64, device=device)
+        Y_scale = torch.tensor(Y_scale, dtype=torch.double, device=device)
+        Y_zero_point = torch.tensor(Y_zero_point, dtype=torch.int64, device=device)
         packed_weight = qconv_prepack(
             W_q_cpu_tensor,
             weight_scale,
@@ -6478,6 +6482,8 @@ class TestQuantizedConv(TestCase):
 
         if post_op.binary_attr == "add":
             X2_q_cpu_tensor = X2_q.int_repr()
+            X2_scale = torch.tensor(X2_scale, dtype=torch.double, device=device)
+            X2_zero_point = torch.tensor(X2_zero_point, dtype=torch.int64, device=device)
             Y_q_cpu_tensor = qconv(
                 X_q_cpu_tensor,
                 X_scale,

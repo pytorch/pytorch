@@ -432,20 +432,20 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         example_inputs = (x,)
         node_occurrence = {
             # one for input and weight of the conv, two for input/output for the maxpool2d
-            torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 3,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 3,
             torch.ops.quantized_decomposed.quantize_per_channel.default: 1,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
         }
         node_list = [
-            torch.ops.quantized_decomposed.quantize_per_tensor.default,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
             torch.ops.aten.convolution.default,
-            torch.ops.quantized_decomposed.quantize_per_tensor.default,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
             torch.ops.aten.max_pool2d_with_indices.default,
-            torch.ops.quantized_decomposed.quantize_per_tensor.default,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
         ]
         _, prepare_model, _ = self._test_quantizer(
             m,

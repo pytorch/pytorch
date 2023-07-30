@@ -405,24 +405,22 @@ class TestPatternMatcher(TestPatternMatcherBase):
             v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
                 1
             )
-            # Totally 9 pattern_matcher_count, 41 pattern_matcher_nodes + 1 optional(unary post op)
+            # Totally 8 pattern_matcher_count, 38 pattern_matcher_nodes + 1 optional(unary post op)
             # 1. Pair of to_int8 and to_fp32 at conv input * 2, extra input of add * 1, and graph output * 1
             #    matched in pointless_convert pass at
             #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
-            # 2. Dequant pattern matcher for dequant promotion * 1
-            #    [convert_element_type_3, sub_1, mul_3]
-            # 3. Dequant-conv pattern matched in quantization weight prepack * 2
+            # 2. Dequant-conv pattern matched in quantization weight prepack * 2
             #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
-            # 4. Quantization fusion in post-grad fusion pass * 1
+            # 3. Quantization fusion in post-grad fusion pass * 1
             #    [qconv2d_pointwise_default, div_1, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
-            # 5. Qconv2d_add * 1
+            # 4. Qconv2d_add * 1
             #    [qconv2d_pointwise_default_1, convert_element_type_5, sub_2, mul_5, add_3, optional(relu),
             #     mul_6, round_4, add_4, clamp_min_3, clamp_max_3, convert_element_type_6]
             self._test_common(
                 mod,
                 (v,),
-                9,
-                42 if has_relu else 41,
+                8,
+                39 if has_relu else 38,
                 check_quantization=True,
             )
 
