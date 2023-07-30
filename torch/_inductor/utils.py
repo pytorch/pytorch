@@ -38,7 +38,7 @@ from .cuda_properties import current_device, get_device_capability
 
 log = logging.getLogger(__name__)
 
-T = TypeVar("T")
+_T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 
@@ -101,7 +101,7 @@ def conditional_product(*args):
     return functools.reduce(operator.mul, [x for x in args if x])
 
 
-def decode_device(device: Optional[torch.device]) -> torch.device:
+def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
     if device is None:
         return torch.tensor(0.0).device  # default device
     if isinstance(device, str):
@@ -120,7 +120,7 @@ def sympy_dot(seq1, seq2):
     return sympy.expand(sum(a * b for a, b in zip(seq1, seq2)))
 
 
-def unique(it: Iterable[T]) -> Iterable[T]:
+def unique(it: Iterable[_T]) -> Iterable[_T]:
     return {id(x): x for x in it}.values()
 
 
