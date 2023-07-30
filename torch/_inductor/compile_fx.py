@@ -843,7 +843,9 @@ def fw_compiler_freezing(
     # for freezing, all graph outputs should be user visible
     *_, model_outputs_node = opt_model.graph.nodes
     model_outputs = model_outputs_node.args[0]
-    user_visible_outputs = [n.name for n in model_outputs]
+    user_visible_outputs = [
+        n.name for n in model_outputs if isinstance(n, torch.fx.Node)
+    ]
 
     # constant params will be real tensors, not fake
     with unittest.mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
