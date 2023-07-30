@@ -386,6 +386,9 @@ def break_graph_if_unsupported(*, push):
             state = self.copy_graphstate()
             reason = None
             try:
+                TracingContext.set_current_loc(
+                    self.f_code.co_filename, self.lineno, self.f_code.co_name
+                )
                 return inner_fn(self, inst)
             except Unsupported as excp:
                 if self.has_backedge() and self.should_compile_partial_graph():
@@ -411,7 +414,7 @@ def break_graph_if_unsupported(*, push):
 
                 log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
 
-                user_stack = [self.frame_summary()] + list(reversed(excp.real_stack))
+                user_stack = excp.real_stack
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
                 frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
                 # torch._dynamo.explain() formats this a little nicer, and presents a slightly
@@ -684,18 +687,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
-        except BackendCompilerFailed:
-            raise
-        except Unsupported as exc:
-            exc.real_stack.append(self.frame_summary())
+        except Unsupported:
             if self.empty_checkpoint():
                 raise
             log.debug("step triggered compile", exc_info=True)
-        except Exception as exc:
-            real_stack = getattr(exc, "real_stack", [])
-            real_stack.append(self.frame_summary())
-            exc.real_stack = real_stack  # type: ignore[attr-defined]
-            raise
 
         # generate code from checkpoint
         assert not self.output.output_instructions

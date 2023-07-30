@@ -1,8 +1,9 @@
 import os
 import textwrap
 from enum import auto, Enum
-from traceback import extract_stack, format_exc, format_list, FrameSummary
+from traceback import extract_stack, format_exc, format_list, StackSummary, FrameSummary
 from typing import cast, List
+import torch._guards
 
 from . import config
 from .config import is_fbcode
@@ -67,7 +68,7 @@ class BackendCompilerFailed(TorchDynamoException):
 class Unsupported(TorchDynamoException):
     def __init__(self, msg):
         super().__init__(msg)
-        self.real_stack = []
+        self.real_stack = torch._guards.TracingContext.extract_stack()
         self.msg = msg
         self.category = None
         self.add_to_stats()
@@ -167,7 +168,7 @@ def augment_exc_message(exc, msg="\n", export=False):
         and len(exc.real_stack) > 0
         and not (config.verbose and config.suppress_errors)
     ):
-        msg += f"\nfrom user code:\n {''.join(traceback.format_list(list(reversed(get_real_stack(exc)[0:2]))))}"
+        msg += f"\nfrom user code:\n {''.join(traceback.format_list(get_real_stack(exc)))}"
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
         msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
@@ -208,9 +209,9 @@ def augment_exc_message(exc, msg="\n", export=False):
         exc.args = (new_msg,) + exc.args[1:]
 
 
-def get_real_stack(exc) -> List[FrameSummary]:
+def get_real_stack(exc) -> StackSummary:
     assert hasattr(exc, "real_stack")
-    return cast(List[FrameSummary], exc.real_stack)
+    return cast(StackSummary, exc.real_stack)
 
 
 # filter out all frames after entering dynamo
@@ -251,7 +252,7 @@ def format_error_msg_verbose(exc, code, record_filename=None, frame=None):
             stack_above_dynamo = filter_stack(extract_stack(frame))
 
         msg += "".join(
-            format_list(stack_above_dynamo + list(reversed(get_real_stack(exc))))
+            format_list(stack_above_dynamo + get_real_stack(exc))
         )
         msg += "\n"
         msg += "=" * 10
