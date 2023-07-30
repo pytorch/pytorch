@@ -319,6 +319,30 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                 )
             )
 
+    def test_diagnostic_context_raises_original_exception_from_diagnostic_created_from_it(
+        self,
+    ):
+        with self.assertRaises(ValueError):
+            try:
+                raise ValueError("original exception")
+            except ValueError as e:
+                diagnostic = infra.Diagnostic(
+                    self.rules.rule_without_message_args, infra.Level.ERROR
+                )
+                diagnostic = diagnostic.with_source_exception(e)
+                self.context.log_and_raise_if_error(diagnostic)
+
+    def test_diagnostic_context_raises_if_diagnostic_is_warning_and_warnings_as_errors_is_true(
+        self,
+    ):
+        with self.assertRaises(infra.RuntimeErrorWithDiagnostic):
+            self.context.options.warnings_as_errors = True
+            self.context.log_and_raise_if_error(
+                infra.Diagnostic(
+                    self.rules.rule_without_message_args, infra.Level.WARNING
+                )
+            )
+
 
 if __name__ == "__main__":
     common_utils.run_tests()

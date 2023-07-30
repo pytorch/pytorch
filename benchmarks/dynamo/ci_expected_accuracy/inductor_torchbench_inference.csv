@@ -47,6 +47,7 @@ resnet152,pass,0
 resnet18,pass,0
 resnet50,pass,0
 resnext50_32x4d,pass,0
+sam,pass,0
 shufflenet_v2_x1_0,pass,0
 soft_actor_critic,pass,0
 speech_transformer,pass,10
