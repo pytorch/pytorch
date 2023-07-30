@@ -529,7 +529,6 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Store.cpp",
     "torch/csrc/distributed/c10d/TCPStore.cpp",
     "torch/csrc/distributed/c10d/TCPStoreBackend.cpp",
-    "torch/csrc/distributed/c10d/TCPStoreLibUvBackend.cpp",
     "torch/csrc/distributed/c10d/Utils.cpp",
     "torch/csrc/distributed/c10d/comm.cpp",
     "torch/csrc/distributed/c10d/debug.cpp",

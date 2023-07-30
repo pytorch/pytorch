@@ -189,7 +189,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.num_static_inputs = num_static_inputs
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
-        self.mutated_input_idxs: List[int] = []
         self.unaligned_buffers: Set[str] = set()
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
@@ -293,7 +292,7 @@ class GraphLowering(torch.fx.Interpreter):
             for n in conv_nodes
         ):
             log.debug(
-                "Skip layout optimization because some convolutions have smaller out_channel"
+                "Skip layout optimization because some convoluttions have smaller out_channel"
             )
             return False
 
@@ -755,7 +754,6 @@ class GraphLowering(torch.fx.Interpreter):
                                 torch.ops.mkldnn._convolution_transpose_pointwise.default,
                                 torch.ops.mkldnn._linear_pointwise.default,
                                 torch.ops.mkldnn._linear_pointwise.binary,
-                                torch.ops.aten.mkldnn_rnn_layer.default,
                             ]
                             if torch._C.has_mkl:
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]

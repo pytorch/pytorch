@@ -77,20 +77,16 @@ class WorkflowCheckState:
 
 class FlakyRule:
     def __init__(self, name: str, captures: List[str]):
-        self.name = re.compile(name)
-        self.captures = [re.compile(r) for r in captures]
+        self.name = name
+        self.captures = captures
 
     def matches(self, job: Optional[Dict[str, Any]]) -> bool:
         return (
             job is not None
-            and self.name.search(job.get("name", "")) is not None
+            and self.name in job.get("name", "")
             and job.get("failure_captures") is not None
             and all(
-                any(
-                    r.search(capture) is not None
-                    for capture in job.get("failure_captures", [])
-                )
-                for r in self.captures
+                capture in job.get("failure_captures", []) for capture in self.captures
             )
         )
 
@@ -1090,12 +1086,7 @@ class GitHubPR:
         ignore_current_checks: Optional[List[str]] = None,
     ) -> None:
         # Raises exception if matching rule is not found
-        (
-            merge_rule,
-            pending_checks,
-            failed_checks,
-            ignorable_checks,
-        ) = find_matching_merge_rule(
+        merge_rule, pending_checks, failed_checks = find_matching_merge_rule(
             self,
             repo,
             skip_mandatory_checks=skip_mandatory_checks,
@@ -1128,10 +1119,6 @@ class GitHubPR:
                 author=self.get_author(),
                 pending_checks=pending_checks,
                 failed_checks=failed_checks,
-                ignore_current_checks=ignorable_checks.get("IGNORE_CURRENT_CHECK", []),
-                broken_trunk_checks=ignorable_checks.get("BROKEN_TRUNK", []),
-                flaky_checks=ignorable_checks.get("FLAKY", []),
-                unstable_checks=ignorable_checks.get("UNSTABLE", []),
                 last_commit_sha=self.last_commit().get("oid", ""),
                 merge_base_sha=self.get_merge_base(),
                 merge_commit_sha=merge_commit_sha,
@@ -1247,7 +1234,6 @@ def find_matching_merge_rule(
     MergeRule,
     List[Tuple[str, Optional[str], Optional[int]]],
     List[Tuple[str, Optional[str], Optional[int]]],
-    Dict[str, List[Any]],
 ]:
     """
     Returns merge rule matching to this pr together with the list of associated pending
@@ -1361,7 +1347,7 @@ def find_matching_merge_rule(
                 lambda x: "EasyCLA" in x or not skip_mandatory_checks, mandatory_checks
             )
         )
-        pending_checks, failed_checks, _ = categorize_checks(
+        pending_checks, failed_checks = categorize_checks(
             checks,
             required_checks,
             ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD
@@ -1401,23 +1387,13 @@ def find_matching_merge_rule(
             )
 
         # Categorize all checks when skip_mandatory_checks (force merge) is set. Do it here
-        # where the list of checks is readily available. These records will be saved into
-        # Rockset merge records
-        (
-            pending_mandatory_checks,
-            failed_mandatory_checks,
-            ignorable_checks,
-        ) = categorize_checks(
+        # where the list of checks is readily available
+        pending_mandatory_checks, failed_mandatory_checks = categorize_checks(
             checks,
             [],
-            ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD,
+            ok_failed_checks_threshold=0,
         )
-        return (
-            rule,
-            pending_mandatory_checks,
-            failed_mandatory_checks,
-            ignorable_checks,
-        )
+        return (rule, pending_mandatory_checks, failed_mandatory_checks)
 
     if reject_reason_score == 20000:
         raise MandatoryChecksMissingError(reject_reason, rule)
@@ -1451,10 +1427,6 @@ def save_merge_record(
     author: str,
     pending_checks: List[Tuple[str, Optional[str], Optional[int]]],
     failed_checks: List[Tuple[str, Optional[str], Optional[int]]],
-    ignore_current_checks: List[Tuple[str, Optional[str], Optional[int]]],
-    broken_trunk_checks: List[Tuple[str, Optional[str], Optional[int]]],
-    flaky_checks: List[Tuple[str, Optional[str], Optional[int]]],
-    unstable_checks: List[Tuple[str, Optional[str], Optional[int]]],
     last_commit_sha: str,
     merge_base_sha: str,
     merge_commit_sha: str = "",
@@ -1486,10 +1458,6 @@ def save_merge_record(
                 "author": author,
                 "pending_checks": pending_checks,
                 "failed_checks": failed_checks,
-                "ignore_current_checks": ignore_current_checks,
-                "broken_trunk_checks": broken_trunk_checks,
-                "flaky_checks": flaky_checks,
-                "unstable_checks": unstable_checks,
                 "last_commit_sha": last_commit_sha,
                 "merge_base_sha": merge_base_sha,
                 "merge_commit_sha": merge_commit_sha,
@@ -1767,7 +1735,6 @@ def categorize_checks(
 ) -> Tuple[
     List[Tuple[str, Optional[str], Optional[int]]],
     List[Tuple[str, Optional[str], Optional[int]]],
-    Dict[str, List[Any]],
 ]:
     """
     Categories all jobs into the list of pending and failing jobs. All known flaky
@@ -1776,11 +1743,7 @@ def categorize_checks(
     """
     pending_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
     failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
-
-    # ok_failed_checks is used with ok_failed_checks_threshold while ignorable_failed_checks
-    # is used to keep track of all ignorable failures when saving the merge record on Rockset
     ok_failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
-    ignorable_failed_checks: Dict[str, List[Any]] = defaultdict(list)
 
     # If required_checks is not set or empty, consider all names are relevant
     relevant_checknames = [
@@ -1799,22 +1762,17 @@ def categorize_checks(
         classification = check_runs[checkname].classification
         job_id = check_runs[checkname].job_id
 
-        if status is None and classification != "UNSTABLE":
-            # NB: No need to wait if the job classification is unstable as it would be
-            # ignored anyway. This is useful to not need to wait for scarce resources
-            # like ROCm, which is also frequently in unstable mode
+        if status is None:
             pending_checks.append((checkname, url, job_id))
         elif not is_passing_status(check_runs[checkname].status):
-            target = (
-                ignorable_failed_checks[classification]
-                if classification
-                in ("IGNORE_CURRENT_CHECK", "BROKEN_TRUNK", "FLAKY", "UNSTABLE")
-                else failed_checks
-            )
-            target.append((checkname, url, job_id))
-
-            if classification in ("BROKEN_TRUNK", "FLAKY", "UNSTABLE"):
+            if classification == "IGNORE_CURRENT_CHECK":
+                pass
+            elif classification == "UNSTABLE":
+                pass
+            elif classification in ("BROKEN_TRUNK", "FLAKY"):
                 ok_failed_checks.append((checkname, url, job_id))
+            else:
+                failed_checks.append((checkname, url, job_id))
 
     if ok_failed_checks:
         warn(
@@ -1834,8 +1792,7 @@ def categorize_checks(
     ):
         failed_checks = failed_checks + ok_failed_checks
 
-    # The list of ignorable_failed_checks is returned so that it can be saved into the Rockset merge record
-    return (pending_checks, failed_checks, ignorable_failed_checks)
+    return (pending_checks, failed_checks)
 
 
 def merge(
@@ -1896,7 +1853,7 @@ def merge(
 
     if ignore_current:
         checks = pr.get_checkrun_conclusions()
-        _, failing, _ = categorize_checks(
+        _, failing = categorize_checks(
             checks,
             list(checks.keys()),
             ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD,
@@ -1965,7 +1922,7 @@ def merge(
                 flaky_rules,
                 ignore_current_checks=ignore_current_checks,
             )
-            pending, failing, _ = categorize_checks(
+            pending, failing = categorize_checks(
                 checks,
                 required_checks
                 + [x for x in checks.keys() if x not in required_checks],
@@ -2126,10 +2083,6 @@ def main() -> None:
                 author=pr.get_author(),
                 pending_checks=[],
                 failed_checks=[],
-                ignore_current_checks=[],
-                broken_trunk_checks=[],
-                flaky_checks=[],
-                unstable_checks=[],
                 last_commit_sha=pr.last_commit().get("oid", ""),
                 merge_base_sha=pr.get_merge_base(),
                 is_failed=True,

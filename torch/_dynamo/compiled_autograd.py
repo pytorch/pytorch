@@ -6,7 +6,6 @@ import torch
 from torch._dynamo.external_utils import call_hook
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters
-from torch._prims_common import clone_preserve_strides
 from torch._subclasses import FakeTensorMode
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import (
@@ -19,12 +18,6 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
-
-
-def maybe_clone(x):
-    if x is not None:
-        return clone_preserve_strides(x)
-    return x
 
 
 class AutogradCompilerInstance:
@@ -105,7 +98,7 @@ class AutogradCompilerInstance:
             inputs[i],
         )
         with disable_proxy_modes_tracing():
-            inputs[i] = maybe_clone(inputs[i])
+            inputs[i] = inputs[i].clone()
             self.bind_tensors_to_proxies([inputs[i]], [proxy])
         return inputs
 
@@ -116,7 +109,7 @@ class AutogradCompilerInstance:
             inputs,
         )
         with disable_proxy_modes_tracing():
-            inputs = [maybe_clone(x) for x in inputs]
+            inputs = [x.clone() for x in inputs]
             self.bind_tensors_to_proxies(inputs, proxies)
         return inputs
 
@@ -128,7 +121,7 @@ class AutogradCompilerInstance:
             inputs,
         )
         with disable_proxy_modes_tracing():
-            outputs = [maybe_clone(x) for x in outputs]
+            outputs = [x.clone() for x in outputs]
             self.bind_tensors_to_proxies(outputs, proxies)
         return outputs
 
@@ -158,6 +151,8 @@ class AutogradCompilerInstance:
         if isinstance(proxies, torch.fx.Proxy):
             proxies = [proxies[i] for i in range(len(tensors))]
         assert len(tensors) == len(proxies)
+        assert all(x is not None for x in tensors)
+        assert all(x is not None for x in proxies)
         track_tensor_tree(tensors, proxies, constant=None, tracer=self.fx_tracer)
 
 
