@@ -4050,8 +4050,8 @@ def check_grid_sampler_common(input: Tensor, grid: Tensor):
     torch._check(
         input.shape[0] == grid.shape[0],
         lambda: (
-            "grid_sampler(): expected grid and input to have same batch size, but got "
-            "input with sizes {input.shape} and grid with sizes {grid.shape}"
+            f"grid_sampler(): expected grid and input to have same batch size, but got "
+            f"input with sizes {input.shape} and grid with sizes {grid.shape}"
         ),
     )
     torch._check(
@@ -4144,7 +4144,7 @@ def grid_sampler_3d_backward(
     padding_mode: int,
     align_corners: bool,
     output_mask: Sequence[bool],  # bool[2]
-) -> Tuple[Tensor, Tensor]:
+) -> Tuple[Optional[Tensor], Tensor]:
     check_grid_sampler_common(input, grid)
     check_grid_sampler_3d(input, grid, interpolation_mode)
     input_requires_grad = output_mask[0]
