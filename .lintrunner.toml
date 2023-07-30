@@ -2028,7 +2028,6 @@ exclude_patterns = [
     'torch/distributed/tensor/parallel/multihead_attention_tp.py',
     'torch/distributed/tensor/parallel/style.py',
     'torch/distributed/utils.py',
-    'torch/distributions/distribution.py',  # Use f-string instead of `format` call.
     'torch/fft/__init__.py',
     'torch/func/__init__.py',
     'torch/functional.py',
