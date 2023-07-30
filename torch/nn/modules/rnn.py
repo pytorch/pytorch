@@ -34,12 +34,6 @@ class RNNBase(Module):
 
     Implements aspects of RNNs shared by the RNN, LSTM, and GRU classes, such as module initialization
     and utility methods for parameter storage management.
-
-    .. note::
-        The forward method is not implemented by the RNNBase class.
-
-    .. note::
-        LSTM and GRU classes override some method implemented by RNNBase.
     """
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
                      'batch_first', 'dropout', 'bidirectional', 'proj_size']
