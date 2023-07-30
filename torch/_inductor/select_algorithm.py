@@ -45,6 +45,27 @@ class KernelNamespace:
 extern_kernels = KernelNamespace()
 
 
+class PartialRender:
+    """
+    Some parts of a template need to be generated at the end, but
+    inserted into the template at the start.  This allows doing a bunch
+    of replacements after the initial render.
+    """
+
+    def __init__(self, code, replacement_hooks):
+        super().__init__()
+        self.code = code
+        self.replacement_hooks = replacement_hooks
+
+    def finalize(self):
+        code = self.code
+        assert code is not None, "can only be called once"
+        self.code = None
+        for key, fn in self.replacement_hooks.items():
+            code = code.replace(key, fn())
+        return code
+
+
 class TritonTemplateKernel(TritonKernel):
     def __init__(
         self,
@@ -85,6 +106,7 @@ class TritonTemplateKernel(TritonKernel):
         self.prefix_args = prefix_args
         self.suffix_args = suffix_args
         self.epilogue_fn = epilogue_fn
+        self.render_hooks = dict()
 
     def jit_line(self):
         if self.use_jit:
@@ -144,21 +166,27 @@ class TritonTemplateKernel(TritonKernel):
             # get args in correct order
             self.args.input(input_node.get_name())
 
-        arg_defs, *_ = self.args.python_argdefs()
-        return "\n".join(
-            [
-                "import triton.language as tl",
-                "import triton",
-                "from torch._inductor.triton_heuristics import template",
-                "from torch._inductor.utils import instance_descriptor",
-                "from torch._inductor import triton_helpers",
-                "",
-                self.jit_line(),
-                f"def {self.kernel_name}({', '.join(arg_defs)}):",
-                self.defines,
-                renames.getvalue(),
-            ]
-        )
+        def hook():
+            # python_argdefs() cannot be run until after the rest of the template lazily adds more args
+            arg_defs, *_ = self.args.python_argdefs()
+            return "\n".join(
+                [
+                    "import triton.language as tl",
+                    "import triton",
+                    "from torch._inductor.triton_heuristics import template",
+                    "from torch._inductor.utils import instance_descriptor",
+                    "from torch._inductor import triton_helpers",
+                    "",
+                    self.jit_line(),
+                    f"def {self.kernel_name}({', '.join(arg_defs)}):",
+                    self.defines,
+                    renames.getvalue(),
+                ]
+            )
+
+        assert "<DEF_KERNEL>" not in self.render_hooks
+        self.render_hooks["<DEF_KERNEL>"] = hook
+        return "<DEF_KERNEL>"
 
     def size(self, name: str, index: int):
         """
@@ -195,50 +223,61 @@ class TritonTemplateKernel(TritonKernel):
         assert isinstance(indices, (list, tuple))
         assert isinstance(val, str)
         assert isinstance(mask, str)
-        if self.template_mask is None:
-            indices = list(map(TritonPrinter.paren, indices))
-            index_symbols = [sympy.Symbol(x) for x in indices]
-            lengths = [
-                V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
-            ]
-            assert len(indices) == len(lengths)
+        assert self.template_mask is None
+        indices = list(map(TritonPrinter.paren, indices))
+        index_symbols = [sympy.Symbol(x) for x in indices]
+        lengths = [V.graph.sizevars.simplify(s) for s in self.output_node.get_size()]
+        assert len(indices) == len(lengths)
 
-            # glue to make generated code use same indexing from template
-            for name, range_tree_entry in zip(
-                indices, self.range_trees[0].construct_entries(lengths)
-            ):
-                range_tree_entry.set_name(name)
-            contiguous_index = sympy_dot(
-                ir.FlexibleLayout.contiguous_strides(lengths), index_symbols
-            )
-            contiguous_index = self.rename_indexing(contiguous_index)
-            self.body.writeline("xindex = " + texpr(contiguous_index))
-            self.range_trees[0].lookup(
-                sympy.Integer(1), sympy_product(lengths)
-            ).set_name("xindex")
-            self.template_mask = mask
-            self.template_indices = indices
-            output_index = self.output_node.get_layout().make_indexer()(index_symbols)
-            output_index = self.rename_indexing(output_index)
-            if output_index == contiguous_index:
-                output_index = sympy.Symbol("xindex")
+        # glue to make generated code use same indexing from template
+        for name, range_tree_entry in zip(
+            indices, self.range_trees[0].construct_entries(lengths)
+        ):
+            range_tree_entry.set_name(name)
+        contiguous_index = sympy_dot(
+            ir.FlexibleLayout.contiguous_strides(lengths), index_symbols
+        )
+        contiguous_index = self.rename_indexing(contiguous_index)
+        self.body.writeline("xindex = " + texpr(contiguous_index))
+        self.range_trees[0].lookup(sympy.Integer(1), sympy_product(lengths)).set_name(
+            "xindex"
+        )
+        self.template_mask = mask
+        self.template_indices = indices
+        output_index = self.output_node.get_layout().make_indexer()(index_symbols)
+        output_index = self.rename_indexing(output_index)
+        if output_index == contiguous_index:
+            output_index = sympy.Symbol("xindex")
 
-            epilogue_args = [val]
-            for input_node in itertools.chain(
-                self.input_nodes[: self.prefix_args],
-                self.input_nodes[len(self.input_nodes) - self.suffix_args :],
-            ):
-                input_node.freeze_layout()
-                epilogue_args.append(input_node.make_loader()(index_symbols))
+        epilogue_args = [val]
+        for input_node in itertools.chain(
+            self.input_nodes[: self.prefix_args],
+            self.input_nodes[len(self.input_nodes) - self.suffix_args :],
+        ):
+            input_node.freeze_layout()
+            epilogue_args.append(input_node.make_loader()(index_symbols))
 
-            V.ops.store(
-                self.output_node.get_name(),
-                output_index,
-                self.epilogue_fn(*epilogue_args),
-            )
-        assert self.template_mask == mask
+        V.ops.store(
+            self.output_node.get_name(),
+            output_index,
+            self.epilogue_fn(*epilogue_args),
+        )
         self.codegen_body()
-        return textwrap.indent(self.body.getvalue(), "    ").strip()
+
+        def hook():
+            # more stuff might have been added since the codegen_body above
+            self.codegen_body()
+            return textwrap.indent(self.body.getvalue(), "    ").strip()
+
+        assert "<STORE_OUTPUT>" not in self.render_hooks
+        self.render_hooks["<STORE_OUTPUT>"] = hook
+        return "<STORE_OUTPUT>"
+
+    def render(self, template, kwargs):
+        return PartialRender(
+            template.render(**self.template_env(), **kwargs),
+            self.render_hooks,
+        )
 
     def make_load(self, name, indices, mask):
         """
@@ -438,16 +477,8 @@ class TritonTemplate:
             use_jit=True,
             **kernel_options,
         ) as kernel:
-            # need to do call render twice to get all the needed args right
             try:
-                self.template.render(
-                    **kernel.template_env(),
-                    **kwargs,
-                )
-                code = self.template.render(
-                    **kernel.template_env(),
-                    **kwargs,
-                )
+                code = kernel.render(self.template, kwargs).finalize()
             except ZeroDivisionError:
                 # TODO(nmacchioni): fix sympy division by zero
                 return None
@@ -489,9 +520,9 @@ class TritonTemplate:
                 **kernel_options,
             )
             render = functools.partial(
-                self.template.render,
-                **kernel.template_env(),
-                **kwargs,
+                kernel.render,
+                self.template,
+                kwargs,
             )
             return kernel, render
 

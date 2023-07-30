@@ -27,7 +27,6 @@ from torch.onnx._internal.fx import (
 )
 
 if TYPE_CHECKING:
-    import onnx.defs.OpSchema  # type: ignore[import]
     import onnxscript  # type: ignore[import]
 
 
@@ -134,6 +133,57 @@ class OnnxFunctionDispatcher:
         )
 
     @_beartype.beartype
+    def _filter_or_keep_complex(
+        self,
+        node,
+        default_and_custom_functions: List[registration.SymbolicFunction],
+        diagnostic_context: diagnostics.DiagnosticContext,
+    ) -> List[registration.SymbolicFunction]:
+        if any(
+            torch.is_complex(arg.meta["val"])
+            for arg in node.args
+            if isinstance(arg, torch.fx.Node)
+            and "val" in arg.meta
+            and isinstance(arg.meta["val"], torch.Tensor)
+        ):
+            default_and_custom_functions = [
+                func for func in default_and_custom_functions if func.is_complex
+            ]
+            # If we can't find the complex function group, raise error.
+            if not default_and_custom_functions:
+                op_full_name = self._get_aten_name(
+                    node, diagnostic_context
+                ).qualified_name()
+                diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
+                    diagnostics.rules.no_symbolic_function_for_call_function,
+                    diagnostics.levels.ERROR,
+                    f"Cannot find any COMPLEX symbolic function for {op_full_name}, "
+                    f"which should be registered under {node.target}.",
+                    unsupported_fx_node=node,
+                )
+                diagnostic_context.log(diagnostic)
+                raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
+        else:
+            default_and_custom_functions = [
+                func for func in default_and_custom_functions if not func.is_complex
+            ]
+            # If we can't find the complex function group, raise error.
+            if not default_and_custom_functions:
+                op_full_name = self._get_aten_name(
+                    node, diagnostic_context
+                ).qualified_name()
+                diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
+                    diagnostics.rules.no_symbolic_function_for_call_function,
+                    diagnostics.levels.ERROR,
+                    f"Can ONLY find COMPLEX symbolic function for {op_full_name}, "
+                    f"which should be registered under {node.target}.",
+                    unsupported_fx_node=node,
+                )
+                diagnostic_context.log(diagnostic)
+                raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
+        return default_and_custom_functions
+
+    @_beartype.beartype
     @diagnostics.diagnose_call(
         diagnostics.rules.find_opschema_matched_symbolic_function,
         diagnostic_message_formatter=_find_opschema_matched_symbolic_function_disagnostic_message_formatter,
@@ -191,7 +241,11 @@ class OnnxFunctionDispatcher:
         # that is custom first
         symbolic_function_list: List[registration.SymbolicFunction] = sorted(
             overload_match_ranking,
-            key=lambda k: (overload_match_ranking[k], k.is_custom),
+            key=lambda k: (
+                overload_match_ranking[k],
+                k.is_custom,
+                k.onnx_function.name,
+            ),
             reverse=True,
         )
         return symbolic_function_list[0].onnx_function
@@ -327,7 +381,11 @@ class OnnxFunctionDispatcher:
 
         # NOTE: If the ATen/Custom operators are not registered, the group will be None.
         if function_group is not None:
-            return function_group
+            # If the input has complex dtype, we will only dispatch to the complex functions.
+            function_group = self._filter_or_keep_complex(
+                node, function_group, diagnostic_context
+            )
+            return function_group  # type: ignore[return-value]
 
         # If we can't find the function group, raise error.
         op_full_name = internal_opname.qualified_name()
@@ -419,7 +477,11 @@ class _OnnxSchemaChecker:
         """
         self.onnxfunction = onnxfunction
         self.param_schema = self.onnxfunction.param_schemas()
-        self.op_schema: onnx.defs.OpSchema = self.onnxfunction.op_schema
+        op_schema = self.onnxfunction.op_schema
+        # Both `OnnxFunction` and `TracedOnnxFunction` never return None for `op_schema`.
+        # However their base class would. Hence return type is annotated as Optional[OpSchema].
+        assert op_schema is not None
+        self.op_schema = op_schema
         self.type_constraints = {
             # "T": {"tensor(int64)"}
             constraint.type_param_str: set(constraint.allowed_type_strs)
@@ -498,7 +560,7 @@ class _OnnxSchemaChecker:
                 # of this input defined in the OpSchema, we know the function
                 # and the input are not compatible
                 diagnostic.with_additional_message(
-                    f"#### Failed: input type mismatch! \n"
+                    f"#### Failed: input type mismatch for input '{schema_input.name}'! \n"
                     f"Actual {torch_input_compatible_types} vs\n"
                     f"expected {allowed_types}\n"
                 )
