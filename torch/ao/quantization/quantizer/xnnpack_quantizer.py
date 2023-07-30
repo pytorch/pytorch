@@ -21,8 +21,9 @@ from torch.ao.quantization.observer import (
 )
 
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
+from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 
-from torch.ao.quantization.pt2e.quantizer.utils import (
+from torch.ao.quantization.quantizer.utils import (
     _annotate_input_qspec_map,
     _annotate_output_qspec,
     _is_sym_size_node,
@@ -32,7 +33,6 @@ from torch.ao.quantization.pt2e.quantizer.utils import (
     get_output_act_qspec,
     get_weight_qspec,
 )
-from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 
 from torch.fx import Node
 from torch.fx.passes.utils.source_matcher_utils import get_source_partitions
@@ -64,7 +64,7 @@ def _mark_nodes_as_annotated(nodes: List[Node]):
 
 
 def _get_dynamo_graph(function: Callable, inputs) -> torch.fx.Graph:
-    gm, _ = torchdynamo.export(function, *inputs, aten_graph=True)
+    gm, _ = torchdynamo.export(function, aten_graph=True)(*inputs)
     gm.graph.eliminate_dead_code()
     return gm.graph
 

@@ -2789,6 +2789,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         pg_opts.config.max_ctas = 4
         pg_opts.config.min_ctas = 2
         pg_opts.config.cga_cluster_size = 2
+        pg_opts.config.net_name = "Socket"
         nccl_debug_file = tempfile.NamedTemporaryFile()
         os.environ["NCCL_DEBUG"] = "INFO"
         os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
@@ -2801,9 +2802,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         max_ctas = re.search(rb'Max CTAs.*(\d+)|$', nccl_debug_file_content).group(1)
         min_ctas = re.search(rb'Min CTAs.*(\d+)|$', nccl_debug_file_content).group(1)
         cga_cluster_size = re.search(rb'CGA cluster.*(\d+)|$', nccl_debug_file_content).group(1)
+        net_name = re.search(rb'Using network.([a-zA-z]+)|$', nccl_debug_file_content).group(1)
         self.assertEqual(pg_opts.config.max_ctas, int(max_ctas))
         self.assertEqual(pg_opts.config.min_ctas, int(min_ctas))
         self.assertEqual(pg_opts.config.cga_cluster_size, int(cga_cluster_size))
+        self.assertEqual(pg_opts.config.net_name, net_name.decode())
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
