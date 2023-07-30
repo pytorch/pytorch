@@ -200,7 +200,9 @@ class profile:
         if not self.enabled:
             return
         self.use_cuda = use_cuda
-        self.use_device: Optional[str] = use_device if use_device != "privateuseone" else None
+        self.use_device: Optional[str] = (
+            use_device if use_device != "privateuseone" else None
+        )
         self.function_events: Optional[EventList] = None
         self.entered = False
         self.record_shapes = record_shapes
@@ -221,13 +223,13 @@ class profile:
                 use_kineto
             ), "Device-only events supported only with Kineto (use_kineto=True)"
 
-        if self.use_device and self.use_device != _get_privateuse1_backend_name():
-            warn(f"{self.use_device} doesn't support profile.")
-            self.use_device = None
-
         if self.use_device == "cuda":
             self.use_device = None
             self.use_cuda = True
+
+        if self.use_device and self.use_device != _get_privateuse1_backend_name():
+            warn(f"{self.use_device} doesn't support profile.")
+            self.use_device = None
 
         if self.use_cuda and not torch.cuda.is_available():
             warn("CUDA is not available, disabling CUDA profiling")
@@ -248,9 +250,13 @@ class profile:
                 self.kineto_activities.add(ProfilerActivity.CUDA)
 
         if self.use_device:
-            if (not use_kineto or ProfilerActivity.PrivateUse1 not in
-                    _supported_activities()):
-                assert self.use_cpu, "Legacy custombackend profiling requires use_cpu=True"
+            if (
+                not use_kineto
+                or ProfilerActivity.PrivateUse1 not in _supported_activities()
+            ):
+                assert (
+                    self.use_cpu
+                ), "Legacy custombackend profiling requires use_cpu=True"
                 self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.PrivateUse1)
@@ -411,9 +417,11 @@ class profile:
             )
 
         def _privateuse1_memory_usage(mem_record):
-            return mem_record.nbytes() if \
-                mem_record.device_type() in [DeviceType.PrivateUse1] \
+            return (
+                mem_record.nbytes()
+                if mem_record.device_type() in [DeviceType.PrivateUse1]
                 else 0
+            )
 
         # Create and return FunctionEvent list
         function_events = []

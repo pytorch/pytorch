@@ -26,10 +26,10 @@ class EventList(list):
     """A list of Events (for pretty printing)"""
 
     def __init__(self, *args, **kwargs):
-        use_cuda = kwargs.pop('use_cuda', True)
-        use_device = kwargs.pop('use_device', None)
-        profile_memory = kwargs.pop('profile_memory', False)
-        with_flops = kwargs.pop('with_flops', False)
+        use_cuda = kwargs.pop("use_cuda", True)
+        use_device = kwargs.pop("use_device", None)
+        profile_memory = kwargs.pop("profile_memory", False)
+        with_flops = kwargs.pop("with_flops", False)
         super().__init__(*args, **kwargs)
         self._use_cuda = use_cuda
         self._use_device = use_device
@@ -215,8 +215,9 @@ class EventList(list):
             path (str): Path where the trace will be written.
         """
         import os
+
         device_name = "cuda" if not self._use_device else self._use_device
-        with open(path, 'w') as f:
+        with open(path, "w") as f:
             chrome_events = []
             next_id = 0
             # Use file IO over using json.dump since JSON dumping is very slow and
@@ -253,7 +254,11 @@ class EventList(list):
                         '"id": {}, '
                         '"cat": "cpu_to_{}", '
                         '"args": {{}}}}, '.format(
-                            evt.trace_name, evt.time_range.start, evt.thread, next_id, device_name
+                            evt.trace_name,
+                            evt.time_range.start,
+                            evt.thread,
+                            next_id,
+                            device_name,
                         )
                     )
                     # Note: use torch.profiler to get device kernel trace
@@ -265,7 +270,11 @@ class EventList(list):
             f.write("]")
 
     def supported_export_stacks_metrics(self):
-        return ["self_cpu_time_total", "self_cuda_time_total", "self_privateuse1_time_total"]
+        return [
+            "self_cpu_time_total",
+            "self_cuda_time_total",
+            "self_privateuse1_time_total",
+        ]
 
     def export_stacks(self, path: str, metric: str):
         if metric not in self.supported_export_stacks_metrics():
@@ -390,15 +399,16 @@ class FormattedTimesMixin:
 
     The subclass should define `*_time_total` and `count` attributes.
     """
-    cpu_time_str = _attr_formatter('cpu_time')
-    cuda_time_str = _attr_formatter('cuda_time')
-    privateuse1_time_str = _attr_formatter('privateuse1_time')
-    cpu_time_total_str = _attr_formatter('cpu_time_total')
-    cuda_time_total_str = _attr_formatter('cuda_time_total')
-    privateuse1_time_total_str = _attr_formatter('privateuse1_time_total')
-    self_cpu_time_total_str = _attr_formatter('self_cpu_time_total')
-    self_cuda_time_total_str = _attr_formatter('self_cuda_time_total')
-    self_privateuse1_time_total_str = _attr_formatter('self_privateuse1_time_total')
+
+    cpu_time_str = _attr_formatter("cpu_time")
+    cuda_time_str = _attr_formatter("cuda_time")
+    privateuse1_time_str = _attr_formatter("privateuse1_time")
+    cpu_time_total_str = _attr_formatter("cpu_time_total")
+    cuda_time_total_str = _attr_formatter("cuda_time_total")
+    privateuse1_time_total_str = _attr_formatter("privateuse1_time_total")
+    self_cpu_time_total_str = _attr_formatter("self_cpu_time_total")
+    self_cuda_time_total_str = _attr_formatter("self_cuda_time_total")
+    self_privateuse1_time_total_str = _attr_formatter("self_privateuse1_time_total")
 
     @property
     def cpu_time(self):
@@ -583,10 +593,11 @@ class FunctionEvent(FormattedTimesMixin):
         if self.is_async or not self.use_device:
             return 0
         if self.device_type == DeviceType.CPU:
-            return self.privateuse1_time_total - \
-                sum([child.privateuse1_time_total for child in self.cpu_children])
+            return self.privateuse1_time_total - sum(
+                [child.privateuse1_time_total for child in self.cpu_children]
+            )
         else:
-            assert(self.device_type == DeviceType.CUDA)
+            assert self.device_type == DeviceType.CUDA
             return self.privateuse1_time_total
 
     @property
@@ -596,8 +607,9 @@ class FunctionEvent(FormattedTimesMixin):
         if self.device_type == DeviceType.CPU:
             if not self.is_legacy:
                 # account for the kernels in the children ops
-                return (sum(kinfo.duration for kinfo in self.kernels) +
-                        sum(ch.privateuse1_time_total for ch in self.cpu_children))
+                return sum(kinfo.duration for kinfo in self.kernels) + sum(
+                    ch.privateuse1_time_total for ch in self.cpu_children
+                )
             else:
                 # each legacy cpu events has a single (fake) kernel
                 return sum(kinfo.duration for kinfo in self.kernels)
@@ -611,12 +623,18 @@ class FunctionEvent(FormattedTimesMixin):
 
     def __repr__(self):
         device_name = "cuda" if not self.use_device else self.use_device
-        device_time = self.cuda_time_str if not self.use_device else self.privateuse1_time_str
-        device_memory_usage = self.cuda_memory_usage if not self.use_device else self.privateuse1_memory_usage
+        device_time = (
+            self.cuda_time_str if not self.use_device else self.privateuse1_time_str
+        )
+        device_memory_usage = (
+            self.cuda_memory_usage
+            if not self.use_device
+            else self.privateuse1_memory_usage
+        )
         return (
-            '<FunctionEvent id={} name={} device_type={} node_id={} cpu_time={} start_us={} end_us={} '
-            'cpu_children={} {}_time={} name={} thread={} input_shapes={} '
-            'cpu_memory_usage={} {}_memory_usage={} is_async={} is_remote={} seq_nr={} is_legacy={}>'.format(
+            "<FunctionEvent id={} name={} device_type={} node_id={} cpu_time={} start_us={} end_us={} "
+            "cpu_children={} {}_time={} name={} thread={} input_shapes={} "
+            "cpu_memory_usage={} {}_memory_usage={} is_async={} is_remote={} seq_nr={} is_legacy={}>".format(
                 self.id,
                 self.name,
                 self.device_type,
@@ -716,13 +734,23 @@ class FunctionEventAvg(FormattedTimesMixin):
 
     def __repr__(self):
         device_name = "cuda" if not self.use_device else self.use_device
-        self_device_time = self.self_cuda_time_total_str if not self.use_device else self.self_privateuse1_time_total_str
-        device_time = self.cuda_time_str if not self.use_device else self.privateuse1_time_str
-        device_memory = self.cuda_memory_usage if not self.use_device else self.privateuse1_memory_usage
+        self_device_time = (
+            self.self_cuda_time_total_str
+            if not self.use_device
+            else self.self_privateuse1_time_total_str
+        )
+        device_time = (
+            self.cuda_time_str if not self.use_device else self.privateuse1_time_str
+        )
+        device_memory = (
+            self.cuda_memory_usage
+            if not self.use_device
+            else self.privateuse1_memory_usage
+        )
         return (
-            '<FunctionEventAvg key={} self_cpu_time={} cpu_time={} '
-            ' self_{}_time={} {}_time={} input_shapes={} '
-            'cpu_memory_usage={} {}_memory_usage={}>'.format(
+            "<FunctionEventAvg key={} self_cpu_time={} cpu_time={} "
+            " self_{}_time={} {}_time={} input_shapes={} "
+            "cpu_memory_usage={} {}_memory_usage={}>".format(
                 self.key,
                 self.self_cpu_time_total_str,
                 self.cpu_time_str,
@@ -827,11 +855,17 @@ def _build_table(
 
     has_cuda_time = any(event.self_cuda_time_total > 0 for event in events)
     has_cuda_mem = any(event.self_cuda_memory_usage > 0 for event in events)
-    has_privateuse1_time = any(event.self_privateuse1_time_total > 0 for event in events)
-    has_privateuse1_mem = any(event.self_privateuse1_memory_usage > 0 for event in events)
+    has_privateuse1_time = any(
+        event.self_privateuse1_time_total > 0 for event in events
+    )
+    has_privateuse1_mem = any(
+        event.self_privateuse1_memory_usage > 0 for event in events
+    )
     use_device = events[0].use_device
     if not use_device and (has_privateuse1_mem or has_privateuse1_time):
-        raise RuntimeError("use_device is None, but there is private device performance data.")
+        raise RuntimeError(
+            "use_device is None, but there is private device performance data."
+        )
 
     has_input_shapes = any(
         (event.input_shapes is not None and len(event.input_shapes) > 0)
@@ -842,7 +876,7 @@ def _build_table(
         events = EventList(
             sorted(events, key=lambda evt: getattr(evt, sort_by), reverse=True),
             use_cuda=has_cuda_time,
-            use_device=use_device
+            use_device=use_device,
             profile_memory=profile_memory,
             with_flops=with_flops,
         )
@@ -880,20 +914,24 @@ def _build_table(
         "CPU time avg",
     ]
     if has_cuda_time:
-        headers.extend([
-            'Self CUDA',
-            'Self CUDA %',
-            'CUDA total',
-            'CUDA time avg',
-        ])
+        headers.extend(
+            [
+                "Self CUDA",
+                "Self CUDA %",
+                "CUDA total",
+                "CUDA time avg",
+            ]
+        )
     if has_privateuse1_time:
         privateuse1 = use_device.upper()
-        headers.extend([
-            f'Self {privateuse1}',
-            f'Self {privateuse1} %',
-            f'{privateuse1} total',
-            f'{privateuse1} time avg',
-        ])
+        headers.extend(
+            [
+                f"Self {privateuse1}",
+                f"Self {privateuse1} %",
+                f"{privateuse1} total",
+                f"{privateuse1} time avg",
+            ]
+        )
     if profile_memory:
         headers.extend(
             [
@@ -1134,5 +1172,7 @@ def _build_table(
     if has_cuda_time:
         append(f"Self CUDA time total: {_format_time(sum_self_cuda_time_total)}")
     if has_privateuse1_time:
-        append(f"Self {use_device.upper()} time total: {_format_time(sum_self_privateuse1_time_total)}")
-    return ''.join(result)
+        append(
+            f"Self {use_device.upper()} time total: {_format_time(sum_self_privateuse1_time_total)}"
+        )
+    return "".join(result)
