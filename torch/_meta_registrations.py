@@ -1185,7 +1185,7 @@ def ormqr(
         input.ndim - tau.ndim == 1,
         lambda: (
             f"torch.ormqr: Expected tau to have one dimension less than input, "
-            f"but got tau.ndim equal to {tau.ndim} and {input.ndim} is equal to {input.ndim}"
+            f"but got tau.ndim equal to {tau.ndim} and input.ndim is equal to {input.ndim}"
         ),
     )
     torch._check(
