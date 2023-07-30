@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import re
 from textwrap import dedent
 from unittest.mock import patch
 
@@ -758,7 +759,6 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         g_mod, _ = torch._dynamo.export(mod, x, target)
 
         def _prepare_model_args():
-            arg_list = []
             named_parameters = dict(g_mod.named_parameters(remove_duplicate=False))
             named_buffers = dict(g_mod.named_buffers(remove_duplicate=False))
             params_and_buffers = {
@@ -875,8 +875,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
                 return (output,)
 
-        def double_grad(x):
-            y = Model()
+        def grad_with_create_graph(mod, x, target):
+            y = mod(x, target)
+            # Set create_graph=True to ensure that the sequence_nr
+            # for backward ops continues to count down.
             (gx,) = torch.autograd.grad(
                 y[0], x, create_graph=True, grad_outputs=grad_output
             )
@@ -884,18 +886,17 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         x = torch.rand(100, 16, 32, 32, requires_grad=True)
         target = torch.rand(1)
-        args = [x, target]
+        mod = Model()
+        args = [mod, x, target]
         grad_output = torch.tensor(1.0, requires_grad=True)
-        compiled_f1 = torch.compile(backend="aot_eager")(double_grad)
-        model_instance = Model()
+        compiled_f1 = torch.compile(backend="aot_eager")(grad_with_create_graph)
+        model_instance = compiled_f1
         with profile(
             activities=[torch.profiler.ProfilerActivity.CPU],
             record_shapes=True,
         ) as kineto_prof:
             res = model_instance(*args)
-            (gx,) = torch.autograd.grad(
-                res[0], x, create_graph=True, grad_outputs=grad_output
-            )
+        bwd_set = set()
         prof_str = "SeqNr|Thread|FwdThread|Name\n"
         for event in kineto_prof.events():
             if event.sequence_nr >= 0:
@@ -903,6 +904,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                     prof_str + f"{event.sequence_nr}|{event.thread}"
                     f"|{event.fwd_thread}|{event.name}|\n"
                 )
+                if re.search(r"Backward[01]", event.name):
+                    bwd_set.add(event.sequence_nr)
+        self.assertTrue(len(bwd_set), 13)
 
 
 if __name__ == "__main__":
