@@ -460,7 +460,7 @@ class RNN(RNNBase):
 
     def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1,
                  non_linearity: str = 'tanh', bias: bool = True, batch_first: bool = False,
-                 dropout: float = 0., bidirectional: bool = False, device=None, dtype=None):
+                 dropout: float = 0., bidirectional: bool = False, device=None, dtype=None) -> None:
         self.nonlinearity = non_linearity
         if self.nonlinearity == 'tanh':
             mode = 'RNN_TANH'
@@ -740,7 +740,7 @@ class LSTM(RNNBase):
 
     def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1, bias: bool = True,
                  batch_first: bool = False, dropout: float = 0., bidirectional: bool = False,
-                 proj_size: int = 0, device=None, dtype=None):
+                 proj_size: int = 0, device=None, dtype=None) -> None:
         super().__init__('LSTM', input_size=input_size, hidden_size=hidden_size, num_layers=num_layers,
                          bias=bias, batch_first=batch_first, dropout=dropout, bidirectional=bidirectional,
                          proj_size=proj_size, device=device, dtype=dtype)

@@ -7,6 +7,7 @@ from torch import Tensor  # noqa: F401
 from torch._jit_internal import Tuple, Optional, List, Union, Dict  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
 from torch.ao.nn.quantized.modules.utils import _quantize_weight
+from typing import Type
 
 __all__ = ['pack_weight_bias', 'PackedParameter', 'RNNBase', 'LSTM', 'GRU', 'RNNCellBase', 'RNNCell', 'LSTMCell',
            'GRUCell', "apply_permutation"]
@@ -61,7 +62,7 @@ class PackedParameter(torch.nn.Module):
 
 class RNNBase(torch.nn.Module):
 
-    _FLOAT_MODULE = nn.RNNBase
+    _FLOAT_MODULE: Type[nn.RNNBase] = nn.RNNBase            # Annotation to ensure subclass attributes check against known type
 
     _version = 2
 
@@ -392,7 +393,7 @@ class LSTM(RNNBase):
         >>> c0 = torch.randn(2, 3, 20)
         >>> output, (hn, cn) = rnn(input, (h0, c0))
     """
-    _FLOAT_MODULE = nn.LSTM
+    _FLOAT_MODULE: Type[nn.LSTM] = nn.LSTM
 
     __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
 
@@ -638,7 +639,7 @@ class GRU(RNNBase):
         >>> h0 = torch.randn(2, 3, 20)
         >>> output, hn = rnn(input, h0)
     """
-    _FLOAT_MODULE = nn.GRU
+    _FLOAT_MODULE: Type[nn.GRU] = nn.GRU
 
     __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
 
