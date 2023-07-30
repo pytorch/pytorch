@@ -4118,12 +4118,12 @@ def grid_sampler_2d_backward_meta(
 @register_meta(aten.grid_sampler_3d)
 @out_wrapper()
 def grid_sampler_3d(
-    input: Tensor,
-    grid: Tensor,
-    interpolation_mode: int,
-    padding_mode: int,
-    align_corners: bool,
-) -> Tensor:
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+):
     check_grid_sampler_common(input, grid)
     check_grid_sampler_3d(input, grid, interpolation_mode)
     N = input.shape[0]
@@ -4137,14 +4137,14 @@ def grid_sampler_3d(
 @register_meta(aten.grid_sampler_3d_backward)
 @out_wrapper("grad_input", "grad_grid")
 def grid_sampler_3d_backward(
-    grad_output: Tensor,
-    input: Tensor,
-    grid: Tensor,
-    interpolation_mode: int,
-    padding_mode: int,
-    align_corners: bool,
-    output_mask: Sequence[bool],  # bool[2]
-) -> Tuple[Optional[Tensor], Tensor]:
+    grad_output,
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+    output_mask,
+):
     check_grid_sampler_common(input, grid)
     check_grid_sampler_3d(input, grid, interpolation_mode)
     input_requires_grad = output_mask[0]
