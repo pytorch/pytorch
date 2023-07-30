@@ -1,16 +1,19 @@
-from collections import defaultdict
 import copy
 import dataclasses
-import sympy
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple, Union
-from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
+
+import sympy
 
 import torch
-from torch.fx.passes.infra.pass_manager import PassManager
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
-from torch.fx.experimental.symbolic_shapes import SymInt
+from torch import fx
+from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.experimental.symbolic_shapes import SymInt
+from torch.fx.passes.infra.pass_manager import PassManager
+
 from . import error
 from .pass_base import PassType
 from .passes.add_runtime_assertions_for_constraints_pass import (
@@ -122,7 +125,8 @@ class ExportedProgram:
                     f"{received_spec}"
                 )
 
-        param_buffer_values = (value for _, value in self.state_dict.items())
+        param_buffer_values = tuple(value for _, value in self.state_dict.items())
+        self._check_input_constraints(*param_buffer_values, *args)
 
         with torch.no_grad():
             res = torch.fx.Interpreter(self.graph_module).run(
@@ -207,6 +211,24 @@ class ExportedProgram:
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
         return transformed_ep
+
+    def _check_input_constraints(self, *args):
+        # TODO(zhxchen17) Remove _add_runtime_assertions.
+        # TODO(zhxchen17) Don't generate a runtime graph on the fly.
+        _assertion_graph = fx.GraphModule({}, fx.Graph())
+        for p in self.graph.nodes:
+            if p.op != "placeholder":
+                continue
+            new_p = _assertion_graph.graph.placeholder(p.name)
+            new_p.meta = p.meta
+        _assertion_graph.graph.output(())
+        _assertion_graph_res = _AddRuntimeAssertionsForConstraintsPass(
+            self.range_constraints,
+            self.equality_constraints,
+        )(_assertion_graph)
+        assert _assertion_graph_res is not None
+        _assertion_graph = _assertion_graph_res.graph_module
+        _assertion_graph(*args)
 
     def _add_runtime_assertions(
         self,
