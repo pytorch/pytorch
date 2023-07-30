@@ -1,10 +1,9 @@
 # Owner(s): ["module: inductor"]
+import copy
 import functools
 import re
 import unittest
 from unittest.mock import patch
-
-import copy
 
 import torch
 import torch._export
