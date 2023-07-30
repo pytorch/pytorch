@@ -1127,7 +1127,7 @@ class AOTInductorModelCache:
             void run(
                     const std::vector<at::Tensor>& input_tensors,
                     std::vector<at::Tensor>& output_tensors) {
-                model.run(input_tensors, output_tensors, at::cuda::getCurrentCUDAStream());
+                model.run(input_tensors, output_tensors, at::cuda::getCurrentCUDAStream().stream());
             }
             """
             module = torch.utils.cpp_extension.load_inline(

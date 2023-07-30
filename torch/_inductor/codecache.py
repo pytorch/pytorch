@@ -727,10 +727,13 @@ def get_include_and_linking_paths(
                 )
             else:
                 macros = f"-D{macros}"
+
         if aot_mode and config.aot_inductor.abi_compatible:
             if macros is None:
                 macros = ""
             macros += " -D AOT_INDUCTOR_ABI_COMPATIBLE"
+            if cuda:
+                macros += " -D USE_CUDA"
 
         if cuda:
             if config.is_fbcode():

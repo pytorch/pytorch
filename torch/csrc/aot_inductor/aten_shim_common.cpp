@@ -6,8 +6,6 @@
 #include <iostream>
 #include <memory>
 
-#include <c10/cuda/CUDAStream.h>
-
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
@@ -491,12 +489,4 @@ AOTInductorTensorHandle aot_inductor_mm_out(
   // TODO: directly call cublas
   at::mm_out(out_tensor, self_tensor, mat2_tensor);
   return out;
-}
-
-void aot_inductor_set_current_cuda_stream(
-    void* stream,
-    AOTInductorDeviceIndex device_index) {
-  cudaStream_t cuda_stream = static_cast<cudaStream_t>(stream);
-  c10::cuda::setCurrentCUDAStream(
-      at::cuda::getStreamFromExternal(cuda_stream, device_index));
 }

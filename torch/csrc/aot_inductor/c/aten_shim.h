@@ -105,9 +105,11 @@ AOT_INDUCTOR_EXPORT AOTInductorTensorHandle aot_inductor_mm_out(
     AOTInductorTensorHandle self,
     AOTInductorTensorHandle mat2);
 
+#ifdef USE_CUDA
 AOT_INDUCTOR_EXPORT void aot_inductor_set_current_cuda_stream(
     void* stream,
     AOTInductorDeviceIndex device_index);
+#endif
 
 #ifdef __cplusplus
 }

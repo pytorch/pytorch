@@ -12,6 +12,7 @@
 #include <torch/csrc/aot_inductor/c/aten_shim.h>
 #else
 #include <ATen/Tensor.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/aot_inductor/c/utils.h>
 #endif
 

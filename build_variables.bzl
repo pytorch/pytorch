@@ -501,7 +501,7 @@ lazy_tensor_core_python_sources = [
 ]
 
 inductor_core_resources = [
-    "torch/csrc/aot_inductor/aten_shim.cpp",
+    "torch/csrc/aot_inductor/aten_shim_common.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
 ]
 
@@ -692,6 +692,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/passes/frozen_conv_add_relu_fusion_cuda.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
     "torch/csrc/jit/runtime/register_cuda_ops.cpp",
+    "torch/csrc/aot_inductor/aten_shim_cuda.cpp",
 ]
 
 # These files are the only ones that are supported on Windows.
