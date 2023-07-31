@@ -1,8 +1,9 @@
 import os
 import textwrap
+import types
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, FrameSummary
-from typing import cast, List
+from typing import cast, List, Optional, Tuple
 
 from . import config
 from .config import is_fbcode
@@ -226,23 +227,14 @@ def filter_stack(stack):
     return user_stack
 
 
-def format_error_msg_verbose(exc, code, record_filename=None, frame=None):
-    msg = str(
-        format_bytecode(
-            "WON'T CONVERT",
-            code.co_name,
-            code.co_filename,
-            code.co_firstlineno,
-            code,
-        )
-    )
-    line_loc = msg.find("\n")
-    header = msg[:line_loc]
-    msg = msg[line_loc + 1 :]
-    stack_trace = "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
-    stack_trace += format_exc()
+def format_error_msg_verbose(
+    exc: Exception, code: types.CodeType, frame: Optional[types.FrameType] = None
+) -> Tuple[str, str]:
+    msg = f"WON'T CONVERT {code.co_name} {code.co_filename} line {code.co_firstlineno}"
+    msg = "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
+    msg += format_exc()
     if hasattr(exc, "real_stack"):
-        stack_trace += (
+        msg += (
             "\n"
             + "=" * 10
             + " The above exception occurred while processing the following code "
@@ -253,23 +245,33 @@ def format_error_msg_verbose(exc, code, record_filename=None, frame=None):
         if frame is not None:
             stack_above_dynamo = filter_stack(extract_stack(frame))
 
-        stack_trace += "".join(
+        msg += "".join(
             format_list(stack_above_dynamo + list(reversed(get_real_stack(exc))))
         )
-        stack_trace += "\n"
-        stack_trace += "=" * 10
+        msg += "\n"
+        msg += "=" * 10
 
-    return header, msg, stack_trace
-
-
-def format_error_msg(exc, code, record_filename=None, frame=None):
-    if config.verbose:
-        header, msg, stack_trace = format_error_msg_verbose(
-            exc, code, record_filename, frame
+    bytecode_msg = str(
+        format_bytecode(
+            "WON'T CONVERT",
+            code.co_name,
+            code.co_filename,
+            code.co_firstlineno,
+            code,
         )
-    else:
-        header = f"WON'T CONVERT {code.co_name} {code.co_filename} line {code.co_firstlineno}"
-        msg = f"due to: \n{format_exc(limit=-1)}"
-        stack_trace = ""
+    )
 
-    return header, msg, stack_trace
+    return msg, bytecode_msg
+
+
+def format_error_msg(
+    exc: Exception, code: types.CodeType, frame: Optional[types.FrameType] = None
+) -> Tuple[str, str]:
+    if config.verbose:
+        msg, bytecode_msg = format_error_msg_verbose(exc, code, frame)
+    else:
+        msg = f"WON'T CONVERT {code.co_name} {code.co_filename} line {code.co_firstlineno}\n"
+        msg += f"due to: \n{format_exc(limit=-1)}"
+        bytecode_msg = ""
+
+    return msg, bytecode_msg
