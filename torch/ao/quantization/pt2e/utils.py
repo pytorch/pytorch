@@ -141,9 +141,10 @@ def get_aten_graph_module(
     import torch._dynamo
     aten_pattern, _ = torch._dynamo.export(
         pattern,
-        *copy.deepcopy(example_inputs),
         aten_graph=True,
         tracing_mode="real",
+    )(
+        *copy.deepcopy(example_inputs),
         **kwargs,
     )
     aten_pattern.graph.eliminate_dead_code()

@@ -9,6 +9,9 @@ import torch
 
 import torch._inductor
 
+# The rest of the optimizers not yet imported: Adamax, ASGD, LBFGS, NAdam, RAdam, SGD, SparseAdam
+from torch.optim import Adadelta, Adagrad, Adam, AdamW, RMSprop, Rprop
+
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -92,8 +95,6 @@ def make_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
     @requires_cuda()
     def test_fn(self):
-        import os
-
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
         input = torch.ones([10, 10], device="cuda:0")
@@ -102,7 +103,6 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
         )
         model(input).sum().backward()
 
-        os.environ["TORCHDYNAMO_REPORT_GUARD_FAILURES"] = "1"
         opt_compiled = optim_cls(model.parameters(), **kwargs)
         compiled_step = compile_opt(opt_compiled)
 
@@ -110,12 +110,11 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
         with torch.set_grad_enabled(False):
             compiled_step()
 
-            torch._logging.set_logs(recompiles=True)
             compiled_step()
 
             # perturb state to force recompile
             # Adagrad doesn't reinitialize state on each step
-            if optim_cls is torch.optim.Adagrad:
+            if optim_cls is Adagrad:
                 opt_compiled.param_groups[0]["lr"] = 0.02
             else:
                 opt_compiled.state.clear()
@@ -147,36 +146,37 @@ class CompiledOptimizerTests(TestCase):
         super().tearDown()
         torch._inductor.metrics.reset()
 
-    test_adam = make_test(torch.optim.Adam, lr=0.01)
-    test_adam_weight_decay = make_test(torch.optim.Adam, lr=0.01, weight_decay=0.01)
-    test_adamw = make_test(torch.optim.AdamW, lr=0.01)
-    # Need to an impl which does not use python scalars
-    # test_adamax = make_test(torch.optim.Adamax, lr=0.01)
-    # test_nadam = make_test(torch.optim.NAdam, lr=0.01)
-    test_rprop = make_test(torch.optim.Rprop, kernel_count=6, lr=0.01)
-    test_rmsprop = make_test(torch.optim.RMSprop, kernel_count=1, lr=0.01)
-    test_adadelta = make_test(torch.optim.Adadelta, kernel_count=5, lr=0.01)
-    test_adagrad = make_test(torch.optim.Adagrad, kernel_count=5, lr=0.01)
-    # test_sgd = make_test(torch.optim.SGD, kernel_count=1, lr=0.01)
+    test_adam = make_test(Adam, lr=0.01)
+    test_adam_weight_decay = make_test(Adam, lr=0.01, weight_decay=0.01)
+    test_adam_amsgrad = make_test(Adam, lr=0.01, amsgrad=True)
+    test_adam_maximize = make_test(Adam, lr=0.01, maximize=True)
+    test_adam_weight_decay_and_maximize = make_test(
+        Adam, lr=0.01, weight_decay=0.01, maximize=True
+    )
+    test_adam_everything = make_test(
+        Adam, lr=0.01, weight_decay=1.0, amsgrad=True, capturable=True, maximize=True
+    )
 
-    test_adam_recompile = make_recompile_test(torch.optim.Adam, lr=0.01)
-    test_adamw_recompile = make_recompile_test(torch.optim.AdamW, lr=0.01)
+    test_adamw = make_test(AdamW, lr=0.01)
+    # Need to an impl which does not use python scalars
+    # test_adamax = make_test(Adamax, lr=0.01)
+    # test_nadam = make_test(NAdam, lr=0.01)
+    test_rprop = make_test(Rprop, kernel_count=1, lr=0.01)
+    test_rmsprop = make_test(RMSprop, kernel_count=1, lr=0.01)
+    test_adadelta = make_test(Adadelta, kernel_count=1, lr=0.01)
+    test_adagrad = make_test(Adagrad, kernel_count=5, lr=0.01)
+    # test_sgd = make_test(SGD, kernel_count=1, lr=0.01)
+
+    test_adam_recompile = make_recompile_test(Adam, lr=0.01)
+    test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
     # Need an impl which does not use python scalars
-    # test_adamax_recompile = make_recompile_test(torch.optim.Adamax, lr=0.01)
-    # test_nadam_recompile = make_recompile_test(torch.optim.NAdam, lr=0.01)
-    test_rprop_recompile = make_recompile_test(
-        torch.optim.Rprop, kernel_count=6, lr=0.01
-    )
-    test_rmsprop_recompile = make_recompile_test(
-        torch.optim.RMSprop, kernel_count=1, lr=0.01
-    )
-    test_adadelta_recompile = make_recompile_test(
-        torch.optim.Adadelta, kernel_count=5, lr=0.01
-    )
-    test_adagrad_recompile = make_recompile_test(
-        torch.optim.Adagrad, kernel_count=5, lr=0.01
-    )
-    # test_sgd_recompile = make_recompile_test(torch.optim.SGD, kernel_count=1, lr=0.01)
+    # test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
+    # test_nadam_recompile = make_recompile_test(NAdam, lr=0.01)
+    test_rprop_recompile = make_recompile_test(Rprop, kernel_count=1, lr=0.01)
+    test_rmsprop_recompile = make_recompile_test(RMSprop, kernel_count=1, lr=0.01)
+    test_adadelta_recompile = make_recompile_test(Adadelta, kernel_count=1, lr=0.01)
+    test_adagrad_recompile = make_recompile_test(Adagrad, kernel_count=5, lr=0.01)
+    # test_sgd_recompile = make_recompile_test(SGD, kernel_count=1, lr=0.01)
 
 
 if __name__ == "__main__":
