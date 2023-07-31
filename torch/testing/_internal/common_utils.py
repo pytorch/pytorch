@@ -144,7 +144,7 @@ class TestEnvironment:
         implied = implied_by_fn()
         enabled = enabled or implied
         if include_in_repro and (env_var is not None) and (enabled != default) and not implied:
-            TestEnvironment.repro_env_vars[name] = env_var_val
+            TestEnvironment.repro_env_vars[env_var] = env_var_val
 
         # export flag globally for convenience
         assert name not in globals(), f"duplicate definition of flag '{name}'"
@@ -1323,10 +1323,11 @@ def skipIfNotMiopenSuggestNHWC(fn):
 def setLinalgBackendsToDefaultFinally(fn):
     @wraps(fn)
     def _fn(*args, **kwargs):
+        _preferred_backend = torch.backends.cuda.preferred_linalg_library()
         try:
             fn(*args, **kwargs)
         finally:
-            torch.backends.cuda.preferred_linalg_library('default')
+            torch.backends.cuda.preferred_linalg_library(_preferred_backend)
     return _fn
 
 
