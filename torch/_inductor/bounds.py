@@ -15,12 +15,18 @@ class BoundVars:
     """
     Performs Value Range Analysis on LoopBody's fx graph by calling BoundVars.run()
     It exposes the ranges of the nodes in the `bounds` variable
+
+    Note. A current limitation of this analysis is that it just works on a per-loop basis.
+    We should be able to propagate the bounds between across the whole graph. This may benefit
+    the case a bounded variable is returned by a kernel and fed into another.
     """
 
     def __init__(self, loop_body: LoopBody):
         self.loop_body = loop_body
         self.replacement_vals = {
-            k: ValueRanges(0, v if not free_symbols(v) else math.inf)
+            k: ValueRanges(0, v - 1)
+            if not free_symbols(v)
+            else ValueRanges(2, math.inf)
             for k, v in loop_body.var_ranges.items()
         }
         # avoid computing these values, pessimistically assume that they are unbounded
