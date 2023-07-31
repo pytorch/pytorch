@@ -1,4 +1,5 @@
 #include <torch/csrc/utils/object_ptr.h>
+#include <c10/macros/Macros.h>
 
 #include <torch/csrc/python_headers.h>
 
