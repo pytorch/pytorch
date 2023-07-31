@@ -93,6 +93,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return size_;
   }
 
+  // Returns an unique opaque ID of this process group object.
+  int64_t getID() const {
+    return reinterpret_cast<std::intptr_t>(this);
+  }
+
+  // Returns an unique opaque ID of a backend for the specific backend type
+  // that can correlate with this process group's collectives.
+  int64_t getBackendID(BackendType backend_type) const {
+    return reinterpret_cast<std::intptr_t>(getBackend(backend_type).get());
+  }
+
   virtual const std::string getBackendName() const {
     return options_->backend;
   };

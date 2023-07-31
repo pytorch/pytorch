@@ -200,6 +200,19 @@ class TestInductorDynamic(TestCase):
         ref = pad_same(x, (5, 5), (2, 2))
         self.assertEqual(res, ref, atol=0, rtol=0)
 
+    def test_slice_scatter(self, device):
+        def fn(i):
+            s3 = i.size(0)
+            x = torch.ones(64, s3, device=device)
+            y = torch.ones(64, s3 // 2, device=device)
+            return torch.slice_scatter(x, y, 1, s3 // 2, 2 * (s3 // 2))
+
+        a = torch.randn(16, device=device)
+        cfn = self.compile_fn(fn)
+        expect = fn(a)
+        actual = cfn(a)
+        self.assertEqual(expect, actual)
+
     def test_slice_index_changing_sign(self, device):
         def fn(x, y):
             y0, y1 = y.shape

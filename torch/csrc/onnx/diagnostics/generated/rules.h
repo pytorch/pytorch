@@ -106,8 +106,8 @@ enum class Rule : uint32_t {
   kOpLevelDebugging,
 
   /**
-   * @brief Find the OnnxFunction that matches the input dtypes by comparing
-   * them with their opschemas.
+   * @brief Find the OnnxFunction that matches the input/attribute dtypes by
+   * comparing them with their opschemas.
    */
   kFindOpschemaMatchedSymbolicFunction,
 
