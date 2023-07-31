@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch.testing._internal.hypothesis_utils as hu
+import random
 hu.assert_deadline_disabled()
 
 
@@ -17,7 +18,7 @@ class PruningOpTest(TestCase):
     # We mask a row if its indicator value is less than the threshold.
     def _generate_rowwise_mask(self, embedding_rows):
         indicator = torch.from_numpy((np.random.random_sample(embedding_rows)).astype(np.float32))
-        threshold = np.random.random_sample()
+        threshold = random.uniform(0, 1)
         mask = torch.BoolTensor([True if val >= threshold else False for val in indicator])
         return mask
 
