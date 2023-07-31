@@ -1,8 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/ForeachUtils.h>
-#include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <c10/util/TypeSafeSignMath.h>
+#include <ATen/native/cuda/ForeachFunctors.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
