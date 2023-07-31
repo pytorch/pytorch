@@ -84,11 +84,6 @@ install_ubuntu() {
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 30
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 30
     update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-10 30
-
-    # https://www.spinics.net/lists/libreoffice/msg07549.html
-    sudo rm -rf /usr/lib/gcc/x86_64-linux-gnu/11
-    wget https://github.com/gcc-mirror/gcc/commit/2b2d97fc545635a0f6aa9c9ee3b017394bc494bf.patch -O noexecpt.patch
-    sudo patch  /usr/include/c++/10/bits/range_access.h noexecpt.patch
   fi
 
   # Cleanup package manager
