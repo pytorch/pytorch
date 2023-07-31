@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import \
      skipCPUIfNoMklSparse,
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
-    SM53OrLater, SM60OrLater, with_tf32_off, TEST_CUDNN,
+    SM53OrLater, SM60OrLater, SM80OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version, _get_torch_rocm_version, PLATFORM_SUPPORTS_FUSED_SDPA
 )
 from torch.testing._internal.common_utils import (
@@ -851,7 +851,7 @@ def error_inputs_normal(op, device, **kwargs):
     yield ErrorInput(
         SampleInput(t, args=(0, invalid_std)),
         error_type=RuntimeError,
-        error_regex=r"normal expects std >= 0.0, but found std {}".format(invalid_std),
+        error_regex=fr"normal expects std >= 0.0, but found std {invalid_std}",
     )
 
 def sample_inputs_cauchy(op, device, dtype, requires_grad, **kwargs):
@@ -871,7 +871,7 @@ def error_inputs_cauchy(op, device, **kwargs):
     yield ErrorInput(
         SampleInput(t, args=(0, invalid_scale,)),
         error_type=RuntimeError,
-        error_regex=r"cauchy_ expects sigma > 0.0, but found sigma={}".format(invalid_scale),
+        error_regex=fr"cauchy_ expects sigma > 0.0, but found sigma={invalid_scale}",
     )
 
 
@@ -893,7 +893,7 @@ def error_inputs_exponential(op, device, **kwargs):
     yield ErrorInput(
         SampleInput(t, args=(invalid_rate,)),
         error_type=RuntimeError,
-        error_regex=r"exponential_ expects lambda > 0.0, but found lambda={}".format(invalid_rate),
+        error_regex=fr"exponential_ expects lambda > 0.0, but found lambda={invalid_rate}",
     )
 
 
@@ -915,7 +915,7 @@ def error_inputs_geometric(op, device, **kwargs):
     yield ErrorInput(
         SampleInput(t, args=(neg_prob,)),
         error_type=RuntimeError,
-        error_regex=r"geometric_ expects p to be in \(0, 1\), but got p={}".format(neg_prob),
+        error_regex=fr"geometric_ expects p to be in \(0, 1\), but got p={neg_prob}",
     )
 
 
@@ -937,7 +937,7 @@ def error_inputs_log_normal(op, device, **kwargs):
     yield ErrorInput(
         SampleInput(t, args=(0, invalid_std)),
         error_type=RuntimeError,
-        error_regex=r"log_normal_ expects std > 0.0, but found std={}".format(invalid_std),
+        error_regex=fr"log_normal_ expects std > 0.0, but found std={invalid_std}",
     )
 
 
@@ -1004,7 +1004,7 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
     yield SampleInput(1, args=(3, 1))
 
 
-def sample_inputs_logpace(op, device, dtype, requires_grad, **kwargs):
+def sample_inputs_logspace(op, device, dtype, requires_grad, **kwargs):
     ends = (-3, 0, 1.2, 2, 4)
     starts = (-2., 0, 1, 2, 4.3)
     nsteps = (0, 1, 2, 4)
@@ -1542,19 +1542,68 @@ def reference_inputs_like_fns(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape, noncontiguous=True))
         yield SampleInput(make_arg(shape, noncontiguous=True).transpose(0, -1))
 
-# TODO: add reduction kwargs
 def sample_inputs_multilabel_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(_make_tensor, dtype=torch.long, requires_grad=False)
 
     inputs = (
-        ([], make_target([], low=0, high=1)),
-        ([S], make_target([S], low=0, high=S)),
-        ([M, S], make_target([M, S], low=0, high=S)),
+        ([], make_target([], low=0, high=1), {}),
+        ([S], make_target([S], low=0, high=S), {}),
+        ([M, S], make_target([M, S], low=0, high=S), {}),
+        ([M, S], make_target([M, S], low=0, high=S), {"reduction": "none"}),
+        ([M, S], make_target([M, S], low=0, high=S), {"reduction": "mean"}),
+        ([M, S], make_target([M, S], low=0, high=S), {"reduction": "sum"}),
     )
 
-    for shape, target in inputs:
-        yield SampleInput(_make_tensor(shape), args=(target,))
+    for shape, target, kwargs in inputs:
+        yield SampleInput(_make_tensor(shape), args=(target,), kwargs=kwargs)
+
+
+def reference_inputs_multilabel_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_multilabel_margin_loss(op_info, device, dtype, requires_grad, **kwargs)
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(_make_tensor, dtype=torch.long, requires_grad=False)
+    make_target_tensor = partial(torch.tensor, device=device, dtype=torch.long, requires_grad=False)
+
+    inputs = (
+        # random tests including -1 target labels
+        ([], make_target([], low=-1, high=1)),
+        ([S], make_target([S], low=-1, high=S)),
+        ([M, S], make_target([M, S], low=-1, high=S)),
+        # repeated target labels and -1 (labels after the first -1 are ignored)
+        ([], make_target_tensor(-1)),
+        ([7], make_target_tensor([2, 0, 6, -1, 4, -1, 6])),
+        ([4, 5], make_target_tensor([[4, -1, 0, -1, 2], [0, 0, 4, 1, 4], [-1, 3, -1, 1, 0], [4, 3, 2, 1, 0]])),
+    )
+    reductions = (None, "none", "mean", "sum")
+
+    for (shape, target), reduction in product(inputs, reductions):
+        kwargs = {}
+        if reduction is not None:
+            kwargs["reduction"] = reduction
+        yield SampleInput(_make_tensor(shape), args=(target,), kwargs=kwargs)
+
+
+def error_inputs_multilabel_margin_loss(op, device, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=torch.float32)
+    # invalid reduction
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4),), kwargs={'reduction': 'abc'}),
+                     error_type=ValueError, error_regex='abc is not a valid value for reduction')
+    # invalid input
+    yield ErrorInput(SampleInput(make_input(5, 0), args=(make_input(5, 4),), kwargs={}),
+                     error_type=RuntimeError,
+                     error_regex=r'Expected non-empty vector or matrix with optional 0-dim batch size, but got: \[5, 0\]')
+    yield ErrorInput(SampleInput(make_input(0,), args=(make_input(0,),), kwargs={}),
+                     error_type=RuntimeError,
+                     error_regex=r'Expected non-empty vector or matrix with optional 0-dim batch size, but got: \[0\]')
+    # invalid target
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(4,),), kwargs={}),
+                     error_type=RuntimeError,
+                     error_regex=r'inconsistent target size: \[4\] for input of size: \[5, 4\]')
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input((),),), kwargs={}),
+                     error_type=RuntimeError,
+                     error_regex=r'inconsistent target size: \[\] for input of size: \[5, 4\]')
+
 
 def get_independent_tensor(tensor):
     return tensor.clone().requires_grad_(tensor.requires_grad)
@@ -1889,9 +1938,10 @@ def sample_inputs_logcumsumexp(self, device, dtype, requires_grad, **kwargs):
             yield SampleInput(t, dim)
 
 def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):
-    yield SampleInput((make_tensor((S, S), dtype=dtype, device=device,
-                                   low=None, high=None,
-                                   requires_grad=requires_grad)))
+    yield SampleInput(
+        make_tensor((S, S), dtype=dtype, device=device,
+                    low=None, high=None,
+                    requires_grad=requires_grad))
 
 
 def error_inputs_trace(op, device):
@@ -3077,10 +3127,6 @@ def sample_inputs_threshold(op_info, device, dtype, requires_grad, **kwargs):
         # threshold and values args must be numbers
         yield SampleInput(make_arg(x_size), make_arg(()).item(), make_arg(()).item())
 
-def sample_inputs_argsort(*args, **kwargs):
-    return (sample_input for sample_input in sample_inputs_sort(*args, **kwargs)
-            if "stable" not in sample_input.kwargs)
-
 def sample_inputs_unique(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
@@ -4020,7 +4066,7 @@ def error_inputs_group_norm(opinfo, device, **kwargs):
 
     # check that input has minimum number of dimensions
     err_msg1 = "Expected at least 2 dimensions for input tensor but received"
-    s1 = SampleInput(make_arg((1)), args=(1,))
+    s1 = SampleInput(make_arg(1), args=(1,))
     yield ErrorInput(s1, error_regex=err_msg1)
 
     # check that the channels dimension is compatible with number of groups
@@ -6950,7 +6996,7 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
 
         if mask_t.sum() == 0:
             def random_index(shape):
-                return tuple((random.randrange(0, max_idx) for max_idx in shape))
+                return tuple(random.randrange(0, max_idx) for max_idx in shape)
 
             mask_t[random_index(mask_t.shape)] = True
             return mask_t
@@ -7897,7 +7943,17 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
         is_causal=is_causal,
         dropout_p=dropout_p
     )
-    samples.append(diff_v_head_dim)
+
+    # Add an attn_mask
+    samples.append(
+        SampleInput(
+            make((batch, num_heads, seq_q, head_dim)),
+            make((batch, num_heads, seq_kv, head_dim)),
+            make((batch, num_heads, seq_kv, head_dim)),
+            attn_mask=make((seq_q, seq_kv)),
+            is_causal=False,
+            dropout_p=0.0)
+    )
 
     yield from samples
 
@@ -8499,6 +8555,7 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        backward_requires_result=True,
     ),
     ForeachFuncInfo(
         'acos',
@@ -8553,12 +8610,14 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        backward_requires_result=True,
     ),
     ForeachFuncInfo(
         'tanh',
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        backward_requires_result=True,
     ),
     ForeachFuncInfo(
         'sin',
@@ -8589,6 +8648,7 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        backward_requires_result=True,
     ),
 
     ForeachFuncInfo(
@@ -8625,6 +8685,7 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        backward_requires_result=True,
     ),
 
     ForeachFuncInfo(
@@ -8670,6 +8731,7 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        backward_requires_result=True,
     ),
 
     ForeachFuncInfo(
@@ -8679,6 +8741,7 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        backward_requires_result=True,
     ),
 
     ForeachFuncInfo(
@@ -8716,6 +8779,15 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        skips=(
+            # note(crcrpar): excluding cdouble from dtypes above might be better.
+            # Guard for `error: "In-place abs is not supported for complex tensors."`
+            DecorateInfo(
+                unittest.skip("_foreach_zero is not implemented"),
+                'TestForeach',
+                'test_outplace_forward_mode_AD',
+            ),
+        ),
     ),
 ]
 
@@ -8804,6 +8876,7 @@ foreach_binary_op_db: List[OpInfo] = [
                          "TestForeach", "test_binary_op"),
         ),
         supports_forward_ad=True,
+        backward_requires_result=True,
     ),
 ]
 
@@ -8839,6 +8912,7 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
 foreach_lerp_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "lerp",
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
         dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=foreach_lerp_sample_func(3, True, False),
@@ -11148,7 +11222,7 @@ op_db: List[OpInfo] = [
            supports_out=True,
            supports_autograd=False,
            error_inputs_func=error_inputs_linspace,
-           sample_inputs_func=sample_inputs_logpace,
+           sample_inputs_func=sample_inputs_logspace,
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
@@ -12562,7 +12636,7 @@ op_db: List[OpInfo] = [
            variant_test_name='reflect',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_and_complex_types(),
+           dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='reflect'),
            skips=(
@@ -12577,7 +12651,7 @@ op_db: List[OpInfo] = [
            variant_test_name='replicate',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_and_complex_types(),
+           dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='replicate'),
            skips=(
@@ -12823,7 +12897,9 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
         supports_gradgrad=False,
-        sample_inputs_func=sample_inputs_multilabel_margin_loss
+        sample_inputs_func=sample_inputs_multilabel_margin_loss,
+        reference_inputs_func=reference_inputs_multilabel_margin_loss,
+        error_inputs_func=error_inputs_multilabel_margin_loss,
     ),
     OpInfo('nn.functional.leaky_relu',
            aliases=None,
@@ -13316,6 +13392,8 @@ op_db: List[OpInfo] = [
         decorators=[DecorateInfo(toleranceOverride(
             {torch.float32: tol(atol=5e-05, rtol=5e-6)}), 'TestCommon', device_type='cuda',), ],
         skips=(
+            # When attn mask is a composite tensor this fails backward by returning a none
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward', device_type='cuda'),
             # This is only failing on Linux Bionic 3.10 Cuda 11.6
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
                          device_type='cuda', active_if=_get_torch_cuda_version() >= (11, 6)),
@@ -13336,7 +13414,10 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
             DecorateInfo(unittest.skip('output is non-deterministic (when dropout_p > 0)'), 'TestCommon', 'test_compare_cpu'),
             # TODO skip this for now since we can't skip on runtime arch support
-            DecorateInfo(unittest.skip('This is '), 'TestInductorOpInfo', 'test_comprehensive'),),
+            DecorateInfo(unittest.skip('This is '), 'TestInductorOpInfo', 'test_comprehensive'),
+            # skip for sm < 80
+            DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),),
     ),
     UnaryUfuncInfo(
         'nn.functional.silu',
@@ -14913,7 +14994,7 @@ op_db: List[OpInfo] = [
                                     dtypes=[torch.bfloat16]),
                    ),),
     OpInfo('lerp',
-           dtypes=floating_and_complex_types_and(torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
            dtypesIfCUDA=floating_and_complex_types_and(torch.chalf, torch.half, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_lerp,
@@ -18216,7 +18297,7 @@ op_db: List[OpInfo] = [
         "argsort",
         dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-        sample_inputs_func=sample_inputs_argsort,
+        sample_inputs_func=sample_inputs_sort,
         supports_out=False,
         supports_autograd=False,
         skips=(

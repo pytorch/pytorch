@@ -179,6 +179,16 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         slice = g_op(g, "Slice", input, start_input, end, axis, step)
         self.run_test(g, slice.node(), expect_tensor(None, shape=(None, None)))
 
+    def test_slice_with_dynamic_start_index(self):
+        g = self.create_empty_graph()
+        input = self.insert_tensor_constant(g, torch.ones(2, 3, 4, 5))
+        start_input = g.addInput()
+        start_input.setType(start_input.type().with_sizes([2]))
+        end = self.insert_tensor_constant(g, torch.tensor([3, 4]))
+        axis = self.insert_tensor_constant(g, torch.tensor([1, -1]))
+        slice = g_op(g, "Slice", input, start_input, end, axis)
+        self.run_test(g, slice.node(), expect_tensor(None, shape=(2, None, 4, None)))
+
     def test_broadcast_matmul(self):
         g = self.create_empty_graph()
         constant = self.insert_tensor_constant(g, torch.ones(5, 1, 2))

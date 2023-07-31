@@ -134,6 +134,10 @@
 #define C10_UNUSED __attribute__((__unused__))
 #endif //_MSC_VER
 
+#if !defined(__has_attribute)
+#define __has_attribute(x) 0
+#endif
+
 // Direct port of LLVM_ATTRIBUTE_USED.
 #if __has_attribute(used)
 #define C10_USED __attribute__((__used__))

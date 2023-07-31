@@ -70,12 +70,11 @@ jobs:
 
       - name: Build docker image
         id: build-docker-image
-        uses: ./.github/actions/calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
-          skip_push: false
-          force_push: true
+          push: true
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
@@ -109,5 +108,4 @@ jobs:
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
-
         if: always()
