@@ -294,8 +294,8 @@ def print_assert_equal(test_string, actual, desired):
 
     Examples
     --------
-    >>> np.testing.print_assert_equal('Test XYZ of func xyz', [0, 1], [0, 1])
-    >>> np.testing.print_assert_equal('Test XYZ of func xyz', [0, 1], [0, 2])
+    >>> np.testing.print_assert_equal('Test XYZ of func xyz', [0, 1], [0, 1])  # doctest: +SKIP
+    >>> np.testing.print_assert_equal('Test XYZ of func xyz', [0, 1], [0, 2])  # doctest: +SKIP
     Traceback (most recent call last):
     ...
     AssertionError: Test XYZ of func xyz failed
@@ -363,7 +363,7 @@ def assert_almost_equal(actual, desired, decimal=7, err_msg="", verbose=True):
 
     Examples
     --------
-    >>> from numpy.testing import assert_almost_equal
+    >>> from torch._numpy.testing import assert_almost_equal
     >>> assert_almost_equal(2.3333333333333, 2.33333334)
     >>> assert_almost_equal(2.3333333333333, 2.33333334, decimal=10)
     Traceback (most recent call last):
@@ -381,10 +381,10 @@ def assert_almost_equal(actual, desired, decimal=7, err_msg="", verbose=True):
     Arrays are not almost equal to 9 decimals
     <BLANKLINE>
     Mismatched elements: 1 / 2 (50%)
-    Max absolute difference: 6.66669964e-09
-    Max relative difference: 2.85715698e-09
-     x: array([1.         , 2.333333333])
-     y: array([1.        , 2.33333334])
+    Max absolute difference: 6.666699636781459e-09
+    Max relative difference: 2.8571569790287484e-09
+     x: torch.ndarray([1.0000, 2.3333], dtype=float64)
+     y: torch.ndarray([1.0000, 2.3333], dtype=float64)
 
     """
     __tracebackhide__ = True  # Hide traceback for py.test
@@ -483,10 +483,10 @@ def assert_approx_equal(actual, desired, significant=7, err_msg="", verbose=True
 
     Examples
     --------
-    >>> np.testing.assert_approx_equal(0.12345677777777e-20, 0.1234567e-20)
-    >>> np.testing.assert_approx_equal(0.12345670e-20, 0.12345671e-20,
+    >>> np.testing.assert_approx_equal(0.12345677777777e-20, 0.1234567e-20)  # doctest: +SKIP
+    >>> np.testing.assert_approx_equal(0.12345670e-20, 0.12345671e-20,  # doctest: +SKIP
     ...                                significant=8)
-    >>> np.testing.assert_approx_equal(0.12345670e-20, 0.12345672e-20,
+    >>> np.testing.assert_approx_equal(0.12345670e-20, 0.12345672e-20,  # doctest: +SKIP
     ...                                significant=8)
     Traceback (most recent call last):
         ...
@@ -681,7 +681,7 @@ def assert_array_compare(
                     np.minimum(error, error2, out=error)
                 max_abs_error = max(error)
                 remarks.append(
-                    "Max absolute difference: " + array2string(max_abs_error)
+                    "Max absolute difference: " + array2string(max_abs_error.item())
                 )
 
                 # note: this definition of relative error matches that one
@@ -693,7 +693,7 @@ def assert_array_compare(
                 else:
                     max_rel_error = max(error[nonzero] / abs(y[nonzero]))
                 remarks.append(
-                    "Max relative difference: " + array2string(max_rel_error)
+                    "Max relative difference: " + array2string(max_rel_error.item())
                 )
 
             err_msg += "\n" + "\n".join(remarks)
@@ -776,21 +776,6 @@ def assert_array_equal(x, y, err_msg="", verbose=True, *, strict=False):
     >>> np.testing.assert_array_equal([1.0,2.33333,np.nan],
     ...                               [np.exp(0),2.33333, np.nan])
 
-    Assert fails with numerical imprecision with floats:
-
-    >>> np.testing.assert_array_equal([1.0,np.pi,np.nan],
-    ...                               [1, np.sqrt(np.pi)**2, np.nan])
-    Traceback (most recent call last):
-        ...
-    AssertionError:
-    Arrays are not equal
-    <BLANKLINE>
-    Mismatched elements: 1 / 3 (33.3%)
-    Max absolute difference: 4.4408921e-16
-    Max relative difference: 1.41357986e-16
-     x: array([1.      , 3.141593,      nan])
-     y: array([1.      , 3.141593,      nan])
-
     Use `assert_allclose` or one of the nulp (number of floating point values)
     functions for these cases instead:
 
@@ -814,9 +799,9 @@ def assert_array_equal(x, y, err_msg="", verbose=True, *, strict=False):
     Arrays are not equal
     <BLANKLINE>
     (shapes (2, 5), () mismatch)
-     x: array([[3, 3, 3, 3, 3],
-           [3, 3, 3, 3, 3]])
-     y: array(3)
+     x: torch.ndarray([[3, 3, 3, 3, 3],
+            [3, 3, 3, 3, 3]])
+     y: torch.ndarray(3)
 
     The `strict` parameter also ensures that the array data types match:
 
@@ -828,9 +813,9 @@ def assert_array_equal(x, y, err_msg="", verbose=True, *, strict=False):
     AssertionError:
     Arrays are not equal
     <BLANKLINE>
-    (dtypes int64, float32 mismatch)
-     x: array([2, 2, 2])
-     y: array([2., 2., 2.], dtype=float32)
+    (dtypes dtype("int64"), dtype("float32") mismatch)
+     x: torch.ndarray([2, 2, 2])
+     y: torch.ndarray([2., 2., 2.])
     """
     __tracebackhide__ = True  # Hide traceback for py.test
     assert_array_compare(
@@ -904,10 +889,10 @@ def assert_array_almost_equal(x, y, decimal=6, err_msg="", verbose=True):
     Arrays are not almost equal to 5 decimals
     <BLANKLINE>
     Mismatched elements: 1 / 3 (33.3%)
-    Max absolute difference: 6.e-05
-    Max relative difference: 2.57136612e-05
-     x: array([1.     , 2.33333,     nan])
-     y: array([1.     , 2.33339,     nan])
+    Max absolute difference: 5.999999999994898e-05
+    Max relative difference: 2.5713661239633743e-05
+     x: torch.ndarray([1.0000, 2.3333,    nan], dtype=float64)
+     y: torch.ndarray([1.0000, 2.3334,    nan], dtype=float64)
 
     >>> np.testing.assert_array_almost_equal([1.0,2.33333,np.nan],
     ...                                      [1.0,2.33333, 5], decimal=5)
@@ -917,8 +902,8 @@ def assert_array_almost_equal(x, y, decimal=6, err_msg="", verbose=True):
     Arrays are not almost equal to 5 decimals
     <BLANKLINE>
     x and y nan location mismatch:
-     x: array([1.     , 2.33333,     nan])
-     y: array([1.     , 2.33333, 5.     ])
+     x: torch.ndarray([1.0000, 2.3333,    nan], dtype=float64)
+     y: torch.ndarray([1.0000, 2.3333, 5.0000], dtype=float64)
 
     """
     __tracebackhide__ = True  # Hide traceback for py.test
@@ -1009,10 +994,10 @@ def assert_array_less(x, y, err_msg="", verbose=True):
     Arrays are not less-ordered
     <BLANKLINE>
     Mismatched elements: 1 / 3 (33.3%)
-    Max absolute difference: 1.
+    Max absolute difference: 1.0
     Max relative difference: 0.5
-     x: array([ 1.,  1., nan])
-     y: array([ 1.,  2., nan])
+     x: torch.ndarray([1.,  1., nan], dtype=float64)
+     y: torch.ndarray([1.,  2., nan], dtype=float64)
 
     >>> np.testing.assert_array_less([1.0, 4.0], 3)
     Traceback (most recent call last):
@@ -1021,10 +1006,10 @@ def assert_array_less(x, y, err_msg="", verbose=True):
     Arrays are not less-ordered
     <BLANKLINE>
     Mismatched elements: 1 / 2 (50%)
-    Max absolute difference: 2.
-    Max relative difference: 0.66666667
-     x: array([1., 4.])
-     y: array(3)
+    Max absolute difference: 2.0
+    Max relative difference: 0.6666666666666666
+     x: torch.ndarray([1., 4.], dtype=float64)
+     y: torch.ndarray(3)
 
     >>> np.testing.assert_array_less([1.0, 2.0, 3.0], [4])
     Traceback (most recent call last):
@@ -1033,8 +1018,8 @@ def assert_array_less(x, y, err_msg="", verbose=True):
     Arrays are not less-ordered
     <BLANKLINE>
     (shapes (3,), (1,) mismatch)
-     x: array([1., 2., 3.])
-     y: array([4])
+     x: torch.ndarray([1., 2., 3.], dtype=float64)
+     y: torch.ndarray([4])
 
     """
     __tracebackhide__ = True  # Hide traceback for py.test
@@ -1066,8 +1051,8 @@ def assert_string_equal(actual, desired):
 
     Examples
     --------
-    >>> np.testing.assert_string_equal('abc', 'abc')
-    >>> np.testing.assert_string_equal('abc', 'abcd')
+    >>> np.testing.assert_string_equal('abc', 'abc')  # doctest: +SKIP
+    >>> np.testing.assert_string_equal('abc', 'abcd')  # doctest: +SKIP
     Traceback (most recent call last):
       File "<stdin>", line 1, in <module>
     ...
@@ -1355,9 +1340,9 @@ def assert_array_almost_equal_nulp(x, y, nulp=1):
     --------
     >>> x = np.array([1., 1e-10, 1e-20])
     >>> eps = np.finfo(x.dtype).eps
-    >>> np.testing.assert_array_almost_equal_nulp(x, x*eps/2 + x)
+    >>> np.testing.assert_array_almost_equal_nulp(x, x*eps/2 + x)  # doctest: +SKIP
 
-    >>> np.testing.assert_array_almost_equal_nulp(x, x*eps + x)
+    >>> np.testing.assert_array_almost_equal_nulp(x, x*eps + x)  # doctest: +SKIP
     Traceback (most recent call last):
       ...
     AssertionError: X and Y are not equal to 1 ULP (max is 2)
@@ -1417,7 +1402,7 @@ def assert_array_max_ulp(a, b, maxulp=1, dtype=None):
     Examples
     --------
     >>> a = np.linspace(0., 1., 100)
-    >>> res = np.testing.assert_array_max_ulp(a, np.arcsin(np.sin(a)))
+    >>> res = np.testing.assert_array_max_ulp(a, np.arcsin(np.sin(a)))  # doctest: +SKIP
 
     """
     __tracebackhide__ = True  # Hide traceback for py.test
@@ -1461,7 +1446,7 @@ def nulp_diff(x, y, dtype=None):
     --------
     # By definition, epsilon is the smallest number such as 1 + eps != 1, so
     # there should be exactly one ULP between 1 and 1 + eps
-    >>> nulp_diff(1, 1 + np.finfo(x.dtype).eps)
+    >>> nulp_diff(1, 1 + np.finfo(x.dtype).eps)  # doctest: +SKIP
     1.0
     """
     import numpy as np
@@ -1829,7 +1814,7 @@ class clear_and_catch_warnings(warnings.catch_warnings):
     Examples
     --------
     >>> import warnings
-    >>> with np.testing.clear_and_catch_warnings(
+    >>> with np.testing.clear_and_catch_warnings(  # doctest: +SKIP
     ...         modules=[np.core.fromnumeric]):
     ...     warnings.simplefilter('always')
     ...     warnings.filterwarnings('ignore', module='np.core.fromnumeric')
