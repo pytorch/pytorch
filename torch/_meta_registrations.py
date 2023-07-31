@@ -548,6 +548,49 @@ def meta__linalg_eigh(
     return vals, vecs
 
 
+def cloneBatchedColumnMajor(src: Tensor) -> Tensor:
+    return src.mT.clone(memory_format=torch.contiguous_format).transpose(-2, -1)
+
+
+@register_meta(aten._cholesky_solve_helper)
+@out_wrapper()
+def _cholesky_solve_helper(self: Tensor, A: Tensor, upper: bool) -> Tensor:
+    return cloneBatchedColumnMajor(self)
+
+
+@register_meta(aten.cholesky_solve)
+@out_wrapper()
+def cholesky_solve(self: Tensor, A: Tensor, upper: bool = False) -> Tensor:
+    torch._check(
+        self.ndim >= 2,
+        lambda: f"b should have at least 2 dimensions, but has {self.ndim} dimensions instead",
+    )
+    torch._check(
+        A.ndim >= 2,
+        lambda: f"u should have at least 2 dimensions, but has {A.ndim} dimensions instead",
+    )
+    self_broadcasted, A_broadcasted = _linalg_broadcast_batch_dims_name(
+        self, A, "cholesky_solve"
+    )
+    return _cholesky_solve_helper(self_broadcasted, A_broadcasted, upper)
+
+
+@register_meta(aten.cholesky)
+@out_wrapper()
+def cholesky(self: Tensor, upper: bool = False) -> Tensor:
+    if self.numel() == 0:
+        return torch.empty_like(self, memory_format=torch.legacy_contiguous_format)
+    squareCheckInputs(self, "cholesky")
+    return cloneBatchedColumnMajor(self)
+
+
+@register_meta(aten.cholesky_inverse)
+@out_wrapper()
+def cholesky_inverse(self: Tensor, upper: bool = False) -> Tensor:
+    squareCheckInputs(self, "cholesky_inverse")
+    return cloneBatchedColumnMajor(self)
+
+
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
 @register_meta(aten.linalg_cholesky_ex.default)
 def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = False):
@@ -2214,6 +2257,13 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
     return self.new_empty(self.shape).to(memory_format=memory_format)
 
 
+@register_meta(aten._adaptive_avg_pool3d_backward)
+@out_wrapper()
+def meta__adaptive_avg_pool3d_backward(grad_output, self):
+    _adaptive_pool_empty_output_check(grad_output, "adaptive_avg_pool3d_backward")
+    return torch.empty_like(self, memory_format=torch.legacy_contiguous_format)
+
+
 def _adaptive_pool_empty_output_check(grad_output: Tensor, arg_name: str):
     ndim = grad_output.ndim
     for i in range(1, ndim):
@@ -2851,6 +2901,10 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     return x1.new_empty(output_shape)
 
 
+# NB: This meta function accepts non-meta arguments!  When this behavior
+# was originally introduced this was accidental, but it is now load bearing
+# as people are using this so that they can conveniently test code involving
+# embeddings (feeding CPU tensor inputs with meta device EmbeddingBag module)
 @register_meta(aten._embedding_bag.default)
 def meta_embedding_bag(
     weight,
@@ -4433,6 +4487,7 @@ def meta__scaled_dot_product_efficient(
     query: Tensor,
     key: Tensor,
     value: Tensor,
+    attn_bias: Optional[Tensor],
     compute_log_sumexp: bool,
     dropout_p=0.0,
     is_causal: bool = False,
@@ -4477,11 +4532,13 @@ def meta__scaled_dot_product_efficient_backward(
     query: Tensor,
     key: Tensor,
     value: Tensor,
+    attn_bias: Optional[Tensor],
     out: Tensor,
     logsumexp: Tensor,
     philox_seed: Tensor,
     philox_offset: Tensor,
     dropout_p: float,
+    grad_input_mask: List[bool],
     is_causal: bool = False,
     scale: Optional[float] = None,
 ):
@@ -4510,8 +4567,16 @@ def meta__scaled_dot_product_efficient_backward(
         dtype=value.dtype,
         device=value.device,
     )
+    grad_bias = None
+    if attn_bias is not None and grad_input_mask[3]:
+        grad_bias = torch.empty_strided(
+            attn_bias.size(),
+            attn_bias.stride(),
+            dtype=attn_bias.dtype,
+            device=attn_bias.device,
+        )
 
-    return grad_q, grad_k, grad_v
+    return grad_q, grad_k, grad_v, grad_bias
 
 
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
@@ -4676,6 +4741,11 @@ def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=
         _safe_copy_out(copy_from=i, copy_to=indices)  # type: ignore[arg-type]
         return values, indices
     return v, i
+
+
+@register_meta(aten.argsort.stable)
+def meta_argsort(self, *, stable, dim=-1, descending=False):
+    return meta_sort(self, stable=stable, dim=dim, descending=descending)[1]
 
 
 def rnn_cell_checkSizes(

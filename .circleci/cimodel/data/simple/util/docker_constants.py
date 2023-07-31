@@ -1,10 +1,12 @@
 AWS_DOCKER_HOST = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 
+
 def gen_docker_image(container_type):
     return (
         "/".join([AWS_DOCKER_HOST, "pytorch", container_type]),
         f"docker-{container_type}",
     )
+
 
 def gen_docker_image_requires(image_name):
     return [f"docker-{image_name}"]

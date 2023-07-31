@@ -73,7 +73,11 @@ from .dicts import (
     DefaultDictVariable,
     HFPretrainedConfigVariable,
 )
-from .distributed import DeviceMeshVariable, PlacementClassVariable
+from .distributed import (
+    DeviceMeshVariable,
+    PlacementClassVariable,
+    ProcessGroupVariable,
+)
 from .functions import (
     CollectiveFunctionRewriteVariable,
     UserFunctionVariable,
@@ -115,11 +119,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
-from .user_defined import (
-    ProcessGroupVariable,
-    UserDefinedClassVariable,
-    UserDefinedObjectVariable,
-)
+from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 
 log = logging.getLogger(__name__)
@@ -217,6 +217,7 @@ class VariableBuilder:
             TensorVariable,
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
+            NumpyNdarrayVariable,
         ]:
             return True
         return False
@@ -269,7 +270,12 @@ class VariableBuilder:
         # NB: Careful not to close over self to avoid ref cycle from lru_cache
         entries = [
             (
-                (torch.Tensor, torch.nn.Parameter, torch._subclasses.FakeTensor),
+                (
+                    torch.Tensor,
+                    torch.nn.Buffer,
+                    torch.nn.Parameter,
+                    torch._subclasses.FakeTensor,
+                ),
                 cls.wrap_tensor,
             ),
             ((tuple, list, odict_values), cls.wrap_listlike),
@@ -882,6 +888,7 @@ class VariableBuilder:
         else:
             assert type(value) in (
                 torch.Tensor,
+                torch.nn.Buffer,
                 torch.nn.Parameter,
                 torch._subclasses.fake_tensor.FakeTensor,
             ) or is_traceable_wrapper_subclass(value), type(value)
@@ -1493,7 +1500,7 @@ def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
     if (
-        type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
+        type(e) in (torch.Tensor, torch.nn.Parameter, torch.nn.Buffer, FakeTensor)
         or (ignore_subclass and isinstance(e, torch.Tensor))
         or is_traceable_wrapper_subclass(e)
     ):
@@ -1569,10 +1576,11 @@ class SourcelessBuilder:
             return ConstDictVariable(
                 {k: self(tx, v) for k, v in value.items()},
                 dict,
+                mutable_local=MutableLocal(),
             )
         elif isinstance(value, (tuple, list)):
             cls = BaseListVariable.cls_for(type(value))
-            return cls([self(tx, x) for x in value])
+            return cls([self(tx, x) for x in value], mutable_local=MutableLocal())
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod
