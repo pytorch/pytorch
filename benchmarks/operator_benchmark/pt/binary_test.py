@@ -22,7 +22,7 @@ binary_configs_broadcast = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu"],
-        "dtype": [torch.float],
+        "dtype": [torch.float, torch.bfloat16],
     },
     tags=["short"],
 )
@@ -31,8 +31,8 @@ binary_configs_broadcast = op_bench.config_list(
 class BinaryOpBcastBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, in_one, in_two, dtype, device, op_func):
         self.inputs = {
-            "in_one": torch.randn(in_one, device=device).to(dtype=dtype),
-            "in_two": torch.randn(in_two, device=device).to(dtype=dtype),
+            "in_one": torch.randn(in_one, device=device, dtype=dtype),
+            "in_two": torch.randn(in_two, device=device, dtype=dtype),
         }
         self.op_func = op_func
 
@@ -67,8 +67,8 @@ binary_short_configs = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
-        "dtype_one": [torch.int32],
-        "dtype_two": [torch.int32],
+        "dtype_one": [torch.int32, torch.bfloat16],
+        "dtype_two": [torch.int32, torch.bfloat16],
     },
     tags=["short"],
 )
@@ -78,8 +78,8 @@ binary_long_configs = op_bench.cross_product_configs(
     N=[32, 64],
     K=[256, 512],
     device=["cpu", "cuda"],
-    dtype_one=[torch.int8, torch.int32],
-    dtype_two=[torch.int8, torch.int32],
+    dtype_one=[torch.int8, torch.int32, torch.bfloat16],
+    dtype_two=[torch.int8, torch.int32, torch.bfloat16],
     tags=["long"],
 )
 

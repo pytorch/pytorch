@@ -10,6 +10,7 @@ import operator_benchmark as op_bench
 
 cross_product_configs = {
     "device": ["cpu", "cuda"],
+    "dtype": [torch.float32, torch.bfloat16]
 }
 
 # Configs for PT Cat operator
@@ -122,7 +123,7 @@ cat_configs_manyinputs = op_bench.config_list(
 
 
 class CatBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, sizes, N, dim, device):
+    def init(self, sizes, N, dim, device, dtype):
         random.seed(42)
         inputs = []
         gen_sizes = []
@@ -138,8 +139,8 @@ class CatBenchmark(op_bench.TorchBenchmarkBase):
                 )
 
         for s in gen_sizes:
-            inputs.append(torch.rand(s, device=device))
-        result = torch.empty(0, device=device)
+            inputs.append(torch.rand(s, device=device, dtype=dtype))
+        result = torch.empty(0, device=device, dtype=dtype)
         self.inputs = {"result": result, "inputs": inputs, "dim": dim}
         self.set_module_name("cat")
 

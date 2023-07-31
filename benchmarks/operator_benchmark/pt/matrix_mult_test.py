@@ -15,6 +15,7 @@ batch_mm_configs_short = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
+        "dtype": [torch.float32, torch.bfloat16]
     },
     tags=["short"],
 )
@@ -27,6 +28,7 @@ batch_mm_configs_long = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
+        "dtype": [torch.float32, torch.bfloat16]
     },
     tags=["long"],
 )
@@ -41,10 +43,10 @@ batch_mm_op_list = op_bench.op_list(
 
 
 class BatchMatrixMultBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, B, M, N, K, device, op_func):
+    def init(self, B, M, N, K, device, dtype, op_func):
         self.inputs = {
-            "input_one": torch.rand(B, M, N, device=device),
-            "input_two": torch.rand(B, N, K, device=device),
+            "input_one": torch.rand(B, M, N, device=device, dtype=dtype),
+            "input_two": torch.rand(B, N, K, device=device, dtype=dtype),
         }
         self.op_func = op_func
 
@@ -68,6 +70,7 @@ batch_elementwise_configs_short = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
+        "dtype": [torch.float32, torch.bfloat16]
     },
     tags=["short"],
 )
@@ -78,6 +81,7 @@ batch_elementwise_configs_long = op_bench.cross_product_configs(
     M=[128, 512, 1024],
     N=[128, 512, 1024],
     device=["cpu", "cuda"],
+    dtype=[torch.float32, torch.bfloat16],
     tags=["long"],
 )
 
@@ -91,10 +95,10 @@ batch_elementwise_op_list = op_bench.op_list(
 
 
 class BatchElementWiseBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, B, M, N, device, op_func):
+    def init(self, B, M, N, device, dtype, op_func):
         self.inputs = {
-            "input_one": torch.rand(B, M, N, device=device),
-            "input_two": torch.rand(B, M, N, device=device),
+            "input_one": torch.rand(B, M, N, device=device, dtype=dtype),
+            "input_two": torch.rand(B, M, N, device=device, dtype=dtype),
         }
         self.op_func = op_func
 

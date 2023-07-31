@@ -14,6 +14,7 @@ mm_short_configs = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
+        "dtype": [torch.float32, torch.bfloat16]
     },
     tags=["short"],
 )
@@ -26,19 +27,20 @@ mm_long_configs = op_bench.cross_product_configs(
     trans_a=[False, True],
     trans_b=[True, False],
     device=["cpu", "cuda"],
+    dtype=[torch.float32, torch.bfloat16],
     tags=["long"],
 )
 
 
 class MatMulBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, K, trans_a, trans_b, device):
+    def init(self, M, N, K, trans_a, trans_b, device, dtype):
         self.inputs = {
-            "input_one": torch.rand(M, N, device=device)
+            "input_one": torch.rand(M, N, device=device, dtype=dtype)
             if trans_a
-            else torch.rand(N, M, device=device).t(),
-            "input_two": torch.rand(N, K, device=device)
+            else torch.rand(N, M, device=device, dtype=dtype).t(),
+            "input_two": torch.rand(N, K, device=device, dtype=dtype)
             if trans_b
-            else torch.rand(K, N, device=device).t(),
+            else torch.rand(K, N, device=device, dtype=dtype).t(),
         }
         self.set_module_name("matmul")
 

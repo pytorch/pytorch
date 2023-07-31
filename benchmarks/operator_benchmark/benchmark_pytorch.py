@@ -88,15 +88,18 @@ class TorchBenchmarkBase(torch.nn.Module):
 
         # This is a list of attributes which will not be included
         # in the test name.
-        skip_key_list = ["device"]
+        skip_key_list = ["device", "dtype", "memory_format"]
 
         test_name_str = []
         for key in kargs:
             value = kargs[key]
-            test_name_str.append(
-                ("" if key in skip_key_list else key)
-                + str(value if type(value) != bool else int(value))
-            )
+            try:
+                appended_str = ("" if key in skip_key_list else key) + \
+                               str(value if type(value) != bool else int(value)).removeprefix("torch.")
+            except AttributeError:
+                appended_str = ("" if key in skip_key_list else key) + \
+                               str(value if type(value) != bool else int(value))
+            test_name_str.append(appended_str)
         name = (self.module_name() + "_" + "_".join(test_name_str)).replace(" ", "")
         return name
 

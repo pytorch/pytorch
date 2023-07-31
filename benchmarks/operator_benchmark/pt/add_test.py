@@ -6,7 +6,7 @@ import operator_benchmark as op_bench
 
 # Configs for PT add operator
 add_long_configs = op_bench.cross_product_configs(
-    M=[8, 128], N=[32, 64], K=[256, 512], device=["cpu", "cuda"], tags=["long"]
+    M=[8, 128], N=[32, 64], K=[256, 512], device=["cpu", "cuda"], tags=["long"], dtype=[torch.float32, torch.bfloat16]
 )
 
 
@@ -19,19 +19,20 @@ add_short_configs = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
+        "dtype" : [torch.float32, torch.bfloat16],
     },
     tags=["short"],
 )
 
 
 class AddBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, K, device):
+    def init(self, M, N, K, device, dtype):
         self.inputs = {
             "input_one": torch.rand(
-                M, N, K, device=device, requires_grad=self.auto_set()
+                M, N, K, device=device, dtype=dtype, requires_grad=self.auto_set()
             ),
             "input_two": torch.rand(
-                M, N, K, device=device, requires_grad=self.auto_set()
+                M, N, K, device=device, dtype=dtype, requires_grad=self.auto_set()
             ),
         }
         self.set_module_name("add")
@@ -56,11 +57,11 @@ op_bench.generate_pt_gradient_test(add_long_configs + add_short_configs, AddBenc
 
 
 class AddmmBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, K, device):
+    def init(self, M, N, K, device, dtype):
         self.inputs = {
-            "input_one": torch.rand(M, K, device=device, requires_grad=self.auto_set()),
-            "mat1": torch.rand(M, N, device=device, requires_grad=self.auto_set()),
-            "mat2": torch.rand(N, K, device=device, requires_grad=self.auto_set()),
+            "input_one": torch.rand(M, K, device=device, dtype=dtype, requires_grad=self.auto_set()),
+            "mat1": torch.rand(M, N, device=device, dtype=dtype, requires_grad=self.auto_set()),
+            "mat2": torch.rand(N, K, device=device, dtype=dtype, requires_grad=self.auto_set()),
         }
         self.set_module_name("addmm")
 
@@ -79,13 +80,13 @@ class AddrBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, device, dtype):
         self.inputs = {
             "input_one": torch.rand(
-                (M, N), device=device, requires_grad=self.auto_set(), dtype=dtype
+                (M, N), device=device, dtype=dtype, requires_grad=self.auto_set()
             ),
             "vec1": torch.rand(
-                (M,), device=device, requires_grad=self.auto_set(), dtype=dtype
+                (M,), device=device, dtype=dtype, requires_grad=self.auto_set()
             ),
             "vec2": torch.rand(
-                (N,), device=device, requires_grad=self.auto_set(), dtype=dtype
+                (N,), device=device, dtype=dtype, requires_grad=self.auto_set()
             ),
         }
         self.set_module_name("addr")
@@ -98,8 +99,8 @@ addr_configs = op_bench.cross_product_configs(
     M=[8, 256],
     N=[256, 16],
     device=["cpu", "cuda"],
-    dtype=[torch.double, torch.half],
-    tags=["addr"],
+    dtype=[torch.double],
+    tags=["short"],
 )
 
 op_bench.generate_pt_test(addr_configs, AddrBenchmark)
@@ -110,13 +111,13 @@ op_bench.generate_pt_gradient_test(addr_configs, AddrBenchmark)
 
 
 class AddbmmBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, B, M, N, K, device):
+    def init(self, B, M, N, K, device, dtype):
         self.inputs = {
             "input_one": torch.rand(
-                (M, N), device=device, requires_grad=self.auto_set()
+                (M, N), device=device, dtype=dtype, requires_grad=self.auto_set()
             ),
             "batch1": torch.rand(
-                (B, M, K), device=device, requires_grad=self.auto_set()
+                (B, M, K), device=device, dtype=dtype, requires_grad=self.auto_set()
             ),
             "batch2": torch.rand(
                 (
@@ -125,6 +126,7 @@ class AddbmmBenchmark(op_bench.TorchBenchmarkBase):
                     N,
                 ),
                 device=device,
+                dtype=dtype,
                 requires_grad=self.auto_set(),
             ),
         }
@@ -139,8 +141,9 @@ addbmm_configs = op_bench.cross_product_configs(
     M=[8, 256],
     N=[256, 16],
     K=[15, 16],
+    dtype=[torch.float32, torch.bfloat16],
     device=["cpu", "cuda"],
-    tags=["addbmm"],
+    tags=["short"],
 )
 
 op_bench.generate_pt_test(addbmm_configs, AddbmmBenchmark)

@@ -16,17 +16,18 @@ diag_configs_short = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
+        "dtype": [torch.float32]
     },
     tags=["short"],
 )
 
 
 class DiagBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, dim, M, N, diagonal, out, device):
+    def init(self, dim, M, N, diagonal, out, device, dtype):
         self.inputs = {
-            "input": torch.rand(M, N, device=device)
+            "input": torch.rand(M, N, device=device, dtype=dtype)
             if dim == 2
-            else torch.rand(M, device=device),
+            else torch.rand(M, device=device, dtype=dtype),
             "diagonal": diagonal,
             "out": out,
             "out_tensor": torch.tensor(

@@ -1,4 +1,5 @@
 import operator_benchmark as op_bench
+import torch
 
 """
 Configs shared by multiple benchmarks
@@ -19,6 +20,8 @@ conv_1d_configs_short = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
+        "dtype": [torch.float32, torch.bfloat16],
+        "memory_format": [torch.contiguous_format],
     },
     tags=["short"],
 )
@@ -31,6 +34,8 @@ conv_1d_configs_long = op_bench.cross_product_configs(
     N=[8],
     L=[128],
     device=["cpu", "cuda"],
+    dtype=[torch.float32, torch.bfloat16],
+    memory_format=[torch.contiguous_format],
     tags=["long"],
 )
 
@@ -52,6 +57,8 @@ conv_2d_configs_short = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
+        "dtype": [torch.float32, torch.bfloat16],
+        "memory_format": [torch.channels_last, torch.contiguous_format],
     },
     tags=["short"],
 )
@@ -67,6 +74,8 @@ conv_2d_configs_long = op_bench.cross_product_configs(
     G=[1],
     pad=[0],
     device=["cpu", "cuda"],
+    dtype=[torch.float32, torch.bfloat16],
+    memory_format=[torch.channels_last, torch.contiguous_format],
     tags=["long"],
 )
 
@@ -87,6 +96,8 @@ conv_2d_pw_configs_short = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
+        "dtype": [torch.float32, torch.bfloat16],
+        "memory_format": [torch.channels_last, torch.contiguous_format],
     },
     tags=["short"],
 )
@@ -101,6 +112,8 @@ conv_2d_pw_configs_long = op_bench.cross_product_configs(
     G=[1],
     pad=[0],
     device=["cpu", "cuda"],
+    dtype=[torch.float32, torch.bfloat16],
+    memory_format=[torch.channels_last, torch.contiguous_format],
     tags=["long"],
 )
 
@@ -112,6 +125,8 @@ conv_3d_configs_short = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
+        "dtype": [torch.float32, torch.bfloat16],
+        "memory_format": [torch.channels_last_3d, torch.contiguous_format],
     },
     tags=["short"],
 )
@@ -125,13 +140,14 @@ linear_configs_short = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
+        "dtype": [torch.float32, torch.bfloat16]
     },
     tags=["short"],
 )
 
 
 linear_configs_long = op_bench.cross_product_configs(
-    N=[32, 64], IN=[128, 512], OUT=[64, 128], device=["cpu", "cuda"], tags=["long"]
+    N=[32, 64], IN=[128, 512], OUT=[64, 128], device=["cpu", "cuda"], dtype=[torch.float32, torch.bfloat16], tags=["long"]
 )
 
 embeddingbag_short_configs = op_bench.cross_product_configs(

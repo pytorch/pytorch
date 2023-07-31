@@ -19,6 +19,7 @@ index_select_configs_short = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
+        "dtype": [torch.float32, torch.bfloat16]
     },
     tags=["short"],
 )
@@ -30,17 +31,18 @@ index_select_configs_long = op_bench.cross_product_configs(
     K=[1, 2],
     dim=[1],
     device=["cpu", "cuda"],
+    dtype=[torch.float32, torch.bfloat16],
     tags=["long"],
 )
 
 
 class IndexSelectBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, K, dim, device):
+    def init(self, M, N, K, dim, device, dtype):
         max_val = N
         numpy.random.seed((1 << 32) - 1)
         index_dim = numpy.random.randint(0, N)
         self.inputs = {
-            "input_one": torch.rand(M, N, K, device=device),
+            "input_one": torch.rand(M, N, K, device=device, dtype=dtype),
             "dim": dim,
             "index": torch.tensor(
                 numpy.random.randint(0, max_val, index_dim), device=device

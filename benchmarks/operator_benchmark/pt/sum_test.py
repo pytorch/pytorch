@@ -11,6 +11,7 @@ sum_configs = op_bench.cross_product_configs(
     dim=[0, 1],
     contiguous=[True, False],
     device=["cpu", "cuda"],
+    dtype=[torch.float32, torch.bfloat16],
     tags=["short"],
 ) + op_bench.cross_product_configs(
     R=[1024, 8192],
@@ -18,17 +19,18 @@ sum_configs = op_bench.cross_product_configs(
     dim=[0, 1],
     contiguous=[True, False],
     device=["cpu", "cuda"],
+    dtype=[torch.float32, torch.bfloat16],
     tags=["long"],
 )
 
 
 class SumBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, R, V, dim, contiguous, device):
+    def init(self, R, V, dim, contiguous, device, dtype):
         shape = (R, V) if dim == 0 else (V, R)
-        tensor = torch.rand(shape, device=device)
+        tensor = torch.rand(shape, device=device, dtype=dtype)
 
         if not contiguous:
-            storage = torch.empty([s * 2 for s in shape], device=device)
+            storage = torch.empty([s * 2 for s in shape], device=device, dtype=dtype)
             storage[::2, ::2] = tensor
             self.input_tensor = storage[::2, ::2]
         else:

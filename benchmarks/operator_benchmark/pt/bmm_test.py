@@ -6,10 +6,10 @@ import operator_benchmark as op_bench
 
 
 class BmmBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, B, M, N, K, device, op):
+    def init(self, B, M, N, K, device, dtype, op):
         self.inputs = {
             "batch1": torch.rand(
-                (B, M, K), device=device, requires_grad=self.auto_set()
+                (B, M, K), device=device, dtype=dtype, requires_grad=self.auto_set()
             ),
             "batch2": torch.rand(
                 (
@@ -18,6 +18,7 @@ class BmmBenchmark(op_bench.TorchBenchmarkBase):
                     N,
                 ),
                 device=device,
+                dtype=dtype,
                 requires_grad=self.auto_set(),
             ),
         }
@@ -34,6 +35,7 @@ bmm_configs = op_bench.cross_product_configs(
     N=[256, 16],
     K=[16, 32],
     device=["cpu"],
+    dtype=[torch.float32, torch.bfloat16],
     tags=["short"],
     op=["bmm", "matmul"],
 )

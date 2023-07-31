@@ -13,21 +13,22 @@ groupnorm_configs_short = op_bench.cross_product_configs(
     ),
     num_groups=(2, 4),
     tags=["short"],
+    dtype=[torch.float32, torch.bfloat16]
 )
 
 
 class GroupNormBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, dims, num_groups):
+    def init(self, dims, num_groups, dtype):
         num_channels = dims[1]
         self.inputs = {
-            "input": (torch.rand(*dims) - 0.5) * 256,
+            "input": (torch.rand(*dims, dtype=dtype) - 0.5) * 256,
             "num_groups": num_groups,
-            "weight": torch.rand(num_channels, dtype=torch.float),
-            "bias": torch.rand(num_channels, dtype=torch.float),
+            "weight": torch.rand(num_channels, dtype=dtype),
+            "bias": torch.rand(num_channels, dtype=dtype),
             "eps": 1e-5,
         }
 
-    def forward(self, input, num_groups: int, weight, bias, eps: float):
+    def forward(self, input, num_groups: int, weight, bias, eps):
         return F.group_norm(input, num_groups, weight=weight, bias=bias, eps=eps)
 
 

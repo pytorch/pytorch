@@ -12,16 +12,17 @@ instancenorm_configs_short = op_bench.cross_product_configs(
         (32, 8, 56, 56),
     ),
     tags=["short"],
+    dtype=[torch.float32, torch.bfloat16]
 )
 
 
 class InstanceNormBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, dims):
+    def init(self, dims, dtype):
         num_channels = dims[1]
         self.inputs = {
-            "input": (torch.rand(*dims) - 0.5) * 256,
-            "weight": torch.rand(num_channels, dtype=torch.float),
-            "bias": torch.rand(num_channels, dtype=torch.float),
+            "input": (torch.rand(*dims, dtype=dtype) - 0.5) * 256,
+            "weight": torch.rand(num_channels, dtype=dtype),
+            "bias": torch.rand(num_channels, dtype=dtype),
             "eps": 1e-5,
         }
 

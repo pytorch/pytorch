@@ -13,17 +13,18 @@ layernorm_configs_short = op_bench.cross_product_configs(
         (32, 8, 16),
         (64, 128, 56, 56),
     ),
+    dtype=[torch.float32, torch.bfloat16],
     tags=["short"],
 )
 
 
 class LayerNormBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, dims):
-        input = (torch.rand(*dims) - 0.5) * 256
+    def init(self, dims, dtype):
+        input = (torch.rand(*dims, dtype=dtype) - 0.5) * 256
         self.inputs = {
             "input": input,
-            "weight": torch.rand(*input.size()[1:], dtype=torch.float),
-            "bias": torch.rand(*input.size()[1:], dtype=torch.float),
+            "weight": torch.rand(*input.size()[1:], dtype=dtype),
+            "bias": torch.rand(*input.size()[1:], dtype=dtype),
             "eps": 1e-5,
         }
 
