@@ -55,7 +55,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   StorageImpl(
       use_byte_size_t /*use_byte_size*/,
-      SymInt size_bytes,
+      const SymInt& size_bytes,
       at::Allocator* allocator,
       bool resizable)
       : StorageImpl(
