@@ -17,6 +17,7 @@
 #include <ATen/ops/abs_native.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/core/GeneratorForPrivateuseone.h>
+#include <ATen/detail/PrivateUse1HooksInterface.h>
 
 static uint64_t add_counter = 0;
 static uint64_t last_saved_value = 0;
@@ -31,7 +32,9 @@ static uint64_t last_storageImpl_saved_value = 0;
 namespace at {
 namespace detail {
 
-C10_REGISTER_GUARD_IMPL(PrivateUse1, c10::impl::NoOpDeviceGuardImpl<DeviceType::PrivateUse1>);
+C10_REGISTER_GUARD_IMPL(
+    PrivateUse1,
+    c10::impl::NoOpDeviceGuardImpl<DeviceType::PrivateUse1>);
 
 }} // namespace at::detail
 
@@ -55,8 +58,10 @@ struct CustomBackendMetadata : public c10::BackendMeta {
   int format_number_{-1};
   mutable bool cloned_{false};
   // define the constructor
-  CustomBackendMetadata(int backend_version_format, int format_number): backend_version_format_(backend_version_format), format_number_(format_number) {}
-  c10::intrusive_ptr<c10::BackendMeta> clone(const c10::intrusive_ptr<c10::BackendMeta>& ptr) const override {
+  CustomBackendMetadata(int backend_version_format, int format_number) :
+      backend_version_format_(backend_version_format), format_number_(format_number) {}
+  c10::intrusive_ptr<c10::BackendMeta> clone(
+      const c10::intrusive_ptr<c10::BackendMeta>& ptr) const override {
     cloned_ = true;
     return c10::BackendMeta::clone(ptr);
   }
@@ -85,18 +90,22 @@ void for_deserialization(const at::Tensor& t, std::unordered_map<std::string, bo
   if (m.find("format_number") != m.end()) {
     format_number = 29;
   }
-  c10::intrusive_ptr<c10::BackendMeta> new_tmeta{std::unique_ptr<c10::BackendMeta>(new CustomBackendMetadata(backend_version_format, format_number))};
+  c10::intrusive_ptr<c10::BackendMeta> new_tmeta{std::unique_ptr<c10::BackendMeta>(
+      new CustomBackendMetadata(backend_version_format, format_number))};
   t.unsafeGetTensorImpl()->set_backend_meta(new_tmeta);
 }
 
-void custom_serialization_registry(){
-torch::jit::TensorBackendMetaRegistry(c10::DeviceType::PrivateUse1, &for_serialization, &for_deserialization);
+void custom_serialization_registry() {
+  torch::jit::TensorBackendMetaRegistry(c10::DeviceType::PrivateUse1,
+                                        &for_serialization,
+                                        &for_deserialization);
 }
 
 //check if BackendMeta serialization correctly
 bool check_backend_meta(const at::Tensor& t) {
   if (t.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr()) {
-    CustomBackendMetadata* tmeta = dynamic_cast<CustomBackendMetadata*>(t.unsafeGetTensorImpl()->get_backend_meta());
+    CustomBackendMetadata* tmeta = dynamic_cast<CustomBackendMetadata*>(
+        t.unsafeGetTensorImpl()->get_backend_meta());
     if (tmeta->backend_version_format_==1 && tmeta->format_number_==29) {
       return true;
     }
@@ -108,13 +117,18 @@ bool check_backend_meta(const at::Tensor& t) {
 void custom_set_backend_meta(const at::Tensor& t) {
   int backend_version_format{1};
   int format_number{29};
-  c10::intrusive_ptr<c10::BackendMeta> new_tmeta{std::unique_ptr<c10::BackendMeta>(new CustomBackendMetadata(backend_version_format, format_number))};
+  c10::intrusive_ptr<c10::BackendMeta> new_tmeta{std::unique_ptr<c10::BackendMeta>(
+      new CustomBackendMetadata(backend_version_format, format_number))};
   t.unsafeGetTensorImpl()->set_backend_meta(new_tmeta);
 }
 
 // A dummy storageImpl for our custom device, that secretly uses the CPU
-c10::intrusive_ptr<c10::StorageImpl> make_custom_storage_impl(c10::StorageImpl::use_byte_size_t, c10::SymInt size_bytes, c10::Allocator* allocator, bool resizable) {
-  c10::intrusive_ptr<c10::StorageImpl> custom_storage_impl = c10::make_intrusive<c10::StorageImpl>(c10::StorageImpl::use_byte_size_t(), size_bytes, allocator, resizable);
+c10::intrusive_ptr<c10::StorageImpl> make_custom_storage_impl(c10::StorageImpl::use_byte_size_t,
+                                                              c10::SymInt size_bytes,
+                                                              c10::Allocator* allocator,
+                                                              bool resizable) {
+  c10::intrusive_ptr<c10::StorageImpl> custom_storage_impl = c10::make_intrusive<c10::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(), size_bytes, allocator, resizable);
   storageImpl_counter += 1;
   return custom_storage_impl;
 }
@@ -133,7 +147,7 @@ bool custom_storageImpl_called() {
 }
 
 // basic dummy add function
-at::Tensor custom_add_Tensor(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha) {
+at::Tensor custom_add_Tensor(const at::Tensor& self, const at::Tensor& other, const at::Scalar& alpha) {
   add_counter += 1;
   // Since this custom device is just for testing, not bothering to implement kernels.
   return at::empty(self.sizes(), self.options());
@@ -170,13 +184,28 @@ REGISTER_ALLOCATOR(c10::DeviceType::PrivateUse1, &global_custom_alloc);
 
 // basic dummy empty function, so we can directly construct tensors on the custom device
 // This dummy test device will just use the CPU allocator, and ignores pinned memory.
-at::Tensor custom_empty_memory_format(at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, c10::optional<at::MemoryFormat> memory_format) {
+at::Tensor custom_empty_memory_format(at::IntArrayRef size,
+                                      c10::optional<at::ScalarType> dtype,
+                                      c10::optional<at::Layout> layout,
+                                      c10::optional<at::Device> device,
+                                      c10::optional<bool> pin_memory,
+                                      c10::optional<at::MemoryFormat> memory_format) {
   constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);
-  return at::detail::empty_generic(size, &global_custom_alloc, private_use_ks, c10::dtype_or_default(dtype), memory_format);
+  return at::detail::empty_generic(size,
+                                   &global_custom_alloc,
+                                   private_use_ks,
+                                   c10::dtype_or_default(dtype),
+                                   memory_format);
 }
-at::Tensor custom_empty_symint(c10::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, c10::optional<at::MemoryFormat> memory_format) {
+at::Tensor custom_empty_symint(c10::IntArrayRef size,
+                               c10::optional<at::ScalarType> dtype,
+                               c10::optional<at::Layout> layout,
+                               c10::optional<at::Device> device,
+                               c10::optional<bool> pin_memory,
+                               c10::optional<at::MemoryFormat> memory_format) {
   constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);
-  return at::detail::empty_generic(size, &global_custom_alloc, private_use_ks, c10::dtype_or_default(dtype), memory_format);
+  return at::detail::empty_generic(size,
+    &global_custom_alloc, private_use_ks, c10::dtype_or_default(dtype), memory_format);
 }
 
 at::Tensor & custom_fill__scalar(at::Tensor & self, const at::Scalar & value) {
@@ -186,8 +215,12 @@ at::Tensor & custom_fill__scalar(at::Tensor & self, const at::Scalar & value) {
 
 // basic dummy copy_() function, so we can copy from the custom device to/from CPU
 at::Tensor custom__copy_from(const at::Tensor& self, const at::Tensor& dst, bool non_blocking) {
-  TORCH_CHECK(self.is_cpu() || self.device().type() == c10::DeviceType::PrivateUse1, "Dummy test only allows copy from cpu -> dummy device.");
-  TORCH_CHECK(dst.is_cpu() || dst.device().type() == c10::DeviceType::PrivateUse1, "Dummy test only allows copy from cpu -> dummy device.");
+  TORCH_CHECK(
+      self.is_cpu() || self.device().type() == c10::DeviceType::PrivateUse1,
+      "Dummy test only allows copy from cpu -> dummy device.");
+  TORCH_CHECK(
+      dst.is_cpu() || dst.device().type() == c10::DeviceType::PrivateUse1,
+      "Dummy test only allows copy from cpu -> dummy device.");
 
   // Some dummy asserts for the basic use case: inputs are the same size / dtype, all contiguous.
   TORCH_CHECK(self.sizes() == dst.sizes());
@@ -198,7 +231,12 @@ at::Tensor custom__copy_from(const at::Tensor& self, const at::Tensor& dst, bool
   return dst;
 }
 
-at::Tensor custom_empty_strided(c10::IntArrayRef size, c10::IntArrayRef stride, c10::optional<at::ScalarType> dtype_opt, c10::optional<at::Layout> layout_opt, c10::optional<at::Device> device_opt, c10::optional<bool> pin_memory_opt) {
+at::Tensor custom_empty_strided(c10::IntArrayRef size,
+                                c10::IntArrayRef stride,
+                                c10::optional<at::ScalarType> dtype_opt,
+                                c10::optional<at::Layout> layout_opt,
+                                c10::optional<at::Device> device_opt,
+                                c10::optional<bool> pin_memory_opt) {
   constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);
   auto dtype = c10::dtype_or_default(dtype_opt);
   return  at::detail::empty_strided_generic(size, stride, &global_custom_alloc, private_use_ks, dtype);
@@ -210,15 +248,23 @@ at::Tensor& custom_set_source_Storage(at::Tensor& result, c10::Storage src) {
   c10::IntArrayRef stride = {};
   result.unsafeGetTensorImpl()->set_storage_offset(0);
   at::OptionalIntArrayRef stride_opt = stride.data() != nullptr ? at::OptionalIntArrayRef(stride) : c10::nullopt;
-  at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(), new_size, stride_opt, /*resize_storage=*/!result.is_meta());
+  at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(),
+                               new_size, stride_opt,
+                               /*resize_storage=*/!result.is_meta());
   return result;
 }
 
 // Some set operations for the basic use case
-at::Tensor& custom_set_source_Storage_storage_offset(at::Tensor& result, c10::Storage storage, int64_t storage_offset, c10::IntArrayRef size, c10::IntArrayRef stride) {
+at::Tensor& custom_set_source_Storage_storage_offset(at::Tensor& result,
+                                                     c10::Storage storage,
+                                                     int64_t storage_offset,
+                                                     c10::IntArrayRef size,
+                                                     c10::IntArrayRef stride) {
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
   at::OptionalIntArrayRef stride_opt = stride.data() != nullptr ? at::OptionalIntArrayRef(stride) : c10::nullopt;
-  at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(), size, stride_opt, /*resize_storage=*/!result.is_meta());
+  at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(),
+                               size, stride_opt,
+                               /*resize_storage=*/!result.is_meta());
   return result;
 }
 
@@ -226,7 +272,11 @@ at::Tensor& custom_set_source_Storage_storage_offset(at::Tensor& result, c10::St
 std::vector<void*> custom_pinned_data_ptr;
 
 at::Tensor custom__pin_memory(const at::Tensor& self, c10::optional<at::Device> device) {
-  TORCH_CHECK(self.device().is_cpu(), "cannot pin '", self.toString(), "' only dense CPU tensors can be pinned");
+  TORCH_CHECK(
+      self.device().is_cpu(),
+      "cannot pin '",
+      self.toString(),
+      "' only dense CPU tensors can be pinned");
 
   // record pinned data ptr
   at::Tensor dump_pinned_tensor = self * 1.0;
@@ -337,6 +387,42 @@ void set_custom_device_index(c10::DeviceIndex device_index) {
   custom_device_index = device_index;
 }
 
+
+struct FooHooksInterface : public at::PrivateUse1HooksInterface {
+    ~FooHooksInterface() override = default;
+    const at::Generator& getDefaultGenerator(c10::DeviceIndex device_index) override {
+      static auto device_gen = make_generator_privateuse1(device_index);
+      return device_gen;
+    }
+};
+
+struct FooHooksArgs : public at::PrivateUse1HooksArgs {};
+
+TORCH_DECLARE_REGISTRY(PrivateUse1HooksRegistry, FooHooksInterface, FooHooksArgs);
+#define REGISTER_PRIVATEUSE1_HOOKS(clsname) \
+  C10_REGISTER_CLASS(PrivateUse1HooksRegistry, clsname, clsname)
+
+C10_DEFINE_REGISTRY(PrivateUse1HooksRegistry, FooHooksInterface, FooHooksArgs)
+
+static at::PrivateUse1HooksInterface* get_private_hooks() {
+  static at::PrivateUse1HooksInterface* privateuse1_hooks;
+  static c10::once_flag once;
+  c10::call_once(once, [] {
+    privateuse1_hooks = PrivateUse1HooksRegistry()->Create("PrivateUse1Hooks", {}).release();
+    if (!privateuse1_hooks) {
+      privateuse1_hooks = new FooHooksInterface();
+    }
+  });
+  return privateuse1_hooks;
+}
+
+void register_hook() {
+  at::RegisterPrivateUse1HooksInterface(get_private_hooks());
+}
+
+const at::Generator& default_generator(c10::DeviceIndex device_index) {
+  return at::globalContext().defaultGenerator(at::Device(c10::DeviceType::PrivateUse1, device_index));;
+}
 // Here, we're exposing a custom device object that corresponds to our custom backend.
 // We do this using pybind: exposing an "extension_name.custom_device()" function in python,
 // that's implemented in C++.
@@ -352,4 +438,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_set_backend_meta", &custom_set_backend_meta, "a fake set tensor BackendMeta function");
     m.def("check_backend_meta", &check_backend_meta, "check if BackendMeta serialization correctly");
     m.def("custom_serialization_registry", &custom_serialization_registry, "register custom serialization function");
+    m.def("register_hook", &register_hook, "register_hook for privateuse1");
+    m.def("default_generator", &default_generator, "default_generator for privateuse1");
 }

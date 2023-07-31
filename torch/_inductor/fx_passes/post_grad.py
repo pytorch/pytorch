@@ -25,6 +25,7 @@ from ..pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
     register_replacement,
+    remove_extra_clones,
     stable_topological_sort,
 )
 from ..virtualized import V
@@ -61,6 +62,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
+
+        remove_extra_clones(gm.graph)
 
         for patterns in pass_patterns:
             patterns.apply(gm.graph)

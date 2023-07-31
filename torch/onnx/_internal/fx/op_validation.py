@@ -238,6 +238,11 @@ def generate_random_tensors(shape: torch.Size, dtype: torch.dtype):
         return torch.where(
             random_numbers > 0.5, torch.tensor(True), torch.tensor(False)
         )
+    if fx_type_utils.is_torch_complex_dtype(dtype):
+        # ONNX does not support complex values, but supports their real representation
+        return torch.randn(
+            (*shape, 2), dtype=fx_type_utils.from_complex_to_float(dtype)
+        )
     return torch.randn(shape, dtype=dtype)
 
 

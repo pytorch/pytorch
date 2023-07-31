@@ -1570,10 +1570,11 @@ class SourcelessBuilder:
             return ConstDictVariable(
                 {k: self(tx, v) for k, v in value.items()},
                 dict,
+                mutable_local=MutableLocal(),
             )
         elif isinstance(value, (tuple, list)):
             cls = BaseListVariable.cls_for(type(value))
-            return cls([self(tx, x) for x in value])
+            return cls([self(tx, x) for x in value], mutable_local=MutableLocal())
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod

@@ -62,7 +62,6 @@ from .passes.add_runtime_assertions_for_constraints_pass import _AddRuntimeAsser
 #
 # result = torch._dynamo.export(
 #     my_model,
-#     *sixtyfour_tensors,
 #     constraints=[
 #         # if you do only dynamic_dim, this is sugar for
 #         # -Inf <= dynamic_dim(blah, 0) <= Inf; we don’t otherwise
@@ -74,6 +73,8 @@ from .passes.add_runtime_assertions_for_constraints_pass import _AddRuntimeAsser
 #         # NB: But we actually truncate ranges to be >= 2, because of
 #         # 0/1 specialization
 #     ]
+# )(
+#     *sixtyfour_tensors,
 # )
 def dynamic_dim(t: torch.Tensor, index: int):
     if not isinstance(t, torch.Tensor):
@@ -152,10 +153,11 @@ def export(
         try:
             gm_torch_level, _ = torch._dynamo.export(
                 f,
-                *args,
                 constraints=constraints,
                 assume_static_by_default=True,
                 tracing_mode="symbolic",
+            )(
+                *args,
                 **kwargs,
             )
 

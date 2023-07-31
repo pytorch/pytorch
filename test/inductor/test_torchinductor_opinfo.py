@@ -11,6 +11,11 @@ from unittest.mock import patch
 import torch
 
 from torch._dynamo.test_case import run_tests
+from torch._subclasses.fake_tensor import (
+    DataDependentOutputException,
+    DynamicOutputShapeException,
+    FakeTensorMode,
+)
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -34,6 +39,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.utils._pytree import tree_map
 
 try:
     try:
@@ -137,6 +143,14 @@ inductor_skips["cpu"] = {
 
 if IS_MACOS and IS_X86:
     inductor_skips["cpu"]["rsqrt"] = {b8, i32}
+    inductor_skips["cpu"]["nn.functional.multi_margin_loss"] = {
+        b8,
+        f16,
+        f32,
+        f64,
+        i32,
+        i64,
+    }
 
 inductor_skips["cuda"] = {
     # Jiterator kernel is not expected to work with inductor
@@ -164,29 +178,22 @@ inductor_expected_failures_single_sample["cpu"] = {
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "allclose": {f16, f32, f64},
     "angle": {f16, f32, f64},
-    "argwhere": {b8, f16, f32, f64, i32, i64},
     "bernoulli": {f32, f64},
-    "bincount": {i32, i64},
     "bucketize": {b8, f16, f32, f64, i32, i64},
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
-    "corrcoef": {f32, f64, i32, i64},
     "cov": {f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
-    # Unsupported: data dependent operator: aten._local_scalar_dense.default
-    "item": {b8, f16, f32, f64, i32, i64},
     "linalg.eig": {f32, f64},
     "linalg.eigh": {f32, f64},
     "linalg.eigvals": {f32, f64},
     "linalg.eigvalsh": {f32, f64},
     "linalg.lstsq": {f32, f64},
     # This pair of strings denotes a test variant
-    ("linalg.lstsq", "grad_oriented"): {f32, f64},
     "masked.var": {f16},
     "masked_scatter": {f16, f32, f64},
-    "masked_select": {b8, f16, f32, f64, i32, i64},
     ("max", "reduction_with_dim"): {b8},
     ("min", "reduction_with_dim"): {b8},
     "multinomial": {f32, f64},
@@ -197,12 +204,10 @@ inductor_expected_failures_single_sample["cpu"] = {
     # f16 handling issue https://github.com/pytorch/pytorch/issues/105914
     "nn.functional.cosine_similarity": {f16},
     "nn.functional.ctc_loss": {f32, f64},
-    "nn.functional.gaussian_nll_loss": {f16, f32, f64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.one_hot": {i64},
     "nn.functional.rrelu": {f32, f64},
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
-    "nonzero": {b8, f16, f32, f64, i32, i64},
     "normal": {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "polar": {f32, f64},
@@ -229,8 +234,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "log_normal": {f16},
     ("normal", "in_place"): {f16, f32, f64},
     "uniform": {f16},
-    "unique": {b8, f16, f32, f64, i32, i64},
-    "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     "var": {f16},
     "var_mean": {f16},
     "view_as_complex": {f16},
@@ -264,32 +267,23 @@ inductor_expected_failures_single_sample["cuda"] = {
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "__rdiv__": {b8, f16, f32, f64, i32, i64},
     "addr": {f16},
-    "allclose": {f16, f32, f64},
     "angle": {f32, f64},
-    "argwhere": {b8, f16, f32, f64, i32, i64},
     ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
     "baddbmm": {f16},
     "bernoulli": {f16, f32, f64},
-    "bincount": {i32, i64},
     "bucketize": {b8, f16, f32, f64, i32, i64},
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
-    "corrcoef": {f16, f32, f64, i32, i64},
     "cov": {f16, f32, f64, i32, i64},
-    "equal": {b8, f16, f32, f64, i32, i64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
-    # Unsupported: data dependent operator: aten._local_scalar_dense.default
-    "item": {b8, f16, f32, f64, i32, i64},
     "linalg.eig": {f32, f64},
     "linalg.eigh": {f32, f64},
     "linalg.eigvals": {f32, f64},
     "linalg.eigvalsh": {f32, f64},
     "linalg.householder_product": {f32, f64},
     "linalg.lstsq": {f32, f64},
-    ("linalg.lstsq", "grad_oriented"): {f32, f64},
     "masked_scatter": {f16, f32, f64},
-    "masked_select": {b8, f16, f32, f64, i32, i64},
     ("max", "reduction_with_dim"): {b8},
     ("min", "reduction_with_dim"): {b8},
     "multinomial": {f16, f32, f64},
@@ -297,11 +291,9 @@ inductor_expected_failures_single_sample["cuda"] = {
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.grid_sample": {f16},
     "grid_sampler_2d": {f16},
-    "nn.functional.gaussian_nll_loss": {f16, f32, f64},
     "nn.functional.one_hot": {i64},
     "nn.functional.rrelu": {f16, f32, f64},
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
-    "nonzero": {b8, f16, f32, f64, i32, i64},
     "normal": {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "polar": {f32, f64},
@@ -325,8 +317,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     ("normal", "in_place"): {f16, f32, f64},
     "log_normal": {f16, f32, f64},
     "uniform": {f16, f32, f64},
-    "unique": {b8, f16, f32, f64, i32, i64},
-    "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     # AssertionError: Tensor-likes are not close!
     "nn.functional.triplet_margin_loss": {f16},
     "pca_lowrank": {f32, f64},
@@ -585,6 +575,25 @@ class TestInductorOpInfo(TestCase):
             else:
                 samples = [next(samples)]
 
+        def do_nopython(fn, args, kwargs):
+            try:
+                mode = FakeTensorMode()
+
+                def map_to_fake(e):
+                    if isinstance(e, torch.Tensor):
+                        return mode.from_tensor(e)
+                    else:
+                        return e
+
+                args, kwargs = tree_map(map_to_fake, (args, kwargs))
+                with mode:
+                    fn(*args, **kwargs)
+
+            except (DataDependentOutputException, DynamicOutputShapeException):
+                return False
+
+            return True
+
         try:
             for sample_input in samples:
                 args = [sample_input.input] + list(sample_input.args)
@@ -596,12 +605,15 @@ class TestInductorOpInfo(TestCase):
                 if device_type == "cuda":
                     # opinfo test case have already place the input on the correct device
                     # so we don't need do additional copy by setting copy_to_cuda=False
+
+                    no_python = do_nopython(fn, args, kwargs)
                     adjusted_kwargs = {
                         "check_lowp": False,
-                        "nopython": True,
+                        "nopython": no_python,
                         "copy_to_cuda": False,
                         "reference_in_float": False,
                         "check_gradient": requires_grad,
+                        "check_has_compiled": no_python,
                     }
                     adjusted_kwargs.update(overridden_kwargs)
                     self.check_model_cuda(
@@ -611,9 +623,11 @@ class TestInductorOpInfo(TestCase):
                         **adjusted_kwargs,
                     )
                 elif device_type == "cpu":
+                    no_python = do_nopython(fn, args, kwargs)
                     adjusted_kwargs = {
                         "check_lowp": False,
-                        "nopython": True,
+                        "nopython": no_python,
+                        "check_has_compiled": no_python,
                         # skip checking gradient on CPU for now
                         "check_gradient": False,
                     }
