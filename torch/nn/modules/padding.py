@@ -121,11 +121,11 @@ class CircularPad2d(_CircularPadNd):
         >>> # using different paddings for different sides
         >>> m = nn.CircularPad2d((1, 1, 2, 0))
         >>> m(input)
-        tensor([[[[0., 0., 1., 2., 2.],
-                  [0., 0., 1., 2., 2.],
-                  [0., 0., 1., 2., 2.],
-                  [3., 3., 4., 5., 5.],
-                  [6., 6., 7., 8., 8.]]]])
+        tensor([[[[5., 3., 4., 5., 3.],
+                  [8., 6., 7., 8., 6.],
+                  [2., 0., 1., 2., 0.],
+                  [5., 3., 4., 5., 3.],
+                  [8., 6., 7., 8., 6.]]]])
 
     """
     padding: Tuple[int, int, int, int]
@@ -188,7 +188,7 @@ class CircularPad3d(_CircularPadNd):
     def _check_input_dim(self, input):
         if input.dim() != 4 and input.dim() != 5:
             raise ValueError(
-                f"expected 2D or 3D input (got {input.dim()}D input)"
+                f"expected 4D or 5D input (got {input.dim()}D input)"
             )
 
 
