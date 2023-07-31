@@ -40,8 +40,15 @@ if torch.cuda.is_available():
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
     SEMI_STRUCTURED_SUPPORTED_BACKENDS.append("cutlass")
 
-if torch._cslt_available():
-    SEMI_STRUCTURED_SUPPORTED_BACKENDS.append("cusparselt")
+    # check if cslt is available for now using this:
+    # TODO when we add cusparselt as a backend, we can update this to be correct
+    try:
+        torch._cslt_compress(torch.ones(128, 128).cuda())
+        SEMI_STRUCTURED_SUPPORTED_BACKENDS.append("cusparselt")
+    except Exception:
+        pass
+
+
 
 def rand_sparse_semi_structured_mask(
     r, c, dtype=torch.float16, device="cuda", choice=None

@@ -1,4 +1,4 @@
-# Find the CUSPARSELT libraries
+# Find the CUSPARSELT library
 #
 # The following variables are optionally searched for defaults
 #  CUSPARSELT_ROOT: Base directory where CUSPARSELT is found

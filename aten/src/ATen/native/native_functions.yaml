@@ -4180,8 +4180,6 @@
 
 - func: _nnpack_available() -> bool
 
-- func: _cslt_available() -> bool
-
 - func: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, SymInt[2] padding, int[2] stride=1) -> Tensor
   variants: function
   dispatch:
