@@ -560,6 +560,7 @@ exclude_patterns = [
     'fb/**',
     '**/fb/**',
     # These are safe to exclude as they do not have Python
+    'c10/**/*',
 ]
 command = [
     'python3',
