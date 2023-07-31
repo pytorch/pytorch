@@ -1070,9 +1070,13 @@ pip3 install lintrunner
 2. Run lintrunner
 ```bash
 # Run lintrunner on the entire codebase
-lintrunner
+lintrunner --take CLANG-TIDY --all-files
 # Run lintrunner on your changes only
+<<<<<<< HEAD
 lintrunner --changed-only
+=======
+lintrunner --take CLANGTIDY
+>>>>>>> origin/doc-fix-contributing.md
 ```
 This will run a variety of linters on the entire codebase or on your changes only, respectively. 
 One of the linters that lintrunner runs is clang-tidy.
