@@ -149,6 +149,13 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
 
     For further details regarding the algorithm we refer to `ADADELTA: An Adaptive Learning Rate Method`_.
     """ + r"""
+    The `Adadelta` optimizer is a popular choice for deep learning, as it is
+    relatively simple to implement and can be effective in a variety of
+    settings. The optimizer is based on the idea of adaptive learning rates,
+    which means that the learning rate for each parameter is adjusted
+    individually based on its own history of gradients. This can help to
+    prevent the optimizer from getting stuck in local minima, and can also
+    make the optimizer more robust to changes in the data.
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -162,6 +169,17 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
         {foreach}
         {maximize}
         {differentiable}
+        
+    The `rho` parameter controls the rate at which the squared gradients are
+    averaged. A higher value of `rho` will result in a slower average, which
+    can be helpful for preventing oscillations in the learning process. The
+    `eps` parameter is a small value that is added to the denominator to
+    improve numerical stability. The `lr` parameter controls the overall
+    learning rate of the optimizer. A higher value of `lr` will result in
+    faster learning, but it can also lead to overfitting. The `weight_decay`
+    parameter applies a penalty to the weights of the model, which can help
+    to prevent overfitting.
+
 
     .. _ADADELTA\: An Adaptive Learning Rate Method:
         https://arxiv.org/abs/1212.5701
