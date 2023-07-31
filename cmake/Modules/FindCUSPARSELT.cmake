@@ -50,8 +50,8 @@ if(CUSPARSELT_FOUND)
                CUSPARSELT_VERSION_PATCH "${CUSPARSELT_HEADER_CONTENTS}")
   string(REGEX REPLACE "define CUSPARSELT_VER_PATCH * +([0-9]+)" "\\1"
                CUSPARSELT_VERSION_PATCH "${CUSPARSELT_VERSION_PATCH}")
-  # Assemble cuSPARSELt version
-  if(NOT CUSPARSELT_VERSION_MAJOR)
+  # Assemble cuSPARSELt version. Use minor version since current major version is 0.
+  if(NOT CUSPARSELT_VERSION_MINOR)
     set(CUSPARSELT_VERSION "?")
   else()
     set(CUSPARSELT_VERSION
