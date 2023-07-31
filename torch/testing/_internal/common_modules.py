@@ -3030,13 +3030,13 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.RNNCell,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True),
-               module_error_inputs_func=partial(module_error_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True),
+               module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU_Cell,
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.GRUCell,
                module_inputs_func=module_inputs_torch_nn_RNN_GRU_Cell,
-               module_error_inputs_func=partial(module_error_inputs_torch_nn_RNN_GRU_Cell, is_rnn=False),
+               module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU_Cell,
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
