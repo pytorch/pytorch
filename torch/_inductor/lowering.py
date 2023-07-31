@@ -92,7 +92,6 @@ add_needs_realized_inputs(
     ]
 )
 
-add_layout_constraint(aten.max_pool2d_with_indices_backward, require_dense)
 
 # TODO(jansel): ezyang says we won't need this in the future, try removing it
 # based on https://github.com/pytorch/pytorch/blob/9e3eb329df8f701/c10/core/ScalarType.h#L28
@@ -1652,6 +1651,8 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
     kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
 
+
+add_layout_constraint(aten.max_pool2d_with_indices_backward, require_dense)
 
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
