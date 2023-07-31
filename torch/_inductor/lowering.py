@@ -186,6 +186,7 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
             dtype = get_promoted_dtype(
                 *promoting_args, type_promotion_kind=type_promotion_kind
             )
+
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg):
             if isinstance(arg, TensorBox):
@@ -196,6 +197,7 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
                 return ir.Constant(arg.value, dtype, args[indices[0]].get_device())
             else:
                 return arg
+
         args = [promote(a) for a in args]
     if broadcast and indices:
         for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
