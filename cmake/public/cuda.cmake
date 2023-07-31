@@ -280,9 +280,9 @@ if(CAFFE2_USE_CUSPARSELT)
 
   add_library(torch::cusparselt INTERFACE IMPORTED)
   target_include_directories(torch::cusparselt INTERFACE ${CUSPARSELT_INCLUDE_PATH})
-  target_link_libraries(torch::cusparselt INTERFACE ${CUSPARSELT_LIBRARY_PATH}/libcusparseLt.so)
+  target_link_libraries(torch::cusparselt INTERFACE ${CUSPARSELT_LIBRARY_PATH})
 else()
-  message(STATUS "USE_CUDNN is set to 0. Compiling without cuDNN support")
+  message(STATUS "USE_CUSPARSELT is set to 0. Compiling without cuSPARSELt support")
 endif()
 
 # curand
