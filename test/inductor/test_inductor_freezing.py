@@ -32,6 +32,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
+    skipIfRocm,
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
 )
@@ -372,6 +373,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod_eager = mod(x)
                 self.assertEqual(foo(mod, x), mod_eager)
 
+    @skipIfRocm
     def test_cpp_wrapper(self):
         mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
 
