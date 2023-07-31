@@ -8,6 +8,8 @@
 PyTorch documentation
 ===================================
 
+Welcome to PyTorch Documentation – your ultimate resource for learning, exploring, and harnessing the power of PyTorch, an open-source deep learning framework that empowers researchers and developers to build innovative and cutting-edge machine learning models.
+
 PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
 
 Features described in this documentation are classified by release status:
