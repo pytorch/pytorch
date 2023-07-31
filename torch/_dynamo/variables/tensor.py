@@ -689,7 +689,9 @@ class SymNodeVariable(VariableTracker):
         self.sym_num = sym_num
 
     def __str__(self):
-        return str(self.evaluate_expr())
+        if isinstance(self.sym_num, torch.SymInt):
+            return str(self.evaluate_expr())
+        return super().__str__()
 
     def python_type(self):
         if isinstance(self.sym_num, SymTypes):
