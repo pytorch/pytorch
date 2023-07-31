@@ -61,7 +61,7 @@ def make_test(optim_cls, closure=None, kernel_count=2, **kwargs):
         torch._inductor.metrics.reset()
         input = torch.ones([10, 10], device="cuda:0")
         model_eager = torch.nn.Sequential(
-            *[torch.nn.Linear(10, 10, device="cuda:0") for _ in range(1)]
+            *[torch.nn.Linear(10, 10, device="cuda:0") for _ in range(2)]
         )
         model_eager(input).sum().backward()
 
