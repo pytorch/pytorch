@@ -21,5 +21,5 @@ traced_script_module.save("MobileNetV2.pt")
 # Dump root ops used by the model (for custom build optimization).
 ops = torch.jit.export_opnames(traced_script_module)
 
-with open('MobileNetV2.yaml', 'w') as output:
+with open("MobileNetV2.yaml", "w") as output:
     yaml.dump(ops, output)

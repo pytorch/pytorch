@@ -853,6 +853,20 @@ def has_composite_implicit_kernel(op):
         return False
     return True
 
+# Private API that returns a dict containing all ATen operators
+# that have CompositeImplicitAutograd decompositions registered in the dispatcher.
+def _get_composite_implicit_autograd_decomps() -> Dict[OpOverload, Callable]:
+    import re
+    # Get all C++ CompositeImplicitAutograd decomps.
+    op_names = [re.split(r'::|\.', x) for x in torch._C._dispatch_get_registrations_for_dispatch_key("CompositeImplicitAutograd")]
+    composite_implicit_ops = [getattr(getattr(getattr(torch.ops, x[0]), x[1]), "default" if len(x) < 3 else x[2]) for x in op_names if x[0] == "aten"]
+
+    # The API above only finds ops with a C++ CompositeImplicitAutograd registration.
+    # We also need to get at any ops that were given CompositeImplicitAutograd registrations from python.
+    all_op_names = [re.split(r'::|\.', x) for x in torch._C._dispatch_get_all_op_names()]
+    all_ops = [getattr(getattr(getattr(torch.ops, x[0]), x[1]), "default" if len(x) < 3 else x[2]) for x in all_op_names if x[0] == "aten"]
+    python_composite_implicit_ops = [x for x in all_ops if torch._C.DispatchKey.CompositeImplicitAutograd in x.py_kernels]
+    return torch._decomp.get_decompositions(composite_implicit_ops + python_composite_implicit_ops, prefer_cpp_composites=True)
 
 # The ops "namespace"
 ops = _Ops()
