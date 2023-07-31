@@ -26,8 +26,9 @@ void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle& op, D
     "(see Note [Ambiguity in AutogradOther kernel]). "
     "If you want to override CompositeImplicitAutograd, please open an issue to request a dedicated "
     "Autograd dispatch key for the backend.\n",
-    "If you only want to run inference instead of training, add `c10::InferenceMode mode;` "
-    "before model.forward(). Note this guard is only available in C++ but not Python at present.",
+    "If you only want to run inference instead of training, in C++, add `c10::InferenceMode mode;` "
+    "before model.forward(); in Python, use `torch.inference_mode()` as a context manager (see "
+    "https://pytorch.org/docs/stable/generated/torch.inference_mode.html).",
     "\nCanonical state\n~~~~~~~~~~~\n", op.dumpState(), "\n\n");
 }
 
