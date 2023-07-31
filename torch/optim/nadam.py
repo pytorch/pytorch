@@ -6,6 +6,7 @@ from typing import List, Optional
 
 __all__ = ['NAdam', 'nadam']
 
+
 class NAdam(Optimizer):
     def __init__(self, params, lr=2e-3, betas=(0.9, 0.999), eps=1e-8,
                  weight_decay=0, momentum_decay=4e-3, decoupled_weight_decay: bool = False,
@@ -113,6 +114,7 @@ class NAdam(Optimizer):
 
         return loss
 
+
 NAdam.__doc__ = r"""Implements NAdam algorithm.
 
     .. math::
@@ -193,7 +195,6 @@ def nadam(params: List[Tensor],
 
     See :class:`~torch.optim.NAdam` for details.
     """
-
 
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
@@ -315,7 +316,8 @@ def _multi_tensor_nadam(params: List[Tensor],
 
     assert not differentiable, "_foreach ops don't support autograd"
 
-    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps])
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+        [params, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps])
     for ((grouped_params, grouped_grads, grouped_exp_avgs,
          grouped_exp_avg_sqs, grouped_mu_products, grouped_state_steps), _) in grouped_tensors.values():
 
@@ -330,7 +332,8 @@ def _multi_tensor_nadam(params: List[Tensor],
             bias_correction2 = torch._foreach_add(torch._foreach_mul(bias_correction2, -1.0), 1.0)
             raised_step = torch._foreach_pow(0.96, torch._foreach_mul(grouped_state_steps, momentum_decay))
             mus = torch._foreach_mul(torch._foreach_add(torch._foreach_mul(raised_step, -0.5), 1.0), beta1)
-            raised_step_next = torch._foreach_pow(0.96, torch._foreach_mul(torch._foreach_add(grouped_state_steps, 1.0), momentum_decay))
+            raised_step_next = torch._foreach_pow(0.96,
+                                                  torch._foreach_mul(torch._foreach_add(grouped_state_steps, 1.0), momentum_decay))
             mu_nexts = torch._foreach_mul(torch._foreach_add(torch._foreach_mul(raised_step_next, -0.5), 1.0), beta1)
         else:
             bias_correction2 = [1 - beta2 ** step.item() for step in grouped_state_steps]
@@ -365,15 +368,20 @@ def _multi_tensor_nadam(params: List[Tensor],
             step_size_grads = torch._foreach_mul(mu_quotient, -1.0)
 
             mu_nexts_modified = torch._foreach_mul(mu_nexts, lr)
-            mu_products_next_modified = torch._foreach_add(torch._foreach_mul(torch._foreach_mul(grouped_mu_products, mu_nexts), -1.0), 1.0)
+            mu_products_next_modified = torch._foreach_add(torch._foreach_mul(torch._foreach_mul(
+                grouped_mu_products,
+                mu_nexts),
+                -1.0),
+                1.0)
             mu_next_quotient = torch._foreach_div(mu_nexts_modified, mu_products_next_modified)
             step_size_expavgs = torch._foreach_mul(mu_next_quotient, -1.0)
 
             torch._foreach_addcdiv_(grouped_params, torch._foreach_mul(grouped_grads, step_size_grads), exp_avg_sq_sqrt)
-            torch._foreach_addcdiv_(grouped_params, torch._foreach_mul(grouped_exp_avgs, step_size_expavgs), exp_avg_sq_sqrt)
+            torch._foreach_addcdiv_(grouped_params, torch._foreach_mul(
+                grouped_exp_avgs, step_size_expavgs), exp_avg_sq_sqrt)
         else:
             step_size_grads = _stack_if_compiling([(lr * (1. - mu) / (1. - mu_product.item())) * -1
-                                                for mu_product, mu in zip(grouped_mu_products, mus)])
+                                                  for mu_product, mu in zip(grouped_mu_products, mus)])
             step_size_expavg = _stack_if_compiling([(lr * mu_next / (1. - mu_product.item() * mu_next)) * -1
                                                     for mu_product, mu_next in zip(grouped_mu_products, mu_nexts)])
 
