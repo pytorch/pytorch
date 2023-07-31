@@ -41,7 +41,7 @@ if torch.cuda.is_available():
     SEMI_STRUCTURED_SUPPORTED_BACKENDS.append("cutlass")
 
     # check if cslt is available for now using this:
-    # TODO when we add cusparselt as a backend, we can update this to be correct
+    # TODO when we add cusparselt as a backend, we can update this to be use torch.cusparselt.is_available()
     try:
         torch._cslt_compress(torch.ones(128, 128).cuda())
         SEMI_STRUCTURED_SUPPORTED_BACKENDS.append("cusparselt")
