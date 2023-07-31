@@ -447,8 +447,8 @@ class TestExport(TestCase):
 
         inp_container = ((torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),)
 
-        ep = export(Foo(), inp_container, _add_runtime_assertions=False)
-        ep_rexported = export(ep.module(), inp_container, _add_runtime_assertions=False)
+        ep = export(Foo(), inp_container)
+        ep_rexported = export(ep.module(), inp_container)
 
         inp_test = ((torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),)
 
@@ -485,8 +485,8 @@ class TestExport(TestCase):
 
         inp_container = ({"a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)), "b": torch.randn(20, 16, 50, 100)},)
 
-        ep = export(Foo(), inp_container, _add_runtime_assertions=False)
-        ep_rexported = export(ep.module(), inp_container, _add_runtime_assertions=False)
+        ep = export(Foo(), inp_container)
+        ep_rexported = export(ep.module(), inp_container)
 
         inp_test = ({"a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)), "b": torch.randn(20, 16, 50, 100)},)
 
