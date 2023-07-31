@@ -258,7 +258,7 @@ def set_logs(
             Whether to emit the TorchInductor perf hints. Default: ``False``
 
         onnx_diagnostics (:class:`bool`):
-            Whether to emit the ONNX exporter diagnostics. Default: ``False``
+            Whether to emit the ONNX exporter diagnostics in logging. Default: ``False``
 
         modules (dict):
             This argument provides an alternate way to specify the above log
