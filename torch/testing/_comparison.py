@@ -1235,7 +1235,13 @@ def not_close_error_metas(
                 "please except the previous error and raise an expressive `ErrorMeta` instead."
             ) from error
 
-    return error_metas
+    # Any ErrorMeta objects in this list will have captured
+    # traceback that refer to the frame of this function,
+    # if the local variable `error_metas` creates a reference cycle
+    # back to the ErrorMeta objects. By poping the actual list of
+    # error_metas on return we break the cycle.
+    error_metas = [error_metas]
+    return error_metas.pop()
 
 
 def assert_close(
