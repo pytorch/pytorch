@@ -3389,9 +3389,7 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_CircularPad2d,
                module_error_inputs_func=module_error_inputs_torch_nn_Pad2d,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.CircularPad3d,
                module_inputs_func=module_inputs_torch_nn_CircularPad3d,
