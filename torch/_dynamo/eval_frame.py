@@ -16,7 +16,18 @@ import warnings
 import weakref
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 from unittest.mock import patch
 
 import torch
@@ -831,6 +842,13 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         return r
 
 
+class ExportResult(NamedTuple):
+    graph_module: torch.fx.GraphModule
+    guards: Set[_guards.Guard]
+    # NB: Do not add new fields without overriding __iter__; people are
+    # destructuring so it is BC-breaking
+
+
 def export(
     f: Callable[..., Any],
     *extra_args,
@@ -844,7 +862,7 @@ def export(
     assume_static_by_default: bool = False,
     fake_mode: fake_tensor.FakeTensorMode = None,
     **extra_kwargs,
-) -> Callable[..., Tuple[torch.fx.GraphModule, Set[_guards.Guard]]]:
+) -> Callable[..., ExportResult]:
     """
     Export an input function f to a format that can be executed outside of PyTorch using the FX graph.
 
@@ -1195,7 +1213,7 @@ def export(
         )
 
         new_graph.recompile()
-        return (new_graph, out_guards)
+        return ExportResult(new_graph, out_guards)
 
     if extra_args or extra_kwargs:
         warnings.warn(

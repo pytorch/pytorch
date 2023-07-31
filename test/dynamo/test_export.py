@@ -191,7 +191,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return y[0] + y[1]
 
         inp = [torch.tensor([1.3, 3.77, 0.1]), torch.tensor([8.7, 6.23, 9.9])]
-        gm, _ = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(inp)
+        gm = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(
+            inp
+        ).graph_module
         self.assertTrue(torch._dynamo.utils.same(gm(inp), f(inp)))
 
     def test_export_with_shallow_list_copy_with_side_effects(self):
@@ -202,7 +204,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return x[0] + x[1], y[0] + y[1], y[2]
 
         inp = [torch.tensor([1.3, 3.77, 0.1]), torch.tensor([8.7, 6.23, 9.9])]
-        gm, _ = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(inp)
+        gm = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(
+            inp
+        ).graph_module
         res = gm(inp)
         ref = f(inp)
         self.assertTrue(torch._dynamo.utils.same(res, ref))
@@ -973,7 +977,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             def __init__(self):
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.ones(1, 1))
-                self.register_buffer("buffer", torch.ones(1, 1))
+                self.buffer = torch.nn.Buffer(torch.ones(1, 1))
 
             def forward(self, x):
                 x = torch.nn.functional.linear(x, torch.randn(4, 4))
@@ -2665,7 +2669,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer1", torch.ones(6, 2))
+                self.buffer1 = torch.nn.Buffer(torch.ones(6, 2))
 
             def forward(self, x):
                 x.add_(2)
@@ -3288,6 +3292,160 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
     add_2 = add_1 + sin_2;  add_1 = sin_2 = None
     return add_2""",
         )
+
+    def test_retracibility(self):
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x):
+                a, b = x
+                a_conv = self.conv(a)
+                a_linear = self.linear(a_conv)
+                b_conv = self.conv(b)
+                b_linear = self.linear(b_conv)
+                return (
+                    a_linear.cos() + b_linear.sin(),
+                    a_linear.sin() + b_linear.cos(),
+                )
+
+        inp_container = (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100))
+
+        gm, _ = torch._dynamo.export(Foo(), inp_container, aten_graph=True)
+        gm2, _ = torch._dynamo.export(gm, inp_container, aten_graph=True)
+
+        inp_test = (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100))
+
+        self.assertTrue(torch.allclose(gm(inp_test)[0], gm2(inp_test)[0]))
+        self.assertTrue(torch.allclose(gm(inp_test)[1], gm2(inp_test)[1]))
+
+    def test_retracibility_dict_container_inp_out(self):
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x):
+                a1, a2 = x["a"]
+                b = x["b"]
+                a1_conv = self.conv(a1)
+                a1_linear = self.linear(a1_conv)
+                a2_conv = self.conv(a2)
+                a2_linear = self.linear(a2_conv)
+                b_conv = self.conv(b)
+                b_linear = self.linear(b_conv)
+                return {
+                    "a": [
+                        a1_linear.cos() + b_linear.sin(),
+                        a1_linear.cos() + b_linear.sin(),
+                    ],
+                    "b": a2_linear.sin() + b_linear.cos(),
+                }
+
+        inp_container = {
+            "a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),
+            "b": torch.randn(20, 16, 50, 100),
+        }
+
+        gm, _ = torch._dynamo.export(Foo(), inp_container, aten_graph=True)
+        gm2, _ = torch._dynamo.export(gm, inp_container, aten_graph=True)
+
+        inp_test = {
+            "a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),
+            "b": torch.randn(20, 16, 50, 100),
+        }
+
+        self.assertTrue(torch.allclose(gm(inp_test)["a"][0], gm2(inp_test)["a"][0]))
+        self.assertTrue(torch.allclose(gm(inp_test)["a"][1], gm2(inp_test)["a"][1]))
+        self.assertTrue(torch.allclose(gm(inp_test)["b"], gm2(inp_test)["b"]))
+
+    def test_retracibility_nested_list_out(self):
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x):
+                a1, a2 = x["a"]
+                b = x["b"]
+                a1_conv = self.conv(a1)
+                a1_linear = self.linear(a1_conv)
+                a2_conv = self.conv(a2)
+                a2_linear = self.linear(a2_conv)
+                b_conv = self.conv(b)
+                b_linear = self.linear(b_conv)
+                return [
+                    [
+                        a1_linear.cos() + b_linear.sin(),
+                        a1_linear.cos() + b_linear.sin(),
+                    ],
+                    [
+                        a2_linear.sin() + b_linear.cos(),
+                        a2_linear.sin() + b_linear.cos(),
+                    ],
+                ]
+
+        inp_container = {
+            "a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),
+            "b": torch.randn(20, 16, 50, 100),
+        }
+
+        gm, _ = torch._dynamo.export(Foo(), inp_container, aten_graph=True)
+        gm2, _ = torch._dynamo.export(gm, inp_container, aten_graph=True)
+
+        inp_test = {
+            "a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),
+            "b": torch.randn(20, 16, 50, 100),
+        }
+
+        self.assertTrue(torch.allclose(gm(inp_test)[0][0], gm2(inp_test)[0][0]))
+        self.assertTrue(torch.allclose(gm(inp_test)[0][1], gm2(inp_test)[0][1]))
+        self.assertTrue(torch.allclose(gm(inp_test)[1][0], gm2(inp_test)[1][0]))
+        self.assertTrue(torch.allclose(gm(inp_test)[1][1], gm2(inp_test)[1][1]))
+
+    @unittest.expectedFailure
+    def test_fx_pytree(self):
+        def foo(args):
+            flat_args, spec = torch.utils._pytree.tree_flatten(args)
+            flat_args_fx = torch.fx._pytree.tree_flatten_spec(args, spec)
+            return flat_args_fx[0] + flat_args[0]
+
+        inp_container = (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100))
+
+        gm, _ = torch._dynamo.export(foo, inp_container, aten_graph=True)
+
+        self.assertTrue(torch.allclose(foo(inp_container), gm(inp_container)))
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
