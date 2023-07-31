@@ -6,7 +6,8 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
-__all__ = ['Uniform']
+__all__ = ["Uniform"]
+
 
 class Uniform(Distribution):
     r"""
@@ -25,8 +26,10 @@ class Uniform(Distribution):
         high (float or Tensor): upper range (exclusive).
     """
     # TODO allow (loc,scale) parameterization to allow independent constraints.
-    arg_constraints = {'low': constraints.dependent(is_discrete=False, event_dim=0),
-                       'high': constraints.dependent(is_discrete=False, event_dim=0)}
+    arg_constraints = {
+        "low": constraints.dependent(is_discrete=False, event_dim=0),
+        "high": constraints.dependent(is_discrete=False, event_dim=0),
+    }
     has_rsample = True
 
     @property
