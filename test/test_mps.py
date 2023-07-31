@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["module: mps"]
 
 import io
@@ -23,7 +22,7 @@ from torch.nn import Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, run_tests, TestCase, download_file, IS_CI, NoTest,
-     TEST_WITH_UBSAN, skipIfSlowGradcheckEnv, suppress_warnings)
+     skipIfSlowGradcheckEnv, suppress_warnings)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
@@ -408,7 +407,6 @@ def mps_ops_modifier(ops):
         'cumprod': None,
         'digamma': None,
         'erfc': None,
-        'erfinv': None,
         'frexp': None,
         'gcd': None,
         'geqrf': None,
@@ -424,7 +422,6 @@ def mps_ops_modifier(ops):
         'isposinf': None,
         'kthvalue': None,
         'lcm': None,
-        'lerp': None,
         'lgamma': None,
         'linalg.cholesky': None,
         'linalg.cholesky_ex': None,
@@ -832,7 +829,7 @@ def skipMPSMemoryLeakCheckIf(condition):
         return fn
     return dec
 
-class MpsMemoryLeakCheck():
+class MpsMemoryLeakCheck:
     def __init__(self, testcase, name=None):
         self.name = testcase.id() if name is None else name
         self.testcase = testcase
@@ -3745,7 +3742,7 @@ class TestLogical(TestCaseMPS):
             result_cpu = torch.logical_and(cpu_x, cpu_other)
             self.assertEqual(result, result_cpu)
 
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor(([1, 0, 0, 1])))
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
         helper(
             self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
             self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
@@ -3769,7 +3766,7 @@ class TestLogical(TestCaseMPS):
 
             self.assertEqual(result, result_cpu)
 
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor(([1, 0, 0, 1])))
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
         helper(
             self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
             self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
@@ -3793,7 +3790,7 @@ class TestLogical(TestCaseMPS):
 
             self.assertEqual(result, result_cpu)
 
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor(([1, 0, 0, 1])))
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
         helper(
             self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
             self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
@@ -4162,7 +4159,6 @@ class TestNLLLoss(TestCaseMPS):
         self._nll_loss_helper([2, 3, 5, 1], "none", torch.empty([2, 5, 1], device=device))
         self._nll_loss_helper([2, 3, 5, 7, 1], "none", torch.empty([2, 5, 7, 1], device=device))
 
-    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_nll_loss_empty_tensor_reduction_mean(self, device='cpu'):
         nan = torch.tensor(float('nan'), device=device)
         self._nll_loss_helper([1, 3], "mean", nan)
@@ -4985,6 +4981,9 @@ class TestNLLLoss(TestCaseMPS):
         helper((1, 1, 3, 3))
         helper((7, 13))
         helper((2, 8, 4, 5))
+        x_cpu = torch.tensor([], dtype=torch.bool)
+        x_mps = x_cpu.to("mps")
+        assert x_cpu.all() == x_mps.all().cpu()
 
     # Test forward min
     def test_min_el(self):
@@ -7547,6 +7546,26 @@ class TestNLLLoss(TestCaseMPS):
         helper((2, 8, 3, 5), torch.expm1)
         helper((2, 8, 3, 5), torch.log)
         helper((2, 8, 3, 5), torch.cos)
+        helper((2, 8, 3, 5), torch.erfinv)
+
+
+    def test_non_dense_in_storage_unary_ops(self):
+        def helper(op):
+            for dtypef in [torch.float32]:
+                cpu_x = torch.randn(100, device='cpu', dtype=dtypef, requires_grad=False)
+                mps_x = cpu_x.detach().clone().to('mps')
+                self.assertEqual(op(cpu_x[::2]), op(mps_x[::2]))
+
+            for dtypei in [torch.int32, torch.int16, torch.int8]:
+                cpu_x = torch.randint(127, device='cpu', size=(100,), dtype=dtypei, requires_grad=False)
+                mps_x = cpu_x.to('mps')
+                self.assertEqual(op(cpu_x[::2]), op(mps_x[::2]), rtol=1e-4, atol=1e-4)
+
+        helper(torch.exp)
+        helper(torch.exp2)
+        helper(torch.expm1)
+        helper(torch.log)
+        helper(torch.cos)
 
     def test_atan2(self):
         def helper(shape):
@@ -9231,7 +9250,7 @@ class TestConvolutionMPS(TestCaseMPS):
                                     [[3.0000004768, 6.5000000000, 5.0000, 4.6675000191, 9.2500],
                                      [1.0000000000, 7.1665000916, 5.0000, 5.0000000000, 9.2500]], device="mps").view(1, 1, 2, 5)
                         else:
-                            raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
+                            raise AssertionError(f"missing groundtruth test for padding mode '{padding_mode}'")
                     elif mode == 'nearest':
                         if padding_mode == 'zeros':
                             if align_corners:
@@ -9261,7 +9280,7 @@ class TestConvolutionMPS(TestCaseMPS):
                                     [[1., 8., 5., 7., 9.],
                                      [1., 8., 5., 8., 9.]], device="mps").view(1, 1, 2, 5)
                         else:
-                            raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
+                            raise AssertionError(f"missing groundtruth test for padding mode '{padding_mode}'")
                     elif mode == 'bicubic':
                         if padding_mode == 'zeros':
                             if align_corners:
@@ -9291,10 +9310,10 @@ class TestConvolutionMPS(TestCaseMPS):
                                     [[2.7993753, 6.6050020, 4.25, 4.7138715, 10.269531],
                                      [0.8125000, 7.2822485, 4.25, 5.0000052, 9.332031]], device="mps").view(1, 1, 2, 5)
                         else:
-                            raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
+                            raise AssertionError(f"missing groundtruth test for padding mode '{padding_mode}'")
 
                     else:
-                        raise AssertionError("missing groundtruth test for interpolation mode '{}'".format(mode))
+                        raise AssertionError(f"missing groundtruth test for interpolation mode '{mode}'")
                     output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
                                            align_corners=align_corners)
                     self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,
@@ -10452,7 +10471,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.huber_loss',
         'true_divide', 'kron',
         'gradient', 'var', 'std', 'ldexp',
-        'linalg.vector_norm',
+        'linalg.vector_norm', 'lerp',
         'addr', 'var_mean',
         'var_mean_unbiased',
         'acosh', 'asinh', 'asin',

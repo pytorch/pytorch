@@ -99,7 +99,7 @@ class _StorageBase:
         return str(self)
 
     def __iter__(self):
-        return iter((self[i] for i in range(self.size())))
+        return iter(self[i] for i in range(self.size()))
 
     def __copy__(self):
         return self.clone()
@@ -784,7 +784,7 @@ class TypedStorage:
 
     def __iter__(self):
         _warn_typed_storage_removal()
-        return iter((self[i] for i in range(self.size())))
+        return iter(self[i] for i in range(self.size()))
 
     def __copy__(self):
         _warn_typed_storage_removal()
@@ -943,13 +943,13 @@ class TypedStorage:
 
         else:
             if dtype is not None or len(args) == 5:
-                raise RuntimeError((
+                raise RuntimeError(
                     "from_buffer: 'dtype' can only be specified in "
-                    "UntypedStorage.from_buffer and TypedStorage.from_buffer"))
+                    "UntypedStorage.from_buffer and TypedStorage.from_buffer")
             if device is not None:
-                raise RuntimeError((
+                raise RuntimeError(
                     "from_buffer: 'device' can only be specified in "
-                    "UntypedStorage.from_buffer and TypedStorage.from_buffer"))
+                    "UntypedStorage.from_buffer and TypedStorage.from_buffer")
 
             dtype = cls._dtype
             untyped_storage = torch.UntypedStorage.from_buffer(*args, dtype=dtype, **kwargs)
