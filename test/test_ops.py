@@ -1935,8 +1935,6 @@ class TestRefsOpsInfo(TestCase):
 
 fake_skips = (
     "aminmax",  # failing input
-    "cholesky",  # Could not run 'aten::cholesky' with arguments from the 'Meta' backend
-    "cholesky_inverse",  # Could not run 'aten::cholesky' with arguments from the 'Meta' backend
     "cov",  # aweights cannot be negtaive
     "istft",  # window overlap add min: 0
     "linalg.eigvals",  # The tensor has a non-zero number of elements, but its data is not allocated yet
@@ -2014,7 +2012,6 @@ fake_backward_skips = {
     "roll",
     "svd_lowrank",
     "sgn",
-    "cholesky",
 }
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {

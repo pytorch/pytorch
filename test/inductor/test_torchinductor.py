@@ -6685,6 +6685,17 @@ class CommonTemplate:
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    def test_inductor_bucketize_computed_offsets(self):
+        def fn(inp, offsets):
+            return torch.ops.prims._inductor_bucketize(inp, offsets + 0.01)
+
+        inp = torch.tensor(
+            [-1.0, -0.9, -0.8, -0.5, 0.0, 0.1, 0.2, 0.4, 0.5, 0.6, 0.9, 0.91]
+        )
+        offsets = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9]) - 0.01
+
+        self.common(fn, (inp, offsets), check_lowp=False)
+
     @config.patch(implicit_fallbacks=True)
     def test_custom_op(self):
         import torch.library
