@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils.weak import WeakTensorKeyDictionary
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -6234,9 +6235,7 @@ class CommonTemplate:
         class Repro(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer(
-                    "_tensor_constant0", torch.randn([], dtype=torch.float32)
-                )
+                self._tensor_constant0 = nn.Buffer(torch.randn([], dtype=torch.float32))
 
             def forward(self, arg0_1, arg1_1):
                 convert_element_type = torch.ops.prims.convert_element_type.default(
@@ -6685,6 +6684,17 @@ class CommonTemplate:
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    def test_inductor_bucketize_computed_offsets(self):
+        def fn(inp, offsets):
+            return torch.ops.prims._inductor_bucketize(inp, offsets + 0.01)
+
+        inp = torch.tensor(
+            [-1.0, -0.9, -0.8, -0.5, 0.0, 0.1, 0.2, 0.4, 0.5, 0.6, 0.9, 0.91]
+        )
+        offsets = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9]) - 0.01
+
+        self.common(fn, (inp, offsets), check_lowp=False)
+
     @config.patch(implicit_fallbacks=True)
     def test_custom_op(self):
         import torch.library
@@ -6938,6 +6948,46 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse("to(tl.int64)" in code)
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_constant_folding_deallocation(self):
+            import torch._inductor
+
+            def fn():
+                x = torch.empty([100])
+                for _ in range(10):
+                    x = x + 1
+
+                return x
+
+            mod = make_fx(fn)()
+
+            live_tensors = WeakTensorKeyDictionary()
+            max_live_tensors = 0
+
+            class LiveTensors(TorchDispatchMode):
+                def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                    nonlocal live_tensors
+                    nonlocal max_live_tensors
+
+                    kwargs = kwargs if kwargs else {}
+                    for arg in tree_flatten((args, kwargs))[0]:
+                        if isinstance(arg, torch.Tensor):
+                            live_tensors[arg] = True
+
+                    out = func(*args, **kwargs)
+
+                    live_tensors[out] = True
+                    max_live_tensors = max(max_live_tensors, len(live_tensors))
+
+                    return out
+
+            mode = LiveTensors()
+            from torch._inductor.freezing import ConstantFolder
+
+            with mode:
+                ConstantFolder(mod).run()
+
+            self.assertTrue(max_live_tensors == 2)
 
         # See https://github.com/pytorch/pytorch/issues/100348
         def test_inductor_detach_view(self):
