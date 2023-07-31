@@ -15,13 +15,7 @@ from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
-TEST_CUDNN = False
 TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
-if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
-    CUDNN_HEADER_EXISTS = os.path.isfile(os.path.join(CUDA_HOME, "include/cudnn.h"))
-    TEST_CUDNN = (
-        TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
-    )
 
 
 def remove_build_path():
@@ -122,6 +116,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
                 torch._register_device_module('xxx', DummyModule)
             # check generator registered before using
+            torch.utils.rename_privateuse1_backend('foo')
             with self.assertRaisesRegex(RuntimeError, "torch has no module of"):
                 with torch.random.fork_rng(device_type="foo"):
                     pass
@@ -161,7 +156,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             with self.assertRaisesRegex(RuntimeError, "The custom device module of"):
                 torch.utils.generate_methods_for_privateuse1_backend()
 
-        def test_generator_registration():
+        def test_open_device_generator_registration_and_hooks():
             device = self.module.custom_device()
             # None of our CPU operations should call the custom add function.
             self.assertFalse(self.module.custom_add_called())
@@ -176,6 +171,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             with self.assertRaisesRegex(RuntimeError,
                                         "Only can register a generator to the PrivateUse1 dispatch key once"):
                 self.module.register_generator()
+            self.module.register_hook()
+            default_gen = self.module.default_generator(0)
+            self.assertTrue(default_gen.device.type == torch._C._get_privateuse1_backend_name())
 
         def test_open_device_dispatchstub():
             # test kernels could be reused by privateuse1 backend through dispatchstub
@@ -417,7 +415,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_before_common_registration()
         test_common_registration()
         test_after_common_registration()
-        test_generator_registration()
+        test_open_device_generator_registration_and_hooks()
         test_open_device_dispatchstub()
         test_open_device_random()
         test_open_device_tensor()

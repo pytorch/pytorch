@@ -512,7 +512,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         # ensure compatibilty with dynamo explain
 
-        explain_out = torch._dynamo.explain(ddp_m, inputs)
+        explain_out = torch._dynamo.explain(ddp_m)(inputs)
         break_reasons = explain_out.break_reasons
         self.assertEqual(len(break_reasons), 3)
         self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
@@ -760,8 +760,9 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self._param = torch.randn((3,), device="cuda")
-                self._buf = torch.nn.Buffer(
-                    torch.randn((3,), requires_grad=False, device="cuda"))
+                self.register_buffer(
+                    "_buf", torch.randn((3,), requires_grad=False, device="cuda")
+                )
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 # Use `_param` and `_buf` each twice in this compiled forward
@@ -788,8 +789,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         class BufModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self._buf = nn.Buffer(
-                    torch.randn((3,), requires_grad=False, device="cuda")
+                self.register_buffer(
+                    "_buf", torch.randn((3,), requires_grad=False, device="cuda")
                 )
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -801,7 +802,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 self._param = nn.Parameter(torch.randn((1,), device="cuda"))
                 self._buf_module = BufModule()
                 # Share the buffer, meaning same tensor but different source
-                self._buf = self._buf_module._buf
+                self.register_buffer("_buf", self._buf_module._buf)
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 # Use the same buffer tensor twice in the compiled forward,
@@ -816,11 +817,11 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         fsdp_model = torch._dynamo.optimize(cnt)(fsdp_model)
         inp = torch.randn((2, 3), device="cuda")
-        for _ in range(3):
+        for _ in range(15):
             fsdp_model(inp)
         # Check for no recompiles (if there were incorrect de-dup guards, then
         # the frame count would be equal to the number of forward calls)
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.frame_count, 3)
 
     def test_fsdp_staticmethod(self):
         """
@@ -860,7 +861,10 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             test_outs.append(fsdp_model(x))
             # Check for no recompiles, which could happen if incorrectly
             # passing args to the staticmethod (e.g. doubly passing `self`)
-            self.assertEqual(cnt.frame_count, 1)
+            # 3 is expected here for 1 forward.
+            # Graph 1 should be add and imul
+            # Graphs 2 and 3 are forward hooks on device mesh, and are fine to capture.
+            self.assertEqual(cnt.frame_count, 3)
         for test_out in test_outs:
             self.assertEqual(test_out, ref_out)
 

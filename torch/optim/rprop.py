@@ -153,7 +153,7 @@ Rprop.__doc__ = r"""Implements the resilient backpropagation algorithm.
     For further details regarding the algorithm we refer to the paper
     `A Direct Adaptive Method for Faster Backpropagation Learning: The RPROP Algorithm
     <http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.21.1417>`_.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -163,11 +163,11 @@ Rprop.__doc__ = r"""Implements the resilient backpropagation algorithm.
             (default: (0.5, 1.2))
         step_sizes (Tuple[float, float], optional): a pair of minimal and
             maximal allowed step sizes (default: (1e-6, 50))
-        {foreach}
-        {maximize}
-        {differentiable}
+        {_foreach_doc}
+        {_maximize_doc}
+        {_differentiable_doc}
 
-    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
+    """
 
 def rprop(
     params: List[Tensor],

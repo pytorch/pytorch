@@ -639,6 +639,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return l3[0] + l3[1]
 
     @make_test
+    def test_list_index_with_constant_tensor(a, b):
+        l1 = [a, b, a + 1, b + 1]
+        return l1[torch.as_tensor(2)]
+
+    @make_test
     def test_startswith(a, b):
         x = a + b
         if "foobar".startswith("foo") and "test" in constant3.__module__:

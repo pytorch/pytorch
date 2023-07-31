@@ -524,7 +524,11 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
     // strides from packed projection for nested tensors when seq_len is 1 will be
     // and will trigger a contiguous call in the kernel, so we prevent this
     bool no_seq_len_1_nested = query.is_nested() ? check_for_seq_len_1_nested_tensor(kernel_params, false) : true;
-    if (no_seq_len_1_nested &&
+    // The API for transfomer_encoder is a mask of shape (Batch_Size, Seq_len_q)
+    // For mem-eff attention this will cause the expand call to error
+    // For now I am going to turn of that path not have to deal with all the annoying
+    // Mask type shape grossness
+    if (!mask.has_value() && no_seq_len_1_nested &&
         (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention)) {
       auto x = at::linear(query, qkv_weight, qkv_bias);
       auto chunks = x.chunk(3, -1);
@@ -536,7 +540,6 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
                       .transpose(1, 2);
       chunks[2] = (chunks[2].view({x_size_0, -1, num_head, dim_per_head}))
                       .transpose(1, 2);
-
       auto y = at::scaled_dot_product_attention(
           chunks[0], chunks[1], chunks[2], mask, 0.0, false, c10::nullopt);
 
@@ -712,6 +715,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
+    const c10::optional<at::Tensor>& attn_bias,
     bool compute_log_sumexp,
     double dropout_p,
     bool is_causal,
@@ -733,7 +737,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
       q_t,
       k_t,
       v_t,
-      c10::nullopt,
+      attn_bias,
       c10::nullopt,
       c10::nullopt,
       c10::nullopt,
@@ -1045,8 +1049,14 @@ std::tuple<at::Tensor, at::Tensor, Tensor, Tensor> _efficient_attention_forward(
 
       // assign strides for bias, viewed as
       // (batch_sz, n_heads, n_queries, n_keys)
-      const at::Tensor bias_4d_view =
-          get_bias_4d_view(*bias, B, num_heads, M, N);
+      // We make sure to expand prior to calling the kernel
+      const at::Tensor& bias_4d_view = *bias;
+      TORCH_CHECK(bias_4d_view.dim()==4);
+      TORCH_CHECK(bias_4d_view.size(0)==B);
+      TORCH_CHECK(bias_4d_view.size(1)==num_heads);
+      TORCH_CHECK(bias_4d_view.size(2)==M);
+      TORCH_CHECK(bias_4d_view.size(3)==N);
+
       ASSIGN_CHECK_OVERFLOW(p.bias_strideB, bias_4d_view.stride(0));
       ASSIGN_CHECK_OVERFLOW(p.bias_strideH, bias_4d_view.stride(1));
       ASSIGN_CHECK_OVERFLOW(p.bias_strideM, bias_4d_view.stride(2));

@@ -664,7 +664,7 @@ def squeeze(x, dim=None):
 
     new_shape = []
     for d, s in enumerate(x.get_size()):
-        if not (d in dims and V.graph.sizevars.shape_env.evaluate_expr(sympy.Eq(s, 1))):
+        if not (d in dims and V.graph.sizevars.evaluate_expr(sympy.Eq(s, 1))):
             new_shape.append(s)
 
     # squeeze does nothing if the size isn't 1
@@ -779,11 +779,14 @@ def repeat(x, repeats):
 
     new_size = list(x.get_size())
 
+    zero_tensor = False
     for i in range(len(repeats)):
-        assert repeats[i] != 0
-        if repeats[i] != 1:
-            new_size[i] = new_size[i] * repeats[i]
+        if repeats[i] == 0:
+            zero_tensor = True
+        new_size[i] = new_size[i] * repeats[i]
 
+    if zero_tensor:
+        return empty(new_size, dtype=x.get_dtype(), device=x.get_device())
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
         return expand(x, new_size)
 
@@ -835,9 +838,9 @@ def slice_(x, dim=0, start=0, end=2**63, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
-    if V.graph.sizevars.shape_env.evaluate_expr(sympy.Lt(start + dim_size, 0)):
+    if V.graph.sizevars.evaluate_expr(sympy.Lt(start + dim_size, 0)):
         start = 0
-    if V.graph.sizevars.shape_env.evaluate_expr(sympy.Lt(end + dim_size, 0)):
+    if V.graph.sizevars.evaluate_expr(sympy.Lt(end + dim_size, 0)):
         end = 0
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
@@ -882,7 +885,7 @@ def roll(a, shifts, dims=tuple()):
 
     (dim,) = dims
     # TODO: Avoid guarding on shape here
-    size = V.graph.sizevars.guard_static_shape(a.get_size()[dim])
+    size = V.graph.sizevars.evaluate_static_shape(a.get_size()[dim])
     start = (size - shifts[0]) % size
     a_loader = a.make_loader()
 
@@ -957,8 +960,7 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
         dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
     )
 
-    evaluate_expr = V.graph.sizevars.shape_env.evaluate_expr
-    offset_negative = evaluate_expr(sympy.Lt(offset, 0))
+    offset_negative = V.graph.sizevars.evaluate_expr(sympy.Lt(offset, 0))
     if offset_negative:
         diag_size = max(min(original_shape[dim1] + offset, original_shape[dim2]), 0)
     else:
@@ -1014,11 +1016,11 @@ def select(x, dim, idx):
 @register_lowering(aten.split, type_promotion_kind=None)
 def split(x, sizes, dim=0):
     dim = _validate_dim(x, dim, 0)
-    x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
+    x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
     if isinstance(sizes, sympy.Expr):
         # TODO: We don't have to guard on sizes per se, but the number
         # of splits must stay constant
-        sizes = V.graph.sizevars.guard_static_shape(sizes)
+        sizes = V.graph.sizevars.evaluate_static_shape(sizes)
     if isinstance(sizes, (int, sympy.Integer)):
         sizes = [sizes] * ((x_size + sizes - 1) // sizes)
     result = []
@@ -1038,7 +1040,7 @@ def split_with_sizes(x, sizes, dim=0):
 @register_lowering(aten.unbind, type_promotion_kind=None)
 def unbind(x, dim=0):
     dim = _validate_dim(x, dim, 0)
-    x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
+    x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
     result = []
     for i in range(x_size):
         result.append(select(x, dim, i))
@@ -1100,7 +1102,7 @@ def _validate_dim(x, dim, offset=0):
 def glu(x, dim=-1):
     dim = _validate_dim(x, dim, 0)
     # TODO: don't guard on static shape here
-    new_len = V.graph.sizevars.guard_static_shape(x.get_size()[dim]) // 2
+    new_len = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim]) // 2
     a = slice_(x, dim, 0, new_len)
     b = slice_(x, dim, new_len, new_len * 2)
     return mul(a, sigmoid(b))
@@ -1113,6 +1115,7 @@ def register_onednn_fusion_ops():
             torch.ops.mkldnn._convolution_pointwise_,
             torch.ops.mkldnn._convolution_transpose_pointwise,
             torch.ops.mkldnn._linear_pointwise,
+            aten.mkldnn_rnn_layer.default,
         ]
 
         @register_lowering(torch.ops.mkldnn._convolution_pointwise)
@@ -1251,6 +1254,47 @@ def register_onednn_fusion_ops():
                     scalars,
                     algorithm,
                 )
+            )
+
+        @register_lowering(aten.mkldnn_rnn_layer.default)
+        def mkldnn_rnn_layer(
+            x: TensorBox,
+            w0: TensorBox,
+            w1: TensorBox,
+            w2: TensorBox,
+            w3: TensorBox,
+            hx: TensorBox,
+            cx: TensorBox,
+            reverse: bool,
+            batch_sizes: List[int],
+            mode: int,
+            hidden_size: int,
+            num_layers: int,
+            has_biases: bool,
+            bidirectional: bool,
+            batch_first: bool,
+            train: bool,
+        ):
+            return pytree.tree_map(
+                TensorBox.create,
+                ir.MkldnnRnnLayer.create(
+                    x,
+                    w0,
+                    w1,
+                    w2,
+                    w3,
+                    hx,
+                    cx,
+                    reverse,
+                    batch_sizes,
+                    mode,
+                    hidden_size,
+                    num_layers,
+                    has_biases,
+                    bidirectional,
+                    batch_first,
+                    train,
+                ),
             )
 
         if torch._C.has_mkl:
@@ -1597,6 +1641,11 @@ def _inductor_bucketize(
             input, boundaries, out_int32=out_int32, right=right
         )
 
+    # The entire boundaries tensor needs to be used by ops.bucketize, so we
+    # need to realize it into global memory; or in other words, we can't
+    # guarantee that boundaries.get_name() (used below) will exist unless
+    # we call boundaries.realize().
+    boundaries.realize()
     boundaries_size = boundaries.get_size()[0]
     boundaries_loader = boundaries.make_loader()
     device = input.get_device()
@@ -1705,7 +1754,6 @@ make_fallback(aten.cumprod, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
-make_fallback(aten.dist)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten.fractional_max_pool2d)
@@ -1741,7 +1789,6 @@ make_fallback(aten.max_unpool2d)
 make_fallback(aten.max_unpool3d)
 make_fallback(aten.median)
 make_fallback(aten.mode)
-make_fallback(aten.multilabel_margin_loss_forward)
 make_fallback(aten.nanmedian)
 make_fallback(aten.ormqr)
 make_fallback(aten._pdist_forward)
@@ -1794,12 +1841,10 @@ make_fallback(aten.fractional_max_pool2d_backward)
 make_fallback(aten.fractional_max_pool3d_backward)
 make_fallback(aten._linalg_check_errors)
 make_fallback(aten.max_pool3d_with_indices_backward)
-make_fallback(aten.multilabel_margin_loss_backward)
 make_fallback(aten._pdist_backward)
 make_fallback(aten.reflection_pad1d_backward)
 make_fallback(aten.replication_pad1d_backward)
 make_fallback(aten.soft_margin_loss_backward, warn=False)
-make_fallback(aten.softshrink_backward, warn=False)
 make_fallback(aten.linalg_pinv.atol_rtol_tensor)
 make_fallback(aten.segment_reduce.default)
 make_fallback(aten._segment_reduce_backward.default)
@@ -1887,7 +1932,7 @@ def select_scatter(x, src, dim: int, index: int):
     assert x.get_dtype() == src.get_dtype()
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
-    if index < 0:
+    if V.graph.sizevars.evaluate_expr(sympy.Lt(index, 0)):
         index = index + x.get_size()[dim]
     V.graph.sizevars.guard_leq(0, index)
     V.graph.sizevars.guard_lt(index, x.get_size()[dim])
@@ -1918,9 +1963,9 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
-    if start is not None and start < 0:
+    if start is not None and V.graph.sizevars.evaluate_expr(sympy.Lt(start, 0)):
         start = start + dim_size
-    if end is not None and end < 0:
+    if end is not None and V.graph.sizevars.evaluate_expr(sympy.Lt(end, 0)):
         end = end + dim_size
     if start is None:
         start = 0
@@ -2731,7 +2776,7 @@ def upsample_nearestnd(
     x_loader = x.make_loader()
     i_sizes = x.get_size()[-n:]
     batch = x.get_size()[:-n]
-    i_sizes = [V.graph.sizevars.guard_static_shape(i) for i in i_sizes]
+    i_sizes = [V.graph.sizevars.evaluate_static_shape(i) for i in i_sizes]
 
     assert len(scales_x) == n
     o_sizes = output_size
@@ -2803,8 +2848,8 @@ def upsample_bicubic2d_default(
     N, C, iH, iW = x.get_size()
     oH, oW = output_size
 
-    iH = V.graph.sizevars.guard_static_shape(iH)
-    iW = V.graph.sizevars.guard_static_shape(iW)
+    iH = V.graph.sizevars.evaluate_static_shape(iH)
+    iW = V.graph.sizevars.evaluate_static_shape(iW)
 
     def get_int_dtype(maxval):
         if maxval > torch.iinfo(torch.int32).max:
@@ -2905,8 +2950,8 @@ def reflection_pad2d(x, padding):
 
     x_loader = x.make_loader()
     *batch, h, w = x.get_size()
-    h = V.graph.sizevars.guard_static_shape(h)
-    w = V.graph.sizevars.guard_static_shape(w)
+    h = V.graph.sizevars.evaluate_static_shape(h)
+    w = V.graph.sizevars.evaluate_static_shape(w)
 
     def reflect(x, size, offset):
         size_num = size
@@ -2936,8 +2981,8 @@ def reflection_pad2d_backward(grad_output, x, padding):
     left, right, top, bot = padding
 
     *_, h, w = x.get_size()
-    h = V.graph.sizevars.guard_static_shape(h) - 1
-    w = V.graph.sizevars.guard_static_shape(w) - 1
+    h = V.graph.sizevars.evaluate_static_shape(h) - 1
+    w = V.graph.sizevars.evaluate_static_shape(w) - 1
     grad_loader = grad_output.make_loader()
     *_, h_grad, w_grad = grad_output.get_size()
 
@@ -3523,8 +3568,8 @@ def _adaptive_avg_pool2d(x, output_size):
 
     *batch, h_in, w_in = x.get_size()
 
-    h_in = V.graph.sizevars.guard_static_shape(h_in)
-    w_in = V.graph.sizevars.guard_static_shape(w_in)
+    h_in = V.graph.sizevars.evaluate_static_shape(h_in)
+    w_in = V.graph.sizevars.evaluate_static_shape(w_in)
 
     h_out, w_out = output_size
 
@@ -3590,8 +3635,8 @@ def upsample_nearest2d_backward(
     x.realize_hint()
 
     *batch, inp_h, inp_w = x.get_size()
-    inp_h = V.graph.sizevars.guard_static_shape(inp_h)
-    inp_w = V.graph.sizevars.guard_static_shape(inp_w)
+    inp_h = V.graph.sizevars.evaluate_static_shape(inp_h)
+    inp_w = V.graph.sizevars.evaluate_static_shape(inp_w)
 
     *batch, out_h, out_w = input_size
 
