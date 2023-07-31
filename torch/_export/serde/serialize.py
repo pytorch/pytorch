@@ -215,15 +215,15 @@ def deserialize_operator(serialized_target: str):
 
 def serialize_call_spec(call_spec: ep.CallSpec) -> CallSpec:
     return CallSpec(
-        in_spec=pytree_to_str(call_spec.in_spec),
-        out_spec=pytree_to_str(call_spec.out_spec),
+        in_spec=pytree_to_str(call_spec.in_spec) if call_spec.in_spec else "",
+        out_spec=pytree_to_str(call_spec.out_spec) if call_spec.out_spec else "",
     )
 
 
 def deserialize_call_spec(call_spec: CallSpec) -> ep.CallSpec:
     return ep.CallSpec(
-        in_spec=str_to_pytree(call_spec.in_spec),
-        out_spec=str_to_pytree(call_spec.out_spec),
+        in_spec=str_to_pytree(call_spec.in_spec) if call_spec.in_spec else None,
+        out_spec=str_to_pytree(call_spec.out_spec) if call_spec.out_spec else None,
     )
 
 
