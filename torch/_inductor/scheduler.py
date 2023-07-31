@@ -13,7 +13,7 @@ import sympy
 import torch
 from torch._dynamo.utils import dynamo_timed
 
-from . import config, dependencies, ir, metrics
+from . import comms, config, dependencies, ir, metrics
 from .dependencies import StarDep, WeakDep
 from .sizevars import SimplifyIndexing
 from .utils import cache_on_self, cmp, free_symbol_has, has_triton
@@ -58,7 +58,7 @@ def fuse(node1: "BaseSchedulerNode", node2: "BaseSchedulerNode"):
 
 class BaseSchedulerNode:
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer):
-        self.scheduler: Scheduler = scheduler
+        self.scheduler: "Scheduler" = scheduler
         self.node: ir.Buffer = node
         self.users: Optional[List[NodeUser]] = None
         self.inverse_users: List[BaseSchedulerNode] = []
@@ -111,6 +111,7 @@ class BaseSchedulerNode:
         # deduplicate
         result: Dict[int, NodeUser] = {}
         for use in users:
+            assert isinstance(use, NodeUser), f"use: {use}, type: {type(use)}"
             if id(use.node) in result:
                 result[id(use.node)] = NodeUser(
                     use.node, result[id(use.node)].can_inplace and use.can_inplace
@@ -118,6 +119,17 @@ class BaseSchedulerNode:
             else:
                 result[id(use.node)] = use
         self.users = list(result.values())
+
+    @property
+    def users_snode(self):
+        users_snode = [x.node for x in self.users]
+        for user_snode, user in zip(users_snode, self.users):
+            assert isinstance(user_snode, BaseSchedulerNode), f"{user_snode}, {type(user_snode)}, {user}, {type(user)}"
+        return users_snode
+
+    @property
+    def args(self):
+        return self.inverse_users
 
     def set_last_usage(
         self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
@@ -266,7 +278,7 @@ class BaseSchedulerNode:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
                     read.name
                 )
-                if input_node and V.graph.wrapper_code.can_reuse(input_node, self):
+                if input_node and V.graph.wrapper_code.can_reuse(input_node):
                     remaining_uses = [
                         x
                         for x in input_node.users
@@ -598,8 +610,9 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def add_mutation_dep(self, name):
         raise NotImplementedError
 
-    def set_users(self, users: List["NodeUser"]):
-        raise NotImplementedError
+    # TODO(yf225): figure out why we need to comment this out
+    # def set_users(self, users: List["NodeUser"]):
+    #     raise NotImplementedError
 
     def get_aliases(self):
         raise NotImplementedError
@@ -864,6 +877,10 @@ class Scheduler:
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
+
+        comms.decide_global_ordering_comms(self.nodes)
+
+        self.compute_predecessors()
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.create_foreach_nodes()
@@ -872,6 +889,8 @@ class Scheduler:
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
+        # TODO(yf225): verify difference of before vs. after
+        self.compute_users()  # refresh users and inverse_users to reflect fused nodes
         self.debug_draw_graph()
 
         # used during codegen:
@@ -1031,6 +1050,38 @@ class Scheduler:
         for node in self.nodes:
             for user in node.users:
                 user.node.inverse_users.append(node)
+
+    def compute_users(self):
+        # set up buffer name to (fused)snode mapping
+        buf_to_snode = {}
+        for node in self.nodes:
+            if isinstance(node, FusedSchedulerNode):
+                for x in node.snodes:
+                    buf_to_snode[x.get_name()] = node
+            buf_to_snode[node.get_name()] = node
+
+        for node in self.nodes:
+            node.users = []
+            node.inverse_users = []
+
+        # compute inverse_users
+        for node in self.nodes:
+            inverse_users = []
+            for dep in node.unmet_dependencies:
+                assert dep.name in buf_to_snode
+                dep_node = buf_to_snode[dep.name]
+                inverse_users.append(dep_node)
+            node.inverse_users = inverse_users
+
+        # compute users
+        node_to_users = {}
+        for node in self.nodes:
+            for inverse_user in node.inverse_users:
+                node_to_users.setdefault(inverse_user, []).append(node)
+        for node, users in node_to_users.items():
+            # TODO(yf225): how to avoid hardcoding can_inplace=False?
+            # in general, how to make .users and .inverse_users be the same type?
+            node.set_users([NodeUser(user_node, can_inplace=False) for user_node in users])
 
     def dead_node_elimination(self):
         """
