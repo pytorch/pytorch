@@ -487,8 +487,6 @@ include_patterns = [
     '**/*.h',
 ]
 exclude_patterns = [
-    'fb/**',
-    '**/fb/**',
     'torch/csrc/utils/pybind.h',
     'torch/utils/benchmark/utils/valgrind_wrapper/compat_bindings.cpp',
     'caffe2/**/*',
