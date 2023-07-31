@@ -1,3 +1,4 @@
+// See Note [BatchLinearAlgebraLib split implementation files]
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>

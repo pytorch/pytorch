@@ -1,3 +1,22 @@
+// Note [BatchLinearAlgebraLib split implementation files]
+//
+// There are two files that implement the interfaces found in
+// BatchLinearAlgebraLib.h
+// - BatchLinearAlgebraLib.cpp
+// - BatchLinearAlgebraLibBlas.cpp (this file)
+//
+// In order to support the ROCm build target, the use of cublas and
+// cusolver APIs needed to be split into separate source files to
+// accomodate the hipify step of the ROCm build process.
+//
+// To create this current file, the original file
+// BatchLinearAlgebraLib.cpp was copied to
+// BatchLinearAlgebraLibBlas.cpp, then any functions that used cusolver
+// APIs were removed. Similarly, in the original file
+// BatchLinearAlgebraLib.cpp, any use of cublas APIs was removed.
+// The net result is a split of the BatchLinearAlgebraLib
+// implementation files. The original file BatchLinearAlgebraLib.cpp
+// contains the full, original git history for both files.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
