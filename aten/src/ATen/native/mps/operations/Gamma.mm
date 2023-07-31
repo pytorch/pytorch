@@ -1,0 +1,274 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ExpandUtils.h>
+#include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/Resize.h>
+#include <ATen/native/mps/OperationUtils.h>
+#include <fmt/format.h>
+
+// #include <ATen/native/UnaryOps.h>
+// #include <ATen/native/mps/UnaryConstants.h>
+// #ifndef AT_PER_OPERATOR_HEADERS
+// #include <ATen/Functions.h>
+// #include <ATen/NativeFunctions.h>
+// #else
+#include <ATen/ops/lgamma_native.h>
+// #endif
+
+
+// namespace at::meta {
+//   /* macro expands to: upsample_nearest1d::upsample_nearest1d( */
+//   TORCH_META_FUNC(lgamma_out) (const Tensor& self) {
+//     auto outputSize = self.sizes();
+
+//     auto options = self.options().dtype(at::kFloat);
+
+//     set_output(outputSize, options);
+//   }
+// }
+
+
+namespace at::native {
+namespace mps {
+
+// The c++ gamma functions that I've ported here come from https://www.johndcook.com/Gamma.cpp.
+
+static const char* GAMMA_OPS_TEMPLATE = R"METAL(
+#include <metal_stdlib>
+using namespace metal;
+
+constant float EULER_MASCHERONI = 0.577215664901532860606512090;
+
+constant float HALF_LOG_TWO_PI = 0.91893853320467274178032973640562;
+
+// numerator coefficients for approximation over the interval (1,2)
+constant float GAMMA_NUMERATOR_COEF[8] =
+    {{
+        -1.71618513886549492533811E+0,
+        2.47656508055759199108314E+1,
+        -3.79804256470945635097577E+2,
+        6.29331155312818442661052E+2,
+        8.66966202790413211295064E+2,
+        -3.14512729688483675254357E+4,
+        -3.61444134186911729807069E+4,
+        6.64561438202405440627855E+4
+    }};
+
+// denominator coefficients for approximation over the interval (1,2)
+constant float GAMMA_DENOMINATOR_COEF[8] =
+    {{
+        -3.08402300119738975254353E+1,
+        3.15350626979604161529144E+2,
+        -1.01515636749021914166146E+3,
+        -3.10777167157231109440444E+3,
+        2.25381184209801510330112E+4,
+        4.75584627752788110767815E+3,
+        -1.34659959864969306392456E+5,
+        -1.15132259675553483497211E+5
+    }};
+
+// lgamma expansion coefficients
+constant float LGAMMA_EXPANSION_COEF[8] =
+    {{
+		 1.0/12.0,
+		-1.0/360.0,
+		1.0/1260.0,
+		-1.0/1680.0,
+		1.0/1188.0,
+		-691.0/360360.0,
+		1.0/156.0,
+		-3617.0/122400.0
+    }};
+
+float LogGamma({0} x);
+
+float Gamma({0} x) {{
+    if (x < 0.001) {{
+        // For small x, 1/Gamma(x) has power series x + gamma x^2  - ...
+        // So in this range, 1/Gamma(x) = x + gamma x^2 with error on the order of x^3.
+        // The relative error over this interval is less than 6e-7.
+
+        return 1.0/(x*(1.0 + EULER_MASCHERONI * x));
+    }}
+
+	else if (x < 12.0) {{
+
+        // The algorithm directly approximates gamma over (1,2) and uses
+        // reduction identities to reduce other arguments to this interval.
+
+		float y = x;
+        int n = 0;
+        bool less_than_one = (y < 1.0);
+
+        // Add or subtract integers as necessary to bring y into (1,2)
+        if (less_than_one)
+        {{
+            y += 1.0;
+        }}
+        else
+        {{
+            n = static_cast<int> (floor(y)) - 1;
+            y -= n;
+        }}
+
+        float num = 0.0;
+        float den = 1.0;
+        int i;
+
+        float z = y - 1;
+        for (i = 0; i < 8; i++)
+        {{
+            num = (num + GAMMA_NUMERATOR_COEF[i])*z;
+            den = den*z + GAMMA_DENOMINATOR_COEF[i];
+        }}
+        float result = num/den + 1.0;
+
+        // Apply correction if argument was not initially in (1,2)
+        if (less_than_one)
+        {{
+            // identity gamma(z) = gamma(z+1)/z
+            result /= (y-1.0);
+        }}
+        else
+        {{
+            // identity gamma(z+n) = z*(z+1)* ... *(z+n-1)*gamma(z)
+            for (i = 0; i < n; i++)
+                result *= y++;
+        }}
+
+		return result;
+    }}
+
+    else {{
+        return exp(LogGamma(x));
+    }}
+}}
+
+float LogGamma({0} x) {{
+    if (x < 12.0)
+    {{
+        return log(fabs(Gamma(x)));
+    }}
+
+	// Abramowitz and Stegun 6.1.41
+    // Asymptotic series should be good to at least 11 or 12 figures
+    // For error analysis, see Whittiker and Watson
+    // A Course in Modern Analysis (1927), page 252
+
+    float z = 1.0 / (x*x);
+    float sum = LGAMMA_EXPANSION_COEF[7];
+
+    for (int i=6; i >= 0; i--)
+    {{
+        sum *= z;
+        sum += LGAMMA_EXPANSION_COEF[i];
+    }}
+    float series = sum/x;
+
+    float logGamma = (x - 0.5) * log(static_cast<{0}>(x)) - x + HALF_LOG_TWO_PI + series;
+	return logGamma;
+}}
+
+
+kernel void lgamma(device {0} *input [[buffer(0)]],
+                   device {1} *output [[buffer(1)]],
+                   uint id [[thread_position_in_grid]]) {{
+    output[id] = LogGamma(input[id]);
+}}
+
+)METAL";
+
+void dispatch1DJob(id<MTLComputeCommandEncoder> commandEncoder, id<MTLComputePipelineState> cplState, uint32_t length);
+
+static id<MTLLibrary> compileGammaOpsLibrary(id<MTLDevice> device,
+                                               const std::string& t1,
+                                               const std::string& t2) {
+  auto key = t1 + t2;
+  static std::unordered_map<std::string, id<MTLLibrary>> libMap;
+  auto it = libMap.find(key);
+  if (it != libMap.end()) {
+    return it->second;
+  }
+  NSError* error = nil;
+  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
+  [options setLanguageVersion:MTLLanguageVersion2_3];
+  auto rc =
+      [device newLibraryWithSource:[NSString stringWithUTF8String:fmt::format(GAMMA_OPS_TEMPLATE, t1, t2).c_str()]
+                           options:options
+                             error:&error];
+  TORCH_CHECK(rc != nil && error == nil, "Failed to compile library: ", [[error localizedDescription] UTF8String]);
+  libMap[key] = rc;
+  return rc;
+}
+
+id<MTLComputePipelineState> getCPLState(id<MTLDevice> device,
+                                               const std::string& t1,
+                                               const std::string& t2,
+                                               const std::string& fname) {
+  auto key = t1 + t2 + fname;
+  static std::unordered_map<std::string, id<MTLComputePipelineState>> cplMap;
+  auto it = cplMap.find(key);
+  if (it != cplMap.end()) {
+    return it->second;
+  }
+  NSError* error = nil;
+  auto library = compileGammaOpsLibrary(device, t1, t2);
+  id<MTLFunction> func = [library newFunctionWithName:[NSString stringWithUTF8String:fname.c_str()]];
+  TORCH_CHECK(func != nil, "Can't get function ", fname);
+  auto rc = [device newComputePipelineStateWithFunction:func error:&error];
+  TORCH_CHECK(
+      rc != nil && error == nil, "Failed to construct pipeline state: ", [[error localizedDescription] UTF8String]);
+  cplMap[key] = rc;
+  return rc;
+}
+
+} // namespace mps
+
+TORCH_IMPL_FUNC(lgamma_out_mps)(const Tensor& self, const Tensor& output_) {
+
+  TORCH_CHECK(self.scalar_type() != ScalarType::Double, "MPS does not support lgamma_out op with scalar type: Double");
+
+  Tensor output = output_;
+  bool needs_output_copy = false;
+  uint32_t length = output.numel();
+  if (length == 0) {
+    return;
+  }
+  using namespace mps;
+  @autoreleasepool {
+
+    id<MTLDevice> device = MPSDevice::getInstance()->device();
+    id<MTLComputePipelineState> cplState =
+        getCPLState(device,
+                    scalarToMetalTypeString(self.scalar_type()),
+                    scalarToMetalTypeString(output.scalar_type()),
+                    "lgamma");
+
+    if (!self.is_contiguous()) {
+      output = output.contiguous();
+      needs_output_copy = true;
+    }
+
+    MPSStream* mpsStream = getCurrentMPSStream();
+    dispatch_sync(mpsStream->queue(), ^() {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      id<MTLBuffer> outBuf = getMTLBufferStorage(output);
+      id<MTLBuffer> selfBuf = getMTLBufferStorage(self);
+
+      getMPSProfiler().beginProfileKernel(cplState, "lgamma_out", {self});
+
+      [computeEncoder setComputePipelineState:cplState];
+      [computeEncoder setBuffer:selfBuf offset:self.storage_offset() * self.element_size() atIndex:0];
+      [computeEncoder setBuffer:outBuf offset:output.storage_offset() * output.element_size() atIndex:1];
+
+
+      mps::dispatch1DJob(computeEncoder, cplState, static_cast<uint32_t>(length));
+
+      getMPSProfiler().endProfileKernel(cplState);
+    });
+  }
+  if (needs_output_copy) {
+    output_.copy_(output);
+  }
+}
+
+} // namespace at::native

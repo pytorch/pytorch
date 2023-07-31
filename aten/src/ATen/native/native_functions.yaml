@@ -9115,6 +9115,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: lgamma_out
+    MPS: lgamma_out_mps
   tags: pointwise
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
