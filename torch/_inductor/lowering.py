@@ -3502,7 +3502,7 @@ def max_pool2d_with_indices_backward_impl(
         inner_fn=fn,
         ranges=new_size,
     )
-    # out.realize_hint()
+    out.realize()
     return out
 
 
