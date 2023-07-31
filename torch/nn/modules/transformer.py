@@ -241,15 +241,15 @@ class TransformerEncoder(Module):
         elif encoder_layer.norm_first :
             why_not_sparsity_fast_path = f"{enc_layer}.norm_first was True"
         elif not encoder_layer.self_attn.batch_first:
-            why_not_sparsity_fast_path = f" {enc_layer}.self_attn.batch_first was not True"
+            why_not_sparsity_fast_path = f"{enc_layer}.self_attn.batch_first was not True (use batch_first for better performance)"
         elif not encoder_layer.self_attn._qkv_same_embed_dim:
             why_not_sparsity_fast_path = f"{enc_layer}.self_attn._qkv_same_embed_dim was not True"
         elif not encoder_layer.activation_relu_or_gelu:
-            why_not_sparsity_fast_path = f" {enc_layer}.activation_relu_or_gelu was not True"
+            why_not_sparsity_fast_path = f"{enc_layer}.activation_relu_or_gelu was not True"
         elif not (encoder_layer.norm1.eps == encoder_layer.norm2.eps) :
             why_not_sparsity_fast_path = f"{enc_layer}.norm1.eps was not equal to {enc_layer}.norm2.eps"
         elif encoder_layer.self_attn.num_heads % 2 == 1:
-            why_not_sparsity_fast_path = "num_head is odd"
+            why_not_sparsity_fast_path = f"{enc_layer}.self_attn.num_heads is odd"
 
         if enable_nested_tensor and why_not_sparsity_fast_path:
             warnings.warn(f"enable_nested_tensor is True, but self.use_nested_tensor is False because {why_not_sparsity_fast_path}")
