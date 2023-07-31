@@ -2731,7 +2731,6 @@ class TestAOTModuleSimplified(AOTTestCase):
 aot_autograd_failures = {
     # data-dependent control flow
     xfail('cov'),
-    xfail('istft'),
     xfail('nn.functional.gaussian_nll_loss'),
     xfail('tensor_split'),
     xfail('corrcoef'),
@@ -2752,24 +2751,6 @@ aot_autograd_failures = {
     # Worked with real but not with fake
     xfail('_segment_reduce', 'lengths'),
     skip('nn.functional.nll_loss', ''),  # UBSAN failure!
-
-    # many complex operators incorrect striding, metadata
-    xfail('fft.fft', ''),
-    xfail('fft.hfft2', ''),
-    xfail('fft.hfft', ''),
-    xfail('fft.hfftn', ''),
-    xfail('fft.ifft', ''),
-    xfail('fft.ihfft2', ''),
-    xfail('fft.ihfft', ''),
-    xfail('fft.ihfftn', ''),
-    xfail('fft.irfft2', ''),
-    xfail('fft.irfft', ''),
-    xfail('fft.irfftn', ''),
-    xfail('fft.rfft2', ''),
-    xfail('fft.rfft', ''),
-    xfail('fft.rfftn', ''),
-
-    xfail('stft', ''),
 
     # Misc
     xfail('to_sparse'),
@@ -2843,12 +2824,31 @@ symbolic_aot_autograd_failures = {
     xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('special.polygamma', 'special_polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic ...
-    xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/de...
     xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
     decorate('linalg.householder_product', decorator=unittest.skipIf(IS_MACOS and IS_X86, 'flaky')),
+
+    # many complex operators incorrect striding, metadata
+    xfail('fft.fft', ''),
+    xfail('fft.fftn', ''),
+    xfail('fft.fft2', ''),
+    xfail('fft.hfft2', ''),
+    xfail('fft.hfft', ''),
+    xfail('fft.hfftn', ''),
+    xfail('fft.ifft', ''),
+    xfail('fft.ifftn', ''),
+    xfail('fft.ifft2', ''),
+    xfail('fft.ihfft2', ''),
+    xfail('fft.ihfft', ''),
+    xfail('fft.ihfftn', ''),
+    xfail('fft.irfft2', ''),
+    xfail('fft.irfft', ''),
+    xfail('fft.irfftn', ''),
+    xfail('fft.rfft2', ''),
+    xfail('fft.rfft', ''),
+    xfail('fft.rfftn', ''),
 }
 
 def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):

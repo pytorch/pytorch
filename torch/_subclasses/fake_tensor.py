@@ -445,20 +445,6 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     )
 
 
-# Create a tensor with uknown strides
-def fake_like_with_unbacked_strides(fake_mode, func, like):
-    if fake_mode.shape_env is None or not fake_mode.shape_env.allow_dynamic_stride_ops:
-        raise UnsupportedOperatorException(func)
-
-    shape, dtype, device = like.shape, like.dtype, like.device
-    stride = [fake_mode.shape_env.create_unbacked_symint() for _ in shape]
-    with in_kernel_invocation_manager(fake_mode):
-        out = aten.empty_strided(shape, stride=stride, dtype=dtype, device=device)
-    out._set_conj(like.is_conj())
-    out._set_neg(like.is_neg())
-    return FakeTensor(fake_mode, out, device)
-
-
 @register_op_impl([aten._fft_r2c.default, aten._fft_c2c.default, aten._fft_c2r.default])
 def fft_stride_workaround(fake_mode, func, *args, **kwargs):
     # This is a workaround for the FFT meta implmentations having incorrect strides
@@ -470,10 +456,7 @@ def fft_stride_workaround(fake_mode, func, *args, **kwargs):
         # For static shapes, we can fall back to eager for the real strides
         return run_fallback_kernel(fake_mode, func, args, kwargs, None)
 
-    # For dynamic shapes, we use unbacked symints for the strides
-    with in_kernel_invocation_manager(fake_mode):
-        output = func(*args, **kwargs)
-    return fake_like_with_unbacked_strides(fake_mode, func, output)
+    raise UnsupportedOperatorException(func)
 
 
 # Dont default to default device handling,
