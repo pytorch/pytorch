@@ -111,12 +111,12 @@ def calculate_gain(nonlinearity, param=None):
             # True/False are instances of int, hence check above
             negative_slope = param
         else:
-            raise ValueError("negative_slope {} not a valid number".format(param))
+            raise ValueError(f"negative_slope {param} not a valid number")
         return math.sqrt(2.0 / (1 + negative_slope ** 2))
     elif nonlinearity == 'selu':
         return 3.0 / 4  # Value found empirically (https://github.com/pytorch/pytorch/pull/50664)
     else:
-        raise ValueError("Unsupported nonlinearity {}".format(nonlinearity))
+        raise ValueError(f"Unsupported nonlinearity {nonlinearity}")
 
 
 def uniform_(tensor: Tensor, a: float = 0., b: float = 1.) -> Tensor:
@@ -364,7 +364,7 @@ def _calculate_correct_fan(tensor, mode):
     mode = mode.lower()
     valid_modes = ['fan_in', 'fan_out']
     if mode not in valid_modes:
-        raise ValueError("Mode {} not supported, please use one of {}".format(mode, valid_modes))
+        raise ValueError(f"Mode {mode} not supported, please use one of {valid_modes}")
 
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     return fan_in if mode == 'fan_in' else fan_out
@@ -540,8 +540,7 @@ def _make_deprecate(meth):
     old_name = new_name[:-1]
 
     def deprecated_init(*args, **kwargs):
-        warnings.warn("nn.init.{} is now deprecated in favor of nn.init.{}."
-                      .format(old_name, new_name), stacklevel=2)
+        warnings.warn(f"nn.init.{old_name} is now deprecated in favor of nn.init.{new_name}.", stacklevel=2)
         return meth(*args, **kwargs)
 
     deprecated_init.__doc__ = r"""
