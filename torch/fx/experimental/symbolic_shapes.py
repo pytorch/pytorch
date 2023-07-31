@@ -1898,6 +1898,7 @@ class ShapeEnv:
         self, *,
         allow_scalar_outputs=True,
         allow_dynamic_output_shape_ops=True,
+        allow_dynamic_stride_ops=True,
         # NB: These are legacy configuration that help us make good choices
         # when the constraint/dynamic dims are not explicitly passed to us.
         # Ideally we will fix all call sites to be explicit and not have

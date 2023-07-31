@@ -7,7 +7,18 @@ import traceback
 import weakref
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
 from weakref import ReferenceType
 
 import torch
@@ -53,6 +64,7 @@ T = TypeVar("T")
 TensorWeakRef = Any
 
 aten = torch._ops.ops.aten
+prims = torch._ops.ops.prims
 
 CONSTANT_NUMEL_LIMIT = 1
 
@@ -372,11 +384,17 @@ class FakeTensorConverter:
 op_implementations = []
 
 
-def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverload]):
+def register_op_impl(
+    run_impl_check: Union[
+        Callable[[OpOverload], bool], OpOverload, Sequence[OpOverload]
+    ]
+):
     def impl_decorator(op_impl):
         global op_implementations
         if isinstance(run_impl_check, OpOverload):
             op_implementations.append((lambda func: func == run_impl_check, op_impl))
+        elif isinstance(run_impl_check, Sequence):
+            op_implementations.append((lambda func: func in run_impl_check, op_impl))
         else:
             op_implementations.append((run_impl_check, op_impl))
 
@@ -428,26 +446,34 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     )
 
 
-# Many of these operators mutate striding in place and output conj depending on input
-# that is not reflected in meta registration.
-# TODO: fix registrations, add all existing impls that are correct
-def unsupported_complex_op(op):
-    if op.namespace not in ("aten", "prims"):
-        return False
-    if op is aten._fft_c2c.default:
-        return False
+# Create a tensor with uknown strides
+def empty_with_unbacked_strides(fake_mode, func, shape, dtype, device):
+    if fake_mode.shape_env is None or not fake_mode.shape_env.allow_dynamic_stride_ops:
+        raise UnsupportedOperatorException(func)
 
-    op_name = op.name()
-    if "fft" in op_name:
-        return True
-    return False
+    stride = [fake_mode.shape_env.create_unbacked_symint() for _ in shape]
+    with in_kernel_invocation_manager(fake_mode):
+        out = aten.empty_strided(shape, stride=stride, dtype=dtype, device=device)
+    return FakeTensor(fake_mode, out, device)
 
 
-# These operators mutate striding in place and output conj depending on input
-# that is not reflected in meta registration
-@register_op_impl(unsupported_complex_op)
-def unsupported_fft(fake_mode, func, *args, **kwargs):
-    raise UnsupportedOperatorException(func)
+@register_op_impl([aten._fft_r2c, aten._fft_c2c, aten._fft_c2r])
+def fft_stride_workaround(fake_mode, func, *args, **kwargs):
+    # This is a workaround for the FFT meta implmentations having incorrect strides
+    def extractor(input, *args, **kwargs):
+        return input
+
+    input = extractor(*args, **kwargs)
+    if not input._has_symbolic_sizes_strides and fake_mode.allow_fallback_kernels:
+        # For static shapes, we can fall back to eager for the real strides
+        return run_fallback_kernel(fake_mode, func, args, kwargs, None)
+
+    # For dynamic shapes, we use unbacked symints for the strides
+    with in_kernel_invocation_manager(fake_mode):
+        output = func(*args, **kwargs)
+    return empty_with_unbacked_strides(
+        fake_mode, func, output.shape, output.dtype, output.device
+    )
 
 
 # Dont default to default device handling,
@@ -1397,9 +1423,9 @@ class FakeTensorMode(TorchDispatchMode):
         # TODO - we should be use the prim aten impl
         # TODO - fix prims complex ops
         if (
-            "prims::" in func._schema.name
+            func.namespace == "prims"
             and hasattr(func, "prim_meta_impl")
-            and not unsupported_complex_op(func)
+            and "fft" not in func.name()
         ):
             with self:
                 return func.prim_meta_impl(*args, **kwargs)
