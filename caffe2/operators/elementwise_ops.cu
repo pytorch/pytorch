@@ -9,6 +9,14 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/conversions.h"
 
+#if defined(USE_ROCM)
+// until we use hipblas v2
+// hipify correctly maps things like CUDA_R_16F to HIP_R_16F,
+// however hipblas v1 is still using its custom type
+#define HIP_R_16F  HIPBLAS_R_16F
+#define HIP_R_32F  HIPBLAS_R_32F
+#endif // USE_ROCM
+
 namespace caffe2 {
 
 REGISTER_CUDA_OPERATOR(

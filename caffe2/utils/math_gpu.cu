@@ -41,7 +41,7 @@
 #if defined(USE_ROCM)
 #define CUBLAS_HALF_TYPE hipblasHalf
 #define HIPBLAS_GEMM_DEFAULT_TENSOR_OP HIPBLAS_GEMM_DEFAULT
-// until we use hiblas v2
+// until we use hipblas v2
 // hipify correctly maps things like CUDA_R_16F to HIP_R_16F,
 // however hipblas v1 is still using its custom type
 #define HIP_R_16F  HIPBLAS_R_16F
