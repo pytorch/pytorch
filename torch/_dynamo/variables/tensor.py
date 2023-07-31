@@ -688,11 +688,6 @@ class SymNodeVariable(VariableTracker):
         # TODO: Should we allow non SymTypes here?  Today it is allowed
         self.sym_num = sym_num
 
-    def __str__(self):
-        if isinstance(self.sym_num, torch.SymInt):
-            return str(self.evaluate_expr())
-        return super().__str__()
-
     def python_type(self):
         if isinstance(self.sym_num, SymTypes):
             return self.sym_num.node.pytype
