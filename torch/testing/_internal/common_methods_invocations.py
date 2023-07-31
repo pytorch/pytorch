@@ -8780,6 +8780,14 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
     ),
+
+    ForeachFuncInfo(
+        'sign',
+        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
+    ),
 ]
 
 foreach_binary_op_db: List[OpInfo] = [
