@@ -10,6 +10,9 @@ on:
     - cron: 45 0,4,8,12,16,20 * * 1-5
     - cron: 45 4,12 * * 0,6
 
+env:
+  HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
