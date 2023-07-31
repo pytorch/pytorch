@@ -38,7 +38,6 @@ from torch.distributed.fsdp._common_utils import (
 from torch.distributed.fsdp._dynamo_utils import _annotate_modules_for_dynamo
 from torch.distributed.fsdp._init_utils import (
     _check_orig_params_flattened,
-    _get_default_comm_hook,
     _init_buffer_state,
     _init_core_state,
     _init_device_handle,
@@ -1942,16 +1941,19 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             raise AssertionError(
                 "register_comm_hook can only be called on a root instance."
             )
-        for submodule in traversal_utils._get_fsdp_states(self):
-            assert (
-                not submodule._hook_registered
-            ), "communication hook can be only registered once"
-            submodule._hook_registered = True
-            assert submodule._comm_hook == _get_default_comm_hook(
-                self.sharding_strategy
-            ), f"communication hook should be default, but it is {submodule._comm_hook.__name__} instead"
-            submodule._comm_hook_state = state
-            submodule._comm_hook = hook
+        for fsdp_state in traversal_utils._get_fsdp_states(self):
+            if fsdp_state.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+                raise AssertionError(
+                    f"Communication hook is not supported for hybrid strategies: {fsdp_state.sharding_strategy}"
+                )
+            if fsdp_state._comm_hook is not None:
+                raise AssertionError("A communication hook is already registered")
+            if not callable(hook):
+                raise ValueError(
+                    f"The communication hook must be callable but got {hook}"
+                )
+            fsdp_state._comm_hook = hook
+            fsdp_state._comm_hook_state = state
 
 
 def _get_grad_norm(
