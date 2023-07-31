@@ -267,7 +267,7 @@ test_dynamo_shard() {
       test_fx \
       test_package \
       test_legacy_vmap \
-      test_custom_op_testing \
+      test_custom_ops \
       test_content_store \
       export/test_db \
       functorch/test_dims \
