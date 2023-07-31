@@ -552,6 +552,23 @@ def forward(self, primals_1, primals_2, primals_3):
         self.verify_aot_autograd(f, create_inp(True), test_mutation=True)
         self.verify_aot_autograd(f, create_inp(False), test_mutation=True)
 
+    def test_input_output_aliase_custom_autograd_function(self):
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, gx):
+                return gx * 0.5
+
+        def f(x):
+            return Foo.apply(x)
+
+        inp = [torch.ones(2, 2, requires_grad=True)]
+        self.verify_aot_autograd(f, inp, test_mutation=False)
+
     def test_input_mutation_requires_grad_detach(self):
         # Here, "a" requires grad, and gets mutated, so we append a copy_() to the end of the graph.
         # Its mutation doesn't take part in autograd though, because we mutated a detach'd view.

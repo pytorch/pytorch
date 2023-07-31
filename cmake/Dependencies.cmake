@@ -1298,17 +1298,9 @@ if(USE_ROCM)
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
 
-    # Note [rocblas & rocfft cmake bug]
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # TODO: There is a bug in rocblas's & rocfft's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
-    # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
-    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
-      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-        roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
-    else()
-      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-        roc::rocblas roc::rocfft hip::hiprand roc::hipsparse)
-    endif()
+    list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
+      roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
+
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
@@ -1319,15 +1311,10 @@ if(USE_ROCM AND ROCM_VERSION_DEV VERSION_LESS "5.2.0")
   # We check again for USE_ROCM because it might have been set to OFF
   # in the if above
   include_directories(SYSTEM ${HIP_PATH}/include)
-  include_directories(SYSTEM ${ROCBLAS_PATH}/include)
-  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
-    include_directories(SYSTEM ${HIPFFT_PATH}/include)
-  else()
-    include_directories(SYSTEM ${ROCFFT_PATH}/include)
-  endif()
+  include_directories(SYSTEM ${HIPBLAS_PATH}/include)
+  include_directories(SYSTEM ${HIPFFT_PATH}/include)
   include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
   include_directories(SYSTEM ${HIPRAND_PATH}/include)
-  include_directories(SYSTEM ${ROCRAND_PATH}/include)
   include_directories(SYSTEM ${THRUST_PATH})
 endif()
 
