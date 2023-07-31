@@ -73,6 +73,44 @@ class TestCase(TorchTestCase):
     device = DEVICE
     pass
 
+# temporary code structure
+class EstimateSnodeRuntimeTests(TestCase):
+    def test_horizontal_reduction_pointwise(self):
+        print("========================================1. test_horizontal_reduction_pointwise")
+        def f(a):
+            b = a.sum(dim=1)
+            c = a.cos()
+            return b, c
+
+        inp = (T(10, 10),)
+        self.assertExpectedInline(count_numel(f, *inp), """210""")
+
+    def test_matmul(self):
+        print("========================================2. test_matmul")
+        def f(a, b):
+            return torch.matmul(a, b)
+
+        inp = (T(10, 10), T(10, 10), )
+        self.assertExpectedInline(count_numel(f, *inp), """300""")
+
+    def test_pointwise(self):
+        print("========================================3. test_pointwise")
+        def f(x):
+            return x.cos()
+
+        inp = (T(10),)
+        self.assertExpectedInline(count_numel(f, *inp), """20""")
+
+    def test_conv(self):
+        print("========================================4. test_conv")
+        def f(x):
+            filters = torch.randn(8, 4, 3, 3)
+            inputs = torch.randn(1, 4, 5, 5)
+            return torch.nn.functional.conv2d(inputs, filters, padding=1)
+
+        inp = (T(10, 10, 3),)
+        self.assertExpectedInline(count_numel(f, *inp), """988""")
+
 
 class NumBytesMetricTests(TestCase):
     """
