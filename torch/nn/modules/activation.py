@@ -1162,7 +1162,11 @@ class MultiheadAttention(Module):
             )
             # We have to use list comprehensions below because TorchScript does not support
             # generator expressions.
-            if torch.overrides.has_torch_function(tensor_args):
+            torch_fn_mode_stack = torch.overrides._get_current_function_mode_stack()
+            is_pre_dispatch_tracing = len(torch_fn_mode_stack) == 1 and \
+                type(torch_fn_mode_stack[0]) == torch.fx.experimental.proxy_tensor.PreDispatchTorchFunctionMode
+            # For the special-casing of pre_dispatch tracing, see https://github.com/pytorch/pytorch/issues/106302
+            if torch.overrides.has_torch_function(tensor_args) and not is_pre_dispatch_tracing:
                 why_not_fast_path = "some Tensor argument has_torch_function"
             elif not all(_check_arg_device(x) for x in tensor_args):
                 why_not_fast_path = ("some Tensor argument's device is neither one of "

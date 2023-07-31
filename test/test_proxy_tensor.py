@@ -167,6 +167,27 @@ def forward(self, a_1):
     matmul = torch.ops.aten.matmul.default(a_1, ones);  a_1 = ones = None
     return matmul""")
 
+    # See https://github.com/pytorch/pytorch/issues/106302
+    def test_pre_dispatch_multihead_attention(self):
+        m = torch.nn.MultiheadAttention(4, 4, batch_first=True)
+        m.eval()
+
+        inp = torch.randn(4, 4, 4)
+        with torch.no_grad():
+            fx_g = make_fx(m, pre_dispatch=True)(inp, inp, inp)
+        # The important bit: MultiheadAttention has a fast_path native op, and we still expect
+        # the fast path to be hit when we're tracing with pre_dispatch.
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    _param_constant0 = self._param_constant0
+    _param_constant1 = self._param_constant1
+    _param_constant2 = self._param_constant2
+    _param_constant3 = self._param_constant3
+    _native_multi_head_attention = torch.ops.aten._native_multi_head_attention.default(arg2_1, arg2_1, arg2_1, 4, 4, _param_constant0, _param_constant1, _param_constant2, _param_constant3);  arg2_1 = _param_constant0 = _param_constant1 = _param_constant2 = _param_constant3 = None
+    getitem = _native_multi_head_attention[0]
+    getitem_1 = _native_multi_head_attention[1];  _native_multi_head_attention = None
+    return (getitem, getitem_1)""")  # noqa: B950
+
     def test_pre_dispatch_linear(self):
         def f(a, b, c):
             return torch.nn.functional.linear(a, b, c)
