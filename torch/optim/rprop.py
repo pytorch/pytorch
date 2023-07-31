@@ -322,15 +322,14 @@ def _multi_tensor_rprop(
         # for dir>=0 dfdx=dfdx
         grouped_grads = list(grouped_grads)
         for i in range(len(grouped_grads)):
-            grouped_grads[i].copy_(grouped_grads[i])
             grouped_grads[i][signs[i].eq(etaminus)] = 0
 
-        # reuse signs as an intermediate
-        for i in range(len(grouped_grads)):
-            signs[i] = grouped_grads[i].sign()
+        # explicitly del signs as it's not used after here to save memory
+        del signs
 
         # update parameters
-        torch._foreach_addcmul_(grouped_params, signs, grouped_step_sizes, value=-1)
+        grad_signs = [grad.sign() for grad in grouped_grads]
+        torch._foreach_addcmul_(grouped_params, grad_signs, grouped_step_sizes, value=-1)
 
         # Logically, you may expect grouped_prevs to get updated to grouped_grads, but that's
         # basically already happened since we've been using grouped_prevs' memory to store
