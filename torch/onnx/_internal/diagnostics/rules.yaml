@@ -338,13 +338,12 @@
         - ValueError: Arguments/keyword arguments do not match the signature of the symbolic function.
 
       2. Potentially wrong torchlib operators:
-        If the warnings are triggered by the following error, users should be aware that
-        the results from symbolic functions do not match the results of torch ops, suggesting
-        that the symbolic functions may be incorrect in dispatching or implementation. In such cases,
-        it is recommended to report the issue to the PyTorch-ONNX team, or create/register a custom
-        symbolic function to replace the default one.
+        If the warnings are triggered by the following error, users should be aware that the symbolic functions
+        may be incorrect in dispatching or implementation. In such cases, it is recommended to report
+        the issue to the PyTorch-ONNX team, or create/register a custom symbolic function to replace the default one.
 
-        - AssertionError: The symbolic function is potentially wrong.
+        - AssertionError: The symbolic function is potentially wrong as the results do not match the results of torch ops.
+        - TypeError: The symbolic function is potentially wrong as the opschema doesn't match inputs.
 
   message_strings:
     default:
@@ -357,15 +356,15 @@
 - id: FXE0014
   name: find-opschema-matched-symbolic-function
   short_description:
-    text: Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas.
+    text: Find the OnnxFunction that matches the input/attribute dtypes by comparing them with their opschemas.
   full_description:
     text: "Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas.
       A warning will be issued if the matched OnnxFunction is not an exact match."
     markdown: |
-      When an ATen/Custom operator is registered and needs to be dispatched to an OnnxFunction, the input
-      dtypes of the ATen/Custom operator are compared with the input dtypes of the OnnxFunction opschemas
+      When an ATen/Custom operator is registered and needs to be dispatched to an OnnxFunction, the input/attribute
+      dtypes of the ATen/Custom operator are compared with the input/attribute dtypes of the OnnxFunction opschemas
       to find a match. However, if a perfect/exact match is not found, the dispatcher will attempt to find
-      the nearest match with the highest number of input dtypes matching the OnnxFunction opschemas, while
+      the nearest match with the highest number of input/attribute dtypes matching the OnnxFunction opschemas, while
       issuing a warning.
 
       There are two types of level that can be triggered in this rule:
