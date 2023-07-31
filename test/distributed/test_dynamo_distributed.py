@@ -19,7 +19,7 @@ from torch._dynamo.utils import same
 from torch._dynamo.testing import collect_results
 from torch._inductor.utils import has_triton
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, lambda_auto_wrap_policy
-from torch._higher_order_ops.wrap import tag_activation_checkpoint
+from torch._higher_order_ops.wrap import handle_activation_checkpoint
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import (
@@ -365,7 +365,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(correct_outputs, outputs))
             # Each FSDP module is a separate graph
             self.assertEqual(cnt.frame_count, 2)
-            self.assertTrue(find_first_node(cnt.graphs[0], tag_activation_checkpoint) is not None)
+            self.assertTrue(find_first_node(cnt.graphs[0], handle_activation_checkpoint) is not None)
 
 
 

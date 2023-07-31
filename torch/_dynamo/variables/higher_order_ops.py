@@ -248,8 +248,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         elif value.__name__ == "wrap":
             return WrapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
-            "wrap_activation_checkpoint",
-            "tag_activation_checkpoint",
+            "handle_activation_checkpoint",
         ):
             return CheckpointHigherOrderVariable(value, source, **kwargs)
         else:
@@ -890,10 +889,14 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
-        from torch._higher_order_ops.wrap import TagActivationCheckpoint
+        from torch._higher_order_ops.wrap import HandleActivationCheckpoint
         from .builder import wrap_fx_proxy
 
-        checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
+        if "context_fn" in kwargs:
+            context_fn = kwargs.pop("context_fn")
+            self.value.context_fn = context_fn.fn
+
+        checkpoint_kwargs, gmod_kwargs = HandleActivationCheckpoint.divide_kwargs(kwargs)
 
         # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
         # already flattened above and managed inside the fx graph.
