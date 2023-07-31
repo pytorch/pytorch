@@ -5933,7 +5933,7 @@ class TestNLLLoss(TestCaseMPS):
         # pad dims < input dims
         helper((50, 9, 300), (0, 0, 0, 31), nn.ConstantPad2d)
         # pad dims == input dims
-        helper_fucntional((1, 3), (0, 2, 0, 1), 'constant')
+        helper_functional((1, 3), (0, 2, 0, 1), 'constant')
         # input.numel() == 0 but output.numel() > 0
         helper((0, 3, 3), (1, 1, 1, 1, 1, 1), nn.ConstantPad2d)
         # pad dims < input dims - 2
