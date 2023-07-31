@@ -1,3 +1,4 @@
+import torch
 from . import allowed_functions, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, register_backend
 from .convert_frame import replay
@@ -72,3 +73,4 @@ def reset() -> None:
     eval_frame.most_recent_backend = None
     compilation_metrics.clear()
     reset_frame_count()
+    torch._C._dynamo.compiled_autograd.clear_cache()
