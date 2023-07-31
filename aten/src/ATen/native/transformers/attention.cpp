@@ -598,7 +598,7 @@ at::Tensor preprocess_mask(
        query.sym_size(1),
        query.sym_size(2),
        key.sym_size(2)});
-  `
+
   bool aligned_last_dim = is_aligned<mem_eff_alignment>(attn_mask.sym_size(-1));
   // Apply pad_bias and store the result in attn_mask
   if (!aligned_last_dim) {

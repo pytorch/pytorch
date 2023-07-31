@@ -574,7 +574,7 @@ bool check_nonzero_sequence_lengths(sdp_params params, bool debug) {
 bool check_last_dim_stride_equals_1(sdp_params params, bool debug) {
   if (has_for_nested_inputs(params)){
     // The stride checking for NestedTensors is done within the kernel
-    // And if contiguous will be called if the kernel is selected
+    // And .contiguous will be called if needed
     return true;
   }
   // This function checks that the last dimension of the inputs to
