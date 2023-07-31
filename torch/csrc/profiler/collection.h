@@ -637,6 +637,10 @@ TORCH_API bool get_fwd_bwd_enabled();
 TORCH_API void set_fwd_bwd_enabled_fn(std::function<bool()>);
 TORCH_API void set_fwd_bwd_enabled_val(bool);
 
+TORCH_API bool get_cuda_sync_enabled();
+TORCH_API void set_cuda_sync_enabled_fn(std::function<bool()>);
+TORCH_API void set_cuda_sync_enabled_val(bool);
+
 } // namespace impl
 } // namespace profiler
 } // namespace torch

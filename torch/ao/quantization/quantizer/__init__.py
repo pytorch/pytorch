@@ -1,4 +1,5 @@
-from .xnnpack_quantizer import XNNPACKQuantizer
+from .composable_quantizer import ComposableQuantizer
+from .embedding_quantizer import EmbeddingQuantizer
 from .quantizer import (
     DerivedQuantizationSpec,
     EdgeOrNode,
@@ -6,16 +7,14 @@ from .quantizer import (
     OperatorConfig,
     OperatorPatternType,
     QuantizationAnnotation,
+    QuantizationConfig,
     QuantizationSpec,
     QuantizationSpecBase,
     Quantizer,
     SharedQuantizationSpec,
-    QuantizationConfig,
 )
 from .x86_inductor_quantizer import X86InductorQuantizer
-
-from .composable_quantizer import ComposableQuantizer
-from .embedding_quantizer import EmbeddingQuantizer
+from .xnnpack_quantizer import XNNPACKQuantizer
 
 __all__ = [
     "ComposableQuantizer",

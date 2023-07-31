@@ -40,13 +40,15 @@ void initThroughputBenchmarkBindings(PyObject* module) {
             // the GIL or not further down in the stack
             return self.runOnce(std::move(args), std::move(kwargs));
           })
-      .def("benchmark", [](ThroughputBenchmark& self, BenchmarkConfig config) {
-        // The benchmark always runs without the GIL. GIL will be used where
-        // needed. This will happen only in the nn.Module mode when manipulating
-        // inputs and running actual inference
-        pybind11::gil_scoped_release no_gil_guard;
-        return self.benchmark(config);
-      });
+      .def(
+          "benchmark",
+          [](ThroughputBenchmark& self, const BenchmarkConfig& config) {
+            // The benchmark always runs without the GIL. GIL will be used where
+            // needed. This will happen only in the nn.Module mode when
+            // manipulating inputs and running actual inference
+            pybind11::gil_scoped_release no_gil_guard;
+            return self.benchmark(config);
+          });
 }
 
 } // namespace throughput_benchmark
