@@ -14,7 +14,7 @@ from onnxscript import BFLOAT16, DOUBLE, FLOAT, FLOAT16  # type: ignore[import]
 from onnxscript.function_libs.torch_lib import ops  # type: ignore[import]
 from onnxscript.onnx_opset import opset15 as op  # type: ignore[import]
 from torch.onnx._internal.diagnostics import infra
-from torch.onnx._internal.fx import onnxfunction_dispatcher, registration
+from torch.onnx._internal.fx import diagnostics, onnxfunction_dispatcher, registration
 from torch.testing._internal import common_utils
 
 # TODO: this can only be global. https://github.com/microsoft/onnxscript/issues/805
@@ -328,11 +328,18 @@ class TestOpSchemaWrapper(common_utils.TestCase):
     )
     def test_perfect_match_inputs(self, inputs, attributes, assertion):
         # OnnxFunction with default attributes
+        dummy_diagnostic = diagnostics.Diagnostic(
+            rule=diagnostics.rules.find_opschema_matched_symbolic_function,
+            level=diagnostics.levels.WARNING,
+        )
         op_schema_wrapper_add = onnxfunction_dispatcher._OnnxSchemaChecker(
             ops.core.aten_add
         )
         self.assertEqual(
-            op_schema_wrapper_add.perfect_match_inputs(inputs, attributes), assertion
+            op_schema_wrapper_add.perfect_match_inputs(
+                dummy_diagnostic, inputs, attributes
+            ),
+            assertion,
         )
 
     @common_utils.parametrize(

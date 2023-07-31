@@ -91,8 +91,54 @@ class MyModule2(torch.nn.Module):
         return d0 + d1
 
 
+class MyModule3(torch.nn.Module):
+    def __init__(self, device, has_weight=True, has_bias=True):
+        super().__init__()
+        self.device = device
+        self.scale0 = torch.nn.ParameterList(
+            [torch.nn.Parameter(torch.randn(10)) for _ in range(5)]
+        ).to(self.device)
+        self.bias0 = torch.nn.ParameterList(
+            [torch.nn.Parameter(torch.randn(10)) for _ in range(5)]
+        ).to(self.device)
+        self.scale1 = (
+            torch.nn.ParameterList(
+                [torch.nn.Parameter(torch.randn(5, 10)) for _ in range(5)]
+            ).to(self.device)
+            if has_weight
+            else [None for _ in range(5)]
+        )
+        self.bias1 = (
+            torch.nn.ParameterList(
+                [torch.nn.Parameter(torch.randn(5, 10)) for _ in range(5)]
+            ).to(self.device)
+            if has_bias
+            else [None for _ in range(5)]
+        )
+
+    def forward(self, x):
+        l1_out = torch.split(x.to(self.device), 10, dim=2)
+        post_l1 = [
+            torch.nn.functional.layer_norm(
+                l1_out[i], (10,), weight=self.scale0[i], bias=self.bias0[i]
+            )
+            for i in range(len(l1_out))
+        ]
+        l1_out = torch.cat(post_l1, dim=2)
+
+        l2_out = torch.split(l1_out, 10, dim=2)
+        post_l2 = [
+            torch.nn.functional.layer_norm(
+                l2_out[i], (5, 10), weight=self.scale1[i], bias=self.bias1[i]
+            )
+            for i in range(len(l2_out))
+        ]
+
+        return torch.cat(post_l2, dim=2)
+
+
 @unittest.skipIf(not has_fbgemm, "requires fbgemm")
-@torch._inductor.config.patch(group_fusion=True)
+@torch._inductor.config.patch(group_fusion=True, batch_fusion=True)
 class TestGroupFusion(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
@@ -125,9 +171,9 @@ class TestGroupFusion(TestCase):
             counters.clear()
             module = MyModule(z, has_bias).eval().to("cuda")
             input = [
-                torch.randn(4, z).to("cuda"),
-                torch.randn(4, z).to("cuda"),
-                torch.randn(4, z).to("cuda"),
+                torch.randn(4, z, device="cuda"),
+                torch.randn(4, z, device="cuda"),
+                torch.randn(4, z, device="cuda"),
             ]
             traced = torch.compile(module)
             ref = module(*input)
@@ -137,6 +183,10 @@ class TestGroupFusion(TestCase):
                 counters["inductor"]["group_fusion"],
                 2 if has_bias else 0,
             )
+            self.assertEqual(
+                counters["inductor"]["batch_fusion"],
+                0,
+            )
             ref.sum().backward()
             res.sum().backward()
             self.compare_parameters(module, traced)
@@ -145,15 +195,19 @@ class TestGroupFusion(TestCase):
                 counters["inductor"]["group_fusion"],
                 2 if has_bias else 0,
             )
+            self.assertEqual(
+                counters["inductor"]["batch_fusion"],
+                0,
+            )
             counters.clear()
 
     def test_group_linear_fusion_different_shapes(self):
         counters.clear()
         module = MyModule2().eval().to("cuda")
         input = [
-            torch.randn(4, 6).to("cuda"),
-            torch.randn(4, 8).to("cuda"),
-            torch.randn(4, 10).to("cuda"),
+            torch.randn(4, 6, device="cuda"),
+            torch.randn(4, 8, device="cuda"),
+            torch.randn(4, 10, device="cuda"),
         ]
         traced = torch.compile(module)
         ref = module(*input)
@@ -163,6 +217,10 @@ class TestGroupFusion(TestCase):
             counters["inductor"]["group_fusion"],
             1,
         )
+        self.assertEqual(
+            counters["inductor"]["batch_fusion"],
+            0,
+        )
         ref.sum().backward()
         res.sum().backward()
         self.compare_parameters(module, traced)
@@ -171,7 +229,53 @@ class TestGroupFusion(TestCase):
             counters["inductor"]["group_fusion"],
             1,
         )
+        self.assertEqual(
+            counters["inductor"]["batch_fusion"],
+            0,
+        )
         counters.clear()
+
+    def test_batch_layer_norm_fusion(self):
+        for has_weight in [True, False]:
+            for has_bias in [True, False]:
+                counters.clear()
+                module = MyModule3("cuda", has_weight, has_bias).eval().to("cuda")
+                input = [torch.randn(2, 5, 50, device="cuda")]
+                traced = torch.compile(module)
+                ref = module(*input)
+                res = traced(*input)
+                self.compare_pred(module, traced, input)
+                self.assertEqual(
+                    counters["inductor"]["group_fusion"],
+                    0,
+                )
+                self.assertEqual(counters["inductor"]["batch_fusion"], 2)
+                self.assertEqual(
+                    counters["inductor"]["scmerge_split_removed"],
+                    3,
+                )
+                self.assertEqual(
+                    counters["inductor"]["scmerge_cat_removed"],
+                    3,
+                )
+                ref.sum().backward()
+                res.sum().backward()
+                self.compare_parameters(module, traced)
+                self.compare_gradients(module, traced)
+                self.assertEqual(
+                    counters["inductor"]["group_fusion"],
+                    0,
+                )
+                self.assertEqual(counters["inductor"]["batch_fusion"], 2)
+                self.assertEqual(
+                    counters["inductor"]["scmerge_split_removed"],
+                    3,
+                )
+                self.assertEqual(
+                    counters["inductor"]["scmerge_cat_removed"],
+                    3,
+                )
+                counters.clear()
 
 
 if __name__ == "__main__":

@@ -737,9 +737,7 @@ def test_distributed(test_module, test_directory, options):
                 init_str = "with {} init_method"
                 with_init = init_str.format("file" if with_init_file else "env")
                 print_to_stderr(
-                    "Running distributed tests for the {} backend {}".format(
-                        backend, with_init
-                    )
+                    f"Running distributed tests for the {backend} backend {with_init}"
                 )
             old_environ = dict(os.environ)
             os.environ["TEMP_DIR"] = tmp_dir
@@ -848,7 +846,7 @@ def run_doctests(test_module, test_directory, options):
     if enabled["qengine"] == "auto":
         try:
             # Is there a better check if quantization is enabled?
-            import torch.ao.nn.quantized as nnq  # NOQA
+            import torch.ao.nn.quantized as nnq  # NOQA: F401
 
             torch.backends.quantized.engine = "qnnpack"
             torch.backends.quantized.engine = "fbgemm"
@@ -859,9 +857,9 @@ def run_doctests(test_module, test_directory, options):
 
     if enabled["onnx"] == "auto":
         try:
-            import onnx  # NOQA
-            import onnxruntime  # NOQA
-            import onnxscript  # NOQA
+            import onnx  # NOQA: F401
+            import onnxruntime  # NOQA: F401
+            import onnxscript  # NOQA: F401
         except ImportError:
             exclude_module_list.append("torch.onnx.*")
             enabled["onnx"] = False

@@ -358,12 +358,12 @@ def augment_many_model_functions_with_bundled_inputs(
                 """))
 
     # Define some high level helper methods that act on all bundled inputs
-    model.define(textwrap.dedent("""
+    model.define(textwrap.dedent(f"""
         def get_bundled_inputs_functions_and_info(self):
             all_inputs : Dict[str, Dict[str,List[str]]] = {{}}
-            {template}
+            {get_bundled_inputs_functions_and_info_template}
             return all_inputs
-        """.format(template=get_bundled_inputs_functions_and_info_template)))
+        """))
 
 def _inflate_expr(
     arg: T, ref: str, inflate_helper_fn_name: str, skip_size_check: bool = False
