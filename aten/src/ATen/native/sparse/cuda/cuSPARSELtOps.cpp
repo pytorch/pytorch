@@ -12,8 +12,7 @@
 
 #if !AT_CUSPARSELT_ENABLED()
 
-namespace at{
-namespace native{
+namespace at::native {
 
 at::Tensor _cslt_compress(const Tensor& sparse_input){
     TORCH_CHECK(false, "cuSPARSELT not supported on your machine.");
@@ -28,15 +27,13 @@ at::Tensor _cslt_sparse_mm(
     TORCH_CHECK(false, "cuSPARSELT not supported on your machine.");
 }
 
-} // namespace native
-} //namespace at
+} // namespace at::native
 
 #else // No cuSPARSELt support, throw error if these functions are called.
 
 #include <cusparseLt.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 cusparseLtHandle_t handle;
 bool handle_initialized = false;
@@ -263,7 +260,6 @@ at::Tensor _cslt_sparse_mm(
   return res;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif
