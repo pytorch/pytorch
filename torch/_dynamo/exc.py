@@ -230,8 +230,10 @@ def filter_stack(stack):
 def format_error_msg_verbose(
     exc: Exception, code: types.CodeType, frame: Optional[types.FrameType] = None
 ) -> Tuple[str, str]:
-    msg = f"WON'T CONVERT {code.co_name} {code.co_filename} line {code.co_firstlineno}"
-    msg = "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
+    msg = (
+        f"WON'T CONVERT {code.co_name} {code.co_filename} line {code.co_firstlineno}\n"
+    )
+    msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
     msg += format_exc()
     if hasattr(exc, "real_stack"):
         msg += (
