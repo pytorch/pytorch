@@ -45,16 +45,16 @@ nn/qat/ @jerryzh168
 # Distributed package
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/torch/csrc/distributed/ @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @fduwjj @kiukchung @d4l3k
-/torch/distributed/ @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @fduwjj @kiukchung @d4l3k
-/torch/distributed/_composable @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @yhcharles @fegin @fduwjj @kiukchung @d4l3k
-/torch/nn/parallel/ @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @fduwjj @kiukchung @d4l3k
+/torch/csrc/distributed/ @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @fduwjj @kiukchung @d4l3k @penguinwu
+/torch/distributed/ @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @fduwjj @kiukchung @d4l3k @penguinwu
+/torch/distributed/_composable @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @yhcharles @fegin @fduwjj @kiukchung @d4l3k @penguinwu
+/torch/nn/parallel/ @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @fduwjj @kiukchung @d4l3k @penguinwu
 
 # Distributed tests
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/test/distributed @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @fduwjj
-/torch/testing/_internal/distributed @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @fduwjj
+/test/distributed @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @fduwjj @penguinwu
+/torch/testing/_internal/distributed @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @fduwjj @penguinwu
 
 # ONNX Export
 /torch/csrc/jit/passes/onnx.h @bowenbao @abock @thiagocrepaldi

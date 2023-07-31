@@ -157,7 +157,7 @@ class TestCommon(TestCase):
             if isinstance(result, torch.Tensor):
                 self.assertTrue(result.device == cuda_device)
             elif is_iterable_of_tensors(result):
-                self.assertTrue(all((t.device == cuda_device for t in result)))
+                self.assertTrue(all(t.device == cuda_device for t in result))
             else:
                 self.skipTest(
                     "Skipped! Only supports single tensor or iterable of tensor outputs."
@@ -219,7 +219,7 @@ class TestCommon(TestCase):
             self.assertTrue(False)
 
         for file_name in files:
-            with open(os.path.join(pytorch_dir, file_name), "r") as f:
+            with open(os.path.join(pytorch_dir, file_name)) as f:
                 lines = f.read()
                 matches = regex.findall(lines)
                 for match in matches:
@@ -723,7 +723,7 @@ class TestCommon(TestCase):
                     return (out.stride(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple((t.stride() for t in out))
+                return tuple(t.stride() for t in out)
 
             # Extracts data pointers from a tensor or iterable of tensors into a tuple
             # NOTE: only extracts on the CPU and CUDA device types since some
@@ -736,7 +736,7 @@ class TestCommon(TestCase):
                     return (out.data_ptr(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple((t.data_ptr() for t in out))
+                return tuple(t.data_ptr() for t in out)
 
             @suppress_warnings
             def _compare_out(transform, *, compare_strides_and_data_ptrs=True):
@@ -751,7 +751,7 @@ class TestCommon(TestCase):
                 self.assertEqual(expected, out)
 
                 if compare_strides_and_data_ptrs:
-                    stride_msg = "Strides are not the same! Original strides were {0} and strides are now {1}".format(
+                    stride_msg = "Strides are not the same! Original strides were {} and strides are now {}".format(
                         original_strides, final_strides
                     )
                     self.assertEqual(original_strides, final_strides, msg=stride_msg)
@@ -843,7 +843,7 @@ class TestCommon(TestCase):
                     return (out.stride(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple((t.stride() for t in out))
+                return tuple(t.stride() for t in out)
 
             # Extracts data pointers from a tensor or iterable of tensors into a tuple
             # NOTE: only extracts on the CPU and CUDA device types since some
@@ -856,7 +856,7 @@ class TestCommon(TestCase):
                     return (out.data_ptr(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple((t.data_ptr() for t in out))
+                return tuple(t.data_ptr() for t in out)
 
             def _compare_out(transform, *, compare_strides_and_data_ptrs=True):
                 out = _apply_out_transform(transform, expected)
@@ -869,7 +869,7 @@ class TestCommon(TestCase):
                 self.assertEqual(expected, out)
 
                 if compare_strides_and_data_ptrs:
-                    stride_msg = "Strides are not the same! Original strides were {0} and strides are now {1}".format(
+                    stride_msg = "Strides are not the same! Original strides were {} and strides are now {}".format(
                         original_strides, final_strides
                     )
                     self.assertEqual(original_strides, final_strides, msg=stride_msg)
@@ -1325,7 +1325,7 @@ class TestCommon(TestCase):
                 # one or more tensors requiring grad
                 def _tensor_requires_grad(x):
                     if isinstance(x, dict):
-                        for k, v in x.items():
+                        for v in x.values():
                             if _tensor_requires_grad(v):
                                 return True
                     if isinstance(x, (list, tuple)):
@@ -1390,20 +1390,18 @@ class TestCommon(TestCase):
 
         # Partially supporting a dtype is not an error, but we print a warning
         if (len(partially_supported_forward) + len(partially_supported_backward)) > 0:
-            msg = "Some dtypes for {0} on device type {1} are only partially supported!\n".format(
-                op.name, device_type
-            )
+            msg = f"Some dtypes for {op.name} on device type {device_type} are only partially supported!\n"
             if len(partially_supported_forward) > 0:
                 msg = (
                     msg
-                    + "The following dtypes only worked on some samples during forward: {0}.\n".format(
+                    + "The following dtypes only worked on some samples during forward: {}.\n".format(
                         partially_supported_forward
                     )
                 )
             if len(partially_supported_backward) > 0:
                 msg = (
                     msg
-                    + "The following dtypes only worked on some samples during backward: {0}.\n".format(
+                    + "The following dtypes only worked on some samples during backward: {}.\n".format(
                         partially_supported_backward
                     )
                 )
@@ -1426,34 +1424,32 @@ class TestCommon(TestCase):
                 return
 
         # Generates error msg
-        msg = "The supported dtypes for {0} on device type {1} are incorrect!\n".format(
-            op.name, device_type
-        )
+        msg = f"The supported dtypes for {op.name} on device type {device_type} are incorrect!\n"
         if len(supported_but_unclaimed_forward) > 0:
             msg = (
                 msg
-                + "The following dtypes worked in forward but are not listed by the OpInfo: {0}.\n".format(
+                + "The following dtypes worked in forward but are not listed by the OpInfo: {}.\n".format(
                     supported_but_unclaimed_forward
                 )
             )
         if len(supported_but_unclaimed_backward) > 0:
             msg = (
                 msg
-                + "The following dtypes worked in backward but are not listed by the OpInfo: {0}.\n".format(
+                + "The following dtypes worked in backward but are not listed by the OpInfo: {}.\n".format(
                     supported_but_unclaimed_backward
                 )
             )
         if len(claimed_but_unsupported_forward) > 0:
             msg = (
                 msg
-                + "The following dtypes did not work in forward but are listed by the OpInfo: {0}.\n".format(
+                + "The following dtypes did not work in forward but are listed by the OpInfo: {}.\n".format(
                     claimed_but_unsupported_forward
                 )
             )
         if len(claimed_but_unsupported_backward) > 0:
             msg = (
                 msg
-                + "The following dtypes did not work in backward but are listed by the OpInfo: {0}.\n".format(
+                + "The following dtypes did not work in backward but are listed by the OpInfo: {}.\n".format(
                     claimed_but_unsupported_backward
                 )
             )
@@ -1939,8 +1935,6 @@ class TestRefsOpsInfo(TestCase):
 
 fake_skips = (
     "aminmax",  # failing input
-    "cholesky",  # Could not run 'aten::cholesky' with arguments from the 'Meta' backend
-    "cholesky_inverse",  # Could not run 'aten::cholesky' with arguments from the 'Meta' backend
     "cov",  # aweights cannot be negtaive
     "istft",  # window overlap add min: 0
     "linalg.eigvals",  # The tensor has a non-zero number of elements, but its data is not allocated yet
@@ -2018,7 +2012,6 @@ fake_backward_skips = {
     "roll",
     "svd_lowrank",
     "sgn",
-    "cholesky",
 }
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
