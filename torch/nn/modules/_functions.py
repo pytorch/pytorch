@@ -17,7 +17,7 @@ class SyncBatchNorm(Function):
 
         size = int(input.numel() // input.size(1))
         if size == 1 and world_size < 2:
-            raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
+            raise ValueError(f'Expected more than 1 value per channel when training, got input size {size}')
 
         num_channels = input.shape[1]
         if input.numel() > 0:
@@ -194,7 +194,7 @@ class CrossMapLRN2d(Function):
         ctx.scale = None
 
         if input.dim() != 4:
-            raise ValueError("CrossMapLRN2d: Expected input to be 4D, got {}D instead.".format(input.dim()))
+            raise ValueError(f"CrossMapLRN2d: Expected input to be 4D, got {input.dim()}D instead.")
 
         ctx.scale = ctx.scale or input.new()
         output = input.new()

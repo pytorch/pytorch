@@ -18,11 +18,11 @@ import torch.nn.functional as F
 import itertools
 from collections import defaultdict
 from torch import inf
-from torch.nn import Buffer, Parameter
+from torch.nn import Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, run_tests, TestCase, download_file, IS_CI, NoTest,
-     TEST_WITH_UBSAN, skipIfSlowGradcheckEnv, suppress_warnings)
+     skipIfSlowGradcheckEnv, suppress_warnings)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
@@ -407,7 +407,6 @@ def mps_ops_modifier(ops):
         'cumprod': None,
         'digamma': None,
         'erfc': None,
-        'erfinv': None,
         'frexp': None,
         'gcd': None,
         'geqrf': None,
@@ -4160,7 +4159,6 @@ class TestNLLLoss(TestCaseMPS):
         self._nll_loss_helper([2, 3, 5, 1], "none", torch.empty([2, 5, 1], device=device))
         self._nll_loss_helper([2, 3, 5, 7, 1], "none", torch.empty([2, 5, 7, 1], device=device))
 
-    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_nll_loss_empty_tensor_reduction_mean(self, device='cpu'):
         nan = torch.tensor(float('nan'), device=device)
         self._nll_loss_helper([1, 3], "mean", nan)
@@ -7548,6 +7546,8 @@ class TestNLLLoss(TestCaseMPS):
         helper((2, 8, 3, 5), torch.expm1)
         helper((2, 8, 3, 5), torch.log)
         helper((2, 8, 3, 5), torch.cos)
+        helper((2, 8, 3, 5), torch.erfinv)
+
 
     def test_non_dense_in_storage_unary_ops(self):
         def helper(op):
@@ -7659,14 +7659,14 @@ class TestNNMPS(NNTestCase):
             def __init__(self):
                 super().__init__()
                 self.layer_dummy_param = Parameter(torch.empty(3, 5))
-                self.layer_dummy_buf = Buffer(torch.zeros(1, 3, 3, 7))
+                self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
 
         class Net(nn.Module):
             def __init__(self):
                 super().__init__()
                 self.l1 = Layer()
                 self.dummy_param = Parameter(torch.empty(3, 5))
-                self.dummy_buf = Buffer(torch.zeros(7, 3, 3, 1))
+                self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))
 
         l = Layer()
         n = Net()
@@ -10471,7 +10471,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.huber_loss',
         'true_divide', 'kron',
         'gradient', 'var', 'std', 'ldexp',
-        'linalg.vector_norm',
+        'linalg.vector_norm', 'lerp',
         'addr', 'var_mean',
         'var_mean_unbiased',
         'acosh', 'asinh', 'asin',

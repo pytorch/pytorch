@@ -817,7 +817,7 @@ class TestFX(JitTestCase):
                 self.mm_param = torch.nn.Parameter(torch.randn(d_hid, d_hid))
                 self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
                 self.lin = torch.nn.Linear(d_hid, d_hid)
-                self.buffer = torch.nn.Buffer(torch.randn(bs + 100, d_hid))
+                self.register_buffer('buffer', torch.randn(bs + 100, d_hid))
 
             def forward(self, x):
                 x = torch.mm(x, self.mm_param)
@@ -2660,7 +2660,7 @@ class TestFX(JitTestCase):
         class GetItemBase(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.pe = torch.nn.Buffer(torch.randn(8, 8))
+                self.register_buffer('pe', torch.randn(8, 8))
 
         class GetItem1(GetItemBase):
             def forward(self, x):
@@ -3026,7 +3026,7 @@ class TestFX(JitTestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(100, 200)
-                self.buf = torch.nn.Buffer(torch.randn(2, 3))
+                self.register_buffer("buf", torch.randn(2, 3))
                 self.net_c = C()
 
             def forward(self, x):
@@ -3196,7 +3196,7 @@ class TestFX(JitTestCase):
             def __init__(self):
                 super().__init__()
                 self.l1 = torch.nn.Linear(1, 1)
-                self.buffer = torch.nn.Buffer(torch.ones(1))
+                self.register_buffer('buffer', torch.ones(1))
 
             def forward(self, x):
                 return self.l1(x) + self.buffer
@@ -3490,7 +3490,7 @@ class TestFX(JitTestCase):
 
         def f_sum_dict(x):
             out = 0
-            for k, v in x.items():
+            for v in x.values():
                 out += v
             return out
 
@@ -4302,7 +4302,7 @@ class TestFunctionalTracing(JitTestCase):
                 try:
                     sig = inspect.signature(fn)
                     has_tensor_arg = False
-                    for arg, param in sig.parameters.items():
+                    for param in sig.parameters.values():
                         if isinstance(param.annotation, type) and issubclass(param.annotation, torch.Tensor):
                             has_tensor_arg = True
                     if not has_tensor_arg:

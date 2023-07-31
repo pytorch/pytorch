@@ -565,7 +565,8 @@ class CudaReproTests(TestCase):
                 start = math.log2(0.5)
                 end = math.log2(1 / (2**8))
 
-                self.scales = nn.Buffer(
+                self.register_buffer(
+                    "scales",
                     2
                     ** torch.arange(
                         start,
@@ -990,6 +991,15 @@ class CudaReproTests(TestCase):
         res = opt_fn(x, y, z)
 
         self.assertEqual(ref, res)
+
+    # https://github.com/pytorch/pytorch/issues/104937
+    def test_linear_with_zero_infeature_size(self):
+        m = nn.Linear(in_features=0, out_features=0, bias=True).to("cuda")
+        x = torch.rand(1, 1, 0, device="cuda")
+        expect = m(x)
+        opt_fn = torch.compile(m)
+        actual = opt_fn(x)
+        self.assertEqual(expect, actual)
 
 
 if __name__ == "__main__":

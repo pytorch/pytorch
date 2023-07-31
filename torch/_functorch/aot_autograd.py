@@ -21,6 +21,7 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code, preserve_rng_state
 from torch._guards import detect_fake_mode, tracing
 from torch._prims_common import CUDARngStateHelper
@@ -2874,6 +2875,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         num_symints_saved_for_bw = _num_symints_saved_for_bw
 
         @staticmethod
+        def _compiled_autograd_key(ctx):
+            return (aot_config.aot_id, *ctx.symints)
+
+        @staticmethod
         def forward(ctx, *deduped_flat_tensor_args):
             args = deduped_flat_tensor_args
             if CompiledFunction.metadata.is_rng_op_functionalized:
@@ -3061,6 +3066,16 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             del contiguous_args
 
             def call_compiled_backward():
+                if ctx._is_compiled_autograd_tracing():
+                    # For compiled autograd, run raw FX graph so that it can be inlined into the larger graph
+                    symints = ctx._get_compiled_autograd_symints()
+                    assert len(symints) == len(ctx.symints)
+                    all_args[:len(symints)] = symints
+                    context = torch._C._DisableAutocast if disable_amp else nullcontext
+                    with context():
+                        out = normalize_as_list(bw_module(*all_args))
+                    out = functionalized_rng_runtime_epilogue(CompiledFunction.metadata, out)
+                    return tuple(out)
                 ctx.maybe_clear_saved_tensors()
                 if CompiledFunction.compiled_bw is None:
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
@@ -3091,6 +3106,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     @staticmethod
                     def backward(ctx, *args):
                         raise RuntimeError("torch.compile with aot_autograd does not currently support double backward")
+
+                CompiledFunctionBackward._compiled_autograd_key = CompiledFunction._compiled_autograd_key
+
                 # Pass args even though they're unused, so that the graph is built
                 out = CompiledFunctionBackward.apply(*all_args)
             else:
@@ -3752,11 +3770,12 @@ def aot_module_simplified(
         no_tangents=False,
     )
 
-    compiled_fn = create_aot_dispatcher_function(
-        functional_call,
-        full_args,
-        aot_config,
-    )
+    with compiled_autograd.disable():
+        compiled_fn = create_aot_dispatcher_function(
+            functional_call,
+            full_args,
+            aot_config,
+        )
 
     # TODO: There is something deeply wrong here; compiled_fn running with
     # the boxed calling convention, but aot_module_simplified somehow

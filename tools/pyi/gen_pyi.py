@@ -185,9 +185,7 @@ def sig_for_ops(opname: str) -> List[str]:
 
     # we have to do this by hand, because they are hand-bound in Python
 
-    assert opname.endswith("__") and opname.startswith("__"), "Unexpected op {}".format(
-        opname
-    )
+    assert opname.endswith("__") and opname.startswith("__"), f"Unexpected op {opname}"
 
     name = opname[2:-2]
     if name in binary_ops:
@@ -370,9 +368,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                 )
             ],
             "leaky_relu_": [
-                "def leaky_relu_({}) -> Tensor: ...".format(
-                    ", ".join(["input: Tensor", "negative_slope: float = ..."])
-                )
+                f"def leaky_relu_({', '.join(['input: Tensor', 'negative_slope: float = ...'])}) -> Tensor: ..."
             ],
             "log_sigmoid": ["def log_sigmoid(input: Tensor) -> Tensor: ..."],
             "gelu": ["def gelu(input: Tensor, approximate: str = ...) -> Tensor: ..."],
@@ -387,9 +383,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                 "def softshrink(input: Tensor, lambd: float = ...) -> Tensor: ..."
             ],
             "hardsigmoid": [
-                "def hardsigmoid({}) -> Tensor: ...".format(
-                    ", ".join(["input: Tensor", "*", "out: Optional[Tensor] = None"])
-                )
+                f"def hardsigmoid({', '.join(['input: Tensor', '*', 'out: Optional[Tensor] = None'])}) -> Tensor: ..."
             ],
             "linear": [
                 "def linear({}) -> Tensor: ...".format(

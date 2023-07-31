@@ -272,9 +272,13 @@ def postprocess_forward_derivatives(
     args_with_derivatives: Sequence[Binding],
 ) -> List[ForwardDerivative]:
     def find_required_inputs(formula: str, postfix: str) -> Tuple[str, ...]:
+        is_foreach = f.func.name.name.base.startswith("_foreach_")
         required_inputs = set()
         for arg in args_with_derivatives:
-            if arg.type in ("at::TensorList", "const at::ITensorListRef &"):
+            if (
+                arg.type in ("at::TensorList", "const at::ITensorListRef &")
+                and not is_foreach
+            ):
                 # The functions taking TensorList handle everything internally
                 continue
             arg_name = arg.name
@@ -392,12 +396,10 @@ def postprocess_forward_derivatives(
 
             # Call into the forward again. We need two cases here to handle both Tensor methods and at:: functions.
             if Variant.function in f.variants:
-                fw_formula = "at::{}({})".format(defn_name, ", ".join(new_args))
+                fw_formula = f"at::{defn_name}({', '.join(new_args)})"
             else:
                 assert Variant.method in f.variants
-                fw_formula = "{}.{}({})".format(
-                    new_args[0], defn_name, ", ".join(new_args[1:])
-                )
+                fw_formula = f"{new_args[0]}.{defn_name}({', '.join(new_args[1:])})"
 
             # All of the input tangents are always used so all of them are required here.
             required_inputs_tangent = tuple(diff_arg_names)
@@ -808,9 +810,7 @@ def saved_variables(
         (
             r"{}.sym_size\((-?\w+)\)",
             {
-                "suffix": lambda m: "_sym_argsize_{}".format(
-                    m.groups()[0].replace("-", "minus_")
-                ),
+                "suffix": lambda m: f"_sym_argsize_{m.groups()[0].replace('-', 'minus_')}",
                 "nctype": lambda name: NamedCType(name, BaseCType(SymIntT)),
             },
         ),
