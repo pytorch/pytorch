@@ -6,6 +6,7 @@ import collections
 import contextlib
 import copy
 import csv
+import dataclasses
 import functools
 import importlib
 import itertools
@@ -2057,17 +2058,38 @@ class BenchmarkRunner:
                     # TB and TIMM use list example_inputs
                     # HF use dict example_inputs
                     if isinstance(example_inputs, dict):
-                        raise RuntimeError(
-                            "expect example_inputs as list/tuple, but got dict. need to support kwargs in torch._export.export"
+                        example_kwargs = example_inputs
+                        example_args = tuple()
+                    else:
+                        example_args = example_inputs
+                        example_kwargs = {}
+
+                    # Register the output dataclass to pytree
+                    example_output = pytree.tree_flatten(
+                        model_copy(*example_args, **example_kwargs)
+                    )[0]
+                    output_dataclass_types = [
+                        type(out)
+                        for out in example_output
+                        if dataclasses.is_dataclass(type(out))
+                    ]
+                    for output_type in output_dataclass_types:
+                        from torch._export.utils import (
+                            register_dataclass_as_pytree_node,
                         )
+
+                        register_dataclass_as_pytree_node(output_type)
+
                     # apply export on module directly
                     # no need for n iterations
                     # the logic should be the same to self.model_iter_fn (forward_pass)
                     with self.autocast():
                         optimized_model_iter_fn = optimize_ctx(
-                            model_copy, example_inputs
+                            model_copy, example_args, example_kwargs
                         )
-                        new_result = optimized_model_iter_fn(*example_inputs)
+                        new_result = optimized_model_iter_fn(
+                            *example_args, **example_kwargs
+                        )
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
                     new_result = optimized_model_iter_fn(model_copy, example_inputs)
