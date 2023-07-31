@@ -3,7 +3,7 @@ import operator
 import sys
 from enum import Enum
 from functools import partial, reduce
-from itertools import product
+from itertools import chain, product
 from typing import Callable, cast, Iterable, List, Optional, Tuple, Union
 
 import torch
@@ -628,6 +628,11 @@ def soft_margin_loss_backward(
     if reduction == Reduction.MEAN.value:
         grad_input = grad_input / self.numel()
     return grad_input
+
+
+@register_decomposition(aten.dist)
+def dist(input: Tensor, other: Tensor, p: float = 2):
+    return aten.norm(input - other, p=p)
 
 
 @register_decomposition(aten._euclidean_dist)
@@ -2280,7 +2285,7 @@ def one_layer_rnn_data(
     hh_bias = params[3] if has_biases else None
 
     step_output = []
-    hiddens: List["torch.Tensor"] = []
+    hiddens: List[torch.Tensor] = []
 
     last_batch_size = batch_sizes[-1] if reverse else batch_sizes[0]
     cur_hidden = hidden.narrow(0, 0, last_batch_size)
@@ -2352,6 +2357,56 @@ def one_layer_rnn(inp, hidden, params, has_biases, hidden_fn, reverse=False):
     out = torch.cat(step_output, 0)
 
     return out, cur_hidden.squeeze(0)
+
+
+def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
+    w0 = params[0]
+    w1 = params[1]
+    if has_biases:
+        w2 = params[2]
+        w3 = params[3]
+    else:
+        w2 = torch.zeros(w0.size())
+        w3 = torch.zeros(w1.size())
+
+    hx = hidden[0].unsqueeze(0)
+    cx = hidden[1].unsqueeze(0)
+
+    batch_sizes: List[int] = []
+    mode = 2  # third_party/ideep/include/ideep/abstract_types.hpp: ideep::rnn_kind::LSTM = 2
+    hidden_size = hx.size(2)
+    num_layers = 1
+
+    # _rnn_helper already handles bidirectional and batch_first so we hard-code them to False here
+    bidirectional = False
+    batch_first = False
+
+    train = False
+    # If batch_first, inp has been permuted in _rnn_helper. Convert to contiguous here.
+    # Same as aten/src/ATen/native/mkldnn/RNN.cpp: mkldnn_rnn: input = input.contiguous();
+    inp = inp.contiguous()
+    hx = hx.contiguous()
+    cx = cx.contiguous()
+    outputs = torch.ops.aten.mkldnn_rnn_layer.default(
+        inp,
+        w0,
+        w1,
+        w2,
+        w3,
+        hx,
+        cx,
+        reverse,
+        batch_sizes,
+        mode,
+        hidden_size,
+        num_layers,
+        has_biases,
+        bidirectional,
+        batch_first,
+        train,
+    )
+    y, hy, cy = outputs[0], outputs[1], outputs[2]
+    return y, (hy.squeeze(0), cy.squeeze(0))
 
 
 def _rnn_helper(
@@ -2631,6 +2686,56 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
     return out, hidden_out
 
 
+def select_one_layer_lstm_function(input, hx, params):
+    r"""Check whether we could use decompose lstm with mkldnn_rnn_layer.
+    All the below conditions need to be met:
+        * ``torch._C._has_mkldnn`` returns ``True``.
+        * All the input args are on CPU.
+        * The dtypes of args are either torch.float or torch.bfloat16.
+        * Inference.
+        * ``has_projections`` returns ``False``.
+
+    Args:
+        * input: the input sequence to LSTM
+        * hx: a tuple of the input hidden state and cell state ``(h_0, c_0)`` to LSTM
+        * params: the weight and bias tensors of LSTM
+    """
+
+    def use_mkldnn(input, hx, params):
+        if not torch._C._has_mkldnn:
+            return False
+
+        tensors = [input] + list(hx) + list(chain.from_iterable(params))
+        devices = {t.device for t in tensors}
+        if len(devices) != 1:
+            return False
+
+        device = devices.pop()
+        if device != torch.device("cpu"):
+            return False
+        # With autocast, possible to have mixed dtype here
+        dtypes = {t.dtype for t in tensors}
+        for dtype in dtypes:
+            if dtype not in [torch.float, torch.bfloat16]:
+                return False
+
+        if input.requires_grad:
+            return False
+
+        has_projections = hx[0].size(2) != hx[1].size(2)
+        if has_projections:
+            return False
+
+        return True
+
+    # mkldnn_one_layer_lstm does not depend on seq_len while one_layer_lstm
+    # will expand over the seq_len dim
+    if use_mkldnn(input, hx, params):
+        return mkldnn_one_layer_lstm
+    else:
+        return one_layer_lstm
+
+
 @register_decomposition(aten.lstm.input)
 @aten.lstm.input.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.lstm.input.py_impl(DispatchKey.Autograd)
@@ -2648,6 +2753,7 @@ def lstm_impl(
     assert len(hx) == 2, "lstm expects two hidden states"
     params = gather_params(params, has_biases, hx[0].size(2) != hx[1].size(2))
     hidden = list(zip(hx[0], hx[1]))
+    layer_fn = select_one_layer_lstm_function(input, hx, params)
     out, final_hiddens = _rnn_helper(
         input,
         hidden,
@@ -2658,7 +2764,7 @@ def lstm_impl(
         train,
         bidirectional,
         batch_first,
-        one_layer_lstm,
+        layer_fn,
     )
     final_hiddens = list(zip(*final_hiddens))
     return out, torch.stack(final_hiddens[0], 0), torch.stack(final_hiddens[1], 0)
@@ -3198,34 +3304,30 @@ def binary_cross_entropy_with_logits(
     return apply_loss_reduction(loss, reduction)
 
 
-def should_fold(tensor1: torch.Tensor, dim_tensor2: int) -> bool:
-    dim_tensor1 = tensor1.ndim
-    if dim_tensor1 >= 3 and (dim_tensor2 == 1 or dim_tensor2 == 2):
-        t1_sizes_ptr = tensor1.shape
-        t1_strides = tensor1.stride()
-        if (
-            dim_tensor1 == 3
-            and dim_tensor2 == 2
-            and t1_strides[-1] != 1
-            and t1_strides[0] == t1_sizes_ptr[1] * t1_sizes_ptr[2]
-        ):
-            # First dim is slowest moving, and then the following two dims are
-            # transposed. This can happen for example by permute(0, 2, 1).
-            # First 2 dims could be folded to use mm but would require permutation
-            # with actual data movement, which can be instead handled by BMM with each
-            # GEMM transposed.
-            # This can be generalized to a tensor with dim X + Y + Z where X, Y, and Z
-            # dims are contiguous, Y dims and Z dims are transposed, and X, Y, Z > 0.
-            # For example, this can happen by permute(0, 1, 5, 2, 3, 4), where X = 2,
-            # Y = 3, and Z = 1.
-            return False
-        else:
-            return True
-    else:
+def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor) -> bool:
+    # For comments of the logic of this function see eager in /native/LinearAlgebra.cpp
+
+    t1, t2 = (tensor1, tensor2) if tensor1.ndim >= tensor2.ndim else (tensor2, tensor1)
+
+    if not (t1.ndim >= 3 and t2.ndim <= 2):
         return False
+    if t2.requires_grad:
+        return True
+    if tensor1.ndim == 2:
+        return False
+    if t1.numel() == 0:
+        return True
+
+    t1_shape = t1.shape
+    t1_stride = t1.stride()
+    return all(
+        st1 == st2 * s2
+        for (st1, st2, s2) in zip(t1_stride[:-2], t1_stride[1:-1], t1_shape[1:-1])
+    )
 
 
 @aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@out_wrapper()
 def matmul(tensor1, tensor2):
     dim_tensor1 = tensor1.dim()
     dim_tensor2 = tensor2.dim()
@@ -3237,12 +3339,8 @@ def matmul(tensor1, tensor2):
     elif dim_tensor1 == 1 and dim_tensor2 == 2:
         return torch.squeeze(torch.mm(torch.unsqueeze(tensor1, 0), tensor2), 0)
     elif dim_tensor1 == 2 and dim_tensor2 == 2:
-        # if tensor1.shape[1] != tensor2.shape[0]:
-        #     breakpoint()
         return torch.mm(tensor1, tensor2)
-    elif should_fold(tensor1, dim_tensor2) or should_fold(tensor2, dim_tensor1):
-        # NB: Much of this was written with Copilot! (although still had to fix a bunch of issues)
-
+    elif should_fold(tensor1, tensor2):
         # dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
         # dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
         # and some condition on the strides is fulfilled
@@ -3268,10 +3366,13 @@ def matmul(tensor1, tensor2):
         t2_is_matrix = t2.dim() == 2
         if t2_is_matrix:
             output_shape.append(t2.shape[1])
+
+        # This will almost always be a view.
+        # It may not be a view if t2->requires_grad(). See should_fold in aten/ for an explanation
         t1_folded = t1.reshape(folded_dim1, sizes_1[-1])
         if t2_is_matrix:
-            # FIXME This path always does an unnecessary copy when transpose == True as the returned
-            # result from BLAS is already C-transposed
+            # This copies if we perform a 2D @ 3D and the first tensor requires_grad
+            # See should_fold native/LinearAlgebra.cpp for why.
             output = t1_folded.mm(t2).view(output_shape)
             return output.mT.contiguous() if transpose else output
         else:
@@ -3285,10 +3386,23 @@ def matmul(tensor1, tensor2):
         batch_tensor1 = tensor1.shape[:-2]
         m2 = tensor2.size(-2) if dim_tensor2 > 1 else tensor2.size(-1)
         p = tensor2.size(-1) if dim_tensor2 > 1 else 1
+
         batch_tensor2: List[int] = []
         # TODO: handling of slice
         for i in range(dim_tensor2 - 2):
             batch_tensor2.append(tensor2.size(i))
+
+        # Same optimization for the gradients as that in should_fold
+        # If we're going to broadcast, we force it to go through the should_fold branch
+        if (
+            dim_tensor1 == 3
+            and dim_tensor2 == 3
+            and batch_tensor1[0] != batch_tensor2[0]
+        ):
+            if batch_tensor1[0] == 1 and tensor1.requires_grad():
+                return matmul(tensor1.squeeze(0), tensor2)
+            if batch_tensor2[0] == 1 and tensor2.requires_grad():
+                return matmul(tensor1, tensor2.squeeze(0))
 
         # expand the batch portion (i.e. cut off matrix dimensions and expand rest)
         expand_batch_portion = list(
@@ -3296,7 +3410,6 @@ def matmul(tensor1, tensor2):
         )
 
         tensor1_expand_size = expand_batch_portion + [n, m1]
-        tensor2_expand_size = expand_batch_portion + [m2, p]
 
         expand_batch_product = prod(expand_batch_portion)
 
@@ -3304,9 +3417,20 @@ def matmul(tensor1, tensor2):
         tensor1_expanded = tensor1.expand(tensor1_expand_size).reshape(
             expand_batch_product, n, m1
         )
-        tensor2_expanded = tensor2.expand(tensor2_expand_size).reshape(
-            expand_batch_product, m2, p
-        )
+
+        vector_rhs = dim_tensor2 == 1
+        if vector_rhs:
+            tensor2_expand_size = expand_batch_portion + [m2]
+            tensor2_expanded = (
+                tensor2.expand(tensor2_expand_size)
+                .reshape(expand_batch_product, m2)
+                .unsqueeze(2)
+            )
+        else:
+            tensor2_expand_size = expand_batch_portion + [m2, p]
+            tensor2_expanded = tensor2.expand(tensor2_expand_size).reshape(
+                expand_batch_product, m2, p
+            )
 
         output_shape = expand_batch_portion
         if dim_tensor1 > 1:
@@ -3315,7 +3439,10 @@ def matmul(tensor1, tensor2):
         if dim_tensor2 > 1:
             output_shape.append(p)
 
-        return tensor1_expanded.bmm(tensor2_expanded).view(output_shape)
+        if vector_rhs:
+            return tensor1_expanded.bmm(tensor2_expanded).squeeze(-1).view(output_shape)
+        else:
+            return tensor1_expanded.bmm(tensor2_expanded).view(output_shape)
     else:
         torch._check(False, lambda: "both arguments to matmul need to be at least 1D")
 
@@ -3500,6 +3627,57 @@ def multi_margin_loss(
         return z.sum() / z.shape[1]
     else:
         return z.mean(dim=1)
+
+
+@register_decomposition(aten.multilabel_margin_loss_forward)
+@aten.multilabel_margin_loss_forward.default.py_impl(DispatchKey.Autograd)
+@out_wrapper("output", "is_target")
+def multilabel_margin_loss_forward(
+    input: Tensor,
+    target: Tensor,
+    reduction: int,
+) -> Tuple[Tensor, Tensor]:
+    orig_input_shape = input.shape
+    orig_target_shape = target.shape
+    input = torch.atleast_2d(input)
+    target = torch.atleast_2d(target)
+    dim = input.shape[1]
+    torch._check(
+        len(orig_input_shape) <= 2 and dim != 0,
+        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {orig_input_shape}",
+    )
+    torch._check(
+        len(orig_target_shape) <= 2 and orig_target_shape == orig_input_shape,
+        lambda: f"inconsistent target size: {orig_target_shape} for input of size: {orig_input_shape}",
+    )
+    # ignores labels after the first -1, detects when -1 is not present
+    idx = torch.arange(dim, device=target.device)
+    is_end = target == -1
+    end_idx = torch.amin(torch.where(is_end, idx, dim), dim=-1, keepdim=True)
+    # target indices
+    target_mask = idx < end_idx
+    # masks target to be able to use gather, which doesn't allow -1
+    tidx0 = torch.where(target_mask, target, 0)
+    u = torch.gather(input, dim=-1, index=tidx0)
+    # is_target
+    tidx1 = torch.where(target_mask, target, -1)
+    is_target = torch.any(idx == tidx1.unsqueeze(dim=-1), dim=1)
+    # loss
+    z = 1.0 - u.T.unsqueeze(dim=-1) + input
+    z = z.clamp_min(0)
+    z = z / dim
+    # masks loss
+    z = torch.where(is_target, 0, z)
+    # reduction
+    if reduction == Reduction.MEAN.value:
+        z = z.sum(dim=(0, -1)).mean()
+    elif reduction == Reduction.SUM.value:
+        z = z.sum()
+    else:
+        z = z.sum(dim=(0, -1))
+    # result
+    is_target = is_target.to(input.dtype).reshape(orig_target_shape)
+    return z, is_target
 
 
 def register_inplace(aten_op, outplace_op):

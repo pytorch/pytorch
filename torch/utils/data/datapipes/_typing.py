@@ -308,8 +308,7 @@ class _DataPipeMeta(GenericMeta):
         t = _DataPipeType(params[0])
 
         if not t.issubtype(self.type):
-            raise TypeError('Can not subclass a DataPipe[{}] from DataPipe[{}]'
-                            .format(t, self.type))
+            raise TypeError(f'Can not subclass a DataPipe[{t}] from DataPipe[{self.type}]')
 
         # Types are equal, fast path for inheritance
         if self.type == t:
@@ -388,8 +387,7 @@ def _dp_init_subclass(sub_cls, *args, **kwargs):
             param = _eval_type(sub_cls.type.param, base_globals, locals())
             sub_cls.type.param = param
         except TypeError as e:
-            raise TypeError("{} is not supported by Python typing"
-                            .format(sub_cls.type.param.__forward_arg__)) from e
+            raise TypeError(f"{sub_cls.type.param.__forward_arg__} is not supported by Python typing") from e
 
     if '__iter__' in sub_cls.__dict__:
         iter_fn = sub_cls.__dict__['__iter__']
@@ -421,8 +419,7 @@ def reinforce_type(self, expected_type):
     _type_check(expected_type, msg="'expected_type' must be a type")
 
     if not issubtype(expected_type, self.type.param):
-        raise TypeError("Expected 'expected_type' as subtype of {}, but found {}"
-                        .format(self.type, _type_repr(expected_type)))
+        raise TypeError(f"Expected 'expected_type' as subtype of {self.type}, but found {_type_repr(expected_type)}")
 
     self.type = _DataPipeType(expected_type)
     return self

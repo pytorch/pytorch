@@ -144,7 +144,7 @@ class TestEnvironment:
         implied = implied_by_fn()
         enabled = enabled or implied
         if include_in_repro and (env_var is not None) and (enabled != default) and not implied:
-            TestEnvironment.repro_env_vars[name] = env_var_val
+            TestEnvironment.repro_env_vars[env_var] = env_var_val
 
         # export flag globally for convenience
         assert name not in globals(), f"duplicate definition of flag '{name}'"
@@ -462,7 +462,7 @@ class parametrize(_TestParametrizer):
             return value.formatted_name
         else:
             # Include name and value separated by underscore.
-            return '{}_{}'.format(name, str(value).replace('.', '_'))
+            return f"{name}_{str(value).replace('.', '_')}"
 
     def _default_subtest_name(self, values):
         return '_'.join([self._formatted_str_repr(a, v) for a, v in zip(self.arg_names, values)])
@@ -686,12 +686,18 @@ def wait_for_process(p, timeout=None):
     except subprocess.TimeoutExpired:
         # send SIGINT to give pytest a chance to make xml
         p.send_signal(signal.SIGINT)
-        exit_status = p.wait(timeout=5)
+        exit_status = None
+        try:
+            exit_status = p.wait(timeout=5)
+        # try to handle the case where p.wait(timeout=5) times out as well as
+        # otherwise the wait() call in the finally block can potentially hang
+        except subprocess.TimeoutExpired:
+            pass
         if exit_status is not None:
             return exit_status
         else:
             p.kill()
-            raise
+        raise
     except:  # noqa: B001,E722, copied from python core library
         p.kill()
         raise
@@ -1317,10 +1323,11 @@ def skipIfNotMiopenSuggestNHWC(fn):
 def setLinalgBackendsToDefaultFinally(fn):
     @wraps(fn)
     def _fn(*args, **kwargs):
+        _preferred_backend = torch.backends.cuda.preferred_linalg_library()
         try:
             fn(*args, **kwargs)
         finally:
-            torch.backends.cuda.preferred_linalg_library('default')
+            torch.backends.cuda.preferred_linalg_library(_preferred_backend)
     return _fn
 
 
