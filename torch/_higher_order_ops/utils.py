@@ -2,10 +2,11 @@ from typing import Any, Callable
 
 import torch
 import torch.utils._pytree as pytree
+from torch._ops import HigherOrderOperator
 
 
 def autograd_not_implemented_inner(
-    operator: Callable, op_name: str, delayed_error: bool, *args: Any, **kwargs: Any
+    operator: HigherOrderOperator, delayed_error: bool, *args: Any, **kwargs: Any
 ) -> Any:
     """If autograd is enabled and any of the arguments require grad this will either
     raise an error or return a DelayedError depending on the value of delayed.
@@ -28,7 +29,7 @@ def autograd_not_implemented_inner(
         ):
             if delayed_error:
                 err_fn = torch._C._functions.DelayedError(
-                    f"Autograd not implemented for {op_name}",
+                    f"Autograd not implemented for {str(operator)}",
                     1,
                 )
 
@@ -38,13 +39,16 @@ def autograd_not_implemented_inner(
                         tensor.requires_grad = True
                     return tensor
 
-                return pytree.tree_map_only(torch.Tensor, lambda x: err_fn(fake_requires_grad(x)), result)
+                return pytree.tree_map_only(
+                    torch.Tensor, lambda x: err_fn(fake_requires_grad(x)), result
+                )
             else:
-                raise RuntimeError(f"Autograd not implemented for {op_name}")
+                raise RuntimeError(f"Autograd not implemented for {str(operator)}")
         return result
 
 
-def autograd_not_implemented(op, deferred_error):
+def autograd_not_implemented(op: HigherOrderOperator, deferred_error: bool) -> Callable:
     def inner(*args, **kwargs):
-        return autograd_not_implemented_inner(op, op.__name__, deferred_error, *args, **kwargs)
+        return autograd_not_implemented_inner(op, deferred_error, *args, **kwargs)
+
     return inner

@@ -11,8 +11,8 @@ from torch._functorch.eager_transforms import (
     _wrap_all_tensors_to_functional,
     functionalize,
 )
-from torch._ops import HigherOrderOperator
 from torch._higher_order_ops.utils import autograd_not_implemented
+from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -26,7 +26,6 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _pop_mode_temporarily,
 )
-from torch.utils._pytree import tree_flatten
 
 
 @dataclass
