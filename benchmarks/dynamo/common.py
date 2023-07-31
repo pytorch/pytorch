@@ -2911,9 +2911,7 @@ def run(runner, args, original_dir=None):
     if args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
-        torch._dynamo.config.automatic_dynamic_shapes = True
     if args.dynamic_shapes:
-        torch._dynamo.config.automatic_dynamic_shapes = True
         if not args.dynamic_batch_only:
             torch._dynamo.config.assume_static_by_default = False
     if args.specialize_int:
@@ -2991,8 +2989,6 @@ def run(runner, args, original_dir=None):
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
-        if args.only in {"hf_T5_generate"}:
-            torch._dynamo.config.automatic_dynamic_shapes = True
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False

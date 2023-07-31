@@ -1,4 +1,4 @@
-from numbers import Real, Number
+from numbers import Number, Real
 
 import torch
 from torch.distributions import constraints
@@ -6,7 +6,8 @@ from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
-__all__ = ['Beta']
+__all__ = ["Beta"]
+
 
 class Beta(ExponentialFamily):
     r"""
@@ -25,17 +26,28 @@ class Beta(ExponentialFamily):
         concentration0 (float or Tensor): 2nd concentration parameter of the distribution
             (often referred to as beta)
     """
-    arg_constraints = {'concentration1': constraints.positive, 'concentration0': constraints.positive}
+    arg_constraints = {
+        "concentration1": constraints.positive,
+        "concentration0": constraints.positive,
+    }
     support = constraints.unit_interval
     has_rsample = True
 
     def __init__(self, concentration1, concentration0, validate_args=None):
         if isinstance(concentration1, Real) and isinstance(concentration0, Real):
-            concentration1_concentration0 = torch.tensor([float(concentration1), float(concentration0)])
+            concentration1_concentration0 = torch.tensor(
+                [float(concentration1), float(concentration0)]
+            )
         else:
-            concentration1, concentration0 = broadcast_all(concentration1, concentration0)
-            concentration1_concentration0 = torch.stack([concentration1, concentration0], -1)
-        self._dirichlet = Dirichlet(concentration1_concentration0, validate_args=validate_args)
+            concentration1, concentration0 = broadcast_all(
+                concentration1, concentration0
+            )
+            concentration1_concentration0 = torch.stack(
+                [concentration1, concentration0], -1
+            )
+        self._dirichlet = Dirichlet(
+            concentration1_concentration0, validate_args=validate_args
+        )
         super().__init__(self._dirichlet._batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
@@ -57,8 +69,7 @@ class Beta(ExponentialFamily):
     @property
     def variance(self):
         total = self.concentration1 + self.concentration0
-        return (self.concentration1 * self.concentration0 /
-                (total.pow(2) * (total + 1)))
+        return self.concentration1 * self.concentration0 / (total.pow(2) * (total + 1))
 
     def rsample(self, sample_shape=()):
         return self._dirichlet.rsample(sample_shape).select(-1, 0)
