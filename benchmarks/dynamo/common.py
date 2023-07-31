@@ -1102,6 +1102,7 @@ class AOTInductorModelCache:
             example_outputs = eager_forward(
                 copy.deepcopy(model), clone_inputs(example_inputs)
             )
+
             if isinstance(example_outputs, dict):
                 # Workaround Huggingface output type issue ModelOutput
                 example_outputs = dict(example_outputs)
@@ -1109,8 +1110,28 @@ class AOTInductorModelCache:
             for output in example_outputs:
                 output_tensors.append(torch.empty_like(output))
 
-            # The exact API is subject to change
-            exported = torch._export.export(model, example_inputs)
+            # Register the output dataclass to pytree
+            example_outputs = eager_forward(
+                copy.deepcopy(model), clone_inputs(example_inputs)
+            )
+            example_outputs_flat, _ = pytree.tree_flatten(example_outputs)
+            output_dataclass_types = [
+                type(out)
+                for out in example_outputs_flat
+                if dataclasses.is_dataclass(type(out))
+            ]
+            for output_type in output_dataclass_types:
+                from torch._export.utils import register_dataclass_as_pytree_node
+
+                register_dataclass_as_pytree_node(output_type)
+
+            example_inputs = (
+                (tuple(), example_inputs)
+                if isinstance(example_inputs, dict)
+                else (example_inputs, {})
+            )
+
+            exported = torch._export.export(model, example_inputs[0], example_inputs[1])
             param_buffer_values = list(exported.state_dict.values())
             flat_example_inputs = fx_pytree.tree_flatten_spec(
                 example_inputs, exported.call_spec.in_spec
@@ -1163,6 +1184,11 @@ def export_aot_inductor(forward: Callable):
             model, example_inputs, eager_forward
         )
         param_buffer_values = list(exported.state_dict.values())
+        example_inputs = (
+            (tuple(), example_inputs)
+            if isinstance(example_inputs, dict)
+            else (example_inputs, {})
+        )
         flat_example_inputs = fx_pytree.tree_flatten_spec(
             example_inputs, exported.call_spec.in_spec
         )
