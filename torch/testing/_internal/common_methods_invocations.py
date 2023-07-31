@@ -8833,6 +8833,15 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
         has_no_out_of_place=True,
+        skips=(
+            # note(crcrpar): excluding cdouble from dtypes above might be better.
+            # Guard for `error: "In-place abs is not supported for complex tensors."`
+            DecorateInfo(
+                unittest.skip("_foreach_zero is not implemented"),
+                'TestForeach',
+                'test_outplace_forward_mode_AD',
+            ),
+        ),
     ),
 
     ForeachFuncInfo(
