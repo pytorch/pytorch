@@ -19,7 +19,7 @@ hf_Bert,pass,7
 hf_Bert_large,pass,7
 hf_DistilBert,pass,7
 hf_GPT2,pass,7
-hf_Reformer,pass,44
+hf_Reformer,pass,43
 hf_T5_large,pass_due_to_skip,0
 lennard_jones,pass,8
 maml_omniglot,pass,8

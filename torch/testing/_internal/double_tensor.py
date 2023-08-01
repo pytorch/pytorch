@@ -1,8 +1,8 @@
 import torch
 
+
 # A simple tensor subclass that holds two tensors internally, and runs every op on both tensors.
 class DoubleTensor(torch.Tensor):
-
     @staticmethod
     def __new__(cls, a, b, *, requires_grad: bool = False):
         assert a.device == b.device and a.layout == b.layout and a.requires_grad == b.requires_grad and a.dtype == b.dtype
@@ -13,9 +13,7 @@ class DoubleTensor(torch.Tensor):
         kwargs["layout"] = a.layout
         kwargs["requires_grad"] = a.requires_grad
         kwargs["dtype"] = a.dtype
-        return torch.Tensor._make_wrapper_subclass(
-            cls, shape, **kwargs
-        )
+        return torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
 
     def __init__(self, a, b, *, requires_grad: bool = False):
         self.a = a
