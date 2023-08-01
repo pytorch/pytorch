@@ -15,7 +15,6 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_FBCODE,
-    skipIfRocm,
     TEST_WITH_ASAN,
 )
 
@@ -144,7 +143,6 @@ class CudaReproTests(TestCase):
         compiled = compile_fx_inner(mod, ())
         assert compiled([])[0].device.type == "cuda"
 
-    @skipIfRocm
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_no_device_idx_repro_cudagraphs(self):
@@ -173,7 +171,6 @@ class CudaReproTests(TestCase):
 
         self.common(Repro(), ())
 
-    @skipIfRocm
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_expanded_inputs_cudagraphs(self):
@@ -187,7 +184,6 @@ class CudaReproTests(TestCase):
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
-    @skipIfRocm
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(
         automatic_dynamic_shapes=True,
@@ -236,7 +232,6 @@ class CudaReproTests(TestCase):
         self.assertEqual(real_out, compiled_out)
         torch._dynamo.reset()
 
-    @skipIfRocm
     @config.patch({"triton.cudagraphs": True, "size_asserts": False})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_expanded_inputs_cudagraphs_no_size_asserts(self):
@@ -250,8 +245,6 @@ class CudaReproTests(TestCase):
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
-    # TODO: enable
-    @skipIfRocm
     @config.patch({"triton.cudagraph_trees": False})
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
