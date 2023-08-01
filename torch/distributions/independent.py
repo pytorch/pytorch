@@ -1,10 +1,12 @@
+from typing import Dict
+
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _sum_rightmost
-from typing import Dict
 
-__all__ = ['Independent']
+__all__ = ["Independent"]
+
 
 class Independent(Distribution):
     r"""
@@ -37,15 +39,20 @@ class Independent(Distribution):
     """
     arg_constraints: Dict[str, constraints.Constraint] = {}
 
-    def __init__(self, base_distribution, reinterpreted_batch_ndims, validate_args=None):
+    def __init__(
+        self, base_distribution, reinterpreted_batch_ndims, validate_args=None
+    ):
         if reinterpreted_batch_ndims > len(base_distribution.batch_shape):
-            raise ValueError("Expected reinterpreted_batch_ndims <= len(base_distribution.batch_shape), "
-                             "actual {} vs {}".format(reinterpreted_batch_ndims,
-                                                      len(base_distribution.batch_shape)))
+            raise ValueError(
+                "Expected reinterpreted_batch_ndims <= len(base_distribution.batch_shape), "
+                "actual {} vs {}".format(
+                    reinterpreted_batch_ndims, len(base_distribution.batch_shape)
+                )
+            )
         shape = base_distribution.batch_shape + base_distribution.event_shape
         event_dim = reinterpreted_batch_ndims + len(base_distribution.event_shape)
-        batch_shape = shape[:len(shape) - event_dim]
-        event_shape = shape[len(shape) - event_dim:]
+        batch_shape = shape[: len(shape) - event_dim]
+        event_shape = shape[len(shape) - event_dim :]
         self.base_dist = base_distribution
         self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
@@ -53,10 +60,13 @@ class Independent(Distribution):
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Independent, _instance)
         batch_shape = torch.Size(batch_shape)
-        new.base_dist = self.base_dist.expand(batch_shape +
-                                              self.event_shape[:self.reinterpreted_batch_ndims])
+        new.base_dist = self.base_dist.expand(
+            batch_shape + self.event_shape[: self.reinterpreted_batch_ndims]
+        )
         new.reinterpreted_batch_ndims = self.reinterpreted_batch_ndims
-        super(Independent, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        super(Independent, new).__init__(
+            batch_shape, self.event_shape, validate_args=False
+        )
         new._validate_args = self._validate_args
         return new
 
@@ -105,8 +115,13 @@ class Independent(Distribution):
 
     def enumerate_support(self, expand=True):
         if self.reinterpreted_batch_ndims > 0:
-            raise NotImplementedError("Enumeration over cartesian product is not implemented")
+            raise NotImplementedError(
+                "Enumeration over cartesian product is not implemented"
+            )
         return self.base_dist.enumerate_support(expand=expand)
 
     def __repr__(self):
-        return self.__class__.__name__ + '({}, {})'.format(self.base_dist, self.reinterpreted_batch_ndims)
+        return (
+            self.__class__.__name__
+            + f"({self.base_dist}, {self.reinterpreted_batch_ndims})"
+        )
