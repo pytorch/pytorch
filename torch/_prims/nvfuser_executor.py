@@ -476,9 +476,7 @@ def maybe_partition_graph(
 class NVTXInterpreter(torch.fx.Interpreter):
     def run_node(self, n):
         torch.cuda.nvtx.range_push(
-            "name: {}, args: {}, op: {}, kwargs: {}".format(
-                n.name, n.args, n.op, n.kwargs
-            )
+            f"name: {n.name}, args: {n.args}, op: {n.op}, kwargs: {n.kwargs}"
         )
         result = super().run_node(n)
         torch.cuda.nvtx.range_pop()

@@ -446,7 +446,7 @@ def _flatten_optim_state_dict(
             for fqn in fqns:
                 if not unflat_osd_state[fqn]:
                     continue
-                for state_name, param_state in unflat_osd_state[fqn].items():
+                for state_name in unflat_osd_state[fqn].keys():
                     unflat_osd_state[fqn][state_name] = _broadcast_state(
                         fsdp_state, unflat_osd_state[fqn][state_name], group=group
                     )

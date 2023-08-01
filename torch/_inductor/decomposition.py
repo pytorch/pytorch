@@ -19,6 +19,7 @@ quantized_decomposed = torch.ops.quantized_decomposed
 
 inductor_decompositions = get_decompositions(
     [
+        aten._adaptive_avg_pool2d_backward,
         aten.arange,
         aten.bitwise_and_,
         aten.bitwise_or_,
@@ -26,8 +27,21 @@ inductor_decompositions = get_decompositions(
         aten.dist,
         aten.empty_like,
         aten.flip,
+        aten.gelu,
+        aten.hardtanh,
+        aten.index_select,
         aten.lcm,
+        aten.leaky_relu,
         aten.linalg_vector_norm,
+        aten._log_softmax,
+        aten.max_pool2d_with_indices_backward,
+        aten._native_batch_norm_legit,
+        aten._native_batch_norm_legit_functional,
+        aten._native_batch_norm_legit_no_training,
+        aten.native_batch_norm,
+        aten.native_group_norm,
+        aten.native_layer_norm,
+        aten._softmax,
         aten.sin_,
         aten.sqrt_,
         aten.std,
@@ -36,6 +50,7 @@ inductor_decompositions = get_decompositions(
         aten.tril_indices,
         aten.triu_indices,
         aten.unsafe_split,
+        aten.upsample_bilinear2d.vec,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}

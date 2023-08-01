@@ -448,7 +448,7 @@ def _invalid_settings_err_msg(settings):
     return msg
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def _parse_log_settings(settings):
     if settings == "":
         return dict()

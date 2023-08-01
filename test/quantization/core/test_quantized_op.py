@@ -223,9 +223,7 @@ class TestQuantizedOps(TestCase):
                     # Finds qY using in-place or non-in-place quantized operators.
                     qY = q_op(qX, **extra_kwargs)
 
-                    self.assertEqual(qY, qY_hat, msg='{} - {} failed: ({} vs. {})'.format(
-                        fn_name, q_op, qY, qY_hat
-                    ))
+                    self.assertEqual(qY, qY_hat, msg=f'{fn_name} - {q_op} failed: ({qY} vs. {qY_hat})')
 
     """Tests the correctness of the quantized::relu op."""
     @override_qengines
@@ -2202,8 +2200,7 @@ class TestQuantizedOps(TestCase):
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
             self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                             msg="{} results are off: qX_hat={} X_ref={}"
-                             .format(name, qX_hat.int_repr(), X_ref),
+                             msg=f"{name} results are off: qX_hat={qX_hat.int_repr()} X_ref={X_ref}",
                              exact_dtype=False)
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
@@ -2257,8 +2254,7 @@ class TestQuantizedOps(TestCase):
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
             self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                             msg="{} results are off: qX_hat={}, X_ref={}"
-                             .format(name, qX_hat.int_repr(), X_ref), exact_dtype=False)
+                             msg=f"{name} results are off: qX_hat={qX_hat.int_repr()}, X_ref={X_ref}", exact_dtype=False)
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
