@@ -52,12 +52,13 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         We expect a record_function event to be added on the CPU side, surrounding
         the launch of each triton kernel.
         """
+
         def fn(x, y):
             return (x + y).sin().cos()
 
         fn_opt = torch.compile(fn)
 
-        x, y = [torch.rand((4, 4), device="cuda") for _ in range(2)]
+        x, y = (torch.rand((4, 4), device="cuda") for _ in range(2))
 
         for _ in range(2):
             fn_opt(x, y)
@@ -75,7 +76,11 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         # this test, and then view test.json in chrome://tracing to see the trace.
         self.assertTrue(
             any(
-                (hasattr(event, "name") and "sin" in event.name and "triton" in event.name)
+                (
+                    hasattr(event, "name")
+                    and "sin" in event.name
+                    and "triton" in event.name
+                )
                 for event in prof.events()
             )
         )

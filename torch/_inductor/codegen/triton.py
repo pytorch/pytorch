@@ -6,7 +6,6 @@ import itertools
 import logging
 import math
 import operator
-from enum import Enum
 from typing import Dict, Iterable, List, Set
 
 import sympy
