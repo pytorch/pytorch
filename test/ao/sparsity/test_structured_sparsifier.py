@@ -992,6 +992,7 @@ class TestFPGMPruner(TestCase):
 
         pruned_y = pruned_model(x)
         # assert shapes
+        expected_conv1 = expected_conv1.to(device)
         assert pruned_y.shape == (1, 4, 32, 32)
         assert pruned_model.conv2d1.weight.shape == expected_conv1.shape
         assert pruned_model.conv2d2.weight.shape == (4, 2, 3, 3), "conv2d2 should have input channel pruned"
@@ -1020,6 +1021,8 @@ class TestFPGMPruner(TestCase):
         pruned_model = pruner.prune()
         pruned_y = pruned_model(x)
         # assert shapes
+        expected_conv1 = expected_conv1.to(device)
+        expected_conv2 = expected_conv2.to(device)
         assert pruned_y.shape == (1, 2, 32, 32)
         assert pruned_model.conv2d1.weight.shape == expected_conv1.shape
         assert pruned_model.conv2d2.weight.shape == expected_conv2.shape
