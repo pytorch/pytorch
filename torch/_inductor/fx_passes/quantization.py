@@ -452,8 +452,8 @@ def _register_dequant_promotion_pass(pattern, pass_number):
         assert to_fp32_node.target is prims.convert_element_type.default
 
         graph = match.graph
-        for index in range(len(list(mul_node.users)) - 1):
-            user_node = list(mul_node.users)[index]
+        user_node_list = list(mul_node.users)
+        for user_node in user_node_list:
             # Step1: Duplicate the mul node
             new_mul_node = clone_to_new_node(graph, mul_node, user_node)
             # Step2: Duplicate the sub node
