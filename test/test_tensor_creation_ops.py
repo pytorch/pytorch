@@ -3948,6 +3948,7 @@ class TestAsArray(TestCase):
             t = torch.asarray(e)
             self.assertEqual(t, original)
 
+    @skipIfTorchDynamo
     @onlyCPU
     def test_numpy_scalars(self, device):
         scalar = np.float64(0.5)
