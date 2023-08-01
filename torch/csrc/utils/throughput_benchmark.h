@@ -171,7 +171,7 @@ void ModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs);
  */
 class C10_HIDDEN ThroughputBenchmark {
  public:
-  explicit ThroughputBenchmark(jit::Module module);
+  explicit ThroughputBenchmark(const jit::Module& module);
   explicit ThroughputBenchmark(py::object module);
 
   // Add one more input example. This input example should be in the exact
