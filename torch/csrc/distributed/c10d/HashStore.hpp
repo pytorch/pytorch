@@ -49,7 +49,7 @@ class TORCH_API HashStore : public Store {
     const std::vector<std::string>& keys,
     const std::vector<std::vector<uint8_t>>& values) override;
 
-  // Returns true if this store support watchKey, append, multiGet and multiSet
+  // Returns true if this store support append, multiGet and multiSet
   bool hasExtendedApi() const override;
 
  protected:

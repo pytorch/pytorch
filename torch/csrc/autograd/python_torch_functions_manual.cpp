@@ -484,6 +484,26 @@ static PyObject* THPVariable__enable_functionalization(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable__functionalize_enable_reapply_views(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_enable_reapply_views(bool reapply_views=False)"},
+      /*traceable=*/true);
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  const auto reapply_views = r.toBool(0);
+  if (reapply_views) {
+    at::functionalization::impl::setFunctionalizationReapplyViewsTLS(true);
+  } else {
+    at::functionalization::impl::setFunctionalizationReapplyViewsTLS(false);
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable__disable_functionalization(
     PyObject* self,
     PyObject* args,
@@ -496,12 +516,13 @@ static PyObject* THPVariable__disable_functionalization(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable__sync(
+static PyObject* THPVariable__functionalize_sync(
     PyObject* self,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  static PythonArgParser parser({"_sync(Tensor t)"}, /*traceable=*/true);
+  static PythonArgParser parser(
+      {"_functionalize_sync(Tensor t)"}, /*traceable=*/true);
 
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -546,8 +567,8 @@ static PyMethodDef torch_functions_manual[] = {
      castPyCFunctionWithKeywords(THPVariable__freeze_functional_tensor),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
-    {"_sync",
-     castPyCFunctionWithKeywords(THPVariable__sync),
+    {"_functionalize_sync",
+     castPyCFunctionWithKeywords(THPVariable__functionalize_sync),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_enable_functionalization",
@@ -561,6 +582,11 @@ static PyMethodDef torch_functions_manual[] = {
     {"_functionalize_has_metadata_mutation",
      castPyCFunctionWithKeywords(
          THPVariable__functionalize_has_metadata_mutation),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_functionalize_enable_reapply_views",
+     castPyCFunctionWithKeywords(
+         THPVariable__functionalize_enable_reapply_views),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"nonzero",
