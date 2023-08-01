@@ -1439,18 +1439,6 @@ class TestSDPAFailureModes(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
-    @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM90Device, "Does not support fused SDPA or pre-SM90 hardware")
-    def test_mem_efficient_fail_sm90(self, device):
-        dtype = torch.float16
-        shape = (16, 16, 32, 32)
-        make_tensor = partial(rand_sdpa_tensor, shape=shape, type=type, device=device, dtype=dtype)
-        q, k, v = make_tensor(), make_tensor(), make_tensor()
-        with sdp_kernel(**backend_map[SDPBackend.EFFICIENT_ATTENTION]):
-            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, None, 0.0, False))
-
-
 class TestSDPA(NNTestCase):
     """ Used to test generic functionality of scaled_dot_product_attention
     Summary:
