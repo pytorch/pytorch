@@ -415,7 +415,7 @@ inline __device__ void convert_dKV(const Params &params) {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_even_M, bool Is_even_K, bool Is_first, bool Is_last, bool Seq_parallel=false, typename Params>
+template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_even_MN, bool Is_even_K, bool Is_first, bool Is_last, bool Seq_parallel=false, typename Params>
 inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const int bidb, const int bidh, const int n_block) {
 
     using Element = typename Kernel_traits::Element;
@@ -436,7 +436,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     constexpr int AtomLayoutMS = Kernel_traits::AtomLayoutMSdP;
     constexpr bool Double_buffer = !Kernel_traits::No_double_buffer;
 
-    const BlockInfo</*Varlen=*/!Is_even_M> binfo(params, bidb);
+    const BlockInfo</*Varlen=*/!Is_even_MN> binfo(params, bidb);
     if (n_block * kBlockN >= binfo.actual_seqlen_k || binfo.actual_seqlen_q == 0) return;
 
     int m_block_max = cute::ceil_div(binfo.actual_seqlen_q, kBlockM);
@@ -668,10 +668,10 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
         #pragma unroll
         for (int k = 0; k < size(tdKVpdKV); ++k) { tdKVpdKV(k) = get<1>(tdKVcdKV(0, 0, k)) < params.d; }
         // Clear_OOB_K must be false since we don't want to write zeros to gmem
-        pytorch_flash::copy</*Is_even_MN=*/false, Is_even_K, /*Clear_OOB_MN=*/false, /*Clear_OOB_K=*/false>(
+        pytorch_flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/false, /*Clear_OOB_K=*/false>(
             gmem_thr_copy_dKV, tdKrdK, tdKgdK, tdKVcdKV, tdKVpdKV, binfo.actual_seqlen_k - n_block * kBlockN
         );
-        pytorch_flash::copy</*Is_even_MN=*/false, Is_even_K, /*Clear_OOB_MN=*/false, /*Clear_OOB_K=*/false>(
+        pytorch_flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/false, /*Clear_OOB_K=*/false>(
             gmem_thr_copy_dKV, tdVrdV, tdVgdV, tdKVcdKV, tdKVpdKV, binfo.actual_seqlen_k - n_block * kBlockN
         );
         return;
@@ -687,7 +687,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
 
     if (Kernel_traits::Is_V_in_regs) {
         // Clear the smem tiles to account for predicated off loads
-        pytorch_flash::copy</*Is_even_MN=*/false, Is_even_K, /*Clear_OOB_MN=*/true>(
+        pytorch_flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/true>(
             gmem_thr_copy_QKV, tVgV, tVsV, tKVcKV, tKVpKV, binfo.actual_seqlen_k - n_block * kBlockN
         );
         pytorch_flash::cp_async_fence();
@@ -697,18 +697,18 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     Tensor tdOrO = make_fragment_like(tdOgO);
     if (!Is_first) {
         // Clear the smem tiles to account for predicated off loads
-        pytorch_flash::copy<Is_even_M, Is_even_K, /*Clear_OOB_MN=*/true>(
+        pytorch_flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/true>(
             gmem_thr_copy_dO, tdOgdO, tdOsdO, tQcQ, tQpQ, binfo.actual_seqlen_q - m_block * kBlockM
         );
     } else {
-        pytorch_flash::copy<Is_even_M, Is_even_K, /*Clear_OOB_MN=*/true>(
+        pytorch_flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/true>(
             gmem_thr_copy_dO, tdOgdO, tdOrdO, tQcQ, tQpQ, binfo.actual_seqlen_q - m_block * kBlockM
         );
-        pytorch_flash::copy<Is_even_M, Is_even_K, /*Clear_OOB_MN=*/true>(
+        pytorch_flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/true>(
             gmem_thr_copy_dO, tdOgO, tdOrO, tQcQ, tQpQ, binfo.actual_seqlen_q - m_block * kBlockM
         );
     }
-    pytorch_flash::copy<Is_even_M, Is_even_K, /*Clear_OOB_MN=*/true>(
+    pytorch_flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/true>(
         gmem_thr_copy_QKV, tQgQ, tQsQ, tQcQ, tQpQ, binfo.actual_seqlen_q - m_block * kBlockM
     );
 
@@ -722,7 +722,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     for (int mi = 0; mi < size(lse); ++mi) {
         // Using uint32_t row makes it 10us slower on d=128, not sure why.
         const int row = get<0>(taccScS_row(mi));
-        lse(mi) = Is_even_M || row < binfo.actual_seqlen_q - m_block * kBlockM ? gLSE(row) : 0;
+        lse(mi) = Is_even_MN || row < binfo.actual_seqlen_q - m_block * kBlockM ? gLSE(row) : 0;
     }
 
     // Tensor tKrK = make_fragment_like(tKsK);
@@ -730,11 +730,11 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     // copy(gmem_thr_copy_QKV, tKgK, tKrK);
     // // if (cute::thread(1, 0)) { print(tKrK); }
 
-    pytorch_flash::copy</*Is_even_MN=*/false, Is_even_K, /*Clear_OOB_MN=*/true>(
+    pytorch_flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/true>(
         gmem_thr_copy_QKV, tKgK, tKsK, tKVcKV, tKVpKV, binfo.actual_seqlen_k - n_block * kBlockN
     );
     if (!Kernel_traits::Is_V_in_regs) {
-        pytorch_flash::copy</*Is_even_MN=*/false, Is_even_K, /*Clear_OOB_MN=*/true>(
+        pytorch_flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/true>(
             gmem_thr_copy_QKV, tVgV, tVsV, tKVcKV, tKVpKV, binfo.actual_seqlen_k - n_block * kBlockN
         );
     }
@@ -783,16 +783,26 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
 
         // Reshape acc_s from (MMA=4, MMA_N, MMA_N) to (col=(2, MMA_N), row=(2, MMA_N))
         Tensor scores = make_tensor(acc_s.data(), pytorch_flash::convert_layout_acc_rowcol(acc_s.layout()));
-        // if (cute::thread(32, 0)) { print(scores); }
-        // We don't need to mask out the elements beyond actual_seqlen_k, because acc_s would
-        // be some finite value for those indices. In the end when we multiply with K to get dQ,
-        // the corresponding values of K would be 0, so the result would still be correct.
-        // Putting this causal masking right after acc_s is *much* slower for some reason.
-        if (Is_causal && m_block * kBlockM < (n_block + 1) * kBlockN) {
-            pytorch_flash::apply_mask_causal(scores, n_block * kBlockN + (tidx / 32 / AtomLayoutMS) * MMA_N_SdP * 16,
-                                     binfo.actual_seqlen_k, m_block * kBlockM + get<0>(taccScS_row(0)),
-                                     // binfo.actual_seqlen_k, m_block * kBlockM + (tidx / 32) % AtomLayoutMS * 16 + (tidx % 32) / 4,
-                                     AtomLayoutMS * 16);
+        // TD [2023-07-29]: I was thinking that we don't need to mask out the elements beyond
+        // actual_seqlen_k, because acc_s would be some finite value for those indices.
+        // In the end when we multiply with K to get dQ, the corresponding values of K would be 0,
+        // so the result would still be correct.
+        // However, it's possible that the values in acc_s are so large that they overflow
+        // when we multiply with dP and convert to fp16, resulting in Inf in dS and NaNs in dQ.
+        // So we need to mask out the elements beyond actual_seqlen_k.
+        if (!Is_causal) {
+            if (!Is_even_MN && (n_block + 1) * kBlockN >= binfo.actual_seqlen_k) {
+                pytorch_flash::apply_mask(scores, binfo.actual_seqlen_k,
+                                  n_block * kBlockN + (tidx / 32 / AtomLayoutMS) * MMA_N_SdP * 16);
+            }
+        } else {
+            // Putting this causal masking right after acc_s is *much* slower for some reason.
+            if (m_block * kBlockM < (n_block + 1) * kBlockN) {
+                pytorch_flash::apply_mask_causal(scores, n_block * kBlockN + (tidx / 32 / AtomLayoutMS) * MMA_N_SdP * 16,
+                                         binfo.actual_seqlen_k, m_block * kBlockM + get<0>(taccScS_row(0)),
+                                         // binfo.actual_seqlen_k, m_block * kBlockM + (tidx / 32) % AtomLayoutMS * 16 + (tidx % 32) / 4,
+                                         AtomLayoutMS * 16);
+            }
         }
         // if (cute::thread(32, 0)) { print(scores); }
         // Compute the exponential value.
@@ -979,7 +989,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
             Tensor tdQcdQ = gmem_thr_copy_dQ.partition_D(cdQ);
             #pragma unroll
             for (int m = 0; m < size<1>(tdQgdQ); ++m) {
-                if (Is_even_M || get<0>(tdQcdQ(0, m, 0)) < binfo.actual_seqlen_q - m_block * kBlockM) {
+                if (Is_even_MN || get<0>(tdQcdQ(0, m, 0)) < binfo.actual_seqlen_q - m_block * kBlockM) {
                     copy(gmem_thr_copy_dQ, tdQrdQ(_, m, _), tdQgdQ(_, m, _));
                 }
             }
@@ -1010,8 +1020,11 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     Tensor taccdVrdV = smem_thr_copy_dKV.retile_S(rdV);       // ((Atom,AtomNum), MMA_N, MMA_N)
     Tensor taccdVsdV = smem_thr_copy_dKV.partition_D(sdV);    // ((Atom,AtomNum),PIPE_M,PIPE_N)
 
-    // If we don't need syncthreads here since we're writing to the same location as sK and sV.
-    // Unless Is_V_in_regs. If Is_last, there's already a __syncthreads() at the end of the loop.
+    // We need syncthreads here since we're writing to the same location as sK and sV.
+    // Without syncthreads, some thread might modify the location of sK while another thread
+    // is reading it for dQ gemm, leading to a race condition.
+    // If Is_last, there's already a __syncthreads() at the end of the loop.
+    if (!Is_last) { __syncthreads(); }
     if (Kernel_traits::Is_V_in_regs && !Is_last) { __syncthreads(); }
 
     copy(smem_thr_copy_dKV, taccdKrdK, taccdKsdK);
@@ -1045,10 +1058,10 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     #pragma unroll
     for (int k = 0; k < size(tdKVpdKV); ++k) { tdKVpdKV(k) = get<1>(tdKVcdKV(0, 0, k)) < params.d; }
     // Clear_OOB_K must be false since we don't want to write zeros to gmem
-    pytorch_flash::copy</*Is_even_MN=*/false, Is_even_K, /*Clear_OOB_MN=*/false, /*Clear_OOB_K=*/false>(
+    pytorch_flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/false, /*Clear_OOB_K=*/false>(
         gmem_thr_copy_dKV, tdKrdK, tdKgdK, tdKVcdKV, tdKVpdKV, binfo.actual_seqlen_k - n_block * kBlockN
     );
-    pytorch_flash::copy</*Is_even_MN=*/false, Is_even_K, /*Clear_OOB_MN=*/false, /*Clear_OOB_K=*/false>(
+    pytorch_flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/false, /*Clear_OOB_K=*/false>(
         gmem_thr_copy_dKV, tdVrdV, tdVgdV, tdKVcdKV, tdKVpdKV, binfo.actual_seqlen_k - n_block * kBlockN
     );
 
@@ -1489,7 +1502,7 @@ inline __device__ void compute_dq_dk_dv(const Params &params) {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_even_M, bool Is_even_K, typename Params>
+template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_even_MN, bool Is_even_K, typename Params>
 inline __device__ void compute_dq_dk_dv_seqk_parallel(const Params &params) {
 
     const int n_block = blockIdx.x;
@@ -1498,7 +1511,7 @@ inline __device__ void compute_dq_dk_dv_seqk_parallel(const Params &params) {
     // The block index for the head.
     const int bidh = blockIdx.z;
 
-    compute_dq_dk_dv_1colblock<Kernel_traits, Is_dropout, Is_causal, Is_even_M, Is_even_K, false, false, /*Seq_parallel=*/true>(params, bidb, bidh, n_block);
+    compute_dq_dk_dv_1colblock<Kernel_traits, Is_dropout, Is_causal, Is_even_MN, Is_even_K, false, false, /*Seq_parallel=*/true>(params, bidb, bidh, n_block);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
