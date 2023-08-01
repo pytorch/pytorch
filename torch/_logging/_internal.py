@@ -118,6 +118,18 @@ class LogState:
 log_registry = LogRegistry()
 log_state = LogState()
 
+# Groups of logging configurations that can be used with `set_logs`.
+# Format is a dict of logging group name -> set_logs keyword arguments.
+LOG_GROUPS = {
+    "default": {
+        "graph_breaks": True,
+        "recompiles": True,
+        "dynamic": logging.DEBUG,
+        "guards": True,
+        "trace_source": True,
+    },
+}
+
 
 def set_logs(
     *,
@@ -142,6 +154,7 @@ def set_logs(
     output_code: bool = False,
     schedule: bool = False,
     perf_hints: bool = False,
+    default: bool = False,
     modules: Optional[Dict[str, Union[int, bool]]] = None,
 ):
     """
@@ -252,6 +265,10 @@ def set_logs(
         perf_hints (:class:`bool`):
             Whether to emit the TorchInductor perf hints. Default: ``False``
 
+        default (:class:`bool`):
+            Generate "interesting" logs (graph breaks, recompiles, dynamic shapes,
+            guards, traced source). Default: ``False``
+
         modules (dict):
             This argument provides an alternate way to specify the above log
             component and artifact settings, in the format of a keyword args
@@ -289,6 +306,12 @@ def set_logs(
     modules = modules or {}
 
     def _set_logs(**kwargs):
+        for group, config in LOG_GROUPS.items():
+            if group in kwargs:
+                for name, val in config.items():
+                    kwargs[name] = val
+                kwargs.pop(group)
+
         default_level = kwargs.pop("all", None)
         if default_level:
             if default_level not in logging._levelToName:
@@ -357,6 +380,7 @@ def set_logs(
         output_code=output_code,
         schedule=schedule,
         perf_hints=perf_hints,
+        default=default,
     )
 
 
@@ -439,6 +463,7 @@ def _invalid_settings_err_msg(settings):
             ["all"],
             log_registry.log_alias_to_log_qname.keys(),
             log_registry.artifact_names,
+            LOG_GROUPS.keys(),
         )
     )
     msg = (
@@ -479,6 +504,15 @@ def _parse_log_settings(settings):
         if name == "all":
             for log_qname in log_registry.get_log_qnames():
                 log_state.enable_log(log_qname, level)
+        elif name in LOG_GROUPS:
+            for key, arg in LOG_GROUPS[name].items():
+                if log_registry.is_log(key):
+                    log_qname = log_registry.log_alias_to_log_qname[key]
+                    log_state.enable_log(log_qname, arg)
+                elif log_registry.is_artifact(key):
+                    log_state.enable_artifact(key)
+                else:
+                    raise ValueError(f"Log group {name} has bad setting ({key}: {arg})")
 
     for name in log_names:
         name, level = get_name_level_pair(name)
@@ -489,7 +523,7 @@ def _parse_log_settings(settings):
             log_state.enable_log(log_qname, level)
         elif log_registry.is_artifact(name):
             log_state.enable_artifact(name)
-        elif name == "all":
+        elif name == "all" or name in LOG_GROUPS:
             continue
         elif _is_valid_module(name):
             if not _has_registered_parent(name):
