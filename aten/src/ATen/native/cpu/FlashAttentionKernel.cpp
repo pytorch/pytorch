@@ -112,8 +112,8 @@ void cpu_flash_attention(
   int64_t lStrideM = logsumexp.stride(1);
   int64_t lStrideH = logsumexp.stride(2);
 
-  int64_t qSplitSize = qSplitSize > qSize ? qSize : q_split_size;
-  int64_t kvSplitSize = kvSplitSize > kvSize ? kvSize : kv_split_size;
+  int64_t qSplitSize = q_split_size > qSize ? qSize : q_split_size;
+  int64_t kvSplitSize = kv_split_size > kvSize ? kvSize : kv_split_size;
   int64_t qSlice = (qSize - 1) / qSplitSize + 1;
   int64_t num_thread = at::get_num_threads();
 
@@ -335,8 +335,8 @@ void cpu_flash_attention_backward(
   int64_t grad_oStrideM = grad_out.stride(1);
   int64_t grad_oStrideH = grad_out.stride(2);
 
-  int64_t qSplitSize = qSplitSize > qSize ? qSize : q_split_size;
-  int64_t kvSplitSize = kvSplitSize > kvSize ? kvSize : kv_split_size;
+  int64_t qSplitSize = q_split_size > qSize ? qSize : q_split_size;
+  int64_t kvSplitSize = kv_split_size > kvSize ? kvSize : kv_split_size;
   int64_t num_thread = at::get_num_threads();
 
   const auto dtype = query.scalar_type();
