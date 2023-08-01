@@ -1,25 +1,26 @@
+from __future__ import annotations
+
+import functools
+
 import inspect
-from typing import Any, Callable, Dict, Mapping, Tuple
+import traceback
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.diagnostics.infra import _infra, formatter
 
 
 @_beartype.beartype
-def python_frame(frame: inspect.FrameInfo) -> _infra.StackFrame:
-    """Returns a StackFrame for the given inspect.FrameInfo."""
-    snippet = (
-        frame.code_context[frame.index].strip()
-        if frame.code_context is not None and frame.index is not None
-        else None
-    )
+def python_frame(frame: traceback.FrameSummary) -> _infra.StackFrame:
+    """Returns a StackFrame for the given traceback.FrameSummary."""
+    snippet = frame.line
 
     return _infra.StackFrame(
         location=_infra.Location(
             uri=frame.filename,
             line=frame.lineno,
             snippet=snippet,
-            function=frame.function,
+            function=frame.name,
             message=snippet,
         )
     )
@@ -34,24 +35,32 @@ def python_call_stack(frames_to_skip: int = 0, frames_to_log: int = 16) -> _infr
         raise ValueError("frames_to_log must be non-negative")
     frames_to_skip += 2  # Skip this function and beartype.
     stack = _infra.Stack()
-    stack.frames = [
-        python_frame(frame)
-        # TODO(bowbao): Rewrite with 'traceback' to speedup performance.
-        # Reference code: `torch/fx/proxy.py`.
-        # `inspect.stack(0)` will speedup the call greatly, but loses line snippet.
-        for frame in inspect.stack()[frames_to_skip : frames_to_skip + frames_to_log]
-    ]
+    # Frames are returned in order of oldest to newest.
+    frames = traceback.extract_stack(limit=frames_to_skip + frames_to_log)
+    frames.reverse()
+    stack.frames = [python_frame(frame) for frame in frames[frames_to_skip:]]
     stack.message = "Python call stack"
     return stack
+
+
+@functools.lru_cache
+def _function_source_info(fn: Callable) -> Tuple[Sequence[str], int, Optional[str]]:
+    """Returns the source lines, line number, and source file path for the given function.
+
+    Essentially, inspect.getsourcelines() and inspect.getsourcefile() combined.
+    Caching is applied to reduce the performance impact of this function.
+    """
+    source_lines, lineno = inspect.getsourcelines(fn)
+    return source_lines, lineno, inspect.getsourcefile(fn)
 
 
 @_beartype.beartype
 def function_location(fn: Callable) -> _infra.Location:
     """Returns a Location for the given function."""
-    source_lines, lineno = inspect.getsourcelines(fn)
+    source_lines, lineno, uri = _function_source_info(fn)
     snippet = source_lines[0].strip() if len(source_lines) > 0 else "<unknown>"
     return _infra.Location(
-        uri=inspect.getsourcefile(fn),
+        uri=uri,
         line=lineno,
         snippet=snippet,
         message=formatter.display_name(fn),

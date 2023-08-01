@@ -290,6 +290,7 @@ mobile::Module FlatbufferLoader::parseModule(
   module_parsed_ = false;
 
   const auto* ivalues = module->ivalues();
+  TORCH_CHECK(ivalues != nullptr, "Corrupted ivalues field")
   all_ivalues_.resize(ivalues->size());
   all_types_.resize(module->object_types()->size());
   storages_.resize(module->storage_data_size());
@@ -733,7 +734,7 @@ void FlatbufferLoader::extractJitSourceAndConstants(
     }
   }
   const auto* jit_constants = module_->jit_constants();
-  for (auto i = 0; i < jit_constants->size(); ++i) {
+  for (const auto i : c10::irange(jit_constants->size())) {
     constants->emplace_back(getIValue(jit_constants->Get(i)));
   }
   parseExtraFilesFromVector(module_->jit_sources(), jit_sources);
@@ -743,7 +744,7 @@ void FlatbufferLoader::extractJitSourceAndConstants(
 
 mobile::Module parse_and_initialize_mobile_module(
     void* data,
-    size_t,
+    size_t size,
     c10::optional<at::Device>,
     ExtraFilesMap* extra_files,
     bool should_copy_tensor_memory) {
@@ -751,6 +752,12 @@ mobile::Module parse_and_initialize_mobile_module(
       mobile::serialization::ModuleBufferHasIdentifier(data), "Format error");
   // TODO(T128189662): If not copying, enforce that data is aligned to
   // kFlatbufferDataAlignmentBytes, and add unit tests.
+
+  // Validate Flatbuffer module before parsing.
+  flatbuffers::Verifier verifier(reinterpret_cast<uint8_t*>(data), size);
+  TORCH_CHECK(
+      mobile::serialization::VerifyModuleBuffer(verifier),
+      "Malformed Flatbuffer module");
 
   FlatbufferLoader loader;
   loader.setShouldCopyTensorMemory(should_copy_tensor_memory);
@@ -782,7 +789,7 @@ mobile::Module parse_and_initialize_mobile_module(
 
 mobile::Module parse_and_initialize_mobile_module_for_jit(
     void* data,
-    size_t,
+    size_t size,
     ExtraFilesMap& jit_sources,
     std::vector<IValue>& jit_constants,
     c10::optional<at::Device>,
@@ -791,6 +798,12 @@ mobile::Module parse_and_initialize_mobile_module_for_jit(
       mobile::serialization::ModuleBufferHasIdentifier(data), "Format error");
   // TODO(T128189662): Enforce that data is aligned to
   // kFlatbufferDataAlignmentBytes, and add unit tests.
+
+  // Validate Flatbuffer module before parsing.
+  flatbuffers::Verifier verifier(reinterpret_cast<uint8_t*>(data), size);
+  TORCH_CHECK(
+      mobile::serialization::VerifyModuleBuffer(verifier),
+      "Malformed Flatbuffer module");
 
   FlatbufferLoader loader;
   auto* flatbuffer_module = mobile::serialization::GetMutableModule(data);
@@ -886,6 +899,13 @@ mobile::Module parse_flatbuffer_no_object(
     c10::optional<at::Device> device) {
   (void)device;
   (void)size;
+
+  // Validate Flatbuffer module before parsing.
+  flatbuffers::Verifier verifier(reinterpret_cast<uint8_t*>(data.get()), size);
+  TORCH_CHECK(
+      mobile::serialization::VerifyModuleBuffer(verifier),
+      "Malformed Flatbuffer module");
+
   auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
   FlatbufferLoader loader;
   // replace parserObject with to handle only class with field case

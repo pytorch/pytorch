@@ -199,6 +199,8 @@ Tensor class reference
     Tensor.ndim
     Tensor.real
     Tensor.imag
+    Tensor.nbytes
+    Tensor.itemsize
 
     Tensor.abs
     Tensor.abs_
@@ -620,6 +622,7 @@ Tensor class reference
     Tensor.asinh_
     Tensor.arcsinh
     Tensor.arcsinh_
+    Tensor.shape
     Tensor.size
     Tensor.slogdet
     Tensor.slice_scatter

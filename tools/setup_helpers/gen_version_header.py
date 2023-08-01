@@ -41,7 +41,7 @@ def apply_replacements(replacements: Dict[str, str], text: str) -> str:
     Returns:
       Text with replacements applied, if any.
     """
-    for (before, after) in replacements.items():
+    for before, after in replacements.items():
         text = text.replace(before, after)
     return text
 

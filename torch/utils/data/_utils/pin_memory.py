@@ -22,6 +22,9 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
         torch.cuda.set_device(device_id)
     elif device == "xpu":
         torch.xpu.set_device(device_id)  # type: ignore[attr-defined]
+    elif device == torch._C._get_privateuse1_backend_name():
+        custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name())
+        custom_device_mod.set_device(device_id)
 
     def do_one_step():
         try:
@@ -34,7 +37,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
                 data = pin_memory(data, device)
             except Exception:
                 data = ExceptionWrapper(
-                    where="in pin memory thread for device {}".format(device_id))
+                    where=f"in pin memory thread for device {device_id}")
             r = (idx, data)
         while not done_event.is_set():
             try:
@@ -53,7 +56,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
 def pin_memory(data, device=None):
     if isinstance(data, torch.Tensor):
         return data.pin_memory(device)
-    elif isinstance(data, str):
+    elif isinstance(data, (str, bytes)):
         return data
     elif isinstance(data, collections.abc.Mapping):
         try:

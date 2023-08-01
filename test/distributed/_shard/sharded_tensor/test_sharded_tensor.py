@@ -23,6 +23,8 @@ from torch.distributed._shard.sharded_tensor import (
     pre_load_state_dict_hook,
     state_dict_hook,
     ShardedTensor,
+    ShardedTensorBase,
+    ShardedTensorMetadata,
     Shard
 )
 from torch.distributed._shard.sharding_spec import (
@@ -948,7 +950,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         st = sharded_tensor.empty(spec, 10, 20)
         tensor = torch.empty(10, 20)
-        with self.assertRaisesRegex(RuntimeError, "not supported yet for ShardedTensor!"):
+        with self.assertRaisesRegex(RuntimeError, r".*not supported for ShardedTensor!$"):
             torch.add(st, tensor)
 
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
@@ -2775,6 +2777,65 @@ class TestShardMetadata(ShardedTensorTestBase):
         md = ShardMetadata([0], [10])
         shard = Shard(torch.zeros(10), md)
         self.assertIsNone(shard.metadata.placement)
+
+class TestCreateTensorNoProcessGroupMode(TestCase):
+    def test_init_from_local_shards_and_global_metadata(self):
+        st_metadata: ShardedTensorMetadata = ShardedTensorMetadata(
+            shards_metadata=[
+                ShardMetadata(
+                    shard_offsets=[0, 0], shard_sizes=[2, 2], placement="rank:0/cpu"
+                ),
+                ShardMetadata(
+                    shard_offsets=[2, 0], shard_sizes=[2, 2], placement="rank:1/cpu"
+                ),
+            ],
+            size=torch.Size([4, 2]),
+        )
+        st_local_shards: List[Shard] = []
+        for shard_metadata in st_metadata.shards_metadata:
+            st_local_shards.append(
+                Shard(
+                    tensor=torch.zeros(
+                        shard_metadata.shard_sizes,
+                        device=shard_metadata.placement.device(),
+                    ),
+                    metadata=shard_metadata,
+                )
+            )
+
+        ShardedTensorBase._init_from_local_shards_and_global_metadata(
+            local_shards=st_local_shards,
+            sharded_tensor_metadata=st_metadata,
+        )
+
+    def test_non_contiguous_local_shards(self):
+        st_metadata: ShardedTensorMetadata = ShardedTensorMetadata(
+            shards_metadata=[
+                ShardMetadata(
+                    shard_offsets=[0, 0], shard_sizes=[2, 2], placement="rank:0/cpu"
+                ),
+                ShardMetadata(
+                    shard_offsets=[2, 0], shard_sizes=[2, 2], placement="rank:1/cpu"
+                ),
+            ],
+            size=torch.Size([4, 2]),
+        )
+        st_local_shards: List[Shard] = []
+        src = torch.randn(4, 2)
+        for shard_metadata in st_metadata.shards_metadata:
+            offsets = shard_metadata.shard_offsets
+            sizes = shard_metadata.shard_sizes
+            st_local_shards.append(
+                Shard(
+                    tensor=src[offsets[0]:offsets[0] + sizes[0], offsets[1]:offsets[1] + sizes[1]],
+                    metadata=shard_metadata,
+                )
+            )
+
+        ShardedTensorBase._init_from_local_shards_and_global_metadata(
+            local_shards=st_local_shards,
+            sharded_tensor_metadata=st_metadata,
+        )
 
 if __name__ == '__main__':
     run_tests()

@@ -52,7 +52,7 @@ Transform proposal bounding boxes to target bounding box using bounding box
         "If proposals from multiple images in a batch are present, they "
         "should be grouped sequentially and in incremental order."
         "For rotated boxes, this would have an additional angle (in degrees) "
-        "in the format [<optionaal_batch_id>, ctr_x, ctr_y, w, h, angle].")
+        "in the format [<optional_batch_id>, ctr_x, ctr_y, w, h, angle].")
     .Input(
         1,
         "deltas",

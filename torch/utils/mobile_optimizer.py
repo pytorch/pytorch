@@ -31,7 +31,7 @@ def optimize_for_mobile(
     """
     if not isinstance(script_module, torch.jit.ScriptModule):
         raise TypeError(
-            'Got {}, but ScriptModule is expected.'.format(type(script_module)))
+            f'Got {type(script_module)}, but ScriptModule is expected.')
 
     if optimization_blocklist is None:
         optimization_blocklist = set()
@@ -45,7 +45,7 @@ def optimize_for_mobile(
     preserved_methods_str: List[str] = [str(method) for method in preserved_methods]
 
     bundled_inputs_attributes = _get_bundled_inputs_preserved_attributes(script_module, preserved_methods_str)
-    if all([hasattr(script_module, method) for method in bundled_inputs_attributes]):
+    if all(hasattr(script_module, method) for method in bundled_inputs_attributes):
         preserved_methods_str = list(set(preserved_methods_str + bundled_inputs_attributes))
 
     non_exist_methods = []
@@ -54,8 +54,7 @@ def optimize_for_mobile(
             non_exist_methods.append(method)
     if non_exist_methods:
         raise AttributeError(
-            'The following methods to preserve do not exist in script_module: {}'
-            .format(', '.join(non_exist_methods)))
+            f"The following methods to preserve do not exist in script_module: {', '.join(non_exist_methods)}")
 
     backend = backend.lower()
     if backend == 'cpu':
@@ -86,7 +85,7 @@ def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
     """
     if not isinstance(script_module, torch.jit.ScriptModule):
         raise TypeError(
-            'Got {}, but ScriptModule is expected.'.format(type(script_module)))
+            f'Got {type(script_module)}, but ScriptModule is expected.')
 
     lint_list = []
 

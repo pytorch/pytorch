@@ -185,7 +185,7 @@ std::tuple<c10::QScheme, QParamVector> _per_tensor_asym_qparam =
              std::make_pair(".zero_point", IValue(_asym_zero_point)),
              std::make_pair(".scalar_type", IValue(c10::kQUInt8))}));
 
-// quantization parrameters for ops with range -1 to 1
+// quantization parameters for ops with range -1 to 1
 // for example: aten/src/ATen/native/quantized/cpu/qtanh.cpp
 std::tuple<c10::QScheme, QParamVector> _per_tensor_sym_qparam = std::make_tuple(
     c10::kPerTensorAffine,
@@ -253,7 +253,7 @@ bool matchCallFuncToUse(
 
 // Check any use of `v` matches the aten function call
 // or CallFunction patterns
-bool matchArgPattern(
+static bool matchArgPattern(
     Value* v,
     const AtenFuncArgs& aten_func_args,
     const CallFuncArgs& call_func_args) {
@@ -395,7 +395,8 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
   return {};
 }
 
-std::vector<NodeKind> toAtenSymbol(const std::vector<std::string>& func_names) {
+static std::vector<NodeKind> toAtenSymbol(
+    const std::vector<std::string>& func_names) {
   std::vector<NodeKind> symbols;
   std::transform(
       func_names.begin(),
@@ -405,18 +406,18 @@ std::vector<NodeKind> toAtenSymbol(const std::vector<std::string>& func_names) {
   return symbols;
 }
 
-bool isAtenFunc(Node* n, const std::vector<NodeKind>& aten_funcs) {
+static bool isAtenFunc(Node* n, const std::vector<NodeKind>& aten_funcs) {
   return std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
       aten_funcs.end();
 }
 
-bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs) {
+static bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs) {
   const auto& symbols = toAtenSymbol(aten_funcs);
   return isAtenFunc(n, symbols);
 }
 
 // TODO: factor out isCallFunc
-bool isFunctionNode(
+static bool isFunctionNode(
     Node* n,
     const std::vector<std::string>& call_funcs,
     const std::vector<std::string>& aten_funcs) {
@@ -669,7 +670,7 @@ bool is_int_constant(
   return v && v->isInt() && v->toInt() == value;
 }
 
-bool is_functional(
+static bool is_functional(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap,
     const std::string& vname,
@@ -693,7 +694,7 @@ c10::optional<std::string> getModuleName(Value* value) {
   return c10::nullopt;
 }
 
-bool is_module(
+static bool is_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap,
     const std::string& vname,

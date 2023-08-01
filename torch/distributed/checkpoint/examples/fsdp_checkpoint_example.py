@@ -24,7 +24,7 @@ CHECKPOINT_DIR = f"/scratch/{os.environ['LOGNAME']}/checkpoint"
 
 
 def opt_at(opt, idx):
-    return list((opt.state.values()))[idx]
+    return list(opt.state.values())[idx]
 
 
 def init_model():
@@ -107,7 +107,7 @@ def run_fsdp_checkpoint_example(rank, world_size):
         )
 
         flattened_osd = FSDP.optim_state_dict_to_load(
-            optim_state["optim"], model_2, optim_2
+            model_2, optim_2, optim_state["optim"]
         )
         optim_2.load_state_dict(flattened_osd)
 

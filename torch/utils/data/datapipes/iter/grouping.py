@@ -83,7 +83,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
             else:
                 return (len(self.datapipe) + self.batch_size - 1) // self.batch_size
         else:
-            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
 
 
 @functional_datapipe('unbatch')
@@ -117,8 +117,7 @@ class UnBatcherIterDataPipe(IterDataPipe):
 
     def __iter__(self):
         for element in self.datapipe:
-            for i in self._dive(element, unbatch_level=self.unbatch_level):
-                yield i
+            yield from self._dive(element, unbatch_level=self.unbatch_level)
 
     def _dive(self, element, unbatch_level):
         if unbatch_level < -1:
@@ -126,8 +125,7 @@ class UnBatcherIterDataPipe(IterDataPipe):
         if unbatch_level == -1:
             if isinstance(element, (list, DataChunk)):
                 for item in element:
-                    for i in self._dive(item, unbatch_level=-1):
-                        yield i
+                    yield from self._dive(item, unbatch_level=-1)
             else:
                 yield element
         elif unbatch_level == 0:
@@ -135,8 +133,7 @@ class UnBatcherIterDataPipe(IterDataPipe):
         else:
             if isinstance(element, (list, DataChunk)):
                 for item in element:
-                    for i in self._dive(item, unbatch_level=unbatch_level - 1):
-                        yield i
+                    yield from self._dive(item, unbatch_level=unbatch_level - 1)
             else:
                 raise IndexError(f"unbatch_level {self.unbatch_level} exceeds the depth of the DataPipe")
 

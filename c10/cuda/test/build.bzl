@@ -8,17 +8,16 @@ dsa_tests = [
     "impl/CUDAAssertionsTest_multiple_writes_from_same_block.cu",
 ]
 
-def define_targets(rules):
+def define_targets(rules, gtest_deps):
     rules.cc_test(
         name = "test",
         srcs = [
             "impl/CUDATest.cpp",
         ],
-        deps = [
-            "@com_google_googletest//:gtest_main",
-            "//c10/cuda:cuda",
-        ],
         target_compatible_with = rules.requires_cuda_enabled(),
+        deps = [
+            "//c10/cuda",
+        ] + gtest_deps,
     )
 
     for src in dsa_tests:
@@ -28,11 +27,10 @@ def define_targets(rules):
             srcs = [
                 src,
             ],
-            deps = [
-                "@com_google_googletest//:gtest_main",
-                "//c10/cuda:cuda",
-            ],
             target_compatible_with = rules.requires_cuda_enabled(),
+            deps = [
+                "//c10/cuda",
+            ] + gtest_deps,
         )
         rules.cc_test(
             name = "test_" + name,

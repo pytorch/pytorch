@@ -184,7 +184,7 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
         throw ErrorReport(token.range)
             << "Expected a number after '-' but got:" << token.text();
       }
-      // Fallthrough
+      [[fallthrough]];
     case TK_NUMBER:
       str += L.cur().text();
       if (str.find('j') != std::string::npos) {
@@ -520,7 +520,7 @@ void IRParser::parseOperator(Block* b) {
   const FunctionSchema* schema = n->maybeSchema();
 
   // Register outputs.
-  int idx = 0;
+  unsigned idx = 0;
   for (const VarWithType& v : outs) {
     vmap[v.name] = n->outputs()[idx];
     if (schema && !schema->is_varret()) {

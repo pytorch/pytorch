@@ -76,7 +76,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         self.bn.reset_running_stats()
         init.uniform_(self.bn.weight)
         init.zeros_(self.bn.bias)
-        # note: below is actully for conv, not BN
+        # note: below is actually for conv, not BN
         if self.bias is not None:
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
             bound = 1 / math.sqrt(fan_in)
@@ -209,7 +209,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         fused_bias = self.bn.bias - self.bn.weight * fused_mean / fused_std
         conv_bn += fused_bias.reshape(bias_shape)
 
-        # HACK to let conv bias particpiate in loss to avoid DDP error (parameters
+        # HACK to let conv bias participate in loss to avoid DDP error (parameters
         #   were not used in producing loss)
         if self.bias is not None:
             conv_bn += (self.bias - self.bias).reshape(bias_shape)
@@ -453,7 +453,7 @@ class ConvBnReLU1d(ConvBn1d):
 
     @classmethod
     def from_float(cls, mod):
-        return super(ConvBnReLU1d, cls).from_float(mod)
+        return super().from_float(mod)
 
 class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
     r"""A ConvReLU1d module is a fused module of Conv1d and ReLU, attached with
@@ -490,7 +490,7 @@ class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
 
     @classmethod
     def from_float(cls, mod):
-        return super(ConvReLU1d, cls).from_float(mod)
+        return super().from_float(mod)
 
 class ConvBn2d(_ConvBnNd, nn.Conv2d):
     r"""
@@ -585,7 +585,7 @@ class ConvBnReLU2d(ConvBn2d):
 
     @classmethod
     def from_float(cls, mod):
-        return super(ConvBnReLU2d, cls).from_float(mod)
+        return super().from_float(mod)
 
 class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
     r"""A ConvReLU2d module is a fused module of Conv2d and ReLU, attached with
@@ -622,7 +622,7 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
 
     @classmethod
     def from_float(cls, mod):
-        return super(ConvReLU2d, cls).from_float(mod)
+        return super().from_float(mod)
 
 class ConvBn3d(_ConvBnNd, nn.Conv3d):
     r"""
@@ -758,7 +758,7 @@ class ConvBnReLU3d(ConvBn3d):
 
     @classmethod
     def from_float(cls, mod):
-        return super(ConvBnReLU3d, cls).from_float(mod)
+        return super().from_float(mod)
 
 class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
     r"""A ConvReLU3d module is a fused module of Conv3d and ReLU, attached with
@@ -813,7 +813,7 @@ class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
 
     @classmethod
     def from_float(cls, mod):
-        return super(ConvReLU3d, cls).from_float(mod)
+        return super().from_float(mod)
 
 def update_bn_stats(mod):
     if type(mod) in {ConvBnReLU1d, ConvBnReLU2d, ConvBnReLU3d, ConvBn1d, ConvBn2d, ConvBn3d}:

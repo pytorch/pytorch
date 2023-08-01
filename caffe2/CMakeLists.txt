@@ -493,9 +493,6 @@ else()
     append_filelist("lazy_tensor_ts_sources" LIBTORCH_CMAKE_SRCS)
   endif()
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    # TODO: Delete this line once https://github.com/pytorch/pytorch/pull/55889 lands
-    set_source_files_properties(../torch/csrc/jit/serialization/export.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-
     # TODO: Delete this when https://github.com/pytorch/pytorch/issues/35026 is fixed
     set_source_files_properties(../torch/csrc/autograd/record_function_ops.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
   endif()
@@ -533,8 +530,6 @@ endif()
 # Required workaround for LLVM 9 includes.
 if(NOT MSVC)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
-  # Force -Werror on several files
-  set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/mkldnn/Pooling.cpp PROPERTIES COMPILE_FLAGS "-Werror")
 endif()
 # Disable certain warnings for GCC-9.X
 if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
@@ -656,6 +651,15 @@ if(USE_CUDA)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
 endif()
 
+if(USE_FLASH_ATTENTION AND NOT MSVC)
+  # Cutlass contains a sign-compare violation in its codebase to be fixed by https://github.com/NVIDIA/cutlass/pull/869
+  set_source_files_properties(
+    "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/nested/cuda/NestedTensorMatmul.cu"
+    "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/nested/cuda/NestedTensorTransformerFunctions.cu"
+    "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/transformers/cuda/flash_attn/fmha_bwd_hdim128.cu"
+    PROPERTIES COMPILE_FLAGS "-Wno-sign-compare")
+endif()
+
 if(BUILD_ONEDNN_GRAPH)
   list(APPEND Caffe2_CPU_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/LlgaTensorImpl.cpp
@@ -705,6 +709,7 @@ if(NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/api/src/imethod.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/mps.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/_functions.cpp
@@ -751,6 +756,7 @@ if(NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/lr_scheduler.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/step_lr.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/reduce_on_plateau_scheduler.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
   )
@@ -810,13 +816,39 @@ if(HAVE_SOVERSION)
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
-if(HAS_WERROR_SIGN_COMPARE AND WERROR)
-  # target_compile_options(torch_cpu PRIVATE "-Werror=sign-compare")
-  set_property(SOURCE ${ATen_CORE_SRCS} ${ATen_CPU_SRCS} APPEND PROPERTY COMPILE_OPTIONS "-Werror=sign-compare")
+if(BUILD_CAFFE2 AND NOT MSVC)
+  # Caffe2 has too many signed-unsigned violation, but the framework is dead
+  # So no point in fixing those
+  target_compile_options(torch_cpu PRIVATE "-Wno-sign-compare")
+endif()
+
+if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS AND NOT USE_PYTORCH_METAL AND NOT USE_MPS AND NOT USE_COREML_DELEGATE)
+  target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
+  target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
+  get_target_property(TORCH_CPU_SOURCES torch_cpu SOURCES)
+  foreach(generated_file IN LISTS GENERATED_CXX_TORCH)
+    set_source_files_properties(${generated_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+  endforeach()
+  foreach(source_file IN LISTS TORCH_CPU_SOURCES)
+    get_filename_component(source_file "${source_file}" REALPATH)
+    string(FIND "${source_file}" "${CMAKE_BINARY_DIR}" res)
+    if(res GREATER -1)
+      set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+      continue()
+    endif()
+    string(FIND "${source_file}" "caffe2" res)
+    if(res GREATER -1)
+      set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+    endif()
+  endforeach()
 endif()
 
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND
     PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_ONLY_METHOD_OPERATORS")
+
+if(USE_MPS OR USE_PYTORCH_METAL)
+  enable_language(OBJC OBJCXX)
+endif()
 
 if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_cpu PRIVATE
@@ -932,6 +964,9 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda PRIVATE __caffe2_ucc)
     target_compile_definitions(torch_cuda PRIVATE USE_UCC)
   endif()
+  if(USE_FLASH_ATTENTION)
+    target_compile_definitions(torch_cuda PRIVATE USE_FLASH_ATTENTION)
+  endif()
   if(BUILD_LAZY_CUDA_LINALG)
     add_library(torch_cuda_linalg ${ATen_CUDA_LINALG_SRCS})
     target_compile_definitions(torch_cuda_linalg PRIVATE USE_CUDA BUILD_LAZY_CUDA_LINALG)
@@ -951,10 +986,17 @@ elseif(USE_CUDA)
         torch_cuda
     )
     if($ENV{ATEN_STATIC_CUDA})
-      target_link_libraries(torch_cuda_linalg PRIVATE
-          CUDA::cusolver_static
-          ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
-      )
+      if(CUDA_VERSION_MAJOR LESS_EQUAL 11)
+        target_link_libraries(torch_cuda_linalg PRIVATE
+            CUDA::cusolver_static
+            ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
+        )
+      elseif(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
+        target_link_libraries(torch_cuda_linalg PRIVATE
+            CUDA::cusolver_static
+            ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
+        )
+      endif()
     else()
       target_link_libraries(torch_cuda_linalg PRIVATE
           CUDA::cusolver
@@ -1155,6 +1197,11 @@ if(BUILD_TEST)
     endif()
     add_subdirectory(${TORCH_ROOT}/test/cpp/lazy
                      ${CMAKE_BINARY_DIR}/test_lazy)
+  endif()
+  if(BUILD_AOT_INDUCTOR_TEST)
+    add_subdirectory(
+      ${TORCH_ROOT}/test/cpp/aot_inductor
+      ${CMAKE_BINARY_DIR}/test_aot_inductor)
   endif()
 endif()
 
@@ -1574,10 +1621,6 @@ if(BUILD_TENSOREXPR_BENCHMARK)
   add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/tensorexpr ${CMAKE_BINARY_DIR}/tensorexpr_bench)
 endif()
 
-if(BUILD_NVFUSER_BENCHMARK)
-  add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/nvfuser ${CMAKE_BINARY_DIR}/nvfuser_bench)
-endif()
-
 if(BUILD_CPP_BENCHMARKS)
   add_subdirectory(${TORCH_ROOT}/benchmarks/cpp ${PROJECT_BINARY_DIR}/bin)
 endif()
@@ -1663,7 +1706,9 @@ if(BUILD_TEST)
     foreach(test_src ${Caffe2_MPS_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
       add_executable(${test_name} "${test_src}")
-      target_link_libraries(${test_name} torch_library gtest_main)
+      find_library(metal NAMES Metal)
+      find_library(foundation NAMES Foundation)
+      target_link_libraries(${test_name} torch_library gtest_main ${metal} ${foundation})
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
       target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
@@ -1764,7 +1809,7 @@ if(BUILD_PYTHON)
   # location).  It varies from system to system.
   # We should pin the path separator to the forward slash on Windows.
   # More details can be seen at
-  # https://github.com/pytorch/pytorch/tree/master/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
+  # https://github.com/pytorch/pytorch/tree/main/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
   pycmd(PYTHON_SITE_PACKAGES "
       import os
       import sysconfig

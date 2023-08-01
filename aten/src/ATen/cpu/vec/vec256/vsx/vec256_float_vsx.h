@@ -256,29 +256,29 @@ class Vectorized<float> {
   }
 
   Vectorized<float> C10_ALWAYS_INLINE acos() const {
-    return {Sleef_acosf4_u10vsx(_vec0), Sleef_acosf4_u10vsx(_vec1)};
+    return {Sleef_acosf4_u10(_vec0), Sleef_acosf4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE asin() const {
-    return {Sleef_asinf4_u10vsx(_vec0), Sleef_asinf4_u10vsx(_vec1)};
+    return {Sleef_asinf4_u10(_vec0), Sleef_asinf4_u10(_vec1)};
   }
   Vectorized<float> atan() const {
-    return {Sleef_atanf4_u10vsx(_vec0), Sleef_atanf4_u10vsx(_vec1)};
+    return {Sleef_atanf4_u10(_vec0), Sleef_atanf4_u10(_vec1)};
   }
   Vectorized<float> atan2(const Vectorized<float>& b) const {
-    return {Sleef_atan2f4_u10vsx(_vec0, b._vec0), Sleef_atan2f4_u10vsx(_vec1, b._vec1)};
+    return {Sleef_atan2f4_u10(_vec0, b._vec0), Sleef_atan2f4_u10(_vec1, b._vec1)};
   }
   Vectorized<float> copysign(const Vectorized<float> &sign) const {
-    return {Sleef_copysignf4_vsx(_vec0, sign._vec0), Sleef_copysignf4_vsx(_vec1, sign._vec1)};
+    return {Sleef_copysignf4(_vec0, sign._vec0), Sleef_copysignf4(_vec1, sign._vec1)};
   }
   Vectorized<float> lgamma() const {
-    return {Sleef_lgammaf4_u10vsx(_vec0), Sleef_lgammaf4_u10vsx(_vec1)};
+    return {Sleef_lgammaf4_u10(_vec0), Sleef_lgammaf4_u10(_vec1)};
   }
   Vectorized<float> erf() const {
-    return {Sleef_erff4_u10vsx(_vec0), Sleef_erff4_u10vsx(_vec1)};
+    return {Sleef_erff4_u10(_vec0), Sleef_erff4_u10(_vec1)};
   }
 
   Vectorized<float> erfc() const {
-    return {Sleef_erfcf4_u15vsx(_vec0), Sleef_erfcf4_u15vsx(_vec1)};
+    return {Sleef_erfcf4_u15(_vec0), Sleef_erfcf4_u15(_vec1)};
   }
 
   Vectorized<float> erfinv() const {
@@ -301,35 +301,35 @@ class Vectorized<float> {
   }
 
   Vectorized<float> C10_ALWAYS_INLINE exp() const {
-    return {Sleef_expf4_u10vsx(_vec0), Sleef_expf4_u10vsx(_vec1)};
+    return {Sleef_expf4_u10(_vec0), Sleef_expf4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE exp2() const {
-    return {Sleef_exp2f4_u10vsx(_vec0), Sleef_exp2f4_u10vsx(_vec1)};
+    return {Sleef_exp2f4_u10(_vec0), Sleef_exp2f4_u10(_vec1)};
   }
   Vectorized<float> expm1() const {
-    return {Sleef_expm1f4_u10vsx(_vec0), Sleef_expm1f4_u10vsx(_vec1)};
+    return {Sleef_expm1f4_u10(_vec0), Sleef_expm1f4_u10(_vec1)};
   }
 
   Vectorized<float> C10_ALWAYS_INLINE log() const {
-    return {Sleef_logf4_u10vsx(_vec0), Sleef_logf4_u10vsx(_vec1)};
+    return {Sleef_logf4_u10(_vec0), Sleef_logf4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE log10() const {
-    return {Sleef_log10f4_u10vsx(_vec0), Sleef_log10f4_u10vsx(_vec1)};
+    return {Sleef_log10f4_u10(_vec0), Sleef_log10f4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE log1p() const {
-    return {Sleef_log1pf4_u10vsx(_vec0), Sleef_log1pf4_u10vsx(_vec1)};
+    return {Sleef_log1pf4_u10(_vec0), Sleef_log1pf4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE log2() const {
-    return {Sleef_log2f4_u10vsx(_vec0), Sleef_log2f4_u10vsx(_vec1)};
+    return {Sleef_log2f4_u10(_vec0), Sleef_log2f4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE ceil() const {
     return {vec_ceil(_vec0), vec_ceil(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE cos() const {
-    return {Sleef_cosf4_u10vsx(_vec0), Sleef_cosf4_u10vsx(_vec1)};
+    return {Sleef_cosf4_u10(_vec0), Sleef_cosf4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE cosh() const {
-    return {Sleef_coshf4_u10vsx(_vec0), Sleef_coshf4_u10vsx(_vec1)};
+    return {Sleef_coshf4_u10(_vec0), Sleef_coshf4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE floor() const {
     return {vec_floor(_vec0), vec_floor(_vec1)};
@@ -342,16 +342,16 @@ class Vectorized<float> {
     return {vec_round(_vec0), vec_round(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE sin() const {
-    return {Sleef_sinf4_u10vsx(_vec0), Sleef_sinf4_u10vsx(_vec1)};
+    return {Sleef_sinf4_u10(_vec0), Sleef_sinf4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE sinh() const {
-    return {Sleef_sinhf4_u10vsx(_vec0), Sleef_sinhf4_u10vsx(_vec1)};
+    return {Sleef_sinhf4_u10(_vec0), Sleef_sinhf4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE tan() const {
-    return {Sleef_tanf4_u10vsx(_vec0), Sleef_tanf4_u10vsx(_vec1)};
+    return {Sleef_tanf4_u10(_vec0), Sleef_tanf4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE tanh() const {
-    return {Sleef_tanhf4_u10vsx(_vec0), Sleef_tanhf4_u10vsx(_vec1)};
+    return {Sleef_tanhf4_u10(_vec0), Sleef_tanhf4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE trunc() const {
     return {vec_trunc(_vec0), vec_trunc(_vec1)};
@@ -372,19 +372,19 @@ class Vectorized<float> {
   }
 
   Vectorized<float> C10_ALWAYS_INLINE pow(const Vectorized<float>& exp) const {
-    return {Sleef_powf4_u10vsx(_vec0, exp._vec0), Sleef_powf4_u10vsx(_vec1, exp._vec1)};
+    return {Sleef_powf4_u10(_vec0, exp._vec0), Sleef_powf4_u10(_vec1, exp._vec1)};
   }
 
   Vectorized<float> fmod(const Vectorized<float>& b) const {
-    return {Sleef_fmodf4_vsx(_vec0, b._vec0),Sleef_fmodf4_vsx(_vec1, b._vec1)};
+    return {Sleef_fmodf4(_vec0, b._vec0),Sleef_fmodf4(_vec1, b._vec1)};
   }
 
   Vectorized<float> hypot(const Vectorized<float>& b) const {
-    return {Sleef_hypotf4_u05vsx(_vec0, b._vec0), Sleef_hypotf4_u05vsx(_vec1, b._vec1)};
+    return {Sleef_hypotf4_u05(_vec0, b._vec0), Sleef_hypotf4_u05(_vec1, b._vec1)};
   }
 
   Vectorized<float> nextafter(const Vectorized<float>& b) const {
-    return {Sleef_nextafterf4_vsx(_vec0, b._vec0), Sleef_nextafterf4_vsx(_vec1, b._vec1)};
+    return {Sleef_nextafterf4(_vec0, b._vec0), Sleef_nextafterf4(_vec1, b._vec1)};
   }
 
   Vectorized<float> igamma(const Vectorized<float>& x) const {

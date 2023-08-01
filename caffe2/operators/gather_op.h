@@ -194,7 +194,7 @@ class GatherOp : public Operator<Context> {
     }
   }
 
-  virtual ~GatherOp() noexcept {}
+  ~GatherOp() noexcept override {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(

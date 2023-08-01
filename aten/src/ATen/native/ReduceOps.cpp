@@ -24,10 +24,13 @@
 #include <ATen/ops/_cummax_helper_native.h>
 #include <ATen/ops/_cummin_helper.h>
 #include <ATen/ops/_cummin_helper_native.h>
+#include <ATen/ops/_is_all_true_native.h>
+#include <ATen/ops/_is_any_true_native.h>
 #include <ATen/ops/_logcumsumexp.h>
 #include <ATen/ops/_logcumsumexp_native.h>
 #include <ATen/ops/_sparse_sum.h>
 #include <ATen/ops/_sparse_sum_native.h>
+#include <ATen/ops/_sparse_csr_sum.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/all_meta.h>
 #include <ATen/ops/all_native.h>
@@ -160,7 +163,7 @@ static ScalarType get_result_or_bytebool_dtype(const Tensor& self, const Tensor&
   }
 }
 
-void check_result_is_bytebool(const char* name, const Tensor& self, const Tensor& result) {
+static void check_result_is_bytebool(const char* name, const Tensor& self, const Tensor& result) {
   if (result.defined()) {
     // Refer [all, any : uint8 compatibility]
     TORCH_CHECK(
@@ -207,7 +210,7 @@ TORCH_META_FUNC(any)(const Tensor& self) {
   allany_meta(*this, "any", self, {}, false);
 }
 
-void check_argmax_argmin(
+static void check_argmax_argmin(
     const char* name,
     const Tensor& self,
     const c10::optional<int64_t>& dim) {
@@ -233,7 +236,7 @@ TORCH_META_FUNC(argmin)
   resize_reduction(*this, self, optional_to_arrayref(dim), keepdim, kLong);
 }
 
-void meta_func_cum_ops(
+static void meta_func_cum_ops(
     impl::MetaBase& meta,
     const char* name,
     const Tensor& self,
@@ -305,7 +308,7 @@ TORCH_META_FUNC2(mean, dim)
   resize_reduction(*this, self, opt_dim, keepdim, out_dtype);
 }
 
-ScalarType get_result_or_self_value_dtype(
+static ScalarType get_result_or_self_value_dtype(
     const Tensor& self,
     const Tensor& result,
     const c10::optional<ScalarType>& dtype) {
@@ -501,7 +504,7 @@ TORCH_IMPL_FUNC(cumprod_out)
   impl_func_cum_ops(self, dim, result, cumprod_stub);
 }
 
-Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
+static Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
   return w.flip(dim).cumsum(dim).flip(dim);
 }
 
@@ -593,11 +596,11 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     cumprod(input.conj()) = cumprod(input).conj()
   */
 
-  if (input.numel() <= 1) {
+  if (input.sym_numel() <= 1) {
     return grad;
   }
   dim = at::maybe_wrap_dim(dim, input.dim());
-  const int64_t dim_size = input.sizes()[dim];
+  const int64_t dim_size = input.sym_sizes()[dim].guard_int(__FILE__, __LINE__);
   if (dim_size == 1) {
     return grad;
   }
@@ -641,7 +644,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // zeros_like(indices).scatter_(dim, indices, 1.) & cumsum == 1
     // Note that the logic_and with cumsum == 1 accounts
     // for the case when there is no first zero
-    Tensor grad_input = at::zeros(input.sizes(), grad.options());
+    Tensor grad_input = at::zeros_symint(input.sym_sizes(), grad.options());
     const auto cumsum = is_zero.cumsum(dim);
 
     // case k < z1
@@ -710,9 +713,9 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     } else {
       grad_input = at::zeros(input.sizes(), grad.options());
     }
-    auto ones_size = input.sizes().vec();
+    auto ones_size = input.sym_sizes().vec();
     ones_size[dim] = 1;
-    const Tensor ones = at::ones({1}, grad.options()).expand(ones_size);
+    const Tensor ones = at::ones({1}, grad.options()).expand_symint(ones_size);
     Tensor prods_from_k_plus_1;
     Tensor omitted_products;
     for (const auto k : c10::irange(dim_size)) {
@@ -732,7 +735,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
       // At this point omitted_products is the same size
       // as input, except on the dimension dim where it's
       // dim_size - k
-      TORCH_CHECK(omitted_products.size(dim) == dim_size - k);
+      TORCH_CHECK(omitted_products.sym_size(dim) == dim_size - k);
 
       auto grad_slice = at::sum(grad.slice(dim, k) * omitted_products, dim);
       if (are_inputs_tensors_sublcass) {
@@ -853,10 +856,10 @@ std::tuple<Tensor, Tensor> cummin(const Tensor& self, int64_t dim) {
 }
 
 Tensor cummaxmin_backward(const Tensor& grad, const Tensor& input, const Tensor& indices, int64_t dim) {
-  if (input.numel() == 0) {
+  if (input.sym_numel() == 0) {
     return input;
   }
-  auto result = at::zeros(input.sizes(), input.options());
+  auto result = at::zeros_symint(input.sym_sizes(), input.options());
 
   // for composite compliance, use out-of-place variant of
   // `scatter_add` if `indices` or `grad` is a Tensor Subclass.
@@ -984,7 +987,7 @@ Tensor& diff_out(const Tensor& self, int64_t n, int64_t dim, const c10::optional
   }
 }
 
-void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacing_size, at::OptionalIntArrayRef dim,  int64_t edge_order) {
+static void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacing_size, at::OptionalIntArrayRef dim,  int64_t edge_order) {
   // Helper for gradient function to make sure input data satisfies prerequisites
   TORCH_CHECK(self.scalar_type() != ScalarType::Byte, "torch.gradient does not support uint8 input.");
   if (spacing_size.has_value() && !dim.has_value()) {
@@ -1009,7 +1012,7 @@ void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacing_size,
   }
 }
 
-std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordinates, IntArrayRef dim, int64_t edge_order) {
+static std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordinates, IntArrayRef dim, int64_t edge_order) {
   for (const auto i : c10::irange(coordinates.size())) {
     TORCH_CHECK(self.device() == coordinates[i].device(), "torch.gradient expected each tensor to be on the same device, but got devices ", self.device(), " and ", coordinates[i].device(), "!");
   }
@@ -1050,7 +1053,7 @@ std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordinates, 
   return result;
 }
 
-std::vector<Tensor> gradient_helper_float(const Tensor& self, ArrayRef<Scalar> spacing, IntArrayRef dim, int64_t edge_order) {
+static std::vector<Tensor> gradient_helper_float(const Tensor& self, ArrayRef<Scalar> spacing, IntArrayRef dim, int64_t edge_order) {
   std::vector<Tensor> result;
   for (const auto i : c10::irange(dim.size())) {
       int64_t direction = maybe_wrap_dim(dim[i], self.dim());
@@ -1070,7 +1073,7 @@ std::vector<Tensor> gradient_helper_float(const Tensor& self, ArrayRef<Scalar> s
   return result;
 }
 
-std::vector<int64_t> gradient_dim_preprocess(const Tensor& self, c10::optional<int64_t> dim) {
+static std::vector<int64_t> gradient_dim_preprocess(const Tensor& self, c10::optional<int64_t> dim) {
   // if gradient dim is provided as an integer, then we need to compute gradient only on this direction.
   // Moreover, if it's not provided at all, then we are interested in gradient for all directions.
   // Finally, if dim is provided as vector of ints, then it is not expected to be called by this function.
@@ -1253,7 +1256,7 @@ Tensor trace_cpu(const Tensor& self) {
   return result;
 }
 
-void impl_func_prod(
+static void impl_func_prod(
     const Tensor& self,
     IntArrayRef dims,
     bool keepdim,
@@ -1304,7 +1307,9 @@ TORCH_IMPL_FUNC(mean_out)
   // (mean_kernel_impl()) is unvectorized and leads to very poor performance
   // for production workloads. Once that's fixed, the following code can be used
   // in lieu of the sum + divide implementation below.
-  if (self.device().is_cpu()) {
+  // Note: there has an accuracy loss for half and bfloat16 which has one more type
+  // cast compared with mean_stub path.
+  if (self.device().is_cpu() && dtype != kHalf && dtype != kBFloat16) {
     int64_t dim_prod = 1;
     if (!opt_dim.has_value() || opt_dim.value().empty() || self.ndimension() == 0) {
       dim_prod = self.numel();
@@ -1432,7 +1437,7 @@ Tensor& special_logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim
   return at::logsumexp_out(result, self, dims, keepdim);
 }
 
-void impl_func_norm(
+static void impl_func_norm(
     const Tensor& self,
     const OptionalScalarRef& opt_p,
     IntArrayRef dim,
@@ -2058,6 +2063,21 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   if (!self.is_same_size(other)) {
     return false;
   }
+  // Since the flags like neg/conj should be already handled outside the
+  // TensorIterator, it should be safe to have the following fast path by
+  // ensuring the storage and strides exactly the same.
+  if (self.is_alias_of(other)
+      && self.storage_offset() == other.storage_offset()
+      && self.dtype() == other.dtype()
+      && self.is_contiguous() == other.is_contiguous()
+      && self.strides().equals(other.strides())
+      // Extra checks to ensure the safety in case cpu_equal is directly called in C++.
+      && self.layout() == other.layout()
+      && self.is_neg() == other.is_neg()
+      && self.is_conj() == other.is_conj()) {
+    return true;
+  }
+
   std::atomic<bool> result{true};
   auto iter = TensorIteratorConfig()
     .add_input(self)
@@ -2087,7 +2107,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   return result.load();
 }
 
-Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const Tensor& indices, at::IntArrayRef sizes, bool keepdim) {
+static Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const Tensor& indices, at::IntArrayRef sizes, bool keepdim) {
     return at::native::value_selecting_reduction_backward_symint(grad, dim, indices, c10::fromIntArrayRefSlow(sizes), keepdim);
 }
 
@@ -2146,6 +2166,24 @@ Tensor sum_sparse_coo(const Tensor& self, at::OptionalIntArrayRef dim, bool keep
     }
   }
   return result;
+}
+
+Tensor sum_sparse_compressed(
+    const Tensor& self,
+    at::OptionalIntArrayRef dim,
+    bool keepdim,
+    c10::optional<ScalarType> dtype) {
+  // TODO: The signature of sum.dim_IntList and _sparse_csr_sum.dim_dtype is a little
+  // bit different in the second parameters `dim`, which causes the conversion of `dim`
+  // to call into `_sparse_csr_sum`. Align the signatures would be a better choice.
+  TORCH_CHECK(
+      dim.has_value(), "dim has no value, cannot be used in sum.dim_IntList");
+  auto layout = self.layout();
+  TORCH_CHECK(
+      layout == kSparseCsr,
+      "Currently the only compressed sparse format supported for sum.dim_IntList is CSR, but got layout ",
+      layout)
+  return at::_sparse_csr_sum(self, *dim, keepdim, dtype);
 }
 
 } // namespace native

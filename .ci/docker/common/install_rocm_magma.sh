@@ -6,7 +6,7 @@ set -ex
 git clone https://bitbucket.org/icl/magma.git
 pushd magma
 # Fixes memory leaks of magma found while executing linalg UTs
-git checkout 5959b8783e45f1809812ed96ae762f38ee701972
+git checkout 28592a7170e4b3707ed92644bf4a689ed600c27f
 cp make.inc-examples/make.inc.hip-gcc-mkl make.inc
 echo 'LIBDIR += -L$(MKLROOT)/lib' >> make.inc
 echo 'LIB += -Wl,--enable-new-dtags -Wl,--rpath,/opt/rocm/lib -Wl,--rpath,$(MKLROOT)/lib -Wl,--rpath,/opt/rocm/magma/lib' >> make.inc
@@ -18,7 +18,7 @@ else
   amdgpu_targets=`rocm_agent_enumerator | grep -v gfx000 | sort -u | xargs`
 fi
 for arch in $amdgpu_targets; do
-  echo "DEVCCFLAGS += --amdgpu-target=$arch" >> make.inc
+  echo "DEVCCFLAGS += --offload-arch=$arch" >> make.inc
 done
 # hipcc with openmp flag may cause isnan() on __device__ not to be found; depending on context, compiler may attempt to match with host definition
 sed -i 's/^FOPENMP/#FOPENMP/g' make.inc

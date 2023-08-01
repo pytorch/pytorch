@@ -6,6 +6,13 @@
 
 #include "flatbuffers/flatbuffers.h"
 
+// Ensure the included flatbuffers.h is the same version as when this file was
+// generated, otherwise it may not be compatible.
+static_assert(FLATBUFFERS_VERSION_MAJOR == 23 &&
+              FLATBUFFERS_VERSION_MINOR == 3 &&
+              FLATBUFFERS_VERSION_REVISION == 3,
+             "Non-compatible flatbuffers version included");
+
 namespace torch {
 namespace jit {
 namespace mobile {
@@ -123,7 +130,7 @@ inline const char * const *EnumNamesTypeType() {
 }
 
 inline const char *EnumNameTypeType(TypeType e) {
-  if (flatbuffers::IsOutRange(e, TypeType::UNSET, TypeType::NON_OBJ)) return "";
+  if (::flatbuffers::IsOutRange(e, TypeType::UNSET, TypeType::NON_OBJ)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesTypeType()[index];
 }
@@ -198,7 +205,7 @@ inline const char * const *EnumNamesIValueUnion() {
 }
 
 inline const char *EnumNameIValueUnion(IValueUnion e) {
-  if (flatbuffers::IsOutRange(e, IValueUnion::NONE, IValueUnion::Function)) return "";
+  if (::flatbuffers::IsOutRange(e, IValueUnion::NONE, IValueUnion::Function)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesIValueUnion()[index];
 }
@@ -271,8 +278,8 @@ template<> struct IValueUnionTraits<torch::jit::mobile::serialization::Function>
   static const IValueUnion enum_value = IValueUnion::Function;
 };
 
-bool VerifyIValueUnion(flatbuffers::Verifier &verifier, const void *obj, IValueUnion type);
-bool VerifyIValueUnionVector(flatbuffers::Verifier &verifier, const flatbuffers::Vector<flatbuffers::Offset<void>> *values, const flatbuffers::Vector<IValueUnion> *types);
+bool VerifyIValueUnion(::flatbuffers::Verifier &verifier, const void *obj, IValueUnion type);
+bool VerifyIValueUnionVector(::flatbuffers::Verifier &verifier, const ::flatbuffers::Vector<::flatbuffers::Offset<void>> *values, const ::flatbuffers::Vector<IValueUnion> *types);
 
 FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) Int FLATBUFFERS_FINAL_CLASS {
  private:
@@ -283,13 +290,13 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) Int FLATBUFFERS_FINAL_CLASS {
       : int_val_(0) {
   }
   Int(int64_t _int_val)
-      : int_val_(flatbuffers::EndianScalar(_int_val)) {
+      : int_val_(::flatbuffers::EndianScalar(_int_val)) {
   }
   int64_t int_val() const {
-    return flatbuffers::EndianScalar(int_val_);
+    return ::flatbuffers::EndianScalar(int_val_);
   }
   void mutate_int_val(int64_t _int_val) {
-    flatbuffers::WriteScalar(&int_val_, _int_val);
+    ::flatbuffers::WriteScalar(&int_val_, _int_val);
   }
 };
 FLATBUFFERS_STRUCT_END(Int, 8);
@@ -303,13 +310,13 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(1) Bool FLATBUFFERS_FINAL_CLASS {
       : bool_val_(0) {
   }
   Bool(bool _bool_val)
-      : bool_val_(flatbuffers::EndianScalar(static_cast<uint8_t>(_bool_val))) {
+      : bool_val_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_bool_val))) {
   }
   bool bool_val() const {
-    return flatbuffers::EndianScalar(bool_val_) != 0;
+    return ::flatbuffers::EndianScalar(bool_val_) != 0;
   }
   void mutate_bool_val(bool _bool_val) {
-    flatbuffers::WriteScalar(&bool_val_, static_cast<uint8_t>(_bool_val));
+    ::flatbuffers::WriteScalar(&bool_val_, static_cast<uint8_t>(_bool_val));
   }
 };
 FLATBUFFERS_STRUCT_END(Bool, 1);
@@ -323,13 +330,13 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) Double FLATBUFFERS_FINAL_CLASS {
       : double_val_(0) {
   }
   Double(double _double_val)
-      : double_val_(flatbuffers::EndianScalar(_double_val)) {
+      : double_val_(::flatbuffers::EndianScalar(_double_val)) {
   }
   double double_val() const {
-    return flatbuffers::EndianScalar(double_val_);
+    return ::flatbuffers::EndianScalar(double_val_);
   }
   void mutate_double_val(double _double_val) {
-    flatbuffers::WriteScalar(&double_val_, _double_val);
+    ::flatbuffers::WriteScalar(&double_val_, _double_val);
   }
 };
 FLATBUFFERS_STRUCT_END(Double, 8);
@@ -348,22 +355,22 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) PerTensorAffineSchema FLATBUFFERS_FINAL_C
     (void)padding0__;
   }
   PerTensorAffineSchema(double _q_scale, int32_t _q_zero_point)
-      : q_scale_(flatbuffers::EndianScalar(_q_scale)),
-        q_zero_point_(flatbuffers::EndianScalar(_q_zero_point)),
+      : q_scale_(::flatbuffers::EndianScalar(_q_scale)),
+        q_zero_point_(::flatbuffers::EndianScalar(_q_zero_point)),
         padding0__(0) {
     (void)padding0__;
   }
   double q_scale() const {
-    return flatbuffers::EndianScalar(q_scale_);
+    return ::flatbuffers::EndianScalar(q_scale_);
   }
   void mutate_q_scale(double _q_scale) {
-    flatbuffers::WriteScalar(&q_scale_, _q_scale);
+    ::flatbuffers::WriteScalar(&q_scale_, _q_scale);
   }
   int32_t q_zero_point() const {
-    return flatbuffers::EndianScalar(q_zero_point_);
+    return ::flatbuffers::EndianScalar(q_zero_point_);
   }
   void mutate_q_zero_point(int32_t _q_zero_point) {
-    flatbuffers::WriteScalar(&q_zero_point_, _q_zero_point);
+    ::flatbuffers::WriteScalar(&q_zero_point_, _q_zero_point);
   }
 };
 FLATBUFFERS_STRUCT_END(PerTensorAffineSchema, 16);
@@ -379,20 +386,20 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ComplexDouble FLATBUFFERS_FINAL_CLASS {
         imag_(0) {
   }
   ComplexDouble(double _real, double _imag)
-      : real_(flatbuffers::EndianScalar(_real)),
-        imag_(flatbuffers::EndianScalar(_imag)) {
+      : real_(::flatbuffers::EndianScalar(_real)),
+        imag_(::flatbuffers::EndianScalar(_imag)) {
   }
   double real() const {
-    return flatbuffers::EndianScalar(real_);
+    return ::flatbuffers::EndianScalar(real_);
   }
   void mutate_real(double _real) {
-    flatbuffers::WriteScalar(&real_, _real);
+    ::flatbuffers::WriteScalar(&real_, _real);
   }
   double imag() const {
-    return flatbuffers::EndianScalar(imag_);
+    return ::flatbuffers::EndianScalar(imag_);
   }
   void mutate_imag(double _imag) {
-    flatbuffers::WriteScalar(&imag_, _imag);
+    ::flatbuffers::WriteScalar(&imag_, _imag);
   }
 };
 FLATBUFFERS_STRUCT_END(ComplexDouble, 16);
@@ -413,34 +420,34 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) Instruction FLATBUFFERS_FINAL_CLASS {
     (void)padding0__;
   }
   Instruction(int8_t _op, uint16_t _n, int32_t _x)
-      : op_(flatbuffers::EndianScalar(_op)),
+      : op_(::flatbuffers::EndianScalar(_op)),
         padding0__(0),
-        n_(flatbuffers::EndianScalar(_n)),
-        x_(flatbuffers::EndianScalar(_x)) {
+        n_(::flatbuffers::EndianScalar(_n)),
+        x_(::flatbuffers::EndianScalar(_x)) {
     (void)padding0__;
   }
   int8_t op() const {
-    return flatbuffers::EndianScalar(op_);
+    return ::flatbuffers::EndianScalar(op_);
   }
   void mutate_op(int8_t _op) {
-    flatbuffers::WriteScalar(&op_, _op);
+    ::flatbuffers::WriteScalar(&op_, _op);
   }
   uint16_t n() const {
-    return flatbuffers::EndianScalar(n_);
+    return ::flatbuffers::EndianScalar(n_);
   }
   void mutate_n(uint16_t _n) {
-    flatbuffers::WriteScalar(&n_, _n);
+    ::flatbuffers::WriteScalar(&n_, _n);
   }
   int32_t x() const {
-    return flatbuffers::EndianScalar(x_);
+    return ::flatbuffers::EndianScalar(x_);
   }
   void mutate_x(int32_t _x) {
-    flatbuffers::WriteScalar(&x_, _x);
+    ::flatbuffers::WriteScalar(&x_, _x);
   }
 };
 FLATBUFFERS_STRUCT_END(Instruction, 8);
 
-struct QuantizedSchema FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct QuantizedSchema FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef QuantizedSchemaBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_QSCHEME = 4,
@@ -486,24 +493,24 @@ struct QuantizedSchema FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool mutate_axis(int32_t _axis = 0) {
     return SetField<int32_t>(VT_AXIS, _axis, 0);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyField<int8_t>(verifier, VT_QSCHEME) &&
-           VerifyField<double>(verifier, VT_SCALE) &&
-           VerifyField<int32_t>(verifier, VT_ZERO_POINT) &&
+           VerifyField<int8_t>(verifier, VT_QSCHEME, 1) &&
+           VerifyField<double>(verifier, VT_SCALE, 8) &&
+           VerifyField<int32_t>(verifier, VT_ZERO_POINT, 4) &&
            VerifyOffset(verifier, VT_SCALES) &&
            verifier.VerifyTable(scales()) &&
            VerifyOffset(verifier, VT_ZERO_POINTS) &&
            verifier.VerifyTable(zero_points()) &&
-           VerifyField<int32_t>(verifier, VT_AXIS) &&
+           VerifyField<int32_t>(verifier, VT_AXIS, 4) &&
            verifier.EndTable();
   }
 };
 
 struct QuantizedSchemaBuilder {
   typedef QuantizedSchema Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
   void add_qscheme(int8_t qscheme) {
     fbb_.AddElement<int8_t>(QuantizedSchema::VT_QSCHEME, qscheme, 0);
   }
@@ -513,33 +520,33 @@ struct QuantizedSchemaBuilder {
   void add_zero_point(int32_t zero_point) {
     fbb_.AddElement<int32_t>(QuantizedSchema::VT_ZERO_POINT, zero_point, 0);
   }
-  void add_scales(flatbuffers::Offset<torch::jit::mobile::serialization::TensorMetadata> scales) {
+  void add_scales(::flatbuffers::Offset<torch::jit::mobile::serialization::TensorMetadata> scales) {
     fbb_.AddOffset(QuantizedSchema::VT_SCALES, scales);
   }
-  void add_zero_points(flatbuffers::Offset<torch::jit::mobile::serialization::TensorMetadata> zero_points) {
+  void add_zero_points(::flatbuffers::Offset<torch::jit::mobile::serialization::TensorMetadata> zero_points) {
     fbb_.AddOffset(QuantizedSchema::VT_ZERO_POINTS, zero_points);
   }
   void add_axis(int32_t axis) {
     fbb_.AddElement<int32_t>(QuantizedSchema::VT_AXIS, axis, 0);
   }
-  explicit QuantizedSchemaBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit QuantizedSchemaBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<QuantizedSchema> Finish() {
+  ::flatbuffers::Offset<QuantizedSchema> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<QuantizedSchema>(end);
+    auto o = ::flatbuffers::Offset<QuantizedSchema>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<QuantizedSchema> CreateQuantizedSchema(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<QuantizedSchema> CreateQuantizedSchema(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     int8_t qscheme = 0,
     double scale = 0.0,
     int32_t zero_point = 0,
-    flatbuffers::Offset<torch::jit::mobile::serialization::TensorMetadata> scales = 0,
-    flatbuffers::Offset<torch::jit::mobile::serialization::TensorMetadata> zero_points = 0,
+    ::flatbuffers::Offset<torch::jit::mobile::serialization::TensorMetadata> scales = 0,
+    ::flatbuffers::Offset<torch::jit::mobile::serialization::TensorMetadata> zero_points = 0,
     int32_t axis = 0) {
   QuantizedSchemaBuilder builder_(_fbb);
   builder_.add_scale(scale);
@@ -551,7 +558,7 @@ inline flatbuffers::Offset<QuantizedSchema> CreateQuantizedSchema(
   return builder_.Finish();
 }
 
-struct TensorMetadata FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct TensorMetadata FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef TensorMetadataBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_STORAGE_LOCATION_INDEX = 4,
@@ -580,17 +587,17 @@ struct TensorMetadata FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool mutate_storage_offset(int32_t _storage_offset = 0) {
     return SetField<int32_t>(VT_STORAGE_OFFSET, _storage_offset, 0);
   }
-  const flatbuffers::Vector<int32_t> *sizes() const {
-    return GetPointer<const flatbuffers::Vector<int32_t> *>(VT_SIZES);
+  const ::flatbuffers::Vector<int32_t> *sizes() const {
+    return GetPointer<const ::flatbuffers::Vector<int32_t> *>(VT_SIZES);
   }
-  flatbuffers::Vector<int32_t> *mutable_sizes() {
-    return GetPointer<flatbuffers::Vector<int32_t> *>(VT_SIZES);
+  ::flatbuffers::Vector<int32_t> *mutable_sizes() {
+    return GetPointer<::flatbuffers::Vector<int32_t> *>(VT_SIZES);
   }
-  const flatbuffers::Vector<int32_t> *strides() const {
-    return GetPointer<const flatbuffers::Vector<int32_t> *>(VT_STRIDES);
+  const ::flatbuffers::Vector<int32_t> *strides() const {
+    return GetPointer<const ::flatbuffers::Vector<int32_t> *>(VT_STRIDES);
   }
-  flatbuffers::Vector<int32_t> *mutable_strides() {
-    return GetPointer<flatbuffers::Vector<int32_t> *>(VT_STRIDES);
+  ::flatbuffers::Vector<int32_t> *mutable_strides() {
+    return GetPointer<::flatbuffers::Vector<int32_t> *>(VT_STRIDES);
   }
   bool requires_grad() const {
     return GetField<uint8_t>(VT_REQUIRES_GRAD, 0) != 0;
@@ -604,16 +611,16 @@ struct TensorMetadata FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   torch::jit::mobile::serialization::QuantizedSchema *mutable_quantized_schema() {
     return GetPointer<torch::jit::mobile::serialization::QuantizedSchema *>(VT_QUANTIZED_SCHEMA);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyField<uint32_t>(verifier, VT_STORAGE_LOCATION_INDEX) &&
-           VerifyField<int8_t>(verifier, VT_SCALAR_TYPE) &&
-           VerifyField<int32_t>(verifier, VT_STORAGE_OFFSET) &&
+           VerifyField<uint32_t>(verifier, VT_STORAGE_LOCATION_INDEX, 4) &&
+           VerifyField<int8_t>(verifier, VT_SCALAR_TYPE, 1) &&
+           VerifyField<int32_t>(verifier, VT_STORAGE_OFFSET, 4) &&
            VerifyOffset(verifier, VT_SIZES) &&
            verifier.VerifyVector(sizes()) &&
            VerifyOffset(verifier, VT_STRIDES) &&
            verifier.VerifyVector(strides()) &&
-           VerifyField<uint8_t>(verifier, VT_REQUIRES_GRAD) &&
+           VerifyField<uint8_t>(verifier, VT_REQUIRES_GRAD, 1) &&
            VerifyOffset(verifier, VT_QUANTIZED_SCHEMA) &&
            verifier.VerifyTable(quantized_schema()) &&
            verifier.EndTable();
@@ -622,8 +629,8 @@ struct TensorMetadata FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
 
 struct TensorMetadataBuilder {
   typedef TensorMetadata Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
   void add_storage_location_index(uint32_t storage_location_index) {
     fbb_.AddElement<uint32_t>(TensorMetadata::VT_STORAGE_LOCATION_INDEX, storage_location_index, 0);
   }
@@ -633,38 +640,38 @@ struct TensorMetadataBuilder {
   void add_storage_offset(int32_t storage_offset) {
     fbb_.AddElement<int32_t>(TensorMetadata::VT_STORAGE_OFFSET, storage_offset, 0);
   }
-  void add_sizes(flatbuffers::Offset<flatbuffers::Vector<int32_t>> sizes) {
+  void add_sizes(::flatbuffers::Offset<::flatbuffers::Vector<int32_t>> sizes) {
     fbb_.AddOffset(TensorMetadata::VT_SIZES, sizes);
   }
-  void add_strides(flatbuffers::Offset<flatbuffers::Vector<int32_t>> strides) {
+  void add_strides(::flatbuffers::Offset<::flatbuffers::Vector<int32_t>> strides) {
     fbb_.AddOffset(TensorMetadata::VT_STRIDES, strides);
   }
   void add_requires_grad(bool requires_grad) {
     fbb_.AddElement<uint8_t>(TensorMetadata::VT_REQUIRES_GRAD, static_cast<uint8_t>(requires_grad), 0);
   }
-  void add_quantized_schema(flatbuffers::Offset<torch::jit::mobile::serialization::QuantizedSchema> quantized_schema) {
+  void add_quantized_schema(::flatbuffers::Offset<torch::jit::mobile::serialization::QuantizedSchema> quantized_schema) {
     fbb_.AddOffset(TensorMetadata::VT_QUANTIZED_SCHEMA, quantized_schema);
   }
-  explicit TensorMetadataBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit TensorMetadataBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<TensorMetadata> Finish() {
+  ::flatbuffers::Offset<TensorMetadata> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<TensorMetadata>(end);
+    auto o = ::flatbuffers::Offset<TensorMetadata>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<TensorMetadata> CreateTensorMetadata(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<TensorMetadata> CreateTensorMetadata(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     uint32_t storage_location_index = 0,
     int8_t scalar_type = 0,
     int32_t storage_offset = 0,
-    flatbuffers::Offset<flatbuffers::Vector<int32_t>> sizes = 0,
-    flatbuffers::Offset<flatbuffers::Vector<int32_t>> strides = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<int32_t>> sizes = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<int32_t>> strides = 0,
     bool requires_grad = false,
-    flatbuffers::Offset<torch::jit::mobile::serialization::QuantizedSchema> quantized_schema = 0) {
+    ::flatbuffers::Offset<torch::jit::mobile::serialization::QuantizedSchema> quantized_schema = 0) {
   TensorMetadataBuilder builder_(_fbb);
   builder_.add_quantized_schema(quantized_schema);
   builder_.add_strides(strides);
@@ -676,15 +683,15 @@ inline flatbuffers::Offset<TensorMetadata> CreateTensorMetadata(
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<TensorMetadata> CreateTensorMetadataDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<TensorMetadata> CreateTensorMetadataDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     uint32_t storage_location_index = 0,
     int8_t scalar_type = 0,
     int32_t storage_offset = 0,
     const std::vector<int32_t> *sizes = nullptr,
     const std::vector<int32_t> *strides = nullptr,
     bool requires_grad = false,
-    flatbuffers::Offset<torch::jit::mobile::serialization::QuantizedSchema> quantized_schema = 0) {
+    ::flatbuffers::Offset<torch::jit::mobile::serialization::QuantizedSchema> quantized_schema = 0) {
   auto sizes__ = sizes ? _fbb.CreateVector<int32_t>(*sizes) : 0;
   auto strides__ = strides ? _fbb.CreateVector<int32_t>(*strides) : 0;
   return torch::jit::mobile::serialization::CreateTensorMetadata(
@@ -698,18 +705,18 @@ inline flatbuffers::Offset<TensorMetadata> CreateTensorMetadataDirect(
       quantized_schema);
 }
 
-struct String FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct String FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef StringBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_DATA = 4
   };
-  const flatbuffers::String *data() const {
-    return GetPointer<const flatbuffers::String *>(VT_DATA);
+  const ::flatbuffers::String *data() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_DATA);
   }
-  flatbuffers::String *mutable_data() {
-    return GetPointer<flatbuffers::String *>(VT_DATA);
+  ::flatbuffers::String *mutable_data() {
+    return GetPointer<::flatbuffers::String *>(VT_DATA);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_DATA) &&
            verifier.VerifyString(data()) &&
@@ -719,32 +726,32 @@ struct String FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
 
 struct StringBuilder {
   typedef String Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_data(flatbuffers::Offset<flatbuffers::String> data) {
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_data(::flatbuffers::Offset<::flatbuffers::String> data) {
     fbb_.AddOffset(String::VT_DATA, data);
   }
-  explicit StringBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit StringBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<String> Finish() {
+  ::flatbuffers::Offset<String> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<String>(end);
+    auto o = ::flatbuffers::Offset<String>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<String> CreateString(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::String> data = 0) {
+inline ::flatbuffers::Offset<String> CreateString(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::String> data = 0) {
   StringBuilder builder_(_fbb);
   builder_.add_data(data);
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<String> CreateStringDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<String> CreateStringDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     const char *data = nullptr) {
   auto data__ = data ? _fbb.CreateString(data) : 0;
   return torch::jit::mobile::serialization::CreateString(
@@ -752,18 +759,18 @@ inline flatbuffers::Offset<String> CreateStringDirect(
       data__);
 }
 
-struct Device FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct Device FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef DeviceBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_STR = 4
   };
-  const flatbuffers::String *str() const {
-    return GetPointer<const flatbuffers::String *>(VT_STR);
+  const ::flatbuffers::String *str() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_STR);
   }
-  flatbuffers::String *mutable_str() {
-    return GetPointer<flatbuffers::String *>(VT_STR);
+  ::flatbuffers::String *mutable_str() {
+    return GetPointer<::flatbuffers::String *>(VT_STR);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_STR) &&
            verifier.VerifyString(str()) &&
@@ -773,32 +780,32 @@ struct Device FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
 
 struct DeviceBuilder {
   typedef Device Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_str(flatbuffers::Offset<flatbuffers::String> str) {
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_str(::flatbuffers::Offset<::flatbuffers::String> str) {
     fbb_.AddOffset(Device::VT_STR, str);
   }
-  explicit DeviceBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit DeviceBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<Device> Finish() {
+  ::flatbuffers::Offset<Device> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<Device>(end);
+    auto o = ::flatbuffers::Offset<Device>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<Device> CreateDevice(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::String> str = 0) {
+inline ::flatbuffers::Offset<Device> CreateDevice(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::String> str = 0) {
   DeviceBuilder builder_(_fbb);
   builder_.add_str(str);
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<Device> CreateDeviceDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<Device> CreateDeviceDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     const char *str = nullptr) {
   auto str__ = str ? _fbb.CreateString(str) : 0;
   return torch::jit::mobile::serialization::CreateDevice(
@@ -806,25 +813,25 @@ inline flatbuffers::Offset<Device> CreateDeviceDirect(
       str__);
 }
 
-struct List FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct List FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef ListBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_ITEMS = 4,
     VT_ANNOTATION_STR = 6
   };
-  const flatbuffers::Vector<uint32_t> *items() const {
-    return GetPointer<const flatbuffers::Vector<uint32_t> *>(VT_ITEMS);
+  const ::flatbuffers::Vector<uint32_t> *items() const {
+    return GetPointer<const ::flatbuffers::Vector<uint32_t> *>(VT_ITEMS);
   }
-  flatbuffers::Vector<uint32_t> *mutable_items() {
-    return GetPointer<flatbuffers::Vector<uint32_t> *>(VT_ITEMS);
+  ::flatbuffers::Vector<uint32_t> *mutable_items() {
+    return GetPointer<::flatbuffers::Vector<uint32_t> *>(VT_ITEMS);
   }
-  const flatbuffers::String *annotation_str() const {
-    return GetPointer<const flatbuffers::String *>(VT_ANNOTATION_STR);
+  const ::flatbuffers::String *annotation_str() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_ANNOTATION_STR);
   }
-  flatbuffers::String *mutable_annotation_str() {
-    return GetPointer<flatbuffers::String *>(VT_ANNOTATION_STR);
+  ::flatbuffers::String *mutable_annotation_str() {
+    return GetPointer<::flatbuffers::String *>(VT_ANNOTATION_STR);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_ITEMS) &&
            verifier.VerifyVector(items()) &&
@@ -836,37 +843,37 @@ struct List FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
 
 struct ListBuilder {
   typedef List Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_items(flatbuffers::Offset<flatbuffers::Vector<uint32_t>> items) {
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_items(::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> items) {
     fbb_.AddOffset(List::VT_ITEMS, items);
   }
-  void add_annotation_str(flatbuffers::Offset<flatbuffers::String> annotation_str) {
+  void add_annotation_str(::flatbuffers::Offset<::flatbuffers::String> annotation_str) {
     fbb_.AddOffset(List::VT_ANNOTATION_STR, annotation_str);
   }
-  explicit ListBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit ListBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<List> Finish() {
+  ::flatbuffers::Offset<List> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<List>(end);
+    auto o = ::flatbuffers::Offset<List>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<List> CreateList(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::Vector<uint32_t>> items = 0,
-    flatbuffers::Offset<flatbuffers::String> annotation_str = 0) {
+inline ::flatbuffers::Offset<List> CreateList(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> items = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> annotation_str = 0) {
   ListBuilder builder_(_fbb);
   builder_.add_annotation_str(annotation_str);
   builder_.add_items(items);
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<List> CreateListDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<List> CreateListDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     const std::vector<uint32_t> *items = nullptr,
     const char *annotation_str = nullptr) {
   auto items__ = items ? _fbb.CreateVector<uint32_t>(*items) : 0;
@@ -877,18 +884,18 @@ inline flatbuffers::Offset<List> CreateListDirect(
       annotation_str__);
 }
 
-struct IntList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct IntList FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef IntListBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_ITEMS = 4
   };
-  const flatbuffers::Vector<int64_t> *items() const {
-    return GetPointer<const flatbuffers::Vector<int64_t> *>(VT_ITEMS);
+  const ::flatbuffers::Vector<int64_t> *items() const {
+    return GetPointer<const ::flatbuffers::Vector<int64_t> *>(VT_ITEMS);
   }
-  flatbuffers::Vector<int64_t> *mutable_items() {
-    return GetPointer<flatbuffers::Vector<int64_t> *>(VT_ITEMS);
+  ::flatbuffers::Vector<int64_t> *mutable_items() {
+    return GetPointer<::flatbuffers::Vector<int64_t> *>(VT_ITEMS);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_ITEMS) &&
            verifier.VerifyVector(items()) &&
@@ -898,32 +905,32 @@ struct IntList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
 
 struct IntListBuilder {
   typedef IntList Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_items(flatbuffers::Offset<flatbuffers::Vector<int64_t>> items) {
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_items(::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> items) {
     fbb_.AddOffset(IntList::VT_ITEMS, items);
   }
-  explicit IntListBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit IntListBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<IntList> Finish() {
+  ::flatbuffers::Offset<IntList> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<IntList>(end);
+    auto o = ::flatbuffers::Offset<IntList>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<IntList> CreateIntList(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::Vector<int64_t>> items = 0) {
+inline ::flatbuffers::Offset<IntList> CreateIntList(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> items = 0) {
   IntListBuilder builder_(_fbb);
   builder_.add_items(items);
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<IntList> CreateIntListDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<IntList> CreateIntListDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     const std::vector<int64_t> *items = nullptr) {
   auto items__ = items ? _fbb.CreateVector<int64_t>(*items) : 0;
   return torch::jit::mobile::serialization::CreateIntList(
@@ -931,18 +938,18 @@ inline flatbuffers::Offset<IntList> CreateIntListDirect(
       items__);
 }
 
-struct DoubleList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct DoubleList FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef DoubleListBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_ITEMS = 4
   };
-  const flatbuffers::Vector<double> *items() const {
-    return GetPointer<const flatbuffers::Vector<double> *>(VT_ITEMS);
+  const ::flatbuffers::Vector<double> *items() const {
+    return GetPointer<const ::flatbuffers::Vector<double> *>(VT_ITEMS);
   }
-  flatbuffers::Vector<double> *mutable_items() {
-    return GetPointer<flatbuffers::Vector<double> *>(VT_ITEMS);
+  ::flatbuffers::Vector<double> *mutable_items() {
+    return GetPointer<::flatbuffers::Vector<double> *>(VT_ITEMS);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_ITEMS) &&
            verifier.VerifyVector(items()) &&
@@ -952,32 +959,32 @@ struct DoubleList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
 
 struct DoubleListBuilder {
   typedef DoubleList Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_items(flatbuffers::Offset<flatbuffers::Vector<double>> items) {
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_items(::flatbuffers::Offset<::flatbuffers::Vector<double>> items) {
     fbb_.AddOffset(DoubleList::VT_ITEMS, items);
   }
-  explicit DoubleListBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit DoubleListBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<DoubleList> Finish() {
+  ::flatbuffers::Offset<DoubleList> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<DoubleList>(end);
+    auto o = ::flatbuffers::Offset<DoubleList>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<DoubleList> CreateDoubleList(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::Vector<double>> items = 0) {
+inline ::flatbuffers::Offset<DoubleList> CreateDoubleList(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<double>> items = 0) {
   DoubleListBuilder builder_(_fbb);
   builder_.add_items(items);
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<DoubleList> CreateDoubleListDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<DoubleList> CreateDoubleListDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     const std::vector<double> *items = nullptr) {
   auto items__ = items ? _fbb.CreateVector<double>(*items) : 0;
   return torch::jit::mobile::serialization::CreateDoubleList(
@@ -985,18 +992,18 @@ inline flatbuffers::Offset<DoubleList> CreateDoubleListDirect(
       items__);
 }
 
-struct BoolList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct BoolList FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef BoolListBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_ITEMS = 4
   };
-  const flatbuffers::Vector<uint8_t> *items() const {
-    return GetPointer<const flatbuffers::Vector<uint8_t> *>(VT_ITEMS);
+  const ::flatbuffers::Vector<uint8_t> *items() const {
+    return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_ITEMS);
   }
-  flatbuffers::Vector<uint8_t> *mutable_items() {
-    return GetPointer<flatbuffers::Vector<uint8_t> *>(VT_ITEMS);
+  ::flatbuffers::Vector<uint8_t> *mutable_items() {
+    return GetPointer<::flatbuffers::Vector<uint8_t> *>(VT_ITEMS);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_ITEMS) &&
            verifier.VerifyVector(items()) &&
@@ -1006,32 +1013,32 @@ struct BoolList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
 
 struct BoolListBuilder {
   typedef BoolList Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_items(flatbuffers::Offset<flatbuffers::Vector<uint8_t>> items) {
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_items(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> items) {
     fbb_.AddOffset(BoolList::VT_ITEMS, items);
   }
-  explicit BoolListBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit BoolListBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<BoolList> Finish() {
+  ::flatbuffers::Offset<BoolList> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<BoolList>(end);
+    auto o = ::flatbuffers::Offset<BoolList>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<BoolList> CreateBoolList(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::Vector<uint8_t>> items = 0) {
+inline ::flatbuffers::Offset<BoolList> CreateBoolList(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> items = 0) {
   BoolListBuilder builder_(_fbb);
   builder_.add_items(items);
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<BoolList> CreateBoolListDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<BoolList> CreateBoolListDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     const std::vector<uint8_t> *items = nullptr) {
   auto items__ = items ? _fbb.CreateVector<uint8_t>(*items) : 0;
   return torch::jit::mobile::serialization::CreateBoolList(
@@ -1039,18 +1046,18 @@ inline flatbuffers::Offset<BoolList> CreateBoolListDirect(
       items__);
 }
 
-struct Tuple FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct Tuple FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef TupleBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_ITEMS = 4
   };
-  const flatbuffers::Vector<uint32_t> *items() const {
-    return GetPointer<const flatbuffers::Vector<uint32_t> *>(VT_ITEMS);
+  const ::flatbuffers::Vector<uint32_t> *items() const {
+    return GetPointer<const ::flatbuffers::Vector<uint32_t> *>(VT_ITEMS);
   }
-  flatbuffers::Vector<uint32_t> *mutable_items() {
-    return GetPointer<flatbuffers::Vector<uint32_t> *>(VT_ITEMS);
+  ::flatbuffers::Vector<uint32_t> *mutable_items() {
+    return GetPointer<::flatbuffers::Vector<uint32_t> *>(VT_ITEMS);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_ITEMS) &&
            verifier.VerifyVector(items()) &&
@@ -1060,32 +1067,32 @@ struct Tuple FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
 
 struct TupleBuilder {
   typedef Tuple Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_items(flatbuffers::Offset<flatbuffers::Vector<uint32_t>> items) {
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_items(::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> items) {
     fbb_.AddOffset(Tuple::VT_ITEMS, items);
   }
-  explicit TupleBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit TupleBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<Tuple> Finish() {
+  ::flatbuffers::Offset<Tuple> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<Tuple>(end);
+    auto o = ::flatbuffers::Offset<Tuple>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<Tuple> CreateTuple(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::Vector<uint32_t>> items = 0) {
+inline ::flatbuffers::Offset<Tuple> CreateTuple(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> items = 0) {
   TupleBuilder builder_(_fbb);
   builder_.add_items(items);
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<Tuple> CreateTupleDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<Tuple> CreateTupleDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     const std::vector<uint32_t> *items = nullptr) {
   auto items__ = items ? _fbb.CreateVector<uint32_t>(*items) : 0;
   return torch::jit::mobile::serialization::CreateTuple(
@@ -1093,32 +1100,32 @@ inline flatbuffers::Offset<Tuple> CreateTupleDirect(
       items__);
 }
 
-struct Dict FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct Dict FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef DictBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_KEYS = 4,
     VT_VALUES = 6,
     VT_ANNOTATION_STR = 8
   };
-  const flatbuffers::Vector<uint32_t> *keys() const {
-    return GetPointer<const flatbuffers::Vector<uint32_t> *>(VT_KEYS);
+  const ::flatbuffers::Vector<uint32_t> *keys() const {
+    return GetPointer<const ::flatbuffers::Vector<uint32_t> *>(VT_KEYS);
   }
-  flatbuffers::Vector<uint32_t> *mutable_keys() {
-    return GetPointer<flatbuffers::Vector<uint32_t> *>(VT_KEYS);
+  ::flatbuffers::Vector<uint32_t> *mutable_keys() {
+    return GetPointer<::flatbuffers::Vector<uint32_t> *>(VT_KEYS);
   }
-  const flatbuffers::Vector<uint32_t> *values() const {
-    return GetPointer<const flatbuffers::Vector<uint32_t> *>(VT_VALUES);
+  const ::flatbuffers::Vector<uint32_t> *values() const {
+    return GetPointer<const ::flatbuffers::Vector<uint32_t> *>(VT_VALUES);
   }
-  flatbuffers::Vector<uint32_t> *mutable_values() {
-    return GetPointer<flatbuffers::Vector<uint32_t> *>(VT_VALUES);
+  ::flatbuffers::Vector<uint32_t> *mutable_values() {
+    return GetPointer<::flatbuffers::Vector<uint32_t> *>(VT_VALUES);
   }
-  const flatbuffers::String *annotation_str() const {
-    return GetPointer<const flatbuffers::String *>(VT_ANNOTATION_STR);
+  const ::flatbuffers::String *annotation_str() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_ANNOTATION_STR);
   }
-  flatbuffers::String *mutable_annotation_str() {
-    return GetPointer<flatbuffers::String *>(VT_ANNOTATION_STR);
+  ::flatbuffers::String *mutable_annotation_str() {
+    return GetPointer<::flatbuffers::String *>(VT_ANNOTATION_STR);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_KEYS) &&
            verifier.VerifyVector(keys()) &&
@@ -1132,33 +1139,33 @@ struct Dict FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
 
 struct DictBuilder {
   typedef Dict Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_keys(flatbuffers::Offset<flatbuffers::Vector<uint32_t>> keys) {
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_keys(::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> keys) {
     fbb_.AddOffset(Dict::VT_KEYS, keys);
   }
-  void add_values(flatbuffers::Offset<flatbuffers::Vector<uint32_t>> values) {
+  void add_values(::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> values) {
     fbb_.AddOffset(Dict::VT_VALUES, values);
   }
-  void add_annotation_str(flatbuffers::Offset<flatbuffers::String> annotation_str) {
+  void add_annotation_str(::flatbuffers::Offset<::flatbuffers::String> annotation_str) {
     fbb_.AddOffset(Dict::VT_ANNOTATION_STR, annotation_str);
   }
-  explicit DictBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit DictBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<Dict> Finish() {
+  ::flatbuffers::Offset<Dict> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<Dict>(end);
+    auto o = ::flatbuffers::Offset<Dict>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<Dict> CreateDict(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::Vector<uint32_t>> keys = 0,
-    flatbuffers::Offset<flatbuffers::Vector<uint32_t>> values = 0,
-    flatbuffers::Offset<flatbuffers::String> annotation_str = 0) {
+inline ::flatbuffers::Offset<Dict> CreateDict(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> keys = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> values = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> annotation_str = 0) {
   DictBuilder builder_(_fbb);
   builder_.add_annotation_str(annotation_str);
   builder_.add_values(values);
@@ -1166,8 +1173,8 @@ inline flatbuffers::Offset<Dict> CreateDict(
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<Dict> CreateDictDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<Dict> CreateDictDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     const std::vector<uint32_t> *keys = nullptr,
     const std::vector<uint32_t> *values = nullptr,
     const char *annotation_str = nullptr) {
@@ -1181,18 +1188,18 @@ inline flatbuffers::Offset<Dict> CreateDictDirect(
       annotation_str__);
 }
 
-struct ObjectType FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct ObjectType FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef ObjectTypeBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_TYPE_NAME = 4,
     VT_TYPE = 6,
     VT_ATTR_NAMES = 8
   };
-  const flatbuffers::String *type_name() const {
-    return GetPointer<const flatbuffers::String *>(VT_TYPE_NAME);
+  const ::flatbuffers::String *type_name() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_TYPE_NAME);
   }
-  flatbuffers::String *mutable_type_name() {
-    return GetPointer<flatbuffers::String *>(VT_TYPE_NAME);
+  ::flatbuffers::String *mutable_type_name() {
+    return GetPointer<::flatbuffers::String *>(VT_TYPE_NAME);
   }
   torch::jit::mobile::serialization::TypeType type() const {
     return static_cast<torch::jit::mobile::serialization::TypeType>(GetField<uint8_t>(VT_TYPE, 0));
@@ -1200,17 +1207,17 @@ struct ObjectType FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool mutate_type(torch::jit::mobile::serialization::TypeType _type = static_cast<torch::jit::mobile::serialization::TypeType>(0)) {
     return SetField<uint8_t>(VT_TYPE, static_cast<uint8_t>(_type), 0);
   }
-  const flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>> *attr_names() const {
-    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>> *>(VT_ATTR_NAMES);
+  const ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *attr_names() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *>(VT_ATTR_NAMES);
   }
-  flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>> *mutable_attr_names() {
-    return GetPointer<flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>> *>(VT_ATTR_NAMES);
+  ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *mutable_attr_names() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *>(VT_ATTR_NAMES);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_TYPE_NAME) &&
            verifier.VerifyString(type_name()) &&
-           VerifyField<uint8_t>(verifier, VT_TYPE) &&
+           VerifyField<uint8_t>(verifier, VT_TYPE, 1) &&
            VerifyOffset(verifier, VT_ATTR_NAMES) &&
            verifier.VerifyVector(attr_names()) &&
            verifier.VerifyVectorOfStrings(attr_names()) &&
@@ -1220,33 +1227,33 @@ struct ObjectType FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
 
 struct ObjectTypeBuilder {
   typedef ObjectType Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_type_name(flatbuffers::Offset<flatbuffers::String> type_name) {
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_type_name(::flatbuffers::Offset<::flatbuffers::String> type_name) {
     fbb_.AddOffset(ObjectType::VT_TYPE_NAME, type_name);
   }
   void add_type(torch::jit::mobile::serialization::TypeType type) {
     fbb_.AddElement<uint8_t>(ObjectType::VT_TYPE, static_cast<uint8_t>(type), 0);
   }
-  void add_attr_names(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>> attr_names) {
+  void add_attr_names(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> attr_names) {
     fbb_.AddOffset(ObjectType::VT_ATTR_NAMES, attr_names);
   }
-  explicit ObjectTypeBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit ObjectTypeBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<ObjectType> Finish() {
+  ::flatbuffers::Offset<ObjectType> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<ObjectType>(end);
+    auto o = ::flatbuffers::Offset<ObjectType>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<ObjectType> CreateObjectType(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::String> type_name = 0,
+inline ::flatbuffers::Offset<ObjectType> CreateObjectType(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::String> type_name = 0,
     torch::jit::mobile::serialization::TypeType type = torch::jit::mobile::serialization::TypeType::UNSET,
-    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>> attr_names = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> attr_names = 0) {
   ObjectTypeBuilder builder_(_fbb);
   builder_.add_attr_names(attr_names);
   builder_.add_type_name(type_name);
@@ -1254,13 +1261,13 @@ inline flatbuffers::Offset<ObjectType> CreateObjectType(
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<ObjectType> CreateObjectTypeDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<ObjectType> CreateObjectTypeDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     const char *type_name = nullptr,
     torch::jit::mobile::serialization::TypeType type = torch::jit::mobile::serialization::TypeType::UNSET,
-    const std::vector<flatbuffers::Offset<flatbuffers::String>> *attr_names = nullptr) {
+    const std::vector<::flatbuffers::Offset<::flatbuffers::String>> *attr_names = nullptr) {
   auto type_name__ = type_name ? _fbb.CreateString(type_name) : 0;
-  auto attr_names__ = attr_names ? _fbb.CreateVector<flatbuffers::Offset<flatbuffers::String>>(*attr_names) : 0;
+  auto attr_names__ = attr_names ? _fbb.CreateVector<::flatbuffers::Offset<::flatbuffers::String>>(*attr_names) : 0;
   return torch::jit::mobile::serialization::CreateObjectType(
       _fbb,
       type_name__,
@@ -1268,7 +1275,7 @@ inline flatbuffers::Offset<ObjectType> CreateObjectTypeDirect(
       attr_names__);
 }
 
-struct Object FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct Object FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef ObjectBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_TYPE_INDEX = 4,
@@ -1288,11 +1295,11 @@ struct Object FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool mutate_state(uint32_t _state = 0) {
     return SetField<uint32_t>(VT_STATE, _state, 0);
   }
-  const flatbuffers::Vector<uint32_t> *attrs() const {
-    return GetPointer<const flatbuffers::Vector<uint32_t> *>(VT_ATTRS);
+  const ::flatbuffers::Vector<uint32_t> *attrs() const {
+    return GetPointer<const ::flatbuffers::Vector<uint32_t> *>(VT_ATTRS);
   }
-  flatbuffers::Vector<uint32_t> *mutable_attrs() {
-    return GetPointer<flatbuffers::Vector<uint32_t> *>(VT_ATTRS);
+  ::flatbuffers::Vector<uint32_t> *mutable_attrs() {
+    return GetPointer<::flatbuffers::Vector<uint32_t> *>(VT_ATTRS);
   }
   uint32_t setstate_func() const {
     return GetField<uint32_t>(VT_SETSTATE_FUNC, 0);
@@ -1300,49 +1307,49 @@ struct Object FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool mutate_setstate_func(uint32_t _setstate_func = 0) {
     return SetField<uint32_t>(VT_SETSTATE_FUNC, _setstate_func, 0);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyField<uint32_t>(verifier, VT_TYPE_INDEX) &&
-           VerifyField<uint32_t>(verifier, VT_STATE) &&
+           VerifyField<uint32_t>(verifier, VT_TYPE_INDEX, 4) &&
+           VerifyField<uint32_t>(verifier, VT_STATE, 4) &&
            VerifyOffset(verifier, VT_ATTRS) &&
            verifier.VerifyVector(attrs()) &&
-           VerifyField<uint32_t>(verifier, VT_SETSTATE_FUNC) &&
+           VerifyField<uint32_t>(verifier, VT_SETSTATE_FUNC, 4) &&
            verifier.EndTable();
   }
 };
 
 struct ObjectBuilder {
   typedef Object Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
   void add_type_index(uint32_t type_index) {
     fbb_.AddElement<uint32_t>(Object::VT_TYPE_INDEX, type_index, 0);
   }
   void add_state(uint32_t state) {
     fbb_.AddElement<uint32_t>(Object::VT_STATE, state, 0);
   }
-  void add_attrs(flatbuffers::Offset<flatbuffers::Vector<uint32_t>> attrs) {
+  void add_attrs(::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> attrs) {
     fbb_.AddOffset(Object::VT_ATTRS, attrs);
   }
   void add_setstate_func(uint32_t setstate_func) {
     fbb_.AddElement<uint32_t>(Object::VT_SETSTATE_FUNC, setstate_func, 0);
   }
-  explicit ObjectBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit ObjectBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<Object> Finish() {
+  ::flatbuffers::Offset<Object> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<Object>(end);
+    auto o = ::flatbuffers::Offset<Object>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<Object> CreateObject(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<Object> CreateObject(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     uint32_t type_index = 0,
     uint32_t state = 0,
-    flatbuffers::Offset<flatbuffers::Vector<uint32_t>> attrs = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> attrs = 0,
     uint32_t setstate_func = 0) {
   ObjectBuilder builder_(_fbb);
   builder_.add_setstate_func(setstate_func);
@@ -1352,8 +1359,8 @@ inline flatbuffers::Offset<Object> CreateObject(
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<Object> CreateObjectDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<Object> CreateObjectDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     uint32_t type_index = 0,
     uint32_t state = 0,
     const std::vector<uint32_t> *attrs = nullptr,
@@ -1367,17 +1374,17 @@ inline flatbuffers::Offset<Object> CreateObjectDirect(
       setstate_func);
 }
 
-struct EnumValue FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct EnumValue FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef EnumValueBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_TYPE_NAME = 4,
     VT_VALUE = 6
   };
-  const flatbuffers::String *type_name() const {
-    return GetPointer<const flatbuffers::String *>(VT_TYPE_NAME);
+  const ::flatbuffers::String *type_name() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_TYPE_NAME);
   }
-  flatbuffers::String *mutable_type_name() {
-    return GetPointer<flatbuffers::String *>(VT_TYPE_NAME);
+  ::flatbuffers::String *mutable_type_name() {
+    return GetPointer<::flatbuffers::String *>(VT_TYPE_NAME);
   }
   uint32_t value() const {
     return GetField<uint32_t>(VT_VALUE, 0);
@@ -1385,39 +1392,39 @@ struct EnumValue FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool mutate_value(uint32_t _value = 0) {
     return SetField<uint32_t>(VT_VALUE, _value, 0);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_TYPE_NAME) &&
            verifier.VerifyString(type_name()) &&
-           VerifyField<uint32_t>(verifier, VT_VALUE) &&
+           VerifyField<uint32_t>(verifier, VT_VALUE, 4) &&
            verifier.EndTable();
   }
 };
 
 struct EnumValueBuilder {
   typedef EnumValue Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_type_name(flatbuffers::Offset<flatbuffers::String> type_name) {
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_type_name(::flatbuffers::Offset<::flatbuffers::String> type_name) {
     fbb_.AddOffset(EnumValue::VT_TYPE_NAME, type_name);
   }
   void add_value(uint32_t value) {
     fbb_.AddElement<uint32_t>(EnumValue::VT_VALUE, value, 0);
   }
-  explicit EnumValueBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit EnumValueBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<EnumValue> Finish() {
+  ::flatbuffers::Offset<EnumValue> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<EnumValue>(end);
+    auto o = ::flatbuffers::Offset<EnumValue>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<EnumValue> CreateEnumValue(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::String> type_name = 0,
+inline ::flatbuffers::Offset<EnumValue> CreateEnumValue(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::String> type_name = 0,
     uint32_t value = 0) {
   EnumValueBuilder builder_(_fbb);
   builder_.add_value(value);
@@ -1425,8 +1432,8 @@ inline flatbuffers::Offset<EnumValue> CreateEnumValue(
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<EnumValue> CreateEnumValueDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<EnumValue> CreateEnumValueDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     const char *type_name = nullptr,
     uint32_t value = 0) {
   auto type_name__ = type_name ? _fbb.CreateString(type_name) : 0;
@@ -1436,24 +1443,24 @@ inline flatbuffers::Offset<EnumValue> CreateEnumValueDirect(
       value);
 }
 
-struct Operator FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct Operator FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef OperatorBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_NAME = 4,
     VT_OVERLOAD_NAME = 6,
     VT_NUM_ARGS_SERIALIZED = 8
   };
-  const flatbuffers::String *name() const {
-    return GetPointer<const flatbuffers::String *>(VT_NAME);
+  const ::flatbuffers::String *name() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_NAME);
   }
-  flatbuffers::String *mutable_name() {
-    return GetPointer<flatbuffers::String *>(VT_NAME);
+  ::flatbuffers::String *mutable_name() {
+    return GetPointer<::flatbuffers::String *>(VT_NAME);
   }
-  const flatbuffers::String *overload_name() const {
-    return GetPointer<const flatbuffers::String *>(VT_OVERLOAD_NAME);
+  const ::flatbuffers::String *overload_name() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_OVERLOAD_NAME);
   }
-  flatbuffers::String *mutable_overload_name() {
-    return GetPointer<flatbuffers::String *>(VT_OVERLOAD_NAME);
+  ::flatbuffers::String *mutable_overload_name() {
+    return GetPointer<::flatbuffers::String *>(VT_OVERLOAD_NAME);
   }
   int32_t num_args_serialized() const {
     return GetField<int32_t>(VT_NUM_ARGS_SERIALIZED, -1);
@@ -1461,45 +1468,45 @@ struct Operator FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool mutate_num_args_serialized(int32_t _num_args_serialized = -1) {
     return SetField<int32_t>(VT_NUM_ARGS_SERIALIZED, _num_args_serialized, -1);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_NAME) &&
            verifier.VerifyString(name()) &&
            VerifyOffset(verifier, VT_OVERLOAD_NAME) &&
            verifier.VerifyString(overload_name()) &&
-           VerifyField<int32_t>(verifier, VT_NUM_ARGS_SERIALIZED) &&
+           VerifyField<int32_t>(verifier, VT_NUM_ARGS_SERIALIZED, 4) &&
            verifier.EndTable();
   }
 };
 
 struct OperatorBuilder {
   typedef Operator Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_name(flatbuffers::Offset<flatbuffers::String> name) {
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_name(::flatbuffers::Offset<::flatbuffers::String> name) {
     fbb_.AddOffset(Operator::VT_NAME, name);
   }
-  void add_overload_name(flatbuffers::Offset<flatbuffers::String> overload_name) {
+  void add_overload_name(::flatbuffers::Offset<::flatbuffers::String> overload_name) {
     fbb_.AddOffset(Operator::VT_OVERLOAD_NAME, overload_name);
   }
   void add_num_args_serialized(int32_t num_args_serialized) {
     fbb_.AddElement<int32_t>(Operator::VT_NUM_ARGS_SERIALIZED, num_args_serialized, -1);
   }
-  explicit OperatorBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit OperatorBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<Operator> Finish() {
+  ::flatbuffers::Offset<Operator> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<Operator>(end);
+    auto o = ::flatbuffers::Offset<Operator>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<Operator> CreateOperator(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::String> name = 0,
-    flatbuffers::Offset<flatbuffers::String> overload_name = 0,
+inline ::flatbuffers::Offset<Operator> CreateOperator(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::String> name = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> overload_name = 0,
     int32_t num_args_serialized = -1) {
   OperatorBuilder builder_(_fbb);
   builder_.add_num_args_serialized(num_args_serialized);
@@ -1508,8 +1515,8 @@ inline flatbuffers::Offset<Operator> CreateOperator(
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<Operator> CreateOperatorDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<Operator> CreateOperatorDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     const char *name = nullptr,
     const char *overload_name = nullptr,
     int32_t num_args_serialized = -1) {
@@ -1522,24 +1529,24 @@ inline flatbuffers::Offset<Operator> CreateOperatorDirect(
       num_args_serialized);
 }
 
-struct Arg FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct Arg FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef ArgBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_NAME = 4,
     VT_TYPE = 6,
     VT_DEFAULT_VALUE = 8
   };
-  const flatbuffers::String *name() const {
-    return GetPointer<const flatbuffers::String *>(VT_NAME);
+  const ::flatbuffers::String *name() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_NAME);
   }
-  flatbuffers::String *mutable_name() {
-    return GetPointer<flatbuffers::String *>(VT_NAME);
+  ::flatbuffers::String *mutable_name() {
+    return GetPointer<::flatbuffers::String *>(VT_NAME);
   }
-  const flatbuffers::String *type() const {
-    return GetPointer<const flatbuffers::String *>(VT_TYPE);
+  const ::flatbuffers::String *type() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_TYPE);
   }
-  flatbuffers::String *mutable_type() {
-    return GetPointer<flatbuffers::String *>(VT_TYPE);
+  ::flatbuffers::String *mutable_type() {
+    return GetPointer<::flatbuffers::String *>(VT_TYPE);
   }
   uint32_t default_value() const {
     return GetField<uint32_t>(VT_DEFAULT_VALUE, 0);
@@ -1547,45 +1554,45 @@ struct Arg FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool mutate_default_value(uint32_t _default_value = 0) {
     return SetField<uint32_t>(VT_DEFAULT_VALUE, _default_value, 0);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_NAME) &&
            verifier.VerifyString(name()) &&
            VerifyOffset(verifier, VT_TYPE) &&
            verifier.VerifyString(type()) &&
-           VerifyField<uint32_t>(verifier, VT_DEFAULT_VALUE) &&
+           VerifyField<uint32_t>(verifier, VT_DEFAULT_VALUE, 4) &&
            verifier.EndTable();
   }
 };
 
 struct ArgBuilder {
   typedef Arg Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_name(flatbuffers::Offset<flatbuffers::String> name) {
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_name(::flatbuffers::Offset<::flatbuffers::String> name) {
     fbb_.AddOffset(Arg::VT_NAME, name);
   }
-  void add_type(flatbuffers::Offset<flatbuffers::String> type) {
+  void add_type(::flatbuffers::Offset<::flatbuffers::String> type) {
     fbb_.AddOffset(Arg::VT_TYPE, type);
   }
   void add_default_value(uint32_t default_value) {
     fbb_.AddElement<uint32_t>(Arg::VT_DEFAULT_VALUE, default_value, 0);
   }
-  explicit ArgBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit ArgBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<Arg> Finish() {
+  ::flatbuffers::Offset<Arg> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<Arg>(end);
+    auto o = ::flatbuffers::Offset<Arg>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<Arg> CreateArg(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::String> name = 0,
-    flatbuffers::Offset<flatbuffers::String> type = 0,
+inline ::flatbuffers::Offset<Arg> CreateArg(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::String> name = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> type = 0,
     uint32_t default_value = 0) {
   ArgBuilder builder_(_fbb);
   builder_.add_default_value(default_value);
@@ -1594,8 +1601,8 @@ inline flatbuffers::Offset<Arg> CreateArg(
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<Arg> CreateArgDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<Arg> CreateArgDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     const char *name = nullptr,
     const char *type = nullptr,
     uint32_t default_value = 0) {
@@ -1608,25 +1615,25 @@ inline flatbuffers::Offset<Arg> CreateArgDirect(
       default_value);
 }
 
-struct Schema FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct Schema FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef SchemaBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_ARGUMENTS = 4,
     VT_RETURNS = 6
   };
-  const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *arguments() const {
-    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *>(VT_ARGUMENTS);
+  const ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *arguments() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *>(VT_ARGUMENTS);
   }
-  flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *mutable_arguments() {
-    return GetPointer<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *>(VT_ARGUMENTS);
+  ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *mutable_arguments() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *>(VT_ARGUMENTS);
   }
-  const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *returns() const {
-    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *>(VT_RETURNS);
+  const ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *returns() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *>(VT_RETURNS);
   }
-  flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *mutable_returns() {
-    return GetPointer<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *>(VT_RETURNS);
+  ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *mutable_returns() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *>(VT_RETURNS);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_ARGUMENTS) &&
            verifier.VerifyVector(arguments()) &&
@@ -1640,59 +1647,59 @@ struct Schema FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
 
 struct SchemaBuilder {
   typedef Schema Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_arguments(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Arg>>> arguments) {
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_arguments(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Arg>>> arguments) {
     fbb_.AddOffset(Schema::VT_ARGUMENTS, arguments);
   }
-  void add_returns(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Arg>>> returns) {
+  void add_returns(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Arg>>> returns) {
     fbb_.AddOffset(Schema::VT_RETURNS, returns);
   }
-  explicit SchemaBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit SchemaBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<Schema> Finish() {
+  ::flatbuffers::Offset<Schema> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<Schema>(end);
+    auto o = ::flatbuffers::Offset<Schema>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<Schema> CreateSchema(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Arg>>> arguments = 0,
-    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Arg>>> returns = 0) {
+inline ::flatbuffers::Offset<Schema> CreateSchema(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Arg>>> arguments = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Arg>>> returns = 0) {
   SchemaBuilder builder_(_fbb);
   builder_.add_returns(returns);
   builder_.add_arguments(arguments);
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<Schema> CreateSchemaDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *arguments = nullptr,
-    const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *returns = nullptr) {
-  auto arguments__ = arguments ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::Arg>>(*arguments) : 0;
-  auto returns__ = returns ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::Arg>>(*returns) : 0;
+inline ::flatbuffers::Offset<Schema> CreateSchemaDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const std::vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *arguments = nullptr,
+    const std::vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Arg>> *returns = nullptr) {
+  auto arguments__ = arguments ? _fbb.CreateVector<::flatbuffers::Offset<torch::jit::mobile::serialization::Arg>>(*arguments) : 0;
+  auto returns__ = returns ? _fbb.CreateVector<::flatbuffers::Offset<torch::jit::mobile::serialization::Arg>>(*returns) : 0;
   return torch::jit::mobile::serialization::CreateSchema(
       _fbb,
       arguments__,
       returns__);
 }
 
-struct DebugInfo FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct DebugInfo FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef DebugInfoBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_DEBUG_HANDLE = 4
   };
-  const flatbuffers::Vector<int64_t> *debug_handle() const {
-    return GetPointer<const flatbuffers::Vector<int64_t> *>(VT_DEBUG_HANDLE);
+  const ::flatbuffers::Vector<int64_t> *debug_handle() const {
+    return GetPointer<const ::flatbuffers::Vector<int64_t> *>(VT_DEBUG_HANDLE);
   }
-  flatbuffers::Vector<int64_t> *mutable_debug_handle() {
-    return GetPointer<flatbuffers::Vector<int64_t> *>(VT_DEBUG_HANDLE);
+  ::flatbuffers::Vector<int64_t> *mutable_debug_handle() {
+    return GetPointer<::flatbuffers::Vector<int64_t> *>(VT_DEBUG_HANDLE);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_DEBUG_HANDLE) &&
            verifier.VerifyVector(debug_handle()) &&
@@ -1702,32 +1709,32 @@ struct DebugInfo FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
 
 struct DebugInfoBuilder {
   typedef DebugInfo Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_debug_handle(flatbuffers::Offset<flatbuffers::Vector<int64_t>> debug_handle) {
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_debug_handle(::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> debug_handle) {
     fbb_.AddOffset(DebugInfo::VT_DEBUG_HANDLE, debug_handle);
   }
-  explicit DebugInfoBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit DebugInfoBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<DebugInfo> Finish() {
+  ::flatbuffers::Offset<DebugInfo> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<DebugInfo>(end);
+    auto o = ::flatbuffers::Offset<DebugInfo>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<DebugInfo> CreateDebugInfo(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::Vector<int64_t>> debug_handle = 0) {
+inline ::flatbuffers::Offset<DebugInfo> CreateDebugInfo(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> debug_handle = 0) {
   DebugInfoBuilder builder_(_fbb);
   builder_.add_debug_handle(debug_handle);
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<DebugInfo> CreateDebugInfoDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<DebugInfo> CreateDebugInfoDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     const std::vector<int64_t> *debug_handle = nullptr) {
   auto debug_handle__ = debug_handle ? _fbb.CreateVector<int64_t>(*debug_handle) : 0;
   return torch::jit::mobile::serialization::CreateDebugInfo(
@@ -1735,7 +1742,7 @@ inline flatbuffers::Offset<DebugInfo> CreateDebugInfoDirect(
       debug_handle__);
 }
 
-struct Function FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct Function FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef FunctionBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_QN = 4,
@@ -1748,35 +1755,35 @@ struct Function FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     VT_DEBUG_INFO = 18,
     VT_CLASS_TYPE = 20
   };
-  const flatbuffers::String *qn() const {
-    return GetPointer<const flatbuffers::String *>(VT_QN);
+  const ::flatbuffers::String *qn() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_QN);
   }
-  flatbuffers::String *mutable_qn() {
-    return GetPointer<flatbuffers::String *>(VT_QN);
+  ::flatbuffers::String *mutable_qn() {
+    return GetPointer<::flatbuffers::String *>(VT_QN);
   }
-  const flatbuffers::Vector<const torch::jit::mobile::serialization::Instruction *> *instructions() const {
-    return GetPointer<const flatbuffers::Vector<const torch::jit::mobile::serialization::Instruction *> *>(VT_INSTRUCTIONS);
+  const ::flatbuffers::Vector<const torch::jit::mobile::serialization::Instruction *> *instructions() const {
+    return GetPointer<const ::flatbuffers::Vector<const torch::jit::mobile::serialization::Instruction *> *>(VT_INSTRUCTIONS);
   }
-  flatbuffers::Vector<const torch::jit::mobile::serialization::Instruction *> *mutable_instructions() {
-    return GetPointer<flatbuffers::Vector<const torch::jit::mobile::serialization::Instruction *> *>(VT_INSTRUCTIONS);
+  ::flatbuffers::Vector<const torch::jit::mobile::serialization::Instruction *> *mutable_instructions() {
+    return GetPointer<::flatbuffers::Vector<const torch::jit::mobile::serialization::Instruction *> *>(VT_INSTRUCTIONS);
   }
-  const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Operator>> *operators() const {
-    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Operator>> *>(VT_OPERATORS);
+  const ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Operator>> *operators() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Operator>> *>(VT_OPERATORS);
   }
-  flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Operator>> *mutable_operators() {
-    return GetPointer<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Operator>> *>(VT_OPERATORS);
+  ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Operator>> *mutable_operators() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Operator>> *>(VT_OPERATORS);
   }
-  const flatbuffers::Vector<uint32_t> *constants() const {
-    return GetPointer<const flatbuffers::Vector<uint32_t> *>(VT_CONSTANTS);
+  const ::flatbuffers::Vector<uint32_t> *constants() const {
+    return GetPointer<const ::flatbuffers::Vector<uint32_t> *>(VT_CONSTANTS);
   }
-  flatbuffers::Vector<uint32_t> *mutable_constants() {
-    return GetPointer<flatbuffers::Vector<uint32_t> *>(VT_CONSTANTS);
+  ::flatbuffers::Vector<uint32_t> *mutable_constants() {
+    return GetPointer<::flatbuffers::Vector<uint32_t> *>(VT_CONSTANTS);
   }
-  const flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>> *type_annotations() const {
-    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>> *>(VT_TYPE_ANNOTATIONS);
+  const ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *type_annotations() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *>(VT_TYPE_ANNOTATIONS);
   }
-  flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>> *mutable_type_annotations() {
-    return GetPointer<flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>> *>(VT_TYPE_ANNOTATIONS);
+  ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *mutable_type_annotations() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *>(VT_TYPE_ANNOTATIONS);
   }
   int32_t register_size() const {
     return GetField<int32_t>(VT_REGISTER_SIZE, 0);
@@ -1802,7 +1809,7 @@ struct Function FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool mutate_class_type(uint32_t _class_type = 0) {
     return SetField<uint32_t>(VT_CLASS_TYPE, _class_type, 0);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_QN) &&
            verifier.VerifyString(qn()) &&
@@ -1816,68 +1823,68 @@ struct Function FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            VerifyOffset(verifier, VT_TYPE_ANNOTATIONS) &&
            verifier.VerifyVector(type_annotations()) &&
            verifier.VerifyVectorOfStrings(type_annotations()) &&
-           VerifyField<int32_t>(verifier, VT_REGISTER_SIZE) &&
+           VerifyField<int32_t>(verifier, VT_REGISTER_SIZE, 4) &&
            VerifyOffset(verifier, VT_SCHEMA) &&
            verifier.VerifyTable(schema()) &&
            VerifyOffset(verifier, VT_DEBUG_INFO) &&
            verifier.VerifyTable(debug_info()) &&
-           VerifyField<uint32_t>(verifier, VT_CLASS_TYPE) &&
+           VerifyField<uint32_t>(verifier, VT_CLASS_TYPE, 4) &&
            verifier.EndTable();
   }
 };
 
 struct FunctionBuilder {
   typedef Function Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_qn(flatbuffers::Offset<flatbuffers::String> qn) {
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_qn(::flatbuffers::Offset<::flatbuffers::String> qn) {
     fbb_.AddOffset(Function::VT_QN, qn);
   }
-  void add_instructions(flatbuffers::Offset<flatbuffers::Vector<const torch::jit::mobile::serialization::Instruction *>> instructions) {
+  void add_instructions(::flatbuffers::Offset<::flatbuffers::Vector<const torch::jit::mobile::serialization::Instruction *>> instructions) {
     fbb_.AddOffset(Function::VT_INSTRUCTIONS, instructions);
   }
-  void add_operators(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Operator>>> operators) {
+  void add_operators(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Operator>>> operators) {
     fbb_.AddOffset(Function::VT_OPERATORS, operators);
   }
-  void add_constants(flatbuffers::Offset<flatbuffers::Vector<uint32_t>> constants) {
+  void add_constants(::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> constants) {
     fbb_.AddOffset(Function::VT_CONSTANTS, constants);
   }
-  void add_type_annotations(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>> type_annotations) {
+  void add_type_annotations(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> type_annotations) {
     fbb_.AddOffset(Function::VT_TYPE_ANNOTATIONS, type_annotations);
   }
   void add_register_size(int32_t register_size) {
     fbb_.AddElement<int32_t>(Function::VT_REGISTER_SIZE, register_size, 0);
   }
-  void add_schema(flatbuffers::Offset<torch::jit::mobile::serialization::Schema> schema) {
+  void add_schema(::flatbuffers::Offset<torch::jit::mobile::serialization::Schema> schema) {
     fbb_.AddOffset(Function::VT_SCHEMA, schema);
   }
-  void add_debug_info(flatbuffers::Offset<torch::jit::mobile::serialization::DebugInfo> debug_info) {
+  void add_debug_info(::flatbuffers::Offset<torch::jit::mobile::serialization::DebugInfo> debug_info) {
     fbb_.AddOffset(Function::VT_DEBUG_INFO, debug_info);
   }
   void add_class_type(uint32_t class_type) {
     fbb_.AddElement<uint32_t>(Function::VT_CLASS_TYPE, class_type, 0);
   }
-  explicit FunctionBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit FunctionBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<Function> Finish() {
+  ::flatbuffers::Offset<Function> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<Function>(end);
+    auto o = ::flatbuffers::Offset<Function>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<Function> CreateFunction(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::String> qn = 0,
-    flatbuffers::Offset<flatbuffers::Vector<const torch::jit::mobile::serialization::Instruction *>> instructions = 0,
-    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::Operator>>> operators = 0,
-    flatbuffers::Offset<flatbuffers::Vector<uint32_t>> constants = 0,
-    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>> type_annotations = 0,
+inline ::flatbuffers::Offset<Function> CreateFunction(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::String> qn = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<const torch::jit::mobile::serialization::Instruction *>> instructions = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Operator>>> operators = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> constants = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> type_annotations = 0,
     int32_t register_size = 0,
-    flatbuffers::Offset<torch::jit::mobile::serialization::Schema> schema = 0,
-    flatbuffers::Offset<torch::jit::mobile::serialization::DebugInfo> debug_info = 0,
+    ::flatbuffers::Offset<torch::jit::mobile::serialization::Schema> schema = 0,
+    ::flatbuffers::Offset<torch::jit::mobile::serialization::DebugInfo> debug_info = 0,
     uint32_t class_type = 0) {
   FunctionBuilder builder_(_fbb);
   builder_.add_class_type(class_type);
@@ -1892,22 +1899,22 @@ inline flatbuffers::Offset<Function> CreateFunction(
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<Function> CreateFunctionDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<Function> CreateFunctionDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     const char *qn = nullptr,
     const std::vector<torch::jit::mobile::serialization::Instruction> *instructions = nullptr,
-    const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::Operator>> *operators = nullptr,
+    const std::vector<::flatbuffers::Offset<torch::jit::mobile::serialization::Operator>> *operators = nullptr,
     const std::vector<uint32_t> *constants = nullptr,
-    const std::vector<flatbuffers::Offset<flatbuffers::String>> *type_annotations = nullptr,
+    const std::vector<::flatbuffers::Offset<::flatbuffers::String>> *type_annotations = nullptr,
     int32_t register_size = 0,
-    flatbuffers::Offset<torch::jit::mobile::serialization::Schema> schema = 0,
-    flatbuffers::Offset<torch::jit::mobile::serialization::DebugInfo> debug_info = 0,
+    ::flatbuffers::Offset<torch::jit::mobile::serialization::Schema> schema = 0,
+    ::flatbuffers::Offset<torch::jit::mobile::serialization::DebugInfo> debug_info = 0,
     uint32_t class_type = 0) {
   auto qn__ = qn ? _fbb.CreateString(qn) : 0;
   auto instructions__ = instructions ? _fbb.CreateVectorOfStructs<torch::jit::mobile::serialization::Instruction>(*instructions) : 0;
-  auto operators__ = operators ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::Operator>>(*operators) : 0;
+  auto operators__ = operators ? _fbb.CreateVector<::flatbuffers::Offset<torch::jit::mobile::serialization::Operator>>(*operators) : 0;
   auto constants__ = constants ? _fbb.CreateVector<uint32_t>(*constants) : 0;
-  auto type_annotations__ = type_annotations ? _fbb.CreateVector<flatbuffers::Offset<flatbuffers::String>>(*type_annotations) : 0;
+  auto type_annotations__ = type_annotations ? _fbb.CreateVector<::flatbuffers::Offset<::flatbuffers::String>>(*type_annotations) : 0;
   return torch::jit::mobile::serialization::CreateFunction(
       _fbb,
       qn__,
@@ -1921,18 +1928,18 @@ inline flatbuffers::Offset<Function> CreateFunctionDirect(
       class_type);
 }
 
-struct StorageData FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct StorageData FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef StorageDataBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_DATA = 4
   };
-  const flatbuffers::Vector<uint8_t> *data() const {
-    return GetPointer<const flatbuffers::Vector<uint8_t> *>(VT_DATA);
+  const ::flatbuffers::Vector<uint8_t> *data() const {
+    return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_DATA);
   }
-  flatbuffers::Vector<uint8_t> *mutable_data() {
-    return GetPointer<flatbuffers::Vector<uint8_t> *>(VT_DATA);
+  ::flatbuffers::Vector<uint8_t> *mutable_data() {
+    return GetPointer<::flatbuffers::Vector<uint8_t> *>(VT_DATA);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_DATA) &&
            verifier.VerifyVector(data()) &&
@@ -1942,32 +1949,32 @@ struct StorageData FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
 
 struct StorageDataBuilder {
   typedef StorageData Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_data(flatbuffers::Offset<flatbuffers::Vector<uint8_t>> data) {
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_data(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> data) {
     fbb_.AddOffset(StorageData::VT_DATA, data);
   }
-  explicit StorageDataBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit StorageDataBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<StorageData> Finish() {
+  ::flatbuffers::Offset<StorageData> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<StorageData>(end);
+    auto o = ::flatbuffers::Offset<StorageData>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<StorageData> CreateStorageData(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::Vector<uint8_t>> data = 0) {
+inline ::flatbuffers::Offset<StorageData> CreateStorageData(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> data = 0) {
   StorageDataBuilder builder_(_fbb);
   builder_.add_data(data);
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<StorageData> CreateStorageDataDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<StorageData> CreateStorageDataDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     const std::vector<uint8_t> *data = nullptr) {
   if (data) { _fbb.ForceVectorAlignment(data->size(), sizeof(uint8_t), 16); }
   auto data__ = data ? _fbb.CreateVector<uint8_t>(*data) : 0;
@@ -1976,7 +1983,7 @@ inline flatbuffers::Offset<StorageData> CreateStorageDataDirect(
       data__);
 }
 
-struct IValue FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct IValue FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef IValueBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_VAL_TYPE = 4,
@@ -2040,9 +2047,9 @@ struct IValue FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   void *mutable_val() {
     return GetPointer<void *>(VT_VAL);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyField<uint8_t>(verifier, VT_VAL_TYPE) &&
+           VerifyField<uint8_t>(verifier, VT_VAL_TYPE, 1) &&
            VerifyOffset(verifier, VT_VAL) &&
            VerifyIValueUnion(verifier, val(), val_type()) &&
            verifier.EndTable();
@@ -2115,54 +2122,54 @@ template<> inline const torch::jit::mobile::serialization::Function *IValue::val
 
 struct IValueBuilder {
   typedef IValue Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
   void add_val_type(torch::jit::mobile::serialization::IValueUnion val_type) {
     fbb_.AddElement<uint8_t>(IValue::VT_VAL_TYPE, static_cast<uint8_t>(val_type), 0);
   }
-  void add_val(flatbuffers::Offset<void> val) {
+  void add_val(::flatbuffers::Offset<void> val) {
     fbb_.AddOffset(IValue::VT_VAL, val);
   }
-  explicit IValueBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit IValueBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<IValue> Finish() {
+  ::flatbuffers::Offset<IValue> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<IValue>(end);
+    auto o = ::flatbuffers::Offset<IValue>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<IValue> CreateIValue(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<IValue> CreateIValue(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     torch::jit::mobile::serialization::IValueUnion val_type = torch::jit::mobile::serialization::IValueUnion::NONE,
-    flatbuffers::Offset<void> val = 0) {
+    ::flatbuffers::Offset<void> val = 0) {
   IValueBuilder builder_(_fbb);
   builder_.add_val(val);
   builder_.add_val_type(val_type);
   return builder_.Finish();
 }
 
-struct ExtraFile FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct ExtraFile FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef ExtraFileBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_NAME = 4,
     VT_CONTENT = 6
   };
-  const flatbuffers::String *name() const {
-    return GetPointer<const flatbuffers::String *>(VT_NAME);
+  const ::flatbuffers::String *name() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_NAME);
   }
-  flatbuffers::String *mutable_name() {
-    return GetPointer<flatbuffers::String *>(VT_NAME);
+  ::flatbuffers::String *mutable_name() {
+    return GetPointer<::flatbuffers::String *>(VT_NAME);
   }
-  const flatbuffers::String *content() const {
-    return GetPointer<const flatbuffers::String *>(VT_CONTENT);
+  const ::flatbuffers::String *content() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_CONTENT);
   }
-  flatbuffers::String *mutable_content() {
-    return GetPointer<flatbuffers::String *>(VT_CONTENT);
+  ::flatbuffers::String *mutable_content() {
+    return GetPointer<::flatbuffers::String *>(VT_CONTENT);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_NAME) &&
            verifier.VerifyString(name()) &&
@@ -2174,37 +2181,37 @@ struct ExtraFile FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
 
 struct ExtraFileBuilder {
   typedef ExtraFile Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
-  void add_name(flatbuffers::Offset<flatbuffers::String> name) {
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_name(::flatbuffers::Offset<::flatbuffers::String> name) {
     fbb_.AddOffset(ExtraFile::VT_NAME, name);
   }
-  void add_content(flatbuffers::Offset<flatbuffers::String> content) {
+  void add_content(::flatbuffers::Offset<::flatbuffers::String> content) {
     fbb_.AddOffset(ExtraFile::VT_CONTENT, content);
   }
-  explicit ExtraFileBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit ExtraFileBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<ExtraFile> Finish() {
+  ::flatbuffers::Offset<ExtraFile> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<ExtraFile>(end);
+    auto o = ::flatbuffers::Offset<ExtraFile>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<ExtraFile> CreateExtraFile(
-    flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::String> name = 0,
-    flatbuffers::Offset<flatbuffers::String> content = 0) {
+inline ::flatbuffers::Offset<ExtraFile> CreateExtraFile(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::String> name = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> content = 0) {
   ExtraFileBuilder builder_(_fbb);
   builder_.add_content(content);
   builder_.add_name(name);
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<ExtraFile> CreateExtraFileDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<ExtraFile> CreateExtraFileDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     const char *name = nullptr,
     const char *content = nullptr) {
   auto name__ = name ? _fbb.CreateString(name) : 0;
@@ -2215,7 +2222,7 @@ inline flatbuffers::Offset<ExtraFile> CreateExtraFileDirect(
       content__);
 }
 
-struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+struct Module FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef ModuleBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_BYTECODE_VERSION = 4,
@@ -2237,17 +2244,17 @@ struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool mutate_bytecode_version(uint32_t _bytecode_version = 0) {
     return SetField<uint32_t>(VT_BYTECODE_VERSION, _bytecode_version, 0);
   }
-  const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *extra_files() const {
-    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *>(VT_EXTRA_FILES);
+  const ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *extra_files() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *>(VT_EXTRA_FILES);
   }
-  flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *mutable_extra_files() {
-    return GetPointer<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *>(VT_EXTRA_FILES);
+  ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *mutable_extra_files() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *>(VT_EXTRA_FILES);
   }
-  const flatbuffers::Vector<uint32_t> *methods() const {
-    return GetPointer<const flatbuffers::Vector<uint32_t> *>(VT_METHODS);
+  const ::flatbuffers::Vector<uint32_t> *methods() const {
+    return GetPointer<const ::flatbuffers::Vector<uint32_t> *>(VT_METHODS);
   }
-  flatbuffers::Vector<uint32_t> *mutable_methods() {
-    return GetPointer<flatbuffers::Vector<uint32_t> *>(VT_METHODS);
+  ::flatbuffers::Vector<uint32_t> *mutable_methods() {
+    return GetPointer<::flatbuffers::Vector<uint32_t> *>(VT_METHODS);
   }
   uint32_t state_obj() const {
     return GetField<uint32_t>(VT_STATE_OBJ, 0);
@@ -2255,11 +2262,11 @@ struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool mutate_state_obj(uint32_t _state_obj = 0) {
     return SetField<uint32_t>(VT_STATE_OBJ, _state_obj, 0);
   }
-  const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::IValue>> *ivalues() const {
-    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::IValue>> *>(VT_IVALUES);
+  const ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::IValue>> *ivalues() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::IValue>> *>(VT_IVALUES);
   }
-  flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::IValue>> *mutable_ivalues() {
-    return GetPointer<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::IValue>> *>(VT_IVALUES);
+  ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::IValue>> *mutable_ivalues() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::IValue>> *>(VT_IVALUES);
   }
   int32_t storage_data_size() const {
     return GetField<int32_t>(VT_STORAGE_DATA_SIZE, 0);
@@ -2267,29 +2274,29 @@ struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool mutate_storage_data_size(int32_t _storage_data_size = 0) {
     return SetField<int32_t>(VT_STORAGE_DATA_SIZE, _storage_data_size, 0);
   }
-  const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>> *storage_data() const {
-    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>> *>(VT_STORAGE_DATA);
+  const ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>> *storage_data() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>> *>(VT_STORAGE_DATA);
   }
-  flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>> *mutable_storage_data() {
-    return GetPointer<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>> *>(VT_STORAGE_DATA);
+  ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>> *mutable_storage_data() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>> *>(VT_STORAGE_DATA);
   }
-  const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>> *object_types() const {
-    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>> *>(VT_OBJECT_TYPES);
+  const ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>> *object_types() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>> *>(VT_OBJECT_TYPES);
   }
-  flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>> *mutable_object_types() {
-    return GetPointer<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>> *>(VT_OBJECT_TYPES);
+  ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>> *mutable_object_types() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>> *>(VT_OBJECT_TYPES);
   }
-  const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *jit_sources() const {
-    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *>(VT_JIT_SOURCES);
+  const ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *jit_sources() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *>(VT_JIT_SOURCES);
   }
-  flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *mutable_jit_sources() {
-    return GetPointer<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *>(VT_JIT_SOURCES);
+  ::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *mutable_jit_sources() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *>(VT_JIT_SOURCES);
   }
-  const flatbuffers::Vector<uint32_t> *jit_constants() const {
-    return GetPointer<const flatbuffers::Vector<uint32_t> *>(VT_JIT_CONSTANTS);
+  const ::flatbuffers::Vector<uint32_t> *jit_constants() const {
+    return GetPointer<const ::flatbuffers::Vector<uint32_t> *>(VT_JIT_CONSTANTS);
   }
-  flatbuffers::Vector<uint32_t> *mutable_jit_constants() {
-    return GetPointer<flatbuffers::Vector<uint32_t> *>(VT_JIT_CONSTANTS);
+  ::flatbuffers::Vector<uint32_t> *mutable_jit_constants() {
+    return GetPointer<::flatbuffers::Vector<uint32_t> *>(VT_JIT_CONSTANTS);
   }
   uint32_t operator_version() const {
     return GetField<uint32_t>(VT_OPERATOR_VERSION, 0);
@@ -2303,19 +2310,19 @@ struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool mutate_mobile_ivalue_size(uint32_t _mobile_ivalue_size = 0) {
     return SetField<uint32_t>(VT_MOBILE_IVALUE_SIZE, _mobile_ivalue_size, 0);
   }
-  bool Verify(flatbuffers::Verifier &verifier) const {
+  bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyField<uint32_t>(verifier, VT_BYTECODE_VERSION) &&
+           VerifyField<uint32_t>(verifier, VT_BYTECODE_VERSION, 4) &&
            VerifyOffset(verifier, VT_EXTRA_FILES) &&
            verifier.VerifyVector(extra_files()) &&
            verifier.VerifyVectorOfTables(extra_files()) &&
            VerifyOffset(verifier, VT_METHODS) &&
            verifier.VerifyVector(methods()) &&
-           VerifyField<uint32_t>(verifier, VT_STATE_OBJ) &&
+           VerifyField<uint32_t>(verifier, VT_STATE_OBJ, 4) &&
            VerifyOffset(verifier, VT_IVALUES) &&
            verifier.VerifyVector(ivalues()) &&
            verifier.VerifyVectorOfTables(ivalues()) &&
-           VerifyField<int32_t>(verifier, VT_STORAGE_DATA_SIZE) &&
+           VerifyField<int32_t>(verifier, VT_STORAGE_DATA_SIZE, 4) &&
            VerifyOffset(verifier, VT_STORAGE_DATA) &&
            verifier.VerifyVector(storage_data()) &&
            verifier.VerifyVectorOfTables(storage_data()) &&
@@ -2327,44 +2334,44 @@ struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            verifier.VerifyVectorOfTables(jit_sources()) &&
            VerifyOffset(verifier, VT_JIT_CONSTANTS) &&
            verifier.VerifyVector(jit_constants()) &&
-           VerifyField<uint32_t>(verifier, VT_OPERATOR_VERSION) &&
-           VerifyField<uint32_t>(verifier, VT_MOBILE_IVALUE_SIZE) &&
+           VerifyField<uint32_t>(verifier, VT_OPERATOR_VERSION, 4) &&
+           VerifyField<uint32_t>(verifier, VT_MOBILE_IVALUE_SIZE, 4) &&
            verifier.EndTable();
   }
 };
 
 struct ModuleBuilder {
   typedef Module Table;
-  flatbuffers::FlatBufferBuilder &fbb_;
-  flatbuffers::uoffset_t start_;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
   void add_bytecode_version(uint32_t bytecode_version) {
     fbb_.AddElement<uint32_t>(Module::VT_BYTECODE_VERSION, bytecode_version, 0);
   }
-  void add_extra_files(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>> extra_files) {
+  void add_extra_files(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>> extra_files) {
     fbb_.AddOffset(Module::VT_EXTRA_FILES, extra_files);
   }
-  void add_methods(flatbuffers::Offset<flatbuffers::Vector<uint32_t>> methods) {
+  void add_methods(::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> methods) {
     fbb_.AddOffset(Module::VT_METHODS, methods);
   }
   void add_state_obj(uint32_t state_obj) {
     fbb_.AddElement<uint32_t>(Module::VT_STATE_OBJ, state_obj, 0);
   }
-  void add_ivalues(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::IValue>>> ivalues) {
+  void add_ivalues(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::IValue>>> ivalues) {
     fbb_.AddOffset(Module::VT_IVALUES, ivalues);
   }
   void add_storage_data_size(int32_t storage_data_size) {
     fbb_.AddElement<int32_t>(Module::VT_STORAGE_DATA_SIZE, storage_data_size, 0);
   }
-  void add_storage_data(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>>> storage_data) {
+  void add_storage_data(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>>> storage_data) {
     fbb_.AddOffset(Module::VT_STORAGE_DATA, storage_data);
   }
-  void add_object_types(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>>> object_types) {
+  void add_object_types(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>>> object_types) {
     fbb_.AddOffset(Module::VT_OBJECT_TYPES, object_types);
   }
-  void add_jit_sources(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>> jit_sources) {
+  void add_jit_sources(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>> jit_sources) {
     fbb_.AddOffset(Module::VT_JIT_SOURCES, jit_sources);
   }
-  void add_jit_constants(flatbuffers::Offset<flatbuffers::Vector<uint32_t>> jit_constants) {
+  void add_jit_constants(::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> jit_constants) {
     fbb_.AddOffset(Module::VT_JIT_CONSTANTS, jit_constants);
   }
   void add_operator_version(uint32_t operator_version) {
@@ -2373,29 +2380,29 @@ struct ModuleBuilder {
   void add_mobile_ivalue_size(uint32_t mobile_ivalue_size) {
     fbb_.AddElement<uint32_t>(Module::VT_MOBILE_IVALUE_SIZE, mobile_ivalue_size, 0);
   }
-  explicit ModuleBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+  explicit ModuleBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  flatbuffers::Offset<Module> Finish() {
+  ::flatbuffers::Offset<Module> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = flatbuffers::Offset<Module>(end);
+    auto o = ::flatbuffers::Offset<Module>(end);
     return o;
   }
 };
 
-inline flatbuffers::Offset<Module> CreateModule(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<Module> CreateModule(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     uint32_t bytecode_version = 0,
-    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>> extra_files = 0,
-    flatbuffers::Offset<flatbuffers::Vector<uint32_t>> methods = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>> extra_files = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> methods = 0,
     uint32_t state_obj = 0,
-    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::IValue>>> ivalues = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::IValue>>> ivalues = 0,
     int32_t storage_data_size = 0,
-    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>>> storage_data = 0,
-    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>>> object_types = 0,
-    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>> jit_sources = 0,
-    flatbuffers::Offset<flatbuffers::Vector<uint32_t>> jit_constants = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>>> storage_data = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>>> object_types = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>> jit_sources = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> jit_constants = 0,
     uint32_t operator_version = 0,
     uint32_t mobile_ivalue_size = 0) {
   ModuleBuilder builder_(_fbb);
@@ -2414,26 +2421,26 @@ inline flatbuffers::Offset<Module> CreateModule(
   return builder_.Finish();
 }
 
-inline flatbuffers::Offset<Module> CreateModuleDirect(
-    flatbuffers::FlatBufferBuilder &_fbb,
+inline ::flatbuffers::Offset<Module> CreateModuleDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
     uint32_t bytecode_version = 0,
-    const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *extra_files = nullptr,
+    const std::vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *extra_files = nullptr,
     const std::vector<uint32_t> *methods = nullptr,
     uint32_t state_obj = 0,
-    const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::IValue>> *ivalues = nullptr,
+    const std::vector<::flatbuffers::Offset<torch::jit::mobile::serialization::IValue>> *ivalues = nullptr,
     int32_t storage_data_size = 0,
-    const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>> *storage_data = nullptr,
-    const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>> *object_types = nullptr,
-    const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *jit_sources = nullptr,
+    const std::vector<::flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>> *storage_data = nullptr,
+    const std::vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>> *object_types = nullptr,
+    const std::vector<::flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>> *jit_sources = nullptr,
     const std::vector<uint32_t> *jit_constants = nullptr,
     uint32_t operator_version = 0,
     uint32_t mobile_ivalue_size = 0) {
-  auto extra_files__ = extra_files ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>(*extra_files) : 0;
+  auto extra_files__ = extra_files ? _fbb.CreateVector<::flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>(*extra_files) : 0;
   auto methods__ = methods ? _fbb.CreateVector<uint32_t>(*methods) : 0;
-  auto ivalues__ = ivalues ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::IValue>>(*ivalues) : 0;
-  auto storage_data__ = storage_data ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>>(*storage_data) : 0;
-  auto object_types__ = object_types ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>>(*object_types) : 0;
-  auto jit_sources__ = jit_sources ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>(*jit_sources) : 0;
+  auto ivalues__ = ivalues ? _fbb.CreateVector<::flatbuffers::Offset<torch::jit::mobile::serialization::IValue>>(*ivalues) : 0;
+  auto storage_data__ = storage_data ? _fbb.CreateVector<::flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>>(*storage_data) : 0;
+  auto object_types__ = object_types ? _fbb.CreateVector<::flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>>(*object_types) : 0;
+  auto jit_sources__ = jit_sources ? _fbb.CreateVector<::flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>(*jit_sources) : 0;
   auto jit_constants__ = jit_constants ? _fbb.CreateVector<uint32_t>(*jit_constants) : 0;
   return torch::jit::mobile::serialization::CreateModule(
       _fbb,
@@ -2451,22 +2458,22 @@ inline flatbuffers::Offset<Module> CreateModuleDirect(
       mobile_ivalue_size);
 }
 
-inline bool VerifyIValueUnion(flatbuffers::Verifier &verifier, const void *obj, IValueUnion type) {
+inline bool VerifyIValueUnion(::flatbuffers::Verifier &verifier, const void *obj, IValueUnion type) {
   switch (type) {
     case IValueUnion::NONE: {
       return true;
     }
     case IValueUnion::Int: {
-      return verifier.Verify<torch::jit::mobile::serialization::Int>(static_cast<const uint8_t *>(obj), 0);
+      return verifier.VerifyField<torch::jit::mobile::serialization::Int>(static_cast<const uint8_t *>(obj), 0, 8);
     }
     case IValueUnion::Bool: {
-      return verifier.Verify<torch::jit::mobile::serialization::Bool>(static_cast<const uint8_t *>(obj), 0);
+      return verifier.VerifyField<torch::jit::mobile::serialization::Bool>(static_cast<const uint8_t *>(obj), 0, 1);
     }
     case IValueUnion::Double: {
-      return verifier.Verify<torch::jit::mobile::serialization::Double>(static_cast<const uint8_t *>(obj), 0);
+      return verifier.VerifyField<torch::jit::mobile::serialization::Double>(static_cast<const uint8_t *>(obj), 0, 8);
     }
     case IValueUnion::ComplexDouble: {
-      return verifier.Verify<torch::jit::mobile::serialization::ComplexDouble>(static_cast<const uint8_t *>(obj), 0);
+      return verifier.VerifyField<torch::jit::mobile::serialization::ComplexDouble>(static_cast<const uint8_t *>(obj), 0, 8);
     }
     case IValueUnion::TensorMetadata: {
       auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::TensorMetadata *>(obj);
@@ -2520,10 +2527,10 @@ inline bool VerifyIValueUnion(flatbuffers::Verifier &verifier, const void *obj, 
   }
 }
 
-inline bool VerifyIValueUnionVector(flatbuffers::Verifier &verifier, const flatbuffers::Vector<flatbuffers::Offset<void>> *values, const flatbuffers::Vector<IValueUnion> *types) {
+inline bool VerifyIValueUnionVector(::flatbuffers::Verifier &verifier, const ::flatbuffers::Vector<::flatbuffers::Offset<void>> *values, const ::flatbuffers::Vector<IValueUnion> *types) {
   if (!values || !types) return !values && !types;
   if (values->size() != types->size()) return false;
-  for (flatbuffers::uoffset_t i = 0; i < values->size(); ++i) {
+  for (::flatbuffers::uoffset_t i = 0; i < values->size(); ++i) {
     if (!VerifyIValueUnion(
         verifier,  values->Get(i), types->GetEnum<IValueUnion>(i))) {
       return false;
@@ -2533,19 +2540,19 @@ inline bool VerifyIValueUnionVector(flatbuffers::Verifier &verifier, const flatb
 }
 
 inline const torch::jit::mobile::serialization::Module *GetModule(const void *buf) {
-  return flatbuffers::GetRoot<torch::jit::mobile::serialization::Module>(buf);
+  return ::flatbuffers::GetRoot<torch::jit::mobile::serialization::Module>(buf);
 }
 
 inline const torch::jit::mobile::serialization::Module *GetSizePrefixedModule(const void *buf) {
-  return flatbuffers::GetSizePrefixedRoot<torch::jit::mobile::serialization::Module>(buf);
+  return ::flatbuffers::GetSizePrefixedRoot<torch::jit::mobile::serialization::Module>(buf);
 }
 
 inline Module *GetMutableModule(void *buf) {
-  return flatbuffers::GetMutableRoot<Module>(buf);
+  return ::flatbuffers::GetMutableRoot<Module>(buf);
 }
 
 inline torch::jit::mobile::serialization::Module *GetMutableSizePrefixedModule(void *buf) {
-  return flatbuffers::GetMutableSizePrefixedRoot<torch::jit::mobile::serialization::Module>(buf);
+  return ::flatbuffers::GetMutableSizePrefixedRoot<torch::jit::mobile::serialization::Module>(buf);
 }
 
 inline const char *ModuleIdentifier() {
@@ -2553,29 +2560,34 @@ inline const char *ModuleIdentifier() {
 }
 
 inline bool ModuleBufferHasIdentifier(const void *buf) {
-  return flatbuffers::BufferHasIdentifier(
+  return ::flatbuffers::BufferHasIdentifier(
       buf, ModuleIdentifier());
 }
 
+inline bool SizePrefixedModuleBufferHasIdentifier(const void *buf) {
+  return ::flatbuffers::BufferHasIdentifier(
+      buf, ModuleIdentifier(), true);
+}
+
 inline bool VerifyModuleBuffer(
-    flatbuffers::Verifier &verifier) {
+    ::flatbuffers::Verifier &verifier) {
   return verifier.VerifyBuffer<torch::jit::mobile::serialization::Module>(ModuleIdentifier());
 }
 
 inline bool VerifySizePrefixedModuleBuffer(
-    flatbuffers::Verifier &verifier) {
+    ::flatbuffers::Verifier &verifier) {
   return verifier.VerifySizePrefixedBuffer<torch::jit::mobile::serialization::Module>(ModuleIdentifier());
 }
 
 inline void FinishModuleBuffer(
-    flatbuffers::FlatBufferBuilder &fbb,
-    flatbuffers::Offset<torch::jit::mobile::serialization::Module> root) {
+    ::flatbuffers::FlatBufferBuilder &fbb,
+    ::flatbuffers::Offset<torch::jit::mobile::serialization::Module> root) {
   fbb.Finish(root, ModuleIdentifier());
 }
 
 inline void FinishSizePrefixedModuleBuffer(
-    flatbuffers::FlatBufferBuilder &fbb,
-    flatbuffers::Offset<torch::jit::mobile::serialization::Module> root) {
+    ::flatbuffers::FlatBufferBuilder &fbb,
+    ::flatbuffers::Offset<torch::jit::mobile::serialization::Module> root) {
   fbb.FinishSizePrefixed(root, ModuleIdentifier());
 }
 
@@ -2585,4 +2597,3 @@ inline void FinishSizePrefixedModuleBuffer(
 }  // namespace torch
 
 #endif  // FLATBUFFERS_GENERATED_MOBILEBYTECODE_TORCH_JIT_MOBILE_SERIALIZATION_H_
-// @generated

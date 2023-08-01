@@ -6,6 +6,7 @@ from types import MappingProxyType
 from warnings import warn
 
 import torch
+import torch.fx
 import torch.overrides
 from torch._prims_common import (
     _torch_dtype_to_nvfuser_dtype_map,
@@ -60,6 +61,7 @@ DEFAULT_NVFUSER_PYTHON_CONFIG = MappingProxyType(
     }
 )
 
+
 # nvFuserTensorTemplate and nvFuserScalarTemplate are helper objects
 # for cached construction of the nvFuser's Fusion
 # TODO: change what is stored in the cache for nvFuser's Tensor objects
@@ -96,7 +98,7 @@ def compute_contiguity(shape, strides):
     except ImportError:
         from nvfuser._C import compute_contiguity
 
-    return compute_contiguity(shape, strides)
+    return tuple(compute_contiguity(shape, strides))
 
 
 def to_nvfuser_template_args(args):
@@ -180,24 +182,24 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
         class FusionInterpreter(torch.fx.Interpreter):
             def run_node(self, node):
                 # Squeeze requires original shape of args[0]
-                if node.target in [
+                if node.target in (
                     torch.ops.nvprims.squeeze,
                     torch.ops.nvprims.squeeze.default,
-                ]:
+                ):
                     original_shape = list(node.args[0].meta["tensor_meta"].shape)
                     assert len(node.args) == 2
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
-                    args = [args[0], original_shape, args[1]]
+                    args = args[:1] + (original_shape,) + args[1:]
                     return self.call_function(node.target, args, node.kwargs)
 
-                if node.target in [
+                if node.target in (
                     torch.ops.nvprims.native_batch_norm,
                     torch.ops.nvprims.native_batch_norm.default,
-                ]:
+                ):
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
                     assert len(args) == 8
                     training = args[5]
-                    args6_end = tuple(map(_to_nvfuser_constant, args[6:]))
+                    args6_end = tuple(_to_nvfuser_constant(arg) for arg in args[6:])
                     args = args[:5] + (training,) + args6_end
                     return node.target.impl_nvfuser(fd, *args, **kwargs)
 
@@ -208,7 +210,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                 if target == operator.getitem:
                     assert isinstance(args[0], tuple)
                     return target(*args, **kwargs)
-                args = tuple(map(_to_nvfuser_constant, args))
+                args = tuple(_to_nvfuser_constant(arg) for arg in args)
                 target = target.impl_nvfuser
                 args = (fd,) + args
                 return target(*args, **kwargs)
@@ -238,7 +240,9 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                 return arg
 
         # Transforms graph to call nvfuser lowerings
-        nv_args = tuple(map(templates_to_nvfuser_inputs, nv_args_templates))
+        nv_args = tuple(
+            templates_to_nvfuser_inputs(nv_arg) for nv_arg in nv_args_templates
+        )
         out = FusionInterpreter(gm).run(*nv_args)
         flat_out, unflatten_spec = tree_flatten(out)
 
@@ -258,7 +262,6 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
         )
         for arg in flat_args
     ):
-
         # Construction of the fusion is expensive and cached based on the GraphModule
         # and symbolic nvFuser args.
         nv_template_args = to_nvfuser_template_args(flat_args)
@@ -279,7 +282,7 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
 
         if get_nvprim_dump_nvtx():
             torch.cuda.nvtx.range_push(
-                "fusion: {0}, graph: {1}".format(
+                "fusion: {}, graph: {}".format(
                     fusion.id(),
                     str(
                         [
@@ -294,6 +297,7 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
                     ),
                 )
             )
+        warn("nvfuser integration in primTorch is deprecated")
         result = tree_unflatten(
             fusion.execute(concrete_fusion_inputs),  # type: ignore[has-type]
             unflatten_spec,  # type: ignore[has-type]
@@ -472,9 +476,7 @@ def maybe_partition_graph(
 class NVTXInterpreter(torch.fx.Interpreter):
     def run_node(self, n):
         torch.cuda.nvtx.range_push(
-            "name: {0}, args: {1}, op: {2}, kwargs: {3}".format(
-                n.name, n.args, n.op, n.kwargs
-            )
+            f"name: {n.name}, args: {n.args}, op: {n.op}, kwargs: {n.kwargs}"
         )
         result = super().run_node(n)
         torch.cuda.nvtx.range_pop()

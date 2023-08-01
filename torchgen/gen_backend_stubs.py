@@ -22,14 +22,8 @@ from torchgen.model import (
     OperatorName,
 )
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import (
-    concatMap,
-    context,
-    FileManager,
-    NamespaceHelper,
-    Target,
-    YamlLoader,
-)
+from torchgen.utils import concatMap, context, FileManager, NamespaceHelper, Target
+from torchgen.yaml_utils import YamlLoader
 
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
@@ -45,7 +39,6 @@ def parse_backend_yaml(
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     backend_indices: Dict[DispatchKey, BackendIndex],
 ) -> ParsedExternalYaml:
-
     native_functions_map: Dict[OperatorName, NativeFunction] = {
         f.func.name: f
         for f in concatMap(
@@ -54,7 +47,7 @@ def parse_backend_yaml(
         )
     }
 
-    with open(backend_yaml_path, "r") as f:
+    with open(backend_yaml_path) as f:
         yaml_values = yaml.load(f, Loader=YamlLoader)
     assert isinstance(yaml_values, dict)
 
@@ -260,9 +253,9 @@ def error_on_missing_kernels(
     full_codegen: Optional[List[OperatorName]] = None,
 ) -> None:
     try:
-        with open(kernel_defn_file_path, "r") as f:
+        with open(kernel_defn_file_path) as f:
             backend_defns = f.read()
-    except IOError as e:
+    except OSError as e:
         raise AssertionError(
             f"Unable to read from the specified impl_path file: {kernel_defn_file_path}"
         ) from e
@@ -474,6 +467,7 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
     else:
         deferred_template = CodeTemplate(
             """\
+TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions();
 TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
     static auto m = MAKE_TORCH_LIBRARY_IMPL(aten, $dispatch_key);
     $dispatch_registrations_body
@@ -532,7 +526,6 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
 def run(
     source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str] = None
 ) -> None:
-
     # Assumes that this file lives at PYTORCH_ROOT/torchgen/gen_backend_stubs.py
     pytorch_root = pathlib.Path(__file__).parent.parent.absolute()
     template_dir = os.path.join(pytorch_root, "aten/src/ATen/templates")

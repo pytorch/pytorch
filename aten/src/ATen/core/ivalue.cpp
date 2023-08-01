@@ -64,6 +64,11 @@ bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
              _fastEqualsForContainer);
 }
 
+std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
+  out << v.qualifiedClassName() << "." << v.name();
+  return out;
+}
+
 bool operator==(const ivalue::EnumHolder& lhs, const ivalue::EnumHolder& rhs) {
   return lhs.name() == rhs.name() && *rhs.type() == *lhs.type();
 }
@@ -96,6 +101,8 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
         return c10::SymIntType::get();
       case Tag::SymFloat:
         return c10::SymFloatType::get();
+      case Tag::SymBool:
+        return c10::SymBoolType::get();
       case Tag::Bool:
         return BoolType::get();
       case Tag::String:
@@ -243,7 +250,7 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
     case Tag::Capsule:
       TORCH_CHECK_TYPE(
           false, "Cannot inspect value of type ", this->tagKind());
-      // Fall through
+      [[fallthrough]];
     default:
       // don't record scalars.
       break;
@@ -309,9 +316,9 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::SymInt:
       return rhs.isSymInt() && lhs.toSymInt() == rhs.toSymInt();
     case Tag::SymFloat:
-      // NB: this doesn't actually work as sym floats don't have equality
-      // defined
       return rhs.isSymFloat() && lhs.toSymFloat() == rhs.toSymFloat();
+    case Tag::SymBool:
+      return rhs.isSymBool() && lhs.toSymBool() == rhs.toSymBool();
     case Tag::Bool:
       return rhs.isBool() && lhs.toBool() == rhs.toBool();
     case Tag::String:
@@ -368,6 +375,8 @@ size_t IValue::hash(const IValue& v) {
     case Tag::SymInt:
       return c10::get_hash(v.payload.u.as_int);
     case Tag::SymFloat:
+      return c10::get_hash(v.payload.u.as_int);
+    case Tag::SymBool:
       return c10::get_hash(v.payload.u.as_int);
     case Tag::String:
       return c10::get_hash(v.toStringRef());
@@ -463,6 +472,10 @@ bool IValue::isIntList() const {
   return isListOf<c10::IntType>();
 }
 
+bool IValue::isSymIntList() const {
+  return isListOf<c10::SymIntType>();
+}
+
 bool IValue::isBoolList() const {
   return isListOf<c10::BoolType>();
 }
@@ -475,9 +488,9 @@ template <class T>
 std::ostream& printList(
     std::ostream& out,
     const T& list,
-    const std::string start,
-    const std::string finish,
-    IValueFormatter formatter) {
+    const std::string& start,
+    const std::string& finish,
+    const IValueFormatter& formatter) {
   out << start;
   for (const auto i : c10::irange(list.size())) {
     if (i > 0) {
@@ -493,16 +506,16 @@ std::ostream& printList(
 std::ostream& printMaybeAnnotatedList(
     std::ostream& out,
     const IValue& the_list,
-    IValueFormatter formatter) {
+    const IValueFormatter& formatter) {
   auto list_elem_type = the_list.type()->containedType(0);
   if (the_list.toListRef().empty() ||
       !elementTypeCanBeInferredFromMembers(list_elem_type)) {
     out << "annotate(" << the_list.type<c10::Type>()->annotation_str() << ", ";
-    printList(out, the_list.toListRef(), "[", "]", std::move(formatter));
+    printList(out, the_list.toListRef(), "[", "]", formatter);
     out << ")";
     return out;
   } else {
-    return printList(out, the_list.toListRef(), "[", "]", std::move(formatter));
+    return printList(out, the_list.toListRef(), "[", "]", formatter);
   }
 }
 
@@ -510,7 +523,7 @@ template <typename Dict>
 std::ostream& printDict(
     std::ostream& out,
     const Dict& v,
-    IValueFormatter formatter) {
+    const IValueFormatter& formatter) {
   out << "{";
 
   bool first = true;
@@ -531,22 +544,22 @@ std::ostream& printDict(
 }
 
 // Properly disambiguate the type of an empty dict
-std::ostream& printMaybeAnnotatedDict(
+static std::ostream& printMaybeAnnotatedDict(
     std::ostream& out,
     const IValue& the_dict,
-    IValueFormatter formatter) {
+    const IValueFormatter& formatter) {
   auto value_type = the_dict.type()->castRaw<DictType>()->getValueType();
   if (the_dict.toGenericDict().empty() ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
     out << "annotate(" << the_dict.type<c10::Type>()->annotation_str() << ",";
-    printDict(out, the_dict.toGenericDict(), std::move(formatter)) << ")";
+    printDict(out, the_dict.toGenericDict(), formatter) << ")";
   } else {
-    return printDict(out, the_dict.toGenericDict(), std::move(formatter));
+    return printDict(out, the_dict.toGenericDict(), formatter);
   }
   return out;
 }
 
-std::ostream& printComplex(std::ostream & out, const IValue & v) {
+static std::ostream& printComplex(std::ostream & out, const IValue & v) {
   c10::complex<double> d = v.toComplexDouble();
   IValue real(d.real()), imag(std::abs(d.imag()));
   auto sign = "";
@@ -601,6 +614,8 @@ std::ostream& IValue::repr(
       return out << v.toSymInt();
     case IValue::Tag::SymFloat:
       return out << v.toSymFloat();
+    case IValue::Tag::SymBool:
+      return out << v.toSymBool();
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
@@ -636,7 +651,7 @@ std::ostream& IValue::repr(
   }
 }
 
-bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
+static bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
   return arg.type() == type && !arg.kwarg_only() && !arg.default_value();
 }
 
@@ -753,11 +768,6 @@ IValueComparator getGreaterThanComparator(const IValue& v) {
   };
 }
 
-std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
-  out << v.qualifiedClassName() << "." << v.name();
-  return out;
-}
-
 std::ostream& operator<<(std::ostream & out, const IValue & v) {
   auto formatter = [&](std::ostream& out, const IValue& v) {
     out << v;
@@ -791,6 +801,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toSymInt();
     case IValue::Tag::SymFloat:
       return out << v.toSymFloat();
+    case IValue::Tag::SymBool:
+      return out << v.toSymBool();
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
@@ -928,6 +940,7 @@ IValue IValue::deepcopy(
     case IValue::Tag::Int:
     case IValue::Tag::SymInt:
     case IValue::Tag::SymFloat:
+    case IValue::Tag::SymBool:
     case IValue::Tag::Bool:
     case IValue::Tag::Device:
     case IValue::Tag::Uninitialized: {
@@ -1067,6 +1080,8 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
       if (tensor.is_sparse()) {
         // Sparse tensor is indices and values. Both are tensors
         // and contain storage.
+        // TODO (rohan-varma): for tensors created with at::sparse_coo_tensor held
+        // in a python object, this might need a coalesce().
         weakStorageImpls.emplace_back(tensor.indices().storage().getWeakStorageImpl());
         weakStorageImpls.emplace_back(tensor.values().storage().getWeakStorageImpl());
       } else {
@@ -1081,7 +1096,15 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
     value.getSubValues(sub_values);
     for (const at::IValue& sub_value : sub_values) {
       if (sub_value.isTensor()) {
-        weakStorageImpls.emplace_back(sub_value.toTensor().storage().getWeakStorageImpl());
+        auto tens = sub_value.toTensor();
+        if (tens.is_sparse()) {
+          // sparse tensors have 2 storages! one for indices one for values
+          auto coalesced = tens.coalesce();
+          weakStorageImpls.emplace_back(coalesced.indices().storage().getWeakStorageImpl());
+          weakStorageImpls.emplace_back(coalesced.values().storage().getWeakStorageImpl());
+        } else {
+          weakStorageImpls.emplace_back(tens.storage().getWeakStorageImpl());
+        }
       }
     }
   }

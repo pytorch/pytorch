@@ -1,4 +1,3 @@
-# coding=utf-8
 
 from typing import cast, List
 
@@ -405,7 +404,7 @@ def _handle_row_wise_sharding(
     )
 
     op = ReduceOp.SUM if mode != "max" else ReduceOp.MAX
-    # TODO: Make the result a PartialTensor and move the the logic below there.
+    # TODO: Make the result a PartialTensor and move the logic below there.
     local_shards = result.chunk(pg.size())
     result = reduce_scatter(
         torch.empty_like(local_shards[0]),

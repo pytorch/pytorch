@@ -133,7 +133,7 @@ global `CONSTANTS` table (like `foo = CONSTANTS.c0`).
 When importing, the importer will know how to resolve this reference into an
 actual tensor by looking it up in the tensor table. So `CONSTANTS.c0` means
 "this is the `0th` tensor in the tensor tuple in `constants.pkl`." See
-[the constants section](#constantspkl-Constants-in-code) for more info.
+[the constants section](#constantspkl-constants-in-code) for more info.
 
 **Original source range records**. To aid debugging, `PythonPrint` remembers
 the "original" (user-written) location of the source code it's emitting. That
@@ -242,7 +242,7 @@ necessary for pickling a module object.
 ### `data.pkl`: How module object state is serialized
 
 All data is written into the `data.pkl` file with the exception of tensors
-(see [the tensor section](#tensors-How-tensors-are-serialized) below).
+(see [the tensor section](#data-how-tensors-are-serialized) below).
 "Data" means all parts of the module object state, like attributes,
 submodules, etc.
 
@@ -291,7 +291,7 @@ The load process has the following steps:
 
 The unpickling process consists of a single call to unpickle the module
 object contained in `data.pkl`. The `Unpickler` is given a callback that lets it
-resolved any qualified names it encounters into `ClassType`s. This is done by
+resolve any qualified names it encounters into `ClassType`s. This is done by
 resolving the qualified name to the appropriate file in `code/`, then
 compiling that file and returning the appropriate `ClassType`.
 

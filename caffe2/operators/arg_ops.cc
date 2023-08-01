@@ -107,7 +107,7 @@ tensor is removed.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/arg_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/arg_ops.cc
 
 <details>
 
@@ -183,7 +183,7 @@ tensor is removed.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/arg_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/arg_ops.cc
 
 <details>
 

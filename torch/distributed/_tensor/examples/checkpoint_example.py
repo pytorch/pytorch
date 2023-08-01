@@ -27,7 +27,7 @@ from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_modu
 
 class SimpleMLP(torch.nn.Module):
     def __init__(self):
-        super(SimpleMLP, self).__init__()
+        super().__init__()
         self.net1 = torch.nn.Linear(5, 128)
         self.relu = torch.nn.ReLU()
         self.net2 = torch.nn.Linear(128, 12)
@@ -108,7 +108,9 @@ def gen_model_param_in_submesh(model: nn.Module, sub_mesh: DeviceMesh) -> nn.Mod
                 module.register_parameter(name, dist_param)
         elif isinstance(module, torch.nn.Linear) and name == "net2":
             for name, param in module.named_parameters():
-                dist_spec = cast(List[Placement], [Shard(1)] if name == "weight" else [Replicate()])
+                dist_spec = cast(
+                    List[Placement], [Shard(1)] if name == "weight" else [Replicate()]
+                )
                 dist_param = torch.nn.Parameter(
                     distribute_tensor(param, device_mesh, dist_spec)
                 )
@@ -131,7 +133,7 @@ def gen_model_param_in_submesh(model: nn.Module, sub_mesh: DeviceMesh) -> nn.Mod
     )
 
 
-def checkpoint(model: nn.Module, mesh: DeviceMesh) -> nn.Module:
+def checkpoint(model: nn.Module, mesh: DeviceMesh) -> nn.Module:  # type: ignore[empty-body]
     """
     checkpoint save/load models with DTensor parameters
     """

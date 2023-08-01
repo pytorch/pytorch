@@ -182,7 +182,7 @@ def split_module(
                 if def_partition_name is not None:
                     use_partition.partitions_dependent_on.setdefault(def_partition_name)
 
-    # split nodes into parititons
+    # split nodes into partitions
     for node in m.graph.nodes:
         orig_nodes[node.name] = node
 
@@ -231,7 +231,7 @@ def split_module(
     if len(sorted_partitions) != len(partitions):
         raise RuntimeError("cycle exists between partitions!")
 
-    # add placeholders to parititons
+    # add placeholders to partitions
     for partition_name in sorted_partitions:
         partition = partitions[partition_name]
         for input in partition.inputs:

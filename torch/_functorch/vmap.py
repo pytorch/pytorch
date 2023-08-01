@@ -244,6 +244,8 @@ def lazy_load_decompositions():
 
 
     _register_python_decomposition_vmap(torch.ops.aten.mse_loss_backward.default)
+    _register_python_decomposition_vmap(torch.ops.aten.smooth_l1_loss_backward.default)
+    _register_python_decomposition_vmap(torch.ops.aten.huber_loss_backward.default)
     _register_python_decomposition_vmap(torch.ops.aten.addr.default)
 
 # vmap(func)(inputs) wraps all Tensor inputs to be batched in BatchedTensors,

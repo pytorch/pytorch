@@ -13,14 +13,17 @@ __all__ = [
     "ShardingFilterIterDataPipe",
 ]
 
+
 class SHARDING_PRIORITIES(IntEnum):
     DEFAULT = 1
     DISTRIBUTED = 2
     MULTIPROCESSING = 3
 
+
 class _ShardingIterDataPipe(IterDataPipe):
-    def apply_sharding(self, num_of_instances, instance_id, sharding_group):
+    def apply_sharding(self, num_of_instances: int, instance_id: int, sharding_group: SHARDING_PRIORITIES):
         raise NotImplementedError
+
 
 @functional_datapipe('sharding_filter')
 class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
@@ -77,4 +80,4 @@ class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
         if isinstance(self.source_datapipe, Sized):
             return len(self.source_datapipe) // self.num_of_instances +\
                 (1 if (self.instance_id < len(self.source_datapipe) % self.num_of_instances) else 0)
-        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+        raise TypeError(f"{type(self).__name__} instance doesn't have valid length")

@@ -174,7 +174,7 @@ class ConcatLinearLayers {
           constant_as<Tensor>(base_node->namedInput("bias")).value();
 
       // Now iterate over the rest of the users of the set to
-      // see if there is anything that we can coaleasce `base_node` with.
+      // see if there is anything that we can coalesce `base_node` with.
       for (size_t j = i + 1; j < linear_layer_group.size(); j++) {
         auto node = linear_layer_group[j];
         if (checked_nodes.count(node) != 0) {

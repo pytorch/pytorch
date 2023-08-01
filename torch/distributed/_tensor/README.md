@@ -109,9 +109,9 @@ def distribute_module(
 #### High level API examples:
 
 ```python
-def MyModule(nn.Module):
+class MyModule(nn.Module):
     def __init__(self):
-        super.__init__()
+        super().__init__()
         self.fc1 = nn.Linear(8, 8)
         self.fc2 = nn.Linear(8, 8)
         self.relu = nn.ReLU()
@@ -119,26 +119,27 @@ def MyModule(nn.Module):
     def forward(self, input):
         return self.relu(self.fc1(input) + self.fc2(input))
 
-mesh = DeviceMesh(device_type="cuda", [[0, 1], [2, 3]])
+mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1], [2, 3]])
 
 def shard_params(mod_name, mod, mesh):
     rowwise_placement = [Shard(0)]
     def to_dist_tensor(t): return distribute_tensor(t, mesh, rowwise_placement)
     mod._apply(to_dist_tensor)
 
-sharded_module = distribute_module(model, device_mesh, partition_fn=shard_params)
+sharded_module = distribute_module(MyModule(), mesh, partition_fn=shard_params)
 
 def shard_fc(mod_name, mod, mesh):
     rowwise_placement = [Shard(0)]
     if mod_name == "fc1":
         mod.weight = torch.nn.Parameter(distribute_tensor(mod.weight, mesh, rowwise_placement))
 
-sharded_module = distribute_module(model, device_mesh, partition_fn=shard_fc)
+sharded_module = distribute_module(MyModule(), mesh, partition_fn=shard_fc)
+
 ```
 
 ## Compiler and PyTorch DTensor
 
-DTensor provides efficient solutions for cases like Tensor Parallelism. But when using the DTensor's replication in a data parallel fashion, it might become observably slower compared to our existing solutions like DDP/FSDP. This is mainly because mainly because DDP/FSDP have a global view of the entire model architecture, thus could optimize for data parallel specifically, i.e. collective fusion and computation overlap, etc. In contract, DistributedTensor as a Tensor-like object can only optimize within individual tensor operations.
+DTensor provides efficient solutions for cases like Tensor Parallelism. But when using the DTensor's replication in a data parallel fashion, it might become observably slower compared to our existing solutions like DDP/FSDP. This is mainly because DDP/FSDP have a global view of the entire model architecture, thus could optimize for data parallel specifically, i.e. collective fusion and computation overlap, etc. In contrast, DistributedTensor as a Tensor-like object can only optimize within individual tensor operations.
 
 To improve efficiency of DTensor-based data parallel training, we are exploring a compiler-based solution on top of DTensor, which can extract graph information from user programs to expose more performance optimization opportunities.
 

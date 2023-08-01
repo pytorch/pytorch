@@ -21,7 +21,7 @@ def standard_kwargs(kwarg_names, expanded_args):
     '''
     kwarg_values = expanded_args[len(expanded_args) - len(kwarg_names):]
     expanded_args_without_kwargs = expanded_args[:len(expanded_args) - len(kwarg_names)]
-    expanded_kwargs = {name: value for (name, value) in zip(kwarg_names, kwarg_values)}
+    expanded_kwargs = dict(zip(kwarg_names, kwarg_values))
     return expanded_args_without_kwargs, expanded_kwargs
 
 def forward_helper(func, expanded_args, expanded_kwargs):

@@ -1,35 +1,25 @@
+import inspect
 import os
+import re
 import sys
 import tempfile
 from os.path import abspath, dirname
 
 import torch
-
 from . import external_utils
 
-from .logging import get_loggers_level, set_loggers_level
 
-# log level (levels print what it says + all levels listed below it)
-# logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
-# logging.INFO print the steps that dynamo is running and optionally, compiled functions + graphs
-# logging.WARN print warnings (including graph breaks)
-# logging.ERROR print exceptions (and what user code was being processed when it occurred)
-log_level = property(
-    lambda _: get_loggers_level(), lambda _, lvl: set_loggers_level(lvl)
-)
-
-# log compiled function + graphs at level INFO
-output_code = False
-
+# to configure logging for dynamo, aot, and inductor
+# use the following API in the torch._logging module
+# torch._logging.set_logs(dynamo=<level>, aot=<level>, inductor<level>)
+# or use the environment variable TORCH_LOGS="dynamo,aot,inductor" (use a prefix + to indicate higher verbosity)
+# see this design doc for more detailed info
+# Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
 # the name of a file to write the logs to
 log_file_name = None
 
 # Verbose will print full stack traces on warnings and errors
 verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
-
-# If true, traced graph outputs will be outputted as Python GraphModule code.
-# If false, traced graph outputs will be outputted in tabular form.
-output_graph_code = False
 
 # verify the correctness of optimized backend
 verify_correctness = False
@@ -45,8 +35,10 @@ cache_size_limit = 64
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
-# inputs
-specialize_int = True
+# inputs.  Note that assume_static_by_default will also cause ints to get
+# specialized, so this is mostly useful for export, where we want inputs
+# to be dynamic, but accesses to ints should NOT get promoted into inputs.
+specialize_int = False
 
 # Assume these functions return constants
 constant_functions = {
@@ -59,15 +51,27 @@ constant_functions = {
     torch._utils.is_compiling: True,
 }
 
-
-# don't specialize on shapes and strides and put shape ops in graph
-dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
+# legacy config, does nothing now!
+dynamic_shapes = True
 
 # This is a temporarily flag, which changes the behavior of dynamic_shapes=True.
 # When assume_static_by_default is True, we only allocate symbols for shapes marked dynamic via mark_dynamic.
 # NOTE - this flag can be removed once we can run dynamic_shapes=False w/ the mark_dynamic API
 # see [Note - on the state of mark_dynamic]
-assume_static_by_default = False
+assume_static_by_default = True
+
+# This flag changes how dynamic_shapes=True works, and is meant to be used in conjunction
+# with assume_static_by_default=True.
+# With this flag enabled, we always compile a frame as fully static for the first time, and, if we fail
+# any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
+automatic_dynamic_shapes = True
+
+# Typically, if you mark_dynamic a dimension, we will error if the dimension
+# actually ended up getting specialized.  This knob changes the behavior so
+# that we don't error at all.  This is helpful for our CI where I'm using a
+# heuristic to mark batch dimensions as dynamic and the heuristic may get it
+# wrong.
+allow_ignore_mark_dynamic = False
 
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
@@ -94,17 +98,17 @@ traceable_tensor_subclasses = set()
 # This is a good way to get your model to work one way or another, but you may
 # lose optimization opportunities this way.  Devs, if your benchmark model is failing
 # this way, you should figure out why instead of suppressing it.
-suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
+suppress_errors = os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", "1") == "1"
 
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
-replay_record_enabled = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
+replay_record_enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
 # Rewrite assert statement in python with torch._assert
 rewrite_assert_with_torch_assert = True
 
-# Show a warning on every graph break
-print_graph_breaks = False
+# Show a warning for every specialization
+print_specializations = False
 
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
@@ -119,6 +123,10 @@ skipfiles_inline_module_allowlist = {
     torch._refs,
     torch._prims,
     torch._decomp,
+    torch.utils._contextlib,
+    torch.utils._pytree,
+    torch.fx._pytree,
+    torch.sparse,
 }
 
 # If a string representing a PyTorch module is in this ignorelist,
@@ -159,6 +167,12 @@ repro_forward_only = os.environ.get("TORCHDYNAMO_REPRO_FORWARD_ONLY") == "1"
 # has diverged so that we should treat it as an accuracy failure
 repro_tolerance = 1e-3
 
+# If True, when testing if two models are the same, we will test them against
+# a third fp64 reference and only report a problem if the RMSE relative to the
+# fp64 is greater.  However, this will use more memory; you may disable this
+# if memory usage is too high.
+same_two_models_use_fp64 = True
+
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
 # This requires dynamic_shapes to be True.
@@ -182,6 +196,14 @@ enforce_cond_guards_match = True
 # about optimize_ddp behavior.
 optimize_ddp = True
 
+# Whether to skip guarding on FSDP-managed modules
+skip_fsdp_guards = True
+
+# Make dynamo skip guarding on hooks on nn modules
+# Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
+# dynamo will not notice and will execute whichever version you first compiled.
+skip_nnmodule_hook_guards = True
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
@@ -198,13 +220,28 @@ error_on_nested_fx_trace = True
 # Disables graph breaking on rnn. YMMV with backends.
 allow_rnn = False
 
+# If true, error if we try to compile a function that has
+# been seen before.
+error_on_recompile = False
+
+# reports why guards fail. Useful to identify the guards failing frequently and
+# causing recompilations.
+report_guard_failures = os.environ.get("TORCHDYNAMO_REPORT_GUARD_FAILURES") == "1"
+
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 
-# If True, record autograd profiler events for dynamo cache lookups (guards)
-# TODO can we default this to True?
-# and how can we cause registration/deregestration to be sensitive to runtime change of this flag?
-profile_cache_lookup = False
+# trace through numpy ndarray as tensor and try to translate numpy function to torch function.
+numpy_ndarray_as_tensor = False
+
+# Uses z3 for validating the guard optimizations transformations.
+translation_validation = (
+    os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION", "0") == "1"
+)
+# Timeout (in milliseconds) for z3 finding a solution.
+translation_validation_timeout = int(
+    os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION_TIMEOUT", "600000")
+)
 
 
 def is_fbcode():
@@ -221,11 +258,6 @@ else:
     debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
 
 
-# this is to resolve a import problem in fbcode, we will be deleting
-# this very shortly
-DO_NOT_USE_legacy_non_fake_example_inputs = False
-
-
 _save_config_ignore = {
     "repro_after",
     "repro_level",
@@ -234,6 +266,23 @@ _save_config_ignore = {
     # workaround: "cannot pickle module"
     "skipfiles_inline_module_allowlist",
 }
+
+capture_autograd_function = True
+
+# enable/disable dynamo tracing for `torch.func` transforms
+capture_func_transforms = True
+
+_autograd_backward_strict_mode_banned_ops = [
+    "stride",
+    "requires_grad",
+    "storage_offset",
+    "layout",
+    "data",
+]
+
+_autograd_backward_strict_mode_banned_ops.extend(
+    [name for name, _ in inspect.getmembers(torch.Tensor) if re.match(r"^is_.*", name)]
+)
 
 
 from .config_utils import install_config_module

@@ -13,6 +13,8 @@ typedef std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>> twoOutp
 typedef std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>, Tensor, optional<int64_t>> threeOutputs;
 typedef std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>, Tensor, optional<int64_t>, Tensor, optional<int64_t>> fourOutputs;
 
+namespace {
+
 // Note [Batching rules for matmul-like operators]
 // at::matmul doesn't "de-expand" arguments to get better performance (maybe
 // it should). In the batching rules for matmul-like operators (dot, mv, mm),
@@ -337,10 +339,18 @@ oneOutput cholesky_solve_batch_rule(
 
 threeOutputs linalg_lu_factor_ex_batch_rule(
     const Tensor& A, c10::optional<int64_t> A_bdim, bool pivot, bool check_errors) {
-  TORCH_CHECK(rankWithoutBatchDim(A, A_bdim) >= 2, "torch.lu_factor: Expected tensor with 2 or more dimensions. Got size: ", A.sizes(), " instead");
+  TORCH_CHECK(rankWithoutBatchDim(A, A_bdim) >= 2, "torch.lu_factor_ex: Expected tensor with 2 or more dimensions. Got size: ", A.sizes(), " instead");
   const auto A_ = moveBatchDimToFront(A, A_bdim);
   const auto res = at::linalg_lu_factor_ex(A_, pivot, check_errors);
   return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0);
+}
+
+twoOutputs linalg_lu_factor_batch_rule(
+    const Tensor& A, c10::optional<int64_t> A_bdim, bool pivot) {
+  TORCH_CHECK(rankWithoutBatchDim(A, A_bdim) >= 2, "torch.lu_factor: Expected tensor with 2 or more dimensions. Got size: ", A.sizes(), " instead");
+  const auto A_ = moveBatchDimToFront(A, A_bdim);
+  const auto res = at::linalg_lu_factor(A_, pivot);
+  return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0);
 }
 
 oneOutput matrix_exp_batch_rule(const Tensor& self, c10::optional<int64_t> self_bdim) {
@@ -470,12 +480,13 @@ atol_rtol_tensor_batch_rule(
   return std::make_tuple(Func(input_, atol_, rtol_, hermitian), 0);
 }
 
-std::tuple<Tensor, c10::optional<int64_t>>
+static std::tuple<Tensor, c10::optional<int64_t>>
 pinv_batch_rule(
     const Tensor& input, c10::optional<int64_t> input_bdim, const optional<Tensor>& atol,
     const c10::optional<int64_t> atol_bdim, const optional<Tensor>& rtol,
     const c10::optional<int64_t> rtol_bdim, bool hermitian) {
   return atol_rtol_tensor_batch_rule(ATEN_FN2(linalg_pinv, atol_rtol_tensor), input, input_bdim, atol, atol_bdim, rtol, rtol_bdim, hermitian, "linalg.pinv");
+}
 }
 
 #define LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, num_out) SINGLE_ARG(\
@@ -600,6 +611,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(cholesky_solve, cholesky_solve_batch_rule);  // custom dim error
   VMAP_SUPPORT(linalg_lstsq, linalg_lstsq_batch_rule);  // custom errors and sometimes empty return
   VMAP_SUPPORT(linalg_lu_factor_ex, linalg_lu_factor_ex_batch_rule);
+  VMAP_SUPPORT(linalg_lu_factor, linalg_lu_factor_batch_rule);
   VMAP_SUPPORT(linalg_matrix_exp, matrix_exp_batch_rule);
   VMAP_SUPPORT(_linalg_solve_ex, solve_ex_batch_rule);
   VMAP_SUPPORT(linalg_cross, cross_batch_rule);
