@@ -110,10 +110,6 @@ rewrite_assert_with_torch_assert = True
 # Show a warning for every specialization
 print_specializations = False
 
-# Simplify guards, summarizing static and dynamic constraints on dimensions.
-# NOTE: This only has an effect when dynamic_shapes=True.
-summarize_dim_constraints = False
-
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
@@ -129,6 +125,7 @@ skipfiles_inline_module_allowlist = {
     torch._decomp,
     torch.utils._contextlib,
     torch.utils._pytree,
+    torch.fx._pytree,
     torch.sparse,
 }
 

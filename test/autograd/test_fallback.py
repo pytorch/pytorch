@@ -354,6 +354,29 @@ class TestAutogradFallback(TestCase):
                 (z + w).sum().backward()
 
     @parametrize("mode", ("nothing", "warn"))
+    def test_base_does_not_require_grad(self, mode):
+        with autograd_fallback_mode(mode):
+            lib = self.get_lib()
+            lib.define("foo(Tensor(a!) x) -> Tensor(a!)")
+            op = self.get_op("foo")
+
+            def foo_impl(a):
+                with torch.no_grad():
+                    return a.zero_()
+
+            lib.impl("foo", foo_impl, "CPU")
+            x = torch.randn(3)
+            y = x[:]
+            y.requires_grad_()
+            w = y[:]
+            self.assertTrue(w._base is x)
+
+            # Hook should be registered on w, but not w._base
+            op(w)
+            with self._check_ctx(mode):
+                w.sum().backward()
+
+    @parametrize("mode", ("nothing", "warn"))
     def test_post_autograd_returns_mix_of_requires_grad_tensors(self, mode):
         with autograd_fallback_mode(mode):
             lib = self.get_lib()
