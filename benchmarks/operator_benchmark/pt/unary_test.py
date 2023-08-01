@@ -20,14 +20,21 @@ unary_ops_configs_short = op_bench.config_list(
 )
 
 unary_ops_configs_long = op_bench.cross_product_configs(
-    M=[256, 1024], N=[256, 1024], device=["cpu", "cuda"], tags=["long"], dtype=[torch.float32, torch.bfloat16]
+    M=[256, 1024],
+    N=[256, 1024],
+    device=["cpu", "cuda"],
+    tags=["long"],
+    dtype=[torch.float32, torch.bfloat16]
 )
 
 
 class UnaryOpBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, device, op_func):
-        self.inputs = {"input": torch.rand(M, N, device=device)}
+    def init(self, M, N, device, dtype, op_func):
         self.op_func = op_func
+        if self.op_func == exponential_:
+            self.inputs = {"input": torch.rand(M, N, device=device, dtype=dtype).abs()}
+        else:
+            self.inputs = {"input": torch.rand(M, N, device=device, dtype=dtype)}
 
     def forward(self, input):
         return self.op_func(input)
@@ -51,6 +58,10 @@ def exponential_(input):
 
 def normal_(input):
     return input.normal_()
+
+
+def log_normal_(input):
+    return input.log_normal_()
 
 
 def random_(input):
@@ -150,6 +161,7 @@ unary_ops_list = op_bench.op_list(
         ["cauchy_", cauchy_],
         ["digamma_", digamma_],
         ["exponential_", exponential_],
+        ["log_normal_", log_normal_],
         ["normal_", normal_],
         ["random_", random_],
         ["sign_", sign_],

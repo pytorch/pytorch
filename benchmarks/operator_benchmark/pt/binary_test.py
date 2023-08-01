@@ -83,7 +83,6 @@ binary_long_configs = op_bench.cross_product_configs(
     tags=["long"],
 )
 
-
 class BinaryOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, device, dtype_one, dtype_two, op_func):
         self.inputs = {
@@ -100,6 +99,71 @@ op_bench.generate_pt_tests_from_op_list(
     binary_ops_list, binary_short_configs + binary_long_configs, BinaryOpBenchmark
 )
 
+
+other_binary_ops_list = op_bench.op_list(
+    attr_names=["op_name", "op_func"],
+    attrs=[
+        ["atan2", torch.atan2],
+        ["logaddexp", torch.logaddexp],
+        ["logaddexp2", torch.logaddexp2],
+        ["hypot", torch.hypot],
+        ["igamma", torch.igamma],
+        ["igammac", torch.igammac],
+        ["xlogy", torch.xlogy],
+        ["xlog1py", torch.special.xlog1py],
+        ["zeta", torch.special.zeta],
+        ["chebyshev_polynomial_t", torch.special.chebyshev_polynomial_t],
+        ["chebyshev_polynomial_u", torch.special.chebyshev_polynomial_u],
+        ["chebyshev_polynomial_v", torch.special.chebyshev_polynomial_v],
+        ["chebyshev_polynomial_w", torch.special.chebyshev_polynomial_w],
+        ["hermite_polynomial_h", torch.special.hermite_polynomial_h],
+        ["hermite_polynomial_he", torch.special.hermite_polynomial_he],
+        ["laguerre_polynomial_l", torch.special.laguerre_polynomial_l],
+        ["laguerre_polynomial_p", torch.special.legendre_polynomial_p],
+        ["shifted_chebyshev_polynomial_t", torch.special.shifted_chebyshev_polynomial_t],
+        ["shifted_chebyshev_polynomial_u", torch.special.shifted_chebyshev_polynomial_u],
+        ["shifted_chebyshev_polynomial_v", torch.special.shifted_chebyshev_polynomial_v],
+        ["shifted_chebyshev_polynomial_w", torch.special.shifted_chebyshev_polynomial_w],
+    ],
+)
+
+other_binary_ops_long_configs = op_bench.cross_product_configs(
+    M=[8, 128],
+    N=[32, 64],
+    K=[256, 512],
+    device=["cpu", "cuda"],
+    dtype=[torch.float32],
+    tags=["long"],
+)
+
+other_binary_ops_short_configs = op_bench.config_list(
+    attr_names=["M", "N", "K"],
+    attrs=[
+        [1, 1, 1],
+        [64, 64, 64],
+        [64, 64, 128],
+    ],
+    cross_product_configs={
+        "device": ["cpu", "cuda"],
+        "dtype": [torch.float32],
+    },
+    tags=["short"],
+)
+
+class SpecialBinaryOpBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, M, N, K, device, dtype, op_func):
+        self.inputs = {
+            "input_one": torch.randn(M, N, K, device=device, dtype=dtype) * 10,
+            "input_two": torch.randn(M, N, K, device=device, dtype=dtype) * 10,
+        }
+        self.op_func = op_func
+
+    def forward(self, input_one, input_two):
+        return self.op_func(input_one, input_two)
+
+op_bench.generate_pt_tests_from_op_list(
+    other_binary_ops_list, other_binary_ops_long_configs + other_binary_ops_short_configs, SpecialBinaryOpBenchmark
+)
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()
