@@ -64,7 +64,7 @@ def _mark_nodes_as_annotated(nodes: List[Node]):
 
 
 def _get_dynamo_graph(function: Callable, inputs) -> torch.fx.Graph:
-    gm, _ = torchdynamo.export(function, *inputs, aten_graph=True)
+    gm, _ = torchdynamo.export(function, aten_graph=True)(*inputs)
     gm.graph.eliminate_dead_code()
     return gm.graph
 
