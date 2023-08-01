@@ -1,9 +1,9 @@
-from collections import defaultdict
-from typing import Callable, Dict, List, Tuple, Union
-
 import torch
 
+from collections import defaultdict
+
 from torch import nn, Tensor
+from typing import List, Tuple, Dict, Union, Callable
 
 # Type helpers
 InputsType = Union[Tensor, Tuple[Tensor, ...]]
@@ -15,7 +15,6 @@ VType = Union[None, Tensor, Tuple[Tensor, ...]]
 # Type used to store timing results. The first key is the model name, the second key
 # is the task name, the result is a Tuple of: speedup, mean_before, var_before, mean_after, var_after.
 TimingResultType = Dict[str, Dict[str, Tuple[float, ...]]]
-
 
 # Utilities to make nn.Module "functional"
 # In particular the goal is to be able to provide a function that takes as input
@@ -31,7 +30,6 @@ def _del_nested_attr(obj: nn.Module, names: List[str]) -> None:
     else:
         _del_nested_attr(getattr(obj, names[0]), names[1:])
 
-
 def _set_nested_attr(obj: nn.Module, names: List[str], value: Tensor) -> None:
     """
     Set the attribute specified by the given list of names to value.
@@ -42,7 +40,6 @@ def _set_nested_attr(obj: nn.Module, names: List[str], value: Tensor) -> None:
         setattr(obj, names[0], value)
     else:
         _set_nested_attr(getattr(obj, names[0]), names[1:], value)
-
 
 def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     """
@@ -64,7 +61,6 @@ def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     params = tuple(p.detach().requires_grad_() for p in orig_params)
     return params, names
 
-
 def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...]) -> None:
     """
     Reload a set of weights so that `mod` can be used again to perform a forward pass.
@@ -74,7 +70,6 @@ def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...]) -
     for name, p in zip(names, params):
         _set_nested_attr(mod, name.split("."), p)
 
-
 # Utilities to read/write markdown table-like content.
 def to_markdown_table(res: TimingResultType, header: Tuple[str, ...] = None) -> str:
     if header is None:
@@ -83,7 +78,7 @@ def to_markdown_table(res: TimingResultType, header: Tuple[str, ...] = None) -> 
 
     def write_line(*args):
         nonlocal out
-        out += f"| {' | '.join(str(a) for a in args)} |\n"
+        out += "| {} |\n".format(" | ".join(str(a) for a in args))
 
     # Make it a markdown table
     write_line(*header)
@@ -94,7 +89,6 @@ def to_markdown_table(res: TimingResultType, header: Tuple[str, ...] = None) -> 
 
     return out
 
-
 def from_markdown_table(data: str) -> TimingResultType:
     out = data.strip().split("\n")
     out = out[2:]  # Ignore the header lines
@@ -103,16 +97,14 @@ def from_markdown_table(data: str) -> TimingResultType:
     res = defaultdict(defaultdict)
 
     for line in out:
-        model, task, mean, var = (f.strip() for f in line.strip().split("|") if f)
+        model, task, mean, var = [f.strip() for f in line.strip().split("|") if f]
         res[model][task] = (float(mean), float(var))
 
     return res
 
-
 def check_for_functorch():
     try:
         import functorch  # noqa: F401
-
         return True
     except ImportError:
         return False

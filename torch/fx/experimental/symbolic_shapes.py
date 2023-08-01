@@ -661,7 +661,7 @@ class SymNode:
         # Record the FX node of the current node if we are doing translation
         # validation. They will be used for building the input assertions for
         # the translation validation problem.
-        self.fx_node = fx_node if _translation_validation_enabled() else None
+        self.fx_node = fx_node if _translation_validator_enabled() else None
 
     @property
     def expr(self):
@@ -1402,9 +1402,9 @@ del method
 del func
 
 
-def _translation_validation_enabled() -> bool:
-    from torch.fx.experimental.validator import translation_validation_enabled
-    return translation_validation_enabled()
+def _translation_validator_enabled() -> bool:
+    from torch.fx.experimental.validator import translation_validator_enabled
+    return translation_validator_enabled()
 
 
 def _lru_cache(fn, maxsize=None):
@@ -1488,7 +1488,7 @@ class DynamicDimConstraintPrinter(StrPrinter):
         return self.print_source(self.symbol_to_source[expr][0])
 
     def _print_Relational(self, expr):
-        return '{} {} {}'.format(
+        return '%s %s %s' % (
             self.parenthesize(expr.lhs, precedence(expr)),
             expr.rel_op,
             self.parenthesize(expr.rhs, precedence(expr))
@@ -1887,7 +1887,7 @@ TLS = threading.local()
 class ShapeEnvLoggerAdapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):
         # TODO: Maybe suppress the envid if not DEBUG?
-        return f"{self.extra['envid']}: {msg}", kwargs
+        return '%s: %s' % (self.extra['envid'], msg), kwargs
 
 
 ENV_COUNTER = collections.Counter()
@@ -1927,26 +1927,26 @@ class ShapeEnv:
         self.guards: List[ShapeGuard] = []
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
-        self.var_to_val: Dict[sympy.Symbol, sympy.Integer] = {}
+        self.var_to_val: Dict["sympy.Symbol", "sympy.Integer"] = {}
         # Maps symbolic ints to their min/max range.  These ranges
         # are conservative: the int MUST fall in the range, but the
         # range may contain ints which may not actually appear in
         # practice
-        self.var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
-        self.var_to_sources: Dict[sympy.Symbol, List[Source]] = {}
-        self.var_to_stack: Dict[sympy.Symbol, traceback.StackSummary] = {}
+        self.var_to_range: Dict["sympy.Symbol", ValueRanges] = {}
+        self.var_to_sources: Dict["sympy.Symbol", List[Source]] = {}
+        self.var_to_stack: Dict["sympy.Symbol", traceback.StackSummary] = {}
         # Maps symbolic ints to the guards that refine their lower/upper
         # bound. If one of them is None, it means that there are no guards
         # that refine that respective bound.
-        self.var_to_guards: Dict[sympy.Symbol, Tuple[Optional[ShapeGuard], Optional[ShapeGuard]]] = {}
+        self.var_to_guards: Dict["sympy.Symbol", Tuple[Optional[ShapeGuard], Optional[ShapeGuard]]] = {}
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
-        self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}  #
+        self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
         # Set holds a % b expressions that evaluate to 0.
-        self.divisible: Set[sympy.Expr] = set()
+        self.divisible: Set["sympy.Expr"] = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
-        self.val_to_var: Dict[int, sympy.Expr] = {}
+        self.val_to_var: Dict[int, "sympy.Expr"] = {}
         if specialize_zero_one:
             self.val_to_var = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
@@ -1978,7 +1978,7 @@ class ShapeEnv:
         self.fx_node_cache: Dict[Tuple[Callable, Tuple[Any, ...]], torch.fx.Node] = {}
         self.source_to_symbol: Dict[str, sympy.Symbol] = {}
 
-        if _translation_validation_enabled():
+        if _translation_validator_enabled():
             from torch.fx.experimental.validator import TranslationValidator
 
             self.validator = TranslationValidator()
@@ -1991,7 +1991,7 @@ class ShapeEnv:
         self.frozen = True
 
     def _create_symbol_for_source(self, source: Source) -> Optional[sympy.Symbol]:
-        if not _translation_validation_enabled():
+        if not _translation_validator_enabled():
             return None
         srcname = source.name()
         if source not in self.source_to_symbol:
@@ -1999,19 +1999,19 @@ class ShapeEnv:
         return self.source_to_symbol[srcname]
 
     def _add_z3var(self, symbol: sympy.Symbol, type: Type) -> None:
-        if _translation_validation_enabled():
+        if _translation_validator_enabled():
             self.validator.add_var(symbol, type)
 
     def _add_target_expr(self, expr) -> None:
-        if _translation_validation_enabled():
+        if _translation_validator_enabled():
             self.validator.add_target_expr(expr)
 
     def _add_assertion(self, expr) -> None:
-        if _translation_validation_enabled():
+        if _translation_validator_enabled():
             self.validator.add_assertion(expr)
 
     def _check_translation_validate(self) -> None:
-        if not _translation_validation_enabled():
+        if not _translation_validator_enabled():
             return
 
         result = self.validator.validate()
@@ -2053,7 +2053,7 @@ Target Guards:
         # Cache this tuple in order to avoid duplicated nodes.
         node_key = (op, args)
 
-        if _translation_validation_enabled() and node_key not in self.fx_node_cache:
+        if _translation_validator_enabled() and node_key not in self.fx_node_cache:
             from torch.fx.experimental.validator import z3op
 
             # Presence of None in the arguments implies that we should ignore this operation.
@@ -2076,7 +2076,7 @@ Target Guards:
             symbol: sympy.Symbol,
             type: Type,
     ) -> Optional[torch.fx.Node]:
-        if not _translation_validation_enabled():
+        if not _translation_validator_enabled():
             return None
 
         node_key = (self.graph.placeholder, (symbol,))
@@ -2241,7 +2241,7 @@ Target Guards:
             hint: Optional[int],
             source: Optional[Source] = None,
     ):
-        if _translation_validation_enabled() and source is not None:
+        if _translation_validator_enabled() and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
             assert symbol is not None
@@ -2638,7 +2638,7 @@ Target Guards:
 
         if not _simplified:
             for source, expr in input_guards:
-                if _translation_validation_enabled():
+                if _translation_validator_enabled():
                     # Ignore sources that were not turned into SymInts.
                     srcname = source.name()
                     if srcname in self.source_to_symbol:
@@ -2821,7 +2821,7 @@ Target Guards:
             },
         )
 
-        if _translation_validation_enabled():
+        if _translation_validator_enabled():
             from torch.fx.experimental.validator import PopulateValidator
 
             # Add value range bound guards for all symbols with no trivial bounds.
@@ -3097,12 +3097,6 @@ Target Guards:
             raise self._make_data_dependent_error(result_expr, expr)
         return result_expr
 
-    # NB: keep in sync with size_hint
-    @lru_cache(256)
-    def has_hint(self, expr: "sympy.Expr"):
-        result_expr = safe_expand(expr).xreplace(self.var_to_val)
-        return len(result_expr.free_symbols) == 0 or self._maybe_evaluate_static(result_expr) is not None
-
     def _make_data_dependent_error(self, expr, unhinted_expr):
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
@@ -3251,7 +3245,7 @@ Target Guards:
         # If all of the above check, we create an FX node representing the
         # actual expression to be guarded.
         if (
-                _translation_validation_enabled()
+                _translation_validator_enabled()
                 and fx_node is not None
                 and not self._suppress_guards_tls()
         ):
@@ -3297,9 +3291,6 @@ Target Guards:
                 {
                     **self.co_fields,
                     "ignored_guard": f"{expr} == {concrete_val}",
-                    # no version = original state (this signpost is expected)
-                    # version 2 = dynamic backwards is eagerly compiled
-                    "version": 2,
                 },
             )
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
@@ -3422,6 +3413,10 @@ Target Guards:
                 and isinstance(expr.lhs, sympy.Symbol)
                 and expr.lhs in self.var_to_range
             ):
+                continue
+
+            # Use only univariate functions.
+            if len(expr.rhs.free_symbols) > 0:
                 continue
 
             # Update the value range of the left-hand side, if the

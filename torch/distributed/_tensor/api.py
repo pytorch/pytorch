@@ -57,10 +57,7 @@ class _ToTorchTensor(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input: "DTensor"):  # type: ignore[override]
         ctx.dtensor_spec = input._spec
-        # We need to return a fresh Tensor object there as autograd metadata
-        # will be inplaced into it. So we don't want to polute the Tensor
-        # object stored in _local_tensor.
-        return input._local_tensor.view_as(input._local_tensor)
+        return input._local_tensor.detach()
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
@@ -114,9 +111,8 @@ class _FromTorchTensor(torch.autograd.Function):
                     input = input.contiguous()
                     device_mesh.broadcast(input, mesh_dim=idx)
 
-        # We want a fresh Tensor object that shares memory with the input tensor
         dist_tensor = DTensor(
-            input.view_as(input),
+            input,
             device_mesh,
             placements,
             shape=torch.Size(tensor_shape),
@@ -205,7 +201,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         r._spec = DTensorSpec(
             device_mesh, copy.deepcopy(placements), tensor_meta=tensor_meta
         )
-        r._local_tensor = local_tensor
+        # detach local tensor from autograd graph as we initialize the
+        # distributed tensor and autograd will be working on top of
+        # the wrapper tensor directly instead of local torch.Tensor
+        r._local_tensor = local_tensor.detach()
         return r
 
     # pyre-fixme[14]: `__repr__` overrides method defined in `DTensor` inconsistently.
@@ -213,28 +212,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     def __repr__(self):
         # TODO: consider all_gather the local tensors for better debugging
         return f"DTensor(local_tensor={self._local_tensor}, device_mesh={self._spec.mesh}, placements={self._spec.placements})"
-
-    def __tensor_flatten__(self):
-        """
-        protocol to inform how to flatten a DTensor to local tensor
-        for PT2 tracing
-        """
-        return self._local_tensor, self._spec
-
-    @staticmethod
-    def __tensor_unflatten__(local_tensor, spec):
-        assert (
-            spec is not None
-        ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
-        return DTensor(
-            local_tensor,
-            spec.mesh,
-            spec.placements,
-            shape=spec.tensor_meta.shape,
-            dtype=spec.tensor_meta.dtype,
-            requires_grad=spec.tensor_meta.requires_grad,
-            stride=spec.tensor_meta.stride,
-        )
 
     @classmethod
     # pyre-fixme[3]: Return type must be annotated.
@@ -258,8 +235,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             DTensor._propagator,
         )
 
-    @staticmethod
+    @classmethod
     def from_local(
+        cls,
         local_tensor: torch.Tensor,
         device_mesh: Optional[DeviceMesh] = None,
         placements: Optional[Sequence[Placement]] = None,
@@ -431,11 +409,6 @@ def distribute_tensor(
     if is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
         random._rng_tracker = OffsetBasedRNGTracker()
 
-    if not tensor.is_leaf:
-        raise RuntimeError(
-            "`distribute_tensor` should be used to distribute leaf tensors! but found non-leaf tensor!"
-        )
-
     # convert tensor to the corresponding device type if it's not in that device type
     if not tensor.is_meta:
         tensor = tensor.to(device_mesh.device_type)
@@ -486,10 +459,8 @@ def distribute_tensor(
             )
 
     assert local_tensor is not None, "distributing a tensor should not be None"
-    # detach the local tensor passed to DTensor since after the construction
-    # of DTensor, autograd would work on top of DTensor instead of local tensor
     return DTensor(
-        local_tensor.detach(),
+        local_tensor,
         device_mesh,
         placements,
         shape=tensor.size(),

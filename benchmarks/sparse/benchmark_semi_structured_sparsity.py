@@ -1,12 +1,15 @@
-import argparse
 import random
-
-import pandas as pd
 import torch
 import torch.utils.benchmark as benchmark
 from torch import nn
-from torch.sparse import to_sparse_semi_structured
 from tqdm import tqdm
+import pandas as pd
+import argparse
+<<<<<<< HEAD
+from torch.sparse import to_sparse_semi_structured
+=======
+from torch.sparse import to_sparse_semi_structured, SparseSemiStructuredTensor
+>>>>>>> a525d390322 ([core][pruning][feature] cuSPARSELt integration)
 
 
 torch.set_printoptions(
@@ -49,7 +52,11 @@ def rand_sparse_semi_structured_mask(
 
 
 def test_linear(m, k, n, dtype, contiguous, backend):
+<<<<<<< HEAD
     SparseSemiStructuredTensor.fuse_transpose = contiguous
+=======
+    SparseSemiStructuredTensor._fuse_transpose = contiguous
+>>>>>>> a525d390322 ([core][pruning][feature] cuSPARSELt integration)
     mask = rand_sparse_semi_structured_mask(m, k, dtype=dtype)
     sparse_weight = torch.rand(m, k).to(dtype).cuda() * mask
     input_tensor = torch.zeros(n, k).to(dtype).cuda()
@@ -63,11 +70,15 @@ def test_linear(m, k, n, dtype, contiguous, backend):
     dense_output = model(input_tensor)
 
     # sparsify weights
-    model.linear.weight = nn.Parameter(
-        to_sparse_semi_structured(
-            sparse_weight,
-        )
-    )
+<<<<<<< HEAD
+    model.linear.weight = nn.Parameter(to_sparse_semi_structured(sparse_weight,))
+=======
+    if backend == "cutlass":
+        SparseSemiStructuredTensor._FORCE_USE_CUTLASS = True
+        model.linear.weight = nn.Parameter(to_sparse_semi_structured(sparse_weight, mask=mask.bool()))
+    else:
+        model.linear.weight = nn.Parameter(to_sparse_semi_structured(sparse_weight))
+>>>>>>> a525d390322 ([core][pruning][feature] cuSPARSELt integration)
 
     sparse_output = model(input_tensor)
 
@@ -98,7 +109,11 @@ def test_tensor(m, k, n, dtype, contiguous, backend):
     B = torch.zeros(k, n).to(dtype).cuda()
     bias = torch.rand(n).to(dtype).cuda()
 
+<<<<<<< HEAD
     sA = to_sparse_semi_structured(A)
+=======
+    sA = to_sparse_semi_structured(A, mask=A.bool())
+>>>>>>> a525d390322 ([core][pruning][feature] cuSPARSELt integration)
 
     # torch.mm calculation
     if dtype is not torch.int8:

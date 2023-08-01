@@ -1,6 +1,5 @@
 import contextlib
 
-import copy
 import pickle
 import unittest
 from types import FunctionType, ModuleType
@@ -112,9 +111,6 @@ class ConfigModule(ModuleType):
 
     def to_dict(self):
         return self._config
-
-    def get_config_copy(self):
-        return copy.deepcopy(self._config)
 
     def patch(self, arg1=None, arg2=None, **kwargs):
         """

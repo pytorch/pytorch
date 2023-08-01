@@ -14,9 +14,9 @@ def recurrent(x, scale, shift):
     return y
 
 
-x = torch.randn(2, 2, device="cuda")
-scale = torch.randn(2, 2, device="cuda", requires_grad=True)
-shift = torch.randn(2, 2, device="cuda", requires_grad=True)
+x = torch.randn(2, 2, device='cuda')
+scale = torch.randn(2, 2, device='cuda', requires_grad=True)
+shift = torch.randn(2, 2, device='cuda', requires_grad=True)
 inputs = [x, scale, shift]
 
 
@@ -35,16 +35,15 @@ def recurrent_scaleshift(x, scale, shift):
     return y
 
 
-x = torch.randn(2, 2, device="cuda")
-scale = torch.randn(2, 2, device="cuda", requires_grad=True)
-shift = torch.randn(2, 2, device="cuda", requires_grad=True)
+x = torch.randn(2, 2, device='cuda')
+scale = torch.randn(2, 2, device='cuda', requires_grad=True)
+shift = torch.randn(2, 2, device='cuda', requires_grad=True)
 inputs = [x, scale, shift]
 out = recurrent_scaleshift(x, scale, shift)
 recurrent_scaleshift.graph_for(x, scale, shift)
 
 
 import torch
-
 x = torch.tensor([])
 x.requires_grad = True
 x.mean().backward()  # no error triggered

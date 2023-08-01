@@ -26,14 +26,12 @@ class SymbolicFunction:
     op_full_name: The qualified name of the function. In the form of '<namespace>::<op_name>.<overload>'.
     onnx_function: The symbolic function from torchlib.
     is_custom: Whether the function is a custom function.
-    is_complex: Whether the function is a function that handles complex valued inputs.
 
     """
 
     onnx_function: Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]
     op_full_name: str
     is_custom: bool = False
-    is_complex: bool = False
 
 
 class OnnxRegistry:
@@ -83,16 +81,6 @@ class OnnxRegistry:
                     onnx_function=overload_func,
                     op_full_name=internal_name_instance.qualified_name(),
                     is_custom=False,
-                    is_complex=False,
-                )
-                self._register(internal_name_instance, symbolic_function)
-
-            for complex_func in aten_overloads_func.complex:
-                symbolic_function = SymbolicFunction(
-                    onnx_function=complex_func,
-                    op_full_name=internal_name_instance.qualified_name(),
-                    is_custom=False,
-                    is_complex=True,
                 )
                 self._register(internal_name_instance, symbolic_function)
 
@@ -115,7 +103,6 @@ class OnnxRegistry:
         namespace: str,
         op_name: str,
         overload: Optional[str] = None,
-        is_complex: bool = False,
     ) -> None:
         """Registers a custom operator: torch.ops.<namespace>.<op_name>.<overload>.
 
@@ -125,7 +112,6 @@ class OnnxRegistry:
             op_name: The name of the operator to register.
             overload: The overload of the operator to register. If it's default overload,
                 leave it to None.
-            is_complex: Whether the function is a function that handles complex valued inputs.
 
         Raises:
             ValueError: If the name is not in the form of 'namespace::op'.
@@ -137,7 +123,6 @@ class OnnxRegistry:
             onnx_function=function,
             op_full_name=internal_name_instance.qualified_name(),
             is_custom=True,
-            is_complex=is_complex,
         )
         self._register(internal_name_instance, symbolic_function)
 

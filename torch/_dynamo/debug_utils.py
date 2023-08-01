@@ -385,9 +385,11 @@ def same_two_models(
         # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return True.
         log.exception(
-            "While minifying the program in accuracy minification mode, "
-            "ran into a runtime exception which is likely an unrelated issue."
-            " Skipping this graph."
+            (
+                "While minifying the program in accuracy minification mode, "
+                "ran into a runtime exception which is likely an unrelated issue."
+                " Skipping this graph."
+            )
         )
         return True
 
@@ -463,9 +465,11 @@ def backend_accuracy_fails(
         # This means that the the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return False.
         log.exception(
-            "While minifying the program in accuracy minification mode, "
-            "ran into a runtime exception which is likely an unrelated issue."
-            " Skipping this graph"
+            (
+                "While minifying the program in accuracy minification mode, "
+                "ran into a runtime exception which is likely an unrelated issue."
+                " Skipping this graph"
+            )
         )
         return False
 

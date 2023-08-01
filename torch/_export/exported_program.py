@@ -1,19 +1,16 @@
+from collections import defaultdict
 import copy
 import dataclasses
-from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple, Union
-
 import sympy
+from typing import Any, Dict, List, Optional, Tuple, Union
+from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
 
 import torch
+from torch.fx.passes.infra.pass_manager import PassManager
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
-from torch import fx
-from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
-from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import SymInt
-from torch.fx.passes.infra.pass_manager import PassManager
-
+from torch._subclasses.fake_tensor import FakeTensor
 from . import error
 from .pass_base import PassType
 from .passes.add_runtime_assertions_for_constraints_pass import (
@@ -111,13 +108,12 @@ class ExportedProgram:
         self.range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
         self.equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+    def __call__(self, *args: Any) -> Any:
         if self.call_spec.in_spec is not None:
             try:
-                user_args = combine_args_kwargs(args, kwargs)
-                args = fx_pytree.tree_flatten_spec(user_args, self.call_spec.in_spec)  # type: ignore[assignment]
+                args = fx_pytree.tree_flatten_spec(args, self.call_spec.in_spec)  # type: ignore[assignment]
             except Exception:
-                _, received_spec = pytree.tree_flatten(user_args)
+                _, received_spec = pytree.tree_flatten(args)
                 raise error.InternalError(
                     "Trying to flatten user inputs with exported input tree spec: \n"
                     f"{self.call_spec.in_spec}\n"
@@ -125,8 +121,7 @@ class ExportedProgram:
                     f"{received_spec}"
                 )
 
-        param_buffer_values = tuple(value for _, value in self.state_dict.items())
-        self._check_input_constraints(*param_buffer_values, *args)
+        param_buffer_values = (value for _, value in self.state_dict.items())
 
         with torch.no_grad():
             res = torch.fx.Interpreter(self.graph_module).run(
@@ -174,22 +169,6 @@ class ExportedProgram:
         )
         return string
 
-    def __deepcopy__(
-        self, memo: Optional[Dict[int, Any]] = None
-    ) -> "ExportedProgram":
-        gm = copy.deepcopy(self.graph_module, memo)
-        new_ep = ExportedProgram(
-            gm,
-            gm.graph,
-            copy.deepcopy(self.graph_signature, memo),
-            copy.deepcopy(self.call_spec, memo),
-            copy.deepcopy(self.state_dict, memo),
-            copy.deepcopy(self.range_constraints, memo),
-            copy.deepcopy(self.equality_constraints, memo),
-        )
-        return new_ep
-
-
     @property
     def graph(self):
         return self.graph_module.graph
@@ -211,24 +190,6 @@ class ExportedProgram:
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
         return transformed_ep
-
-    def _check_input_constraints(self, *args):
-        # TODO(zhxchen17) Remove _add_runtime_assertions.
-        # TODO(zhxchen17) Don't generate a runtime graph on the fly.
-        _assertion_graph = fx.GraphModule({}, fx.Graph())
-        for p in self.graph.nodes:
-            if p.op != "placeholder":
-                continue
-            new_p = _assertion_graph.graph.placeholder(p.name)
-            new_p.meta = p.meta
-        _assertion_graph.graph.output(())
-        _assertion_graph_res = _AddRuntimeAssertionsForConstraintsPass(
-            self.range_constraints,
-            self.equality_constraints,
-        )(_assertion_graph)
-        assert _assertion_graph_res is not None
-        _assertion_graph = _assertion_graph_res.graph_module
-        _assertion_graph(*args)
 
     def _add_runtime_assertions(
         self,
@@ -419,6 +380,3 @@ def _process_constraints(
         range_constraints[symbol] = RangeConstraint(min_val, max_val)
 
     return range_constraints, equality_constraints
-
-def combine_args_kwargs(args, kwargs):
-    return (args, kwargs) if kwargs else args

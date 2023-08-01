@@ -1,15 +1,9 @@
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import (
-    broadcast_all,
-    lazy_property,
-    logits_to_probs,
-    probs_to_logits,
-)
+from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs
 
-__all__ = ["Binomial"]
-
+__all__ = ['Binomial']
 
 def _clamp_by_zero(x):
     # works like clamp(x, min=0) but has grad at 0 is 0.5
@@ -39,29 +33,19 @@ class Binomial(Distribution):
         probs (Tensor): Event probabilities
         logits (Tensor): Event log-odds
     """
-    arg_constraints = {
-        "total_count": constraints.nonnegative_integer,
-        "probs": constraints.unit_interval,
-        "logits": constraints.real,
-    }
+    arg_constraints = {'total_count': constraints.nonnegative_integer,
+                       'probs': constraints.unit_interval,
+                       'logits': constraints.real}
     has_enumerate_support = True
 
     def __init__(self, total_count=1, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
-            raise ValueError(
-                "Either `probs` or `logits` must be specified, but not both."
-            )
+            raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
-            (
-                self.total_count,
-                self.probs,
-            ) = broadcast_all(total_count, probs)
+            self.total_count, self.probs, = broadcast_all(total_count, probs)
             self.total_count = self.total_count.type_as(self.probs)
         else:
-            (
-                self.total_count,
-                self.logits,
-            ) = broadcast_all(total_count, logits)
+            self.total_count, self.logits, = broadcast_all(total_count, logits)
             self.total_count = self.total_count.type_as(self.logits)
 
         self._param = self.probs if probs is not None else self.logits
@@ -72,10 +56,10 @@ class Binomial(Distribution):
         new = self._get_checked_instance(Binomial, _instance)
         batch_shape = torch.Size(batch_shape)
         new.total_count = self.total_count.expand(batch_shape)
-        if "probs" in self.__dict__:
+        if 'probs' in self.__dict__:
             new.probs = self.probs.expand(batch_shape)
             new._param = new.probs
-        if "logits" in self.__dict__:
+        if 'logits' in self.__dict__:
             new.logits = self.logits.expand(batch_shape)
             new._param = new.logits
         super(Binomial, new).__init__(batch_shape, validate_args=False)
@@ -116,9 +100,7 @@ class Binomial(Distribution):
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         with torch.no_grad():
-            return torch.binomial(
-                self.total_count.expand(shape), self.probs.expand(shape)
-            )
+            return torch.binomial(self.total_count.expand(shape), self.probs.expand(shape))
 
     def log_prob(self, value):
         if self._validate_args:
@@ -131,21 +113,15 @@ class Binomial(Distribution):
         #     (case logit > 0)              = k * logit - n * (log(p) - log(1 - p)) + n * log(p)
         #                                   = k * logit - n * logit - n * log1p(e^-logit)
         #     (merge two cases)             = k * logit - n * max(logit, 0) - n * log1p(e^-|logit|)
-        normalize_term = (
-            self.total_count * _clamp_by_zero(self.logits)
-            + self.total_count * torch.log1p(torch.exp(-torch.abs(self.logits)))
-            - log_factorial_n
-        )
-        return (
-            value * self.logits - log_factorial_k - log_factorial_nmk - normalize_term
-        )
+        normalize_term = (self.total_count * _clamp_by_zero(self.logits)
+                          + self.total_count * torch.log1p(torch.exp(-torch.abs(self.logits)))
+                          - log_factorial_n)
+        return value * self.logits - log_factorial_k - log_factorial_nmk - normalize_term
 
     def entropy(self):
         total_count = int(self.total_count.max())
         if not self.total_count.min() == total_count:
-            raise NotImplementedError(
-                "Inhomogeneous total count not supported by `entropy`."
-            )
+            raise NotImplementedError("Inhomogeneous total count not supported by `entropy`.")
 
         log_prob = self.log_prob(self.enumerate_support(False))
         return -(torch.exp(log_prob) * log_prob).sum(0)
@@ -153,12 +129,8 @@ class Binomial(Distribution):
     def enumerate_support(self, expand=True):
         total_count = int(self.total_count.max())
         if not self.total_count.min() == total_count:
-            raise NotImplementedError(
-                "Inhomogeneous total count not supported by `enumerate_support`."
-            )
-        values = torch.arange(
-            1 + total_count, dtype=self._param.dtype, device=self._param.device
-        )
+            raise NotImplementedError("Inhomogeneous total count not supported by `enumerate_support`.")
+        values = torch.arange(1 + total_count, dtype=self._param.dtype, device=self._param.device)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         if expand:
             values = values.expand((-1,) + self._batch_shape)

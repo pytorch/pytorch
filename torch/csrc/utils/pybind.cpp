@@ -27,7 +27,7 @@ bool type_caster<c10::SymInt>::load(py::handle src, bool) {
 }
 
 py::handle type_caster<c10::SymInt>::cast(
-    const c10::SymInt& si,
+    c10::SymInt si,
     return_value_policy /* policy */,
     handle /* parent */) {
   if (auto m = si.maybe_as_int()) {
@@ -65,7 +65,7 @@ bool type_caster<c10::SymFloat>::load(py::handle src, bool) {
 }
 
 py::handle type_caster<c10::SymFloat>::cast(
-    const c10::SymFloat& si,
+    c10::SymFloat si,
     return_value_policy /* policy */,
     handle /* parent */) {
   if (si.is_symbolic()) {
@@ -95,7 +95,7 @@ bool type_caster<c10::SymBool>::load(py::handle src, bool) {
 }
 
 py::handle type_caster<c10::SymBool>::cast(
-    const c10::SymBool& si,
+    c10::SymBool si,
     return_value_policy /* policy */,
     handle /* parent */) {
   if (si.is_symbolic()) {

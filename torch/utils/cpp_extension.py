@@ -150,11 +150,11 @@ def _join_rocm_home(*paths) -> str:
     only once we need to get any ROCm-specific path.
     '''
     if ROCM_HOME is None:
-        raise OSError('ROCM_HOME environment variable is not set. '
-                      'Please set it to your ROCm install root.')
+        raise EnvironmentError('ROCM_HOME environment variable is not set. '
+                               'Please set it to your ROCm install root.')
     elif IS_WINDOWS:
-        raise OSError('Building PyTorch extensions using '
-                      'ROCm and Windows is not supported.')
+        raise EnvironmentError('Building PyTorch extensions using '
+                               'ROCm and Windows is not supported.')
     return os.path.join(ROCM_HOME, *paths)
 
 
@@ -264,7 +264,7 @@ def _maybe_write(filename, new_content):
     if it already had the right content (to avoid triggering recompile).
     '''
     if os.path.exists(filename):
-        with open(filename) as f:
+        with open(filename, 'r') as f:
             content = f.read()
 
         if content == new_content:
@@ -1834,7 +1834,7 @@ def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
             archs = []
     else:
         archs = _archs.replace(' ', ';').split(';')
-    flags = [f'--offload-arch={arch}' for arch in archs]
+    flags = ['--offload-arch=%s' % arch for arch in archs]
     flags += ['-fno-gpu-rdc']
     return flags
 
@@ -2247,8 +2247,8 @@ def _join_cuda_home(*paths) -> str:
     only once we need to get any CUDA-specific path.
     '''
     if CUDA_HOME is None:
-        raise OSError('CUDA_HOME environment variable is not set. '
-                      'Please set it to your CUDA install root.')
+        raise EnvironmentError('CUDA_HOME environment variable is not set. '
+                               'Please set it to your CUDA install root.')
     return os.path.join(CUDA_HOME, *paths)
 
 

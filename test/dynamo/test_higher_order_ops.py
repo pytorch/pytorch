@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
 import functools
+import re
 import unittest
 
 import functorch.experimental.control_flow as control_flow
@@ -13,12 +14,7 @@ import torch._functorch.config
 import torch.nn as nn
 import torch.utils.checkpoint
 from torch._dynamo.backends.common import aot_autograd
-from torch._dynamo.testing import (
-    CompileCounter,
-    CompileCounterWithBackend,
-    EagerAndRecordGraphs,
-    normalize_gm,
-)
+from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.wrap import wrap
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -27,11 +23,37 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
+def strip_comment(code):
+    code = str(code)
+    return re.sub(r"(?m)^ *#.*\n?", "", code)
+
+
+def remove_trailing_space(code):
+    return "\n".join([line.rstrip() for line in code.split("\n")])
+
+
+def normalize_gm(gm_str):
+    # strip comments as comments have path to files which may differ from
+    # system to system.
+    return remove_trailing_space(strip_comment(gm_str))
+
+
 def check_dynamic_shape_capture():
     # This also mirrors config from `test/dynamo/test_dynamic_shapes.py:make_dynamic_cls`
     if not config.assume_static_by_default:
         return True
     return False
+
+
+# Equivalent to backend="eager", but also records graphs that
+# we can assert on
+class EagerAndRecordGraphs:
+    def __init__(self):
+        self.graphs = []
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        self.graphs.append(gm)
+        return gm
 
 
 def count_ops(gm, args, freq, op):
@@ -1505,13 +1527,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         self._test_wrap_simple(fn, (torch.randn(10, 10),), 4, expected_opcount=1)
 
-    def test_fn_with_kwargs_in_torch_ops(self):
-        def fn(x):
-            return wrap(lambda z: torch.cos(input=z), x)
-
-        x = torch.randn(3)
-        self._test_wrap_simple(fn, (x,), 2, expected_opcount=1)
-
     def test_hooks(self):
         class ToyModel(torch.nn.Module):
             def __init__(self):
@@ -1546,8 +1561,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertTrue(activations.keys() == forward_handles.keys())
 
-
-class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def _grad_compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
         backend = EagerAndRecordGraphs()
         actual = fn(*inputs)

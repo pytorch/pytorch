@@ -44,21 +44,11 @@ if config.is_fbcode():
     from triton.fb import build_paths
     from triton.fb.build import _run_build_command
 
-    from torch._inductor.fb.utils import (
-        log_global_cache_stats,
-        log_global_cache_vals,
-        use_global_cache,
-    )
+    from torch._inductor.fb.logging import global_cache_log
 else:
 
-    def log_global_cache_stats(*args, **kwargs):
+    def global_cache_log(*args, **kwargs):
         pass
-
-    def log_global_cache_vals(*args, **kwargs):
-        pass
-
-    def use_global_cache():
-        return False
 
 
 LOCK_TIMEOUT = 600
@@ -142,39 +132,27 @@ class CacheBase:
 
         return system
 
-    @staticmethod
-    @functools.lru_cache(None)
-    def get_local_cache_path():
-        return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def get_global_cache_path():
-        return (
-            Path(os.path.join(config.global_cache_dir, CacheBase.get_system()["hash"]))
-            if config.global_cache_dir is not None
-            else None
-        )
-
     def __init__(self):
         if not torch.cuda.is_available():
             return
 
         self.system = CacheBase.get_system()
 
-        self.local_cache_path = CacheBase.get_local_cache_path()
-        self.global_cache_path = CacheBase.get_global_cache_path()
+        self.local_cache_path = os.path.join(cache_dir(), self.system["hash"])
+        self.global_cache_path = (
+            os.path.join(os.path.dirname(config.global_cache_dir), self.system["hash"])
+            if config.global_cache_dir is not None
+            else None
+        )
 
     def get_local_cache(self):
-        if not self.local_cache_path.is_file():
+        if not os.path.isfile(self.local_cache_path):
             return {}
-        with open(self.local_cache_path) as local_cache_fp:
+        with open(self.local_cache_path, "r") as local_cache_fp:
             local_cache = json.load(local_cache_fp)
         return local_cache["cache"]
 
     def update_local_cache(self, local_cache):
-        if not os.path.exists(self.local_cache_path.parent):
-            os.makedirs(self.local_cache_path.parent, exist_ok=True)
         write_atomic(
             self.local_cache_path,
             json.dumps({"system": self.system, "cache": local_cache}, indent=4),
@@ -209,9 +187,9 @@ class LocalCache(CacheBase):
 class PersistentCache(CacheBase):
     @functools.lru_cache(None)
     def get_global_cache(self):
-        if self.global_cache_path is None or not self.global_cache_path.is_file():
+        if self.global_cache_path is None or not os.path.isfile(self.global_cache_path):
             return {}
-        with open(self.global_cache_path) as global_cache_fp:
+        with open(self.global_cache_path, "r") as global_cache_fp:
             global_cache = json.load(global_cache_fp)
         return global_cache["cache"]
 
@@ -234,8 +212,7 @@ class PersistentCache(CacheBase):
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
 
-        log_stats = partial(log_global_cache_stats, self.system, name, inputs)
-        log_vals = partial(log_global_cache_vals, self.system, name, inputs)
+        gc_log = partial(global_cache_log, self.system, name, inputs)
         timings = {}
 
         def check_cache(cache, callback=None):
@@ -246,20 +223,20 @@ class PersistentCache(CacheBase):
                 if choice_hash in cache.get(name, {}).get(inputs, {}):
                     # cache hit
                     timings[choice] = cache[name][inputs][choice_hash]
+                    if callback:
+                        callback(choice_hash, cached=True)
                 else:
                     # cache miss
                     hit = False
-                    break
-            if callback:
-                callback(cached=hit)
+                    if callback:
+                        callback(choice_hash, cached=False)
             return hit
 
         if config.max_autotune or config.max_autotune_gemm:
             local_cache = self.get_local_cache()
             # check local cache first since it is data specific to the current machine
-            if not check_cache(local_cache) and not (
-                use_global_cache()
-                and check_cache(self.get_global_cache(), callback=log_stats)
+            if not check_cache(local_cache) and not check_cache(
+                self.get_global_cache(), callback=gc_log
             ):
                 # re-benchmark everything to try to get consistent numbers from the same machine
                 for choice in choices:
@@ -269,15 +246,9 @@ class PersistentCache(CacheBase):
                     local_cache[name][inputs][choice.hash_key()] = timings[choice]
 
                 self.update_local_cache(local_cache)
-
-                if use_global_cache():
-                    timings_to_log = {
-                        choice.hash_key(): timings[choice] for choice in choices
-                    }
-                    log_vals(timings_to_log)
-        elif use_global_cache():
+        else:
             # only check global cache, not local one
-            check_cache(self.get_global_cache(), callback=log_stats)
+            check_cache(self.get_global_cache(), callback=gc_log)
             # may have a partial cache hit, where not everything is benchmarked
 
         return timings
@@ -290,7 +261,7 @@ def get_lock_dir():
     return lock_dir
 
 
-def code_hash(code, extra: str = ""):
+def code_hash(code, extra=""):
     hashing_str = code
     if extra != "":
         hashing_str = hashing_str + "||" + extra
@@ -302,19 +273,13 @@ def code_hash(code, extra: str = ""):
     )
 
 
-def get_path(basename: str, extension: str, specified_dir: str = ""):
-    if specified_dir:
-        if os.path.isabs(specified_dir):
-            subdir = specified_dir
-        else:
-            subdir = os.path.join(cache_dir(), specified_dir)
-    else:
-        subdir = os.path.join(cache_dir(), basename[1:3])
+def get_path(basename: str, extension: str):
+    subdir = os.path.join(cache_dir(), basename[1:3])
     path = os.path.join(subdir, f"{basename}.{extension}")
     return basename, subdir, path
 
 
-def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code"):
+def get_hash(content: Union[str, bytes], extra="", hash_type="code"):
     assert hash_type in ["code", "cubin"], "Hash type not supported"
     if hash_type == "code":
         return code_hash(content, extra)
@@ -323,14 +288,10 @@ def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code
 
 
 def write(
-    content: Union[str, bytes],
-    extension: str,
-    extra: str = "",
-    hash_type: str = "code",
-    specified_dir: str = "",
+    content: Union[str, bytes], extension: str, extra="", hash_type: str = "code"
 ):
     key: str = get_hash(content, extra, hash_type)
-    basename, subdir, path = get_path(key, extension, specified_dir)
+    basename, subdir, path = get_path(key, extension)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     if not os.path.exists(path):
@@ -364,8 +325,6 @@ class CompiledFxGraph:
     device_types: Set[str] = field(default_factory=set)
     device_idxs: Set[int] = field(default_factory=set)
     mutated_inputs: Set[str] = field(default_factory=set)
-    mutated_input_idxs: Set[int] = field(default_factory=list)
-
     _boxed_call: bool = None
 
     def __call__(self, inputs) -> Any:
@@ -541,14 +500,15 @@ cdll.LoadLibrary("__lib_path__")
             try:
                 # Check build result
                 compile_file(input_path, output_path, build_cmd)
+                # TODO: get vectorization working in fbcode.
+                # For now, this always fails, so we fall back to generating non-vectorized cpu code.
                 subprocess.check_call(
                     [
-                        sys.executable,
+                        "python",
                         "-c",
                         VecISA._avx_py_load.replace("__lib_path__", output_path),
                     ],
                     stderr=subprocess.DEVNULL,
-                    env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
                 )
             except Exception as e:
                 return False
@@ -561,7 +521,7 @@ class VecAVX512(VecISA):
     _bit_width = 512
     _macro = "CPU_CAPABILITY_AVX512"
     _arch_flags = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
-    _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
+    _dtype_nelements = {torch.float: 16, torch.bfloat16: 32}
 
     def __str__(self) -> str:
         return "avx512"
@@ -574,7 +534,7 @@ class VecAVX2(VecISA):
     _bit_width = 256
     _macro = "CPU_CAPABILITY_AVX2"
     _arch_flags = "-mavx2 -mfma"
-    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
+    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16}
 
     def __str__(self) -> str:
         return "avx2"
@@ -677,8 +637,7 @@ def use_custom_generated_macros():
 
 def use_fb_internal_macros():
     if config.is_fbcode():
-        openmp_lib = build_paths.openmp_lib()
-        return f"-Wp,-fopenmp {openmp_lib} -D C10_USE_GLOG -D C10_USE_MINIMAL_GLOG"
+        return "-D C10_USE_GLOG -D C10_USE_MINIMAL_GLOG -D C10_MOBILE"
     else:
         return ""
 
@@ -699,33 +658,22 @@ def get_include_and_linking_paths(
         # to do to enable OMP build on darwin where PyTorch is built with IOMP
         # and we need a way to link to what PyTorch links.
         ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
+        if aot_mode:
+            ipaths += [os.path.join(_TORCH_PATH, "_inductor", "aot_inductor_include")]
         lpaths = cpp_extension.library_paths(cuda) + [
             sysconfig.get_config_var("LIBDIR")
         ]
         libs = []
         # No need to manually specify libraries in fbcode.
         if not config.is_fbcode():
-            libs += ["c10", "torch", "torch_cpu"]
+            libs += ["c10", "torch", "torch_cpu", "torch_python"]
             libs += ["gomp"]
-            if not aot_mode:
-                libs += ["torch_python"]
         else:
             # internal remote execution is able to find omp, but not gomp
             libs += ["omp"]
         macros = vec_isa.build_macro()
         if macros:
-            if config.is_fbcode() and vec_isa != invalid_vec_isa:
-                cap = str(vec_isa).upper()
-                macros = " ".join(
-                    [
-                        vec_isa.build_arch_flags(),
-                        f"-D CPU_CAPABILITY={cap}",
-                        f"-D CPU_CAPABILITY_{cap}",
-                        f"-D HAVE_{cap}_CPU_DEFINITION",
-                    ]
-                )
-            else:
-                macros = f"-D{macros}"
+            macros = f"-D{macros}"
         if cuda:
             if config.is_fbcode():
                 libs += ["cuda"]
@@ -742,11 +690,6 @@ def get_include_and_linking_paths(
             # GNU OpenMP generally is not available on MacOS
             # There is either Intel OpenMP(for x86) or LLVM OpenMP (for both x86 and arm64)
             libs = ["omp"]
-            if os.getenv("OMP_PREFIX") is not None:
-                # Support OpenMP on MacOS
-                ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))
-                lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))
-
             if os.getenv("CONDA_PREFIX") is not None:
                 # On MacOS OpenMP is not available via the system install
                 # But on conda can be provided using https://anaconda.org/anaconda/llvm-openmp
@@ -822,12 +765,7 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key, params, cubin):
-        _, path = write(
-            cubin,
-            "cubin",
-            hash_type="cubin",
-            specified_dir=config.aot_inductor_output_path,
-        )
+        _, path = write(cubin, "cubin", hash_type="cubin")
         params["cubin_path"] = path
         cls.cache[key] = params
 
@@ -849,20 +787,20 @@ class AotCodeCache:
                 "i", "o", vec_isa=picked_vec_isa, cuda=cuda, aot_mode=graph.aot_mode
             )
         )
-        key, input_path = write(
-            source_code,
-            "cpp",
-            extra=cpp_command,
-            specified_dir=config.aot_inductor_output_path,
-        )
+        key, input_path = write(source_code, "cpp", extra=cpp_command)
         if key not in cls.cache:
             from filelock import FileLock
 
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                output_so = os.path.splitext(input_path)[0] + ".so"
-
+                # Place the generated .so into a sub-folder with the full hex-hash to avoid
+                # any name collision.
+                output_so_dir = os.path.splitext(input_path)[0]
+                if not os.path.exists(output_so_dir):
+                    os.makedirs(output_so_dir, exist_ok=False)
+                so_name = f"{config.dll_name}.so"
+                output_so = os.path.join(output_so_dir, so_name)
                 if not os.path.exists(output_so):
                     cmd = cpp_compile_command(
                         input=input_path,
@@ -894,7 +832,7 @@ class AotCodeCache:
 # - valid_vec_isa_list()
 # - VecISA.__bool__() <-- takes out a lock
 # - compile_file() <-- imports cpp_prefix_path from cpp, which causes us to try to take out the same lock.
-@functools.lru_cache
+@functools.lru_cache()
 def cpp_prefix_path():
     path = Path(__file__).parent / "codegen/cpp_prefix.h"
     with path.open() as f:

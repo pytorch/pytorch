@@ -589,27 +589,27 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
   auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
   auto& schema = op.schema();
   auto schema_ref = std::reference_wrapper<const FunctionSchema>(schema);
-  constexpr auto num_boxed_args = impl::boxed_size<Args...>();
-  if constexpr (num_boxed_args != 0) {
-    if (guard.needsInputs()) {
-      // If we used std::array<IValue, num_boxed_args> here, we would
-      // have to spend time default constructing the IValues in
-      // boxedArgs. aligned_storage has no such requirement.
-      impl::IValueAlignedStorage boxedArgs[num_boxed_args];
-      // For debugging only; could be removed (but the compiler will do
-      // that for us and it's nice to have the extra assurance of
-      // correctness from our debug builds).
-      int lastArgIdx = 0;
-      impl::boxArgsToStack(boxedArgs, lastArgIdx, args...);
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(lastArgIdx == num_boxed_args);
-      // I don't *think* we need std::launder here, because IValue has
-      // no subclasses and no const or reference fields.
-      runRecordFunction(guard, schema_ref, dispatchKey, c10::ArrayRef<const c10::IValue>(reinterpret_cast<IValue *>(boxedArgs), num_boxed_args));
-      for (size_t ii = 0; ii < num_boxed_args; ++ii) {
-        reinterpret_cast<IValue *>(&boxedArgs[ii])->~IValue();
-      }
-    } else {
-      runRecordFunction(guard, schema_ref, dispatchKey);
+  if (guard.needsInputs()) {
+    constexpr auto num_boxed_args = impl::boxed_size<Args...>();
+    // If we used std::array<IValue, num_boxed_args> here, we would
+    // have to spend time default constructing the IValues in
+    // boxedArgs. aligned_storage has no such requirement.
+    // Max to avoid zero-size array.`
+    std::aligned_storage_t<sizeof(IValue), alignof(IValue)> boxedArgs[std::max(num_boxed_args, static_cast<size_t>(1))];
+    // For debugging only; could be removed (but the compiler will do
+    // that for us and it's nice to have the extra assurance of
+    // correctness from our debug builds).
+    int lastArgIdx = 0;
+    impl::boxArgsToStack(boxedArgs, lastArgIdx, args...);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(lastArgIdx == num_boxed_args);
+    // I don't *think* we need std::launder here, because IValue has
+    // no subclasses and no const or reference fields. (We also
+    // couldn't use it even if we wanted to because we are currently
+    // stuck on C++14 rather than C++17, but we could do a backport
+    // similar to folly::launder if needed.)
+    runRecordFunction(guard, schema_ref, dispatchKey, c10::ArrayRef<const c10::IValue>(reinterpret_cast<IValue *>(boxedArgs), num_boxed_args));
+    for (size_t ii = 0; ii < num_boxed_args; ++ii) {
+      reinterpret_cast<IValue *>(&boxedArgs[ii])->~IValue();
     }
   } else {
     runRecordFunction(guard, schema_ref, dispatchKey);

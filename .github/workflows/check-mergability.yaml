@@ -1,0 +1,42 @@
+# Checks for merge conflicts when a pull request is opened or updated
+name: Check mergability onto main
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  merge_check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Check for merge conflicts
+        run: |
+
+          git config --global user.email "fakeUser@example.com"
+          git config --global user.name "Fakey McFakeFace"
+
+          # Fetch the main branch
+          git fetch origin main:main
+
+          # Try to merge main onto the current branch
+          # The --no-commit and --no-ff flags make sure we don't actually
+          # commit a merge or create a merge commit, respectively.
+          git merge --no-commit --no-ff main || MERGE_CONFLICT=1
+
+          # Check if there was a merge conflict
+          if [[ -z "$MERGE_CONFLICT" ]]; then
+            echo "No merge conflicts detected."
+            exit 0
+          else
+            echo "Merge conflict detected. Failing the job..."
+            exit 1
+          fi
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

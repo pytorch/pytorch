@@ -149,9 +149,9 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
 
     if isinstance(f, str):
         if not os.path.exists(f):  # type: ignore[type-var]
-            raise ValueError(f"The provided filename {f} does not exist")  # type: ignore[str-bytes-safe]
+            raise ValueError("The provided filename {} does not exist".format(f))  # type: ignore[str-bytes-safe]
         if os.path.isdir(f):
-            raise ValueError(f"The provided filename {f} is a directory")  # type: ignore[str-bytes-safe]
+            raise ValueError("The provided filename {} is a directory".format(f))  # type: ignore[str-bytes-safe]
 
     map_location = validate_map_location(map_location)
     if _extra_files is None:

@@ -125,7 +125,7 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
 #endif
   } else if (device_type == at::kMeta) {
     at::native::resize_bytes_meta(storage.unsafeGetStorageImpl(), newsize);
-  } else if (device_type == at::kXPU || device_type == at::kPrivateUse1) {
+  } else if (device_type == at::kPrivateUse1) {
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
         !c10::overflows<int64_t>(size_bytes_i),
@@ -213,18 +213,15 @@ static PyObject* THPStorage_fromBuffer(
   auto dtype = reinterpret_cast<THPDtype*>(dtype_obj);
   scalar_type = dtype->scalar_type;
 
-  const bool is_endian_independent = (scalar_type == at::kByte) ||
-      (scalar_type == at::kChar) || (scalar_type == at::kFloat8_e5m2) ||
-      (scalar_type == at::kFloat8_e4m3fn);
-
   TORCH_CHECK(
-      is_endian_independent || (byte_order_str != nullptr),
+      (scalar_type == at::kByte) || (scalar_type == at::kChar) ||
+          (byte_order_str != nullptr),
       "function missing required argument 'byte_order' (pos 2)");
   size_t element_size = c10::elementSize(scalar_type);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool do_byte_swap;
-  if (!is_endian_independent) {
+  if (scalar_type != at::kByte && scalar_type != at::kChar) {
     if (strcmp(byte_order_str, "native") == 0) {
       do_byte_swap = false;
     } else if (strcmp(byte_order_str, "big") == 0) {
@@ -295,7 +292,7 @@ static PyObject* THPStorage_fromBuffer(
       c10::GetDefaultCPUAllocator(),
       /*resizable=*/true);
 
-  if (is_endian_independent) {
+  if (scalar_type == at::kByte || scalar_type == at::kChar) {
     memcpy(storage->mutable_data(), src + offset, count);
   } else if (scalar_type == at::kBool) {
     // Because of ASAN checks, that are failing whenever

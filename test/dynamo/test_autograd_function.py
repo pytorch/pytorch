@@ -207,7 +207,7 @@ class ContextMarkAndSave(torch.autograd.Function):
 
 class ModuleWithGradFunc(torch.nn.Module):
     def __init__(self, func):
-        super().__init__()
+        super(ModuleWithGradFunc, self).__init__()
         self.f = func.apply
 
     def forward(self, x):
@@ -336,7 +336,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         class MyMod(torch.nn.Module):
             def __init__(self):
-                super().__init__()
+                super(MyMod, self).__init__()
                 self.gamma = torch.nn.Parameter(torch.rand([4, 128, 32, 32]))
 
             def forward(self, x):

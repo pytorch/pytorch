@@ -2,9 +2,8 @@
 # for benchmarking and some control flow stripped out.
 # https://github.com/mlperf/training/blob/master/rnn_translator/pytorch/seq2seq/models/attention.py
 
-import torch
-
 from . import benchmark
+import torch
 
 
 class BahdanauAttention(benchmark.Benchmark):

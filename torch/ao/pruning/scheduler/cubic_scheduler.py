@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import warnings
 
 from .base_scheduler import BaseScheduler

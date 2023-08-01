@@ -1188,7 +1188,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 3)  # rand, rand
         try:
-            graph, _ = torch._dynamo.export(fn)()
+            graph, _ = torch._dynamo.export(fn)
             # See https://github.com/pytorch/pytorch/pull/87490
             self.fail("unexpected export success")
         except torch._dynamo.exc.Unsupported:
@@ -2632,7 +2632,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # https://github.com/pytorch/pytorch/issues/93781
         @torch.compile
         def f():
-            _generator_type = type(_ for _ in ())
+            _generator_type = type((_ for _ in ()))
 
         self.assertNoUnraisable(f)
 
@@ -2650,11 +2650,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 6)
         self.assertEqual(cnt.frame_count, 1)
 
-        exported, _ = torch._dynamo.export(f)(torch.Tensor([3, 4, 5]))
+        exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
 
         with self.assertRaisesRegex(RuntimeError, "First dim need to be 3"):
-            exported, _ = torch._dynamo.export(f)(torch.Tensor([4, 4, 5]))
+            exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
 
     def test_not_rewrite_assert_for_other_errors(self):
         def f(x):
@@ -2668,17 +2668,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(ValueError, "input sum needs to be 3"):
             opt_fn(*args)
 
-    def test_rewrite_assert_dont_change_bytecode(self):
-        def fn(x):
-            with torch.no_grad():
-                assert x.max() < 5, f"invalid max {x.max()}"
-                x = torch.sin(x)
-            return x
-
-        x = torch.ones(4)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
-        self.assertTrue(same(fn(x), opt_fn(x)))
-
     def test_rewrite_assert_without_msg(self):
         def f(x):
             b = x.sin()
@@ -2686,11 +2675,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return x.cos() + b
 
         args = (torch.Tensor([3, 4, 5]),)
-        exported, _ = torch._dynamo.export(f)(torch.Tensor([3, 4, 5]))
+        exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
 
         with self.assertRaisesRegex(RuntimeError, "assertion error"):
-            exported, _ = torch._dynamo.export(f)(torch.Tensor([4, 4, 5]))
+            exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
 
     def test_rewrite_assert_with_non_string_msg(self):
         def f(x):
@@ -2718,7 +2707,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return x.cos() + b
 
         args = (torch.Tensor([3, 4, 5]),)
-        exported, _ = torch._dynamo.export(f)(torch.Tensor([3, 4, 5]))
+        exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
 
         cnt = torch._dynamo.testing.CompileCounter()
@@ -2728,7 +2717,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 3)
         self.assertEqual(cnt.frame_count, 1)
 
-        exported, _ = torch._dynamo.export(f)(torch.Tensor([4, 4, 5]))
+        exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
 
     def test_size_typematch(self):
@@ -2885,7 +2874,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         inp = torch.randn(6, 5)
 
-        gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.randn(4, 5))
+        gm, _ = torch._dynamo.export(f, torch.randn(4, 5), aten_graph=True)
         self.assertEqual(gm(inp).shape, f(inp).shape)
 
     @torch._dynamo.config.patch("specialize_int", False)
@@ -3058,10 +3047,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         gm, _ = torch._dynamo.export(
             f,
-            aten_graph=True,
-        )(
             torch.zeros(6, 4),
             torch.tensor(1),
+            aten_graph=True,
         )
         self.assertEqual(
             f(torch.zeros(6, 4), torch.tensor(1)),
@@ -3159,9 +3147,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         gm, _ = torch._dynamo.export(
             f,
-            aten_graph=True,
-        )(
             torch.zeros(6, 4),
+            aten_graph=True,
         )
 
         self.assertEqual(f(torch.ones(8, 4)), gm(torch.ones(8, 4)))
@@ -3431,18 +3418,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return torch.compile(fn, backend="eager")
 
         make_fn(None)()
-
-    def test_string_format(self):
-        s = "temp{i}"
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            if s.format(i=4) == "temp4":
-                return torch.sin(x)
-            return torch.cos(x)
-
-        x = torch.randn(4)
-        self.assertEqual(fn(x), torch.sin(x))
 
 
 if __name__ == "__main__":

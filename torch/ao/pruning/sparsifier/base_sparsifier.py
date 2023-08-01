@@ -201,7 +201,8 @@ class BaseSparsifier(abc.ABC):
                         )
                         # info_from_tensor_fqn will chop leading '.' from tensor_fqn so ignore that
                     ), (
-                        f"Given both `{key}` and `tensor_fqn` in the config, it is expected them to agree!"
+                        "Given both `{}` and `tensor_fqn` in the config, it is expected them to "
+                        "agree!".format(key)
                     )
             local_args.update(info_from_tensor_fqn)
             self.groups.append(local_args)

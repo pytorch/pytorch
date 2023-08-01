@@ -32,8 +32,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     This subclass stores the dense tensor in a compressed form by only storing the specified elements and corresponding metadata.
     These two are stored next to each other in one contiguous tensor.
 
-    We choose to store the specified elements and the metadata in a single tensor for compatibilty with cuSPARSELt,
-    which expects the datat to be stored in this format.
+    We choose to store the specified elements and the metadata in a single tensor for compatibilty with cuSPARSELt, which expects the datat to be stored in this format.
 
     compressed tensor = [ specified elements of original tensor | metadata ]
 
@@ -139,22 +138,28 @@ class SparseSemiStructuredTensor(torch.Tensor):
             # check device
             if not original_tensor.is_cuda:
                 raise RuntimeError(
-                    f"Error original_tensor.device= {original_tensor.device} is not supported! "
-                    "Only CUDA tensors are currently supported."
+                    (
+                        f"Error original_tensor.device= {original_tensor.device} is not supported! "
+                        "Only CUDA tensors are currently supported."
+                    )
                 )
 
             # check dim
             if original_tensor.dim() != 2:
                 raise RuntimeError(
-                    f"Error original_tensor.dim = {original_tensor.dim()} is not supported! "
-                    "Only 2d tensors are currently supported."
+                    (
+                        f"Error original_tensor.dim = {original_tensor.dim()} is not supported! "
+                        "Only 2d tensors are currently supported."
+                    )
                 )
 
             # check dtype
             if original_tensor.dtype not in _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG:
                 raise RuntimeError(
-                    f"Error original_tensor.dtype {original_tensor.dtype} is not a supported dtype! "
-                    "dtype must be one of: {_DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG}"
+                    (
+                        f"Error original_tensor.dtype {original_tensor.dtype} is not a supported dtype! "
+                        "dtype must be one of: {_DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG}"
+                    )
                 )
 
             # check shape
@@ -168,8 +173,10 @@ class SparseSemiStructuredTensor(torch.Tensor):
             if m < min_rows or m % min_rows or n < min_cols or n % min_cols:
                 # TODO in the future we can add in padding to support dimensions that aren't perfect multiples
                 raise RuntimeError(
-                    f"Error original_tensor.shape {original_tensor.shape} is not supported! "
-                    "Both dimensions must be larger or equal than and a multiple of ({min_rows}, {min_cols})"
+                    (
+                        f"Error original_tensor.shape {original_tensor.shape} is not supported! "
+                        "Both dimensions must be larger or equal than and a multiple of ({min_rows}, {min_cols})"
+                    )
                 )
 
             if self._FORCE_CUTLASS:
@@ -283,7 +290,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                     )
                 else:
                     return torch._cslt_sparse_mm(
-                        input_B.compressed_tensor, input_A.T, bias  # type: ignore[arg-type]
+                        input_B.compressed_tensor, input_A.T, bias
                     ).t()
 
         # handle mm
@@ -297,7 +304,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                     ).t()
                 else:
                     return torch._cslt_sparse_mm(
-                        input_A.compressed_tensor, input_B, None  # type: ignore[arg-type]
+                        input_A.compressed_tensor, input_B, None
                     )
 
             elif isinstance(input_B, cls) and input_B.transposed:
@@ -306,7 +313,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                         input_A, input_B.values(), input_B.indices()
                     )
                 else:
-                    return torch._cslt_sparse_mm(input_B.compressed_tensor, input_A.T, None).t()  # type: ignore[arg-type]
+                    return torch._cslt_sparse_mm(input_B.compressed_tensor, input_A.T, None).t()
 
         # When torch is run with inference mode, pytorch does not decompose torch.ops.aten.linear into a .t() and addmm(),
         # so we must match the aten.linear op. In this case, we need to explicitly handle collapsing to 2d matmul
@@ -324,8 +331,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
                     )
                 else:
                     return torch._cslt_sparse_mm(
-                        weight.compressed_tensor,  # type: ignore[arg-type]
-                        input_tensor.view(-1, shape[-1]).t(),
+                        weight.compressed_tensor,
+                        input_tensor.view(-1, shape[-1]).T,
                         bias
                     ).t().view(*shape[:-1], -1)
 

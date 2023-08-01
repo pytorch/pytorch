@@ -1,6 +1,5 @@
-import torch
-
 import operator_benchmark as op_bench
+import torch
 
 
 """Microbenchmarks for channel_shuffle operator."""
@@ -14,7 +13,7 @@ channel_shuffle_long_configs = op_bench.cross_product_configs(
     width=[32, 64],
     groups=[4, 8],
     channel_last=[True, False],
-    tags=["long"],
+    tags=["long"]
 )
 
 
@@ -31,7 +30,7 @@ channel_shuffle_short_configs = op_bench.config_list(
     cross_product_configs={
         "channel_last": [True, False],
     },
-    tags=["short"],
+    tags=["short"]
 )
 
 
@@ -42,17 +41,18 @@ class ChannelSHuffleBenchmark(op_bench.TorchBenchmarkBase):
         input_data = torch.rand(data_shape)
         if channel_last:
             input_data = input_data.contiguous(memory_format=torch.channels_last)
-        self.inputs = {"input_data": input_data, "groups": groups}
-        self.set_module_name("channel_shuffle")
+        self.inputs = {
+            "input_data": input_data,
+            "groups": groups
+        }
+        self.set_module_name('channel_shuffle')
 
     def forward(self, input_data, groups: int):
         return torch.channel_shuffle(input_data, groups)
 
 
-op_bench.generate_pt_test(
-    channel_shuffle_short_configs + channel_shuffle_long_configs,
-    ChannelSHuffleBenchmark,
-)
+op_bench.generate_pt_test(channel_shuffle_short_configs + channel_shuffle_long_configs,
+                          ChannelSHuffleBenchmark)
 
 
 if __name__ == "__main__":

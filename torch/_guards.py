@@ -4,7 +4,6 @@ import dataclasses
 import enum
 import functools
 import logging
-import threading
 import traceback
 import unittest.mock
 import weakref
@@ -441,7 +440,7 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.dynamo_guards = state.dynamo_guards
 
 
-_TLS = threading.local()
+_CURRENT_TRACING_CONTEXT = None
 
 """
 TracingContext is the source of truth for all currently accumulated information
@@ -472,7 +471,7 @@ class TracingContext:
 
     @staticmethod
     def get() -> Optional["TracingContext"]:
-        return getattr(_TLS, "tracing_context", None)
+        return _CURRENT_TRACING_CONTEXT
 
     def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
@@ -564,12 +563,13 @@ Calls to TracingContext.get() while not under a `with tracing()` context will re
 
 @contextmanager
 def tracing(context: TracingContext):
-    old_context = getattr(_TLS, "tracing_context", None)
-    _TLS.tracing_context = context
+    global _CURRENT_TRACING_CONTEXT
+    old_context = _CURRENT_TRACING_CONTEXT
+    _CURRENT_TRACING_CONTEXT = context
     try:
-        yield context
+        yield _CURRENT_TRACING_CONTEXT
     finally:
-        _TLS.tracing_context = old_context
+        _CURRENT_TRACING_CONTEXT = old_context
 
 
 # Subclasses can be found in torch/_dynamo/source.py
@@ -638,11 +638,9 @@ def detect_fake_mode(inputs: Any = None):
     if fake_modes:
         fake_mode, desc1, i1 = fake_modes[0]
         for m, desc2, i2 in fake_modes[1:]:
-            assert fake_mode is m, (
-                f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
-                f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
-                f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
-            )
+            assert (
+                fake_mode is m
+            ), f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}"
         return fake_mode
     else:
         return None

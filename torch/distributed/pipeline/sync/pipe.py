@@ -218,7 +218,7 @@ def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[tor
     return partitions, devices
 
 
-MOVING_DENIED = TypeError("denied to move parameters and buffers, because Pipe should manage device placement")
+MOVING_DENIED = TypeError("denied to move parameters and buffers, " "because Pipe should manage device placement")
 
 
 class Pipe(Module):

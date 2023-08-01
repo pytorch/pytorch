@@ -75,7 +75,7 @@ def visualize_graph_executor(state, name_prefix, pb_graph, inline_graph):
                   executors_it=iter(state.autograd_fallback.executors()))
 
     for i, (arg_spec, plan) in enumerate(state.execution_plans.items()):
-        subgraph_name = name_prefix + f'plan{i}/'
+        subgraph_name = name_prefix + 'plan{}/'.format(i)
 
         # Create a disconnected node that will keep information regarding the input
         # types of this trace. This is unfortunately a bit too verbose to be included

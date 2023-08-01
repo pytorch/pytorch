@@ -842,11 +842,6 @@ class TestOptim(TestCase):
             (optim.NAdam, dict(weight_decay=1.0, momentum_decay=6e-3)),
             (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3)),
             (optim.NAdam, dict(weight_decay=0.01, momentum_decay=4e-3)),
-            (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3, decoupled_weight_decay=True)),
-            (
-                optim.NAdam,
-                dict(weight_decay=0.01, momentum_decay=4e-3, decoupled_weight_decay=True),
-            ),
             (
                 optim.SGD,
                 dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True),
@@ -854,14 +849,6 @@ class TestOptim(TestCase):
             (
                 optim.SGD,
                 dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False),
-            ),
-            (
-                optim.SGD,
-                dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True, maximize=True),
-            ),
-            (
-                optim.SGD,
-                dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False, maximize=True),
             ),
             (optim.RAdam, dict(weight_decay=0, eps=1e-6)),
             (optim.RAdam, dict(weight_decay=0)),
@@ -913,7 +900,7 @@ class TestOptim(TestCase):
         configs = [
             (o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ in [
                 "Adadelta", "Adagrad", "Adamax", "Adam", "AdamW", "ASGD", "NAdam",
-                "RAdam", "RMSprop", "SGD"
+                "RAdam", "RMSprop"
             ]
         ]
         self._test_foreach_memory(configs)
@@ -1090,10 +1077,8 @@ class TestOptim(TestCase):
             constructor_accepts_foreach=True,
         )
         self._test_complex_2d(optim.Adam)
-        self._test_complex_2d(functools.partial(optim.Adam, foreach=False))
-        self._test_complex_2d(functools.partial(optim.Adam, foreach=False, amsgrad=True))
-        self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2))
-        self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2, amsgrad=True))
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=True))
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=True, weight_decay=0.2))
 
         with self.assertRaisesRegex(
             ValueError, "Invalid beta parameter at index 0: 1.0"
@@ -1145,10 +1130,7 @@ class TestOptim(TestCase):
             constructor_accepts_foreach=True,
         )
         self._test_complex_2d(optim.AdamW)
-        self._test_complex_2d(functools.partial(optim.AdamW, foreach=False))
-        self._test_complex_2d(functools.partial(optim.AdamW, foreach=False, amsgrad=True))
-        self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2))
-        self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2, amsgrad=True))
+        self._test_complex_2d(functools.partial(optim.AdamW, foreach=True))
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.AdamW(None, lr=1e-2, weight_decay=-1)
 
@@ -1257,30 +1239,6 @@ class TestOptim(TestCase):
                 lr=1e-3,
                 weight_decay=0.1,
                 momentum_decay=6e-3,
-                foreach=foreach,
-            ),
-            [lambda opt: ExponentialLR(opt, gamma=0.9)],
-            constructor_accepts_foreach=True,
-        )
-        # NAdamW tests
-        self._test_basic_cases(
-            lambda weight, bias, foreach: optim.NAdam(
-                [weight, bias],
-                lr=1e-3,
-                weight_decay=0.1,
-                momentum_decay=6e-3,
-                decoupled_weight_decay=True,
-                foreach=foreach,
-            ),
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, foreach: optim.NAdam(
-                [weight, bias],
-                lr=1e-3,
-                weight_decay=0.1,
-                momentum_decay=6e-3,
-                decoupled_weight_decay=True,
                 foreach=foreach,
             ),
             [lambda opt: ExponentialLR(opt, gamma=0.9)],
@@ -1743,8 +1701,8 @@ class TestOptim(TestCase):
 
         num_tensors = 5
         for functional_optim, amsgrad, no_grad_scale in itertools.product((adam.adam, adamw.adamw), (False, True), (False, True)):
-            params, grads, exp_avgs, exp_avg_sqs = (
-                [torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4))
+            params, grads, exp_avgs, exp_avg_sqs = [
+                [torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4)]
             prev_params = [t.clone().detach() for t in params]
             max_exp_avg_sqs = [torch.ones((1,), device="cuda") for _ in range(num_tensors)] if amsgrad else []
             state_steps = [torch.ones((), dtype=torch.float32, device="cuda") for _ in range(num_tensors)]
@@ -1912,99 +1870,6 @@ class TestOptim(TestCase):
                 optimizer_ctor([torch.empty((), device="cuda")], foreach=True, fused=True)
             with self.assertRaisesRegex(RuntimeError, "`fused` does not support `differentiable`"):
                 optimizer_ctor([torch.empty((), device="cuda")], differentiable=True, fused=True)
-
-    @staticmethod
-    def _state_dict_pre_hook(optimizer: Optimizer) -> None:
-        optimizer.state["test"] = 1
-
-    @staticmethod
-    def _state_dict_post_hook(optimizer: Optimizer, state_dict: Dict[str, Any]) -> Dict[str, Any]:
-        if "test" in state_dict["state"]:
-            state_dict["state"].pop("test")
-            state_dict["ran_state_dict_pre_hook"] = True
-        else:
-            state_dict["ran_state_dict_pre_hook"] = False
-        return state_dict
-
-    @staticmethod
-    def _load_state_dict_pre_hook1(optimizer: Optimizer, state_dict: Dict[str, Any]) -> None:
-        state_dict["param_groups"][0]["lr"] = 0.002
-
-    @staticmethod
-    def _load_state_dict_pre_hook2(optimizer: Optimizer, state_dict: Dict[str, Any]) -> Dict[str, Any]:
-        # The typical use case for returning a state dict is to drastically modify the state dict.
-        # I will simulate by simply making a deep copy and ensuring that my_state_dict still gets used
-        my_state_dict = deepcopy(state_dict)
-        my_state_dict["param_groups"][0]["lr"] = 0.003
-        return my_state_dict
-
-    @staticmethod
-    def _load_state_dict_post_hook(optimizer: Optimizer) -> None:
-        optimizer.state["ran_load_state_dict_pre_hook2"] = optimizer.param_groups[0]["lr"] == 0.003
-        optimizer.state["ran_load_state_dict_post_hook"] = True
-
-    def test_state_dict_pre_hook(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-        opt.register_state_dict_pre_hook(self._state_dict_pre_hook)
-        state_dict = opt.state_dict()
-        self.assertEqual(state_dict["state"]["test"], 1)
-
-    def test_state_dict_post_hook(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-        opt.register_state_dict_post_hook(self._state_dict_post_hook)
-        state_dict = opt.state_dict()
-        self.assertEqual(state_dict["ran_state_dict_pre_hook"], False)
-
-    def test_state_dict_pre_post_hook(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-        opt.register_state_dict_pre_hook(self._state_dict_pre_hook)
-        opt.register_state_dict_post_hook(self._state_dict_post_hook)
-        state_dict = opt.state_dict()
-        self.assertFalse("test" in state_dict["state"])
-        self.assertEqual(state_dict["ran_state_dict_pre_hook"], True)
-
-    def test_load_state_dict_pre_hook_and_prepend(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-        state_dict = opt.state_dict()
-
-        # usually one would have a new opt instance here, but it's all the same here
-        opt.register_load_state_dict_pre_hook(self._load_state_dict_pre_hook1)
-        opt.load_state_dict(state_dict)
-        self.assertEqual(opt.param_groups[0]["lr"], 0.002)
-
-        opt.register_load_state_dict_pre_hook(self._load_state_dict_pre_hook2, prepend=True)
-        opt.load_state_dict(state_dict)
-        # If prepend were False would be 0.003 but since prepend is True, the other hook overrides
-        self.assertEqual(opt.param_groups[0]["lr"], 0.002)
-
-    def test_load_state_dict_post_hook(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-
-        opt.register_load_state_dict_post_hook(self._load_state_dict_post_hook)
-        opt.load_state_dict(opt.state_dict())
-        self.assertFalse(opt.state["ran_load_state_dict_pre_hook2"])
-        self.assertTrue(opt.state["ran_load_state_dict_post_hook"])
-
-    def test_load_state_dict_pre_post_hook(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-
-        opt.register_load_state_dict_pre_hook(self._load_state_dict_pre_hook2)
-        opt.register_load_state_dict_post_hook(self._load_state_dict_post_hook)
-        opt.load_state_dict(opt.state_dict())
-        self.assertTrue(opt.state["ran_load_state_dict_pre_hook2"])
-        self.assertTrue(opt.state["ran_load_state_dict_post_hook"])
 
 
 def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
@@ -2264,18 +2129,6 @@ class TestDifferentiableOptimizer(TestCase):
                 state,
                 torch.optim.NAdam,
                 {"lr": 0.9, "differentiable": True},
-                *state.values(),
-            ),
-        )
-
-        gradcheck(
-            _diff_fn,
-            (
-                p,
-                grad,
-                state,
-                torch.optim.NAdam,
-                {"lr": 0.9, "decoupled_weight_decay": True, "differentiable": True},
                 *state.values(),
             ),
         )

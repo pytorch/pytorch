@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Adds docstrings to functions defined in the torch._C"""
 
 import re
@@ -3043,7 +3044,6 @@ resolve_neg(input) -> Tensor
 
 Returns a new tensor with materialized negation if :attr:`input`'s negative bit is set to `True`,
 else returns :attr:`input`. The output tensor will always have its negative bit set to `False`.
-
 Args:
     {input}
 
@@ -3054,11 +3054,12 @@ Example::
     >>> z = y.imag
     >>> z.is_neg()
     True
-    >>> out = z.resolve_neg()
+    >>> out = y.resolve_neg()
     >>> out
-    tensor([-1., -2., 3.])
+    tensor([-1, -2, -3])
     >>> out.is_neg()
     False
+
 """.format(
         **common_args
     ),
@@ -11996,21 +11997,19 @@ Example::
 add_docstr(
     torch.fake_quantize_per_channel_affine,
     r"""
-fake_quantize_per_channel_affine(input, scale, zero_point, axis, quant_min, quant_max) -> Tensor
+fake_quantize_per_channel_affine(input, scale, zero_point, quant_min, quant_max) -> Tensor
 
 Returns a new tensor with the data in :attr:`input` fake quantized per channel using :attr:`scale`,
 :attr:`zero_point`, :attr:`quant_min` and :attr:`quant_max`, across the channel specified by :attr:`axis`.
 
 .. math::
-    \text{output} = (
-        min(
-            \text{quant\_max},
-            max(
-                \text{quant\_min},
-                \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
-            )
-        ) - \text{zero\_point}
-    ) \times \text{scale}
+    \text{output} = min(
+        \text{quant\_max},
+        max(
+            \text{quant\_min},
+            \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
+        )
+    )
 
 Args:
     input (Tensor): the input value(s), in ``torch.float32``
@@ -14053,19 +14052,23 @@ for unary_base_func_name in (
     if hasattr(torch, unary_foreach_func_name):
         add_docstr(
             getattr(torch, unary_foreach_func_name),
-            rf"""
-{unary_foreach_func_name}(self: List[Tensor]) -> List[Tensor]
+            r"""
+{}(self: List[Tensor]) -> List[Tensor]
 
-Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
-            """,
+Apply :func:`torch.{}` to each Tensor of the input list.
+            """.format(
+                unary_foreach_func_name, unary_base_func_name
+            ),
         )
     unary_inplace_foreach_func_name = f"{unary_foreach_func_name}_"
     if hasattr(torch, unary_inplace_foreach_func_name):
         add_docstr(
             getattr(torch, unary_inplace_foreach_func_name),
-            rf"""
-{unary_inplace_foreach_func_name}(self: List[Tensor]) -> None
+            r"""
+{}(self: List[Tensor]) -> None
 
-Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
-        """,
+Apply :func:`torch.{}` to each Tensor of the input list.
+        """.format(
+                unary_inplace_foreach_func_name, unary_base_func_name
+            ),
         )

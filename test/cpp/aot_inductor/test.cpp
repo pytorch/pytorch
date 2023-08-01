@@ -3,8 +3,8 @@
 #include <vector>
 
 #include <c10/cuda/CUDAStream.h>
-#include <torch/csrc/inductor/aot_inductor_interface.h>
 #include <torch/torch.h>
+#include "aot_inductor_interface.h"
 
 namespace torch {
 namespace aot_inductor {

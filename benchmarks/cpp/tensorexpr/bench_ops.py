@@ -1,5 +1,4 @@
 import timeit
-
 import torch
 import torch.nn.functional as F
 
@@ -47,7 +46,7 @@ unary_ops = [
     torch.lgamma,
 ]
 
-print(f"{'op':20s} {'eager':>10s} {'nnc':>10s} {'speedup':>10s}")
+print("{:20s} {:>10s} {:>10s} {:>10s}".format("op", "eager", "nnc", "speedup"))
 
 for op in unary_ops:
     x = torch.rand((1024, 1024))
@@ -68,10 +67,9 @@ for op in unary_ops:
     tjit = timeit.timeit(stmt="traced(x)", globals=globals(), number=bench_iters)
     print(f"{op.__name__:20s} {teager:10.3f} {tjit:10.3f} {teager/tjit:10.2f}")
 
-
 def test_batch_norm():
     op = F.batch_norm
-    print(f"{'op':20s} {'shape':20s} {'eager':>10s} {'nnc':>10s} {'speedup':>10s}")
+    print("{:20s} {:20s} {:>10s} {:>10s} {:>10s}".format("op", "shape", "eager", "nnc", "speedup"))
     batch_norm_shapes = [
         [1, 64, 112, 112],
         [1, 256, 14, 14],
@@ -82,12 +80,11 @@ def test_batch_norm():
         [5, 256, 14, 14],
         [5, 128, 28, 28],
         [5, 64, 56, 56],
-        [5, 512, 7, 7],
-    ]
+        [5, 512, 7, 7]]
     for n, c, h, w in batch_norm_shapes:
         x = torch.rand((n, c, h, w))
-        y = torch.rand(c)
-        z = torch.rand(c)
+        y = torch.rand((c))
+        z = torch.rand((c))
         traced = torch.jit.trace(lambda x, y, z: op(x, y, z), (x, y, z))
 
         # Warmup.
@@ -102,12 +99,7 @@ def test_batch_norm():
         # Benchmark.
         bench_iters = 100
         teager = timeit.timeit(stmt="op(x, y, z)", globals=locals(), number=bench_iters)
-        tjit = timeit.timeit(
-            stmt="traced(x, y, z)", globals=locals(), number=bench_iters
-        )
-        print(
-            f"{op.__name__:20s} ({n:>3d}, {c:>3d}, {h:>3d}, {w:>3d}) {teager:10.3f} {tjit:10.3f} {teager/tjit:10.2f}"
-        )
-
+        tjit = timeit.timeit(stmt="traced(x, y, z)", globals=locals(), number=bench_iters)
+        print(f"{op.__name__:20s} ({n:>3d}, {c:>3d}, {h:>3d}, {w:>3d}) {teager:10.3f} {tjit:10.3f} {teager/tjit:10.2f}")
 
 test_batch_norm()
