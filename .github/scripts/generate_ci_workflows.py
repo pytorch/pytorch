@@ -212,7 +212,9 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.RELEASE,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS, generate_binary_build_matrix.RELEASE
+            OperatingSystem.WINDOWS,
+            generate_binary_build_matrix.RELEASE,
+            generate_shared_build_only=False,
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
