@@ -421,4 +421,4 @@ def _process_constraints(
     return range_constraints, equality_constraints
 
 def combine_args_kwargs(args, kwargs):
-    return (args, kwargs) if kwargs else args
+    return (args, kwargs) if kwargs is not None else args
