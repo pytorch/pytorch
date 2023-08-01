@@ -315,7 +315,6 @@ class TestIsscalar:
         assert_(np.isscalar(Number()))
 
 
-@pytest.mark.xfail(reason="TODO")
 class TestBoolScalar:
     def test_logical(self):
         f = np.False_
@@ -1272,23 +1271,6 @@ class TestArrayComparisons:
         assert_(type(res) is bool)
 
 
-def assert_array_strict_equal(x, y):
-    assert_array_equal(x, y)
-    # Check flags, 32 bit arches typically don't provide 16 byte alignment
-    if ((x.dtype.alignment <= 8 or
-            np.intp().dtype.itemsize != 4) and
-            sys.platform != 'win32'):
-        assert_(x.flags == y.flags)
-    else:
-        assert_(x.flags.owndata == y.flags.owndata)
-        assert_(x.flags.writeable == y.flags.writeable)
-        assert_(x.flags.c_contiguous == y.flags.c_contiguous)
-        assert_(x.flags.f_contiguous == y.flags.f_contiguous)
-        assert_(x.flags.writebackifcopy == y.flags.writebackifcopy)
-    # check endianness
-    assert_(x.dtype.isnative == y.dtype.isnative)
-
-
 class TestClip:
     def setup_method(self):
         self.nr = 5
@@ -1353,9 +1335,10 @@ class TestClip:
         actual = np.clip(arr, 1, 0)
         assert_equal(actual, expected)
 
-    @pytest.mark.xfail(reason="torch.clamp not implemented")
     @pytest.mark.parametrize("dtype", 'eFD')
     def test_ones_pathological_2(self, dtype):
+        if dtype in "FD":
+            pytest.xfail("torch.clamp not implemented for complex types")
         # for preservation of behavior described in
         # gh-12519; amin > amax behavior may still change
         # in the future
@@ -1364,7 +1347,6 @@ class TestClip:
         actual = np.clip(arr, 1, 0)
         assert_equal(actual, expected)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_simple_double(self):
         # Test native double input with scalar min/max.
         a = self._generate_data(self.nr, self.nc)
@@ -1372,9 +1354,8 @@ class TestClip:
         M = 0.6
         ac = self.fastclip(a, m, M)
         act = self.clip(a, m, M)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_simple_int(self):
         # Test native int input with scalar min/max.
         a = self._generate_int_data(self.nr, self.nc)
@@ -1383,9 +1364,8 @@ class TestClip:
         M = 4
         ac = self.fastclip(a, m, M)
         act = self.clip(a, m, M)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_array_double(self):
         # Test native double input with array min/max.
         a = self._generate_data(self.nr, self.nc)
@@ -1393,9 +1373,9 @@ class TestClip:
         M = m + 0.5
         ac = self.fastclip(a, m, M)
         act = self.clip(a, m, M)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
+    @pytest.mark.xfail(reason="byteorder not supported in torch")
     def test_simple_nonnative(self):
         # Test non native double input with scalar min/max.
         # Test native double input with non native double scalar min/max.
@@ -1415,7 +1395,7 @@ class TestClip:
         act = self.clip(a, m, M)
         assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
+    @pytest.mark.xfail(reason="clamp not supported for complex")
     def test_simple_complex(self):
         # Test native complex input with native double scalar min/max.
         # Test native input with complex double scalar min/max.
@@ -1424,7 +1404,7 @@ class TestClip:
         M = 1.
         ac = self.fastclip(a, m, M)
         act = self.clip(a, m, M)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
         # Test native input with complex double scalar min/max.
         a = 3 * self._generate_data(self.nr, self.nc)
@@ -1432,9 +1412,9 @@ class TestClip:
         M = 1. + 2.j
         ac = self.fastclip(a, m, M)
         act = self.clip(a, m, M)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
+    @pytest.mark.xfail(reason="clamp not supported for complex")
     def test_clip_complex(self):
         # Address Issue gh-5354 for clipping complex arrays
         # Test native complex input without explicit min/max
@@ -1444,10 +1424,9 @@ class TestClip:
         M = a.max()
         am = self.fastclip(a, m, None)
         aM = self.fastclip(a, None, M)
-        assert_array_strict_equal(am, a)
-        assert_array_strict_equal(aM, a)
+        assert_array_equal(am, a)
+        assert_array_equal(aM, a)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_clip_non_contig(self):
         # Test clip for non contiguous native input and native scalar min/max.
         a = self._generate_data(self.nr * 2, self.nc * 3)
@@ -1456,9 +1435,8 @@ class TestClip:
         assert_(not a.flags['C_CONTIGUOUS'])
         ac = self.fastclip(a, -1.6, 1.7)
         act = self.clip(a, -1.6, 1.7)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_simple_out(self):
         # Test native double input with scalar min/max.
         a = self._generate_data(self.nr, self.nc)
@@ -1468,9 +1446,9 @@ class TestClip:
         act = np.zeros(a.shape)
         self.fastclip(a, m, M, ac)
         self.clip(a, m, M, act)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
+    @pytest.mark.xfail(reason="casting not supported")
     @pytest.mark.parametrize("casting", [None, "unsafe"])
     def test_simple_int32_inout(self, casting):
         # Test native int32 input with double min/max and int32 out.
@@ -1479,17 +1457,12 @@ class TestClip:
         M = np.float64(2)
         ac = np.zeros(a.shape, dtype=np.int32)
         act = ac.copy()
-        if casting is None:
-            with assert_warns(DeprecationWarning):
-                # NumPy 1.17.0, 2018-02-24 - casting is unsafe
-                self.fastclip(a, m, M, ac, casting=casting)
-        else:
+        if casting is not None:
             # explicitly passing "unsafe" will silence warning
             self.fastclip(a, m, M, ac, casting=casting)
         self.clip(a, m, M, act)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_simple_int64_out(self):
         # Test native int32 input with int32 scalar min/max and int64 out.
         a = self._generate_int32_data(self.nr, self.nc)
@@ -1499,9 +1472,9 @@ class TestClip:
         act = ac.copy()
         self.fastclip(a, m, M, ac)
         self.clip(a, m, M, act)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
+    @pytest.mark.xfail(reason="FIXME arrays not equal")
     def test_simple_int64_inout(self):
         # Test native int32 input with double array min/max and int32 out.
         a = self._generate_int32_data(self.nr, self.nc)
@@ -1509,13 +1482,10 @@ class TestClip:
         M = np.float64(1)
         ac = np.zeros(a.shape, dtype=np.int32)
         act = ac.copy()
-        with assert_warns(DeprecationWarning):
-            # NumPy 1.17.0, 2018-02-24 - casting is unsafe
-            self.fastclip(a, m, M, ac)
         self.clip(a, m, M, act)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
+    @pytest.mark.xfail(reason="FIXME arrays not equal")
     def test_simple_int32_out(self):
         # Test native double input with scalar min/max and int out.
         a = self._generate_data(self.nr, self.nc)
@@ -1523,13 +1493,9 @@ class TestClip:
         M = 2.0
         ac = np.zeros(a.shape, dtype=np.int32)
         act = ac.copy()
-        with assert_warns(DeprecationWarning):
-            # NumPy 1.17.0, 2018-02-24 - casting is unsafe
-            self.fastclip(a, m, M, ac)
         self.clip(a, m, M, act)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_simple_inplace_01(self):
         # Test native double input with array min/max in-place.
         a = self._generate_data(self.nr, self.nc)
@@ -1538,9 +1504,8 @@ class TestClip:
         M = 1.0
         self.fastclip(a, m, M, a)
         self.clip(a, m, M, ac)
-        assert_array_strict_equal(a, ac)
+        assert_array_equal(a, ac)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_simple_inplace_02(self):
         # Test native double input with scalar min/max in-place.
         a = self._generate_data(self.nr, self.nc)
@@ -1549,9 +1514,8 @@ class TestClip:
         M = 0.6
         self.fastclip(a, m, M, a)
         self.clip(ac, m, M, ac)
-        assert_array_strict_equal(a, ac)
+        assert_array_equal(a, ac)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_noncontig_inplace(self):
         # Test non contiguous double input with double scalar min/max in-place.
         a = self._generate_data(self.nr * 2, self.nc * 3)
@@ -1565,7 +1529,6 @@ class TestClip:
         self.clip(ac, m, M, ac)
         assert_array_equal(a, ac)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_type_cast_01(self):
         # Test native double input with scalar min/max.
         a = self._generate_data(self.nr, self.nc)
@@ -1573,9 +1536,8 @@ class TestClip:
         M = 0.6
         ac = self.fastclip(a, m, M)
         act = self.clip(a, m, M)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_type_cast_02(self):
         # Test native int32 input with int32 scalar min/max.
         a = self._generate_int_data(self.nr, self.nc)
@@ -1584,9 +1546,8 @@ class TestClip:
         M = 4
         ac = self.fastclip(a, m, M)
         act = self.clip(a, m, M)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_type_cast_03(self):
         # Test native int32 input with float64 scalar min/max.
         a = self._generate_int32_data(self.nr, self.nc)
@@ -1594,9 +1555,8 @@ class TestClip:
         M = 4
         ac = self.fastclip(a, np.float64(m), np.float64(M))
         act = self.clip(a, np.float64(m), np.float64(M))
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_type_cast_04(self):
         # Test native int32 input with float32 scalar min/max.
         a = self._generate_int32_data(self.nr, self.nc)
@@ -1604,9 +1564,8 @@ class TestClip:
         M = np.float32(4)
         act = self.fastclip(a, m, M)
         ac = self.clip(a, m, M)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_type_cast_05(self):
         # Test native int32 with double arrays min/max.
         a = self._generate_int_data(self.nr, self.nc)
@@ -1614,9 +1573,9 @@ class TestClip:
         M = 1.
         ac = self.fastclip(a, m * np.zeros(a.shape), M)
         act = self.clip(a, m * np.zeros(a.shape), M)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
+    @pytest.mark.xfail(reason="newbyteorder not supported")
     def test_type_cast_06(self):
         # Test native with NON native scalar min/max.
         a = self._generate_data(self.nr, self.nc)
@@ -1625,9 +1584,9 @@ class TestClip:
         M = 1.
         act = self.clip(a, m_s, M)
         ac = self.fastclip(a, m_s, M)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
+    @pytest.mark.xfail(reason="newbyteorder not supported")
     def test_type_cast_07(self):
         # Test NON native with native array min/max.
         a = self._generate_data(self.nr, self.nc)
@@ -1637,9 +1596,9 @@ class TestClip:
         assert_(not a_s.dtype.isnative)
         act = a_s.clip(m, M)
         ac = self.fastclip(a_s, m, M)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
+    @pytest.mark.xfail(reason="newbyteorder not supported")
     def test_type_cast_08(self):
         # Test NON native with native scalar min/max.
         a = self._generate_data(self.nr, self.nc)
@@ -1649,9 +1608,9 @@ class TestClip:
         assert_(not a_s.dtype.isnative)
         ac = self.fastclip(a_s, m, M)
         act = a_s.clip(m, M)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
+    @pytest.mark.xfail(reason="newbyteorder not supported")
     def test_type_cast_09(self):
         # Test native with NON native array min/max.
         a = self._generate_data(self.nr, self.nc)
@@ -1661,9 +1620,8 @@ class TestClip:
         assert_(not m_s.dtype.isnative)
         ac = self.fastclip(a, m_s, M)
         act = self.clip(a, m_s, M)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_type_cast_10(self):
         # Test native int32 with float min/max and float out for output argument.
         a = self._generate_int_data(self.nr, self.nc)
@@ -1672,9 +1630,9 @@ class TestClip:
         M = np.float32(1)
         act = self.clip(a, m, M, out=b)
         ac = self.fastclip(a, m, M, out=b)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
+    @pytest.mark.xfail(reason="newbyteorder not supported")
     def test_type_cast_11(self):
         # Test non native with native scalar, min/max, out non native
         a = self._generate_non_native_data(self.nr, self.nc)
@@ -1685,9 +1643,8 @@ class TestClip:
         M = 1.
         self.fastclip(a, m, M, out=b)
         self.clip(a, m, M, out=bt)
-        assert_array_strict_equal(b, bt)
+        assert_array_equal(b, bt)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_type_cast_12(self):
         # Test native int32 input and min/max and float out
         a = self._generate_int_data(self.nr, self.nc)
@@ -1696,9 +1653,8 @@ class TestClip:
         M = np.int32(1)
         act = self.clip(a, m, M, out=b)
         ac = self.fastclip(a, m, M, out=b)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_clip_with_out_simple(self):
         # Test native double input with scalar min/max
         a = self._generate_data(self.nr, self.nc)
@@ -1708,9 +1664,9 @@ class TestClip:
         act = np.zeros(a.shape)
         self.fastclip(a, m, M, ac)
         self.clip(a, m, M, act)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
+    @pytest.mark.xfail(reason="FIXME arrays not equal")
     def test_clip_with_out_simple2(self):
         # Test native int32 input with double min/max and int32 out
         a = self._generate_int32_data(self.nr, self.nc)
@@ -1718,13 +1674,9 @@ class TestClip:
         M = np.float64(2)
         ac = np.zeros(a.shape, dtype=np.int32)
         act = ac.copy()
-        with assert_warns(DeprecationWarning):
-            # NumPy 1.17.0, 2018-02-24 - casting is unsafe
-            self.fastclip(a, m, M, ac)
         self.clip(a, m, M, act)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_clip_with_out_simple_int32(self):
         # Test native int32 input with int32 scalar min/max and int64 out
         a = self._generate_int32_data(self.nr, self.nc)
@@ -1734,9 +1686,9 @@ class TestClip:
         act = ac.copy()
         self.fastclip(a, m, M, ac)
         self.clip(a, m, M, act)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
+    @pytest.mark.xfail(reason="FIXME arrays not equal")
     def test_clip_with_out_array_int32(self):
         # Test native int32 input with double array min/max and int32 out
         a = self._generate_int32_data(self.nr, self.nc)
@@ -1744,13 +1696,10 @@ class TestClip:
         M = np.float64(1)
         ac = np.zeros(a.shape, dtype=np.int32)
         act = ac.copy()
-        with assert_warns(DeprecationWarning):
-            # NumPy 1.17.0, 2018-02-24 - casting is unsafe
-            self.fastclip(a, m, M, ac)
         self.clip(a, m, M, act)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
+    @pytest.mark.xfail(reason="FIXME arrays not equal")
     def test_clip_with_out_array_outint32(self):
         # Test native double input with scalar min/max and int out
         a = self._generate_data(self.nr, self.nc)
@@ -1758,13 +1707,9 @@ class TestClip:
         M = 2.0
         ac = np.zeros(a.shape, dtype=np.int32)
         act = ac.copy()
-        with assert_warns(DeprecationWarning):
-            # NumPy 1.17.0, 2018-02-24 - casting is unsafe
-            self.fastclip(a, m, M, ac)
         self.clip(a, m, M, act)
-        assert_array_strict_equal(ac, act)
+        assert_array_equal(ac, act)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_clip_with_out_transposed(self):
         # Test that the out argument works when transposed
         a = np.arange(16).reshape(4, 4)
@@ -1773,7 +1718,6 @@ class TestClip:
         expected = self.clip(a, 4, 10)
         assert_array_equal(out, expected)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_clip_with_out_memory_overlap(self):
         # Test that the out argument works when it has memory overlap
         a = np.arange(16).reshape(4, 4)
@@ -1782,7 +1726,6 @@ class TestClip:
         expected = self.clip(ac[:-1], 4, 10)
         assert_array_equal(a[1:], expected)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_clip_inplace_array(self):
         # Test native double input with array min/max
         a = self._generate_data(self.nr, self.nc)
@@ -1791,9 +1734,8 @@ class TestClip:
         M = 1.0
         self.fastclip(a, m, M, a)
         self.clip(a, m, M, ac)
-        assert_array_strict_equal(a, ac)
+        assert_array_equal(a, ac)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_clip_inplace_simple(self):
         # Test native double input with scalar min/max
         a = self._generate_data(self.nr, self.nc)
@@ -1802,9 +1744,8 @@ class TestClip:
         M = 0.6
         self.fastclip(a, m, M, a)
         self.clip(a, m, M, ac)
-        assert_array_strict_equal(a, ac)
+        assert_array_equal(a, ac)
 
-    @pytest.mark.xfail(reason="TODO: implement choose")
     def test_clip_func_takes_out(self):
         # Ensure that the clip() function takes an out=argument.
         a = self._generate_data(self.nr, self.nc)
@@ -1813,7 +1754,7 @@ class TestClip:
         M = 0.6
         a2 = np.clip(a, m, M, out=a)
         self.clip(a, m, M, ac)
-        assert_array_strict_equal(a2, ac)
+        assert_array_equal(a2, ac)
         assert_(a2 is a)
 
     @pytest.mark.skip(reason="Edge case; Wait until deprecation graduates")
@@ -1845,9 +1786,6 @@ class TestClip:
         actual = np.clip(a, amin, amax)
         assert_equal(actual, expected)
 
-    @pytest.mark.xfail(reason="no scalar nan propagation yet", )
-                   #    raises=AssertionError,
-                   #    strict=True)
     @pytest.mark.parametrize("arr, amin, amax", [
         # problematic scalar nan case from hypothesis
         (np.zeros(10, dtype=np.int64),

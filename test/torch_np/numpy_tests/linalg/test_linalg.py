@@ -320,12 +320,10 @@ class LinalgNonsquareTestCase(LinalgTestCase):
 
 class HermitianTestCase(LinalgTestCase):
 
-    @pytest.mark.xfail(reason="zero-sized arrays")
     def test_herm_cases(self):
         self.check_cases(require={'hermitian'},
                          exclude={'generalized', 'size-0'})
 
-    @pytest.mark.xfail(reason="zero-sized arrays")
     def test_empty_herm_cases(self):
         self.check_cases(require={'hermitian', 'size-0'},
                          exclude={'generalized'})
@@ -338,7 +336,6 @@ class LinalgGeneralizedSquareTestCase(LinalgTestCase):
         self.check_cases(require={'generalized', 'square'},
                          exclude={'size-0'})
 
-    @pytest.mark.xfail(reason="zero-size arrays")
     @pytest.mark.slow
     def test_generalized_empty_sq_cases(self):
         self.check_cases(require={'generalized', 'square', 'size-0'})
@@ -364,7 +361,6 @@ class HermitianGeneralizedTestCase(LinalgTestCase):
         self.check_cases(require={'generalized', 'hermitian'},
                          exclude={'size-0'})
 
-    @pytest.mark.xfail(reason="zero-size arrays")
     @pytest.mark.slow
     def test_generalized_empty_herm_cases(self):
         self.check_cases(require={'generalized', 'hermitian', 'size-0'},
@@ -414,7 +410,7 @@ class TestSolve(SolveCases):
         x = np.array([[1, 0.5], [0.5, 1]], dtype=dtype)
         assert_equal(linalg.solve(x, x).dtype, dtype)
 
-    @pytest.mark.xfail(reason="zero-sized arrays")
+    @pytest.mark.skip(reason="subclass")
     def test_0_size(self):
         class ArraySubclass(np.ndarray):
             pass
@@ -448,7 +444,7 @@ class TestSolve(SolveCases):
         assert_raises(ValueError, linalg.solve, a[0:0], b[0:0])
         assert_raises(ValueError, linalg.solve, a[:, 0:0, 0:0], b)
 
-    @pytest.mark.xfail(reason="zero-sized arrays")
+    @pytest.mark.skip(reason="subclass")
     def test_0_size_k(self):
         # test zero multiple equation (K=0) case.
         class ArraySubclass(np.ndarray):
@@ -483,7 +479,7 @@ class TestInv(InvCases):
         x = np.array([[1, 0.5], [0.5, 1]], dtype=dtype)
         assert_equal(linalg.inv(x).dtype, dtype)
 
-    @pytest.mark.xfail(reason="zero-sized arrays")
+    @pytest.mark.skip(reason="subclass")
     def test_0_size(self):
         # Check that all kinds of 0-sized arrays work
         class ArraySubclass(np.ndarray):
@@ -518,7 +514,7 @@ class TestEigvals(EigvalsCases):
         x = np.array([[1, 0.5], [-1, 1]], dtype=dtype)
         assert_equal(linalg.eigvals(x).dtype, get_complex_dtype(dtype))
 
-    @pytest.mark.xfail(reason="zero-sized arrays")
+    @pytest.mark.skip(reason="subclass")
     def test_0_size(self):
         # Check that all kinds of 0-sized arrays work
         class ArraySubclass(np.ndarray):
@@ -561,7 +557,7 @@ class TestEig(EigCases):
         assert_equal(w.dtype, get_complex_dtype(dtype))
         assert_equal(v.dtype, get_complex_dtype(dtype))
 
-    @pytest.mark.xfail(reason="zero-sized arrays")
+    @pytest.mark.skip(reason="subclass")
     def test_0_size(self):
         # Check that all kinds of 0-sized arrays work
         class ArraySubclass(np.ndarray):
@@ -1034,6 +1030,7 @@ class TestMatrixPower:
 class TestEigvalshCases(HermitianTestCase, HermitianGeneralizedTestCase):
 
     def do(self, a, b, tags):
+        pytest.xfail(reason="sort complex")
         # note that eigenvalue arrays returned by eig must be sorted since
         # their order isn't guaranteed.
         ev = linalg.eigvalsh(a, 'L')
@@ -1102,6 +1099,7 @@ class TestEigvalsh:
 class TestEighCases(HermitianTestCase, HermitianGeneralizedTestCase):
 
     def do(self, a, b, tags):
+        pytest.xfail(reason="sort complex")
         # note that eigenvalue arrays returned by eig must be sorted since
         # their order isn't guaranteed.
         ev, evc = linalg.eigh(a)
