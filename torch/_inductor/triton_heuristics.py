@@ -398,11 +398,14 @@ class CachingAutotuner(KernelInterface):
             launcher.config.pre_hook(
                 {**zip(self.arg_names, args), **launcher.config.kwargs}
             )
-        return launcher(
-            *args,
-            grid=grid,
-            stream=stream,
-        )
+        with torch.profiler.record_function(
+            self.meta.get("kernel_name", "triton kernel")
+        ):
+            return launcher(
+                *args,
+                grid=grid,
+                stream=stream,
+            )
 
 
 def _find_names(obj):

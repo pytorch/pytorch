@@ -6,6 +6,7 @@ import itertools
 import logging
 import math
 import operator
+from enum import Enum
 from typing import Dict, Iterable, List, Set
 
 import sympy
@@ -1771,6 +1772,7 @@ class TritonKernel(Kernel):
             "constants": {},
             "mutated_arg_names": mutated_args,
             "autotune_hints": set(self.autotune_hints),
+            "kernel_name": "DESCRIPTIVE_KRNL_NAME",
         }
 
         for tree in self.range_trees:
@@ -2346,6 +2348,7 @@ class TritonScheduling:
             # use the original src_code as the key
             wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
+            src_code = src_code.replace("DESCRIPTIVE_KRNL_NAME", kernel_name)
             src_code = src_code.replace("KERNEL_NAME", subs_name)
 
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
