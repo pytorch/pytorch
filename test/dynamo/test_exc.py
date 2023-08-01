@@ -93,9 +93,10 @@ from user code:
     @make_logging_test()
     def test_internal_error_suppress_errors(self, records):
         def fn001(x):
-            @comptime
-            def _(ctx):
+            def f(ctx):
                 raise AssertionError()
+
+            comptime(f)
 
         torch.compile(fn001, backend="eager")(torch.randn(1))
 
@@ -107,13 +108,13 @@ from user code:
 WON'T CONVERT fn001 test_exc.py line N
 ========== TorchDynamo Stack Trace ==========
 Traceback (most recent call last):
-  File "test_exc.py", line N, in _
+  File "test_exc.py", line N, in f
     raise AssertionError()
 AssertionError:
 
 from user code:
    File "test_exc.py", line N, in fn001
-    def _(ctx):
+    comptime(f)
 
 
 ========== The above exception occurred while processing the following code ==========
@@ -123,7 +124,7 @@ from user code:
   File "test_exc.py", line N, in fn001
     def fn001(x):
   File "test_exc.py", line N, in fn001
-    def _(ctx):
+    comptime(f)
 
 ==========""",
         )
@@ -131,9 +132,12 @@ from user code:
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_internal_error_no_suppress(self):
         def fn001(x):
-            @comptime
-            def _(ctx):
+            # NB: avoid decorator, as 3.11 changed the line number attributed
+            # in this situation
+            def f(ctx):
                 raise AssertionError()
+
+            comptime(f)
 
         # NB: OK for user code to be truncated here, because the regular
         # exception backtrace has the rest of the crumbs
@@ -145,7 +149,7 @@ from user code:
 
 from user code:
    File "test_exc.py", line N, in fn001
-    def _(ctx):
+    comptime(f)
 """,
         )
 
@@ -186,11 +190,13 @@ Graph break: call_function graph_break in skip_files _dynamo/decorators.py from 
         # Do NOT let this get attributed to x + 1
         self.assertExpectedInlineMunged(
             torch._dynamo.exc.BackendCompilerFailed,
-            lambda: torch.compile(fn001, backend="relu_compile_error_TESTING_ONLY")(torch.randn(1)),
-            '''\
+            lambda: torch.compile(fn001, backend="relu_compile_error_TESTING_ONLY")(
+                torch.randn(1)
+            ),
+            """\
 backend='relu_compile_error_TESTING_ONLY' raised:
 ReluCompileError:
-'''
+""",
         )
 
 
