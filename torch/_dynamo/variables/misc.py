@@ -820,7 +820,6 @@ class NumpyVariable(VariableTracker):
     ) -> "VariableTracker":
         from ..utils import numpy_to_tensor_wrapper
 
-        from .builder import wrap_fx_proxy_cls
         from .tensor import NumpyNdarrayVariable
 
         options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
@@ -839,17 +838,12 @@ class NumpyVariable(VariableTracker):
 
             # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
             #  wrapped by NumpyNdarrayVariable which is wrong!
-            return wrap_fx_proxy_cls(
-                target_cls=NumpyNdarrayVariable,
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    numpy_to_tensor_wrapper(func),
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-                example_value=None,
-                **options,
+            proxy = tx.output.create_proxy(
+                "call_function",
+                numpy_to_tensor_wrapper(func),
+                *proxy_args_kwargs(args, kwargs),
             )
+            return NumpyNdarrayVariable.create(tx, proxy, **options)
 
     def call_method(
         self,

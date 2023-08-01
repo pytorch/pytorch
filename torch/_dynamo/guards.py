@@ -85,6 +85,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("__load_module", lambda name: importlib.import_module(name)),
         ("utils_device", torch.utils._device),
         ("device", torch.device),
+        ("__numpy_to_tensor", torch._dynamo.utils.numpy_to_tensor),
     ]
 )
 
@@ -569,11 +570,11 @@ class GuardBuilder(GuardBuilderBase):
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
-    def TENSOR_MATCH(self, guard: Guard):
+    def TENSOR_MATCH(self, guard: Guard, value=None):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
         else:
-            value = self.get(guard.name)
+            value = value if value is not None else self.get(guard.name)
             assert isinstance(value, torch.Tensor)
             tensor_name = self.arg_ref(guard)
             # [Note - On Export Tensor Guards]
