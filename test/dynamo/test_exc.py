@@ -16,18 +16,6 @@ from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_
 class ExcTests(LoggingTestCase):
     maxDiff = None
 
-    def assertExpectedInlineMunged(
-        self, exc_type, callable, expect, *, suppress_suffix=True
-    ):
-        try:
-            callable()
-        except exc_type as e:
-            self.assertExpectedInline(
-                munge_exc(e, suppress_suffix=suppress_suffix), expect, skip=1
-            )
-            return
-        self.fail(msg="Did not raise when expected to")
-
     def test_unsupported_real_stack(self):
         # exercise Unsupported constructor and augment_exc_message
         def fn002(x):
