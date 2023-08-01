@@ -195,24 +195,6 @@ def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module):
             )
 
 
-def _init_device_mesh(
-    root_state: _FSDPState,
-) -> Optional[DeviceMesh]:
-    # TODO: Remove it once we fully introduce device_mesh as an kwarg of FSDP.
-    # Temporarily keeping it here so MS folks can use it to build out support for 1D DTensor state_dict.
-    if root_state._device_mesh is not None:
-        return root_state._device_mesh
-    if root_state.process_group != dist.distributed_c10d._get_default_group():
-        return None
-    if get_backend() == "fake" or not root_state.compute_device:
-        return None
-
-    device_type = root_state.compute_device.type
-    mesh_tensor = torch.arange(get_world_size(root_state.process_group))
-    device_mesh = DeviceMesh(device_type, mesh_tensor, _validate_mesh=False)
-    return device_mesh
-
-
 @no_type_check
 def _share_state_and_init_handle_attrs(
     root_state: _FSDPState,
@@ -232,7 +214,6 @@ def _share_state_and_init_handle_attrs(
         attr_name_to_values[attr_name] = set()
     root_state._all_fsdp_states = traversal_utils._get_fsdp_states(root_module)
     root_state._all_handles = root_state._exec_order_data.all_handles  # share reference
-    root_state._device_mesh = _init_device_mesh(root_state)
     # Update _has_optim_in_backward for each handle.
     for handle in root_state._all_handles:
         flat_param = handle.flat_param
