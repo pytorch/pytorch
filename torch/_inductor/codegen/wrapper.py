@@ -147,10 +147,22 @@ class EnterCudaDeviceContextManagerLine:
     def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
         if V.graph.cpp_wrapper:
             code.writeline("\n")
-            if self.first_time:
-                code.writeline(f"at::cuda::CUDAGuard device_guard({self.device_idx});")
+            if V.graph.aot_mode:
+                # In AOT mode, we have a stream provided as a param. A stream is
+                # associated with a device, so we never expect the device to change.
+                assert self.first_time
+                # CUDAStreamGuard sets the stream and the device.
+                code.writeline(
+                    f"at::cuda::CUDAStreamGuard stream_guard("
+                    f"at::cuda::getStreamFromExternal(stream, {self.device_idx}));"
+                )
             else:
-                code.writeline(f"device_guard.set_index({self.device_idx});")
+                if self.first_time:
+                    code.writeline(
+                        f"at::cuda::CUDAGuard device_guard({self.device_idx});"
+                    )
+                else:
+                    code.writeline(f"device_guard.set_index({self.device_idx});")
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
@@ -1347,13 +1359,19 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                     int numWraps,
                     int sharedMemBytes,
                     void* args[],
-                    int device_index) {
+                    cudaStream_t stream) {
                 AT_CUDA_DRIVER_CHECK_OVERRIDE(cuLaunchKernel(
-                    func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes,
-                    at::cuda::getCurrentCUDAStream(device_index), args, nullptr));
+                    func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes, stream, args, nullptr));
             }
             """
         )
+
+    def write_get_cuda_stream(self, index):
+        name = f"stream{index}"
+        self.writeline(
+            f"cudaStream_t {name} = at::cuda::getCurrentCUDAStream({index});"
+        )
+        return name
 
     def define_kernel(
         self, name: str, kernel: str, metadata: Optional[str] = None, cuda=True
@@ -1426,6 +1444,9 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         call_args = self.generate_args_decl(call_args)
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
         self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
+        stream = (
+            "stream" if V.graph.aot_mode else self.write_get_cuda_stream(device_index)
+        )
         self.writeline(
             "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
                 name,
@@ -1435,6 +1456,6 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 params["num_warps"],
                 params["shared_mem"],
                 kernel_args_var,
-                device_index,
+                stream,
             )
         )
