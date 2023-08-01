@@ -1,7 +1,6 @@
 #define PY_SSIZE_T_CLEAN
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/utils/python_compat.h>
-#include <string.h>
 #include <opcode.h>
 #include <stdbool.h>
 
