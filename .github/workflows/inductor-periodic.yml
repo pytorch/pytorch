@@ -40,7 +40,7 @@ jobs:
           { config: "dynamic_aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
-    env:
+    secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ env.HUGGING_FACE_HUB_TOKEN }}
 
   linux-bionic-cuda12_1-py3_10-gcc9-periodic-dynamo-benchmarks-test:
@@ -52,5 +52,5 @@ jobs:
       docker-image: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
 
-    env:
+    secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ env.HUGGING_FACE_HUB_TOKEN }}

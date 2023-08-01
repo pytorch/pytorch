@@ -25,7 +25,7 @@ jobs:
           { config: "inductor_timm_perf_compare", shard: 2, num_shards: 2, runner: "linux.gcp.a100" },
           { config: "inductor_torchbench_perf_compare", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
         ]}
-    env:
+    secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ env.HUGGING_FACE_HUB_TOKEN }}
 
   linux-bionic-cuda11_8-py3_10-gcc7-inductor-test:
@@ -37,5 +37,5 @@ jobs:
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
-    env:
+    secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ env.HUGGING_FACE_HUB_TOKEN }}
