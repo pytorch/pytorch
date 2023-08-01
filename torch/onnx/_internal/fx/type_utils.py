@@ -31,9 +31,9 @@ class TensorLike(Protocol):
         ...
 
 
-def is_torch_complex_dtype(tensor: TensorLike) -> bool:
+def is_torch_complex_dtype(tensor_dtype: torch.dtype) -> bool:
     # NOTE: This is needed as TorchScriptTensor is nor supported by torch.is_complex()
-    return tensor.dtype in _COMPLEX_TO_FLOAT
+    return tensor_dtype in _COMPLEX_TO_FLOAT
 
 
 def from_complex_to_float(dtype: torch.dtype) -> torch.dtype:
@@ -82,11 +82,7 @@ def from_torch_dtype_to_abbr(dtype: Optional[torch.dtype]) -> str:
     return _TORCH_DTYPE_TO_ABBREVIATION.get(dtype, "")
 
 
-def from_scalar_type_to_torch_dtype(scalar_type: type) -> torch.dtype:
-    return _SCALAR_TYPE_TO_TORCH_DTYPE[scalar_type]
-
-
-def maybe_from_scalar_type_to_torch_dtype(scalar_type: type) -> Optional[torch.dtype]:
+def from_scalar_type_to_torch_dtype(scalar_type: type) -> Optional[torch.dtype]:
     return _SCALAR_TYPE_TO_TORCH_DTYPE.get(scalar_type)
 
 
@@ -109,6 +105,9 @@ _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: Dict[
     int: {"tensor(int16)", "tensor(int32)", "tensor(int64)"},
     float: {"tensor(float16)", "tensor(float)", "tensor(double)"},
     bool: {"tensor(int32)", "tensor(int64)", "tensor(bool)"},
+    torch.complex32: {"tensor(float16)"},
+    torch.complex64: {"tensor(float)"},
+    torch.complex128: {"tensor(double)"},
 }
 
 _PYTHON_TYPE_TO_TORCH_DTYPE = {

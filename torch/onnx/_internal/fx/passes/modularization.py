@@ -798,7 +798,7 @@ class Modularize(_pass.Transform):
         >>>         out = self.linear(out)
         >>>         return out
         >>>
-        >>> gm, _ = torch._dynamo.export(TestModule(), torch.tensor([0, 1, 2]), aten_graph=True)
+        >>> gm, _ = torch._dynamo.export(TestModule(), aten_graph=True)(torch.tensor([0, 1, 2]))
         >>> gm.print_readable()
 
         >>> gm = passes.Modularize(infra.DiagnosticContext("test_context", "1.0"), gm).run()
