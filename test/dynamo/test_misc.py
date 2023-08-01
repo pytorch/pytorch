@@ -49,7 +49,6 @@ from torch.fx.experimental.symbolic_shapes import (
     FloorDiv,
     Mod,
 )
-from torch.fx.experimental.validator import SympyToZ3, TranslationValidator
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
@@ -57,7 +56,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_MULTIGPU,
 )
-from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
+from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE, TEST_Z3
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
@@ -823,7 +822,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         v2 = torch.randn((10, 10))
         correct = fn(v1, v2)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize((cnts))(fn)
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertEqual(opt_fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
@@ -837,7 +836,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         v2 = torch.randn((10, 10))
         correct = fn(v1, v2)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize((cnts))(fn)
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertEqual(opt_fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -1283,6 +1282,21 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
 
     @requires_numpy_pytorch_interop
+    def test_numpy_ndarray_works_with_builtin_function(self):
+        def fn(x):
+            v = x.sum() / len(x)
+            return v
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        for _ in range(10):
+            x = np.random.randn(2, 3)
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
+
+    @requires_numpy_pytorch_interop
     def test_mandelbrot_numpy(self):
         def mandelbrot_numpy(max_iter):
             # Define the boundaries of the complex plane
@@ -1317,6 +1331,37 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             ref = mandelbrot_numpy(x.item())
             res = opt_fn(x.item())
             self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @requires_numpy_pytorch_interop
+    @torch._dynamo.config.patch(numpy_ndarray_as_tensor=True)
+    def test_numpy_on_cuda(self):
+        x = np.arange(10)
+
+        @torch.compile
+        def fn(x):
+            return x**2
+
+        with torch.device("cuda"):
+            r = fn(x)
+
+        self.assertEqual(type(r), np.ndarray)
+        self.assertEqual(r, x**2)
+
+    @requires_numpy_pytorch_interop
+    @torch._dynamo.config.patch(numpy_ndarray_as_tensor=True)
+    def test_numpy_as_global(self):
+        global x
+        x = np.arange(10)
+
+        @torch.compile(fullgraph=True)
+        def fn(y):
+            return y + x + x
+
+        r = fn(np.arange(10))
+        self.assertEqual(type(r), np.ndarray)
+        self.assertEqual(r, x * 3)
+        del x
 
     def test_graph_break_correctly_when_passing_numpy_ndarray_to_torch_function(self):
         # from transformers/models/big_bird/modeling_big_bird.py
@@ -2170,8 +2215,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             f = "linetable_writer"
             return f"Test if {f} generates correct co_linetable: {c}"
 
-        # Dynamo doesn't deal with column locations or end line numbers,
-        # so we only check that start line numbers in the linetables match.
         keys = bytecode_transformation.get_code_keys()
         code_options = {k: getattr(fn.__code__, k) for k in keys}
         result = bytecode_transformation.clean_and_assemble_instructions(
@@ -2182,8 +2225,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         l1, l2 = list(fn.__code__.co_positions()), list(result[1].co_positions())
         self.assertEqual(len(l1), len(l2))
         for p1, p2 in zip(l1, l2):
-            # check that start line numbers match
-            self.assertEqual(p1[0], p2[0])
+            self.assertEqual(p1, p2)
         self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
 
     @skipIfNotPy311
@@ -2202,7 +2244,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 def fn():
     foo.bar(1, 2, 3)
 {str(chr(10)).join(' ' * 4 + 'x' + str(i) + ' = 1' for i in range(1 << 9))}
-    l = [{str(' ').join('x' + str(i) + ',' for i in range(1 << 9))}]
+    l = [{' '.join('x' + str(i) + ',' for i in range(1 << 9))}]
         """
         locals = {}
         exec(fn_str, {}, locals)
@@ -2223,8 +2265,7 @@ def fn():
         l1, l2 = list(fn.__code__.co_positions()), list(result[1].co_positions())
         self.assertEqual(len(l1), len(l2))
         for p1, p2 in zip(l1, l2):
-            # check that start line numbers match
-            self.assertEqual(p1[0], p2[0])
+            self.assertEqual(p1, p2)
         self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
 
     @unittest.skipIf(
@@ -2342,6 +2383,36 @@ def fn():
         class MyEnum(enum.Enum):
             FOO = 10
             BAR = 20
+
+        def fn(x):
+            y = x + 2
+            z = {
+                MyEnum.FOO: torch.tensor(1),
+                MyEnum.BAR: 10,
+                "MyEnum.BAR": torch.tensor(8),
+                5: torch.rand(3),
+            }
+            torch._dynamo.graph_break()
+            a = z[MyEnum.FOO] + z["MyEnum.BAR"]
+            b = y * 2
+            return a, b
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        for _ in range(10):
+            x = torch.rand(3)
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_enum_as_dict_key_with_overloaded_str(self):
+        class MyEnum(enum.Enum):
+            FOO = 10
+            BAR = 20
+
+            def __str__(self):
+                return self.value
 
         def fn(x):
             y = x + 2
@@ -3057,7 +3128,7 @@ def fn():
                     memo=memo, prefix=prefix, remove_duplicate=remove_duplicate
                 ):
                     for pn, p in self.named_parameters():
-                        fpn = "%s.%s" % (mn, pn) if mn else pn
+                        fpn = f"{mn}.{pn}" if mn else pn
                         self.names.append(fpn)
 
         # Test plain recurse
@@ -3172,7 +3243,7 @@ def fn():
         def f(x):
             return 1 + torch._shape_as_tensor(x)[0]
 
-        gm, _ = torch._dynamo.export(f, torch.ones(6))
+        gm, _ = torch._dynamo.export(f)(torch.ones(6))
 
         input_one_dim = torch.ones(6)
         input_two_dims = torch.ones(7, 4)
@@ -3512,8 +3583,8 @@ def fn():
         def f(pred, pred2, x):
             return cond(pred, true_fn, false_fn, [pred2, x])
 
-        graph, guard = torch._dynamo.export(
-            f, torch.tensor(False), torch.tensor(True), torch.tensor([0.25, 0.25])
+        graph, guard = torch._dynamo.export(f)(
+            torch.tensor(False), torch.tensor(True), torch.tensor([0.25, 0.25])
         )
         true_true_sin = graph(
             torch.tensor(True), torch.tensor(True), torch.tensor([0.25, 0.25])
@@ -3551,8 +3622,8 @@ def fn():
         def f(pred, x):
             return cond(pred, true_fn, false_fn, [x])
 
-        graph, guard = torch._dynamo.export(
-            f, torch.tensor(False), torch.tensor([0.25, 0.25])
+        graph, guard = torch._dynamo.export(f)(
+            torch.tensor(False), torch.tensor([0.25, 0.25])
         )
         true_mirror = graph(torch.tensor(True), torch.tensor([0.25, 0.25]))
         self.assertTrue(same(torch.tensor([0.25, 0.25]), true_mirror))
@@ -3820,7 +3891,7 @@ def fn():
                 return self.mod[0](x)
 
         m = Mod()
-        graph, _ = torch._dynamo.export(m, torch.randn(3, 3))
+        graph, _ = torch._dynamo.export(m)(torch.randn(3, 3))
 
     def test_nn_sequential_invocation(self):
         with freeze_rng_state():
@@ -3842,7 +3913,7 @@ def fn():
             m = TestModel()
             x = torch.rand((2, 2))
             real = m(x)
-            graph, _ = torch._dynamo.export(m, x)
+            graph, _ = torch._dynamo.export(m)(x)
             dynamo_result = graph(x)
             self.assertTrue(same(real, dynamo_result))
 
@@ -3866,7 +3937,7 @@ def fn():
             m = TestModel()
             x = torch.rand((2, 2))
             real = m(x)
-            graph, _ = torch._dynamo.export(m, x)
+            graph, _ = torch._dynamo.export(m)(x)
             dynamo_result = graph(x)
             self.assertTrue(same(real, dynamo_result))
 
@@ -4653,7 +4724,7 @@ def fn():
         b.tag = "b"
         b.frog = "ribbit"
 
-        exported = torch._dynamo.export(foo, a, b)
+        exported = torch._dynamo.export(foo)(a, b)
         out_graph = exported[0]
 
         nodes = list(out_graph.graph.nodes)
@@ -4701,7 +4772,7 @@ def fn():
         state[0].tag = "STATE_0"
         state[1].tag = "HMMM"
 
-        exported = torch._dynamo.export(pre_attention_state_ops, i, mems, state)
+        exported = torch._dynamo.export(pre_attention_state_ops)(i, mems, state)
         out_graph = exported[0]
 
         nodes = list(out_graph.graph.nodes)
@@ -5002,11 +5073,11 @@ def fn():
             (15, 16, 7),
             (17, 17, 6),
         ]
-        self.assertEquals(len(tab), len(expected))
+        self.assertEqual(len(tab), len(expected))
         for entry, exp in zip(tab, expected):
-            self.assertEquals(entry.start, exp[0] * 2)
-            self.assertEquals(entry.end, exp[1] * 2)
-            self.assertEquals(entry.target, exp[2] * 2)
+            self.assertEqual(entry.start, exp[0] * 2)
+            self.assertEqual(entry.end, exp[1] * 2)
+            self.assertEqual(entry.target, exp[2] * 2)
 
     @skipIfNotPy311
     def test_remove_dead_code_with_exn_table_entries(self):
@@ -5030,17 +5101,17 @@ def fn():
         )
         bytecode_transformation.propagate_inst_exn_table_entries(insts)
         insts = bytecode_analysis.remove_dead_code(insts)
-        self.assertEquals(len(insts), 5)
+        self.assertEqual(len(insts), 5)
         self.assertNotIn(exn_start, insts)
         self.assertNotIn(exn_end, insts)
         self.assertIn(target2, insts)
         self.assertIn(target3, insts)
         bytecode_transformation.update_offsets(insts)
         tab = bytecode_transformation.compute_exception_table(insts)
-        self.assertEquals(len(tab), 1)
-        self.assertEquals(tab[0].start, 2)
-        self.assertEquals(tab[0].end, 4)
-        self.assertEquals(tab[0].target, 6)
+        self.assertEqual(len(tab), 1)
+        self.assertEqual(tab[0].start, 2)
+        self.assertEqual(tab[0].end, 4)
+        self.assertEqual(tab[0].target, 6)
 
     def test_unhandled_exception_in_dynamo(self):
         # traceback.format_exc() approximates an unhandled exception
@@ -5112,6 +5183,146 @@ def fn():
 
         dis.dis(fn)
         self.assertEqual(torch._dynamo.optimize("eager")(fn)(), 3)
+
+    @skipIfNotPy311
+    def test_get_instruction_source_311(self):
+        def f():
+            # flake8: noqa
+            # fmt: off
+            # test binary ops
+            a = ( b   )   +   c
+            a = (a + b) // (c - d)
+            a = b    \
+         +\
+               c  # test
+            a = (
+                (b  # test +
+                    )  \
+                # +
+            << (
+
+                c  # test
+                \
+            )  # test
+            )
+
+            # test slice
+            a = bbb   [  ccc    ]
+            b = bbbbb \
+                [  ccc # test
+
+                 + ddd  \
+
+                ] # test
+            a = bbb[ccc][ddd][eee]
+
+            # test nested and multiline function calls
+            a = g(g(g(b)))
+            a = g(h(
+                g(b),
+                c
+            ))
+
+            # test chained function calls
+            a = (g(x).y)(
+                z
+            )(1)(2)
+
+            # test unicode (match traceback behavior)
+            a = ("🔥🔥🔥" +
+                + "🔥🔥") + b
+
+        from torch._dynamo.utils import get_instruction_source_311
+
+        offsets = (3, 11, 15, 19, 23, 29, 35, 46, 58, 74)
+        insts = list(dis.get_instructions(f))
+        # uncomment to determine offsets
+        # print(*enumerate(insts), sep="\n")
+        all_sources = "\n".join(
+            get_instruction_source_311(f.__code__, insts[offset]) for offset in offsets
+        )
+        self.assertExpectedInline(
+            all_sources,
+            """\
+            a = ( b   )   +   c
+                ~~~~~~~~~~^~~~~
+
+            a = (a + b) // (c - d)
+                ~~~~~~~~^^~~~~~~~~
+
+            a = b    \\
+                ~~~~~~
+         +\\
+         ^~
+               c  # test
+               ~
+
+                (b  # test +
+                ~~~~~~~~~~~~
+                    )  \\
+                    ~~~~
+                # +
+                ~~~
+            << (
+            ^^~~
+
+
+                c  # test
+                ~~~~~~~~~
+                \\
+                ~
+            )  # test
+            ~
+
+            a = bbb   [  ccc    ]
+                ~~~~~~^^^^^^^^^^^
+
+            b = bbbbb \\
+                ~~~~~~~
+                [  ccc # test
+                ^^^^^^^^^^^^^
+
+
+                 + ddd  \\
+                 ^^^^^^^^
+
+
+                ] # test
+                ^
+
+            a = bbb[ccc][ddd][eee]
+                ~~~~~~~~^^^^^
+
+            a = g(g(g(b)))
+                  ~^^^^^^
+
+            a = g(h(
+                  ~^
+                g(b),
+                ^^^^^
+                c
+                ^
+            ))
+            ^
+
+            a = (g(x).y)(
+                ~~~~~~~~~
+                z
+                ~
+            )(1)(2)
+            ~^^^
+""",
+        )
+        # test unicode (since assertExpectedInline doesn't support unicode)
+        self.assertEqual(
+            get_instruction_source_311(f.__code__, insts[84]),
+            """\
+            a = ("🔥🔥🔥" +
+                ~~~~~~~~
+                + "🔥🔥") + b
+                ~~~~~~~~^~~
+""",
+        )
 
     def test_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
@@ -5727,7 +5938,7 @@ def ___make_guard_fn():
     def test_dynamo_compiling_fake_tensor_to_vararg_int(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 # use numpy int so it's wrapped as fake tensor in dynamo
@@ -5746,7 +5957,7 @@ def ___make_guard_fn():
     def test_scalar_tensor_is_equivalent_to_symint_argument(self):
         class GumbelTopKSampler(torch.nn.Module):
             def __init__(self, T, k):
-                super(GumbelTopKSampler, self).__init__()
+                super().__init__()
                 self.T = torch.nn.Parameter(
                     torch.tensor(T, dtype=torch.float32), requires_grad=False
                 )
@@ -5773,7 +5984,7 @@ def ___make_guard_fn():
     def test_scalar_tensor_is_equivalent_to_symint_list_argument(self):
         class Jitter(torch.nn.Module):
             def __init__(self, jitter_val):
-                super(Jitter, self).__init__()
+                super().__init__()
                 self.jitter_val = jitter_val
 
             def roll_tensor(self, input):
@@ -5948,7 +6159,9 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 9)
 
-    def _prepare_for_translation_validator(self):
+    def _prepare_for_translation_validation(self):
+        from torch.fx.experimental.validator import TranslationValidator
+
         validator = TranslationValidator()
 
         # SymPy symbols.
@@ -5956,19 +6169,20 @@ def ___make_guard_fn():
 
         # Z3 symbols.
         [validator.add_var(s, int) for s in (s0, s1, s2)]
-        z0, z1, z2 = [validator.z3var(s) for s in (s0, s1, s2)]
+        z0, z1, z2 = (validator.z3var(s) for s in (s0, s1, s2))
 
         return (s0, s1, s2), (z0, z1, z2), validator
 
-    @torch._dynamo.config.patch(translation_validation=True)
+    @unittest.skipIf(not TEST_Z3, "Z3 not installed")
     def test_sympy_to_z3_translation(self):
         import z3
+        from torch.fx.experimental.validator import SympyToZ3
 
         (
             (s0, s1, s2),
             (z0, z1, z2),
             validator,
-        ) = self._prepare_for_translation_validator()
+        ) = self._prepare_for_translation_validation()
 
         test_cases = [
             # Integer constants.
@@ -6031,13 +6245,13 @@ def ___make_guard_fn():
                 z3_expr.eq(result), msg=f"expected: {z3_expr}. Got: {result}"
             )
 
-    @torch._dynamo.config.patch(translation_validation=True)
-    def test_translation_validator_sat(self):
+    @unittest.skipIf(not TEST_Z3, "Z3 not installed")
+    def test_translation_validation_sat(self):
         (
             (s0, s1, s2),
             (z0, z1, z2),
             validator,
-        ) = self._prepare_for_translation_validator()
+        ) = self._prepare_for_translation_validation()
 
         validator.add_source_expr(z0 > 5)
         validator.add_source_expr(z1 / 2 > z0)
@@ -6051,13 +6265,13 @@ def ___make_guard_fn():
         self.assertIsNone(r.model)
         self.assertIsNone(r.failed_source_expr)
 
-    @torch._dynamo.config.patch(translation_validation=True)
-    def test_translation_validator_unsat(self):
+    @unittest.skipIf(not TEST_Z3, "Z3 not installed")
+    def test_translation_validation_unsat(self):
         (
             (s0, s1, s2),
             (z0, z1, z2),
             validator,
-        ) = self._prepare_for_translation_validator()
+        ) = self._prepare_for_translation_validation()
 
         validator.add_source_expr(z0 > 5)
         validator.add_source_expr(z1 / 2 > z0)
@@ -6216,6 +6430,107 @@ def ___make_guard_fn():
         foo(g3, g2, g4)
         # assert no recompile
         self.assertEqual(counter.frame_count, 6)
+
+    def test_tolist_scalar(self):
+        def fn(x):
+            new_list = []
+            for i in x.tolist():
+                new_list.append(i * 4)
+            return new_list
+
+        x = torch.tensor([3])
+        eager = fn(x)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter, nopython=True)(fn)(x)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_tolist_1d(self):
+        def fn(x):
+            new_list = []
+            for i in x.tolist():
+                new_list.append(i * 4)
+            return new_list
+
+        x = torch.tensor([2, 1])
+        eager = fn(x)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter, nopython=True)(fn)(x)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_tolist_kd(self):
+        def fn(x):
+            new_list = []
+            for i in x.tolist():
+                new_list.append(i * 4)
+            return new_list
+
+        x = torch.tensor([[[2, 1], [2, 1], [2, 1]], [[2, 1], [2, 1], [2, 1]]])
+        eager = fn(x)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter, nopython=True)(fn)(x)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    @patch.object(torch._dynamo.config, "specialize_int", True)
+    def test_tolist_0d(self):
+        def fn(x):
+            new_list = []
+            i = x.tolist()
+            new_list.append(i * 4)
+            return new_list
+
+        x = torch.tensor(42)
+        eager = fn(x)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter, nopython=True)(fn)(x)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    @patch.object(torch._dynamo.config, "assume_static_by_default", False)
+    @patch.object(torch._dynamo.config, "automatic_dynamic_shapes", False)
+    def test_tolist_kd_dynamic(self):
+        def fn(x):
+            new_list = []
+            i = x.tolist()
+            new_list.append(i * 4)
+            return new_list
+
+        x = torch.randint(3, 5, [5, 5])
+        eager = fn(x)
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter, nopython=True)(fn)
+        compiled = compiled_fn(x)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Value change, no recompiles
+        x = torch.randint(7, 9, [5, 5])
+        compiled_fn(x)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Size change, forced recompiles
+        x = torch.randint(3, 5, [3, 3])
+        compiled_fn(x)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_tolist_float(self):
+        def fn(x):
+            new_list = []
+            for i in x.tolist():
+                new_list.append(i * 4)
+            return new_list
+
+        x = torch.tensor(
+            [[[2.0, 1.0], [2.0, 1.0], [2.0, 1.0]], [[2.0, 1.0], [2.0, 1.0], [2.0, 1.0]]]
+        )
+        eager = fn(x)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(fn)(x)
+        self.assertEqual(eager, compiled)
+        # Nothing to compile here
+        self.assertEqual(counter.frame_count, 0)
 
 
 class TestTracer(JitTestCase):
