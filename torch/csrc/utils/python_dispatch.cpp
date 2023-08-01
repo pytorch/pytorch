@@ -206,6 +206,28 @@ static py::object ophandle_call_boxed(
   return torch::jit::createPyObjectForStack(std::move(stack));
 }
 
+// A small RAII guard that lets you explicitly *remove* a key from the TLS
+// exclude set.
+class SetExcludeDispatchKeyGuard {
+ public:
+  SetExcludeDispatchKeyGuard(DispatchKey k, bool set_excluded)
+      : k(k), old(c10::impl::tls_is_dispatch_key_excluded(k)) {
+    c10::impl::tls_set_dispatch_key_excluded(k, set_excluded);
+  }
+  ~SetExcludeDispatchKeyGuard() {
+    c10::impl::tls_set_dispatch_key_excluded(k, old);
+  }
+  SetExcludeDispatchKeyGuard(const SetExcludeDispatchKeyGuard&) = delete;
+  SetExcludeDispatchKeyGuard operator=(const SetExcludeDispatchKeyGuard&) =
+      delete;
+  SetExcludeDispatchKeyGuard(SetExcludeDispatchKeyGuard&&) = delete;
+  SetExcludeDispatchKeyGuard operator=(SetExcludeDispatchKeyGuard&&) = delete;
+
+ private:
+  DispatchKey k;
+  bool old;
+};
+
 void initDispatchBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -667,8 +689,12 @@ void initDispatchBindings(PyObject* module) {
       c10::impl::ExcludeDispatchKeyGuard,
       c10::DispatchKeySet>(m, "ExcludeDispatchKeyGuard");
 
+  py_context_manager<c10::impl::IncludeDispatchKeyGuard, c10::DispatchKey>(
+      m, "_IncludeDispatchKeyGuard");
   py_context_manager<c10::impl::ExcludeDispatchKeyGuard, c10::DispatchKeySet>(
       m, "_ExcludeDispatchKeyGuard");
+  py_context_manager<SetExcludeDispatchKeyGuard, c10::DispatchKey, bool>(
+      m, "_SetExcludeDispatchKeyGuard");
 
   py_context_manager_DEPRECATED<at::AutoDispatchBelowAutograd>(
       m, "_AutoDispatchBelowAutograd");
