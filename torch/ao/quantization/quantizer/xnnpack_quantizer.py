@@ -322,12 +322,20 @@ class XNNPACKQuantizer(Quantizer):
     def set_module_type(
         self, module_type: Callable, quantization_config: QuantizationConfig
     ):
+        """ Set quantization_config for a submodule with type: `module_type`, for example:
+        quantizer.set_module_name(Sub) or quantizer.set_module_name(nn.Linear), it will quantize all supported operator/operator
+        patterns in the submodule with this module type with the given `quantization_config`
+        """
         self.module_type_config[module_type] = quantization_config
         return self
 
     def set_module_name(
         self, module_name: str, quantization_config: Optional[QuantizationConfig]
     ):
+        """ Set quantization_config for a submodule with name: `module_name`, for example:
+        quantizer.set_module_name("blocks.sub"), it will quantize all supported operator/operator
+        patterns in the submodule with this module name with the given `quantization_config`
+        """
         assert (
             quantization_config is not None
         ), " quantization_config == None is not supported yet"
