@@ -25,7 +25,7 @@ class _ConstantPadNd(Module):
         return F.pad(input, self.padding, 'constant', self.value)
 
     def extra_repr(self) -> str:
-        return 'padding={}, value={}'.format(self.padding, self.value)
+        return f'padding={self.padding}, value={self.value}'
 
 
 class ConstantPad1d(_ConstantPadNd):
@@ -178,7 +178,7 @@ class _ReflectionPadNd(Module):
         return F.pad(input, self.padding, 'reflect')
 
     def extra_repr(self) -> str:
-        return '{}'.format(self.padding)
+        return f'{self.padding}'
 
 
 class ReflectionPad1d(_ReflectionPadNd):
@@ -335,7 +335,7 @@ class _ReplicationPadNd(Module):
         return F.pad(input, self.padding, 'replicate')
 
     def extra_repr(self) -> str:
-        return '{}'.format(self.padding)
+        return f'{self.padding}'
 
 
 class ReplicationPad1d(_ReplicationPadNd):
@@ -522,7 +522,7 @@ class ZeroPad1d(ConstantPad1d):
         super().__init__(padding, 0.)
 
     def extra_repr(self) -> str:
-        return '{}'.format(self.padding)
+        return f'{self.padding}'
 
 class ZeroPad2d(ConstantPad2d):
     r"""Pads the input tensor boundaries with zero.
@@ -575,7 +575,7 @@ class ZeroPad2d(ConstantPad2d):
         super().__init__(padding, 0.)
 
     def extra_repr(self) -> str:
-        return '{}'.format(self.padding)
+        return f'{self.padding}'
 
 class ZeroPad3d(ConstantPad3d):
     r"""Pads the input tensor boundaries with zero.
@@ -617,4 +617,4 @@ class ZeroPad3d(ConstantPad3d):
         super().__init__(padding, 0.)
 
     def extra_repr(self) -> str:
-        return '{}'.format(self.padding)
+        return f'{self.padding}'

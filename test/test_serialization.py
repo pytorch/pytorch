@@ -3908,7 +3908,7 @@ class TestSerialization(TestCase, SerializationMixin):
             state_dict = m.state_dict()
             torch.save(state_dict, f)
             result = torch.load(f, mmap=True)
-            for k, v in result.items():
+            for v in result.values():
                 self.assertTrue(v.is_cuda)
 
     def run(self, *args, **kwargs):

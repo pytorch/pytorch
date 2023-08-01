@@ -303,6 +303,10 @@ CI_SKIP_OPTIMIZER = {
     "PegasusForConditionalGeneration",  # OOM
 }
 
+CI_SKIP_DYNAMIC_BATCH_ONLY = {
+    "sam",
+}
+
 
 def model_specified_by_path(path_and_class_str):
     return ":" in path_and_class_str
@@ -2471,6 +2475,9 @@ def parse_args(args=None):
         "--cpp-wrapper", action="store_true", help="turn on cpp/cuda wrapper codegen"
     )
     parser.add_argument(
+        "--freezing", action="store_true", help="turn on freezing", default=False
+    )
+    parser.add_argument(
         "--ci", action="store_true", help="Flag to tell that its a CI run"
     )
     parser.add_argument(
@@ -2904,9 +2911,7 @@ def run(runner, args, original_dir=None):
     if args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
-        torch._dynamo.config.automatic_dynamic_shapes = True
     if args.dynamic_shapes:
-        torch._dynamo.config.automatic_dynamic_shapes = True
         if not args.dynamic_batch_only:
             torch._dynamo.config.assume_static_by_default = False
     if args.specialize_int:
@@ -2980,11 +2985,10 @@ def run(runner, args, original_dir=None):
             # https://github.com/pytorch/pytorch/issues/96724
             "Wav2Vec2ForCTC",
             "Wav2Vec2ForPreTraining",
+            "sam",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
-        if args.only in {"hf_T5_generate"}:
-            torch._dynamo.config.automatic_dynamic_shapes = True
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
@@ -3179,6 +3183,8 @@ def run(runner, args, original_dir=None):
         inductor_config.split_reductions = not args.disable_split_reductions
         inductor_config.triton.divisible_by_16 = not args.disable_divisible_by_16
         inductor_config.cpp_wrapper = args.cpp_wrapper
+        if args.inference:
+            inductor_config.freezing = args.freezing
 
     runner.setup_amp()
 
@@ -3312,7 +3318,11 @@ def run(runner, args, original_dir=None):
                         marked = True
                         break
 
-            if args.dynamic_batch_only and batch_size > 1:
+            if (
+                args.dynamic_batch_only
+                and batch_size > 1
+                and model_name not in CI_SKIP_DYNAMIC_BATCH_ONLY
+            ):
                 tree_map_only(torch.Tensor, detect_and_mark_batch, example_inputs)
                 assert marked, f"nothing in example_inputs had a dim with {batch_size}"
 

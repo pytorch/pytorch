@@ -65,9 +65,7 @@ def fully_shard(
     state = _init_ignored_module_states(state, module, ignored_modules, ignored_states)
     state = _init_device_handle(state, module, state._ignored_params, device_id)
     _annotate_modules_for_dynamo(module, state._ignored_modules, True)
-    state = _init_process_group_state(
-        state, process_group, ShardingStrategy.FULL_SHARD, policy
-    )
+    state = _init_process_group_state(state, process_group, strategy, policy)
     if policy is not None:
         fsdp_kwargs = {
             "process_group": process_group,
