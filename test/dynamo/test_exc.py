@@ -1,7 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
-import os.path
-import re
+import logging
+import unittest
 
 import torch
 import torch._dynamo
@@ -10,32 +10,8 @@ import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.utils import LazyString
+from torch.testing._internal.common_utils import munge_exc
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-
-
-def munge_exc(e, suppress_suffix=True, file=__file__):
-    s = str(e)
-
-    # Remove everything that looks like stack frames in NOT this file
-    def repl_frame(m):
-        if m.group(1) != file:
-            return ""
-        # Don't accept top-level, even for this script, these will wobble
-        # depending on how the testing script was invoked
-        if m.group(2) == "<module>":
-            return ""
-
-        return m.group(0)
-
-    s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n    .+\n', repl_frame, s)
-    s = re.sub(r"line \d+", "line N", s)
-    s = re.sub(file, os.path.basename(__file__), s)
-    s = re.sub(os.path.join(os.path.dirname(torch.__file__), ""), "", s)
-    s = re.sub(r"\\", "/", s)
-    if suppress_suffix:
-        s = re.sub(r"\nSet TORCH_LOGS.+", "", s, flags=re.DOTALL)
-    s = re.sub(r" +$", "", s, flags=re.M)
-    return s
 
 
 class ExcTests(LoggingTestCase):
@@ -95,8 +71,6 @@ from user code:
 """,
         )
 
-    # TODO: it seems like suppress_errors causes noisy error formatting even
-    # for Unsupported
     @torch._dynamo.config.patch(verbose=True, suppress_errors=True)
     @make_logging_test()
     def test_internal_error_suppress_errors(self, records):
@@ -136,6 +110,50 @@ from user code:
 
 ==========""",
         )
+
+    @make_logging_test()
+    def test_not_implemented_error(self, records):
+        def fn001(x):
+            def f(ctx):
+                raise NotImplementedError()
+
+            # Ensure graph break is not possible
+            for i in range(3):
+                comptime(f)
+
+        torch.compile(fn001, backend="eager")(torch.randn(1))
+
+        record = self.getRecord(records, "WON'T CONVERT")
+
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            """\
+WON'T CONVERT fn001 test_exc.py line N
+due to:
+Traceback (most recent call last):
+  File "test_exc.py", line N, in f
+    raise NotImplementedError()
+torch._dynamo.exc.InternalTorchDynamoError:
+
+from user code:
+   File "test_exc.py", line N, in fn001
+    comptime(f)
+""",
+        )
+
+    @unittest.expectedFailure
+    @torch._dynamo.config.patch(inject_BUILD_SET_unimplemented_TESTING_ONLY=True)
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_unsupported_error(self, records):
+        def fn001(x):
+            return {1, 2}
+
+        torch.compile(fn001, backend="eager")(torch.randn(1))
+
+        # TODO: There is no graph break log!  This is because the graph break
+        # logging is not in a centralized location; unsupported
+        # instruction bypasses it
+        self.getRecord(records, "Graph break:")
 
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_internal_error_no_suppress(self):

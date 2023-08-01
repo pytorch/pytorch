@@ -690,6 +690,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             return inst.opname != "RETURN_VALUE"
         except Unsupported:
             if self.empty_checkpoint():
+                log.debug("empty checkpoint")
                 raise
             log.debug("step triggered compile", exc_info=True)
 
@@ -1275,6 +1276,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(ListVariable(items, mutable_local=MutableLocal(), **options))
 
     def BUILD_SET(self, inst):
+        if config.inject_BUILD_SET_unimplemented_TESTING_ONLY:
+            unimplemented("missing: BUILD_SET")
         items = self.popn(inst.argval)
         options = VariableTracker.propagate(items)
         new_set = SetVariable(self, items, mutable_local=MutableLocal(), **options)
