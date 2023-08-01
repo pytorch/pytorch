@@ -128,7 +128,11 @@ list(APPEND NVFUSER_SRCS
     ${NVFUSER_SRCS_DIR}/scheduler/mma_utils.cpp
 )
 
-add_library(${NVFUSER_CODEGEN} SHARED ${NVFUSER_SRCS})
+if(${BUILD_SHARED_LIBS})
+  add_library(${NVFUSER_CODEGEN} SHARED ${NVFUSER_SRCS})
+else()
+  add_library(${NVFUSER_CODEGEN} STATIC ${NVFUSER_SRCS})
+endif()
 
 if(NOT USE_ROCM)
   target_compile_options(${NVFUSER_CODEGEN} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
