@@ -72,7 +72,7 @@ class BaseSchedulerNode:
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
 
-    def debug_str(self, fused=False):
+    def debug_str(self) -> str:
         """Longer form printout for trace logs"""
         name = self.get_name()
         lines = [
@@ -89,11 +89,7 @@ class BaseSchedulerNode:
         except Exception:
             log.warning("Ignoring error in debug_str()", exc_info=True)
 
-        text = "\n".join(lines).rstrip()
-        if fused:  # indent for better readability
-            return textwrap.indent(text, "    ")
-
-        return text
+        return "\n".join(lines).rstrip()
 
     def debug_str_extra(self) -> str:
         return ""
@@ -540,10 +536,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
     def debug_str_extra(self) -> str:
         lines = [
-            f"{self.get_name()}.snodes[{i}] =\n{node.debug_str(True)}"
+            f"{self.get_name()}.snodes[{i}] =\n{node.debug_str()}"
             for i, node in enumerate(self.snodes)
         ]
-        return "\n".join(lines).rstrip()
+        return textwrap.indent("\n".join(lines).rstrip(), "    ")
 
     def set_last_usage(
         self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
