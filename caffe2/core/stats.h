@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 #include "caffe2/core/logging.h"
-#include "caffe2/core/static_tracepoint.h"
+#include "c10/util/static_tracepoint.h"
 
 namespace caffe2 {
 

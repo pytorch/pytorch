@@ -1515,6 +1515,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     "test_view_clone_view_inplace",
     "test_view_inplace",
 ])
+@unittest.skipIf(TEST_WITH_TORCHDYNAMO, "dynamo-ing code with proxy + fake doesnt work well")
 class TestCrossRefFunctionalization(TestFunctionalization):
     crossref = True
 

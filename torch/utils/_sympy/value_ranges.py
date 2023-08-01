@@ -428,6 +428,14 @@ class SymPyValueRangeAnalysis:
     def ceil(cls, x):
         return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.ceiling)
 
+    # It's used in some models on symints
+    @staticmethod
+    def sqrt(x):
+        x = ValueRanges.wrap(x)
+        if x.lower < 0:
+            return ValueRanges.unknown()
+        return ValueRanges.increasing_map(x, sympy.sqrt)
+
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     def __init__(self):
@@ -522,13 +530,6 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
         return cls.add(a, cls.neg(b))
 
     @staticmethod
-    def sqrt(x):
-        x = ValueRanges.wrap(x)
-        if x.lower < 0:
-            return ValueRanges.unknown()
-        return ValueRanges.increasing_map(x, sympy.sqrt)
-
-    @staticmethod
     def where(a, b, c):
         b = ValueRanges.wrap(b)
         c = ValueRanges.wrap(c)
@@ -540,16 +541,26 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
             return ValueRanges(sympy.Min(b.lower, c.lower), sympy.Max(b.upper, c.upper))
 
     def __getattr__(self, name):
-        log.warning("unhandled ValueRange op %s", name)
+        log.debug("unhandled ValueRange op %s", name)
         return self.default_handler
 
 
 def bound_sympy(expr: sympy.Expr, ranges: Dict[sympy.Symbol, ValueRanges]) -> ValueRanges:
-    # Add dynamic shapes within the expression as potentially unbounded
-    dynamic_shapes = expr.free_symbols - ranges.keys()
-    if dynamic_shapes:
+    unbounded_vars = expr.free_symbols - ranges.keys()
+    if unbounded_vars:
+        # Give some bounds to the free variables via their SymPy assumptions
+        # TODO A better way of doing this would be to assign them a range upon creation, as
+        #      size variables can come with a lower bound of 2, as we specialise on 0 and 1
         ranges = deepcopy(ranges)
-        for s in dynamic_shapes:
-            ranges[s] = ValueRanges(0, math.inf)  # type: ignore[index]
+        for s in unbounded_vars:
+            assert s.is_integer  # type: ignore[attr-defined]
+            if s.is_positive:  # type: ignore[attr-defined]
+                lower = 1
+            elif s.is_nonnegative:  # type: ignore[attr-defined]
+                lower = 0
+            else:
+                lower = -math.inf  # type: ignore[assignment]
 
-    return sympy_interp(SymPyValueRangeAnalysis(), ranges, expr)
+            ranges[s] = ValueRanges(lower, math.inf)  # type: ignore[index]
+
+    return sympy_interp(SymPyValueRangeAnalysis, ranges, expr)
