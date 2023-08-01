@@ -40,6 +40,7 @@ on:
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
 jobs:
   test:
