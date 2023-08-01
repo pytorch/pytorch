@@ -940,11 +940,10 @@ class GraphLowering(torch.fx.Interpreter):
         ):  # compute bounded for large tensors
             # matmul and conv, compute bound
 
-            from torch.utils.flop_counter import conv_flop
+            from torch.utils.flop_counter import conv_flop, mm_flop
 
             if getattr(snode.node, "kernel", "") == "extern_kernels.convolution":
-                extern_kernel_alloc = snode.node  # ExternKernelAlloc
-                inputs = extern_kernel_alloc.inputs
+                inputs = snode.node.inputs
                 assert len(inputs) == 2
 
                 x_shape = inputs[0].get_size()
@@ -962,8 +961,14 @@ class GraphLowering(torch.fx.Interpreter):
                 )
 
                 # TODO: handle backward, transpose
-            else:
-                pass
+            elif(getattr(snode.node, "kernel", "") == "extern_kernels.mm"):
+                inputs = snode.node.inputs
+                assert len(inputs) == 2
+                a_shape = inputs[0].get_size()
+                b_shape = inputs[1].get_size()
+                return 1/gpu_flops * mm_flop(a_shape, b_shape)
+
+                #TODO: other types of matmul
 
         # TODO: add support for more snodes/irnodes
 
