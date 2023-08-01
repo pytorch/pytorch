@@ -1,14 +1,15 @@
 import os
 import textwrap
 from enum import auto, Enum
-from traceback import extract_stack, format_exc, format_list, StackSummary, FrameSummary
-from typing import cast, List
+from traceback import extract_stack, format_exc, format_list, StackSummary
+from typing import cast, Optional
+
 import torch._guards
 
 from . import config
 from .config import is_fbcode
 
-from .utils import counters, format_bytecode
+from .utils import counters
 
 if is_fbcode():
     from torch.fb.exportdb.logging import exportdb_error_message
@@ -163,12 +164,11 @@ class KeyErrorMsg:
 def augment_exc_message(exc, msg="\n", export=False):
     import traceback
 
-    if (
-        hasattr(exc, "real_stack")
-        and len(exc.real_stack) > 0
-        and not (config.verbose and config.suppress_errors)
-    ):
-        msg += f"\nfrom user code:\n {''.join(traceback.format_list(get_real_stack(exc)))}"
+    real_stack = get_real_stack(exc)
+    if real_stack is not None:
+        msg += (
+            f"\nfrom user code:\n {''.join(traceback.format_list(get_real_stack(exc)))}"
+        )
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
         msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
@@ -209,9 +209,20 @@ def augment_exc_message(exc, msg="\n", export=False):
         exc.args = (new_msg,) + exc.args[1:]
 
 
-def get_real_stack(exc) -> StackSummary:
-    assert hasattr(exc, "real_stack")
-    return cast(StackSummary, exc.real_stack)
+def get_real_stack(exc, frame=None) -> Optional[StackSummary]:
+    real_stack = getattr(exc, "real_stack", None)
+    if real_stack is None:
+        return None
+
+    # NB: it's possible for real_stack to be []; we still attempt to
+    # report a stack anyway because the stack_above_dynamo may still
+    # be useful for debugging
+
+    stack_above_dynamo = []
+    if frame is not None:
+        stack_above_dynamo = filter_stack(extract_stack(frame))
+
+    return cast(StackSummary, stack_above_dynamo + real_stack)
 
 
 # filter out all frames after entering dynamo
@@ -228,18 +239,13 @@ def filter_stack(stack):
 
 
 def format_error_msg_verbose(exc, code, record_filename=None, frame=None):
-    msg = str(
-        format_bytecode(
-            "WON'T CONVERT",
-            code.co_name,
-            code.co_filename,
-            code.co_firstlineno,
-            code,
-        )
+    msg = (
+        f"WON'T CONVERT {code.co_name} {code.co_filename} line {code.co_firstlineno}\n"
     )
     msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
     msg += format_exc()
-    if hasattr(exc, "real_stack"):
+    real_stack = get_real_stack(exc, frame)
+    if real_stack is not None:
         msg += (
             "\n"
             + "=" * 10
@@ -247,13 +253,7 @@ def format_error_msg_verbose(exc, code, record_filename=None, frame=None):
             + "=" * 10
             + "\n\n"
         )
-        stack_above_dynamo = []
-        if frame is not None:
-            stack_above_dynamo = filter_stack(extract_stack(frame))
-
-        msg += "".join(
-            format_list(stack_above_dynamo + get_real_stack(exc))
-        )
+        msg += "".join(format_list(real_stack))
         msg += "\n"
         msg += "=" * 10
 
@@ -264,7 +264,7 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
     msg = os.linesep * 2
 
     if config.verbose:
-        msg = format_error_msg_verbose(exec, code, record_filename, frame)
+        msg = format_error_msg_verbose(exc, code, record_filename, frame)
     else:
         msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
  line {code.co_firstlineno} \ndue to: \n{format_exc(limit=-1)}"

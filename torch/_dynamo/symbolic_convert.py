@@ -415,6 +415,7 @@ def break_graph_if_unsupported(*, push):
                 log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
 
                 user_stack = excp.real_stack
+                # TODO: Also report the traceback from the parent frame
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
                 frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
                 # torch._dynamo.explain() formats this a little nicer, and presents a slightly
@@ -425,7 +426,7 @@ def break_graph_if_unsupported(*, push):
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
                     graph_break_log.debug(
-                        "Graph break: %s from user code at %s",
+                        "Graph break: %s from user code at:\n%s",
                         excp,
                         user_stack_formatted,
                     )
@@ -707,7 +708,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
 
     def run_ctx_mgr(self):
-        return contextlib.nullcontext()
+        # NB: Don't push the top level frame summary; set_current_loc will
+        # take care of it.  However, DO make sure we attach real_stack to
+        # exceptions
+        return TracingContext.current_frame(None)
 
     def run(self):
         with self.run_ctx_mgr():
