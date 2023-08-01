@@ -346,7 +346,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             v = torch.randn(2, 4, 16).to(torch.bfloat16)
             # 1. view(match_count=4, match_nodes=4).
             # 2. mm to packed linear(match_count=2, match_nodes=2).
-            # 3. view+ linear+view to linear(match_count=2, match_nodes=6).
+            # 3. view+linear+view to linear(match_count=2, match_nodes=6).
             # 4. linear+silu fusion(match_count=1, match_nodes=5).
             match_count = 9
             match_nodes = 17
