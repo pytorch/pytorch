@@ -2,6 +2,8 @@ import os
 import textwrap
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
+import types
+import inspect
 from typing import cast, Optional
 
 import torch._guards
@@ -220,7 +222,22 @@ def get_real_stack(exc, frame=None) -> Optional[StackSummary]:
 
     stack_above_dynamo = []
     if frame is not None:
-        stack_above_dynamo = filter_stack(extract_stack(frame))
+        # NB: frame is PyInterpreterFrame on Python 3.11 and later,
+        # not a TRUE frame object.  You can't actually feed it
+        # to traceback because it doesn't have enough information.
+        # To solve this problem, we technically should just materialize
+        # the frame, the same way _PyFrame_GetFrameObject would do
+        # (but we cannot actually do this, because this populates
+        # frame_obj field, which default eval frame doesn't like).
+        #
+        # Fortunately, in this case, we can hack it: there's no need
+        # to actually use the truly top frame, we can just extract
+        # from where we are right now and rely on filter_stack to
+        # get rid of all the dynamo frames.
+        if not isinstance(frame, types.FrameType):
+            stack_above_dynamo = filter_stack(extract_stack())
+        else:
+            stack_above_dynamo = filter_stack(extract_stack(frame))
 
     return cast(StackSummary, stack_above_dynamo + real_stack)
 
