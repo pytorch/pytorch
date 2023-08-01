@@ -2526,6 +2526,26 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(actual, expected)
 
+    def test_vmap_illegal_op_graph_break(self):
+        counters.clear()
+
+        def bad_fn(x):
+            x.stride()
+            return x
+
+        def wrapper_fn(x):
+            return torch.func.vmap(bad_fn)(x)
+
+        x = torch.randn(3, 3, 3)
+        actual = wrapper_fn(x)
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"Illegal getattr invocation stride in strict mode": 2},
+        )
+        self.assertEqual(actual, expected)
+
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):

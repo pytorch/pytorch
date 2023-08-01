@@ -793,15 +793,19 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             else:
                 unbatched_input_args.append(arg)
 
-        # trace through the function with unbatched inputs.
-        _, body_graph, body_lifted_freevars = speculate_subgraph(
-            tx,
-            fn,
-            torch.utils._pytree.tree_unflatten(unbatched_input_args, arg_spec),
-            {},
-            graph_checkpoint,
-            checkpoint,
-        )
+        # Ban ops like `stride`, `storage_offset` in the traced functions.
+        # NOTE: We are conservatively banning more ops (vmap should be able
+        #       to handle a few of them).
+        with tx.strict_translation_mode():
+            # trace through the function with unbatched inputs.
+            _, body_graph, body_lifted_freevars = speculate_subgraph(
+                tx,
+                fn,
+                torch.utils._pytree.tree_unflatten(unbatched_input_args, arg_spec),
+                {},
+                graph_checkpoint,
+                checkpoint,
+            )
 
         body_name = add_subgraph(
             tx,
