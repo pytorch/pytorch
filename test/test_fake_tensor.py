@@ -179,6 +179,14 @@ class FakeTensorTest(TestCase):
                 x = torch.rand([16, 1], device=device)
                 x[..., 0] = 0
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_device_inplace_copy(self):
+        with FakeTensorMode():
+            x = torch.rand([8, 8], device="cpu")
+            y = torch.rand([8, 8], device="cuda")
+            assert x.copy_(y).device.type == "cpu"
+            assert y.copy_(x).device.type == "cuda"
+
     def test_fake_dispatch_keys(self):
         with FakeTensorMode():
             x = torch.rand([4])
@@ -1006,6 +1014,15 @@ class FakeTensorOperatorInvariants(TestCase):
 
             self.assertEqual(ref.size(), meta_out.size())
 
+    def test_module_deepcopy(self):
+        import copy
+        from torch._guards import detect_fake_mode
+        with FakeTensorMode() as m:
+            lin1 = torch.nn.Linear(2, 2)
+            lin2 = copy.deepcopy(lin1)
+            all_params = list(lin1.parameters()) + list(lin2.parameters())
+            curr_mode = detect_fake_mode(all_params)
+            self.assertTrue(curr_mode is m)
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")

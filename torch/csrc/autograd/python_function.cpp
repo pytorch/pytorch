@@ -204,7 +204,6 @@ auto PyNode::name() const -> std::string {
   return name;
 }
 
-#ifdef TORCH_COMPILED_AUTOGRAD
 void PyNode::compiled_args(CompiledNodeArgs& args) {
   static PyObject* method_name =
       PyUnicode_InternFromString("_compiled_autograd_key");
@@ -217,7 +216,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   auto size = PyTuple_GET_SIZE(pykey.get());
   TORCH_INTERNAL_ASSERT(size > 0);
   // first value is unique ID of the AotAutograd graph
-  ssize_t key = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), 0));
+  auto key = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), 0));
   if (C10_UNLIKELY(key < 0)) {
     TORCH_CHECK(PyErr_Occurred(), "key must be positive");
     throw_python_error();
@@ -272,7 +271,6 @@ variable_list PyNode::apply_with_saved(
   saved.after(f->input_info);
   return result;
 }
-#endif
 
 } // namespace autograd
 } // namespace torch
