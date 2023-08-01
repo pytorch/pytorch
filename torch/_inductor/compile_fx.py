@@ -325,9 +325,18 @@ def compile_fx_inner(
             if isinstance(t, torch.Tensor)
         )
 
+        # doesnt work for non-trees because the warmup run would apply mutation twice
+        if config.triton.cudagraph_trees:
+            # checking if mutation is only on paramameters/static inputs
+            has_mutation = not all(
+                idx < num_fixed for idx in compiled_graph.mutated_input_idxs
+            )
+        else:
+            has_mutation = len(compiled_graph.mutated_inputs) != 0
+
         cudagraph_tests = [
             (set(compiled_graph.device_types) == {"cuda"}, "non-cuda device in graph"),
-            (not compiled_graph.mutated_inputs, "mutated inputs"),
+            (not has_mutation, "mutated inputs"),
             (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
             (not complex_memory_overlap_inputs, "complex memory overlap"),
             (
@@ -394,7 +403,7 @@ def compile_fx_inner(
             if len(set(compiled_graph.device_types)) > 1:
                 perf_hint_log.warning("skipping cudagraphs due to multiple devices")
             elif set(compiled_graph.device_types) == {"cuda"}:
-                if compiled_graph.mutated_inputs:
+                if has_mutation:
                     perf_hint_log.warning("skipping cudagraphs due to input mutation")
                 elif complex_memory_overlap_inputs:
                     perf_hint_log.warning(
@@ -529,6 +538,7 @@ def fx_codegen_and_compile(
                 device_types=graph.device_types,
                 device_idxs=graph.device_idxs,
                 mutated_inputs=graph.mutated_inputs,
+                mutated_input_idxs=graph.mutated_input_idxs,
             )
     return compiled_graph
 
@@ -833,7 +843,9 @@ def fw_compiler_freezing(
     # for freezing, all graph outputs should be user visible
     *_, model_outputs_node = opt_model.graph.nodes
     model_outputs = model_outputs_node.args[0]
-    user_visible_outputs = [n.name for n in model_outputs]
+    user_visible_outputs = [
+        n.name for n in model_outputs if isinstance(n, torch.fx.Node)
+    ]
 
     # constant params will be real tensors, not fake
     with unittest.mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
