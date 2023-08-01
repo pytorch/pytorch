@@ -289,9 +289,9 @@ class SymInt:
         return str(self.node)
 
     def __str__(self):
-        tmp = self.node.maybe_as_int()
+        tmp = self.node.hint
         if tmp is not None:
-            return tmp
+            return str(tmp)
         return super().__str__()
 
 class SymFloat:
