@@ -928,7 +928,8 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(mul, [-1])
     select = torch.ops.aten.select.int(mul, 0, 0)
     detach = torch.ops.aten.detach.default(select);  select = None
-    return [view, mul, detach]""")
+    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
+    return [view, mul, detach_1]""")
 
     def test_output_aliases_intermediate_inplace_view(self):
         def f(a):
