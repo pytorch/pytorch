@@ -1,3 +1,4 @@
+#include "c10/core/SymInt.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
@@ -55,18 +56,21 @@ static inline bool parseLinearFlatten3d() {
 
 // `_flatten_3d_linear` flattens the first two dimensions of the input tensor
 // before passing it to linear operation, if the input tensor is 3D
-static inline Tensor _flatten_3d_linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
+static inline Tensor _flatten_nd_linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
     const auto input_sizes = input.sym_sizes();
-    const auto result = at::addmm(bias, input.view_symint({input_sizes[0] * input_sizes[1], input_sizes[2]}), weight.t());
-    return result.view_symint({input_sizes[0], input_sizes[1], result.sym_size(1)});
+    const auto result = at::addmm(bias, input.reshape_symint({-1, input_sizes.at(input_sizes.size() -1)}), weight.t());
+    auto new_size = input_sizes.slice(0, input_sizes.size() - 1);
+    std::vector<SymInt> sizes_vec(new_size.begin(), new_size.end());
+    sizes_vec.push_back(result.sym_size(1));
+    return result.view_symint(sizes_vec);
 }
+
 
 Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
     : c10::MaybeOwned<Tensor>::owned(c10::in_place);
-
   if (input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, *bias);
   }
@@ -75,19 +79,20 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
     return xnnpack::linear(input, weight, *bias);
   }
 #endif
-  if (input.dim() == 2 && bias->defined()) {
+  const auto input_dim = input.dim();
+  if (input_dim == 2 && bias->defined()) {
     // Fused op is marginally faster.
     return at::addmm(*bias, input, weight.t());
   }
-  if (input.dim() == 3 && bias->defined() && !input.is_xla()) {
+  if ((input_dim == 3 || input_dim == 4) && bias->defined() && !input.is_xla()) {
     // Also hit the fused path for contiguous 3D input, if not using xla
     // backend. Reshaping/flattening has some performance implications on xla.
     if (input.is_contiguous()) {
-      return _flatten_3d_linear(input, weight, *bias);
-    } else if (parseLinearFlatten3d()) {
+      return _flatten_nd_linear(input, weight, *bias);
+    } else if (parseLinearFlatten3d() && input_dim == 3) {
       // If user forces flattening via env var
       const Tensor input_cont = input.contiguous();
-      return _flatten_3d_linear(input_cont, weight, *bias);
+      return _flatten_nd_linear(input_cont, weight, *bias);
     }
   }
   auto output = at::matmul(input, weight.t());
