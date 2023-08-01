@@ -1235,6 +1235,7 @@ def not_close_error_metas(
                 "please except the previous error and raise an expressive `ErrorMeta` instead."
             ) from error
 
+    # [ErrorMeta Cycles]
     # ErrorMeta objects in this list capture
     # tracebacks that refer to the frame of this function.
     # The local variable `error_metas` refers to the error meta
