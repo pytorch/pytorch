@@ -2,7 +2,7 @@ import logging
 import warnings
 
 from copy import deepcopy
-from typing import Any, Collection, Dict, List, Mapping, Union
+from typing import Any, Callable, Collection, Dict, List, Mapping, Optional, Union, overload
 
 import torch
 import torch.nn as nn
@@ -20,7 +20,7 @@ class _NamedOptimizer(optim.Optimizer):
     """
     ``_NamedOptimizer`` takes a dict of parameters and exposes ``state_dict`` by
     parameter key. We replace the original key (number) in an optim to the
-    fully qualifed name (FQN) string. User can initialize the optim as they
+    fully qualified name (FQN) string. User can initialize the optim as they
     initialize a PyTorch optim, the only difference is that they also need to
     pass in the FQN of each parameters.
 
@@ -63,8 +63,8 @@ class _NamedOptimizer(optim.Optimizer):
         self,
         named_parameters: Mapping[str, Union[torch.Tensor, ShardedTensor]],
         optimizer_class: optim.Optimizer,
-        param_groups: Collection[Mapping[str, Any]] = None,
-        module: nn.Module = None,
+        param_groups: Optional[Collection[Mapping[str, Any]]] = None,
+        module: Optional[nn.Module] = None,
         *args,
         **kwargs,
     ) -> None:
@@ -120,8 +120,8 @@ class _NamedOptimizer(optim.Optimizer):
 
     def state_dict(self) -> Dict[str, Any]:
         """
-        Return the ``state_dict`` of the optimzer. Instead of using number to index
-        parameters, we will use module fully qualifed name (FQN) as the key.
+        Return the ``state_dict`` of the optimizer. Instead of using number to index
+        parameters, we will use module fully qualified name (FQN) as the key.
         """
         state_dict = self._optimizer.state_dict()
         param_groups = state_dict["param_groups"]
@@ -144,14 +144,26 @@ class _NamedOptimizer(optim.Optimizer):
 
         return self._post_state_dict({"state": ret_state, "param_groups": ret_groups})
 
-    def step(self, closure: Any = None) -> None:
+    @overload
+    def step(self, closure: None = ...) -> None:
+        ...
+
+    @overload
+    def step(self, closure: Callable[[], float]) -> float:
+        ...
+
+    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
         """
         Performs a single optimization step.
 
         This will call :meth:`torch.optim.Optimizer.step` on the wrapped
         optimizer.
         """
-        self._optimizer.step(closure=closure)
+        return self._optimizer.step(closure=closure)
+
+    @property
+    def state(self) -> Mapping[torch.Tensor, Any]:  # type: ignore[override]
+        return self._optimizer.state
 
     def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
         """
@@ -291,7 +303,7 @@ class _NamedOptimizer(optim.Optimizer):
 
         This allows doing in-place loading of optimizer state from a checkpoint.
         """
-        for _, param in self.named_parameters.items():
+        for param in self.named_parameters.values():
             if param.requires_grad:
                 t = torch.zeros_like(param)
                 param.grad = torch.autograd.Variable(t)
@@ -299,15 +311,19 @@ class _NamedOptimizer(optim.Optimizer):
         self.step(closure=None)
 
     def _pre_load_state_dict(self, state_dict) -> Dict[str, Any]:
+        # TODO(chienchin): This API should be FSDP agnostic and should support
+        # general user hooks.
         if isinstance(self.module, FSDP):
-            return FSDP.load_optim_state_dict_pre_hook(
-                self.module, self._optimizer, state_dict
+            return FSDP.optim_state_dict_to_load(
+                self.module, self._optimizer, state_dict, is_named_optimizer=True
             )
         return state_dict
 
     def _post_state_dict(self, state_dict) -> Dict[str, Any]:
+        # TODO(chienchin): This API should be FSDP agnostic and should support
+        # general user hooks.
         if isinstance(self.module, FSDP):
-            FSDP.optim_state_dict_post_hook(self.module, self._optimizer, state_dict)
+            FSDP.optim_state_dict(self.module, self._optimizer, state_dict)
         return state_dict
 
 

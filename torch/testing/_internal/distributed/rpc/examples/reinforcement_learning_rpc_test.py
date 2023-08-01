@@ -176,7 +176,7 @@ class Agent:
                 )
             )
 
-        # wait until all obervers have finished this episode
+        # wait until all observers have finished this episode
         for fut in futs:
             fut.wait()
 
@@ -225,7 +225,7 @@ def run_agent(agent, n_steps):
         last_reward = agent.finish_episode()
 
         if agent.running_reward > agent.reward_threshold:
-            print("Solved! Running reward is now {}!".format(agent.running_reward))
+            print(f"Solved! Running reward is now {agent.running_reward}!")
             break
 
 

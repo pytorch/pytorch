@@ -15,10 +15,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
 )
-from torch.testing._internal.common_methods_invocations import (
-    DecorateInfo,
-    op_db,
-)
+from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
 from torch.testing._internal.common_utils import (
     run_tests,
     suppress_warnings,
@@ -151,6 +148,7 @@ dtensor_fails = {
     xfail("einsum"),
     xfail("empty"),
     xfail("empty_like"),
+    xfail("empty_permuted"),
     xfail("exponential"),
     xfail("eye"),
     xfail("fft.fft2"),
@@ -204,6 +202,7 @@ dtensor_fails = {
     xfail("linalg.cross"),
     xfail("linalg.det"),
     xfail("linalg.det", "singular"),
+    xfail("linalg.diagonal"),
     xfail("linalg.eig"),
     xfail("linalg.eigh"),
     xfail("linalg.eigvals"),
@@ -243,8 +242,6 @@ dtensor_fails = {
     xfail("linalg.vector_norm"),
     xfail("linspace"),
     xfail("log_normal"),
-    xfail("log_softmax"),
-    xfail("log_softmax", "with_dtype"),
     xfail("logcumsumexp"),
     xfail("logdet"),
     xfail("logspace"),
@@ -540,7 +537,6 @@ dtensor_fails = {
     skip("prod"),
     skip("_segment_reduce", "lengths"),
     skip("_segment_reduce", "offsets"),
-
     # TODO: fix the following ops
     skip("squeeze"),
 }
@@ -555,7 +551,6 @@ skip_bw = [
     "torch.isfinite",
     "torch.isnan",
 ]
-
 
 
 OP_DB_WORLD_SIZE = 4
@@ -599,7 +594,6 @@ class TestDTensorOps(DTensorOpTestBase):
         flat_rs, _ = tree_flatten(rs)
         self.assertEqual(len(flat_dtensor_rs), len(flat_rs))
         for dtensor_r, r in zip(flat_dtensor_rs, flat_rs):
-
             if not isinstance(r, torch.Tensor):
                 continue
 
@@ -625,10 +619,7 @@ class TestDTensorOps(DTensorOpTestBase):
         def concat_res_if_necessary(func, res: object) -> object:
             # concat the result on corresponding dim for ops like
             # split, so that we can call backward on a single tensor
-            if (
-                (resolve_name(func) is not None)
-                and ("split" in resolve_name(func))
-            ):
+            if (resolve_name(func) is not None) and ("split" in resolve_name(func)):
                 dim = args[2] if len(args) == 3 else 0
                 return torch.cat(res, dim=dim)
             else:
@@ -704,7 +695,6 @@ class TestDTensorOps(DTensorOpTestBase):
 
         return rs
 
-
     def check_dtensor_func(self, test_func, opinfo, dry_run=False):
         try:
             test_func()
@@ -723,4 +713,7 @@ instantiate_device_type_tests(TestDTensorOps, globals(), only_for=(DEVICE_TYPE,)
 
 
 if __name__ == "__main__":
-    run_tests()
+    # NB: CPU dtensor ops test frequently timeout https://github.com/pytorch/pytorch/issues/98816
+    # so running it only on CUDA
+    if torch.cuda.is_available():
+        run_tests()

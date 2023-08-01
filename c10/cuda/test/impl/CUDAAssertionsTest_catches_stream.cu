@@ -14,7 +14,7 @@
 using ::testing::HasSubstr;
 
 /**
- * Device kernel that takes mulitple integer parameters as arguments and
+ * Device kernel that takes multiple integer parameters as arguments and
  * will always trigger a device side assertion.
  */
 __global__ void cuda_multiple_vars_always_fail_assertion_kernel(

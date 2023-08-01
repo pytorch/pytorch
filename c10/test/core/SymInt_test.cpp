@@ -5,19 +5,17 @@
 
 using namespace c10;
 #ifndef C10_MOBILE
-void check(int64_t value) {
-  EXPECT_TRUE(SymInt::check_range(value));
+static void check(int64_t value) {
   const auto i = SymInt(value);
-  EXPECT_FALSE(i.is_symbolic());
-  EXPECT_EQ(i.as_int_unchecked(), value);
+  EXPECT_EQ(i.maybe_as_int(), c10::make_optional(value));
 }
 
 TEST(SymIntTest, ConcreteInts) {
   check(INT64_MAX);
   check(0);
   check(-1);
-  // This is 2^62, which is the most negative number we can support.
   check(-4611686018427387904LL);
+  check(INT64_MIN);
 }
 
 TEST(SymIntTest, CheckRange) {

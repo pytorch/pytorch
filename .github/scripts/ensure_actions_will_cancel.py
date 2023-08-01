@@ -2,19 +2,22 @@
 
 import argparse
 import sys
-import yaml
 
 from pathlib import Path
+
+import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
-EXPECTED_GROUP = "${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}" \
+EXPECTED_GROUP = (
+    "${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}"
     "-${{ github.event_name == 'workflow_dispatch' }}"
+)
 
 
 def should_check(filename: Path) -> bool:
-    with open(filename, "r") as f:
+    with open(filename) as f:
         content = f.read()
 
     data = yaml.safe_load(content)
@@ -34,7 +37,7 @@ if __name__ == "__main__":
     files = [f for f in files if should_check(f)]
     names = set()
     for filename in files:
-        with open(filename, "r") as f:
+        with open(filename) as f:
             data = yaml.safe_load(f)
 
         name = data.get("name")

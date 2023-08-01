@@ -6,7 +6,8 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
-#include <torch/csrc/profiler/standalone/execution_graph_observer.h>
+#include <torch/csrc/profiler/python/combined_traceback.h>
+#include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
@@ -37,7 +38,10 @@ void initPythonBindings(PyObject* module) {
       .value("NVTX", ProfilerState::NVTX)
       .value("ITT", ProfilerState::ITT)
       .value("KINETO", ProfilerState::KINETO)
-      .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK);
+      .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK)
+      .value(
+          "KINETO_PRIVATEUSE1_FALLBACK",
+          ProfilerState::KINETO_PRIVATEUSE1_FALLBACK);
 
   py::enum_<ActiveProfilerType>(m, "ActiveProfilerType")
       .value("NONE", ActiveProfilerType::NONE)
@@ -48,6 +52,8 @@ void initPythonBindings(PyObject* module) {
 
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
+      .value("XPU", ActivityType::XPU)
+      .value("MTIA", ActivityType::MTIA)
       .value("CUDA", ActivityType::CUDA);
 
   py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")
@@ -56,7 +62,8 @@ void initPythonBindings(PyObject* module) {
               std::vector<std::string> /* profiler_metrics */,
               bool /* profiler_measure_per_kernel */,
               bool /* verbose */,
-              std::vector<std::string> /* performance_events  */
+              std::vector<std::string> /* performance_events  */,
+              bool /* enable_cuda_sync_events */
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
@@ -66,11 +73,15 @@ void initPythonBindings(PyObject* module) {
           "    profiler_measure_per_kernel (bool) : whether to profile metrics per kernel\n"
           "       or for the entire measurement duration.\n"
           "    verbose (bool) : whether the trace file has `Call stack` field or not.\n"
-          "    performance_events : a list of profiler events to be used for measurement",
+          "    performance_events : a list of profiler events to be used for measurement.\n"
+          "    enable_cuda_sync_events : for CUDA profiling mode, enable adding CUDA synchronization events\n"
+          "       that expose CUDA device, stream and event synchronization activities. This feature is new\n"
+          "       and currently disabled by default.\n",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,
           py::arg("verbose") = false,
-          py::arg("performance_events") = std::vector<std::string>())
+          py::arg("performance_events") = std::vector<std::string>(),
+          py::arg("enable_cuda_sync_events") = false)
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
             py::list py_metrics;
@@ -88,11 +99,12 @@ void initPythonBindings(PyObject* module) {
                 py_metrics,
                 p.profiler_measure_per_kernel,
                 p.verbose,
+                p.enable_cuda_sync_events,
                 p.performance_events);
           },
           [](py::tuple t) { // __setstate__
-            if (t.size() >= 3) {
-              throw std::runtime_error("Expected atleast 3 values in state");
+            if (t.size() >= 4) {
+              throw std::runtime_error("Expected atleast 4 values in state");
             }
 
             py::list py_metrics = t[0].cast<py::list>();
@@ -103,8 +115,8 @@ void initPythonBindings(PyObject* module) {
             }
 
             std::vector<std::string> performance_events;
-            if (t.size() == 4) {
-              py::list py_perf_events = t[3].cast<py::list>();
+            if (t.size() == 5) {
+              py::list py_perf_events = t[4].cast<py::list>();
               performance_events.resize(py_perf_events.size());
               for (const auto& py_perf_event : py_perf_events) {
                 performance_events.push_back(py::str(py_perf_event));
@@ -115,13 +127,14 @@ void initPythonBindings(PyObject* module) {
                 std::move(metrics),
                 t[1].cast<bool>(),
                 t[2].cast<bool>(),
-                std::move(performance_events));
+                std::move(performance_events),
+                t[3].cast<bool>());
           }));
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
       .def(py::init<
            ProfilerState,
-           bool, /* record_input_shapes */
+           bool, /* report_input_shapes */
            bool, /* profile_memory */
            bool, /* with_stack */
            bool, /* with_flops */
@@ -277,20 +290,40 @@ void initPythonBindings(PyObject* module) {
         return r.endTimeNS() - r.start_time_ns_;
       });
 
-  // PyTorch profiler execution graph internal interface.
+  // PyTorch profiler execution trace internal interface.
   m.def(
-      "_add_execution_graph_observer",
-      &torch::profiler::impl::addExecutionGraphObserver,
+      "_add_execution_trace_observer",
+      &torch::profiler::impl::addExecutionTraceObserver,
       py::arg("output_file_name"));
   m.def(
-      "_remove_execution_graph_observer",
-      &torch::profiler::impl::removeExecutionGraphObserver);
+      "_remove_execution_trace_observer",
+      &torch::profiler::impl::removeExecutionTraceObserver);
   m.def(
-      "_enable_execution_graph_observer",
-      &torch::profiler::impl::enableExecutionGraphObserver);
+      "_enable_execution_trace_observer",
+      &torch::profiler::impl::enableExecutionTraceObserver);
   m.def(
-      "_disable_execution_graph_observer",
-      &torch::profiler::impl::disableExecutionGraphObserver);
+      "_disable_execution_trace_observer",
+      &torch::profiler::impl::disableExecutionTraceObserver);
+  m.def(
+      "_set_record_concrete_inputs_enabled_val",
+      &torch::profiler::impl::set_record_concrete_inputs_enabled_val);
+  m.def(
+      "_set_fwd_bwd_enabled_val",
+      &torch::profiler::impl::set_fwd_bwd_enabled_val);
+  m.def(
+      "_set_cuda_sync_enabled_val",
+      &torch::profiler::impl::set_cuda_sync_enabled_val);
+
+  py::class_<CapturedTraceback, std::shared_ptr<CapturedTraceback>>(
+      m, "CapturedTraceback");
+  m.def(
+      "gather_traceback",
+      CapturedTraceback::gather,
+      py::arg("python") = true,
+      py::arg("script") = true,
+      py::arg("cpp") = true);
+  m.def("symbolize_tracebacks", py_symbolize);
+  installCapturedTracebackPython();
 }
 
 } // namespace profiler

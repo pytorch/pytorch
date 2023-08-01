@@ -114,7 +114,11 @@ static void registerIntrinsics(
   using namespace llvm::orc;
 
   auto entry = [&](const char* name, auto ptr) -> SymbolMap::value_type {
+#if LLVM_VERSION_MAJOR >= 17
+    return {Mangle(name), {ExecutorAddr(toAddress(ptr)), JITSymbolFlags::None}};
+#else
     return {Mangle(name), {toAddress(ptr), JITSymbolFlags::None}};
+#endif
   };
 
   SymbolMap symbols;
@@ -153,10 +157,19 @@ class TORCH_API PytorchLLVMJITImpl {
       c10::optional<std::string> attrs)
       : TM(assertSuccess(makeTargetMachineBuilder(triple, cpu, attrs)
                              .createTargetMachine())),
-        LLJ(assertSuccess(LLJITBuilder()
-                              .setJITTargetMachineBuilder(
-                                  makeTargetMachineBuilder(triple, cpu, attrs))
-                              .create())) {
+        LLJ(assertSuccess(
+            LLJITBuilder()
+                .setJITTargetMachineBuilder(
+                    makeTargetMachineBuilder(triple, cpu, attrs))
+#if LLVM_VERSION_MAJOR >= 17
+                .setObjectLinkingLayerCreator([&](ExecutionSession& ES,
+                                                  const Triple& TT) {
+                  return std::make_unique<ObjectLinkingLayer>(
+                      ES,
+                      assertSuccess(jitlink::InProcessMemoryManager::Create()));
+                })
+#endif
+                .create())) {
     auto ProcSymbolsGenerator =
         assertSuccess(DynamicLibrarySearchGenerator::GetForCurrentProcess(
             LLJ->getDataLayout().getGlobalPrefix()));

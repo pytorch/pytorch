@@ -436,19 +436,24 @@ static PyObject* THPVariable__is_functional_tensor(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable__sync(
+static PyObject* THPVariable__functionalize_has_metadata_mutation(
     PyObject* self,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  static PythonArgParser parser({"_sync(Tensor t)"}, /*traceable=*/true);
+  static PythonArgParser parser(
+      {"_functionalize_has_metadata_mutation(Tensor t)"}, /*traceable=*/true);
 
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto self_ = r.tensor(0);
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
-  at::functionalization::impl::sync(self_);
-  Py_RETURN_NONE;
+  auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(self_);
+  if (wrapper->has_metadata_mutation()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
   END_HANDLE_TH_ERRORS
 }
 
@@ -487,6 +492,22 @@ static PyObject* THPVariable__disable_functionalization(
   c10::impl::tls_set_dispatch_key_included(
       at::DispatchKey::Functionalize, false);
   at::functionalization::impl::setFunctionalizationReapplyViewsTLS(false);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPVariable__sync(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"_sync(Tensor t)"}, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  at::functionalization::impl::sync(self_);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -535,6 +556,11 @@ static PyMethodDef torch_functions_manual[] = {
      nullptr},
     {"_disable_functionalization",
      castPyCFunctionWithKeywords(THPVariable__disable_functionalization),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_functionalize_has_metadata_mutation",
+     castPyCFunctionWithKeywords(
+         THPVariable__functionalize_has_metadata_mutation),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"nonzero",

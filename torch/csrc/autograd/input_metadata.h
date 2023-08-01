@@ -41,12 +41,13 @@ struct InputMetadata {
   InputMetadata() = default;
 
   InputMetadata(
-      const at::TensorOptions options,
+      const at::TensorOptions& options,
       MetadataShape input_shape,
       bool is_tensor_subclass)
       : options_{options},
         shape_{std::move(input_shape)},
-        is_tensor_subclass_{is_tensor_subclass} {
+        is_tensor_subclass_{is_tensor_subclass},
+        was_default_constructed_{false} {
     auto device_ = options.device();
     stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
   }
@@ -93,8 +94,7 @@ struct InputMetadata {
         grad.is_nested() == is_nested_tensor(),
         "Both grad and InputMetadata need to be either nested or non nested tensors.")
     if (grad.is_nested()) {
-      return at::native::get_nested_size_tensor(grad).is_same_size(
-          shape_as_tensor());
+      return at::native::get_nested_sizes(grad).is_same_size(shape_as_tensor());
     }
     return grad.sym_sizes().equals(shape_as_dim_vector());
   }
@@ -123,7 +123,7 @@ struct InputMetadata {
     std::stringstream ss;
     ss << "invalid gradient at index " << index << " - got ";
     if (grad.is_nested()) {
-      ss << at::native::get_nested_size_tensor(grad);
+      ss << at::native::get_nested_sizes(grad);
     } else {
       ss << grad.sym_sizes();
     }
@@ -136,21 +136,31 @@ struct InputMetadata {
     return ss;
   }
 
- private:
+  bool was_default_constructed() const {
+    return was_default_constructed_;
+  }
+
   bool is_nested_tensor() const {
     return (c10::holds_alternative<at::Tensor>(shape_));
-  }
-  MetadataShape compute_variant_shape(const at::Tensor& input) {
-    if (input.is_nested()) {
-      auto nested_size = at::native::get_nested_size_tensor(input);
-      return MetadataShape{c10::in_place_type<at::Tensor>, nested_size};
-    }
-    return MetadataShape{c10::in_place_type<SymIntSmallVec>, input.sym_sizes()};
   }
 
   c10::SymIntArrayRef shape_as_dim_vector() const {
     const auto& dim_shape = c10::get<SymIntSmallVec>(shape_);
     return c10::SymIntArrayRef(dim_shape.data(), dim_shape.size());
+  }
+
+  // Danger: not thread safe, caller must protect with lock
+  SymIntSmallVec& mutable_shape_as_dim_vector() {
+    return c10::get<SymIntSmallVec>(shape_);
+  }
+
+ private:
+  MetadataShape compute_variant_shape(const at::Tensor& input) {
+    if (input.is_nested()) {
+      auto nested_size = at::native::get_nested_sizes(input);
+      return MetadataShape{c10::in_place_type<at::Tensor>, nested_size};
+    }
+    return MetadataShape{c10::in_place_type<SymIntSmallVec>, input.sym_sizes()};
   }
 
   at::Tensor shape_as_tensor() const {
@@ -161,6 +171,7 @@ struct InputMetadata {
   MetadataShape shape_;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device());
   bool is_tensor_subclass_ = false;
+  bool was_default_constructed_ = true;
 };
 } // namespace autograd
 } // namespace torch

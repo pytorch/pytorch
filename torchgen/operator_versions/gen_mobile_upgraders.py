@@ -264,7 +264,7 @@ def construct_version_maps(
 ) -> str:
     version_map = torch._C._get_operator_version_map()
     sorted_version_map_ = sorted(version_map.items(), key=lambda item: item[0])  # type: ignore[no-any-return]
-    sorted_version_map = {name: lst for name, lst in sorted_version_map_}
+    sorted_version_map = dict(sorted_version_map_)
 
     operator_list_in_version_map_part = []
     for op_name in sorted_version_map:
@@ -307,7 +307,7 @@ def get_upgrader_bytecode_function_to_index_map(
     upgrader_bytecode_function_to_index_map = {}
     index = 0
     for upgrader_bytecode in upgrader_dict:
-        for upgrader_name, bytecode in upgrader_bytecode.items():
+        for upgrader_name in upgrader_bytecode.keys():
             if upgrader_name in EXCLUE_UPGRADER_SET:
                 continue
             upgrader_bytecode_function_to_index_map[upgrader_name] = index
@@ -378,7 +378,6 @@ def sort_upgrader(upgrader_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def main() -> None:
-
     upgrader_list = generate_upgraders_bytecode()
     sorted_upgrader_list = sort_upgrader(upgrader_list)
     for up in sorted_upgrader_list:

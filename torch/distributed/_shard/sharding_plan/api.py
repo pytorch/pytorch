@@ -29,7 +29,7 @@ class ShardingPlan:
             Default: `None`
         return_local_tensor (List[str], optional): a list of string, each element enables
             a module's sharded output to be returned as a Tensor from its local shards to
-            ensure further processsing in a data parallel fashion. ("" in list means the
+            ensure further processing in a data parallel fashion. ("" in list means the
             root module).
             Default: None
     Example:

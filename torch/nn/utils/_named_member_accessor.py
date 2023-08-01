@@ -82,6 +82,29 @@ def swap_tensor(
     return orig_tensor
 
 
+def swap_submodule(
+    module: "torch.nn.Module",
+    name: str,
+    submodule: "torch.nn.Module",
+) -> "torch.nn.Module":
+    if not isinstance(module, torch.nn.Module):
+        raise TypeError(f"{module} is not an instance of torch.nn.Module")
+    if not isinstance(submodule, torch.nn.Module):
+        raise TypeError(f"{submodule} is not an instance of torch.nn.Module")
+    if "." in name:
+        raise KeyError('submodule name can\'t contain "."')
+    if name == "":
+        raise KeyError('submodule name can\'t be empty string ""')
+    if name not in module._modules:
+        raise KeyError(f"submodule {name} does not exist")
+
+    orig_submodule = module._modules[name]
+    if not isinstance(orig_submodule, torch.nn.Module):
+        raise TypeError(f"{name} attribute is not an instance of torch.nn.Module")
+    module._modules[name] = submodule
+    return orig_submodule
+
+
 class NamedMemberAccessor:
     """
     A class that provides a way to access the submodules and parameters/buffers
@@ -127,6 +150,15 @@ class NamedMemberAccessor:
                 )
             self.memo[name] = submodule
             return submodule
+
+    def swap_submodule(self, path: str, value: "torch.nn.Module") -> "torch.nn.Module":
+        """
+        Swap the submodule specified by the given ``path`` to ``value``.
+        For example, to swap the attribute mod.layer1.conv1 use
+        ``accessor.swap_submodule("layer1.conv1", conv2)``.
+        """
+        prefix, _, attr = path.rpartition(".")
+        return swap_submodule(self.get_submodule(prefix), attr, value)
 
     def get_tensor(self, name: str) -> torch.Tensor:
         """
@@ -286,9 +318,7 @@ class NamedMemberAccessor:
             # Swap back if any key is missing when allow_missing is False
             for name, orig_tensor in orig_named_tensors.items():
                 self.swap_tensor(name, orig_tensor, allow_missing=True)
-            raise RuntimeError(
-                "Missing key(s): {}.".format(", ".join(map(repr, missing_keys)))
-            )
+            raise RuntimeError(f"Missing key(s): {', '.join(map(repr, missing_keys))}.")
         return orig_named_tensors, missing_keys
 
     def check_keys(self, keys: Iterable[str]) -> Tuple[List[str], List[str]]:

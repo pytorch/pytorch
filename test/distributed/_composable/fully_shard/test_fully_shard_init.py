@@ -120,7 +120,7 @@ class TestInitialization(FSDPTest):
         composable_handles = traversal_utils._get_fsdp_handles(composable_module)
         fsdp_wrapped_handles = traversal_utils._get_fsdp_handles(fsdp_wrapped_model)
         self.assertEqual(len(composable_handles), len(fsdp_wrapped_handles))
-        for (composable_handle, fsdp_wrapped_handle) in zip(
+        for composable_handle, fsdp_wrapped_handle in zip(
             composable_handles, fsdp_wrapped_handles
         ):
             self.assertEqual(
@@ -179,7 +179,7 @@ class TestInitialization(FSDPTest):
             policy=policy,
             sync_module_states=True,
         )
-        for (composable_param, fsdp_wrapped_param) in zip(
+        for composable_param, fsdp_wrapped_param in zip(
             composable_module.parameters(),
             fsdp_wrapped_model.parameters(),
         ):
@@ -251,11 +251,20 @@ class TestInitialization(FSDPTest):
         Tests that nested applications of ``fully_shard`` share the expected
         data structure state.
         """
+        self.run_subtests(
+            {"use_policy": [False, True]},
+            self._test_nested_fully_shard_shared_state,
+        )
+
+    def _test_nested_fully_shard_shared_state(self, use_policy: bool):
         device = torch.device("cuda")
         composable_module = CompositeParamModel(device=device)
-        fully_shard(composable_module.u1)
-        fully_shard(composable_module.u2)
-        fully_shard(composable_module)
+        if use_policy:
+            fully_shard(composable_module, policy=ModuleWrapPolicy({UnitModule}))
+        else:
+            fully_shard(composable_module.u1)
+            fully_shard(composable_module.u2)
+            fully_shard(composable_module)
 
         # Run a forward pass to trigger lazy initialization
         inp = torch.randn((2, 100), device=device)
@@ -267,7 +276,14 @@ class TestInitialization(FSDPTest):
         # NOTE: This check only requires that the data structure state is
         # shared. Namely, sharing the FSDP state object itself is sufficient
         # but not necessary.
-        data_structure_names = ["_streams", "_exec_order_data", "_free_event_queue"]
+        data_structure_names = [
+            "_exec_order_data",
+            "_free_event_queue",
+            "_pre_unshard_stream",
+            "_unshard_stream",
+            "_post_backward_stream",
+            "_default_stream",
+        ]
         for data_structure_name in data_structure_names:
             all_structures = set()
             for module in (

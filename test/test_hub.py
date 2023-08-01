@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import retry, IS_SANDCASTLE, TestCase
 
 def sum_of_state_dict(state_dict):
     s = 0
-    for _, v in state_dict.items():
+    for v in state_dict.values():
         s += v.sum()
     return s
 
@@ -107,6 +107,10 @@ class TestHub(TestCase):
         loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL, file_name=file_name)
         expected_file_path = os.path.join(torch.hub.get_dir(), 'checkpoints', file_name)
         self.assertTrue(os.path.exists(expected_file_path))
+        self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
+
+        # with safe weight_only
+        loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL, weights_only=True)
         self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
 
     @retry(Exception, tries=3)

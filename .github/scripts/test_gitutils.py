@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
-from gitutils import PeekableIterator, patterns_to_regex, GitRepo, are_ghstack_branches_in_sync, _shasum
-from unittest import TestCase, main, SkipTest
 from pathlib import Path
+from unittest import main, SkipTest, TestCase
+
+from gitutils import (
+    _shasum,
+    are_ghstack_branches_in_sync,
+    GitRepo,
+    patterns_to_regex,
+    PeekableIterator,
+    retries_decorator,
+)
 
 
 BASE_DIR = Path(__file__).parent
@@ -15,6 +23,7 @@ class TestPeekableIterator(TestCase):
 
     def test_is_iterable(self) -> None:
         from collections.abc import Iterator
+
         iter_ = PeekableIterator("")
         self.assertTrue(isinstance(iter_, Iterator))
 
@@ -35,20 +44,39 @@ class TestPattern(TestCase):
         patterns_re = patterns_to_regex(allowed_patterns)
         fnames = [
             "aten/src/ATen/native/LinearAlgebra.cpp",
-            "aten/src/ATen/native/cpu/LinearAlgebraKernel.cpp"]
+            "aten/src/ATen/native/cpu/LinearAlgebraKernel.cpp",
+        ]
         for filename in fnames:
             self.assertTrue(patterns_re.match(filename))
+
+
+class TestRetriesDecorator(TestCase):
+    def test_simple(self) -> None:
+        @retries_decorator()
+        def foo(x: int, y: int) -> int:
+            return x + y
+
+        self.assertEqual(foo(3, 4), 7)
+
+    def test_fails(self) -> None:
+        @retries_decorator(rc=0)
+        def foo(x: int, y: int) -> int:
+            return x + y
+
+        self.assertEqual(foo("a", 4), 0)
 
 
 class TestGitRepo(TestCase):
     def setUp(self) -> None:
         repo_dir = BASE_DIR.parent.parent.absolute()
         if not (repo_dir / ".git").is_dir():
-            raise SkipTest("Can't find git directory, make sure to run this test on real repo checkout")
+            raise SkipTest(
+                "Can't find git directory, make sure to run this test on real repo checkout"
+            )
         self.repo = GitRepo(str(repo_dir))
 
     def _skip_if_ref_does_not_exist(self, ref: str) -> None:
-        """ Skip test if ref is missing as stale branches are deleted with time """
+        """Skip test if ref is missing as stale branches are deleted with time"""
         try:
             self.repo.show_ref(ref)
         except RuntimeError as e:
@@ -69,5 +97,6 @@ class TestGitRepo(TestCase):
         self._skip_if_ref_does_not_exist(head_ref)
         self.assertFalse(are_ghstack_branches_in_sync(self.repo, head_ref))
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

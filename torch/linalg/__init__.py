@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import sys
 
 import torch
@@ -871,8 +870,8 @@ the output has the same batch dimensions.
 """ + r"""
 
 Args:
-    A (Tensor): tensor of shape (*, n, n) where * is zero or more batch dimensions consisting of symmetric or Hermitian matrices.
-                    `(*, n, n)` where `*` is one or more batch dimensions.
+    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+                consisting of symmetric or Hermitian matrices.
 
 Keyword args:
     hermitian (bool, optional): whether to consider the input to be Hermitian or symmetric.
@@ -920,8 +919,8 @@ If ``check_errors=True`` and ``info`` contains positive integers, then a `Runtim
 """ + r"""
 
 Args:
-    A (Tensor): tensor of shape (*, n, n) where * is zero or more batch dimensions consisting of symmetric or Hermitian matrices.
-                    `(*, n, n)` where `*` is one or more batch dimensions.
+    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+                consisting of symmetric or Hermitian matrices.
 
 Keyword args:
     hermitian (bool, optional): whether to consider the input to be Hermitian or symmetric.
@@ -2048,10 +2047,10 @@ Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
 this function computes the **matrix exponential** of :math:`A \in \mathbb{K}^{n \times n}`, which is defined as
 
 .. math::
-    \mathrm{matrix_exp}(A) = \sum_{k=0}^\infty \frac{1}{k!}A^k \in \mathbb{K}^{n \times n}.
+    \mathrm{matrix\_exp}(A) = \sum_{k=0}^\infty \frac{1}{k!}A^k \in \mathbb{K}^{n \times n}.
 
 If the matrix :math:`A` has eigenvalues :math:`\lambda_i \in \mathbb{C}`,
-the matrix :math:`\mathrm{matrix_exp}(A)` has eigenvalues :math:`e^{\lambda_i} \in \mathbb{C}`.
+the matrix :math:`\mathrm{matrix\_exp}(A)` has eigenvalues :math:`e^{\lambda_i} \in \mathbb{C}`.
 
 Supports input of bfloat16, float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
@@ -2590,7 +2589,7 @@ Examples::
 
     >>> A = torch.randn(4, 4)
     >>> Atensorinv = torch.linalg.tensorinv(A, ind=1)
-    >>> Ainv = torch.linalg.inverse(A)
+    >>> Ainv = torch.linalg.inv(A)
     >>> torch.allclose(Atensorinv, Ainv)
     True
 """)

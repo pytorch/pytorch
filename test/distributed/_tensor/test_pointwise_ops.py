@@ -23,6 +23,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_unless_torch_gpu,
 )
 
+
 def no_op():
     return None
 
@@ -141,6 +142,13 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             args=(input_tensor,),
             kwargs=kwargs,
         )
+
+    def test_partial_add(self):
+        device_mesh = self.build_device_mesh()
+        d_1 = DTensor.from_local(torch.rand(2, 2), device_mesh, [_Partial()])
+        d_2 = DTensor.from_local(torch.rand(2, 2), device_mesh, [_Partial()])
+        d_3 = d_1 + d_2
+        self.assertEqual(d_3._spec.placements[0].is_partial(), True)
 
     def test_activations(self):
         device_mesh = self.build_device_mesh()

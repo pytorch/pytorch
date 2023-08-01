@@ -2,7 +2,13 @@ import collections
 import dataclasses
 import functools
 import inspect
-from typing import Dict, List
+from typing import Any, Dict, List, Tuple
+
+import torch
+import torch.fx
+from torch.fx import _pytree as fx_pytree
+
+from torch.utils import _pytree as pytree
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -54,12 +60,12 @@ class ConstDictVariable(VariableTracker):
         # BUILD_MAP and calling collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
             return [
-                create_instruction("BUILD_MAP", len(self.items)),
+                create_instruction("BUILD_MAP", arg=len(self.items)),
                 *create_call_function(1, False),
             ]
         # BUILD_MAP only if user_cls is dict
         else:
-            return [create_instruction("BUILD_MAP", len(self.items))]
+            return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
     def getitem_const(self, arg: VariableTracker):
         return self.items[ConstDictVariable.get_key(arg)].add_options(self, arg)
@@ -218,6 +224,8 @@ class ConstDictVariable(VariableTracker):
             key.is_python_constant()
             or isinstance(key, TensorVariable)
             and key.specialized_value is not None
+            or isinstance(key, ConstantVariable)
+            and key.python_type() is torch.dtype
         )
 
     @classmethod
@@ -237,6 +245,20 @@ class DefaultDictVariable(ConstDictVariable):
         assert user_cls is collections.defaultdict
         self.default_factory = default_factory
 
+    def is_python_constant(self):
+        # Return false for unsupported defaults. This ensures that a bad handler
+        # path is not taken in BuiltinVariable for getitem.
+        if self.default_factory not in [list, tuple, dict] and not self.items:
+            return False
+        return super().is_python_constant()
+
+    @staticmethod
+    def is_supported_arg(arg):
+        if isinstance(arg, variables.BuiltinVariable):
+            return arg.fn in [list, tuple, dict]
+        else:
+            return isinstance(arg, variables.functions.BaseUserFunctionVariable)
+
     def call_method(
         self,
         tx,
@@ -244,8 +266,6 @@ class DefaultDictVariable(ConstDictVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ListVariable, TupleVariable
-
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if name == "__getitem__":
@@ -260,18 +280,7 @@ class DefaultDictVariable(ConstDictVariable):
                     if istensor(k):
                         tx.store_dict_key(global_key_name(k), k)
                     new_val = collections.OrderedDict(self.items)
-                    if self.default_factory is list:
-                        default_var = ListVariable([], mutable_local=MutableLocal())
-                    elif self.default_factory is tuple:
-                        default_var = TupleVariable([], mutable_local=MutableLocal())
-                    elif self.default_factory is dict:
-                        default_var = ConstDictVariable(
-                            {}, dict, mutable_local=MutableLocal()
-                        )
-                    else:
-                        unimplemented(
-                            f"defaultdict with default_factory = {self.default_factory}"
-                        )
+                    default_var = self.default_factory.call_function(tx, [], {})
                     new_val[k] = default_var
                     new_rec_contains = self.recursively_contains.union(
                         default_var.recursively_contains
@@ -449,3 +458,45 @@ class HFPretrainedConfigVariable(VariableTracker):
         from . import ConstantVariable
 
         return ConstantVariable(getattr(self.obj, name))
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        return variables.ConstantVariable(hasattr(self.obj, name)).add_options(self)
+
+
+def _dictvariable_flatten(d: ConstDictVariable) -> Tuple[List[Any], pytree.Context]:
+    if d.python_type() is not dict:
+        # Note - ConstDictVariable can contain different kinds of dicts.
+        # However, flattening for those must differ and so cannot share the same registration as even if we
+        # consult the underlying python_type() to guide our flattening, that data will need to be propagated
+        # to unflatten. We do not have a good mechanism of doing this today, so we find it easier to treat this
+        # as unimplemented for now.
+
+        # TODO - Add support for flattening a ConstDictVariable with any underlying user_cls
+        unimplemented(f"Unsupported flattening of {d.python_type()}")
+    return list(d.items.values()), list(d.items.keys())
+
+
+def _dictvariable_unflatten(
+    values: List[Any], context: pytree.Context
+) -> ConstDictVariable:
+    assert all(isinstance(x, VariableTracker) for x in values)
+
+    # Guard propagation happens in the ConstDictVariable constructor
+    return ConstDictVariable(
+        dict(zip(context, values)), user_cls=dict, mutable_local=MutableLocal()
+    )
+
+
+def _register_dynamo_dict_to_tree_spec():
+    pytree._register_pytree_node(
+        ConstDictVariable,
+        _dictvariable_flatten,
+        _dictvariable_unflatten,
+        pytree._dict_to_str,
+        pytree._maybe_str_to_dict,
+    )
+
+    fx_pytree.register_pytree_flatten_spec(
+        ConstDictVariable,
+        _dictvariable_flatten,
+    )

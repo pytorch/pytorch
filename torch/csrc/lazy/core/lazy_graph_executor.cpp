@@ -560,7 +560,7 @@ void LazyGraphExecutor::Async::Wait() {
   }
 }
 
-bool LazyGraphExecutor::ShouldSyncTensor(const LazyTensorPtr tensor) const {
+bool LazyGraphExecutor::ShouldSyncTensor(const LazyTensorPtr& tensor) const {
   return tensor->GetIrValue()->op() != ltc_not_supported;
 }
 
@@ -668,7 +668,7 @@ std::vector<torch::lazy::BackendDataPtr> LazyGraphExecutor::SetTensorData(
     const std::vector<BackendDataPtr>& tensor_data_vec) {
   std::vector<BackendDataPtr> tensors_data;
   tensors_data.reserve(indices.size());
-  for (int i = 0; i < indices.size(); i++) {
+  for (const auto i : c10::irange(indices.size())) {
     auto index = indices[i];
     LazyTensorPtr& tensor = (*tensors)[index];
     // If the config.force_ltc_data flag is true, the purpose of this tensor
@@ -783,7 +783,8 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
     // TODO(whc) should computation be allowed null here? (because it is in one
     // case)
     TORCH_CHECK(
-        computation->parameters_size() == po_data->parameters_data.size());
+        computation->parameters_size() ==
+        static_cast<int>(po_data->parameters_data.size()));
   }
 
   return {

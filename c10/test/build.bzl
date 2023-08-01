@@ -10,6 +10,15 @@ def define_targets(rules):
     )
 
     rules.cc_test(
+        name = "core_impl_cow_context_test",
+        srcs = ["core/impl/cow/context_test.cpp"],
+        deps = [
+            "//c10/core:impl_cow_context",
+            "@com_google_googletest//:gtest_main",
+        ],
+    )
+
+    rules.cc_test(
         name = "core_tests",
         size = "small",
         srcs = rules.glob([
@@ -18,9 +27,9 @@ def define_targets(rules):
         ]),
         copts = ["-Wno-deprecated-declarations"],
         deps = [
-            "@com_google_googletest//:gtest_main",
             "//c10/core:base",
             "//c10/util:base",
+            "@com_google_googletest//:gtest_main",
         ],
     )
 
@@ -30,8 +39,8 @@ def define_targets(rules):
         srcs = ["util/typeid_test.cpp"],
         copts = ["-Wno-deprecated-declarations"],
         deps = [
-            "@com_google_googletest//:gtest_main",
             "//c10/util:typeid",
+            "@com_google_googletest//:gtest_main",
         ],
     )
 
@@ -39,43 +48,65 @@ def define_targets(rules):
         name = "util_base_tests",
         srcs = rules.glob(
             ["util/*.cpp"],
-            exclude = ["util/typeid_test.cpp"],
+            exclude = [
+                "util/bit_cast_test.cpp",
+                "util/ssize_test.cpp",
+                "util/typeid_test.cpp",
+            ],
         ),
         copts = ["-Wno-deprecated-declarations"],
         deps = [
             ":Macros",
             ":complex_math_test_common",
             ":complex_test_common",
-            "@com_google_googletest//:gtest_main",
-            "//c10/macros:macros",
+            "//c10/macros",
             "//c10/util:base",
+            "@com_google_googletest//:gtest_main",
+        ],
+    )
+
+    rules.cc_test(
+        name = "util/bit_cast_test",
+        srcs = ["util/bit_cast_test.cpp"],
+        deps = [
+            "//c10/util:bit_cast",
+            "@com_google_googletest//:gtest_main",
+        ],
+    )
+
+    rules.cc_test(
+        name = "util/ssize_test",
+        srcs = ["util/ssize_test.cpp"],
+        deps = [
+            "//c10/util:ssize",
+            "@com_google_googletest//:gtest_main",
         ],
     )
 
     rules.cc_library(
         name = "Macros",
-        hdrs = ["util/Macros.h"],
         testonly = True,
+        hdrs = ["util/Macros.h"],
         visibility = ["//:__subpackages__"],
     )
 
     rules.cc_library(
         name = "complex_math_test_common",
+        testonly = True,
         hdrs = ["util/complex_math_test_common.h"],
         deps = [
-            "@com_google_googletest//:gtest",
             "//c10/util:base",
+            "@com_google_googletest//:gtest",
         ],
-        testonly = True,
     )
 
     rules.cc_library(
         name = "complex_test_common",
+        testonly = True,
         hdrs = ["util/complex_test_common.h"],
         deps = [
-            "@com_google_googletest//:gtest",
-            "//c10/macros:macros",
+            "//c10/macros",
             "//c10/util:base",
+            "@com_google_googletest//:gtest",
         ],
-        testonly = True,
     )

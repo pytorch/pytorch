@@ -10,7 +10,6 @@ from torch._C import _onnx as _C_onnx
 from torch.onnx import errors
 from torch.onnx._internal import _beartype
 
-
 if typing.TYPE_CHECKING:
     # Hack to help mypy to recognize torch._C.Value
     from torch import _C  # noqa: F401
@@ -185,9 +184,22 @@ class JitScalarType(enum.IntEnum):
                 return cls.from_dtype(value.type().getElementType().dtype())
             except RuntimeError:
                 return cls._from_name(str(value.type().getElementType()))
+        if isinstance(value.type(), torch._C.OptionalType):
+            if value.type().getElementType().dtype() is None:
+                if isinstance(default, JitScalarType):
+                    return default
+                raise errors.OnnxExporterError(
+                    "default value must be a JitScalarType object."
+                )
+            return cls.from_dtype(value.type().getElementType().dtype())
 
-        # value must be a non-list torch._C.Value scalar
-        scalar_type = value.type().scalarType()
+        scalar_type = None
+        if value.node().kind() != "prim::Constant" or not isinstance(
+            value.type(), torch._C.NoneType
+        ):
+            # value must be a non-list torch._C.Value scalar
+            scalar_type = value.type().scalarType()
+
         if scalar_type is not None:
             return cls._from_name(scalar_type)
 

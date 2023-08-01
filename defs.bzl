@@ -34,6 +34,7 @@ default_compiler_flags = [
     "-DTH_INDEX_BASE=0",
     "-DMAGMA_V2",
     "-DNO_CUDNN_DESTROY_HANDLE",
+    "-DUSE_EXPERIMENTAL_CUDNN_V8_API",  # enable cudnn v8 api
     "-DUSE_FBGEMM",
     "-DUSE_QNNPACK",
     "-DUSE_PYTORCH_QNNPACK",
@@ -42,11 +43,12 @@ default_compiler_flags = [
     # nvrtc library which we load canonically anyway
     "-DUSE_DIRECT_NVRTC",
     "-DUSE_RUY_QMATMUL",
-] + ([] if native.host_info().os.is_windows else [
+] + select({
     # XNNPACK depends on an updated version of pthreadpool interface, whose implementation
     # includes <pthread.h> - a header not available on Windows.
-    "-DUSE_XNNPACK",
-]) + (["-O1"] if native.read_config("fbcode", "build_mode_test_label", "") == "dev-nosan" else [])
+    "DEFAULT": ["-DUSE_XNNPACK"],
+    "ovr_config//os:windows": [],
+}) + (["-O1"] if native.read_config("fbcode", "build_mode_test_label", "") == "dev-nosan" else [])
 
 compiler_specific_flags = {
     "clang": [

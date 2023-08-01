@@ -16,6 +16,7 @@ def _apply_optimizer_in_backward(
     optimizer_class: Type[torch.optim.Optimizer],
     params: Iterable[torch.nn.Parameter],
     optimizer_kwargs: Dict[str, Any],
+    register_hook: bool = True,
 ) -> None:
     """
     Upon ``backward()``, parameters will fire the corresponding optimizer.
@@ -28,6 +29,11 @@ def _apply_optimizer_in_backward(
         optimizer_class: (Type[torch.optim.Optimizer]): Optimizer to apply to parameter
         params: (Iterator[nn.Parameter]): parameters to apply optimizer state to
         optimizer_kwargs: (Dict[str, Any]): kwargs to pass to optimizer constructor
+        register_hook: (bool): whether to register a hook that runs the optimizer
+            after gradient for this parameter is computed. This is the default
+            way that optimizer in backward is implemented, but specific use cases
+            (such as DDP) may wish to override this to implement custom behavior.
+            (Default = True)
 
     Example::
         params_generator = model.parameters()
@@ -66,6 +72,9 @@ def _apply_optimizer_in_backward(
         param._optimizer_classes.append(optimizer_class)  # type: ignore[attr-defined]
         param._optimizer_kwargs.append(optimizer_kwargs)  # type: ignore[attr-defined]
 
+        if not register_hook:
+            return
+
         def optimizer_hook(*_unused) -> None:
             for opt in param._in_backward_optimizers:  # type: ignore[attr-defined]
                 opt.step()
@@ -79,3 +88,26 @@ def _apply_optimizer_in_backward(
 
     for param in params:
         _apply_optimizer_in_backward_to_param(param)
+
+
+def _get_in_backward_optimizers(module: torch.nn.Module) -> List[torch.optim.Optimizer]:
+    """
+    Return a list of in-backward optimizers applied to ``model``'s parameters. Note that these
+    optimizers are not intended to directly have their ``step`` or ``zero_grad`` methods called
+    by the user and are intended to be used for things like checkpointing.
+
+    Args:
+        module: (torch.nn.Module): model to retrieve in-backward optimizers for
+
+    Returns:
+        List[torch.optim.Optimizer]: the in-backward optimizers.
+
+    Example::
+        _apply_optimizer_in_backward(torch.optim.SGD, model.parameters(), {'lr': 0.01})
+        optims = _get_optimizers_in_backward(model)
+    """
+    optims: List[torch.optim.Optimizer] = []
+    for param in module.parameters():
+        optims.extend(getattr(param, "_in_backward_optimizers", []))
+
+    return optims

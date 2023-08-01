@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
+
 # This class holds information about a single operator used to determine
 # the outcome of a selective/custom PyTorch build that doesn't include
 # registration code for all the supported operators. This is done to
@@ -82,7 +83,7 @@ class SelectiveBuildOperator:
         if "debug_info" in op_info:
             di_list = op_info["debug_info"]
             assert isinstance(di_list, list)
-            debug_info = tuple(map(lambda x: str(x), di_list))
+            debug_info = tuple(str(x) for x in di_list)
 
         return SelectiveBuildOperator(
             name=op_name,
@@ -132,10 +133,7 @@ def combine_operators(
 ) -> "SelectiveBuildOperator":
     if str(lhs.name) != str(rhs.name):
         raise Exception(
-            "Expected both arguments to have the same name, but got '{}' and '{}' instead".format(
-                str(lhs.name),
-                str(rhs.name),
-            )
+            f"Expected both arguments to have the same name, but got '{str(lhs.name)}' and '{str(rhs.name)}' instead"
         )
 
     return SelectiveBuildOperator(
@@ -158,7 +156,7 @@ def merge_operator_dicts(
     rhs: Dict[str, SelectiveBuildOperator],
 ) -> Dict[str, SelectiveBuildOperator]:
     operators: Dict[str, SelectiveBuildOperator] = {}
-    for (op_name, op) in list(lhs.items()) + list(rhs.items()):
+    for op_name, op in list(lhs.items()) + list(rhs.items()):
         new_op = op
         if op_name in operators:
             new_op = combine_operators(operators[op_name], op)

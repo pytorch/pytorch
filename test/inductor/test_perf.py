@@ -1,20 +1,15 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import sys
 from unittest.mock import patch
 
 import functorch
 
-import torch._dynamo
+import torch
 import torch._inductor.config as config
 from torch._dynamo.backends.registry import register_backend
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
-from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
-    TEST_WITH_ROCM,
-    TestCase as TorchTestCase,
-)
+from torch.testing._internal.common_utils import IS_WINDOWS, TestCase as TorchTestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 aten = torch.ops.aten
@@ -25,8 +20,7 @@ def count_bytes_inductor(gm, example_inputs):
     return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
 
 
-# TODO remove version check once dynamo supports 3.11
-if sys.version_info < (3, 11) and not IS_WINDOWS:
+if not IS_WINDOWS:
 
     @torch._dynamo.optimize("count_bytes_inductor")
     def f(x):
@@ -518,5 +512,5 @@ class WouldBeNiceIfItWorked:
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CUDA and not TEST_WITH_ROCM:
+    if HAS_CUDA:
         run_tests(needs="filelock")

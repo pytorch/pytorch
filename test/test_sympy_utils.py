@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: pt2"]
 
 import itertools
@@ -27,7 +26,7 @@ UNARY_OPS = [
     "floor",
     "ceil",
 ]
-BINARY_OPS = ["truediv", "div", "add", "mul", "sub", "pow", "minimum", "maximum", "mod"]
+BINARY_OPS = ["truediv", "div", "floordiv", "truncdiv", "add", "mul", "sub", "pow", "minimum", "maximum", "mod"]
 
 UNARY_BOOL_OPS = ["not_"]
 BINARY_BOOL_OPS = ["or_", "and_"]
@@ -100,32 +99,46 @@ def generate_range(vals):
 
 class TestValueRanges(TestCase):
     @parametrize("fn", UNARY_OPS)
-    def test_unary_ref(self, fn):
+    @parametrize("dtype", ("int", "float"))
+    def test_unary_ref(self, fn, dtype):
+        dtype = {"int": sympy.Integer, "float": sympy.Float}[dtype]
         for v in CONSTANTS:
             if not valid_unary(fn, v):
                 continue
             with self.subTest(v=v):
-                ref_r = getattr(ReferenceAnalysis, fn)(sympy.Integer(v))
-                r = getattr(ValueRangeAnalysis, fn)(ValueRanges.wrap(v))
+                v = dtype(v)
+                ref_r = getattr(ReferenceAnalysis, fn)(v)
+                r = getattr(ValueRangeAnalysis, fn)(v)
+                self.assertEqual(r.lower.is_integer, r.upper.is_integer)
                 self.assertEqual(r.lower, r.upper)
+                self.assertEqual(ref_r.is_integer, r.upper.is_integer)
                 self.assertEqual(ref_r, r.lower)
 
     def test_pow_half(self):
         ValueRangeAnalysis.pow(ValueRanges.unknown(), ValueRanges.wrap(0.5))
 
     @parametrize("fn", BINARY_OPS)
-    def test_binary_ref(self, fn):
+    @parametrize("dtype_a", ("int", "float"))
+    @parametrize("dtype_b", ("int", "float"))
+    def test_binary_ref(self, fn, dtype_a, dtype_b):
+        to_dtype = {"int": sympy.Integer, "float": sympy.Float}
+        dtype_a = to_dtype[dtype_a]
+        dtype_b = to_dtype[dtype_b]
         for a, b in itertools.product(CONSTANTS, repeat=2):
             if not valid_binary(fn, a, b):
                 continue
+            a = dtype_a(a)
+            b = dtype_b(b)
             with self.subTest(a=a, b=b):
-                ref_r = getattr(ReferenceAnalysis, fn)(
-                    sympy.Integer(a), sympy.Integer(b)
-                )
-                r = getattr(ValueRangeAnalysis, fn)(
-                    ValueRanges.wrap(a),
-                    ValueRanges.wrap(b),
-                )
+                r = getattr(ValueRangeAnalysis, fn)(a, b)
+                if r == ValueRanges.unknown():
+                    continue
+                ref_r = getattr(ReferenceAnalysis, fn)(a, b)
+
+                # sympy.floordiv does 1.0 // 1.0 == 1 rather than 1.0. wtf
+                if fn != "floordiv":
+                    self.assertEqual(r.lower.is_integer, r.upper.is_integer)
+                    self.assertEqual(ref_r.is_integer, r.upper.is_integer)
                 self.assertEqual(r.lower, r.upper)
                 self.assertEqual(ref_r, r.lower)
 
@@ -207,12 +220,32 @@ class TestValueRanges(TestCase):
                         r = getattr(ReferenceAnalysis, fn)(
                             sympy.Integer(a0), sympy.Integer(b0)
                         )
-                        self.assertIn(r, ref_r)
+                        if r.is_finite:
+                            self.assertIn(r, ref_r)
+
+    def test_rational_bounds(self):
+        # Repro from https://github.com/pytorch/pytorch/issues/105097
+        from sympy import floor, Eq
+        shape_0 = sympy.Symbol('shape_0', positive=True, integer=True)
+        new_expr = (
+            Eq(30 * floor(4 * ((shape_0 + 1) // 96) *
+                          ((shape_0 + 62017) // (((shape_0 + 1) // 96) + 646)) / 647 +
+                          2584 * ((shape_0 + 62017) // (((shape_0 + 1) // 96) + 646)) / 647),
+               2880 * floor(((shape_0 + 1) // 96) *
+                            ((shape_0 + 62017) // (((shape_0 + 1) // 96) + 646)) / 15528 +
+                            323 * ((shape_0 + 62017) // (((shape_0 + 1) // 96) + 646)) / 7764)))
+        new_range_env = {shape_0: ValueRanges(lower=1, upper=190)}
+        self.assertTrue(new_expr.subs({shape_0: 95}))
+        self.assertIn(True, sympy_interp(ValueRangeAnalysis, new_range_env, new_expr))
 
 
 class TestSympyInterp(TestCase):
     @parametrize("fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS)
     def test_interp(self, fn):
+        # SymPy does not implement truncation for Expressions
+        if fn in ("div", "truncdiv", "minimum", "maximum"):
+            return
+
         from sympy.abc import x, y
         vals = CONSTANTS
         if fn in {*UNARY_BOOL_OPS, *BINARY_BOOL_OPS}:

@@ -3,21 +3,12 @@
 
 from typing import Any
 
-from gitutils import (
-    get_git_remote_name,
-    get_git_repo_dir,
-    GitRepo,
-)
+from github_utils import gh_delete_comment, gh_post_pr_comment
+
+from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
+from label_utils import has_required_labels, is_label_err_comment, LABEL_ERR_MSG
 from trymerge import GitHubPR
-from github_utils import (
-    gh_delete_comment,
-    gh_post_pr_comment,
-)
-from label_utils import (
-    LABEL_ERR_MSG,
-    is_label_err_comment,
-    has_required_labels,
-)
+
 
 def delete_all_label_err_comments(pr: "GitHubPR") -> None:
     for comment in pr.get_comments():
@@ -33,6 +24,7 @@ def add_label_err_comment(pr: "GitHubPR") -> None:
 
 def parse_args() -> Any:
     from argparse import ArgumentParser
+
     parser = ArgumentParser("Check PR labels")
     parser.add_argument("pr_num", type=int)
 

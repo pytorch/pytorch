@@ -35,6 +35,8 @@ class CppSignature:
     # Is this a symint C++ signature.  For BC reasons, functions that take
     # SymInts still present as int64_t in C++, and the SymInt variant is
     # offered at a different overload name
+    #
+    # NB: If a function RETURNS a SymInt, this is ALWAYS false
     symint: bool
 
     # The set of C++ arguments which should not have defaults applied to them

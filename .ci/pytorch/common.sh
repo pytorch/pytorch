@@ -22,7 +22,3 @@ fi
 # TODO: Renable libtorch testing for MacOS, see https://github.com/pytorch/pytorch/issues/62598
 # shellcheck disable=SC2034
 BUILD_TEST_LIBTORCH=0
-
-retry () {
-  "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-}

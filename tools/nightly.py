@@ -105,7 +105,7 @@ class Formatter(logging.Formatter):
         self.redactions[needle] = replace
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def logging_base_dir() -> str:
     meta_dir = os.getcwd()
     base_dir = os.path.join(meta_dir, "nightly", "log")
@@ -113,17 +113,17 @@ def logging_base_dir() -> str:
     return base_dir
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def logging_run_dir() -> str:
     cur_dir = os.path.join(
         logging_base_dir(),
-        "{}_{}".format(datetime.datetime.now().strftime(DATETIME_FORMAT), uuid.uuid1()),
+        f"{datetime.datetime.now().strftime(DATETIME_FORMAT)}_{uuid.uuid1()}",
     )
     os.makedirs(cur_dir, exist_ok=True)
     return cur_dir
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def logging_record_argv() -> None:
     s = subprocess.list2cmdline(sys.argv)
     with open(os.path.join(logging_run_dir(), "argv"), "w") as f:
@@ -233,7 +233,7 @@ def timer(logger: logging.Logger, prefix: str) -> Iterator[None]:
     """Timed context manager"""
     start_time = time.time()
     yield
-    logger.info(f"{prefix} took {time.time() - start_time:.3f} [s]")
+    logger.info("%s took %.3f [s]", prefix, time.time() - start_time)
 
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -607,7 +607,8 @@ def install(
     pytdir.cleanup()
     logger.info(
         "-------\nPyTorch Development Environment set up!\nPlease activate to "
-        f"enable this environment:\n  $ conda activate {env_opts[1]}"
+        "enable this environment:\n  $ conda activate %s",
+        env_opts[1],
     )
 
 

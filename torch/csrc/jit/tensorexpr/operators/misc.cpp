@@ -70,7 +70,7 @@ static bool checkTypes(const ScalarType highType, const int typeConstraints) {
   return false;
 }
 
-bool isScalar(ExprHandle e) {
+static bool isScalar(ExprHandle e) {
   auto n = e.node();
   return n->isConstant() || to<Var>(n);
 }
@@ -188,7 +188,7 @@ static bool isOne(ExprHandle e) {
   return *n == 1;
 }
 
-std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
+static std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
     const std::vector<ExprHandle>& a,
     const std::vector<ExprHandle>& b) {
   auto at = a.rbegin();
@@ -224,7 +224,7 @@ std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
   return {ret, hasBroadcast};
 }
 
-std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
+static std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
     std::vector<std::vector<ExprHandle>> shapes) {
   size_t n = shapes.size();
   if (n == 1) {
@@ -338,7 +338,7 @@ Tensor computeChunk(
         size_t step = buf_info->dims[norm_dim] / chunks;
 
         std::vector<ExprHandle> new_indices;
-        for (int64_t i = 0; i < indices.size(); ++i) {
+        for (int64_t i = 0; i < static_cast<int64_t>(indices.size()); ++i) {
           if (i == norm_dim) {
             new_indices.push_back(
                 indices[i] + ExprHandle(immLike(indices[i], chunkIdx * step)));
@@ -444,7 +444,7 @@ Tensor computeReshape(
         for (size_t idx = 0; idx < A.ndim(); idx++) {
           size_t dim_idx = A.ndim() - idx - 1;
           // We don't need to generate mod-div for the first dimension -
-          // ideally IRSimlifier would get rid of that for us, but for now
+          // ideally IRSimplifier would get rid of that for us, but for now
           // let's just avoid generating it in the first place.
           if (dim_idx > 0) {
             orig_buf_indexes[dim_idx] = flat_idx / stride % A.dim(dim_idx);
@@ -508,7 +508,7 @@ static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
   return {highType, nonEmptyInputs};
 }
 
-Tensor computeCatWoConditionals(
+static Tensor computeCatWoConditionals(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides) {
@@ -574,7 +574,7 @@ Tensor computeCatWoConditionals(
     std::vector<VarPtr> for_vars(dims.size());
     std::vector<ExprPtr> load_indices(dims.size());
     std::vector<ExprPtr> store_indices(dims.size());
-    for (int64_t i = 0; i < dims.size(); ++i) {
+    for (int64_t i = 0; i < static_cast<int64_t>(dims.size()); ++i) {
       for_vars[i] = alloc<Var>(
           "i" + c10::to_string(inp_pos) + "_" + c10::to_string(i),
           dims[i].dtype());
