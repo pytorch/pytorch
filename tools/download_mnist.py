@@ -26,7 +26,7 @@ def report_download_progress(
     if file_size != -1:
         percent = min(1, (chunk_number * chunk_size) / file_size)
         bar = "#" * int(64 * percent)
-        sys.stdout.write("\r0% |{:<64}| {}%".format(bar, int(percent * 100)))
+        sys.stdout.write(f"\r0% |{bar:<64}| {int(percent * 100)}%")
 
 
 def download(destination_path: str, resource: str, quiet: bool) -> None:
