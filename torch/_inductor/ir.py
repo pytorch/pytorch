@@ -1274,11 +1274,11 @@ class WelfordReduction(Reduction):
         # TODO(jansel): convert this to dynamic shapes
         # TODO(jansel): realize the reduction so we can do dynamic indexing
         reduction_ranges = [
-            sympy.Integer(V.graph.sizevars.guard_static_shape(s))
+            sympy.Integer(V.graph.sizevars.evaluate_static_shape(s))
             for s in reduction_ranges
         ]
         reduction_numel = sympy.Integer(
-            V.graph.sizevars.guard_static_shape(reduction_numel)
+            V.graph.sizevars.evaluate_static_shape(reduction_numel)
         )
 
         if V.graph.sizevars.size_hint(reduction_numel) % split == 0:
