@@ -921,7 +921,6 @@ class CudaReproTests(TestCase):
         ref = compiled(list(args))
         assert same(ref, correct)
 
-    @skipIfRocm
     @config.patch({"triton.cudagraphs": True})
     def test_index_put_inplace_cudagraph(self):
         def fn(x, y, z):
@@ -942,7 +941,6 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(ref, res)
 
-    @skipIfRocm
     @config.patch({"triton.cudagraphs": True})
     def test_index_put_cudagraph(self):
         def fn(x, y, z):
@@ -963,7 +961,6 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(ref, res)
 
-    @skipIfRocm
     @config.patch({"triton.cudagraphs": True})
     def test_index_put_no_fallback_cudagraph(self):
         def fn(x, y, z):
