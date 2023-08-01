@@ -22,6 +22,7 @@
 #include <torch/csrc/utils/python_raii.h>
 
 #include <iostream>
+#include <utility>
 
 namespace py = pybind11;
 
@@ -192,10 +193,10 @@ static torch::_RegisterOrVerify register_or_verify() {
 static py::object ophandle_call_boxed(
     const c10::OperatorHandle& handle,
     py::args args,
-    py::kwargs kwargs) {
+    const py::kwargs& kwargs) {
   auto stack = torch::jit::createStackForSchema(
       handle.schema(),
-      args,
+      std::move(args),
       kwargs,
       /*self=*/c10::nullopt);
   {
@@ -204,6 +205,28 @@ static py::object ophandle_call_boxed(
   }
   return torch::jit::createPyObjectForStack(std::move(stack));
 }
+
+// A small RAII guard that lets you explicitly *remove* a key from the TLS
+// exclude set.
+class SetExcludeDispatchKeyGuard {
+ public:
+  SetExcludeDispatchKeyGuard(DispatchKey k, bool set_excluded)
+      : k(k), old(c10::impl::tls_is_dispatch_key_excluded(k)) {
+    c10::impl::tls_set_dispatch_key_excluded(k, set_excluded);
+  }
+  ~SetExcludeDispatchKeyGuard() {
+    c10::impl::tls_set_dispatch_key_excluded(k, old);
+  }
+  SetExcludeDispatchKeyGuard(const SetExcludeDispatchKeyGuard&) = delete;
+  SetExcludeDispatchKeyGuard operator=(const SetExcludeDispatchKeyGuard&) =
+      delete;
+  SetExcludeDispatchKeyGuard(SetExcludeDispatchKeyGuard&&) = delete;
+  SetExcludeDispatchKeyGuard operator=(SetExcludeDispatchKeyGuard&&) = delete;
+
+ private:
+  DispatchKey k;
+  bool old;
+};
 
 void initDispatchBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -306,24 +329,33 @@ void initDispatchBindings(PyObject* module) {
           py::arg("debug") = "impl_t_t")
       .def(
           "impl",
-          [](py::object self,
+          [](const py::object& self,
              const char* name,
              // TODO: empty string no longer works
              c10::DispatchKey dispatch,
              py::object func) {
             HANDLE_TH_ERRORS
             auto& lib = self.cast<torch::Library&>();
-            lib.impl(
-                name,
-                torch::dispatch(
-                    dispatch,
-                    CppFunction::makeFromBoxedFunctor(
-                        std::make_unique<PythonKernelHolder>(func, dispatch))),
-                register_or_verify());
-            python_registrations_[lib._resolve(name)].insert_or_assign(
-                dispatch,
-                std::make_shared<c10::SafePyObject>(
-                    func.release().ptr(), getPyInterpreter()));
+            if (func.is(py::module::import("torch.library")
+                            .attr("fallthrough_kernel"))) {
+              lib.impl(
+                  name,
+                  torch::dispatch(dispatch, CppFunction::makeFallthrough()),
+                  register_or_verify());
+            } else {
+              lib.impl(
+                  name,
+                  torch::dispatch(
+                      dispatch,
+                      CppFunction::makeFromBoxedFunctor(
+                          std::make_unique<PythonKernelHolder>(
+                              func, dispatch))),
+                  register_or_verify());
+              python_registrations_[lib._resolve(name)].insert_or_assign(
+                  dispatch,
+                  std::make_shared<c10::SafePyObject>(
+                      func.release().ptr(), getPyInterpreter()));
+            }
             END_HANDLE_TH_ERRORS_PYBIND
           },
           "",
@@ -332,7 +364,9 @@ void initDispatchBindings(PyObject* module) {
           py::arg("func"))
       .def(
           "define",
-          [](py::object self, const char* schema, const char* alias_analysis) {
+          [](const py::object& self,
+             const char* schema,
+             const char* alias_analysis) {
             auto parsed_schema =
                 torch::schema(schema, parseAliasAnalysisKind(alias_analysis));
             self.cast<torch::Library&>().def(
@@ -655,8 +689,12 @@ void initDispatchBindings(PyObject* module) {
       c10::impl::ExcludeDispatchKeyGuard,
       c10::DispatchKeySet>(m, "ExcludeDispatchKeyGuard");
 
+  py_context_manager<c10::impl::IncludeDispatchKeyGuard, c10::DispatchKey>(
+      m, "_IncludeDispatchKeyGuard");
   py_context_manager<c10::impl::ExcludeDispatchKeyGuard, c10::DispatchKeySet>(
       m, "_ExcludeDispatchKeyGuard");
+  py_context_manager<SetExcludeDispatchKeyGuard, c10::DispatchKey, bool>(
+      m, "_SetExcludeDispatchKeyGuard");
 
   py_context_manager_DEPRECATED<at::AutoDispatchBelowAutograd>(
       m, "_AutoDispatchBelowAutograd");
