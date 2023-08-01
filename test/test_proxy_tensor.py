@@ -1481,7 +1481,6 @@ make_fx_failures = {
     # data-dependent control flow
     skip('item'),
     xfail('cov'),
-    xfail('istft'),
     xfail('nn.functional.gaussian_nll_loss'),
     xfail('tensor_split'),
     xfail('corrcoef'),
@@ -1570,7 +1569,6 @@ symbolic_tensor_failures = {
     xfail('special.polygamma', 'special_polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic meta function/...
     xfail('special.scaled_modified_bessel_k0', ''),  # aten.special_scaled_modified_bessel_k0.default - couldn't find symbo...
     xfail('special.scaled_modified_bessel_k1', ''),  # aten.special_scaled_modified_bessel_k1.default - couldn't find symbo...
-    xfail('stft', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode at...
     xfail('take_along_dim', ''),  # dtype of indices should be Long but got Float
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/decomposition
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
@@ -1592,6 +1590,7 @@ symbolic_tensor_failures = {
     xfail('fft.rfft2', ''),
     xfail('fft.rfft', ''),
     xfail('fft.rfftn', ''),
+    xfail('stft', '')
 }
 symbolic_tensor_segfaults = {
     skip('nn.functional.batch_norm')  # Segfault??
