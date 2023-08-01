@@ -1,16 +1,20 @@
-from collections import defaultdict
 import copy
 import dataclasses
-import sympy
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple, Union
-from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
+
+import sympy
 
 import torch
-from torch.fx.passes.infra.pass_manager import PassManager
 import torch.fx._pytree as fx_pytree
+from torch.fx._compatibility import compatibility
 import torch.utils._pytree as pytree
-from torch.fx.experimental.symbolic_shapes import SymInt
+from torch import fx
+from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.experimental.symbolic_shapes import SymInt
+from torch.fx.passes.infra.pass_manager import PassManager
+
 from . import error
 from .pass_base import PassType
 from .passes.add_runtime_assertions_for_constraints_pass import (
@@ -100,13 +104,56 @@ class ExportedProgram:
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
-        self.graph_module = torch.fx.GraphModule(root, graph)
+        self._graph_module = torch.fx.GraphModule(root, graph)
 
-        self.graph_signature: ExportGraphSignature = graph_signature
-        self.call_spec: CallSpec = call_spec
-        self.state_dict: Dict[str, Any] = state_dict
-        self.range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
-        self.equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
+        self._graph_signature: ExportGraphSignature = graph_signature
+        self._call_spec: CallSpec = call_spec
+        self._state_dict: Dict[str, Any] = state_dict
+        self._range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
+        self._equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
+
+    @property
+    @compatibility(is_backward_compatible=True)
+    def graph_module(self):
+        return self._graph_module
+
+    @graph_module.setter
+    def graph_module(self, gm: torch.fx.GraphModule) -> None:
+        """
+        Set the underlying ``GraphModule`` for this ``ExportedProgram``.
+        """
+        assert isinstance(gm, torch.fx.GraphModule), f'Expected a GraphModule instance, but got {type(gm)}'
+        self._graph_module = gm
+
+    @property
+    @compatibility(is_backward_compatible=True)
+    def graph(self):
+        return self.graph_module.graph
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def graph_signature(self):
+        return self._graph_signature
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def state_dict(self):
+        return self._state_dict
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def call_spec(self):
+        return self._call_spec
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def range_constraints(self):
+        return self._range_constraints
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def equality_constraints(self):
+        return self._equality_constraints
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         if self.call_spec.in_spec is not None:
@@ -122,7 +169,8 @@ class ExportedProgram:
                     f"{received_spec}"
                 )
 
-        param_buffer_values = (value for _, value in self.state_dict.items())
+        param_buffer_values = tuple(value for _, value in self.state_dict.items())
+        self._check_input_constraints(*param_buffer_values, *args)
 
         with torch.no_grad():
             res = torch.fx.Interpreter(self.graph_module).run(
@@ -170,9 +218,20 @@ class ExportedProgram:
         )
         return string
 
-    @property
-    def graph(self):
-        return self.graph_module.graph
+    def __deepcopy__(
+        self, memo: Optional[Dict[int, Any]] = None
+    ) -> "ExportedProgram":
+        gm = copy.deepcopy(self.graph_module, memo)
+        new_ep = ExportedProgram(
+            gm,
+            gm.graph,
+            copy.deepcopy(self.graph_signature, memo),
+            copy.deepcopy(self.call_spec, memo),
+            copy.deepcopy(self.state_dict, memo),
+            copy.deepcopy(self.range_constraints, memo),
+            copy.deepcopy(self.equality_constraints, memo),
+        )
+        return new_ep
 
     def transform(self, *passes: PassType) -> "ExportedProgram":
         pm = PassManager(list(passes))
@@ -191,6 +250,24 @@ class ExportedProgram:
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
         return transformed_ep
+
+    def _check_input_constraints(self, *args):
+        # TODO(zhxchen17) Remove _add_runtime_assertions.
+        # TODO(zhxchen17) Don't generate a runtime graph on the fly.
+        _assertion_graph = fx.GraphModule({}, fx.Graph())
+        for p in self.graph.nodes:
+            if p.op != "placeholder":
+                continue
+            new_p = _assertion_graph.graph.placeholder(p.name)
+            new_p.meta = p.meta
+        _assertion_graph.graph.output(())
+        _assertion_graph_res = _AddRuntimeAssertionsForConstraintsPass(
+            self.range_constraints,
+            self.equality_constraints,
+        )(_assertion_graph)
+        assert _assertion_graph_res is not None
+        _assertion_graph = _assertion_graph_res.graph_module
+        _assertion_graph(*args)
 
     def _add_runtime_assertions(
         self,
