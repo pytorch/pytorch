@@ -62,7 +62,6 @@ def list_mode_options(mode: str = None, dynamic: bool = None) -> Dict[str, Any]:
         mode (str, optional): The mode to return the optimizations for.
         If None, returns optimizations for all modes
         dynamic (bool, optional): Whether dynamic shape is enabled.
-        When dynamic_shape is enabled, cuda graph will be disabled.
 
     Example::
         >>> torch._inductor.list_mode_options()
@@ -79,12 +78,10 @@ def list_mode_options(mode: str = None, dynamic: bool = None) -> Dict[str, Any]:
             "max_autotune": True,
         },
         # enable max-autotune
-        # enable cudagraphs when dynamic is not set
-        # otherwise, if both cudagraphs and dynamic are enabled, Inductor
-        # recompiles for each new shape
+        # enable cudagraphs
         "max-autotune": {
             "max_autotune": True,
-            "triton.cudagraphs": (dynamic is not True),
+            "triton.cudagraphs": True,
         },
     }
     return mode_options[mode] if mode else mode_options

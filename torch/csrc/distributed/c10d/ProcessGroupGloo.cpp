@@ -60,6 +60,7 @@
       func<int8_t>(__VA_ARGS__);                 \
       break;                                     \
     case ::at::ScalarType::Byte:                 \
+    case ::at::ScalarType::Bool:                 \
       func<uint8_t>(__VA_ARGS__);                \
       break;                                     \
     case ::at::ScalarType::Int:                  \
@@ -89,6 +90,7 @@
       func<int8_t>(args);                        \
       break;                                     \
     case ::at::ScalarType::Byte:                 \
+    case ::at::ScalarType::Bool:                 \
       func<uint8_t>(args);                       \
       break;                                     \
     case ::at::ScalarType::Int:                  \
