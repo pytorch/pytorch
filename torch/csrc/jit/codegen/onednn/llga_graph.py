@@ -126,12 +126,16 @@ class LlgaGraph:
             self.desc_id_to_queried_desc[id] = outputs[i]
         return cpart
 
-    def add_op(self, op_kind, name, inputs, outputs=[], kwargs={}):
+    def add_op(self, op_kind, name, inputs, outputs=None, kwargs=None):
+        if outputs is None:
+            outputs = []
         if outputs:
             id = outputs[0].get_id()
         else:
             id = self.generate_id()
         op = llga.op(id, op_kind, name)
+        if kwargs is None:
+            kwargs = {}
         for attr_key in kwargs:
             if isinstance(attr_key, str):
                 if hasattr(llga.op, attr_key):
