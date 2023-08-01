@@ -103,7 +103,7 @@ class OnednnGraphPartitionModule(torch.nn.Module):
         self,
         onednn_graph: LlgaGraph,
         partition: llga.partition,
-        input_order_data: List = [],
+        input_order_data: List = None,
         name="",
     ):
         super().__init__()
@@ -111,7 +111,7 @@ class OnednnGraphPartitionModule(torch.nn.Module):
         self.__name__ = name
         self.partition = partition
         self.onednn_graph = onednn_graph
-        self.input_order_data = input_order_data
+        self.input_order_data = [] if input_order_data is None else input_order_data
         self.input_descs = partition.get_in_ports()
         self.kernel = None
         self.output_descs = None
@@ -318,7 +318,7 @@ def fuse_graph(gm: GraphModule, onednn_graph: LlgaGraph) -> GraphModule:
                 input_order_data=args_to_onednn_order,
                 name=current_partition_ext_name,
             )
-            log.info(f"Using oneDNN fusion: {current_partition_ext_name}")
+            log.info("Using oneDNN fusion: %s", current_partition_ext_name)
 
     gm.recompile()
     return gm
@@ -638,7 +638,7 @@ class LoweringConfig:
         self,
         llga_op,
         in_descs_filtering=None,
-        attribute_inputs={},
+        attribute_inputs=None,
         scalar_in_descs=False,
     ):
         """
@@ -659,7 +659,7 @@ class LoweringConfig:
         self.in_descs_filtering_func = in_descs_filtering
         if in_descs_filtering == "first":
             self.in_descs_filtering_func = lambda in_descs: in_descs[:1]
-        self.attribute_inputs = attribute_inputs
+        self.attribute_inputs = {} if attribute_inputs is None else attribute_inputs
         self.scalar_in_descs = scalar_in_descs
 
 
@@ -766,9 +766,11 @@ for op in _lowerings_map:
         node_name,
         in_descs,
         out_descs,
-        kwargs={},
+        kwargs=None,
         lowering_config=_lowerings_map[op],
     ):
+        if kwargs is None:
+            kwargs = {}
         for attr_kind in lowering_config.attribute_inputs:
             attr_value = lowering_config.attribute_inputs[attr_kind]
             if callable(attr_value):

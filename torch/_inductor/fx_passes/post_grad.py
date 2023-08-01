@@ -35,8 +35,6 @@ from ..utils import decode_device
 from ..virtualized import V
 from .group_batch_fusion import group_batch_fusion_post_grad_passes
 
-from .onednn_graph_fusion import onednn_graph_fuse_fx
-
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -68,7 +66,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
     if config.pattern_matcher:
-        if config.cpp.onednn_graph and torch._C._onednn:
+        if torch.backends.mkldnn.is_available() and config.cpp.onednn_graph:
+            from .onednn_graph_fusion import onednn_graph_fuse_fx
+
             onednn_graph_fuse_fx(gm, is_inference)
         lazy_init()
 
@@ -92,7 +92,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
 @init_once_fakemode
 def lazy_init():
-    if torch._C._has_mkldnn and not config.cpp.onednn_graph:
+    if torch.backends.mkldnn.is_available() and not config.cpp.onednn_graph:
         from .mkldnn_fusion import _mkldnn_fusion_init
 
         _mkldnn_fusion_init()

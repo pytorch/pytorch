@@ -33,10 +33,13 @@ class TestOnednnGraphInductor(TestCase):
         torch._dynamo.reset()
 
     def _check_fusion(
-        self, mod, args, expected_fusion_names: List[str] = [], skip_graphs_before=0
+        self, mod, args, expected_fusion_names: List[str] = None, skip_graphs_before=0
     ):
         if "test_onednn_check_fusion_backend" in _BACKENDS:
             del _BACKENDS["test_onednn_check_fusion_backend"]
+
+        if expected_fusion_names is None:
+            expected_fusion_names = []
 
         @register_backend
         def test_onednn_check_fusion_backend(gm, example_inputs):
@@ -321,7 +324,12 @@ class TestOnednnGraphInductor(TestCase):
 
 class TestOnednnGraphRewrite(torch._dynamo.test_case.TestCase):
     def _check_graph_rewrites(
-        self, mod, args, rewrite_calls=[], pre_rewrite_checks=[], post_rewrite_checks=[]
+        self,
+        mod,
+        args,
+        rewrite_calls=None,
+        pre_rewrite_checks=None,
+        post_rewrite_checks=None,
     ):
         def check_helper(rewrite_checks):
             for assert_check, func in rewrite_checks:
@@ -334,9 +342,15 @@ class TestOnednnGraphRewrite(torch._dynamo.test_case.TestCase):
         decompositions = select_decomp_table()
         gm = make_fx(mod, decomposition_table=decompositions)(*args)
         gm.graph.eliminate_dead_code()
+        if pre_rewrite_checks is None:
+            pre_rewrite_checks = []
         check_helper(pre_rewrite_checks)
+        if rewrite_checks is None:
+            rewrite_checks = []
         for rewrite in rewrite_calls:
             rewrite(gm)
+        if post_rewrite_checks is None:
+            post_rewrite_checks = []
         check_helper(post_rewrite_checks)
 
     def test_manydim_bmm(self):
