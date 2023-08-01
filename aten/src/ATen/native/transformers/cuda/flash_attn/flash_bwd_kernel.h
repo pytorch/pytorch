@@ -1020,8 +1020,11 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     Tensor taccdVrdV = smem_thr_copy_dKV.retile_S(rdV);       // ((Atom,AtomNum), MMA_N, MMA_N)
     Tensor taccdVsdV = smem_thr_copy_dKV.partition_D(sdV);    // ((Atom,AtomNum),PIPE_M,PIPE_N)
 
-    // If we don't need syncthreads here since we're writing to the same location as sK and sV.
-    // Unless Is_V_in_regs. If Is_last, there's already a __syncthreads() at the end of the loop.
+    // We need syncthreads here since we're writing to the same location as sK and sV.
+    // Without syncthreads, some thread might modify the location of sK while another thread
+    // is reading it for dQ gemm, leading to a race condition.
+    // If Is_last, there's already a __syncthreads() at the end of the loop.
+    if (!Is_last) { __syncthreads(); }
     if (Kernel_traits::Is_V_in_regs && !Is_last) { __syncthreads(); }
 
     copy(smem_thr_copy_dKV, taccdKrdK, taccdKsdK);
