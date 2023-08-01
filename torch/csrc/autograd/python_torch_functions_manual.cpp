@@ -516,12 +516,13 @@ static PyObject* THPVariable__disable_functionalization(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable__sync(
+static PyObject* THPVariable__functionalize_sync(
     PyObject* self,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  static PythonArgParser parser({"_sync(Tensor t)"}, /*traceable=*/true);
+  static PythonArgParser parser(
+      {"_functionalize_sync(Tensor t)"}, /*traceable=*/true);
 
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -566,8 +567,8 @@ static PyMethodDef torch_functions_manual[] = {
      castPyCFunctionWithKeywords(THPVariable__freeze_functional_tensor),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
-    {"_sync",
-     castPyCFunctionWithKeywords(THPVariable__sync),
+    {"_functionalize_sync",
+     castPyCFunctionWithKeywords(THPVariable__functionalize_sync),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_enable_functionalization",

@@ -1,6 +1,6 @@
 import torch
 import torch.utils._pytree as pytree
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import TorchDispatchMode, return_and_correct_aliasing
 
 
 class _ToFunctionalTensor(torch.autograd.Function):
@@ -42,11 +42,45 @@ class FunctionalTensor(torch.Tensor):
         kwargs["layout"] = elem.layout
         kwargs["requires_grad"] = elem.requires_grad
         kwargs["dtype"] = elem.dtype
+        kwargs["dispatch_sizes_strides_policy"] = "sizes"
         out = torch.Tensor._make_wrapper_subclass(cls, **kwargs)
         out.elem = elem
         return out
 
+    # Need to disable default torch_function. Why?
+    # Default torch_function will always wrap outputs into a subclass if they aren't already a subclass.
+    # We actually.. don't want to do this sometimes, see Note [FunctionalTensorMode inputs are sometimes plain tensors]
+    __torch_function__ = torch._C._disabled_torch_function_impl
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        # FunctionalTensor needs to plumb all metadata requests to the inner tensor.
+        # In theory we don't have to do this - but if we want to service metadata requests here,
+        # we need to carefully make sure all metadata is accurate (including metadata mutations)
+        if func in [
+            torch.ops.aten.is_contiguous.default,
+            torch.ops.aten.is_contiguous.memory_format,
+            torch.ops.aten.is_strides_like_format.default,
+            torch.ops.aten.is_non_overlapping_and_dense.default,
+            torch.ops.aten.size.default,
+            torch.ops.aten.sym_size.default,
+            torch.ops.aten.stride.default,
+            torch.ops.aten.sym_stride.default,
+            torch.ops.aten.storage_offset.default,
+            torch.ops.aten.sym_storage_offset.default,
+            torch.ops.aten.numel.default,
+            torch.ops.aten.sym_numel.default,
+            torch.ops.aten.dim.default,
+        ]:
+            def unwrap(x):
+                return x.elem
+            args_unwrapped = pytree.tree_map_only(FunctionalTensor, unwrap, args)
+            # All metadata accesses should be plumbed to the inner tensor, that way we don't have to worry
+            # about the problem of keeping metadata in sync between the wrapper and inner tensor.
+            # This also alleviates us from having to manually handle metadata mutations on the wrapper.
+            return func(*args_unwrapped, **kwargs)
         # Originally I tried to implement my subclass without giving it a torch_dispatch, but I gave up:
         # - _make_wrapper_subclass requires a __torch_dispatch__
         # - If we want to use _make_subclass(), we have a problem: the subclass will share a TensorImpl with the inner tensor,
@@ -56,6 +90,9 @@ class FunctionalTensor(torch.Tensor):
         raise RuntimeError(
             "Attempting to use FunctionalTensor on its own. Instead, please use it with a corresponding FunctionalTensorMode()"
         )
+
+    def __repr__(self):
+        return f'FunctionalTensor({str(self.elem)})'
 
     @staticmethod
     def to_functional(x):
@@ -76,8 +113,10 @@ class FunctionalTensor(torch.Tensor):
             out.requires_grad = x_functional.requires_grad
             return out
 
-
 class FunctionalTensorMode(TorchDispatchMode):
+    def __init__(self):
+        self.is_active = True
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
@@ -88,8 +127,19 @@ class FunctionalTensorMode(TorchDispatchMode):
         def wrap(x):
             return FunctionalTensor(x)
 
+        any_functional_inputs = False
+
         def unwrap(x):
+            any_functional_inputs = True
             return x.elem
+
+        args_unwrapped, kwargs_unwrapped = pytree.tree_map_only(
+            FunctionalTensor, unwrap, (args, kwargs)
+        )
+
+        if not self.is_active:
+            assert not any_functional_inputs
+            return func(*args_unwrapped, **kwargs)
 
         # Expectation: functionalization should not **already** be enabled above our mode.
         # Why would that be bad? when we return a FunctionalTensor here, we don't want functionalization
@@ -105,15 +155,15 @@ class FunctionalTensorMode(TorchDispatchMode):
         # This requires swizzling our TLS dispatch keys so that the Functionalize key is active.
         with torch._C._SetExcludeDispatchKeyGuard(
             torch._C.DispatchKey.Functionalize, False
+        ), torch._C._IncludeDispatchKeyGuard(
+            torch._C.DispatchKey.Functionalize
         ):
             try:
                 # By default for python functionalization (for AOTAutograd), we reapply views.
                 torch._functionalize_enable_reapply_views(True)
-                args_unwrapped, kwargs_unwrapped = pytree.tree_map_only(
-                    FunctionalTensor, unwrap, (args, kwargs)
-                )
                 outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
                 pytree.tree_map_only(torch.Tensor, assert_is_functional, outs_unwrapped)
+
                 outs_wrapped = pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
             finally:
                 torch._disable_functionalization()
@@ -125,4 +175,9 @@ class FunctionalTensorMode(TorchDispatchMode):
             torch._C.DispatchKey.Functionalize
         )
         assert is_excluded or not is_included
-        return outs_wrapped
+
+        # Wrapper tensor subclasses do not have correct aliasing info! Use this util to manually correct the output aliasing.
+        # inplace ops like `aten.add_()` are expected to return inputs **directly**, instead of creating fresh tensor objects.
+        # Use this util to figure out the right thing to return.
+        # If none of our inputs were wrapped, then we have no FunctionalTensor outputs that we need to fix up storages for.
+        return return_and_correct_aliasing(func, args, outs_wrapped)
