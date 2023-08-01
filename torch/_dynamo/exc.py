@@ -263,7 +263,7 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
     msg = os.linesep * 2
 
     if config.verbose:
-        msg = format_error_msg_verbose(exec, code, record_filename, frame)
+        msg = format_error_msg_verbose(exc, code, record_filename, frame)
     else:
         msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
  line {code.co_firstlineno} \ndue to: \n{format_exc(limit=-1)}"
