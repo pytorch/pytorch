@@ -1876,6 +1876,131 @@ TEST_F(VulkanAPITest, DISABLED_glu_ch_2) {
   test_glu({1, 2, 100, 40});
 }
 
+void test_gt(const at::IntArrayRef input_shape, const at::IntArrayRef other_shape) {
+  c10::InferenceMode mode;
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto other_cpu = at::rand(other_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto other_vulkan = other_cpu.vulkan();
+
+  const auto out_cpu = at::gt(in_cpu, other_cpu);
+  const auto out_vulkan = at::gt(in_vulkan, other_vulkan);
+
+  const auto check = at::equal(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+    std::cout << "gt test failed with input shape: " << input_shape
+              << " and other shape: " << other_shape << std::endl;
+  }
+  ASSERT_TRUE(check);
+  ASSERT_TRUE(out_cpu.scalar_type() == out_vulkan.scalar_type());
+}
+
+TEST_F(VulkanAPITest, gt) {
+  test_gt({11}, {11});
+  test_gt({2, 3}, {2, 3});
+  test_gt({5, 4, 3}, {5, 4, 3});
+  test_gt({4, 3, 2, 1}, {4, 3, 2, 1});
+}
+
+TEST_F(VulkanAPITest, gt_broadcast) {
+  test_gt({5, 4, 6, 7}, {4, 1, 1});
+  test_gt({4, 3, 2, 5}, {4, 1, 2, 1});
+}
+
+TEST_F(VulkanAPITest, gt_broadcast_invalid) {
+    EXPECT_THROW({
+    at::gt(
+      at::rand({1, 2, 1, 2}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({2, 1, 2, 1}, at::device(at::kCPU).dtype(at::kFloat)).vulkan());
+  }, ::c10::Error);
+}
+
+void test_gt_(const at::IntArrayRef input_shape, const at::IntArrayRef other_shape) {
+  c10::InferenceMode mode;
+  const auto cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto vulkan = cpu.vulkan();
+
+  const auto other_cpu = at::rand(other_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto other_vulkan = other_cpu.vulkan();
+
+  cpu.gt_(other_cpu);
+  vulkan.gt_(other_vulkan);
+
+  const auto check = at::equal(cpu, vulkan.cpu());
+  if (!check) {
+    showRtol(cpu, vulkan.cpu());
+    std::cout << "gt_ test failed with input shape: " << input_shape
+              << " and other shape: " << other_shape << std::endl;
+  }
+  ASSERT_TRUE(check);
+  ASSERT_TRUE(cpu.scalar_type() == vulkan.scalar_type());
+}
+
+TEST_F(VulkanAPITest, gt_) {
+  test_gt_({11}, {11});
+  test_gt_({2, 3}, {2, 3});
+  test_gt_({5, 4, 3}, {5, 4, 3});
+  test_gt_({4, 3, 2, 1}, {4, 3, 2, 1});
+
+}
+
+TEST_F(VulkanAPITest, gt_broadcast_) {
+  test_gt_({5, 4, 6, 7}, {4, 1, 1});
+  test_gt_({4, 3, 2, 5}, {4, 1, 2, 1});
+}
+
+void test_gt_scalar(const at::IntArrayRef input_shape, const float other) {
+  c10::InferenceMode mode;
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::gt(in_cpu, other);
+  const auto out_vulkan = at::gt(in_vulkan, other);
+
+  const auto check = at::equal(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+    std::cout << "gt_scalar test failed with input shape: "
+              << input_shape << std::endl;
+  }
+  ASSERT_TRUE(check);
+  ASSERT_TRUE(out_cpu.scalar_type() == out_vulkan.scalar_type());
+}
+
+TEST_F(VulkanAPITest, gt_scalar) {
+  test_gt_scalar({11}, 0.1f);
+  test_gt_scalar({2, 3}, 0.1f);
+  test_gt_scalar({5, 4, 3}, 0.1f);
+  test_gt_scalar({41, 3, 2, 1}, 0.1f);
+}
+
+void test_gt_scalar_(const at::IntArrayRef input_shape, const float other) {
+  c10::InferenceMode mode;
+  const auto cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto vulkan = cpu.vulkan();
+
+  cpu.gt_(other);
+  vulkan.gt_(other);
+
+  const auto check = at::equal(cpu, vulkan.cpu());
+  if (!check) {
+    showRtol(cpu, vulkan.cpu());
+    std::cout << "gt_scalar_ test failed with input shape: "
+              << input_shape << std::endl;
+  }
+  ASSERT_TRUE(check);
+  ASSERT_TRUE(cpu.scalar_type() == vulkan.scalar_type());
+}
+
+TEST_F(VulkanAPITest, gt_scalar_) {
+  test_gt_scalar_({11}, 0.1f);
+  test_gt_scalar_({2, 3}, 0.1f);
+  test_gt_scalar_({5, 4, 3}, 0.1f);
+  test_gt_scalar_({41, 3, 2, 1}, 0.1f);
+}
+
 TEST_F(VulkanAPITest, hardsigmoid) {
   const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
   const auto in_vulkan = in_cpu.vulkan();

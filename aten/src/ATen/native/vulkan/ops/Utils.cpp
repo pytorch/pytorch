@@ -240,7 +240,7 @@ void pack_vtensor_to_staging(
  * Broadcasting Utils
  */
 
-// check if two tensors are broadcastable
+// Check if two tensors are broadcastable
 void is_broadcastable(const Tensor& input1, const Tensor& input2) {
   TORCH_CHECK(
       input1.dim() <= 4 && input2.dim() <= 4,
@@ -277,7 +277,39 @@ void is_broadcastable(const Tensor& input1, const Tensor& input2) {
   }
 }
 
-// compute the output shape by broadcasting the shapes of t1 and t2
+// Check if other is broadcastable with self.
+// Used for in-place semantics and other cases where an op is broadcastable
+// one-way.
+void is_broadcastable_with_self(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(
+      self.dim() <= 4 && other.dim() <= 4,
+      "Vulkan only supports tensors <= 4 dimensions");
+
+  const std::string broadcast_error_msg =
+      "Other tensor is not broadcastable with self!";
+
+  TORCH_CHECK(
+      (get_dim<Dim4D::Batch>(self) == get_dim<Dim4D::Batch>(other)) ||
+          (get_dim<Dim4D::Batch>(other) == 1),
+      broadcast_error_msg);
+
+  TORCH_CHECK(
+      (get_dim<Dim4D::Channel>(self) == get_dim<Dim4D::Channel>(other)) ||
+          (get_dim<Dim4D::Channel>(other) == 1),
+      broadcast_error_msg);
+
+  TORCH_CHECK(
+      (get_dim<Dim4D::Height>(self) == get_dim<Dim4D::Height>(other)) ||
+          (get_dim<Dim4D::Height>(other) == 1),
+      broadcast_error_msg);
+
+  TORCH_CHECK(
+      (get_dim<Dim4D::Width>(self) == get_dim<Dim4D::Width>(other)) ||
+          (get_dim<Dim4D::Width>(other) == 1),
+      broadcast_error_msg);
+}
+
+// Compute the output shape by broadcasting the shapes of t1 and t2
 std::vector<int64_t> broadcast_size(const Tensor& t1, const Tensor& t2) {
   int64_t t1_size = t1.dim();
   int64_t t2_size = t2.dim();

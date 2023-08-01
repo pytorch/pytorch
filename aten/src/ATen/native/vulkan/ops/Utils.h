@@ -52,6 +52,7 @@ void pack_vtensor_to_staging(
 
 // Broadcasting Utils
 void is_broadcastable(const Tensor& input1, const Tensor& input2);
+void is_broadcastable_with_self(const Tensor& self, const Tensor& other);
 std::vector<int64_t> broadcast_size(const Tensor& t1, const Tensor& t2);
 
 } // namespace utils
