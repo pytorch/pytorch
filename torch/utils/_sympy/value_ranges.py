@@ -541,7 +541,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
             return ValueRanges(sympy.Min(b.lower, c.lower), sympy.Max(b.upper, c.upper))
 
     def __getattr__(self, name):
-        log.warning("unhandled ValueRange op %s", name)
+        log.debug("unhandled ValueRange op %s", name)
         return self.default_handler
 
 
