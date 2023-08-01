@@ -552,6 +552,23 @@ def forward(self, primals_1, primals_2, primals_3):
         self.verify_aot_autograd(f, create_inp(True), test_mutation=True)
         self.verify_aot_autograd(f, create_inp(False), test_mutation=True)
 
+    def test_input_output_aliase_custom_autograd_function(self):
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, gx):
+                return gx * 0.5
+
+        def f(x):
+            return Foo.apply(x)
+
+        inp = [torch.ones(2, 2, requires_grad=True)]
+        self.verify_aot_autograd(f, inp, test_mutation=False)
+
     def test_input_mutation_requires_grad_detach(self):
         # Here, "a" requires grad, and gets mutated, so we append a copy_() to the end of the graph.
         # Its mutation doesn't take part in autograd though, because we mutated a detach'd view.
@@ -1945,7 +1962,7 @@ def forward(self, tangents_1):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(4, 5))
+                self.buffer = torch.nn.Buffer(torch.ones(4, 5))
 
             def forward(self, x):
                 y = self.buffer.add_(3)
@@ -2140,7 +2157,7 @@ class <lambda>(torch.nn.Module):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer1", torch.ones(6, 4))
+                self.buffer1 = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self, x):
                 x.add_(4)
@@ -2153,7 +2170,7 @@ class <lambda>(torch.nn.Module):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer1", torch.ones(6, 4))
+                self.buffer1 = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self, x, y):
                 y.add_(4)
@@ -2746,14 +2763,10 @@ aot_autograd_failures = {
     skip('as_strided_scatter'),
     skip('as_strided', 'partial_views'),  # flaky
 
-    # Too annoying to generate random inputs
-    xfail('cholesky'),
-
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip('max_pool2d_with_indices_backward'),
 
     # Worked with real but not with fake
-    xfail('cholesky_inverse'),
     xfail('_segment_reduce', 'lengths'),
     skip('nn.functional.nll_loss', ''),  # UBSAN failure!
 
@@ -2797,7 +2810,6 @@ aot_autograd_failures = {
 symbolic_aot_autograd_failures = {
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cdist', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('cholesky_inverse', ''),  # could not find kernel
     xfail('combinations', ''),  # aten.masked_select.default
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition

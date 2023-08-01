@@ -855,8 +855,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 torch.nn.Linear(HIDDEN_DIM, HIDDEN_DIM),
                 torch.nn.Linear(HIDDEN_DIM, OUTPUT_DIM),
             ).to(self.device)
-            model.register_buffer(
-                "test_buffer",
+            model.test_buffer = torch.nn.Buffer(
                 torch.ones((1), device=self.device) * self.rank,
             )
             # Define models/optimizers for DDP with ZeRO and DDP with local
