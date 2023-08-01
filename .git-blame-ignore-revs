@@ -36,3 +36,5 @@ dd3a77bc965adf9fe8ba582ee13bb7f14c9661b0
 f70844bec783bfce43c950ccf180dc494e86f2bf
 # 2023-07-28 Apply UFMT to all non test/torch files
 e6ec0efaf87703c5f889cfc20b29be455885d58d
+# 2023-07-31 [optim][BE] split test file into logical parts: SWA, LR, optim
+a53cda1ddc15336dc1ff0ce1eff2a49cdc5f882e
