@@ -240,13 +240,14 @@ class OnnxFunctionDispatcher:
         diagnostic.level = diagnostics.levels.WARNING
 
         # NOTE: Tie breaker: if there are multiple nearest matches, we will choose the one
-        # that is custom first
+        # that is custom first. If there are multiple custom ones, we will choose the one
+        # that is added lastly in the list.
         symbolic_function_list: List[registration.SymbolicFunction] = sorted(
             overload_match_ranking,
             key=lambda k: (
                 overload_match_ranking[k],
                 k.is_custom,
-                k.onnx_function.name,
+                default_and_custom_functions.index(k),
             ),
             reverse=True,
         )

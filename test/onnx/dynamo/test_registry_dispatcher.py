@@ -297,6 +297,73 @@ class TestDispatcher(common_utils.TestCase):
         )
         self.assertEqual(symbolic_fn, test_custom_op)
 
+    @common_utils.parametrize(
+        "node",
+        [
+            common_utils.subtest(
+                torch.fx.Node(
+                    graph=torch.fx.Graph(),
+                    name="aten::add.Tensor",
+                    op="call_function",
+                    target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
+                    args=(torch.tensor(3), torch.tensor(4)),
+                    kwargs={},
+                ),
+                name="nearest_match",
+            ),
+            common_utils.subtest(
+                torch.fx.Node(
+                    graph=torch.fx.Graph(),
+                    name="aten::add.Tensor",
+                    op="call_function",
+                    target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
+                    args=(torch.tensor(3), torch.tensor(4)),
+                    kwargs={"alpha": 1},
+                ),
+                name="perfect_match_with_kwargs",
+            ),
+        ],
+    )
+    def test_find_the_perfect_or_nearest_match_onnxfunction_gives_tie_breaks_to_registered_order(
+        self, node
+    ):
+        custom_domain = onnxscript.values.Opset(domain="custom", version=1)
+
+        @onnxscript.script(custom_domain)
+        def test_second_custom_op(x: TCustomFloat, y: TCustomFloat) -> TCustomFloat:
+            return op.Add(x, y)
+
+        @onnxscript.script(custom_domain)
+        def test_third_custom_op(x: TCustomFloat, y: TCustomFloat) -> TCustomFloat:
+            return op.Add(x, y)
+
+        @onnxscript.script(custom_domain)
+        def test_first_custom_op(x: TCustomFloat, y: TCustomFloat) -> TCustomFloat:
+            return op.Add(x, y)
+
+        op_full_name = "aten::add"
+
+        function_overloads = [
+            registration.SymbolicFunction(
+                test_first_custom_op, op_full_name=op_full_name, is_custom=True
+            ),
+            registration.SymbolicFunction(
+                test_second_custom_op, op_full_name=op_full_name, is_custom=True
+            ),
+            registration.SymbolicFunction(
+                test_third_custom_op, op_full_name=op_full_name, is_custom=True
+            ),
+        ]
+
+        symbolic_fn = self.dispatcher._find_the_perfect_or_nearest_match_onnxfunction(
+            node,
+            function_overloads,
+            node.args,
+            node.kwargs,
+            self.diagnostic_context,
+        )
+        self.assertEqual(symbolic_fn, test_third_custom_op)
+
 
 @common_utils.instantiate_parametrized_tests
 class TestOpSchemaWrapper(common_utils.TestCase):
