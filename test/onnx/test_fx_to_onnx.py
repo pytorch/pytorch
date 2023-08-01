@@ -225,6 +225,25 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             expected_node="aten.add.Tensor",
         )
 
+    def test_aten_div_tensor_mode_does_not_finds_perfect_match_due_to_extra_kwargs(
+        self,
+    ):
+        class CustomModule(nn.Module):
+            def forward(self, x):
+                # Assuming x is a tensor on the CPU, move it to the desired device using device_put()
+                x = torch.ops.aten.div(x, x, rounding_mode="floor")
+                return x
+
+        x = torch.tensor(3, dtype=torch.float32)
+        export_output = dynamo_export(CustomModule(), x)
+
+        assert_has_diagnostics(
+            export_output.diagnostic_context,
+            diagnostics.rules.find_opschema_matched_symbolic_function,
+            diagnostics.levels.WARNING,
+            expected_node="aten.div.Tensor_mode",
+        )
+
     def test_dynamo_export_retains_readable_parameter_and_buffer_names(self):
         class SubModule(torch.nn.Module):
             def __init__(self):

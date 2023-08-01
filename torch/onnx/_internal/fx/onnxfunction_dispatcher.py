@@ -725,6 +725,11 @@ class _OnnxSchemaChecker:
                 if fill_defaults:
                     onnx_attributes[param.name] = param.default
 
+        # pick up extra kwargs
+        extra_kwargs = set(kwargs).difference({param.name for param in param_schemas})
+        for extra_kwarg in extra_kwargs:
+            onnx_attributes[extra_kwarg] = kwargs[extra_kwarg]
+
         return onnx_inputs, onnx_attributes
 
 
