@@ -288,12 +288,6 @@ class SymInt:
     def __repr__(self):
         return str(self.node)
 
-    def __str__(self):
-        tmp = self.node.hint
-        if tmp is not None:
-            return str(tmp)
-        return super().__str__()
-
 class SymFloat:
     """
     Like an float (including magic methods), but redirects all operations on the
