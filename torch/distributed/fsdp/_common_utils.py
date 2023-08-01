@@ -26,6 +26,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.fsdp.flat_param as flat_param_file
 import torch.nn as nn
+from torch import Tensor
 from torch.distributed._composable_state import _get_module_state, _State
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -134,6 +135,10 @@ class _FSDPState(_State):
         self._all_fsdp_states: List[_FSDPState] = []
         self._all_handles: List[flat_param_file.FlatParamHandle] = []
         self._device_mesh: Optional[DeviceMesh] = None
+
+        # Used by stream-based rate limiter
+        self._ping_pong_buffers: List[Tensor] = []
+        self._num_ping_pong_buffers: int = 2
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:

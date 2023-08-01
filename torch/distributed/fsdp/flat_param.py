@@ -513,6 +513,7 @@ class FlatParamHandle:
         # Optimistically assume a valid input `params` and set dtype attributes
         # before `_init_flat_param()`, which performs the actual validation
         self._orig_param_dtype = params[0].dtype
+        self._unsharded_param_dtype: Optional[torch.dtype] = None
         self._init_param_reduce_dtypes(mp_param_dtype, mp_reduce_dtype)
         assert self._fwd_bwd_param_dtype is not None  # mypy
         self._aligned_numel = (
@@ -1132,25 +1133,27 @@ class FlatParamHandle:
         if self.uses_sharded_strategy:
             # We maintain a padded unsharded tensor that serves as the
             # all-gather destination and owns the original parameter storages.
-            unsharded_param_dtype = (
+            self._unsharded_param_dtype = (
                 self._fwd_bwd_param_dtype
                 if self._uses_param_mixed_precision
                 else flat_param.dtype
             )  # use low precision if parameter mixed precision is enabled
-            padded_unsharded_numel = flat_param.numel() * self.world_size
+            self._padded_unsharded_numel = flat_param.numel() * self.world_size
+            """
             flat_param._full_param_padded = torch.zeros(
-                padded_unsharded_numel,
+                self._padded_unsharded_numel,
                 device=self.device,
-                dtype=unsharded_param_dtype,
+                dtype=self._unsharded_param_dtype,
             )
             flat_param._padded_unsharded_size = flat_param._full_param_padded.size()
             _free_storage(flat_param._full_param_padded)
+            """
 
             if self._uses_param_mixed_precision:
                 # For parameter mixed precision, we maintain a full precision
                 # padded unsharded tensor for when we force full precision.
                 flat_param._full_prec_full_param_padded = torch.zeros(
-                    padded_unsharded_numel,
+                    self._padded_unsharded_numel,
                     device=self.device,
                     dtype=flat_param.dtype,  # full precision
                 )
@@ -1258,8 +1261,8 @@ class FlatParamHandle:
         self._check_sharded_strategy()
         flat_param = self.flat_param
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
-        self._check_storage_freed(unsharded_flat_param)
-        _alloc_storage(unsharded_flat_param, flat_param._padded_unsharded_size)  # type: ignore[attr-defined]
+        #self._check_storage_freed(unsharded_flat_param)
+        #_alloc_storage(unsharded_flat_param, flat_param._padded_unsharded_size)  # type: ignore[attr-defined]
         return unsharded_flat_param
 
     def _get_padded_unsharded_flat_param(self) -> torch.Tensor:
@@ -1613,8 +1616,10 @@ class FlatParamHandle:
         # `use_orig_params=True`, the `param` does not point to valid memory
         # when setting `param.data = ...` in `_use_sharded_views()`.
         self._use_sharded_flat_param()
+        """
         if free_unsharded_flat_param:
             self._free_unsharded_flat_param()
+        """
 
     def post_reshard(self):
         """

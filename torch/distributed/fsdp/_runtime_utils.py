@@ -148,6 +148,64 @@ def _validate_and_get_hybrid_shard_state(
 
 
 @no_type_check
+def _find_max_unsharded_numel(
+    root_state: _FSDPState,
+) -> int:
+    """
+    Find the max unsharded buffer size among all FSDP instances.
+    Note: for the return, the int type is used as it has unlimited length in
+    Python 3.
+    """
+    _p_assert(
+        root_state._is_root,
+        "Only call _find_max_unsharded_numel on root state",
+    )
+    max_unsharded_numel = 0
+    for handle in root_state._all_handles:
+        print(f"KW: instance unsharded size: {handle._padded_unsharded_numel}")
+        if handle._padded_unsharded_numel > max_unsharded_numel:
+            max_unsharded_numel = handle._padded_unsharded_numel
+    print(f"KW: max unsharded size: {max_unsharded_numel}")
+    return max_unsharded_numel
+
+
+@no_type_check
+def _create_ping_pong_buffers(
+    root_state: _FSDPState,
+):
+    """
+    Create ping-pong all-gather output buffers under root state.
+    Each buffer corresponds to max FSDP instance size.
+    """
+    _p_assert(
+        root_state._is_root,
+        "Only call _create_ping_pong_buffers on root state",
+    )
+    max_unsharded_numel = _find_max_unsharded_numel(root_state)
+    root_state._ping_pong_buffers = []
+    # Use ping-pong buffer when there are more than 1 FSDP instanceß
+    root_state._num_ping_pong_buffers = 2 if len(root_state._all_handles) > 1 else 1
+    unshard_dtype = root_state._all_handles[0]._unsharded_param_dtype
+    assert unshard_dtype is not None
+    for _ in range(root_state._num_ping_pong_buffers):
+        root_state._ping_pong_buffers.append(
+            torch.empty(
+                max_unsharded_numel,
+                device=root_state.compute_device,
+                dtype=unshard_dtype,
+            )
+        )
+    print(f"KW: created {root_state._num_ping_pong_buffers} buffers of size {max_unsharded_numel}, dtype {unshard_dtype}")
+
+    # Attach ping pong buffers to FSDP handles
+    for i, handle in enumerate(root_state._all_handles):
+        buf = root_state._ping_pong_buffers[i % root_state._num_ping_pong_buffers]
+        # A view into the ping pong buffer based on instance's actual size
+        handle.flat_param._full_param_padded = buf[0 : handle._padded_unsharded_numel]
+        handle.flat_param._padded_unsharded_size = handle.flat_param._full_param_padded.size()
+
+
+@no_type_check
 def _lazy_init(
     state: _FSDPState,
     root_module: nn.Module,
@@ -178,6 +236,9 @@ def _lazy_init(
     _cast_buffers_to_dtype_and_device(buffers, buffer_dtypes, state.compute_device)
     state._exec_order_data.init(state, root_module, state.process_group)
     _share_state_and_init_handle_attrs(state, root_module)
+    # After this point all instance handles are initialized
+    # Create ping-pong all-gather output buffers under the root
+    _create_ping_pong_buffers(state)
     return state
 
 
@@ -353,10 +414,13 @@ def _unshard(
     if state.limit_all_gathers:
         event = state._free_event_queue.dequeue_if_needed()
         if event:
+            """
             with torch.profiler.record_function(
                 "FullyShardedDataParallel.rate_limiter"
             ):
                 event.synchronize()
+            """
+            unshard_stream.wait_event(event)
     with state._device_handle.stream(unshard_stream):
         handle.unshard()
         handle.post_unshard()
