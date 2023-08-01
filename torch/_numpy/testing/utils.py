@@ -593,7 +593,7 @@ def assert_array_compare(
         #     not implement np.all(), so favor using the .all() method
         # We are not committed to supporting such subclasses, but it's nice to
         # support them if possible.
-        if (x_id == y_id).all() != True:
+        if (x_id == y_id).all().item() is not True:
             msg = build_err_msg(
                 [x, y],
                 err_msg + "\nx and y %s location mismatch:" % (hasval),
