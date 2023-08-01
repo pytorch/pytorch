@@ -649,7 +649,8 @@ def _sharded_pre_load_state_dict_hook(
             placements = copy.deepcopy(param.placements)
             placements[-1] = Replicate()
             param = param.redistribute(
-                device_mesh=param.device_mesh, placements=placements,
+                device_mesh=param.device_mesh,
+                placements=placements,
             )
             state_dict[fqn_from_global_root] = param.to_local()
 

@@ -80,7 +80,8 @@ def _gather_state_dict(
             placements = copy.deepcopy(tensor.placements)
             placements[-1] = Replicate()
             tensor = tensor.redistribute(
-                device_mesh=tensor.device_mesh, placements=placements,
+                device_mesh=tensor.device_mesh,
+                placements=placements,
             )
             tensor = tensor.to_local()
         new_state_dict[key] = tensor
@@ -147,6 +148,7 @@ def _create_chunk_sharded_tensor(
     )
 
 
+@no_type_check
 def _create_chunk_dtensor(
     tensor: torch.Tensor,
     rank: int,
@@ -169,9 +171,8 @@ def _create_chunk_dtensor(
     # We need to explicitly call .detach() to return a new tensor detached from the current graph.
     local_tensor = tensor_list[rank].clone().detach()
 
-
     # FSDP placements: [Shard(0)]
     # HSDP placements: [Replicate(), Shard(0)]
     placements = [Replicate() for _ in range(device_mesh.ndim)]
-    placements[-1] = shard_placement
+    placements[-1] = shard_placement  # type: ignore
     return DTensor.from_local(local_tensor, device_mesh, placements)

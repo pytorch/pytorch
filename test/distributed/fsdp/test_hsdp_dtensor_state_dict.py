@@ -63,7 +63,11 @@ class TestDtensorShardedOptimStateDict(DTensorTestBase):
     def test_dtensor_sharded_optim_state_dict(self, offload_to_cpu):
         mesh_tensor = torch.arange(self.world_size).view(2, -1)
         device_mesh = DeviceMesh(self.device_type, mesh_tensor)
-        model = FSDP(TestDummyModel().cuda(), _device_mesh=device_mesh, sharding_strategy=ShardingStrategy.HYBRID_SHARD)
+        model = FSDP(
+            TestDummyModel().cuda(),
+            _device_mesh=device_mesh,
+            sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+        )
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
         model(model.get_input()).sum().backward()
         optim.step()
@@ -112,7 +116,11 @@ class TestDtensorShardedOptimStateDict(DTensorTestBase):
     def test_dtensor_sharded_optim_load_state_dict(self, offload_to_cpu):
         mesh_tensor = torch.arange(self.world_size).view(2, -1)
         device_mesh = DeviceMesh(self.device_type, mesh_tensor)
-        model = FSDP(TestDummyModel().cuda(), _device_mesh=device_mesh)
+        model = FSDP(
+            TestDummyModel().cuda(),
+            _device_mesh=device_mesh,
+            sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+        )
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
         model(model.get_input()).sum().backward()
         optim.step()
