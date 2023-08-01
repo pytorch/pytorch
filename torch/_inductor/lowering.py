@@ -1872,9 +1872,6 @@ make_fallback(torch._prims.rng_prims.run_with_rng_state)
 # fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
 make_fallback(aten.exponential.default, warn=False)
 
-# ROCm specific fallback, perf issues are observed when registered
-make_fallback(aten.miopen_batch_norm, warn=False)
-
 
 # Register with type_promotion_kind None.
 # For example, fp16.copy_(fp32) should **not** promote the first input's dtype.
