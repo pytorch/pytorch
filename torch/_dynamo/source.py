@@ -475,6 +475,19 @@ class ConstantSource(Source):
         raise NotImplementedError()
 
 
+@dataclasses.dataclass(frozen=True)
+class NumpyTensorSource(ChainedSource):
+    def name(self) -> str:
+        return f"__numpy_to_tensor({self.base.name()})"
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("torch._dynamo.utils", "numpy_to_tensor")
+        return self.base.reconstruct(codegen) + create_call_function(1, True)
+
+
 # This is a synthetic source that is associated with the singleton
 # shape env guard we always register for all frames.  We get the actual
 # guard contents from the ambient ShapeEnv
