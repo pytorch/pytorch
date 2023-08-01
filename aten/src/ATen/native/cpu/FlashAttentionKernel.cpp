@@ -49,7 +49,7 @@ inline void fill_stub(scalar_t* data, scalar_t val, int64_t size) {
   }
 }
 
-template <typename scalar_t, int64_t qSplitSize, int64_t kvSplitSize>
+template <typename scalar_t, int64_t q_split_size, int64_t kv_split_size>
 void cpu_flash_attention(
     const Tensor& output,
     const Tensor& logsumexp,
@@ -107,6 +107,8 @@ void cpu_flash_attention(
   int64_t lStrideM = logsumexp.stride(1);
   int64_t lStrideH = logsumexp.stride(2);
 
+  int64_t qSplitSize = qSplitSize > qSize ? qSize : q_split_size;
+  int64_t kvSplitSize = kvSplitSize > kvSize ? kvSize : kv_split_size;
   int64_t qSlice = (qSize - 1) / qSplitSize + 1;
   int64_t num_thread = at::get_num_threads();
 
@@ -259,7 +261,7 @@ void cpu_flash_attention(
 
 }
 
-template <typename scalar_t, int64_t qSplitSize, int64_t kvSplitSize>
+template <typename scalar_t, int64_t q_split_size, int64_t kv_split_size>
 void cpu_flash_attention_backward(
     const at::Tensor& grad_q,
     const at::Tensor& grad_k,
@@ -325,6 +327,8 @@ void cpu_flash_attention_backward(
   int64_t grad_oStrideM = grad_out.stride(1);
   int64_t grad_oStrideH = grad_out.stride(2);
 
+  int64_t qSplitSize = qSplitSize > qSize ? qSize : q_split_size;
+  int64_t kvSplitSize = kvSplitSize > kvSize ? kvSize : kv_split_size;
   int64_t num_thread = at::get_num_threads();
 
   const auto dtype = query.scalar_type();
@@ -529,11 +533,25 @@ void flash_attention_kernel_impl(
     bool is_causal,
     bool return_debug_mask,
     c10::optional<double> scale) {
+  auto q_seq_len = query.size(2);
+
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, query.scalar_type(), "flash_attention", [&] {
-    cpu_flash_attention<scalar_t, 128, 256>(
+    if (q_seq_len >= 768) {
+      cpu_flash_attention<scalar_t, 256, 512>(
         output, logsumexp, cum_seq_q, cum_seq_k,
         max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
         query, key, value, dropout_p, is_causal, return_debug_mask, scale);
+    } else if (q_seq_len >= 192) {
+      cpu_flash_attention<scalar_t, 64, 512>(
+        output, logsumexp, cum_seq_q, cum_seq_k,
+        max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
+        query, key, value, dropout_p, is_causal, return_debug_mask, scale);
+    } else {
+      cpu_flash_attention<scalar_t, 32, 512>(
+        output, logsumexp, cum_seq_q, cum_seq_k,
+        max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
+        query, key, value, dropout_p, is_causal, return_debug_mask, scale);
+    }
   });
 }
 
@@ -560,13 +578,28 @@ void flash_attention_backward_kernel_impl(
   // since we are going to call gemm next
   // zero stride in leading dimension would lead to slow impl for gemm
   auto grad_out_contig = grad_out.contiguous();
+  auto q_seq_len = query.size(1);
 
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, query.scalar_type(), "flash_attention_backward", [&] {
-    cpu_flash_attention_backward<scalar_t, 128, 256>(
+    if (q_seq_len >= 768) {
+      cpu_flash_attention_backward<scalar_t, 256, 512>(
         grad_q, grad_k, grad_v, grad_out_contig,
         query, key, value, out, logsumexp,
         cum_seq_q, cum_seq_k, max_q, max_k, dropout_p,
         is_causal, philox_seed, philox_offset, scale);
+    } else if (q_seq_len >= 192) {
+      cpu_flash_attention_backward<scalar_t, 64, 512>(
+        grad_q, grad_k, grad_v, grad_out_contig,
+        query, key, value, out, logsumexp,
+        cum_seq_q, cum_seq_k, max_q, max_k, dropout_p,
+        is_causal, philox_seed, philox_offset, scale);
+    } else {
+      cpu_flash_attention_backward<scalar_t, 32, 512>(
+        grad_q, grad_k, grad_v, grad_out_contig,
+        query, key, value, out, logsumexp,
+        cum_seq_q, cum_seq_k, max_q, max_k, dropout_p,
+        is_causal, philox_seed, philox_offset, scale);
+    }
   });
 }
 

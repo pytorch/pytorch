@@ -83,7 +83,7 @@ def _map_mt_args_kwargs(args, kwargs, map_fn):
     for a in args:
         impl_args.append(_helper(a, map_fn))
     impl_kwargs = {}
-    for k, v in kwargs.items():
+    for k in kwargs.keys():
         impl_kwargs[k] = _helper(a, map_fn)
     return impl_args, impl_kwargs
 
@@ -109,7 +109,7 @@ def _masked_tensor_str(data, mask, formatter):
             for d in data
         ]
         max_len = max(
-            (8 if x[1] else len(x[0]) for x in zip(formatted_elements, ~mask))
+            8 if x[1] else len(x[0]) for x in zip(formatted_elements, ~mask)
         )
         return (
             "["

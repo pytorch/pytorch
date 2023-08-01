@@ -31,6 +31,22 @@ Variable simple_fn(const Variable& x, const Variable& y) {
   return x + 2 * y + x * y;
 }
 
+TEST(AutogradAPITests, RegisterHookVoidReturnAcceptsUndefinedTensor) {
+  auto x = at::zeros({}, at::kCPU);
+  x.requires_grad_();
+  x.register_hook([](at::TensorBase x) { return; });
+  auto y = torch::autograd::UndefinedGrad().apply({x});
+  y[0].backward();
+}
+
+TEST(AutogradAPITests, RegisterHookTensorReturnAcceptsUndefinedTensor) {
+  auto x = at::zeros({}, at::kCPU);
+  x.requires_grad_();
+  x.register_hook([](at::Tensor x) -> at::Tensor { return x; });
+  auto y = torch::autograd::UndefinedGrad().apply({x});
+  y[0].backward();
+}
+
 TEST(AutogradAPITests, BackwardSimpleTest) {
   Variable x = torch::randn({2, 2}, torch::requires_grad());
   Variable y = torch::randn({2, 2}, torch::requires_grad());
