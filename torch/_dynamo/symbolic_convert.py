@@ -1529,7 +1529,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         value = self.pop()
         if isinstance(value, SymNodeVariable):
-            value = ConstantVariable(str(value.sym_num))
+            value = ConstantVariable(str(value.evaluate_expr()))
         if (flags & 0x03) == 0x01:
             value = BuiltinVariable(str).call_function(self, [value], {})
         elif (flags & 0x03) == 0x02:
