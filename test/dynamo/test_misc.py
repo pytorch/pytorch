@@ -1256,7 +1256,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             y = torch.randn([1, 3])
             ref = fn(x, y)
             res = opt_fn(x, y)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
     def test_tensor_interacts_with_numpy_ndarray(self):
@@ -1275,7 +1275,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             y = torch.randn([1, 3])
             ref = fn(x, y)
             res = opt_fn(x, y)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
     def test_numpy_ndarray_works_with_builtin_function(self):
@@ -1289,7 +1289,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             x = np.random.randn(2, 3)
             ref = fn(x)
             res = opt_fn(x)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
 
     def test_mandelbrot_numpy(self):
