@@ -13,7 +13,7 @@ __all__ = ['L1Loss', 'NLLLoss', 'NLLLoss2d', 'PoissonNLLLoss', 'GaussianNLLLoss'
            'MSELoss', 'BCELoss', 'BCEWithLogitsLoss', 'HingeEmbeddingLoss', 'MultiLabelMarginLoss',
            'SmoothL1Loss', 'HuberLoss', 'SoftMarginLoss', 'CrossEntropyLoss', 'MultiLabelSoftMarginLoss',
            'CosineEmbeddingLoss', 'MarginRankingLoss', 'MultiMarginLoss', 'TripletMarginLoss',
-           'TripletMarginWithDistanceLoss', 'CTCLoss','ObjectDetectionCoordinatesAndSizeLoss']
+           'TripletMarginWithDistanceLoss', 'CTCLoss']
 
 class _Loss(Module):
     reduction: str
@@ -1763,62 +1763,6 @@ class CTCLoss(_Loss):
     def forward(self, log_probs: Tensor, targets: Tensor, input_lengths: Tensor, target_lengths: Tensor) -> Tensor:
         return F.ctc_loss(log_probs, targets, input_lengths, target_lengths, self.blank, self.reduction,
                           self.zero_infinity)
-
-
-# This Loss function can be used for Object detection tasks.
-class ObjectDetectionCoordinatesAndSizeLoss(_Loss):
-    def __init__(self):
-        super(ObjectDetectionCoordinatesAndSizeLoss, self).__init__()
-
-    def forward(self, y_true:Tensor, yhat:Tensor):
-        """
-        ObjectDetectionCoordinatesAndSizeLoss is a custom loss function for object detection. It is a combination of the coordinate loss and the size loss.
-
-        Args:
-            y_true: Ground truth bounding boxes.
-            yhat: Predicted bounding boxes.
-
-        Returns:
-            The loss value.
-
-        Maths:
-            The loss function is defined as follows:
-
-            loss = delta_coord + delta_size
-
-            where delta_coord is the sum of the squared differences between the ground truth coordinates 
-            and the predicted coordinates, and delta_size is the sum of the squared differences between 
-            the ground truth sizes and the predicted sizes.
-        
-        Examples:
-            >>> import torch
-            >>> import torch.nn as nn
-
-            >>> y_true = torch.tensor([[0.1, 0.2, 0.3, 0.4], [0.5, 0.6, 0.7, 0.8]])
-            >>> y_hat = torch.tensor([[0.2, 0.3, 0.4, 0.5], [0.6, 0.7, 0.8, 0.9]])
-
-            >>> loss = OBJLoss()(y_true, y_hat)
-            >>> print(loss.item())
-            0.04000000283122063
-
-        Images:
-            [Image of Ground truth bounding boxes]
-            [Image of Predicted bounding boxes]
-
-
-
-       """
-        delta_coord = torch.sum(torch.square(y_true[:, :2] - yhat[:, :2]))
-
-        h_true = y_true[:, 3] - y_true[:, 1]
-        w_true = y_true[:, 2] - y_true[:, 0]
-
-        h_pred = yhat[:, 3] - yhat[:, 1]
-        w_pred = yhat[:, 2] - yhat[:, 0]
-
-        delta_size = torch.sum(torch.square(w_true - w_pred) + torch.square(h_true - h_pred))
-
-        return delta_coord + delta_size
 
 
 # TODO: L1HingeEmbeddingCriterion
