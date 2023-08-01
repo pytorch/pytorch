@@ -166,7 +166,8 @@ void initJITBindings(PyObject* module) {
   auto jit = m.def_submodule("_jit");
 
   // This is a static object, so we must leak the Python object
-  static py::handle exc = py::exception<JITException>(m, "JITException").release();
+  static py::handle exc =
+      py::exception<JITException>(m, "JITException").release();
 
   py::register_exception_translator([](std::exception_ptr p) {
     try {
