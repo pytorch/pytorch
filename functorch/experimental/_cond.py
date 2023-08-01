@@ -11,6 +11,7 @@ from torch._functorch.eager_transforms import (
     _wrap_all_tensors_to_functional,
     functionalize,
 )
+from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -25,7 +26,6 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _pop_mode_temporarily,
 )
-from torch.utils._pytree import tree_flatten
 
 
 @dataclass
@@ -130,38 +130,7 @@ def cond_dense(pred, true_fn, false_fn, operands):
         return false_fn(*operands)
 
 
-@cond.py_impl(DispatchKey.Autograd)
-def cond_autograd(pred, true_fn, false_fn, *operands):
-    # TODO: support autograd
-    flat_operands, _ = tree_flatten([true_fn, false_fn] + [operands])
-
-    requires_grad = any(
-        isinstance(arg, torch.Tensor) and arg.requires_grad for arg in flat_operands
-    )
-
-    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.AutogradCPU)):
-        result = cond(pred, true_fn, false_fn, *operands)
-
-        # If there is requires_grad, we delay the error until backward pass
-        if requires_grad:
-            # cond can only return one value
-            err_fn = torch._C._functions.DelayedError(
-                b"NYI: torch.cond doesn't support autograd",
-                1,
-            )
-            # Create aliases of the output that has requires_grad=True. We need
-            # at least one of the inputs to err_fn to require grad so that the
-            # output will have a grad_fn.
-
-            def fake_requires_grad(var):
-                if var is not None:
-                    var = var.detach()
-                    var.requires_grad = True
-                return var
-
-            return err_fn(fake_requires_grad(result))
-
-        return result
+cond.py_impl(DispatchKey.Autograd)(autograd_not_implemented(cond, deferred_error=True))
 
 
 @cond.py_impl(ProxyTorchDispatchMode)
