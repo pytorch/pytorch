@@ -983,8 +983,16 @@ static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
   py::object maybe_tensor_unflatten = PyObject_FastGetAttrString(self, "__tensor_unflatten__");
   auto is_traceable_subclass = maybe_tensor_flatten && maybe_tensor_unflatten;
 
+  // FunctionalTensor is a python subclass that we use during compilation.
+  // It explicitly is **not** traceable (doesn't implement __tensor_flatten__),
+  // but we need to use its storage to determine aliasing reliationships in the graph.
+  auto curr_type = (PyObject*)Py_TYPE(self);
+  auto curr_type_name = PyObject_GetAttrString(curr_type, "__name__");
+  auto curr_type_str = std::string(PyUnicode_AsUTF8(curr_type_name));
+  auto is_python_functional_tensor = curr_type_str == "FunctionalTensor";
+
   auto& self_ = THPVariable_Unpack(self);
-  return createPyObject(self_.storage(), /*always_create_python_storage=*/is_traceable_subclass);
+  return createPyObject(self_.storage(), /*always_create_python_storage=*/is_traceable_subclass || is_python_functional_tensor);
   END_HANDLE_TH_ERRORS
 }
 

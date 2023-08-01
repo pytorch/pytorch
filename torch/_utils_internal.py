@@ -64,6 +64,33 @@ def signpost_event(category: str, name: str, parameters: Dict[str, Any]):
     log.info("%s %s: %r", category, name, parameters)
 
 
+def _functionalize_sync(t):
+    # This code lives in python instead of C++ since conditioning on a certain python subclass
+    # is much more of a pain in C++.
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    if isinstance(t, FunctionalTensor):
+        modes = torch.utils._python_dispatch._get_current_dispatch_mode_stack()
+        functional_modes = [
+            x
+            for x in modes
+            if isinstance(x, torch._subclasses.functional_tensor.FunctionalTensorMode)
+        ]
+        # If a FunctionalTensorMode is active while syncing, we don't want it to intercept any ops that get called
+        # when we sync our inner tensor.
+        assert len(functional_modes) < 2
+        if len(functional_modes) == 1:
+            try:
+                functional_modes[0].is_active = False
+                torch._functionalize_sync(t.elem)
+            finally:
+                functional_modes[0].is_active = True
+        else:
+            torch._functionalize_sync(t.elem)
+    else:
+        torch._functionalize_sync(t)
+
+
 TEST_MASTER_ADDR = "127.0.0.1"
 TEST_MASTER_PORT = 29500
 # USE_GLOBAL_DEPS controls whether __init__.py tries to load

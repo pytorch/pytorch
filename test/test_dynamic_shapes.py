@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: jit"]
 
 import contextlib
@@ -195,13 +194,13 @@ class TestPySymInt(TestCase):
 
         self.assertTrue(x.size()[0], 5)
         self.assertTrue(x.size()[1], 4)
-        self.assertTrue(isinstance(x.size()[1], SymInt))
+        self.assertTrue(isinstance(x.size()[1], int))  # due to guard above
         self.assertTrue(x.size()[2] == 3)
 
         self.assertTrue(x.size(0) == 5)
         self.assertTrue(x.size(1) == 4)
         self.assertTrue(x.size(2) == 3)
-        self.assertTrue(isinstance(x.size(2), SymInt))
+        self.assertTrue(isinstance(x.size(2), int))
 
         y = create_symbolic_tensor("y", torch.randn(5, 4, 3)[1:], shape_env)
         self.assertTrue(isinstance(y.storage_offset(), SymInt))

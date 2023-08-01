@@ -143,14 +143,107 @@ class BaseTorchDispatchMode(TorchDispatchMode):
 def is_traceable_wrapper_subclass(t):
     # In order for a tensor subclass to support TorchDispatchMode-style tracing in PT2,
     # It must implement two magic methods: __tensor_flatten__ and __tensor_unflatten__.
-    tensor_like = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
-    return tensor_like and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
+
+    is_subclass = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
+    return is_subclass and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
 
 def transform_subclass(t, callback):
-    assert is_traceable_wrapper_subclass(t)
+    assert is_traceable_wrapper_subclass(t), f"Expects traceable wrapper subclass but got {type(t)}"
     # convert the tensor subclass into its constituent dense tensors,
     # and apply a transformation to each dense tensor.
-    from torch.utils._pytree import tree_map_only
     flattened_tensors, ctx = type(t).__tensor_flatten__(t)
-    transformed_tensors = tree_map_only(torch.Tensor, callback, flattened_tensors)
+    transformed_tensors = torch.utils._pytree.tree_map_only(torch.Tensor, callback, flattened_tensors)
     return type(t).__tensor_unflatten__(transformed_tensors, ctx)
+
+def _correct_storage_aliasing(func, args, outs):
+    assert isinstance(func, torch._ops.OpOverload)
+    assert isinstance(args, (list, tuple))
+    assert isinstance(outs, (list, tuple))
+    flat_outs, _ = torch.utils._pytree.tree_flatten(outs)
+    for x in flat_outs:
+        if isinstance(x, torch.Tensor):
+            # This is hopefully a reasonable assert:
+            # subclasses that rely on this API for output aliasing
+            # should always return wrapper tensor subclasses for us to manually alias.
+            # in theory if a subclass that needs this API wants to sometimes return
+            # plain tensors, we could remove the assert and just not perform the aliasing,
+            # but it seems safer to learn more about this case first.
+            assert hasattr(x, '__torch_dispatch__')
+
+
+    def alias_storage(arg, ret):
+       # Need to run under no_dispatch, because we explicitly do **not**
+       # want our subclass to intercept the set_() call.
+       # instead, our subclass should directly have its storage swapped out.
+       with torch.utils._mode_utils.no_dispatch():
+           if isinstance(ret, torch._subclasses.functional_tensor.FunctionalTensor):
+               # directly calling this overload, and passing ret.shape, because we **explicitly**
+               # don't want to reset the sizes on ret, if the storage implies a size change.
+               # Why?
+               # - FunctionalTensor has a CustomSizes, so that it can plumb all calls to metadata to the inner tensor.
+               # - TensorImpl.set_sizes_strides() therefore yells if you try to directly change sizes.
+               torch.ops.aten.set_.source_Storage_storage_offset(ret, arg.untyped_storage(), 0, ret.shape)
+           else:
+               ret.set_(arg.untyped_storage())
+
+    def is_match(arg, ret):
+        arg_aliases = set() if not arg.alias_info else arg.alias_info.before_set
+        out_aliases = set() if not ret.alias_info else ret.alias_info.before_set
+        return len(arg_aliases & out_aliases) > 0
+
+    num_args = len(func._schema.arguments)
+    num_returns = len(func._schema.returns)
+    for arg_idx in range(num_args):
+        for return_idx in range(num_returns):
+            if is_match(func._schema.arguments[arg_idx], func._schema.returns[return_idx]):
+                alias_storage(args[arg_idx], outs[return_idx])
+
+    # Sigh... the torchscript parser has a bug where alias annotations for Tensor[](a) don't show up properly
+    # See https://github.com/pytorch/pytorch/issues/106173
+    if func.overloadpacket in [
+        torch.ops.aten.chunk,
+        torch.ops.aten.tensor_split,
+        torch.ops.aten.split,
+        torch.ops.aten.split_with_sizes,
+        torch.ops.aten.hsplit,
+        torch.ops.aten.vsplit,
+        torch.ops.aten.dsplit,
+        torch.ops.aten.unbind,
+    ]:
+        assert isinstance(outs, list) and all(isinstance(x, torch.Tensor) for x in outs)
+        for o in outs:
+            # For lists of outputs, need to alias every individual tensor to the input
+            alias_storage(args[0], o)
+
+def return_and_correct_aliasing(func, args, out):
+    def get_write_alias(x):
+        if not x.alias_info or not x.alias_info.before_set:
+            return None
+        before_set = list(x.alias_info.before_set)
+        # torchscript allows for complicated alias sets, but our dispatcher ops only really involve simple aliasing
+        assert len(before_set) == 1
+        if '!' in list(before_set)[0]:
+            return before_set[0]
+        return None
+
+    # Fix up the storages of any outs so that they point to the same storage as the input,
+    # if func is a view op.
+    _correct_storage_aliasing(func, args, [out] if not isinstance(out, (list, tuple)) else out)
+
+    # Next: we need to make sure to return inputs directly, if the output is a mutable alias (e.g. add_()).
+
+    # simple case: none of our outputs have mutable aliases, so we can return the output as-is
+    if not any(get_write_alias(r) is not None for r in func._schema.returns):
+        return out
+
+    # simplifying assumption: we don't have **any** ops with return types like "-> (Tensor(a!), Tensor)"
+    if not all(get_write_alias(r) is not None for r in func._schema.returns):
+        raise RuntimeError("Unsupported schema: " + str(func._schema))
+
+    if len(func._schema.returns) == 1:
+        arg_idx = get_arg_idx_from_alias(get_write_alias(0))
+        return args[arg_idx]
+
+    return [
+        args[get_arg_idx_from_alias(get_write_alias(0))] for i in range(len(func._schema.returns))
+    ]

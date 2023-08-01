@@ -98,7 +98,7 @@ traceable_tensor_subclasses = set()
 # This is a good way to get your model to work one way or another, but you may
 # lose optimization opportunities this way.  Devs, if your benchmark model is failing
 # this way, you should figure out why instead of suppressing it.
-suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
+suppress_errors = os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", "1") == "1"
 
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
@@ -109,10 +109,6 @@ rewrite_assert_with_torch_assert = True
 
 # Show a warning for every specialization
 print_specializations = False
-
-# Simplify guards, summarizing static and dynamic constraints on dimensions.
-# NOTE: This only has an effect when dynamic_shapes=True.
-summarize_dim_constraints = False
 
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
@@ -129,6 +125,7 @@ skipfiles_inline_module_allowlist = {
     torch._decomp,
     torch.utils._contextlib,
     torch.utils._pytree,
+    torch.fx._pytree,
     torch.sparse,
 }
 
@@ -238,10 +235,12 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 numpy_ndarray_as_tensor = False
 
 # Uses z3 for validating the guard optimizations transformations.
-translation_validation = os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATOR", "0") == "1"
+translation_validation = (
+    os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION", "0") == "1"
+)
 # Timeout (in milliseconds) for z3 finding a solution.
 translation_validation_timeout = int(
-    os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATOR_TIMEOUT", "600000")
+    os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION_TIMEOUT", "600000")
 )
 
 
