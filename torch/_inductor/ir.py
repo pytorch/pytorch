@@ -1130,7 +1130,6 @@ class WelfordReduction(Reduction):
             self.reduction_type,
             self.inner_fn(vars, reduction_vars),
         )
-        print(values)
         value = values[self.output_index]
         return ops.store_reduction(output_name, indexer(vars), value)
 

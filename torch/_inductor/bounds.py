@@ -46,7 +46,7 @@ class BoundVars:
         # Initialize the environment with the unbounded variables
         for node in self.unbounded_vars:
             # we need to evaluate masked_subblock to recurse, and we need to set indirect values
-            if (
+            if not isinstance(node.target, str) or (
                 "masked_subblock" not in node.target
                 and "set_indirect" not in node.target
             ):
