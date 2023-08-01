@@ -141,7 +141,7 @@ def _broadcast_to_followers(sequence_id, objects_map):
 
     assert (
         not states.proceed_signal.is_set()
-    ), "Termination signal sequence id {} got set twice.".format(sequence_id)
+    ), f"Termination signal sequence id {sequence_id} got set twice."
     states.gathered_objects = objects_map
     states.proceed_signal.set()
 
@@ -428,7 +428,7 @@ def _to_worker_info(to):
     elif isinstance(to, (str, int)):
         return get_worker_info(to)
     else:
-        raise ValueError("Cannot get WorkerInfo from name {}".format(to))
+        raise ValueError(f"Cannot get WorkerInfo from name {to}")
 
 
 def _rref_typeof_on_owner(rref, blocking: bool = True):
