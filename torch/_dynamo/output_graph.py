@@ -28,6 +28,7 @@ from torch._guards import (
     Source,
     TracingContext,
 )
+from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
 from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
 
@@ -62,6 +63,7 @@ from .utils import (
     count_calls,
     counters,
     dynamo_timed,
+    get_instruction_source_311,
     graph_break_reasons,
     increment_op_count,
     lazy_format_graph_code,
@@ -85,6 +87,7 @@ log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
+trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 
 
 class OutputGraphState(NamedTuple):
@@ -237,6 +240,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # This map ensures that the only tensors in graph inputs, and the only tensors in guards are unique.
         self.real_value_tensor_positive_aliases = WeakTensorKeyDictionary()
 
+        # TODO: maybe should just pass the entire f_code in here?  Not
+        # sure...
+        self.co_fields = {
+            "co_name": f_code.co_name,
+            "co_filename": f_code.co_filename,
+            "co_firstlineno": f_code.co_firstlineno,
+        }
+
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._guards.EXPORT_FAKE_MODE or torch._subclasses.FakeTensorMode(
@@ -244,13 +255,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
                 frame_id=frame_state["_id"],
-                # TODO: maybe should just pass the entire f_code in here?  Not
-                # sure...
-                co_fields={
-                    "co_name": f_code.co_name,
-                    "co_filename": f_code.co_filename,
-                    "co_firstlineno": f_code.co_firstlineno,
-                },
+                co_fields=self.co_fields,
             ),
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
@@ -964,7 +969,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             compiler_fn = self.compiler_fn
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn)
-
             compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
@@ -972,6 +976,18 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
                 e.__traceback__
             ) from None
+
+        signpost_event(
+            "dynamo",
+            "OutputGraph.call_user_compiler",
+            {
+                **self.co_fields,
+                "op_count": tot,
+                "node_count": len(gm.graph.nodes),
+                "input_count": len(placeholders),
+            },
+        )
+
         return compiled_fn
 
     def example_inputs(self) -> List[torch.Tensor]:
@@ -1074,7 +1090,7 @@ class SubgraphTracer(fx.Tracer):
     """
 
     def __init__(self, output_graph, parent=None):
-        super(SubgraphTracer, self).__init__()
+        super().__init__()
         self.output_graph = weakref.proxy(output_graph)
         self.graph = torch.fx.Graph()
         # Map from graph input name to its placeholder proxy object, where the
@@ -1100,6 +1116,7 @@ class SubgraphTracer(fx.Tracer):
         # This is a OrderedDict so that we can
         # maintain the order of args for the HigherOrderOperator call.
         self.lifted_freevars = collections.OrderedDict()
+        self.prev_inst = None
 
     def create_proxy(
         self,
@@ -1145,13 +1162,13 @@ class SubgraphTracer(fx.Tracer):
         #   higher-order-op subgraph until we hit the subgraph where the free
         #   variable is bound
         if self.parent is not None:
-            flat_args, tree_spec = pytree.tree_flatten(args)
-            new_args = []
+            flat_args, tree_spec = pytree.tree_flatten((args, kwargs))
+            new_flat_args = []
             for arg in flat_args:
                 maybe_new_arg = self.maybe_lift_tracked_freevar_to_input(arg)
-                new_args.append(maybe_new_arg)
+                new_flat_args.append(maybe_new_arg)
 
-            args = pytree.tree_unflatten(new_args, tree_spec)
+            args, kwargs = pytree.tree_unflatten(new_flat_args, tree_spec)
 
         rv = super().create_proxy(
             kind, target, args, kwargs, name, type_expr, proxy_factory_fn
@@ -1159,6 +1176,24 @@ class SubgraphTracer(fx.Tracer):
 
         # append stack trace to fx node
         tx = self.output_graph.current_tx
+
+        # log detailed location of line of code in 3.11
+        if sys.version_info >= (3, 11) and kind in (
+            "call_function",
+            "call_method",
+            "call_module",
+        ):
+            cur_inst = tx.current_instruction
+            if cur_inst is not self.prev_inst and cur_inst.positions.lineno is not None:
+                tx_code = tx.f_code
+                header = tx.get_line_of_code_header(lineno=cur_inst.positions.lineno)
+
+                def get_trace_call_log_str():
+                    line = get_instruction_source_311(tx_code, cur_inst).rstrip()
+                    return f"TRACE FX call {rv.node.name} from {header}\n{line}"
+
+                trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
+                self.prev_inst = cur_inst
 
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:

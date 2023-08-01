@@ -10,7 +10,7 @@ numba<=0.49.1; platform_machine != "arm64"
 opt-einsum>=3.3
 psutil==5.9.1
 nvidia-ml-py==11.525.84
-pygments==2.12.0
+pygments==2.15.0
 pytest==7.3.2
 pytest-xdist==3.3.1
 pytest-rerunfailures==10.3

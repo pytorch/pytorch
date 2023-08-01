@@ -498,7 +498,40 @@ class TensorVariable(VariableTracker):
                 example_value=None,
                 **options,
             )
-        elif name in ("tolist", "backward", "data_ptr"):
+        elif name == "tolist":
+            from .builder import SourcelessBuilder
+
+            def tolist(tensor, sub_proxy):
+                def wrap(i, sub_proxy):
+                    return SymNodeVariable.create(
+                        tx,
+                        sub_proxy.item(),
+                        sym_num=tx.output.shape_env.create_unbacked_symint(),
+                    )
+
+                if tensor.dtype not in [
+                    torch.int8,
+                    torch.int16,
+                    torch.int32,
+                    torch.int64,
+                ]:
+                    unimplemented("Input tensor for tolist must be an integer tensor")
+
+                if tensor.dim() == 0:
+                    return wrap(tensor, sub_proxy)
+
+                if tensor.dim() == 1:
+                    return [wrap(val, sub_proxy[i]) for i, val in enumerate(tensor)]
+
+                return [
+                    tolist(sub_tensor, sub_proxy=sub_proxy[i])
+                    for i, sub_tensor in enumerate(tensor)
+                ]
+
+            tensor = self.as_proxy().node.meta["example_value"]
+            out = tolist(tensor, self.as_proxy())
+            return SourcelessBuilder()(tx, out).add_options(options)
+        elif name in ("backward", "data_ptr"):
             unimplemented(f"Tensor.{name}")
         elif name == "item" and not config.capture_scalar_outputs:
             unimplemented(f"Tensor.{name}")
@@ -592,39 +625,17 @@ class TensorVariable(VariableTracker):
             result = TorchVariable(torch.any, **options).call_function(tx, [result], {})
             return result.call_method(tx, "item", [], {})
         elif name == "redistribute":
-            from .user_defined import UserDefinedObjectVariable
-
-            def as_value(v):
-                if isinstance(v, list):
-                    return [as_value(x) for x in v]
-                if isinstance(v, UserDefinedObjectVariable):
-                    from torch.distributed._tensor.placement_types import Shard
-
-                    placement_val = v.value
-                    # XXX: nasty hack in order to get the real object from UserDefinedObject with attributes
-                    if isinstance(
-                        placement_val, Shard
-                    ) and tx.output.side_effects.is_attribute_mutation(v):
-                        placement_val.dim = tx.output.side_effects.load_attr(
-                            v, "dim"
-                        ).value
-                    return placement_val
-                elif isinstance(v, variables.BaseListVariable):
-                    return v.python_type()([as_value(x) for x in v.items])
-                else:
-                    unimplemented("as_value only supports UDO and BaseListVariable")
-
-            args_as_value = as_value(args)
-
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
             # and rewrite args to have only proxyable args, then insert call_function
+            args_as_value = [x.as_python_constant() for x in args]
+
             def redistribute_fn_with_prim_types(x):
                 return x.redistribute(*args_as_value)
 
             # attach the same function name for better debugging
             redistribute_fn_with_prim_types.__name__ = f"prim_{name}"
 
-            tensor_variable = wrap_fx_proxy(
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
@@ -633,7 +644,6 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
-            return tensor_variable
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
@@ -946,6 +956,9 @@ class NumpyNdarrayVariable(TensorVariable):
         from torch._dynamo.variables.builder import wrap_fx_proxy_cls
         from ..utils import numpy_method_wrapper
 
+        if name in ["__len__", "size"]:
+            # delegate back to TensorVariable
+            return super().call_method(tx, name, args, kwargs)
         result = wrap_fx_proxy_cls(
             target_cls=NumpyNdarrayVariable,
             tx=tx,

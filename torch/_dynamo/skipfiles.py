@@ -121,7 +121,7 @@ if torch.distributed.is_available():
     import torch.distributed.algorithms._checkpoint.checkpoint_wrapper
 
     FILENAME_ALLOWLIST |= {
-        torch.distributed.algorithms._checkpoint.checkpoint_wrapper.__file__,
+        torch.distributed.algorithms._checkpoint.checkpoint_wrapper.__file__
     }
 
 # Include optimizer code for tracing
@@ -139,10 +139,10 @@ FILENAME_ALLOWLIST |= {torch.utils._foreach_utils.__file__}
 # TODO: find a better way to express this path without having to import
 # `torch.ao.quantization._pt2e`, which interferes with memory profiling
 FILENAME_ALLOWLIST |= {
-    _module_dir(torch) + "ao/quantization/_pt2e/qat_utils.py",
-    _module_dir(torch) + "ao/quantization/_pt2e/quantizer/qnnpack_quantizer.py",
-    _module_dir(torch) + "ao/quantization/_pt2e/representation/rewrite.py",
-    _module_dir(torch) + "ao/quantization/_pt2e/utils.py",
+    _module_dir(torch) + "ao/quantization/pt2e/qat_utils.py",
+    _module_dir(torch) + "ao/quantization/quantizer/xnnpack_quantizer.py",
+    _module_dir(torch) + "ao/quantization/pt2e/representation/rewrite.py",
+    _module_dir(torch) + "ao/quantization/pt2e/utils.py",
 }
 
 # TODO (zhxchen17) Make exportdb importable here.
@@ -153,6 +153,13 @@ FILENAME_ALLOWLIST |= set(
 # torch.func.grad: need to allow this file to be able to look at `grad_impl`
 FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "_functorch/apis.py",
+}
+
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "distributed/tensor/parallel/_utils.py",
+    _module_dir(torch) + "distributed/tensor/parallel/style.py",
+    _module_dir(torch) + "distributed/_tensor/api.py",
+    _module_dir(torch) + "distributed/_tensor/device_mesh.py",
 }
 
 SKIP_DIRS_RE = None
@@ -194,7 +201,6 @@ def check(filename, allow_torch=False):
         return True
     if filename in FILENAME_ALLOWLIST:
         return False
-
     if allow_torch and is_torch(filename):
         return False
     if is_fbcode and bool(FBCODE_SKIP_DIRS_RE.match(filename)):
@@ -230,13 +236,6 @@ _recompile_re()
 
 
 def is_torch_inline_allowed(filename):
-    # XXX: figure out a better way to allow inlining the placement types
-    if torch.distributed.is_available():
-        import torch.distributed._tensor.placement_types as placement_types
-
-        if filename.startswith(_module_dir(placement_types)):
-            return True
-
     return any(
         filename.startswith(_module_dir(mod))
         for mod in config.skipfiles_inline_module_allowlist
