@@ -921,8 +921,7 @@ class TestBaseStructuredSparsifier(TestCase):
 class TestFPGMPruner(TestCase):
     """
     Test case for the implementation of paper:
-    "Filter Pruning via Geometric Median for Deep Convolutional Neural Networks Acceleration"
-    https://arxiv.org/abs/1811.00250.
+    `Filter Pruning via Geometric Median for Deep Convolutional Neural Networks Acceleration <https://arxiv.org/abs/1811.00250>`_.
     """
     class SimpleConvFPGM(nn.Module):
         def __init__(self):
