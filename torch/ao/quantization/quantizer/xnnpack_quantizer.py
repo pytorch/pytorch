@@ -300,7 +300,7 @@ class XNNPACKQuantizer(Quantizer):
     def set_module_name(
         self, module_name: str, quantization_config: Optional[QuantizationConfig]
     ):
-        """ Set quantization_config for a submodule with name: `module_name`, for example:
+        """Set quantization_config for a submodule with name: `module_name`, for example:
         quantizer.set_module_name("blocks.sub"), it will quantize all supported operator/operator
         patterns in the submodule with this module name with the given `quantization_config`
         """
