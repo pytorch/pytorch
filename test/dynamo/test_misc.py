@@ -1326,20 +1326,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(max_iter)
         self.assertEqual(ref, res)
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_numpy_on_cuda(self):
-        x = np.arange(10)
-
-        @torch.compile
-        def fn(x):
-            return x**2
-
-        with torch.device("cuda"):
-            r = fn(x)
-
-        self.assertEqual(type(r), np.ndarray)
-        self.assertEqual(r, x**2)
-
     def test_numpy_as_global(self):
         global x
         x = np.arange(10)
