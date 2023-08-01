@@ -1298,17 +1298,9 @@ if(USE_ROCM)
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
 
-    # Note [rocblas & rocfft cmake bug]
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # TODO: There is a bug in rocblas's & rocfft's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
-    # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
-    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
-      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-        roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
-    else()
-      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-        roc::rocblas roc::rocfft hip::hiprand roc::hipsparse)
-    endif()
+    list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
+      roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
+
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
@@ -1319,15 +1311,10 @@ if(USE_ROCM AND ROCM_VERSION_DEV VERSION_LESS "5.2.0")
   # We check again for USE_ROCM because it might have been set to OFF
   # in the if above
   include_directories(SYSTEM ${HIP_PATH}/include)
-  include_directories(SYSTEM ${ROCBLAS_PATH}/include)
-  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
-    include_directories(SYSTEM ${HIPFFT_PATH}/include)
-  else()
-    include_directories(SYSTEM ${ROCFFT_PATH}/include)
-  endif()
+  include_directories(SYSTEM ${HIPBLAS_PATH}/include)
+  include_directories(SYSTEM ${HIPFFT_PATH}/include)
   include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
   include_directories(SYSTEM ${HIPRAND_PATH}/include)
-  include_directories(SYSTEM ${ROCRAND_PATH}/include)
   include_directories(SYSTEM ${THRUST_PATH})
 endif()
 
@@ -1379,6 +1366,8 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
     endif()
     set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
+    add_compile_options(-DTORCH_USE_LIBUV)
+    include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/tensorpipe/third_party/libuv/include)
     set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     # Tensorpipe uses cuda_add_library
