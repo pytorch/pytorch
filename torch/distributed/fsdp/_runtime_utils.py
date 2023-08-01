@@ -251,7 +251,8 @@ def _share_state_and_init_handle_attrs(
         fsdp_state._free_event_queue = root_state._free_event_queue
         fsdp_state._handles_prefetched = root_state._handles_prefetched
         fsdp_state._needs_pre_backward_unshard = root_state._needs_pre_backward_unshard
-        fsdp_state._device_mesh = root_state._device_mesh
+        if hasattr(root_state, "_device_mesh"):
+            fsdp_state._device_mesh = root_state._device_mesh
         handle = fsdp_state._handle
         if handle:
             handle.init_flat_param_attributes()
