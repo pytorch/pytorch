@@ -29,7 +29,7 @@ logger = _init_logger()
 
 @compatibility(is_backward_compatible=False)
 @dataclass
-class SourcePartition():
+class SourcePartition:
     # Nodes in a particular partition
     nodes: List[Node]
 

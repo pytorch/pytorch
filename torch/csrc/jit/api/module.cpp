@@ -471,7 +471,7 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
 
 Module freeze(
     const Module& module,
-    c10::optional<std::vector<std::string>> preserved_attrs,
+    const c10::optional<std::vector<std::string>>& preserved_attrs,
     bool optimize_numerics) {
   TORCH_CHECK(
       !module.hasattr("training") || !module.is_training(),

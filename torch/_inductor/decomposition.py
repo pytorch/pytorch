@@ -19,14 +19,29 @@ quantized_decomposed = torch.ops.quantized_decomposed
 
 inductor_decompositions = get_decompositions(
     [
+        aten._adaptive_avg_pool2d_backward,
         aten.arange,
         aten.bitwise_and_,
         aten.bitwise_or_,
         aten.clamp_min_,
+        aten.dist,
         aten.empty_like,
         aten.flip,
+        aten.gelu,
+        aten.hardtanh,
+        aten.index_select,
         aten.lcm,
+        aten.leaky_relu,
         aten.linalg_vector_norm,
+        aten._log_softmax,
+        aten.max_pool2d_with_indices_backward,
+        aten._native_batch_norm_legit,
+        aten._native_batch_norm_legit_functional,
+        aten._native_batch_norm_legit_no_training,
+        aten.native_batch_norm,
+        aten.native_group_norm,
+        aten.native_layer_norm,
+        aten._softmax,
         aten.sin_,
         aten.sqrt_,
         aten.std,
@@ -35,6 +50,7 @@ inductor_decompositions = get_decompositions(
         aten.tril_indices,
         aten.triu_indices,
         aten.unsafe_split,
+        aten.upsample_bilinear2d.vec,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
@@ -166,6 +182,22 @@ def cat(tensors, dim=0):
     if len(tensors) == 1:
         return tensors[0].clone()
     return NotImplemented
+
+
+@register_decomposition([aten.angle])
+def angle(x):
+    if x.is_complex():
+        return torch.where(
+            torch.isnan(x.real), float("nan"), torch.atan2(x.imag, x.real)
+        )
+    else:
+        # when x is real number
+        #   if x >= 0, return 0
+        #   if x < 0, return pi
+        #   if x is nan, return nan
+        ret = torch.where(x < 0, math.pi, 0.0)
+        nan = torch.where(torch.isnan(x), float("nan"), 0.0)
+        return ret + nan
 
 
 @register_decomposition([aten.conj_physical])
