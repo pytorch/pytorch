@@ -1543,8 +1543,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Shared implementation of mutable_data_ptr_impl() and the future
   // mutable_data_ptr_impl().
   template <typename T, typename Func>
-  __ubsan_ignore_pointer_overflow__
-  T* data_ptr_impl_impl(const Func& get_data) const {
+  __ubsan_ignore_pointer_overflow__ T* data_ptr_impl_impl(
+      const Func& get_data) const {
     if (C10_UNLIKELY(!has_storage())) {
       throw_data_ptr_access_error();
     }
