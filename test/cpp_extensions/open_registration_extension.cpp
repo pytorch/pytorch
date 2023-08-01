@@ -18,6 +18,7 @@
 #include <ATen/EmptyTensor.h>
 #include <ATen/core/GeneratorForPrivateuseone.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
+#include <ATen/ops/view.h>
 
 static uint64_t add_counter = 0;
 static uint64_t last_saved_value = 0;
@@ -387,7 +388,6 @@ void set_custom_device_index(c10::DeviceIndex device_index) {
   custom_device_index = device_index;
 }
 
-
 struct FooHooksInterface : public at::PrivateUse1HooksInterface {
     ~FooHooksInterface() override = default;
     const at::Generator& getDefaultGenerator(c10::DeviceIndex device_index) override {
@@ -423,6 +423,37 @@ void register_hook() {
 const at::Generator& default_generator(c10::DeviceIndex device_index) {
   return at::globalContext().defaultGenerator(at::Device(c10::DeviceType::PrivateUse1, device_index));;
 }
+
+struct CustomAutogradFnReturnsSelf : public torch::autograd::Function<CustomAutogradFnReturnsSelf> {
+
+  static at::Tensor forward(torch::autograd::AutogradContext* ctx, at::Tensor self) {
+    return self;
+  }
+
+  static torch::autograd::variable_list backward(torch::autograd::AutogradContext* ctx, torch::autograd::variable_list grad_output) {
+    return {grad_output[0] * 0.5};
+  }
+};
+
+struct CustomAutogradFnAliasing : public torch::autograd::Function<CustomAutogradFnAliasing> {
+
+  static at::Tensor forward(torch::autograd::AutogradContext* ctx, at::Tensor self) {
+    return self.view_symint(self.sym_sizes());
+  }
+
+  static torch::autograd::variable_list backward(torch::autograd::AutogradContext* ctx, torch::autograd::variable_list grad_output) {
+    return {grad_output[0] * 0.5};
+  }
+};
+
+at::Tensor custom_autograd_fn_returns_self(at::Tensor x) {
+  return CustomAutogradFnReturnsSelf::apply(x);
+}
+
+at::Tensor custom_autograd_fn_aliasing(at::Tensor x) {
+  return CustomAutogradFnAliasing::apply(x);
+}
+
 // Here, we're exposing a custom device object that corresponds to our custom backend.
 // We do this using pybind: exposing an "extension_name.custom_device()" function in python,
 // that's implemented in C++.
@@ -440,4 +471,14 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_serialization_registry", &custom_serialization_registry, "register custom serialization function");
     m.def("register_hook", &register_hook, "register_hook for privateuse1");
     m.def("default_generator", &default_generator, "default_generator for privateuse1");
+
+    // Co-opting this file to more easily test torch.compile'ing of custom autograd functions in C++
+    m.def("custom_autograd_fn_returns_self", &custom_autograd_fn_returns_self);
+}
+
+TORCH_LIBRARY(_test_funcs, m) {
+  m.def("custom_autograd_fn_aliasing(Tensor(a) input)-> Tensor(a)");
+}
+TORCH_LIBRARY_IMPL(_test_funcs, AutogradCPU, m) {
+  m.impl("custom_autograd_fn_aliasing", &custom_autograd_fn_aliasing);
 }
