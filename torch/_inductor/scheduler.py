@@ -72,7 +72,7 @@ class BaseSchedulerNode:
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
 
-    def debug_str(self):
+    def debug_str(self, fused=False):
         """Longer form printout for trace logs"""
         name = self.get_name()
         lines = [
@@ -88,9 +88,14 @@ class BaseSchedulerNode:
             ]
         except Exception:
             log.warning("Ignoring error in debug_str()", exc_info=True)
-        return "\n".join(lines).rstrip()
 
-    def debug_str_extra(self):
+        text = "\n".join(lines).rstrip()
+        if fused:  # indent for better readability
+            return textwrap.indent(text, "    ")
+
+        return text
+
+    def debug_str_extra(self) -> str:
         return ""
 
     def log_details(self):
@@ -358,7 +363,7 @@ class BaseSchedulerNode:
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
-    def debug_str_extra(self):
+    def debug_str_extra(self) -> str:
         return f"{self.get_name()}.node.kernel = {getattr(self.node, 'kernel', None)}"
 
     def is_extern(self):
@@ -412,7 +417,7 @@ class SchedulerNode(BaseSchedulerNode):
                 )
             )
 
-    def debug_str_extra(self):
+    def debug_str_extra(self) -> str:
         name = self.get_name()
         lines = [
             f"{name}.group.device = {self.group[0]}",
@@ -533,10 +538,12 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def get_names(self) -> Set[str]:
         return set.union(*[x.get_names() for x in self.snodes])
 
-    def debug_str_extra(self):
-        return (
-            f"{self.get_name()}.snodes = {pformat([x.get_name() for x in self.snodes])}"
-        )
+    def debug_str_extra(self) -> str:
+        lines = [
+            f"{self.get_name()}.snodes[{i}] =\n{node.debug_str(True)}"
+            for i, node in enumerate(self.snodes)
+        ]
+        return "\n".join(lines).rstrip()
 
     def set_last_usage(
         self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
