@@ -106,18 +106,22 @@ def _transform_diagnose_call_message_formatter(
     return f"Running {self.__class__.__name__} pass. "
 
 
-def fx_graph_tabular(graph: torch.fx.Graph) -> str:
+def maybe_fx_graph_tabular(graph: torch.fx.Graph) -> Optional[str]:
     """Return the Graph nodes in tabular format. Equivalent to stdout of `graph.print_tabular()`.
+    If `tabulate` is not installed, return `None`.
 
     Args:
         graph: The Graph to print.
 
     Returns:
-        The Graph printed in a tabular format.
+        The Graph printed in a tabular format. None if `tabulate` is not installed.
     """
     f = io.StringIO()
     with contextlib.redirect_stdout(f):
-        graph.print_tabular()
+        try:
+            graph.print_tabular()
+        except ImportError:
+            return None
     return f.getvalue()
 
 
@@ -214,21 +218,26 @@ class Transform(abc.ABC):
         )
         # Gather graph information before transform.
         old_readable_graph = self.module.print_readable(print_output=False)
-        old_tabular = fx_graph_tabular(self.module.graph)
+        old_tabular = maybe_fx_graph_tabular(self.module.graph)
 
         module = self._run(*args, **kwargs)
 
         # Gather graph information after transform.
         new_readable_graph = module.print_readable(print_output=False)
-        new_tabular = fx_graph_tabular(module.graph)
+        new_tabular = maybe_fx_graph_tabular(module.graph)
 
         graph_diff = _unified_diff(old_readable_graph, new_readable_graph)
         diagnostic.with_additional_message(f"### Graph diff:\n```\n{graph_diff}\n```")
 
-        tabular_diff = _unified_diff(old_tabular, new_tabular)
-        diagnostic.with_additional_message(
-            f"### Tabular diff:\n```\n{tabular_diff}\n```"
-        )
+        if old_tabular is None or new_tabular is None:
+            diagnostic.with_additional_message(
+                "### Tabular diff is not available because `tabulate` is not installed."
+            )
+        else:
+            tabular_diff = _unified_diff(old_tabular, new_tabular)
+            diagnostic.with_additional_message(
+                f"### Tabular diff:\n```\n{tabular_diff}\n```"
+            )
 
         return module
 
