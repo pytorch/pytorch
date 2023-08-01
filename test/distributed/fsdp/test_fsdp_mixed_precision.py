@@ -889,16 +889,38 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
 
             inp = torch.randn(3, 10, device="cuda")
             fsdp_model((inp, self, fsdp_model, mp_config, torch.float32))
-
             for buf in fsdp_model.buffers():
                 self.assertEqual(torch.float16, buf.dtype)
+
             # model.eval() + forward pass should make the buffers in full prec again
+            # Add pre-forward hooks
+            def verify_eval_buffer_dtype(module, input):
+                expected_dtype = (
+                    _BUFFER_ORIG_DTYPE if use_full_prec_in_eval else torch.float16
+                )
+                for buf in module.buffers():
+                    self.assertEqual(expected_dtype, buf.dtype)
+
+            def _get_underlying_module(m):
+                return m.module if isinstance(m, FSDP) else m
+
+            hook_handles = []
+            hook_handles.append(
+                _get_underlying_module(fsdp_model[0]).register_forward_pre_hook(
+                    verify_eval_buffer_dtype
+                )
+            )
+            hook_handles.append(
+                _get_underlying_module(fsdp_model[1]).register_forward_pre_hook(
+                    verify_eval_buffer_dtype
+                )
+            )
+
             fsdp_model.eval()
             fsdp_model((inp, self, fsdp_model, mp_config, torch.float32))
-            # TODO: this test would be more robust if the buffer dtype was
-            # validated in the nn.Module pre-forward hook to ensure that the
-            # buffer computation takes place in the right precision.
-            # https://github.com/pytorch/pytorch/issues/104740
+            for hook_handle in hook_handles:
+                hook_handle.remove()
+
             expected_dtype = (
                 _BUFFER_ORIG_DTYPE if use_full_prec_in_eval else torch.float16
             )
