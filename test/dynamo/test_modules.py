@@ -2114,6 +2114,49 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # causes two compilations, bc unimplemented custom setattr
         self.assertTrue(compiles_without_buffers >= 2)
 
+    def test_cache_size_limit_on_module_graph_break(self):
+        size = (10, 10)
+        cache_size_limit = 2
+        num_of_submodule = cache_size_limit * 2
+
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(*size)
+
+            def helper(self, x):
+                # The first part of the graph is not recompiled because self is not used
+                # in the first part. But, second part is recompiled for each instance of
+                # SubModule.
+                a = torch.sin(torch.cos(x))
+                torch._dynamo.graph_break()
+                return self.linear(a)
+
+            def forward(self, x):
+                return self.helper(x)
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods = [SubModule().cuda() for _ in range(num_of_submodule)]
+
+            def forward(self, x):
+                for mod in self.mods:
+                    x = mod(x)
+                return x
+
+        mod = MockModule()
+        with unittest.mock.patch(
+            "torch._dynamo.config.error_on_recompile", True
+        ), unittest.mock.patch(
+            "torch._dynamo.config.cache_size_limit", cache_size_limit
+        ):
+            cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
+            opt_mod = torch.compile(mod, backend=cnts)
+            x = torch.randn(*size, device="cuda")
+            opt_mod(x)
+            self.assertEqual(cnts.frame_count, 2 * num_of_submodule)
+
 
 if torch.distributed.is_available():
     from torch.testing._internal.distributed._tensor.common_dtensor import (

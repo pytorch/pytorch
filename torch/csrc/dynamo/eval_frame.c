@@ -144,7 +144,6 @@ static PyObject* guard_error_hook = NULL;
 static PyObject* profiler_start_hook = NULL;
 static PyObject* profiler_end_hook = NULL;
 static PyObject* guard_profiler_name_str = NULL; /* cached py str */
-static PyObject* self_string = NULL;
 
 static size_t cache_entry_extra_index = -1;
 static size_t dynamic_frame_state_extra_index = -2;
@@ -284,11 +283,6 @@ inline static bool is_nn_module_instance(PyObject* obj) {
   return false;
 }
 
-inline static PyObject* get_self(THP_EVAL_API_FRAME_OBJECT* frame) {
-  self_string = PyUnicode_FromString("self");
-  return PyDict_GetItem(frame->f_locals, self_string);
-}
-
 inline static PyObject* get_nn_module_if_frame_is_method_of_nn_module(THP_EVAL_API_FRAME_OBJECT* frame) {
   // Essentially returns isinstance(f_locals["self"], nn.Module).
   // There are some caveats here
@@ -299,8 +293,48 @@ inline static PyObject* get_nn_module_if_frame_is_method_of_nn_module(THP_EVAL_A
   // For both of these cases, we will still be functionally correct. Our cache
   // will still work, just that it might have more collisions than necessary for
   // the above cases.
-  PyObject* self_object = get_self(frame);
-  if (self_object != NULL && is_nn_module_instance(self_object)) {
+
+  Py_ssize_t nlocals = frame->f_code->co_nlocals;
+  PyObject* co_varnames = PyCode_GetVarnames(frame->f_code);
+  if (nlocals == 0 || PyTuple_Size(co_varnames) == 0) {
+    return NULL;
+  }
+
+  // Find the index of the first local variable named "self". Because of
+  // continuation on graph breaks, we may have self at non-zero location on the
+  // resumed frames.
+  Py_ssize_t self_index = 0;
+  bool found = false;
+  for (Py_ssize_t i = 0; i < nlocals; i++) {
+    PyObject* first_var = PyTuple_GET_ITEM(co_varnames, i);
+    if (first_var != NULL) {
+      const char* first_var_name = PyUnicode_AsUTF8(first_var);
+      if (strcmp(first_var_name, "self") == 0) {
+        self_index = i;
+        found = true;
+        break;
+      }
+    }
+  }
+
+  if (!found) {
+    return NULL;
+  }
+
+
+  #if IS_PYTHON_3_11_PLUS
+  PyObject** fastlocals = frame->localsplus;
+  #else
+  PyObject** fastlocals = frame->f_localsplus;
+  #endif
+
+  PyObject* self_object = fastlocals[self_index];
+  if (self_object == NULL) {
+    return NULL;
+  }
+  // TODO - Do I need this?
+  Py_INCREF(self_object);
+  if (is_nn_module_instance(self_object)) {
     return self_object;
   }
   return NULL;
@@ -804,11 +838,6 @@ static PyObject* _custom_eval_frame(
   // that gets re-interpreted as a PyObject (which it is NOT!)
   PyObject* result =
       call_callback(callback, frame, cache_size(extra), frame_state);
-
-  // TODO - For some reason, after call_callback, the f_locals are empty from
-  // the frame->f_locals. They need to be repopulated because we use f_locals to
-  // check if a frame is a method of nn module instance.
-  THP_PyFrame_FastToLocalsWithError(frame);
   if (result == NULL) {
     // internal exception, returning here will leak the exception into user code
     // this is useful for debugging -- but we dont want it to happen outside of
