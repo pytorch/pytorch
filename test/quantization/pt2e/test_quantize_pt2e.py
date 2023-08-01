@@ -1197,6 +1197,49 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         ]
         self._test_quantizer(m, example_inputs, quantizer, node_occurrence, node_list)
 
+    def test_xnnpack_quantizer_set_module_type(self):
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.sub = Sub()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.sub(x)
+                return x
+
+        m = M().eval()
+        example_inputs = (torch.randn(3, 5),)
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_module_type(Sub, operator_config)
+        node_occurrence = {
+            torch.ops.aten.addmm.default: 2,
+            # input and output for the second linear
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+        }
+        node_list = [
+            # first linear is not quantized
+            torch.ops.aten.addmm.default,
+            # second linear is quantized
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.addmm.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        ]
+        self._test_quantizer(m, example_inputs, quantizer, node_occurrence, node_list)
+
     def test_propagate_annotation(self):
         quantizer = XNNPACKQuantizer()
         operator_config = get_symmetric_quantization_config(is_per_channel=True)
