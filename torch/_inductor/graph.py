@@ -910,70 +910,6 @@ class GraphLowering(torch.fx.Interpreter):
         assert self.wrapper_code is not None
         return self.wrapper_code.generate()
 
-    # temporary code structure
-    from .scheduler import BaseSchedulerNode
-
-    def get_hardware_specs(self):
-        # TODO: figure out how to get hardware specs
-        gpu_memory_bandwidth = 1555 * 2**30  # 1555 GBps for A100
-        gpu_flops = 312**12  # 312 TFLOPS for A100
-        return (gpu_flops, gpu_memory_bandwidth)
-
-    def estimate_snode_runtime(self, snode: BaseSchedulerNode, rwbytes: int) -> int:
-        from .ir import CollectiveKernel, ComputedBuffer
-        from .scheduler import ExternKernelSchedulerNode, FusedSchedulerNode
-
-        print("GraphLowering::estimate_snode_runtime called")
-        print(snode.debug_str())
-
-        gpu_flops, gpu_memory_bandwidth = self.get_hardware_specs()
-
-        # TODO: figure out which ir.Buffer types are compute vs memory bounded
-        if (
-            isinstance(snode, FusedSchedulerNode)  # assume memory bounded
-            or isinstance(snode.node, ComputedBuffer)  # memory bounded
-            or isinstance(snode.node, CollectiveKernel)  # assume memory bounded
-        ):
-            return rwbytes / gpu_memory_bandwidth
-        elif isinstance(
-            snode, ExternKernelSchedulerNode
-        ):  # compute bounded for large tensors
-            # matmul and conv, compute bound
-
-            from torch.utils.flop_counter import conv_flop, mm_flop
-
-            if getattr(snode.node, "kernel", "") == "extern_kernels.convolution":
-                inputs = snode.node.inputs
-                assert len(inputs) == 2
-
-                x_shape = inputs[0].get_size()
-                w_shape = inputs[1].get_size()
-                out_shape = snode.node.get_size()
-                return 1/gpu_flops * conv_flop(
-                    x_shape=x_shape,
-                    w_shape=w_shape,
-                    out_shape=out_shape,
-                    transposed=False,
-                    _bias = None,
-                    _stride = None,
-                    _padding = None,
-                    _dilation = None
-                )
-
-                # TODO: handle backward, transpose
-            elif(getattr(snode.node, "kernel", "") == "extern_kernels.mm"):
-                inputs = snode.node.inputs
-                assert len(inputs) == 2
-                a_shape = inputs[0].get_size()
-                b_shape = inputs[1].get_size()
-                return 1/gpu_flops * mm_flop(a_shape, b_shape)
-
-                #TODO: other types of matmul
-
-        # TODO: add support for more snodes/irnodes
-
-        return 0
-
     def count_bytes(self):
         from .scheduler import FusedSchedulerNode, NopKernelSchedulerNode, Scheduler
 
@@ -1009,12 +945,10 @@ class GraphLowering(torch.fx.Interpreter):
 
         total_bytes = 0
         node_counts = []
-        print(f"found {len(scheduler.nodes)} snodes")
         for node in scheduler.nodes:
             num_bytes = get_read_write_buffers_sizes(node)
-            runtime = self.estimate_snode_runtime(
-                node, num_bytes
-            )  # temporary code structure just to execute it in test_perf.py
+            # temporary code for testing
+            runtime = node.get_estimated_runtime(num_bytes)
             print(f"estimated runtime: {runtime}")
             node_counts.append((node, num_bytes // 4))
             total_bytes += num_bytes

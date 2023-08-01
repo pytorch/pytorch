@@ -362,6 +362,66 @@ class BaseSchedulerNode:
         buffer.writelines(out_lines)
         self.written = True
 
+    def get_estimated_runtime(self, rwbytes: int) -> float:
+        from .ir import CollectiveKernel, ComputedBuffer
+
+        print("BaseSchedulerNode::get_estimated_runtime called")
+        print(self.debug_str())
+
+        # TODO(xmfan): figure out how to get hardware specs
+        gpu_memory_bandwidth = 1555 * 2**30  # 1555 GBps for A100
+        gpu_flops = 312**12  # 312 TFLOPS for A100
+
+        from torch.utils.flop_counter import conv_flop, mm_flop
+
+        if (
+            isinstance(self, ExternKernelSchedulerNode)
+            and getattr(self.node, "kernel", "") == "extern_kernels.convolution"
+        ):
+            inputs = self.node.inputs
+            assert len(inputs) == 2
+
+            x_shape = inputs[0].get_size()
+            w_shape = inputs[1].get_size()
+            out_shape = self.node.get_size()
+            return (
+                1
+                / gpu_flops
+                * conv_flop(
+                    x_shape=x_shape,
+                    w_shape=w_shape,
+                    out_shape=out_shape,
+                    transposed=False,
+                    _bias=None,
+                    _stride=None,
+                    _padding=None,
+                    _dilation=None,
+                )
+            )
+
+            # TODO(xmfan): handle transpose
+        elif (
+            isinstance(self, ExternKernelSchedulerNode)
+            and getattr(self.node, "kernel", "") == "extern_kernels.mm"
+        ):
+            inputs = self.node.inputs
+            assert len(inputs) == 2
+            a_shape = inputs[0].get_size()
+            b_shape = inputs[1].get_size()
+            return 1 / gpu_flops * mm_flop(a_shape, b_shape)
+
+            # TODO(xmfan): add support for other types of matmul ops e.g. addmm
+        elif (
+            isinstance(self, FusedSchedulerNode)
+            or isinstance(self.node, ComputedBuffer)
+            or isinstance(self.node, CollectiveKernel)
+        ):
+            return rwbytes / gpu_memory_bandwidth
+
+        # TODO(xmfan): add support for more node types
+
+        return 0
+
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
     def debug_str_extra(self) -> str:

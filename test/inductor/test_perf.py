@@ -76,7 +76,6 @@ class TestCase(TorchTestCase):
 # temporary code structure
 class EstimateSnodeRuntimeTests(TestCase):
     def test_horizontal_reduction_pointwise(self):
-        print("========================================1. test_horizontal_reduction_pointwise")
         def f(a):
             b = a.sum(dim=1)
             c = a.cos()
@@ -86,7 +85,6 @@ class EstimateSnodeRuntimeTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """210""")
 
     def test_matmul(self):
-        print("========================================2. test_matmul")
         def f(a, b):
             return torch.matmul(a, b)
 
@@ -94,7 +92,6 @@ class EstimateSnodeRuntimeTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """300""")
 
     def test_pointwise(self):
-        print("========================================3. test_pointwise")
         def f(x):
             return x.cos()
 
@@ -102,7 +99,6 @@ class EstimateSnodeRuntimeTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """20""")
 
     def test_conv(self):
-        print("========================================4. test_conv")
         def f(x, y):
             return torch.nn.functional.conv2d(x, y, padding=1)
 
