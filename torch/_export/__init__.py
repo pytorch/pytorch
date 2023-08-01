@@ -40,7 +40,7 @@ from .exported_program import (
     ExportGraphSignature,
 )
 from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
-
+from .passes.add_runtime_assertions_for_constraints_pass import _AddRuntimeAssertionsForInlineConstraintsPass
 
 # Note - [On Export Dynamic Dimension UX]
 #
@@ -62,7 +62,6 @@ from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 #
 # result = torch._dynamo.export(
 #     my_model,
-#     *sixtyfour_tensors,
 #     constraints=[
 #         # if you do only dynamic_dim, this is sugar for
 #         # -Inf <= dynamic_dim(blah, 0) <= Inf; we don’t otherwise
@@ -74,6 +73,8 @@ from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 #         # NB: But we actually truncate ranges to be >= 2, because of
 #         # 0/1 specialization
 #     ]
+# )(
+#     *sixtyfour_tensors,
 # )
 def dynamic_dim(t: torch.Tensor, index: int):
     if not isinstance(t, torch.Tensor):
@@ -127,9 +128,6 @@ def export(
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
-    *,
-    _add_runtime_assertions=True,
-    _functionalize_runtime_assertions=False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -155,10 +153,11 @@ def export(
         try:
             gm_torch_level, _ = torch._dynamo.export(
                 f,
-                *args,
                 constraints=constraints,
                 assume_static_by_default=True,
                 tracing_mode="symbolic",
+            )(
+                *args,
                 **kwargs,
             )
 
@@ -324,11 +323,9 @@ def export(
                 equality_constraints,
             )
 
-            if _add_runtime_assertions:
-                exported_program = exported_program._add_runtime_assertions(
-                    functionalize=_functionalize_runtime_assertions,
-                )
-
+            exported_program = exported_program.transform(
+                _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
+            )
             return exported_program.transform(_ReplaceSymSizeOpPass())
 
         except (ConstraintViolationError, ValueRangeError) as e:
