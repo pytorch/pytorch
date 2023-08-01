@@ -1562,23 +1562,18 @@ class CPUReproTests(TestCase):
             num_static_inputs=0,
         )
 
+        @contextlib.contextmanager
         def reset_status(graph, checker):
-            @contextlib.contextmanager
-            def ctx(graph, checker):
-                for node in graph.nodes:
-                    if node.target == "constant":
-                        if OptimizationContext.key in node.meta:
-                            opt_ctx = node.meta[OptimizationContext.key]
-                        else:
-                            opt_ctx = OptimizationContext()
-                        opt_ctx.dtype = node.args[-1]
-                        node.meta[OptimizationContext.key] = opt_ctx
-                try:
-                    yield
-                finally:
-                    checker.simd_vec = True
-
-            return ctx(graph, checker)
+            for node in graph.nodes:
+                if node.target == "constant":
+                    if OptimizationContext.key in node.meta:
+                        opt_ctx = node.meta[OptimizationContext.key]
+                    else:
+                        opt_ctx = OptimizationContext()
+                    opt_ctx.dtype = node.args[-1]
+                    node.meta[OptimizationContext.key] = opt_ctx
+            yield
+            checker.simd_vec = True
 
         with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
             graph_lowering
@@ -1590,57 +1585,49 @@ class CPUReproTests(TestCase):
             ) as vec_checker:
                 i32_iinfo = np.iinfo(np.int32)
                 f32_iinfo = np.finfo(np.float32)
-                with contextlib.ExitStack() as stack:
-                    stack.enter_context(reset_status(_graph, vec_checker))
+                with reset_status(_graph, vec_checker):
                     InterpreterShim(_graph, submodules).run(
                         V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max
                     )
-                self.assertTrue(vec_checker.simd_vec)
+                    self.assertTrue(vec_checker.simd_vec)
 
-                with contextlib.ExitStack() as stack:
-                    stack.enter_context(reset_status(_graph, vec_checker))
+                with reset_status(_graph, vec_checker):
                     InterpreterShim(_graph, submodules).run(
                         V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min
                     )
                     self.assertTrue(vec_checker.simd_vec)
 
-                with contextlib.ExitStack() as stack:
-                    stack.enter_context(reset_status(_graph, vec_checker))
+                with reset_status(_graph, vec_checker):
                     InterpreterShim(_graph, submodules).run(
                         V.get_ops_handler(), i32_iinfo.min, np.inf
                     )
                     self.assertTrue(vec_checker.simd_vec)
 
-                with contextlib.ExitStack() as stack:
-                    stack.enter_context(reset_status(_graph, vec_checker))
+                with reset_status(_graph, vec_checker):
                     InterpreterShim(_graph, submodules).run(
                         V.get_ops_handler(), i32_iinfo.min, -np.inf
                     )
                     self.assertTrue(vec_checker.simd_vec)
 
-                with contextlib.ExitStack() as stack:
-                    stack.enter_context(reset_status(_graph, vec_checker))
+                with reset_status(_graph, vec_checker):
                     InterpreterShim(_graph, submodules).run(
                         V.get_ops_handler(), i32_iinfo.min - 1, f32_iinfo.min
                     )
                     self.assertFalse(vec_checker.simd_vec)
 
-                with contextlib.ExitStack() as stack:
-                    stack.enter_context(reset_status(_graph, vec_checker))
+                with reset_status(_graph, vec_checker):
                     InterpreterShim(_graph, submodules).run(
                         V.get_ops_handler(), i32_iinfo.max + 1, f32_iinfo.max
                     )
                     self.assertFalse(vec_checker.simd_vec)
 
-                with contextlib.ExitStack() as stack:
-                    stack.enter_context(reset_status(_graph, vec_checker))
+                with reset_status(_graph, vec_checker):
                     InterpreterShim(_graph, submodules).run(
                         V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min * (1 + 1e-5)
                     )
                     self.assertFalse(vec_checker.simd_vec)
 
-                with contextlib.ExitStack() as stack:
-                    stack.enter_context(reset_status(_graph, vec_checker))
+                with reset_status(_graph, vec_checker):
                     InterpreterShim(_graph, submodules).run(
                         V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max * (1 + 1e-5)
                     )

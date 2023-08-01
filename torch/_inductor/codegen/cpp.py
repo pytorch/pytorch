@@ -400,19 +400,6 @@ def get_current_node_opt_ctx() -> OptimizationContext:
     return get_opt_ctx(V.interpreter.current_node)
 
 
-def get_computation_dtype(dtype) -> torch.dtype:
-    opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-    assert opt_ctx
-    if opt_ctx.dtype != DTYPE_TO_COMPUTATION_DTYPE[dtype]:
-        # the Vec kernel might cast fp64/int64 to fp32/int32 in "constant" to support vectorization
-        assert dtype in (torch.int64, torch.float64)
-        if dtype == torch.int64:
-            assert opt_ctx.dtype == torch.int32
-        else:
-            assert opt_ctx.dtype == torch.float32
-    return opt_ctx.dtype
-
-
 class CppVecOverrides(OpOverrides):
     """Map element-wise ops to aten vectorization C++"""
 
@@ -630,7 +617,9 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
-        proposed_dtype = get_computation_dtype(dtype)
+        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+        assert opt_ctx
+        proposed_dtype = opt_ctx.dtype
         assert proposed_dtype in [
             torch.float,
             torch.int32,
@@ -1034,16 +1023,19 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
-        proposed_dtype = get_computation_dtype(dtype)
+        if dtype in DTYPE_LOWP_FP:
+            # Since load promotes all half-precision inputs to float, constants
+            # must be promoted as well
+            dtype = torch.float32
         if val == float("inf"):
-            return f"std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::infinity()"
+            return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
         elif val == float("-inf"):
-            return f"-std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::infinity()"
+            return f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
         elif math.isnan(val):
-            return f"std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::quiet_NaN()"
+            return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::quiet_NaN()"
         elif val is True or val is False:
-            return ops.to_dtype(str(val).lower(), proposed_dtype)
-        return ops.to_dtype(repr(val), proposed_dtype)
+            return ops.to_dtype(str(val).lower(), dtype)
+        return ops.to_dtype(repr(val), dtype)
 
     @staticmethod
     def index_expr(expr, dtype):
