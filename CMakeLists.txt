@@ -207,6 +207,9 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 cmake_dependent_option(
+    USE_CUSPARSELT "Use cuSPARSELt" ON
+    "USE_CUDA" OFF)
+cmake_dependent_option(
     BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" OFF
     "USE_CUDA" OFF)
 cmake_dependent_option(

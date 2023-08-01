@@ -74,10 +74,12 @@ if(USE_CUDA)
       "-DUSE_CUDA=OFF.")
     caffe2_update_option(USE_CUDA OFF)
     caffe2_update_option(USE_CUDNN OFF)
+    caffe2_update_option(USE_CUSPARSELT OFF)
     caffe2_update_option(USE_NVRTC OFF)
     caffe2_update_option(USE_TENSORRT OFF)
     set(CAFFE2_USE_CUDA OFF)
     set(CAFFE2_USE_CUDNN OFF)
+    set(CAFFE2_USE_CUSPARSELT OFF)
     set(CAFFE2_USE_NVRTC OFF)
     set(CAFFE2_USE_TENSORRT OFF)
   endif()
@@ -1238,11 +1240,6 @@ if(USE_CUDNN)
   target_include_directories(torch::cudnn INTERFACE ${CUDNN_FRONTEND_INCLUDE_DIR})
 endif()
 
-# ---[ cuSPARSELt
-if(USE_CUSPARSELT)
-  target_include_directories(torch::cusparselt INTERFACE ${CUSPARSELT_INCLUDE_DIR})
-endif()
-
 # ---[ HIP
 if(USE_ROCM)
   # This prevents linking in the libtinfo from /opt/conda/lib which conflicts with ROCm libtinfo.
@@ -1390,6 +1387,8 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
     endif()
     set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
+    add_compile_options(-DTORCH_USE_LIBUV)
+    include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/tensorpipe/third_party/libuv/include)
     set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     # Tensorpipe uses cuda_add_library
