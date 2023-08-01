@@ -115,7 +115,7 @@ def _param_rrefs(module_rref, recurse) -> List[rpc.RRef[Parameter]]:
 
 
 def _raise_not_supported(name: str) -> None:
-    raise ValueError("Method ``{}`` not supported for RemoteModule".format(name))
+    raise ValueError(f"Method ``{name}`` not supported for RemoteModule")
 
 
 class _RemoteModule(nn.Module):
@@ -123,7 +123,7 @@ class _RemoteModule(nn.Module):
     def __new__(cls, *args, **kwargs):
         # Use __new__ for logging purposes.
         torch._C._log_api_usage_once("torch.distributed.nn.api.remote_module")
-        return super(_RemoteModule, cls).__new__(cls)
+        return super().__new__(cls)
 
     def __init__(
         self,
