@@ -150,7 +150,7 @@ def compile_cpp_code_inline(name, cpp_sources, functions):
     return cpp_module
 
 def compute_temp_file_path(cpp_tmp_folder, variant_name, file_suffix):
-    return os.path.join(cpp_tmp_folder, '{}_{}.pt'.format(variant_name, file_suffix))
+    return os.path.join(cpp_tmp_folder, f'{variant_name}_{file_suffix}.pt')
 
 def is_torch_nn_functional_test(test_params_dict):
     return 'wrap_functional' in str(test_params_dict.get('constructor', ''))
@@ -177,11 +177,11 @@ def add_test(unit_test_class, test_name, test_fn):
 
 def set_cpp_tensors_requires_grad(cpp_tensor_stmts, python_tensors):
     assert len(cpp_tensor_stmts) == len(python_tensors)
-    return ['{}.requires_grad_(true)'.format(tensor_stmt) if tensor.dtype != torch.long else tensor_stmt
+    return [f'{tensor_stmt}.requires_grad_(true)' if tensor.dtype != torch.long else tensor_stmt
             for tensor_stmt, (_, tensor) in zip(cpp_tensor_stmts, python_tensors)]
 
 def move_cpp_tensors_to_device(cpp_tensor_stmts, device):
-    return ['{}.to("{}")'.format(tensor_stmt, device) for tensor_stmt in cpp_tensor_stmts]
+    return [f'{tensor_stmt}.to("{device}")' for tensor_stmt in cpp_tensor_stmts]
 
 def is_criterion_test(test_instance):
     return isinstance(test_instance, common_nn.CriterionTest)
@@ -209,7 +209,7 @@ def compute_cpp_args_construction_stmts_and_forward_arg_symbols(test_params):
     def add_cpp_forward_args(args):
         args_stmts = []
         for arg_name, _ in args:
-            args_stmts.append('auto {} = arg_dict.at("{}")'.format(arg_name, arg_name))
+            args_stmts.append(f'auto {arg_name} = arg_dict.at("{arg_name}")')
             cpp_forward_args_symbols.append(arg_name)
         return args_stmts
 
@@ -223,7 +223,7 @@ def compute_cpp_args_construction_stmts_and_forward_arg_symbols(test_params):
     # Build the list of other arguments needed
     cpp_other_args_stmts = []
     for arg_name, _ in test_params.arg_dict['other']:
-        cpp_other_args_stmts.append('auto {} = arg_dict.at("{}")'.format(arg_name, arg_name))
+        cpp_other_args_stmts.append(f'auto {arg_name} = arg_dict.at("{arg_name}")')
     cpp_other_args_stmts = move_cpp_tensors_to_device(cpp_other_args_stmts, device)
 
     cpp_args_construction_stmts = cpp_forward_input_args_stmts + cpp_forward_target_args_stmts + \
@@ -292,11 +292,11 @@ def compute_arg_dict(test_params_dict, test_instance):
             if arg_value == '_get_input()':
                 arg_dict['other'].append(CppArg(name=arg_name, value=test_instance._get_input()))
             else:
-                raise RuntimeError("`{}` has unsupported string value: {}".format(arg_name, arg_value))
+                raise RuntimeError(f"`{arg_name}` has unsupported string value: {arg_value}")
         elif isinstance(arg_value, torch.Tensor):
             arg_dict['other'].append(CppArg(name=arg_name, value=arg_value))
         else:
-            raise RuntimeError("`{}` has unsupported value: {}".format(arg_name, arg_value))
+            raise RuntimeError(f"`{arg_name}` has unsupported value: {arg_value}")
 
     return arg_dict
 
@@ -351,4 +351,4 @@ def try_remove_folder(folder_path):
         try:
             shutil.rmtree(folder_path)
         except Exception as e:
-            warnings.warn("Non-blocking folder removal fails with the following error:\n{}".format(str(e)))
+            warnings.warn(f"Non-blocking folder removal fails with the following error:\n{str(e)}")
