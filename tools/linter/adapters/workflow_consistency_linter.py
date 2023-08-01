@@ -103,7 +103,7 @@ if __name__ == "__main__":
                 del job["if"]
 
             # same is true for ['with']['test-matrix']
-            if "test-matrix" in job.get("with",{}):
+            if "test-matrix" in job.get("with", {}):
                 del job["with"]["test-matrix"]
 
             tag_to_jobs[sync_tag].append((path, {job_id: job}))
