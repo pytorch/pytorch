@@ -13,6 +13,7 @@ import operator
 import time
 import logging
 from enum import Enum
+from .efficient_conv_bn_eval import turn_on_efficient_conv_bn_eval
 
 def _parent_name(target : str) -> Tuple[str, str]:
     """
@@ -47,34 +48,25 @@ def replace_node_module(node: fx.Node, modules: Dict[str, Any], new_module: torc
     modules[node.target] = new_module
     setattr(modules[parent_name], name, new_module)
 
-def fuse(model: torch.nn.Module, inplace=False) -> torch.nn.Module:
+def fuse(model: torch.nn.Module, inplace=True) -> torch.nn.Module:
     """
-    Fuses convolution/BN layers for inference purposes. Will deepcopy your
-    model by default, but can modify the model inplace as well.
+    Implementation based on https://arxiv.org/abs/2305.11624
+    "Tune-Mode ConvBN Blocks For Efficient Transfer Learning"
+    It leverages the associative law between convolution and affine transform:
+    normalize (weight * feature) = (normalize weight) * feature, where * is 
+    the convolution operator. During inference, the weight and normalization 
+    can be constant-folded, which is the same as the normally used conv-bn 
+    fusion. A unique feature of this implementation is that it also works for 
+    training when BN is trained in `eval` mode, where keeping BN layers help 
+    stablize training.
+    This function only modifies the `forward` of `model`, without touching the
+     state dict of `model`. It is safe to inplace modify the `model` by 
+    default. It also supports copying the model with `inplace=False`.
     """
-    patterns = [(nn.Conv1d, nn.BatchNorm1d),
-                (nn.Conv2d, nn.BatchNorm2d),
-                (nn.Conv3d, nn.BatchNorm3d)]
     if not inplace:
         model = copy.deepcopy(model)
-    fx_model = fx.symbolic_trace(model)
-    modules = dict(fx_model.named_modules())
-    new_graph = copy.deepcopy(fx_model.graph)
-
-    for pattern in patterns:
-        for node in new_graph.nodes:
-            if matches_module_pattern(pattern, node, modules):
-                if len(node.args[0].users) > 1:  # Output of conv is used by other nodes
-                    continue
-                conv = modules[node.args[0].target]
-                bn = modules[node.target]
-                if not bn.track_running_stats:
-                    continue
-                fused_conv = fuse_conv_bn_eval(conv, bn)
-                replace_node_module(node.args[0], modules, fused_conv)
-                node.replace_all_uses_with(node.args[0])
-                new_graph.erase_node(node)
-    return fx.GraphModule(fx_model, new_graph)
+    turn_on_efficient_conv_bn_eval(model)
+    return model
 
 def remove_dropout(model: nn.Module) -> nn.Module:
     """
