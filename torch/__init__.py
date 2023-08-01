@@ -289,7 +289,10 @@ class SymInt:
         return str(self.node)
 
     def __str__(self):
-        return str(self.node.int_())
+        tmp = self.node.maybe_as_int()
+        if tmp is not None:
+            return tmp
+        return super().__str__()
 
 class SymFloat:
     """
