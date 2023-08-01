@@ -2,8 +2,6 @@ import os
 import textwrap
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-import types
-import inspect
 from typing import cast, Optional
 
 import torch._guards

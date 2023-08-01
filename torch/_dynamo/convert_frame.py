@@ -579,9 +579,9 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
                 error_msg = format_error_msg(e, code, record_filename, frame)
 
             if soft_fail:
-                log.info(error_msg)
+                log.info(error_msg, exc_info=True)
             else:
-                log.warning(error_msg)
+                log.warning(error_msg, exc_info=True)
         return None
 
     _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
