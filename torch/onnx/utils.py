@@ -454,6 +454,11 @@ def export(
             This may allow for better optimizations (e.g. constant folding) by
             backends/runtimes.
 
+            If True, `deduplicate_initializers` pass will not be executed. This means
+            initializers with duplicated values will not be deduplicated and
+            will be treated as distinct inputs to the graph. This allows different
+            input initializers to be supplied at the runtime following export.
+
             If ``opset_version < 9``, initializers MUST be part of graph
             inputs and this argument will be ignored and the behavior will be
             equivalent to setting this argument to True.
