@@ -24,11 +24,10 @@ def munge_exc(e, suppress_suffix=True, file=__file__):
         if m.group(2) == "<module>":
             return ""
 
-        s = m.group(0)
-        s = re.sub(r"line \d+", "line N", s)
-        return s
+        return m.group(0)
 
     s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n    .+\n', repl_frame, s)
+    s = re.sub(r"line \d+", "line N", s)
     s = re.sub(file, os.path.basename(__file__), s)
     s = re.sub(os.path.join(os.path.dirname(torch.__file__), ""), "", s)
     s = re.sub(r"\\", "/", s)
@@ -105,11 +104,11 @@ from user code:
         self.assertExpectedInline(
             munge_exc(record.getMessage()),
             """\
-WON'T CONVERT fn001 test_exc.py line 86
+WON'T CONVERT fn001 test_exc.py line N
 ========== TorchDynamo Stack Trace ==========
 Traceback (most recent call last):
   File "test_exc.py", line N, in _
-    assert False
+    raise AssertionError()
 AssertionError:
 
 from user code:
