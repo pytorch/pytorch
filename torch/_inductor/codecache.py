@@ -364,6 +364,8 @@ class CompiledFxGraph:
     device_types: Set[str] = field(default_factory=set)
     device_idxs: Set[int] = field(default_factory=set)
     mutated_inputs: Set[str] = field(default_factory=set)
+    mutated_input_idxs: Set[int] = field(default_factory=list)
+
     _boxed_call: bool = None
 
     def __call__(self, inputs) -> Any:
@@ -874,6 +876,10 @@ class AotCodeCache:
                         subprocess.check_call(cmd)
                     except subprocess.CalledProcessError as e:
                         raise exc.CppCompileError(cmd, e.output) from e
+                else:
+                    log.debug(
+                        "aot_inductor dynamic library already exist: %s", output_so
+                    )
 
                 cls.cache[key] = output_so
 
@@ -995,7 +1001,7 @@ class CppCodeCache:
 
 
 class PyCodeCache:
-    cache = dict()
+    cache: Dict[Any, types.ModuleType] = dict()
     linemaps = dict()
     clear = staticmethod(cache.clear)
 

@@ -997,7 +997,7 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
     # Extra case to replicate off-by-one issue on CUDA
     cases = list(product(starts, ends, nsteps)) + [(0, 7, 50)]
     for start, end, nstep in cases:
-        if dtype == torch.uint8 and end < 0 or start < 0:
+        if dtype == torch.uint8 and (end < 0 or start < 0):
             continue
         yield SampleInput(start, args=(end, nstep), kwargs={"dtype": dtype, "device": device})
 
@@ -8779,15 +8779,6 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
-        skips=(
-            # note(crcrpar): excluding cdouble from dtypes above might be better.
-            # Guard for `error: "In-place abs is not supported for complex tensors."`
-            DecorateInfo(
-                unittest.skip("_foreach_zero is not implemented"),
-                'TestForeach',
-                'test_outplace_forward_mode_AD',
-            ),
-        ),
     ),
 ]
 
