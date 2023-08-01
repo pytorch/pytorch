@@ -122,10 +122,6 @@ if((NOT TARGET protobuf::libprotobuf) AND (NOT TARGET protobuf::libprotobuf-lite
   #     "Please set the proper paths so that I can find protobuf correctly.")
 endif()
 
-get_target_property(__tmp protobuf::libprotobuf INTERFACE_INCLUDE_DIRECTORIES)
-message(STATUS "Caffe2 protobuf include directory: " ${__tmp})
-include_directories(BEFORE SYSTEM ${__tmp})
-
 # If Protobuf_VERSION is known (true in most cases, false if we are building
 # local protobuf), then we will add a protobuf version check in
 # Caffe2Config.cmake.in.
