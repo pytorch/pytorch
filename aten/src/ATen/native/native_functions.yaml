@@ -3236,17 +3236,17 @@
     MkldnnCPU: mkldnn_linear_backward
   autogen: mkldnn_linear_backward.out
 
-- func: _sparse_semi_structured_linear(Tensor input, Tensor weight, Tensor meta, *, Tensor? bias=None, str? activation=None) -> Tensor
-  dispatch:
-    CUDA: _sparse_semi_structured_linear
-
 - func: _cslt_compress(Tensor input) -> Tensor
   dispatch:
     CUDA: _cslt_compress
 
 - func: _cslt_sparse_mm(Tensor compressed_A, Tensor dense_B, Tensor? bias=None, bool transpose_result=False) -> Tensor
   dispatch:
-    CUDA: _cslt_sparse_mm
+    CUDA: _cslt_sparse_mm 
+
+ - func: _sparse_semi_structured_linear(Tensor input, Tensor weight, Tensor meta, *, Tensor?bias=None, str? activation=None) -> Tensor
+  dispatch:
+    CUDA: _sparse_semi_structured_linear
 
 - func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
 
