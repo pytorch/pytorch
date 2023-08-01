@@ -283,7 +283,14 @@ class RNNBase(Module):
             s += ', bidirectional={bidirectional}'
         return s.format(**self.__dict__)
 
+    def _update_flat_weights(self):
+        if not torch.jit.is_scripting():
+            if self._weights_have_changed():
+                self._init_flat_weights()
+
     def __getstate__(self):
+        # If weights have been changed, update the _flat_weights in __getstate__ here.
+        self._update_flat_weights()
         # Don't serialize the weight references.
         state = self.__dict__.copy()
         del state['_flat_weight_refs']
@@ -469,9 +476,7 @@ class RNN(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
-        if not torch.jit.is_scripting():
-            if self._weights_have_changed():
-                self._init_flat_weights()
+        self._update_flat_weights()
 
         num_directions = 2 if self.bidirectional else 1
         orig_input = input
@@ -773,9 +778,7 @@ class LSTM(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
-        if not torch.jit.is_scripting():
-            if self._weights_have_changed():
-                self._init_flat_weights()
+        self._update_flat_weights()
 
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
@@ -998,9 +1001,7 @@ class GRU(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
-        if not torch.jit.is_scripting():
-            if self._weights_have_changed():
-                self._init_flat_weights()
+        self._update_flat_weights()
 
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile

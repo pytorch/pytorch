@@ -534,7 +534,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def test_operator_with_data_dependent_output(self):
         def func(x):
-            # torch.ops.aten._local_scalar_dense
+            # Repro from llama. Emits `torch.ops.aten._local_scalar_dense`.
             return x + torch.full(x.shape, torch.tensor(torch.finfo(x.dtype).min))
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
@@ -554,7 +554,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             return x.nonzero()
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            func, (torch.randn(3, 4),), verbose=True
+            func, (torch.randn(3, 4),)
         )
 
     def test_gpt2_tiny(self):
