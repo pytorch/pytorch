@@ -9,6 +9,7 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
+from torch._dynamo.utils import LazyString
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -55,11 +56,18 @@ class ExcTests(LoggingTestCase):
     def getRecord(self, records, m):
         record = None
         for r in records:
-            if m in r.msg:
-                self.assertIsNone(record, msg="multiple matching records")
+            # NB: not r.msg because it looks like 3.11 changed how they
+            # structure log records
+            if m in r.getMessage():
+                self.assertIsNone(
+                    record,
+                    msg=LazyString(
+                        lambda: f"multiple matching records: {record} and {r} among {records}"
+                    ),
+                )
                 record = r
         if record is None:
-            self.fail("did not find record")
+            self.fail(f"did not find record among {records}")
         return record
 
     def test_unsupported_real_stack(self):
