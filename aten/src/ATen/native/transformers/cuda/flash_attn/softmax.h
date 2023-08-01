@@ -136,15 +136,18 @@ inline __device__ void max_scale_exp2_sum(Tensor<Engine0, Layout0> &tensor, Tens
 }
 
 template <typename Engine, typename Layout>
-inline __device__ void apply_mask(Tensor<Engine, Layout> &tensor, const uint32_t max_seqlen_k) {
+inline __device__ void apply_mask(Tensor<Engine, Layout> &tensor, const uint32_t max_seqlen_k,
+                                  const uint32_t col_idx_offset_ = 0) {
     // tensor has shape (ncol=(2, MMA_M), nrow=(2, MMA_N))
     static_assert(Layout::rank == 2, "Only support 2D Tensor");
     const uint32_t lane_id = threadIdx.x % 32;
+    const uint32_t col_idx_offset = col_idx_offset_ + (lane_id % 4) * 2;
     #pragma unroll
     for (int nj = 0; nj < size<1, 1>(tensor); ++nj) {
+        const uint32_t col_idx_base = col_idx_offset + nj * 8;
         #pragma unroll
         for (int j = 0; j < size<1, 0>(tensor); ++j) {
-            const uint32_t col_idx = nj * 8 + j + (lane_id % 4) * 2;
+            const uint32_t col_idx = col_idx_base + j;
             if (col_idx >= max_seqlen_k) {
                 // Without the "make_coord" we get wrong results
                 #pragma unroll
