@@ -11,6 +11,7 @@ import os
 import pathlib
 import platform
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -535,9 +536,11 @@ cdll.LoadLibrary("__lib_path__")
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
             output_path = input_path[:-3] + "so"
-            build_cmd = cpp_compile_command(
-                input_path, output_path, warning_all=False, vec_isa=self
-            ).split(" ")
+            build_cmd = shlex.split(
+                cpp_compile_command(
+                    input_path, output_path, warning_all=False, vec_isa=self
+                )
+            )
             try:
                 # Check build result
                 compile_file(input_path, output_path, build_cmd)
@@ -864,13 +867,15 @@ class AotCodeCache:
                 output_so = os.path.splitext(input_path)[0] + ".so"
 
                 if not os.path.exists(output_so):
-                    cmd = cpp_compile_command(
-                        input=input_path,
-                        output=output_so,
-                        vec_isa=picked_vec_isa,
-                        cuda=cuda,
-                        aot_mode=graph.aot_mode,
-                    ).split(" ")
+                    cmd = shlex.split(
+                        cpp_compile_command(
+                            input=input_path,
+                            output=output_so,
+                            vec_isa=picked_vec_isa,
+                            cuda=cuda,
+                            aot_mode=graph.aot_mode,
+                        )
+                    )
                     log.debug("aot compilation command: %s", " ".join(cmd))
                     try:
                         subprocess.check_call(cmd)
@@ -990,9 +995,11 @@ class CppCodeCache:
             with lock:
                 output_path = input_path[:-3] + "so"
                 if not os.path.exists(output_path):
-                    cmd = cpp_compile_command(
-                        input=input_path, output=output_path, vec_isa=picked_vec_isa
-                    ).split(" ")
+                    cmd = shlex.split(
+                        cpp_compile_command(
+                            input=input_path, output=output_path, vec_isa=picked_vec_isa
+                        )
+                    )
                     compile_file(input_path, output_path, cmd)
                 cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key
