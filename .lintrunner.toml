@@ -870,6 +870,8 @@ include_patterns = [
     '.github/workflows/pull.yml',
     '.github/workflows/trunk.yml',
     '.github/workflows/periodic.yml',
+    '.github/workflows/mac-mps.yml',
+    '.github/workflows/slow.yml',
 ]
 command = [
     'python3',
