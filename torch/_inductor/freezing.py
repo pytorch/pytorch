@@ -1,7 +1,8 @@
+import collections
 import itertools
 
 import weakref
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -71,12 +72,27 @@ def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
     return preserved_arg_indices
 
 
+def return_true(*args, **kwargs):
+    return True
+
+
 class ConstantFolder(torch.fx.Interpreter):
-    def __init__(self, gm, skip_constructors=False):
+    def __init__(
+        self,
+        gm,
+        skip_constructors=False,
+        insertable_tensor_check: Optional[Callable[[torch.Tensor], bool]] = None,
+    ):
         super().__init__(gm)
         self.node_replacements = {}
+        self.replaced_uses = collections.Counter()
         self.unknown_value = object()
         self.skip_constructors = skip_constructors
+        self.insertable_tensor_check = (
+            insertable_tensor_check
+            if insertable_tensor_check is not None
+            else return_true
+        )
 
     def run_node(self, node):
         aten = torch.ops.aten
@@ -86,6 +102,7 @@ class ConstantFolder(torch.fx.Interpreter):
             return super().run_node(node)
 
         flattened_inputs = pytree.tree_flatten((args, kwargs))[0]
+
         if self.unknown_value in flattened_inputs:
             return self.unknown_value
 
@@ -115,9 +132,23 @@ class ConstantFolder(torch.fx.Interpreter):
 
         out = super().run_node(node)
 
-        # TODO - remove constant from node_replacement when it has no uses
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
+            if not self.insertable_tensor_check(out):
+                return out
+
             self.node_replacements[node] = out
+
+            flattened_node_inps = pytree.tree_flatten((node.args, node.kwargs))[0]
+
+            for n in flattened_node_inps:
+                if not isinstance(n, torch.fx.Node):
+                    continue
+
+                self.replaced_uses[n] += 1
+
+            for to_delete in self.user_to_last_uses.get(node, []):
+                if self.replaced_uses[to_delete] == len(to_delete.users):
+                    self.node_replacements.pop(to_delete, None)
 
         return out
 

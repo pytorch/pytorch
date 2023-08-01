@@ -872,6 +872,7 @@ class TestOptim(TestCase):
             (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=False)),
             (optim.RMSprop, dict(weight_decay=0, momentum=1, centered=False)),
             (optim.Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
+            (optim.Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50), maximize=True)),
             (optim.ASGD, dict(weight_decay=0)),
             (optim.ASGD, dict(weight_decay=1)),
             (optim.ASGD, dict(weight_decay=0, maximize=True)),
@@ -913,7 +914,7 @@ class TestOptim(TestCase):
         configs = [
             (o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ in [
                 "Adadelta", "Adagrad", "Adamax", "Adam", "AdamW", "ASGD", "NAdam",
-                "RAdam", "RMSprop", "SGD"
+                "RAdam", "RMSprop", "RProp", "SGD"
             ]
         ]
         self._test_foreach_memory(configs)
