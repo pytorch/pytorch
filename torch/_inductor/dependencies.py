@@ -8,6 +8,8 @@ from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
+import torch
+
 from .codegen.common import index_prevent_reordering
 from .utils import get_dtype_size, sympy_str, sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
@@ -152,6 +154,19 @@ class ReadWrites:
             op_counts = other.op_counts
         return ReadWrites(reads - writes, writes, index_exprs, op_counts=op_counts)
 
+    @staticmethod
+    def merge_list(read_writes: List["ReadWrites"]):
+        all_writes = set.union(*[rw.writes for rw in read_writes])
+        all_reads = set.union(*[rw.reads for rw in read_writes]) - all_writes
+        all_index_exprs = set.union(*[rw.index_exprs for rw in read_writes])
+
+        op_counts = collections.Counter()
+        for rw in read_writes:
+            if rw.op_counts is not None:
+                op_counts.update(rw.op_counts)
+
+        return ReadWrites(all_reads, all_writes, all_index_exprs, op_counts=op_counts)
+
     def remove_reads(self, rem_reads):
         return ReadWrites(
             self.reads - rem_reads,
@@ -238,6 +253,17 @@ class _RecordLoadStoreInner(V.MockHandler):
     def index_expr(self, index: sympy.Expr, dtype) -> str:
         self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
         return f"index_expr({sympy_str(index)}, {dtype})"
+
+    def bucketize(
+        self,
+        values,
+        offsets_name: str,
+        offsets_size: sympy.Expr,
+        indexing_dtype: torch.dtype,
+        right: bool,
+    ):
+        self._reads.add(StarDep(offsets_name))
+        return f"bucketize({values}, {offsets_name}, {sympy_str(offsets_size)}, {indexing_dtype}, {right})"
 
 
 class _OpCounter:
