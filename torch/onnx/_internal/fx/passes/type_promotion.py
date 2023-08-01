@@ -30,7 +30,7 @@ from torch.fx.experimental import proxy_tensor
 from torch.fx.node import Node  # noqa: F401
 
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import _pass, diagnostics, type_utils
+from torch.onnx._internal.fx import _pass, diagnostics, type_utils as fx_type_utils
 from torch.utils import _python_dispatch, _pytree
 
 logger = logging.getLogger(__name__)
@@ -1441,7 +1441,7 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                         f"Cast back to {expected_out_dtype}."
                     )
 
-        elif isinstance(node_val, proxy_tensor.py_sym_types):
+        elif fx_type_utils.is_torch_symbolic_type(node_val):
             raise NotImplementedError(
                 "Type promotion does not support node output of sym types."
             )
@@ -1488,9 +1488,12 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                     f"Argument {fx_arg} is not promoted. Already {dtype}."
                 )
                 return fx_arg
-            elif isinstance(arg_val, proxy_tensor.py_sym_types):
+            elif fx_type_utils.is_torch_symbolic_type(arg_val):
                 arg_type = type(arg_val)
-                equivalent_dtype = type_utils.from_scalar_type_to_torch_dtype(arg_type)
+                equivalent_dtype = fx_type_utils.from_scalar_type_to_torch_dtype(
+                    arg_type
+                )
+                assert equivalent_dtype is not None, f"Unexpected arg_type: {arg_type}"
                 if equivalent_dtype != dtype:
                     # Promote Sym number to tensor of dtype.
                     graph = node.graph
@@ -1511,7 +1514,7 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                 )
                 return fx_arg
         elif (
-            equivalent_dtype := type_utils.maybe_from_scalar_type_to_torch_dtype(
+            equivalent_dtype := fx_type_utils.from_scalar_type_to_torch_dtype(
                 type(fx_arg)
             )
         ) is not None:
