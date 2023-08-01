@@ -2485,10 +2485,7 @@ class TritonScheduling:
         # information (and practically, they don't have dep.index so they can't be used
         # for stride_hints below
         dep_sources = [*rw.reads_and_writes()]
-        assert all(
-            isinstance(dep, (MemoryDep, StarDep))
-            for dep in dep_sources
-        )
+        assert all(isinstance(dep, (MemoryDep, StarDep)) for dep in dep_sources)
         deps = [
             dep
             for dep in dep_sources
