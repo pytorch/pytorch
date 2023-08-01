@@ -210,7 +210,7 @@ def full(
 def zeros(
     *size,
     requires_grad: bool = False,
-    dtype: torch.dtype = None,
+    dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
     device_mesh: Optional[DeviceMesh] = None,
     placements: Optional[Sequence[Placement]] = None,
@@ -248,4 +248,5 @@ def zeros(
     )
 
 
-import torch.distributed._tensor._dynamo_utils
+if not torch._running_with_deploy():
+    import torch.distributed._tensor._dynamo_utils

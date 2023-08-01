@@ -663,8 +663,7 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
   for (auto it = out.begin(); it != out.end(); it++) {
     auto elm = *it;
     auto si = py::cast<c10::SymInt>(elm);
-    // TODO: the buffer will need to be made owning later
-    symints.append(si.as_int_unchecked());
+    symints.append(si);
   }
 
   auto result = values_from_buffer(self, symints);

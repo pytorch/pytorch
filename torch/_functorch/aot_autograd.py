@@ -21,11 +21,13 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code, preserve_rng_state
 from torch._guards import detect_fake_mode, tracing
 from torch._prims_common import CUDARngStateHelper
 from torch._logging import getArtifactLogger
 from torch._subclasses import FakeTensor, FakeTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, is_concrete_int, fx_placeholder_vals
@@ -67,6 +69,10 @@ OutputType = Enum(
         "alias_of_intermediate_base_is_user_output",
         # See Note [Intermediate Bases Optimization]
         "unsafe_view_alias",
+        # output is an alias, but has a custom autograd.Function backward.
+        # In this case, we don't want to do view-replay, since we won't be able to replay the custom function.
+        # Instead, we'll treat this output "normally", and trace its backward into the graph.
+        "custom_function_view",
     )
 )
 
@@ -496,7 +502,7 @@ class ViewAndMutationMeta:
         aliased_out_indices = [
             i
             for i, m in enumerate(self.output_info)
-            if m.output_type not in [OutputType.non_alias, OutputType.unsafe_view_alias]
+            if m.output_type not in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]
         ]
         unsafe_view_out_indices = [
             i for i, m in enumerate(self.output_info) if m.output_type is OutputType.unsafe_view_alias
@@ -514,7 +520,8 @@ class ViewAndMutationMeta:
         self.unsafe_view_out_indices = unsafe_view_out_indices
         self.num_outputs = len(self.output_info)
         self.num_outputs_non_aliased = len(
-            [x for x in self.output_info if x.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias]]
+            [x for x in self.output_info
+             if x.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]]
         )
         self.num_outputs_aliased_to_inputs = len(
             [
@@ -727,15 +734,22 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
 
 def to_fun(t):
     if isinstance(t, Tensor):
-        return torch._to_functional_tensor(t, mirror_autograd_meta=True)
+        return FunctionalTensor.to_functional(t)
     else:
         return t
 
 def from_fun(t):
-    if not isinstance(t, Tensor) or not torch._is_functional_tensor(t):
+    if not isinstance(t, FunctionalTensor):
+        # quick sanity assert
+        if isinstance(t, torch.Tensor):
+            assert not torch._is_functional_tensor(t)
         return t
     torch._sync(t)
-    return torch._from_functional_tensor(t)
+    return torch._from_functional_tensor(t.elem)
+
+def has_metadata_mutation(t):
+    assert isinstance(t, FunctionalTensor)
+    return torch._functionalize_has_metadata_mutation(t.elem)
 
 def _get_hints(exprs):
     """
@@ -811,17 +825,11 @@ def run_functionalized_fw_and_collect_metadata(
         if isinstance(t, Tensor):
             if t in memo:
                 return memo[t]
-            r = torch._to_functional_tensor(t, mirror_autograd_meta=True)
+            r = FunctionalTensor.to_functional(t)
             memo[t] = r
             return r
         else:
             return t
-
-    def from_fun(t):
-        if not isinstance(t, Tensor) or not torch._is_functional_tensor(t):
-            return t
-        torch._sync(t)
-        return torch._from_functional_tensor(t)
 
     @wraps(f)
     def inner(*flat_args):
@@ -835,12 +843,11 @@ def run_functionalized_fw_and_collect_metadata(
 
         flat_f_args = pytree.tree_map(to_fun, flat_args)
 
-        torch._enable_functionalization(reapply_views=True)
-        try:
+        # See Note [Disabling Functionalize TLS Above Python Functionalization]
+        disable_above = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
+        with disable_above, FunctionalTensorMode():
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_outs = f(*flat_f_args)
-        finally:
-            torch._disable_functionalization()
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
@@ -848,15 +855,14 @@ def run_functionalized_fw_and_collect_metadata(
             if not isinstance(arg, Tensor):
                 new_arg = arg
             else:
-                torch._sync(f_arg)
-                new_arg = torch._from_functional_tensor(f_arg)
+                new_arg = from_fun(f_arg)
             if arg is not new_arg:
                 if StorageWeakRef(arg.untyped_storage()) == StorageWeakRef(new_arg.untyped_storage()):
                     mutates_data = False
                     mutates_metadata = True
                 else:
                     mutates_data = True
-                    mutates_metadata = torch._functionalize_has_metadata_mutation(f_arg)
+                    mutates_metadata = has_metadata_mutation(f_arg)
                 # Only track requires_grad info on *mutated* inputs,
                 # because they show up in the autograd.Function.forward as outputs
                 input_requires_grad_info.append(
@@ -913,8 +919,20 @@ def run_functionalized_fw_and_collect_metadata(
                 curr for curr in out_storage_to_tensors[curr_storage]
                 if has_same_metadata(o, curr) and curr.requires_grad and o is not curr
             ]
+            is_result_of_custom_autograd_fn = False
+            if isinstance(o, torch.Tensor):
+                # Need to check for both custom cpp (CppFunction) and python (BackwardCFunction) autograd fns
+                if type(o.grad_fn).__name__ == "CppFunction":
+                    is_result_of_custom_autograd_fn = True
+                if isinstance(o.grad_fn, torch.autograd.function.BackwardCFunction):
+                    is_result_of_custom_autograd_fn = True
+
             if not isinstance(o, torch.Tensor):
                 output_type = OutputType.non_alias
+                base_idx = None
+            elif curr_storage in inp_storage_refs and o.grad_fn is not None \
+                    and is_result_of_custom_autograd_fn:
+                output_type = OutputType.custom_function_view
                 base_idx = None
             elif curr_storage in inp_storage_refs:
                 base_idx = inp_storage_refs[curr_storage]
@@ -1023,7 +1041,8 @@ def run_functionalized_fw_and_collect_metadata(
         f_output_tangents = [
             o
             for o, info in zip(flat_f_outs, output_info)
-            if info.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias] and issubclass(info.raw_type, torch.Tensor)
+            if info.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]
+            and issubclass(info.raw_type, torch.Tensor)
         ]
         # intermediate bases are also included in the backward graph
         f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
@@ -1303,7 +1322,7 @@ def fn_prepped_for_autograd(
         # For outputs that are aliases of intermediates, we will have returned the output's _base as an output in the graph instead,
         # which we *should* send to grad()
         output_grad_mask = [
-            meta.output_info[i].output_type in [OutputType.non_alias, OutputType.unsafe_view_alias]
+            meta.output_info[i].output_type in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]
             # Also, only tensor outputs should participate in the backward
             # (in particular, Symint outputs in the forward graph shouldn't get tangents)
             and issubclass(meta.output_info[i].raw_type, torch.Tensor)
@@ -1404,7 +1423,7 @@ def create_joint(
             warnings.filterwarnings(
                 "ignore", "Anomaly Detection has been enabled."
             )
-            with torch.autograd.detect_anomaly(check_nan=False):
+            with torch.autograd.detect_anomaly(check_nan=False), torch.autograd._force_original_view_tracking(True):
                 return inner_fn(*args)
 
     return inner_fn_with_anomaly
@@ -1432,12 +1451,12 @@ def create_functionalized_fn(
     def functionalized_f_helper(*args):
         # Wrap inputs into functional wrappers
         f_args = pytree.tree_map(to_fun, args)
-        torch._enable_functionalization(reapply_views=True)
-        try:
+
+        # See Note [Disabling Functionalize TLS Above Python Functionalization]
+        disable_above = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
+        with disable_above, FunctionalTensorMode():
             # Run the joint
             f_outs = fn(*f_args)
-        finally:
-            torch._disable_functionalization()
 
         if aot_config.keep_inference_input_mutations and not trace_joint:
             # Note: This is a bit annoying. There's a layering issue here, where:
@@ -1467,8 +1486,8 @@ def create_functionalized_fn(
             for i, (inpt_old, inpt_f) in enumerate(zip(args, f_args)):
                 if not isinstance(inpt_f, torch.Tensor):
                     continue
-                torch._sync(inpt_f)
-                inpt_new = torch._from_functional_tensor(inpt_f)
+                assert isinstance(inpt_f, FunctionalTensor)
+                inpt_new = from_fun(inpt_f)
                 if meta.input_info[i].mutates_data and not meta.input_info[i].mutates_metadata:
                     # We found an input that had a (data-only) mutation.
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
@@ -2064,7 +2083,7 @@ def create_synthetic_base_metadata(
     input_metadata_output_info = [
         OutputAliasInfo(
             output_type=OutputType.alias_of_input,
-            raw_type=torch.Tensor,
+            raw_type=FunctionalTensor,
             dynamic_dims={i for i, s in enumerate(outer_args[outer_idx].shape) if not is_concrete_int(s)},
             base_idx=synthetic_base_info[outer_idx][0],
         ) for outer_idx in outer_aliased_arg_idx_with_metadata_mutations]
@@ -2641,7 +2660,7 @@ def create_runtime_wrapper(
             for i, (o, info) in enumerate(zip(
                 fw_outs_no_intermediate_bases, runtime_metadata.output_info
             )):
-                if info.output_type == OutputType.non_alias or info.output_type == OutputType.unsafe_view_alias:
+                if info.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]:
                     fw_outs_including_aliases.append(o)
                     continue
                 if trace_joint:
@@ -3182,7 +3201,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             if torch._guards.TracingContext.get():
                 torch._guards.TracingContext.get().fw_metadata = inner_meta
 
-
             with TracingContext.report_output_strides() as fwd_output_strides:
                 compiled_fw_func = aot_config.fw_compiler(
                     fw_module, adjusted_flat_args
@@ -3197,15 +3215,83 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 if not hasattr(compiled_fw_func, "_boxed_call"):
                     compiled_fw_func = make_boxed_func(compiled_fw_func)
 
+        # NB: It's important to compile backwards ahead of time, as this may
+        # add extra guards which we need to apply to the Dynamo cache at
+        # forwards
+        with track_graph_compiling(aot_config, "backward"):
+            placeholder_list = fx_placeholder_vals(bw_module)
+
+            forward_saved_for_backwards_strides = None
+            if fwd_output_strides is not None:
+                forward_saved_for_backwards_strides = fwd_output_strides[fw_metadata.tensors_saved_for_backwards_slice]
+
+            # saved activations can have different stride to eager if
+            # the compiler does layout optimization. We should restride the
+            # tensor passed in for compiling the backward graph using the
+            # saved tensor's stride.
+            for i in range(len(placeholder_list)):
+                ph_arg = placeholder_list[i]
+                if not isinstance(ph_arg, torch.Tensor):
+                    continue
+
+                if forward_saved_for_backwards_strides is None:
+                    continue
+
+                real_stride = None
+                # Per all_args calling convention
+                j = i - len(symint_outs_saved_for_bw)
+                if 0 <= j < len(forward_saved_for_backwards_strides):
+                    real_stride = forward_saved_for_backwards_strides[j]
+                if real_stride is None:
+                    continue
+
+                # Comparing ph_arg.stride() with real_stride directly may
+                # cause dynamic dimensions in ph_arg being specialized to static
+                # value. Using the hints to avoid that.
+                if _get_hints(ph_arg.stride()) != real_stride:
+                    # Note that here we use the stride of the real tensor to
+                    # restride a FakeTensor. This does not cause trouble
+                    # for dynamic shape since this code path only get
+                    # executed if layout optimization is enabled. And we
+                    # disable layout optimization for dynamic shape right
+                    # now.
+                    #
+                    # A solution that decide stride order based on real
+                    # tensor's stride and then apply that stride order to
+                    # the FakeTensor does not work smoothly since some
+                    # tensor's layout is not 'dense'. E.g. mixnet_l has a
+                    # tensor with size [8, 64, 112, 112] and strides
+                    # (2408448, 1, 21504, 192). The solution mentioned will
+                    # decide a stride of (802816, 1, 7168, 64) for this
+                    # tensor which is wrong.
+                    placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_stride)
+
+            compiled_bw_func = None
+            if len(symint_outs_saved_for_bw):
+                context = torch._C._DisableAutocast if disable_amp else nullcontext
+                with context():
+                    try:
+                        compiled_bw_func = aot_config.bw_compiler(
+                            bw_module, placeholder_list
+                        )
+                    except Exception:
+                        log.warning(
+                            "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
+                            exc_info=True
+                        )
 
     saved_context = TracingContext.get()
 
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
-        compiled_bw = None
+        compiled_bw = compiled_bw_func
         metadata = fw_metadata
         maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
         num_symints_saved_for_bw = _num_symints_saved_for_bw
+
+        @staticmethod
+        def _compiled_autograd_key(ctx):
+            return (aot_config.aot_id, *ctx.symints)
 
         @staticmethod
         def forward(ctx, *deduped_flat_tensor_args):
@@ -3353,7 +3439,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 out_tangents_filtered = [
                     x
                     for x, info in zip(out_tangents, out_info)
-                    if (info.output_type == OutputType.non_alias or info.output_type == OutputType.unsafe_view_alias)
+                    if info.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]
                     and issubclass(info.raw_type, torch.Tensor)
                 ]
                 # intermediate bases always require gradients, and always participate in the backward graph.
@@ -3412,72 +3498,24 @@ Got grad_output types: {str(grad_output_types)}"""
                 all_args = unwrap_tensor_subclasses(all_args, trace_joint=False)
 
             def call_compiled_backward():
-                if CompiledFunction.compiled_bw is None:
-                    assert all(a is not None for a in all_args)
+                if ctx._is_compiled_autograd_tracing():
+                    # For compiled autograd, run raw FX graph so that it can be inlined into the larger graph
+                    symints = ctx._get_compiled_autograd_symints()
+                    assert len(symints) == len(ctx.symints)
+                    all_args[:len(symints)] = symints
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
-
-                    placeholder_list = fx_placeholder_vals(bw_module)
-
-                    forward_saved_for_backwards_strides = None
-                    if fwd_output_strides is not None:
-                        forward_saved_for_backwards_strides = fwd_output_strides[
-                            CompiledFunction.metadata.tensors_saved_for_backwards_slice
-                        ]
-
-                    # saved activations can have different stride to eager if
-                    # the compiler does layout optimization. We should restride the
-                    # tensor passed in for compiling the backward graph using the
-                    # saved tensor's stride.
-                    for i in range(len(placeholder_list)):
-                        ph_arg = placeholder_list[i]
-                        if not isinstance(ph_arg, torch.Tensor):
-                            continue
-
-                        if forward_saved_for_backwards_strides is None:
-                            continue
-
-                        real_stride = None
-                        # Per all_args calling convention
-                        if len(ctx.symints) <= i < len(ctx.symints) + len(forward_saved_for_backwards_strides):
-                            real_stride = forward_saved_for_backwards_strides[i - len(ctx.symints)]
-                        if real_stride is None:
-                            continue
-
-                        # Comparing ph_arg.stride() with real_stride directly may
-                        # cause dynamic dimensions in ph_arg being specialized to static
-                        # value. Using the hints to avoid that.
-                        if _get_hints(ph_arg.stride()) != real_stride:
-                            # Note that here we use the stride of the real tensor to
-                            # restride a FakeTensor. This does not cause trouble
-                            # for dynamic shape since this code path only get
-                            # executed if layout optimization is enabled. And we
-                            # disable layout optimization for dynamic shape right
-                            # now.
-                            #
-                            # A solution that decide stride order based on real
-                            # tensor's stride and then apply that stride order to
-                            # the FakeTensor does not work smoothly since some
-                            # tensor's layout is not 'dense'. E.g. mixnet_l has a
-                            # tensor with size [8, 64, 112, 112] and strides
-                            # (2408448, 1, 21504, 192). The solution mentioned will
-                            # decide a stride of (802816, 1, 7168, 64) for this
-                            # tensor which is wrong.
-                            #
-                            # NB: Occasionally, we will do a restride even
-                            # though it is not necessarily.  This concretely
-                            # happens in XLNetLMHeadModel where inductor
-                            # thinks that the tensor will have (1024, 1024, 1)
-                            # stride but it actually gets (1024, 524288, 1).
-                            # The stride difference here is non-substantive
-                            # as dim 1's size is 1.
-                            placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_stride)
-
+                    with context():
+                        out = normalize_as_list(bw_module(*all_args))
+                    out = functionalized_rng_runtime_epilogue(CompiledFunction.metadata, out)
+                    return tuple(out)
+                ctx.maybe_clear_saved_tensors()
+                if CompiledFunction.compiled_bw is None:
+                    context = torch._C._DisableAutocast if disable_amp else nullcontext
                     with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
                             bw_module, placeholder_list
                         )
 
-                ctx.maybe_clear_saved_tensors()
                 out = call_func_with_args(
                     CompiledFunction.compiled_bw,
                     all_args,
@@ -3505,6 +3543,9 @@ Got grad_output types: {str(grad_output_types)}"""
                     @staticmethod
                     def backward(ctx, *args):
                         raise RuntimeError("torch.compile with aot_autograd does not currently support double backward")
+
+                CompiledFunctionBackward._compiled_autograd_key = CompiledFunction._compiled_autograd_key
+
                 # Pass args even though they're unused, so that the graph is built
                 out = CompiledFunctionBackward.apply(*all_args)
             else:
@@ -4182,11 +4223,12 @@ def aot_module_simplified(
         no_tangents=False,
     )
 
-    compiled_fn = create_aot_dispatcher_function(
-        functional_call,
-        full_args,
-        aot_config,
-    )
+    with compiled_autograd.disable():
+        compiled_fn = create_aot_dispatcher_function(
+            functional_call,
+            full_args,
+            aot_config,
+        )
 
     # TODO: There is something deeply wrong here; compiled_fn running with
     # the boxed calling convention, but aot_module_simplified somehow

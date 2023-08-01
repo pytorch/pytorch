@@ -1598,7 +1598,9 @@ bool FunctionSignature::parse(
   return true;
 }
 
-PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
+PythonArgParser::PythonArgParser(
+    const std::vector<std::string>& fmts,
+    bool traceable)
     : max_args(0), traceable(traceable) {
   int index = 0;
   for (auto& fmt : fmts) {
