@@ -10799,6 +10799,21 @@
     CUDA: foreach_tensor_sigmoid_cuda_
   autogen: _foreach_sigmoid.out
 
+- func: _foreach_sign(Tensor[] self) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_sign_slow
+    CUDA: foreach_tensor_sign_cuda
+
+- func: _foreach_sign_(Tensor(a!)[] self) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_sign_slow_
+    CUDA: foreach_tensor_sign_cuda_
+  autogen: _foreach_sign.out
+
 - func: _foreach_sin(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
@@ -10896,21 +10911,6 @@
     CPU: foreach_tensor_zero_slow_
     CUDA: foreach_tensor_zero_cuda_
   autogen: _foreach_zero, _foreach_zero.out
-
-- func: _foreach_sign(Tensor[] self) -> Tensor[]
-  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_sign_slow
-    CUDA: foreach_tensor_sign_cuda
-
-- func: _foreach_sign_(Tensor(a!)[] self) -> ()
-  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_sign_slow_
-    CUDA: foreach_tensor_sign_cuda_
-  autogen: _foreach_sign.out
 
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
