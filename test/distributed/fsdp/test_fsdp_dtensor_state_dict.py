@@ -158,9 +158,7 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
     def test_dtensor_sharded_model_state_dict(self, offload_to_cpu):
         # Compare the result of SHARDED_STATE_DICT using ShardedTensor and DTensor
         # and check whether they are identical
-        mesh_tensor = torch.arange(self.world_size)
-        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
-        model = FSDP(TestDummyModel().cuda(), _device_mesh=device_mesh)
+        model = FSDP(TestDummyModel().cuda())
         model(model.get_input()).sum().backward()
 
         FSDP.set_state_dict_type(
@@ -199,9 +197,7 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_model_load_state_dict(self, offload_to_cpu):
-        mesh_tensor = torch.arange(self.world_size)
-        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
-        model = FSDP(TestDummyModel().cuda(), _device_mesh=device_mesh)
+        model = FSDP(TestDummyModel().cuda())
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
 
         FSDP.set_state_dict_type(
