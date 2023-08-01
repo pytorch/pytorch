@@ -339,7 +339,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.w2 = torch.nn.Linear(16, 16, bias=False)
 
             def forward(self, x):
-                return F.silu(self.w1(x)), self.w2(x)
+                return F.silu(self.w1(x)) * self.w2(x)
 
         mod = M().to(torch.bfloat16).eval()
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
