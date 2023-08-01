@@ -187,7 +187,7 @@ test_failures = {
     "test_single_elem_indirect_dynamic_shapes": TestFailure(("cpu",)),
     "test_sort_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_split_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_to_device_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_to_device_dynamic_shapes": TestFailure(("cpu",)),
     "test_topk_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_unbind_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_views5_dynamic_shapes": TestFailure(("cpu", "cuda")),
