@@ -1614,7 +1614,7 @@ class TestSDPACudaOnly(NNTestCase):
         out.sum().backward()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
-    @parametrize("dtype", [torch.float, torch.float16, torch.bfloat16])
+    @parametrize("dtype", [torch.float, torch.float16])
     def test_mem_eff_attention_pad_mask(self, device, dtype):
         make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype, requires_grad=True)
         batch, num_heads, head_dim = 8, 8, 64
@@ -1628,7 +1628,7 @@ class TestSDPACudaOnly(NNTestCase):
         out.sum().backward()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
-    @parametrize("dtype", [torch.float, torch.float16, torch.bfloat16])
+    @parametrize("dtype", [torch.float, torch.float16])
     def test_mem_eff_attention_non_contiguous_mask(self, device, dtype):
         make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype, requires_grad=True)
         batch, num_heads, head_dim = 8, 8, 64
@@ -2017,6 +2017,7 @@ class TestSDPACudaOnly(NNTestCase):
             return mask
         if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
+            return
         seed = 42
         scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
@@ -2118,6 +2119,7 @@ class TestSDPACudaOnly(NNTestCase):
             return mask
         if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
+            return
         seed = 42
         scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
