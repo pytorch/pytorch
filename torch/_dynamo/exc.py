@@ -233,11 +233,9 @@ def get_real_stack(exc, frame=None) -> Optional[StackSummary]:
         # Fortunately, in this case, we can hack it: there's no need
         # to actually use the truly top frame, we can just extract
         # from where we are right now and rely on filter_stack to
-        # get rid of all the dynamo frames.
-        if not isinstance(frame, types.FrameType):
-            stack_above_dynamo = filter_stack(extract_stack())
-        else:
-            stack_above_dynamo = filter_stack(extract_stack(frame))
+        # get rid of all the dynamo frames.  For ease of testing
+        # we apply this behavior to ALL Python versions
+        stack_above_dynamo = filter_stack(extract_stack())
 
     return cast(StackSummary, stack_above_dynamo + real_stack)
 
