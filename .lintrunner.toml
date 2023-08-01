@@ -870,6 +870,8 @@ include_patterns = [
     '.github/workflows/pull.yml',
     '.github/workflows/trunk.yml',
     '.github/workflows/periodic.yml',
+    '.github/workflows/mac-mps.yml',
+    '.github/workflows/slow.yml',
 ]
 command = [
     'python3',
@@ -2028,7 +2030,6 @@ exclude_patterns = [
     'torch/distributed/tensor/parallel/multihead_attention_tp.py',
     'torch/distributed/tensor/parallel/style.py',
     'torch/distributed/utils.py',
-    'torch/distributions/distribution.py',  # Use f-string instead of `format` call.
     'torch/fft/__init__.py',
     'torch/func/__init__.py',
     'torch/functional.py',
@@ -2120,8 +2121,6 @@ exclude_patterns = [
     'torch/fx/tensor_type.py',
     'torch/fx/traceback.py',
     'torch/hub.py',
-    'torch/jit/_script.py',  # "Callable[[], Any]" has no attribute "__func__"
-    'torch/jit/frontend.py',  # "expr" has no attribute "id"
     'torch/library.py',
     'torch/linalg/__init__.py',
     # UFMT causes import cycle on masked

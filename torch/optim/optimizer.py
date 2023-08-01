@@ -712,8 +712,8 @@ class Optimizer:
             state_dict (dict): optimizer state. Should be an object returned
                 from a call to :meth:`state_dict`.
         """
-        # deepcopy, to be consistent with module API
-        state_dict = deepcopy(state_dict)
+        # shallow copy, to be consistent with module API
+        state_dict = state_dict.copy()
 
         for pre_hook in self._optimizer_load_state_dict_pre_hooks.values():
             hook_result = pre_hook(self, state_dict)
@@ -722,7 +722,9 @@ class Optimizer:
 
         # Validate the state_dict
         groups = self.param_groups
-        saved_groups = state_dict['param_groups']
+
+        # Deepcopy as we write into saved_groups later to update state
+        saved_groups = deepcopy(state_dict['param_groups'])
 
         if len(groups) != len(saved_groups):
             raise ValueError("loaded state dict has a different number of "
