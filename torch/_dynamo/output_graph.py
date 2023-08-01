@@ -50,7 +50,6 @@ from .source import (
     ConstantSource,
     GlobalStateSource,
     is_constant_source,
-    is_from_local_source,
     LocalSource,
     ParamBufferSource,
     ShapeEnvSource,
@@ -228,7 +227,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         f_code,
     ):
         super().__init__()
-        self.tracers = [SubgraphTracer(self, export_root=export)]
+        self.tracers = [SubgraphTracer(self)]
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: Dict[Source, VariableTracker] = {}
@@ -307,18 +306,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.local_scope = local_scope
         self.root_tx = root_tx
         from torch._dynamo.symbolic_convert import InstructionTranslatorBase
-
-        # Given a source, what are the user stacks of all locations that
-        # accessed it?
-        #
-        # For efficiency, we only populate this:
-        #   - During export, and
-        #   - If the source could potentially lead to a spurious export input
-        #
-        # Feel free to populate this more frequently if other use-cases arise,
-        # but be aware that we have to generate full stacks for each
-        # recording!
-        self.source_to_user_stacks: Dict[Source, List[traceback.StackSummary]] = {}
 
         self._current_tx: List[InstructionTranslatorBase] = []
         self.cleanups: List[CleanupHook] = []
@@ -971,7 +958,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             pl._dynamo_source = arg.source
 
         gm._param_name_to_source = self.param_name_to_source
-        gm._source_to_user_stacks = self.source_to_user_stacks
 
         try:
             name = (
@@ -1103,16 +1089,10 @@ class SubgraphTracer(fx.Tracer):
     compiling and executing the graph.
     """
 
-    def __init__(self, output_graph, parent=None, export_root=False):
+    def __init__(self, output_graph, parent=None):
         super().__init__()
         self.output_graph = weakref.proxy(output_graph)
         self.graph = torch.fx.Graph()
-        # The export is only ever set for the ROOT tracer.  It controls
-        # whether or not certain inputs are allowed to be added or not.
-        # Look at call sites of create_graph_input to see how it is used.
-        if export_root:
-            assert parent is None
-        self.export_root = export_root
         # Map from graph input name to its placeholder proxy object, where the
         # map's keys give all current placeholder node names and can be used to
         # create unique node names
@@ -1286,26 +1266,7 @@ class SubgraphTracer(fx.Tracer):
     # for SymInts that may occur in the tensor argument.
     # Remove this if https://github.com/pytorch/pytorch/issues/99007 gets
     # fixed.
-    def create_graph_input(self, name, type_expr=None, before=False, source=None):
-        if source is None:
-            assert (
-                self.parent is not None
-            ), "you are required to provide a source for inputs on the root tracer"
-
-        # In eager, we are generally OK with adding graph inputs whenever we
-        # want, because we take care of writing the bytecode that knows how
-        # to source all the inputs.
-        #
-        # In export, this is bad, because you want a self-contained export
-        # object which only depends on the inputs you explicitly passed to it.
-        # So we are a bit more strict about what sources can become inputs
-        # in export
-        if self.export_root:
-            if not is_from_local_source(source, allow_cell_or_freevar=False):
-                self.output_graph.source_to_user_stacks.setdefault(source, []).append(
-                    TracingContext.extract_stack()
-                )
-
+    def create_graph_input(self, name, type_expr=None, before=False):
         # unique
         if name in self.input_name_to_proxy:
             for i in itertools.count():

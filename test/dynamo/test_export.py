@@ -3012,34 +3012,6 @@ def forward(self, x):
                     + str(aten_graph),
                 )
 
-    def test_invalid_input_global(self) -> None:
-        global bulbous_bouffant
-        bulbous_bouffant = torch.randn(3)
-
-        def f(y):
-            return bulbous_bouffant + y
-
-        # with self.assertRaisesRegex(Exception, "bulbous_bouffant"):
-        torch._dynamo.export(f)(torch.randn(3))
-
-    def test_invalid_input_nonlocal(self) -> None:
-        arglebargle = torch.randn(3)
-
-        def f(y):
-            return arglebargle + y
-
-        with self.assertRaisesRegex(Exception, "arglebargle"):
-            torch._dynamo.export(f)(torch.randn(3))
-
-    def test_invalid_input_unused_nonlocal_ok(self) -> None:
-        arglebargle = torch.randn(3)
-
-        def f(y):
-            x = arglebargle
-            return y
-
-        torch._dynamo.export(f)(torch.randn(3))
-
     def test_capture_symbolic_tracing(self) -> None:
         from torch._dynamo.output_graph import config
         from torch._subclasses import fake_tensor
