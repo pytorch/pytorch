@@ -474,7 +474,7 @@ def fractional_max_pool2d_with_indices(
             _random_samples=_random_samples,
         )
     if output_size is None and output_ratio is None:
-        raise ValueError("fractional_max_pool2d requires specifying either " "an output_size or an output_ratio")
+        raise ValueError("fractional_max_pool2d requires specifying either an output_size or an output_ratio")
     if output_size is None:
         assert output_ratio is not None
         if len(output_ratio) > 2:
@@ -580,7 +580,7 @@ def fractional_max_pool3d_with_indices(
             _random_samples=_random_samples,
         )
     if output_size is None and output_ratio is None:
-        raise ValueError("fractional_max_pool3d requires specifying either " "an output_size or an output_ratio")
+        raise ValueError("fractional_max_pool3d requires specifying either an output_size or an output_ratio")
     if output_size is None:
         assert output_ratio is not None
         _output_ratio = _triple(output_ratio)
@@ -4425,12 +4425,13 @@ Padding size:
     :math:`\text{padding\_front}, \text{padding\_back})`.
 
 Padding mode:
-    See :class:`torch.nn.ConstantPad2d`, :class:`torch.nn.ReflectionPad2d`, and
-    :class:`torch.nn.ReplicationPad2d` for concrete examples on how each of the
-    padding modes works. Constant padding is implemented for arbitrary dimensions.
-    Replicate and reflection padding are implemented for padding the last 3
-    dimensions of a 4D or 5D input tensor, the last 2 dimensions of a 3D
-    or 4D input tensor, or the last dimension of a 2D or 3D input tensor.
+    See :class:`torch.nn.CircularPad2d`, :class:`torch.nn.ConstantPad2d`,
+    :class:`torch.nn.ReflectionPad2d`, and :class:`torch.nn.ReplicationPad2d`
+    for concrete examples on how each of the padding modes works. Constant
+    padding is implemented for arbitrary dimensions. Circular, replicate and
+    reflection padding are implemented for padding the last 3 dimensions of a
+    4D or 5D input tensor, the last 2 dimensions of a 3D or 4D input tensor,
+    or the last dimension of a 2D or 3D input tensor.
 
 Note:
     When using the CUDA backend, this operation may induce nondeterministic
@@ -4516,7 +4517,7 @@ squeezed (see :func:`torch.squeeze`), resulting in the
 output tensor having 1 fewer dimension.
 
 .. math ::
-    \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
+    \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2, \epsilon) \cdot \max(\Vert x_2 \Vert _2, \epsilon)}
 
 Supports :ref:`type promotion <type-promotion-doc>`.
 

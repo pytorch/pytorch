@@ -165,6 +165,31 @@ class TestDoBench(TestCase):
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
+    def test_cat_addmm(self):
+        def fn(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor):
+            return torch.cat(
+                [
+                    torch.addmm(a, b, c),
+                    torch.addmm(b, c, a),
+                ],
+                1,
+            )
+
+        args = [
+            torch.randn(4, 4, device="cuda"),
+            torch.randn(4, 4, device="cuda"),
+            torch.randn(4, 4, device="cuda"),
+        ]
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "Triton",
+            }
+        ):
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+            torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+
     def test_triton_template_with_epilogues_and_dynamic_shape(self):
         def fn(
             x: torch.Tensor, w: torch.Tensor, bias: torch.Tensor, mul: torch.Tensor

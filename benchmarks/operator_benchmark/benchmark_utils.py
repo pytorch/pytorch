@@ -273,7 +273,7 @@ def random_sample_configs(**configs):
     """
     if "probs" not in configs:
         raise ValueError(
-            "probs is missing. Consider adding probs or" "using other config functions"
+            "probs is missing. Consider adding probs or using other config functions"
         )
 
     configs_attrs_list = []
