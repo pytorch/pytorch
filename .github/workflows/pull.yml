@@ -264,7 +264,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-py3_8-clang8-xla
-      docker-image-name: xla_base
+      docker-image-name: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/xla_base:v1.0
       test-matrix: |
         { include: [
           { config: "xla", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
