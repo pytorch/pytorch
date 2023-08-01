@@ -339,7 +339,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.w2 = torch.nn.Linear(16, 16, bias=False)
 
             def forward(self, x):
-                return F.silu(self.w1(x)) * self.w2(x)
+                return F.silu(self.w1(x)) * F.relu(self.w2(x))
 
         mod = M().to(torch.bfloat16).eval()
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
@@ -347,9 +347,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 1. view(match_count=4, match_nodes=4).
             # 2. mm to packed linear(match_count=2, match_nodes=2).
             # 3. view+linear+view to linear(match_count=2, match_nodes=6).
-            # 4. linear+silu fusion(match_count=1, match_nodes=5).
-            match_count = 9
-            match_nodes = 17
+            # 4. linear+silu fusion(match_count=1, match_nodes=5)
+            # 5. linear+relu fusion(match_count=1, match_nodes=2)
+
+            match_count = 10
+            match_nodes = 19
             self._test_common(mod, (v,), match_count, match_nodes, rtol=1e-2, atol=1e-2)
 
     # https://github.com/pytorch/pytorch/issues/99841.
