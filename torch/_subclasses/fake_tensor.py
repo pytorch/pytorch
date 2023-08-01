@@ -7,18 +7,7 @@ import traceback
 import weakref
 from dataclasses import dataclass
 from functools import partial
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    Type,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
 from weakref import ReferenceType
 
 import torch
@@ -383,17 +372,11 @@ class FakeTensorConverter:
 op_implementations = []
 
 
-def register_op_impl(
-    run_impl_check: Union[
-        Callable[[OpOverload], bool], OpOverload, Sequence[OpOverload]
-    ]
-):
+def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverload]):
     def impl_decorator(op_impl):
         global op_implementations
         if isinstance(run_impl_check, OpOverload):
             op_implementations.append((lambda func: func == run_impl_check, op_impl))
-        elif isinstance(run_impl_check, Sequence):
-            op_implementations.append((lambda func: func in run_impl_check, op_impl))
         else:
             op_implementations.append((run_impl_check, op_impl))
 
@@ -445,7 +428,19 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     )
 
 
-@register_op_impl([aten._fft_r2c.default, aten._fft_c2c.default, aten._fft_c2r.default])
+def unsupported_complex_op(op):
+    if op.namespace not in ("aten", "prims"):
+        return False
+    if op is aten._fft_c2c.default:
+        return False
+
+    op_name = op.name()
+    if "fft" in op_name:
+        return True
+    return False
+
+
+@register_op_impl(unsupported_complex_op)
 def fft_stride_workaround(fake_mode, func, *args, **kwargs):
     # This is a workaround for the FFT meta implmentations having incorrect strides
     def extractor(input, *args, **kwargs):
@@ -1408,7 +1403,7 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             func.namespace == "prims"
             and hasattr(func, "prim_meta_impl")
-            and "fft" not in func.name()
+            and not unsupported_complex_op(func)
         ):
             with self:
                 return func.prim_meta_impl(*args, **kwargs)

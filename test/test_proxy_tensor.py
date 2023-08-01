@@ -1579,14 +1579,10 @@ symbolic_tensor_failures = {
 
     # many complex operators incorrect striding, metadata
     xfail('fft.fft', ''),
-    xfail('fft.fftn', ''),
-    xfail('fft.fft2', ''),
     xfail('fft.hfft2', ''),
     xfail('fft.hfft', ''),
     xfail('fft.hfftn', ''),
     xfail('fft.ifft', ''),
-    xfail('fft.ifftn', ''),
-    xfail('fft.ifft2', ''),
     xfail('fft.ihfft2', ''),
     xfail('fft.ihfft', ''),
     xfail('fft.ihfftn', ''),

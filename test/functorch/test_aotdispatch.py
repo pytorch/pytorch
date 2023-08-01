@@ -2824,7 +2824,6 @@ symbolic_aot_autograd_failures = {
     xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('special.polygamma', 'special_polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic ...
-    xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/de...
@@ -2833,14 +2832,10 @@ symbolic_aot_autograd_failures = {
 
     # many complex operators incorrect striding, metadata
     xfail('fft.fft', ''),
-    xfail('fft.fftn', ''),
-    xfail('fft.fft2', ''),
     xfail('fft.hfft2', ''),
     xfail('fft.hfft', ''),
     xfail('fft.hfftn', ''),
     xfail('fft.ifft', ''),
-    xfail('fft.ifftn', ''),
-    xfail('fft.ifft2', ''),
     xfail('fft.ihfft2', ''),
     xfail('fft.ihfft', ''),
     xfail('fft.ihfftn', ''),
@@ -2850,6 +2845,8 @@ symbolic_aot_autograd_failures = {
     xfail('fft.rfft2', ''),
     xfail('fft.rfft', ''),
     xfail('fft.rfftn', ''),
+
+    xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 
 def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
