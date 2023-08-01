@@ -90,7 +90,9 @@ class JitScalarType(enum.IntEnum):
     QUINT8 = enum.auto()  # 13
     QINT32 = enum.auto()  # 14
     BFLOAT16 = enum.auto()  # 15
-    UNDEFINED = enum.auto()  # 16
+    FLOAT8E5M2 = enum.auto()  # 16
+    FLOAT8E4M3 = enum.auto()  # 17
+    UNDEFINED = enum.auto()  # 18
 
     @classmethod
     @_beartype.beartype
@@ -276,6 +278,8 @@ _SCALAR_TYPE_TO_NAME: Dict[JitScalarType, ScalarName] = {
     JitScalarType.QUINT8: "QUInt8",
     JitScalarType.QINT32: "QInt32",
     JitScalarType.BFLOAT16: "BFloat16",
+    JitScalarType.FLOAT8E5M2: "Float8E5M2",
+    JitScalarType.FLOAT8E4M3: "Float8E4M3",
     JitScalarType.UNDEFINED: "Undefined",
 }
 
@@ -300,6 +304,8 @@ _SCALAR_TYPE_TO_TORCH_NAME: Dict[JitScalarType, TorchName] = {
     JitScalarType.QUINT8: "quint8",
     JitScalarType.QINT32: "qint32",
     JitScalarType.BFLOAT16: "bfloat16",
+    JitScalarType.FLOAT8E5M2: "Float8_e5m2fn",
+    JitScalarType.FLOAT8E4M3: "Float8_e4m3fn",
 }
 
 _TORCH_NAME_TO_SCALAR_TYPE: Dict[TorchName, JitScalarType] = {
@@ -324,6 +330,8 @@ _SCALAR_TYPE_TO_ONNX = {
     JitScalarType.QINT8: _C_onnx.TensorProtoDataType.INT8,
     JitScalarType.QUINT8: _C_onnx.TensorProtoDataType.UINT8,
     JitScalarType.QINT32: _C_onnx.TensorProtoDataType.INT32,
+    JitScalarType.FLOAT8E5M2: _C_onnx.TensorProtoDataType.FLOAT8E5M2,
+    JitScalarType.FLOAT8E4M3: _C_onnx.TensorProtoDataType.FLOAT8E4M3FN,
 }
 
 # source of truth is
@@ -345,6 +353,8 @@ _SCALAR_TYPE_TO_DTYPE = {
     JitScalarType.QUINT8: torch.quint8,
     JitScalarType.QINT32: torch.qint32,
     JitScalarType.BFLOAT16: torch.bfloat16,
+    JitScalarType.FLOAT8E5M2: torch.float8_e5m2,
+    JitScalarType.FLOAT8E4M3: torch.float8_e4m3fn,
 }
 
 _DTYPE_TO_SCALAR_TYPE = {v: k for k, v in _SCALAR_TYPE_TO_DTYPE.items()}
