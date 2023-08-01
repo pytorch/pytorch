@@ -1481,6 +1481,22 @@ class TestSDPA(NNTestCase):
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             assert torch._fused_sdp_choice(q, k, v) == SDPBackend.MATH
 
+    @parametrize("kernel", [SDPBackend.MATH])
+    def test_scaled_dot_product_attention_math_with_negative_scale(self, device, kernel: SDPBackend):
+        # https://github.com/pytorch/pytorch/issues/105190.
+        def ref(x):
+            v1 = torch.matmul(x, x.transpose(-1, -2))
+            v2 = v1 / -0.0001
+            v3 = v2.softmax(dim=-1)
+            v4 = torch.matmul(v3, x)
+            return v4
+
+        x = torch.randn(1, 3, 64, 64, device=device)
+        ref_result = ref(x)
+        with sdp_kernel(**backend_map[kernel]):
+            sdp_math = torch.nn.functional.scaled_dot_product_attention(x, x, x, scale=-1.0 / 0.0001)
+        self.assertEqual(ref_result, sdp_math)
+
 class TestSDPACudaOnly(NNTestCase):
     """ Used to test CUDA only functionality of scaled_dot_product_attention
     Quarks:
