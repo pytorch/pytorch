@@ -47,7 +47,7 @@ class ConcaterMapDataPipe(MapDataPipe):
                 return dp[index - offset]
             else:
                 offset += len(dp)
-        raise IndexError(f"Index {index} is out of range.")
+        raise IndexError("Index {} is out of range.".format(index))
 
     def __len__(self) -> int:
         return sum(len(dp) for dp in self.datapipes)

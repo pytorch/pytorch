@@ -670,14 +670,13 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << "\nTIMEOUT(ms): " << options_->timeout.count()
             << "\nUSE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
-            << "\nTORCH_DISTRIBUTED_DEBUG: "
+            << "\n TORCH_DISTRIBUTED_DEBUG: "
             << std::string(torch_distributed_debug)
-            << "\nNCCL_DEBUG: " << std::string(nccl_debug)
-            << "\nID=" << this->getID();
+            << "\n NCCL_DEBUG: " << std::string(nccl_debug);
 
   RECORD_PARAM_COMMS(
       0, // seq
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       rank, // rank
       "init", // colName
       0, // inSize
@@ -1964,7 +1963,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       tensors, // inputTensors
       tensors, // outputTensors
       rank_, // rank
@@ -1988,7 +1987,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       tensors, // inputTensors
       tensors, // outputTensors
       rank_, // rank
@@ -2015,7 +2014,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       tensors, // inputTensors
       tensors, // outputTensors
       rank_, // rank
@@ -2074,7 +2073,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
       static_cast<int>(
           this->getSequenceNumberForGroup() +
           1), // seq + 1 to match collective increment.
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       rank_, // rank
@@ -2115,7 +2114,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this),
       tensors, // inputTensors
       tensors, // outputTensors
       rank_, // rank
@@ -2178,7 +2177,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_oop(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       rank_, // rank
@@ -2234,7 +2233,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
         static_cast<int>(
             this->getSequenceNumberForGroup() +
             1), // seq + 1 to match collective
-        this->getID(),
+        reinterpret_cast<std::intptr_t>(this), // process group ptr
         inputTensors, // inputTensors
         outputTensors, // outputTensors
         rank_, // rank
@@ -2375,7 +2374,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
         static_cast<int>(
             this->getSequenceNumberForGroup() +
             1), // seq + 1 to match collective
-        this->getID(),
+        reinterpret_cast<std::intptr_t>(this), // process group ptr
         inputTensors, // inputTensors
         outputTensors, // outputTensors
         rank_, // rank
@@ -2494,7 +2493,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       inputTensor, // inputTensor
       outputTensor, // outputTensor
       rank_, // rank
@@ -2573,7 +2572,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   RECORD_PARAM_COMMS(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       rank_, // rank
       "barrier", // colName
       0, // inSize
@@ -2651,7 +2650,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         static_cast<int>(
             this->getSequenceNumberForGroup() +
             1), // seq + 1 to match collective
-        this->getID(),
+        reinterpret_cast<std::intptr_t>(this), // process group ptr
         inputTensor, // inputTensor
         outputTensor, // outputTensor
         rank_, // rank
@@ -2692,7 +2691,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         static_cast<int>(
             this->getSequenceNumberForGroup() +
             1), // seq + 1 to match collective
-        this->getID(),
+        reinterpret_cast<std::intptr_t>(this), // process group ptr
         inputTensor, // inputTensor
         outputTensor, // outputTensor
         rank_, // rank
@@ -2956,7 +2955,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       rank_, // rank
@@ -3042,7 +3041,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      reinterpret_cast<std::intptr_t>(this), // process group ptr
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       rank_, // rank

@@ -1401,10 +1401,10 @@ void check_onnx_proto(const std::string& proto_string) {
     onnx::shape_inference::InferShapes(model, schema_registry, options);
   } catch (const onnx::InferenceError& ex) {
     TORCH_WARN(
-        "The exported ONNX model failed ONNX shape inference. "
-        "The model will not be executable by the ONNX Runtime. "
-        "If this is unintended and you believe there is a bug, "
-        "please report an issue at https://github.com/pytorch/pytorch/issues. "
+        "The exported ONNX model failed ONNX shape inference."
+        "The model will not be executable by the ONNX Runtime."
+        "If this is unintended and you believe there is a bug,"
+        "please report an issue at https://github.com/pytorch/pytorch/issues."
         "Error reported by strict ONNX shape inference: ",
         ex.what());
   }

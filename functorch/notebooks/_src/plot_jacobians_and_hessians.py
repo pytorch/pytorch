@@ -8,13 +8,10 @@ deep learning models. It is difficult (or annoying) to compute these quantities
 efficiently using a standard autodiff system like PyTorch Autograd; functorch
 provides ways of computing various higher-order autodiff quantities efficiently.
 """
-from functools import partial
-
 import torch
 import torch.nn.functional as F
-
+from functools import partial
 torch.manual_seed(0)
-
 
 ######################################################################
 # Setup: Comparing functorch vs the naive approach
@@ -23,7 +20,6 @@ torch.manual_seed(0)
 # This is a simple linear function with non-linear activation.
 def predict(weight, bias, x):
     return F.linear(x, weight, bias).tanh()
-
 
 # Here's some dummy data: a weight, a bias, and a feature vector.
 D = 16
@@ -38,24 +34,19 @@ x = torch.randn(D)
 xp = x.clone().requires_grad_()
 unit_vectors = torch.eye(D)
 
-
 def compute_jac(xp):
-    jacobian_rows = [
-        torch.autograd.grad(predict(weight, bias, xp), xp, vec)[0]
-        for vec in unit_vectors
-    ]
+    jacobian_rows = [torch.autograd.grad(predict(weight, bias, xp), xp, vec)[0]
+                     for vec in unit_vectors]
     return torch.stack(jacobian_rows)
-
 
 jacobian = compute_jac(xp)
 
 # Instead of computing the jacobian row-by-row, we can use ``vmap`` to get rid
 # of the for-loop and vectorize the computation. We can't directly apply vmap
 # to PyTorch Autograd; instead, functorch provides a ``vjp`` transform:
-from functorch import vjp, vmap
-
+from functorch import vmap, vjp
 _, vjp_fn = vjp(partial(predict, weight, bias), x)
-(ft_jacobian,) = vmap(vjp_fn)(unit_vectors)
+ft_jacobian, = vmap(vjp_fn)(unit_vectors)
 assert torch.allclose(ft_jacobian, jacobian)
 
 # In another tutorial a composition of reverse-mode AD and vmap gave us
@@ -68,7 +59,6 @@ assert torch.allclose(ft_jacobian, jacobian)
 # argument that says which argument we would like to compute Jacobians with
 # respect to.
 from functorch import jacrev
-
 ft_jacobian = jacrev(predict, argnums=2)(weight, bias, x)
 assert torch.allclose(ft_jacobian, jacobian)
 
@@ -77,7 +67,6 @@ assert torch.allclose(ft_jacobian, jacobian)
 # there are). In general, we expect that vectorization via ``vmap`` can help
 # eliminate overhead and give better utilization of your hardware.
 from torch.utils.benchmark import Timer
-
 without_vmap = Timer(stmt="compute_jac(xp)", globals=globals())
 with_vmap = Timer(stmt="jacrev(predict, argnums=2)(weight, bias, x)", globals=globals())
 print(without_vmap.timeit(500))
@@ -106,7 +95,7 @@ ft_jac_weight, ft_jac_bias = jacrev(predict, argnums=(0, 1))(weight, bias, x)
 # In reverse-mode AD, we are computing the jacobian row-by-row, while in
 # forward-mode AD (which computes Jacobian-vector products), we are computing
 # it column-by-column. The Jacobian matrix has M rows and N columns.
-from functorch import jacfwd, jacrev
+from functorch import jacrev, jacfwd
 
 # Benchmark with more inputs than outputs
 Din = 32
@@ -117,8 +106,8 @@ x = torch.randn(Din)
 
 using_fwd = Timer(stmt="jacfwd(predict, argnums=2)(weight, bias, x)", globals=globals())
 using_bwd = Timer(stmt="jacrev(predict, argnums=2)(weight, bias, x)", globals=globals())
-print(f"jacfwd time: {using_fwd.timeit(500)}")
-print(f"jacrev time: {using_bwd.timeit(500)}")
+print(f'jacfwd time: {using_fwd.timeit(500)}')
+print(f'jacrev time: {using_bwd.timeit(500)}')
 
 # Benchmark with more outputs than inputs
 Din = 2048
@@ -129,8 +118,8 @@ x = torch.randn(Din)
 
 using_fwd = Timer(stmt="jacfwd(predict, argnums=2)(weight, bias, x)", globals=globals())
 using_bwd = Timer(stmt="jacrev(predict, argnums=2)(weight, bias, x)", globals=globals())
-print(f"jacfwd time: {using_fwd.timeit(500)}")
-print(f"jacrev time: {using_bwd.timeit(500)}")
+print(f'jacfwd time: {using_fwd.timeit(500)}')
+print(f'jacrev time: {using_bwd.timeit(500)}')
 
 ######################################################################
 # Hessian computation with functorch.hessian
@@ -143,7 +132,6 @@ print(f"jacrev time: {using_bwd.timeit(500)}")
 # Depending on your model, you may want to use ``jacfwd(jacfwd(f))`` or
 # ``jacrev(jacrev(f))`` instead to compute hessians.
 from functorch import hessian
-
 # # TODO: make sure PyTorch has tanh_backward implemented for jvp!!
 # hess0 = hessian(predict, argnums=2)(weight, bias, x)
 # hess1 = jacfwd(jacfwd(predict, argnums=2), argnums=2)(weight, bias, x)
@@ -160,10 +148,8 @@ hess2 = jacrev(jacrev(predict, argnums=2), argnums=2)(weight, bias, x)
 # The easiest way to do this is to sum over the batch dimension and then
 # compute the Jacobian of that function:
 
-
 def predict_with_output_summed(weight, bias, x):
     return predict(weight, bias, x).sum(0)
-
 
 batch_size = 64
 Din = 31

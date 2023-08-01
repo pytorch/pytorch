@@ -105,7 +105,9 @@ class TestOperators(common_utils.TestCase):
                 # Assume:
                 #     1) the old test should be delete before the test.
                 #     2) only one assertONNX in each test, otherwise will override the data.
-                assert not os.path.exists(output_dir), f"{output_dir} should not exist!"
+                assert not os.path.exists(output_dir), "{} should not exist!".format(
+                    output_dir
+                )
                 os.makedirs(output_dir)
                 with open(os.path.join(output_dir, "model.onnx"), "wb") as file:
                     file.write(model_def.SerializeToString())

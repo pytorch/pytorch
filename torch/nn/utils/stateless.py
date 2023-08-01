@@ -109,10 +109,12 @@ def _reparametrize_module(
         error_msgs = []
         if len(unexpected_keys) > 0:
             error_msgs.append(
-                f"Unexpected key(s): {', '.join(map(repr, unexpected_keys))}."
+                "Unexpected key(s): {}.".format(", ".join(map(repr, unexpected_keys)))
             )
         if len(missing_keys) > 0:
-            error_msgs.append(f"Missing key(s): {', '.join(map(repr, missing_keys))}.")
+            error_msgs.append(
+                "Missing key(s): {}.".format(", ".join(map(repr, missing_keys)))
+            )
         if len(error_msgs) > 0:
             raise RuntimeError(
                 "Error(s) in reparametrizing for {}:\n\t{}".format(

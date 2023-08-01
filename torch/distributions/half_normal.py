@@ -3,12 +3,11 @@ import math
 import torch
 from torch import inf
 from torch.distributions import constraints
+from torch.distributions.transforms import AbsTransform
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
-from torch.distributions.transforms import AbsTransform
 
-__all__ = ["HalfNormal"]
-
+__all__ = ['HalfNormal']
 
 class HalfNormal(TransformedDistribution):
     r"""
@@ -27,7 +26,7 @@ class HalfNormal(TransformedDistribution):
     Args:
         scale (float or Tensor): scale of the full Normal distribution
     """
-    arg_constraints = {"scale": constraints.positive}
+    arg_constraints = {'scale': constraints.positive}
     support = constraints.nonnegative
     has_rsample = True
 

@@ -117,6 +117,7 @@ class CheckpointWrapper(ActivationWrapper):
         mod: torch.nn.Module,
         checkpoint_impl: CheckpointImpl = CheckpointImpl.REENTRANT,
         checkpoint_fn=None,
+        *checkpoint_fn_args,
         **checkpoint_fn_kwargs,
     ):
         super().__init__(mod)
@@ -126,12 +127,14 @@ class CheckpointWrapper(ActivationWrapper):
             self.checkpoint_fn = partial(
                 torch_utils_checkpoint,
                 use_reentrant=(self.checkpoint_impl == CheckpointImpl.REENTRANT),
+                *checkpoint_fn_args,
                 **checkpoint_fn_kwargs,
             )
         else:
             # Construct user-specified checkpoint function.
             self.checkpoint_fn = partial(
                 checkpoint_fn,
+                *checkpoint_fn_args,
                 **checkpoint_fn_kwargs,
             )
 
@@ -191,6 +194,7 @@ def checkpoint_wrapper(
     module: torch.nn.Module,
     checkpoint_impl: CheckpointImpl = CheckpointImpl.REENTRANT,
     checkpoint_fn=None,
+    *checkpoint_fn_args,
     **checkpoint_fn_kwargs,
 ) -> torch.nn.Module:
     """
@@ -215,6 +219,7 @@ def checkpoint_wrapper(
             Functional checkpoint implementation to use. If this is specified,
             it will be used over the default ``torch.utils.checkpoint.checkpoint``
             implementation and the `checkpoint_impl` argument will be ignored.
+        *checkpoint_fn_args: (Sequence[Any]): Arguments to pass into `checkpoint_fn`.
         **checkpoint_fn_kwargs: (Dict[str, Any]): Keyword arguments to pass into `checkpoint_fn`.
 
     Returns:
@@ -233,6 +238,7 @@ def checkpoint_wrapper(
         module,
         checkpoint_impl,
         checkpoint_fn,
+        *checkpoint_fn_args,
         **checkpoint_fn_kwargs,
     )
 

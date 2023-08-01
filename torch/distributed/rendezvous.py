@@ -45,7 +45,7 @@ def register_rendezvous_handler(scheme, handler):
     global _rendezvous_handlers
     if scheme in _rendezvous_handlers:
         raise RuntimeError(
-            f"Rendezvous handler for {scheme}:// already registered"
+            "Rendezvous handler for {}:// already registered".format(scheme)
         )
     _rendezvous_handlers[scheme] = handler
 
@@ -70,30 +70,34 @@ def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwa
         query_dict = _query_to_dict(result.query)
         assert (
             "rank" not in query_dict and "world_size" not in query_dict
-        ), f"The url: {url} has node-specific arguments(rank, world_size) already."
+        ), "The url: {url} has node-specific arguments(rank, world_size) already.".format(
+            url=url
+        )
         if rank != -1:
             query_dict["rank"] = str(rank)
         if world_size != -1 or world_size_opt is None:
             query_dict["world_size"] = str(world_size)
         result = result._replace(
-            query=f"{'&'.join([f'{k}={v}' for k, v in query_dict.items()])}"
+            query="{}".format(
+                "&".join(["{}={}".format(k, v) for k, v in query_dict.items()])
+            )
         )
         url = urlunparse(result)
 
     if result.scheme not in _rendezvous_handlers:
-        raise RuntimeError(f"No rendezvous handler for {result.scheme}://")
+        raise RuntimeError("No rendezvous handler for {}://".format(result.scheme))
     return _rendezvous_handlers[result.scheme](url, **kwargs)
 
 
 def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
     if not isinstance(url, (str, bytes)):
-        raise RuntimeError(f"`url` must be a string. {type(url)}: {url}")
+        raise RuntimeError("`url` must be a string. {}: {}".format(type(url), url))
 
     if not isinstance(rank, numbers.Integral):
-        raise RuntimeError(f"`rank` must be an integer. {rank}")
+        raise RuntimeError("`rank` must be an integer. {}".format(rank))
 
     if not isinstance(world_size, numbers.Integral):
-        raise RuntimeError(f"`world_size` must be an integer. {world_size}")
+        raise RuntimeError("`world_size` must be an integer. {}".format(world_size))
 
     return _rendezvous_helper(url, rank, world_size, **kwargs)
 
@@ -208,7 +212,7 @@ def _env_rendezvous_handler(
         return _rendezvous_error("env:// rendezvous: " + msg)
 
     def _env_error(var):
-        return _error(f"environment variable {var} expected, but not set")
+        return _error("environment variable %s expected, but not set" % var)
 
     def _get_env_or_raise(env_var: str) -> str:
         env_val = os.environ.get(env_var, None)

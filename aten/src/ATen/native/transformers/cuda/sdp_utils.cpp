@@ -18,7 +18,6 @@
 #include <c10/util/string_view.h>
 #include <cmath>
 #include <functional>
-#include <iostream>
 
 namespace sdp {
 namespace {
@@ -245,7 +244,7 @@ bool check_requires_grad_and_nested(sdp_params params, bool debug) {
 bool check_for_attn_mask(sdp_params params, bool debug) {
   if (params.has_attn_mask) {
     if (debug) {
-      TORCH_WARN("FlashAttention does not support non-null attn_mask.");
+      TORCH_WARN("Both fused kernels do not support non-null attn_mask.");
     }
     return false;
   }
@@ -531,27 +530,6 @@ bool check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90(
   return true;
 }
 
-bool check_nonzero_mask_size(sdp_params params, bool debug) {
-  if (has_for_nested_inputs(params)){
-    // Currently we do not support any masking with NestedTensors
-    // This is checked in validate_sdpa_input so this filter func
-    // Should have no actually bearing on the kernel selection
-    return true;
-  }
-  // In some cases people will pass in 0 sized tensors, this will
-  // cause the fused path to error with unaligned mask
-  bool zero_seq_len_q = params.query.sym_size(-2) == 0;
-  bool zero_seq_len_k = params.key.sym_size(-2) == 0;
-  if (zero_seq_len_q || zero_seq_len_k) {
-    if (debug) {
-      TORCH_WARN(
-          "Fused kernels do not support zero seq_len_q or seq_len_k. ");
-    }
-    return false;
-  }
-  return true;
-}
-
 bool use_flash_attention(sdp_params params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
   TORCH_CHECK(!debug, "Torch was not compiled with flash attention.");
@@ -604,9 +582,9 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
       check_requires_grad_and_nested,
       check_tensor_shapes,
       check_batch_size_and_num_heads,
+      check_for_attn_mask,
       check_head_dim_size_mem_efficient,
-      check_for_seq_len_0_nested_tensor,
-      check_nonzero_mask_size);
+      check_for_seq_len_0_nested_tensor);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;

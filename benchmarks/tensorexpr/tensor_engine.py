@@ -38,7 +38,7 @@ def set_engine_mode(mode):
 
         tensor_engine = nnc_engine.NncEngine()
     else:
-        raise ValueError(f"invalid tensor engine mode: {mode}")
+        raise ValueError("invalid tensor engine mode: %s" % (mode))
     tensor_engine.mode = mode
 
 

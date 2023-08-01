@@ -11,7 +11,7 @@ assert len(sys.argv) == 3
 RESULTS = defaultdict(dict)
 
 for side, f in zip(["static", "dynamic"], sys.argv[1:]):
-    with open(f) as f:
+    with open(f, "r") as f:
         reader = csv.DictReader(f)
         for row in reader:
             RESULTS[(row["bench"], row["name"])][side] = row

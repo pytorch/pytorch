@@ -587,7 +587,7 @@ class ModelReportVisualizer:
             avg_vals = [sum(y_data[:][index]) / num_channels for index in range(num_modules)]
 
             # plot the three things we measured
-            ax.plot(x_data, avg_vals, label=f"Average Value Across {num_channels} Channels")
+            ax.plot(x_data, avg_vals, label="Average Value Across {} Channels".format(num_channels))
             ax.legend(loc='upper right')
         else:
             ax.set_xlabel("idx")

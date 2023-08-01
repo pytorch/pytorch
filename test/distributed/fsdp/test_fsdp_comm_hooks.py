@@ -11,7 +11,6 @@ from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
-from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     requires_nccl_version,
@@ -143,9 +142,16 @@ class TestCommunicationHooks(FSDPTest):
             sharding_strategy=sharding_strategy,
         ).to(self.rank)
 
-        # Check that by default, `_comm_hook` is None
+        # Check that default hook is set to `all_reduce` for `NO_SHARD`
+        # or `reduce_scatter` for sharded cases
+        default_hook = (
+            default_hooks.reduce_scatter_hook
+            if sharding_strategy != ShardingStrategy.NO_SHARD
+            else default_hooks.allreduce_hook
+        )
+
         for entry in FSDP.fsdp_modules(net_default_hook):
-            self.assertEqual(entry._comm_hook, None)
+            self.assertEqual(entry._communication_hook, default_hook)
 
         for _ in range(4):
             # Clear gradients
@@ -208,9 +214,16 @@ class TestCommunicationHooks(FSDPTest):
             sharding_strategy=sharding_strategy,
         )
 
-        # Check that by default, `_comm_hook` is None
+        # Check that default hook is set to `all_reduce` for `NO_SHARD`
+        # or `reduce_scatter` for sharded cases
+        default_hook = (
+            default_hooks.reduce_scatter_hook
+            if sharding_strategy != ShardingStrategy.NO_SHARD
+            else default_hooks.allreduce_hook
+        )
+
         for fsdp_module in FSDP.fsdp_modules(fsdp_model_with_hook):
-            self.assertEqual(fsdp_module._comm_hook, None)
+            self.assertEqual(fsdp_module._communication_hook, default_hook)
 
         dummy_state = DummyState(process_group=None, noise=1234)
         dummy_hook = (
@@ -223,14 +236,32 @@ class TestCommunicationHooks(FSDPTest):
 
         # Check that we can't register comm hook twice
         with self.assertRaisesRegex(
-            AssertionError, "^A communication hook is already registered$"
+            AssertionError, "^communication hook can be only registered once$"
         ):
             fsdp_model_with_hook.register_comm_hook(dummy_state, dummy_hook)
 
         # Check dummy hook was registered for the root and all submodules if any
         for fsdp_module in FSDP.fsdp_modules(fsdp_model_with_hook):
-            self.assertEqual(fsdp_module._comm_hook, dummy_hook)
-            self.assertEqual(fsdp_module._comm_hook_state, dummy_state)
+            self.assertEqual(fsdp_module._communication_hook, dummy_hook)
+            self.assertEqual(fsdp_module._communication_hook_state, dummy_state)
+
+        for fsdp_module in FSDP.fsdp_modules(fsdp_model_with_hook):
+            fsdp_module._communication_hook = None
+
+        in_data = torch.rand(16, 8).cuda()
+        loss = fsdp_model_with_hook(in_data).sum()
+        # This Error is raised during backward pass and is checked with `p_assert`,
+        # i.e. it prints error string but AssertionError raises nothing
+        with self.assertRaises(AssertionError):
+            loss.backward()
+
+        for fsdp_module in FSDP.fsdp_modules(fsdp_model_with_hook):
+            fsdp_module._communication_hook = dummy_hook
+            fsdp_module._communication_hook_state = None
+        # Same as above
+        loss = fsdp_model_with_hook(in_data).sum()
+        with self.assertRaises(AssertionError):
+            loss.backward()
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
@@ -273,26 +304,6 @@ class TestCommunicationHooks(FSDPTest):
             submodules[1].register_comm_hook(dummy_state, dummy_hook)
 
     @skip_if_lt_x_gpu(2)
-    def test_registering_hook_hybrid_strategy(self):
-        for sharding_strategy in (
-            ShardingStrategy.HYBRID_SHARD,
-            ShardingStrategy._HYBRID_SHARD_ZERO2,
-        ):
-            model = Net(False, None, None).cuda()
-            fsdp_model = FSDP(
-                model,
-                auto_wrap_policy=ModuleWrapPolicy({nn.Linear}),
-                sharding_strategy=sharding_strategy,
-            )
-            dummy_state = DummyState(process_group=None, noise=1234)
-            dummy_hook = DummyHook.dummy_hook_for_sharded_fsdp
-            with self.assertRaisesRegex(
-                AssertionError,
-                "Communication hook is not supported for hybrid strategies",
-            ):
-                fsdp_model.register_comm_hook(dummy_state, dummy_hook)
-
-    @skip_if_lt_x_gpu(2)
     @parametrize(
         "sharding_strategy",
         [
@@ -326,10 +337,25 @@ class TestCommunicationHooks(FSDPTest):
         submodules = self._get_submodules(fsdp_model_with_hook)
 
         # Simulate a registration of a hook on a submodule
-        submodules[1]._comm_hook = dummy_hook
+        submodules[1]._hook_registered = True
         # Check that an error is raised when some of submodules have a non-default hook assigned
         with self.assertRaisesRegex(
-            AssertionError, "^A communication hook is already registered$"
+            AssertionError, "^communication hook can be only registered once$"
+        ):
+            fsdp_model_with_hook.register_comm_hook(dummy_state, dummy_hook)
+
+        # Reinitialize the model
+        fsdp_model_with_hook = self._init_model(
+            Net(has_wrapping=True, sharding_strategy=sharding_strategy),
+            sharding_strategy=sharding_strategy,
+        )
+        submodules = self._get_submodules(fsdp_model_with_hook)
+        submodules[1]._communication_hook = dummy_hook
+
+        # Check that an error is raised when some of submodules have a non-default hook assigned
+        with self.assertRaisesRegex(
+            AssertionError,
+            f"^communication hook should be default, but it is {submodules[1]._communication_hook.__name__} instead$",
         ):
             fsdp_model_with_hook.register_comm_hook(dummy_state, dummy_hook)
 

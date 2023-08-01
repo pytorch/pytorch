@@ -12,17 +12,17 @@ from torch._export.db.case import export_case, ExportArgs, SupportLevel
         **{"input0": torch.randn(4), "input1": torch.randn(4)}
     ),
     tags={"python.data-structure"},
-    support_level=SupportLevel.SUPPORTED,
+    support_level=SupportLevel.NOT_SUPPORTED_YET,
 )
-def fn_with_kwargs(pos0, tuple0, *myargs, mykw0, **mykwargs):
+def fn_with_kwargs(pos0, tuple0, *myargs, mykw0=None, **mykwargs):
     """
     Keyword arguments are not supported at the moment.
     """
     out = pos0
     for arg in tuple0:
-        out = out * arg
+        out *= arg
     for arg in myargs:
-        out = out * arg
-    out = out * mykw0
-    out = out * mykwargs["input0"] * mykwargs["input1"]
+        out *= arg
+    out *= mykw0
+    out *= mykwargs["input0"] * mykwargs["input1"]
     return out

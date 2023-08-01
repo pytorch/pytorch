@@ -5,7 +5,6 @@ docs/source/onnx_supported_aten_list.rst.
 """
 
 import os
-
 from torch.onnx import _onnx_supported_ops
 
 # Constants

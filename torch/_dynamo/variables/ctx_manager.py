@@ -220,57 +220,6 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
         return "use_deterministic_algorithms"
 
 
-class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
-    """represents torch.autograd.graph.disable_saved_tensors_hook."""
-
-    @staticmethod
-    def create(tx, target_value, **kwargs):
-        var = DisabledSavedTensorsHooksVariable(
-            target_values=[target_value],
-            initial_values=[
-                torch._C._autograd._saved_tensors_hooks_get_disabled_error_message()
-            ],
-            **kwargs,
-        )
-        var._call_func(tx, [target_value])
-        return var
-
-    def __init__(self, target_values, initial_values=None, **kwargs):
-        super().__init__(
-            target_values=target_values, initial_values=initial_values, **kwargs
-        )
-
-    def enter(self, tx):
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
-
-    def _call_func(self, tx, values):
-        assert len(values) == 1
-        value = values[0]
-        if value is not None:
-            # Disable `saved_tensors_hooks` with message (`value`)
-            # OR
-            # we are exiting this context and restoring the previous message.
-            tx.output.create_node(
-                "call_function",
-                torch._C._autograd._saved_tensors_hooks_disable,
-                (value,),
-                {},
-            )
-            torch._C._autograd._saved_tensors_hooks_disable(value)
-        else:
-            # We are exiting this context and if prev_message was None, we re-enable `saved_tensors_hooks`.
-            tx.output.create_node(
-                "call_function", torch._C._autograd._saved_tensors_hooks_enable, (), {}
-            )
-            torch._C._autograd._saved_tensors_hooks_enable()
-
-    def module_name(self):
-        return "torch.autograd.graph"
-
-    def fn_name(self):
-        return "disable_saved_tensors_hook"
-
-
 class AutocastModeVariable(ContextWrappingVariable):
     @staticmethod
     def create(func, args, kwargs):

@@ -1,9 +1,7 @@
+from . import benchmark
 import itertools
-
 import numpy as np
 import torch
-
-from . import benchmark
 
 
 class BroadcastMulBench(benchmark.Benchmark):
@@ -36,7 +34,7 @@ class BroadcastMulBench(benchmark.Benchmark):
                 [1, N, K], device=device, dtype=dtype, requires_grad=self.requires_grad
             )
         else:
-            raise ValueError(f"invalid case: {case}")
+            raise ValueError("invalid case: %s" % (case))
 
         self.inputs = [self.d1, self.d2]
 
@@ -104,12 +102,8 @@ class BroadcastThreeArgs(benchmark.Benchmark):
         self.K = K
         self.L = L
 
-        self.d1 = self.rand(
-            [M, N], device=device, dtype=dtype, requires_grad=self.requires_grad
-        )
-        self.d2 = self.rand(
-            [K, M, 1], device=device, dtype=dtype, requires_grad=self.requires_grad
-        )
+        self.d1 = self.rand([M, N], device=device, dtype=dtype, requires_grad=self.requires_grad)
+        self.d2 = self.rand([K, M, 1], device=device, dtype=dtype, requires_grad=self.requires_grad)
         self.d3 = self.rand(
             [L, K, 1, 1], device=device, dtype=dtype, requires_grad=self.requires_grad
         )
@@ -154,7 +148,6 @@ class BroadcastThreeArgs(benchmark.Benchmark):
 # benchmark.register_benchmark_class(BroadcastColBench)
 # benchmark.register_benchmark_class(BroadcastThreeArgs)
 
-
 # TODO: merge this with elementwise bench
 # A template class for elementwise operations.
 # A derived class will override the class instance to customize its behavior.
@@ -172,31 +165,19 @@ class BroadcastBench(benchmark.Benchmark):
         self.M = M
         self.N = N
         self.K = K
-        self.d1 = self.rand(
-            [M, N], device=device, dtype=dtype, requires_grad=self.requires_grad
-        )
-        self.d2 = self.rand(
-            [K, 1, N], device=device, dtype=dtype, requires_grad=self.requires_grad
-        )
-        self.d3 = self.rand(
-            [M, N], device=device, dtype=dtype, requires_grad=self.requires_grad
-        )
-        self.d4 = self.rand(
-            [K, M, 1], device=device, dtype=dtype, requires_grad=self.requires_grad
-        )
+        self.d1 = self.rand([M, N], device=device, dtype=dtype, requires_grad=self.requires_grad)
+        self.d2 = self.rand([K, 1, N], device=device, dtype=dtype, requires_grad=self.requires_grad)
+        self.d3 = self.rand([M, N], device=device, dtype=dtype, requires_grad=self.requires_grad)
+        self.d4 = self.rand([K, M, 1], device=device, dtype=dtype, requires_grad=self.requires_grad)
         self.inputs = [self.d1, self.d2, self.d3, self.d4]
 
     def _eval(self, d1, d2, d3, d4, binary_op, unary_op):
         if not binary_op:
-
             def binary_op(x, y):
                 return x + y
-
         if not unary_op:
-
             def unary_op(x):
                 return x
-
         if self.split_input:
             d1 = unary_op(d1)
             d2 = unary_op(d2)

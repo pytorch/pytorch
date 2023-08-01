@@ -3,12 +3,11 @@ import math
 import torch
 from torch import inf
 from torch.distributions import constraints
+from torch.distributions.transforms import AbsTransform
 from torch.distributions.cauchy import Cauchy
 from torch.distributions.transformed_distribution import TransformedDistribution
-from torch.distributions.transforms import AbsTransform
 
-__all__ = ["HalfCauchy"]
-
+__all__ = ['HalfCauchy']
 
 class HalfCauchy(TransformedDistribution):
     r"""
@@ -27,7 +26,7 @@ class HalfCauchy(TransformedDistribution):
     Args:
         scale (float or Tensor): scale of the full Cauchy distribution
     """
-    arg_constraints = {"scale": constraints.positive}
+    arg_constraints = {'scale': constraints.positive}
     support = constraints.nonnegative
     has_rsample = True
 
@@ -45,12 +44,7 @@ class HalfCauchy(TransformedDistribution):
 
     @property
     def mean(self):
-        return torch.full(
-            self._extended_shape(),
-            math.inf,
-            dtype=self.scale.dtype,
-            device=self.scale.device,
-        )
+        return torch.full(self._extended_shape(), math.inf, dtype=self.scale.dtype, device=self.scale.device)
 
     @property
     def mode(self):
@@ -63,9 +57,8 @@ class HalfCauchy(TransformedDistribution):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        value = torch.as_tensor(
-            value, dtype=self.base_dist.scale.dtype, device=self.base_dist.scale.device
-        )
+        value = torch.as_tensor(value, dtype=self.base_dist.scale.dtype,
+                                device=self.base_dist.scale.device)
         log_prob = self.base_dist.log_prob(value) + math.log(2)
         log_prob = torch.where(value >= 0, log_prob, -inf)
         return log_prob

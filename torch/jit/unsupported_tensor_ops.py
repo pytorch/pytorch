@@ -1,35 +1,20 @@
+import torch.jit
 from textwrap import dedent
 
-from typing import Any, Dict
-
-import torch.jit
-
+from typing import Dict, Any
 
 def execWrapper(code, glob, loc):
     exec(code, glob, loc)
 
-
 def _gen_unsupported_methods_properties():
     tensor_attrs = set(filter(lambda x: x[0] != "_", dir(torch.Tensor)))
     tensor = torch.tensor([2])
-    funcs_template = dedent(
-        """
+    funcs_template = dedent('''
     def func(x):
         return x.{op}()
-    """
-    )
+    ''')
 
-    deprecated_apis = {
-        "volatile",
-        "resize",
-        "reinforce",
-        "new",
-        "name",
-        "map2_",
-        "has_names",
-        "grad_fn",
-        "resize_as",
-    }
+    deprecated_apis = {"volatile", "resize", "reinforce", "new", "name", "map2_", "has_names", "grad_fn", "resize_as"}
     tensor_attrs = tensor_attrs - deprecated_apis
 
     properties = []
@@ -61,18 +46,10 @@ Unsupported Tensor Methods
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
     methods, properties = _gen_unsupported_methods_properties()
-    return (
-        header
-        + "\n"
-        + methods
-        + """
+    return header + "\n" + methods + """
 
 Unsupported Tensor Properties
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    """
-        + "\n"
-        + properties
-    )
-
+    """ + "\n" + properties
 
 __doc__ = _list_unsupported_tensor_ops()

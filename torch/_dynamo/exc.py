@@ -159,7 +159,7 @@ class KeyErrorMsg:
         return self.__str__()
 
 
-def augment_exc_message(exc, msg="\n", export=False):
+def augment_exc_message(exc, msg="\n"):
     import traceback
 
     if (
@@ -191,7 +191,7 @@ def augment_exc_message(exc, msg="\n", export=False):
                 "this script to find the smallest traced graph which reproduces this error.\n"
             )
 
-    if not config.suppress_errors and not export:
+    if not config.suppress_errors:
         msg += (
             "\n\n"
             "You can suppress this exception and fall back to eager by setting:\n"
@@ -226,44 +226,39 @@ def filter_stack(stack):
     return user_stack
 
 
-def format_error_msg_verbose(exc, code, record_filename=None, frame=None):
-    msg = str(
-        format_bytecode(
-            "WON'T CONVERT",
-            code.co_name,
-            code.co_filename,
-            code.co_firstlineno,
-            code,
-        )
-    )
-    msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
-    msg += format_exc()
-    if hasattr(exc, "real_stack"):
-        msg += (
-            "\n"
-            + "=" * 10
-            + " The above exception occurred while processing the following code "
-            + "=" * 10
-            + "\n\n"
-        )
-        stack_above_dynamo = []
-        if frame is not None:
-            stack_above_dynamo = filter_stack(extract_stack(frame))
-
-        msg += "".join(
-            format_list(stack_above_dynamo + list(reversed(get_real_stack(exc))))
-        )
-        msg += "\n"
-        msg += "=" * 10
-
-    return msg
-
-
 def format_error_msg(exc, code, record_filename=None, frame=None):
     msg = os.linesep * 2
 
     if config.verbose:
-        msg = format_error_msg_verbose(exec, code, record_filename, frame)
+        msg = str(
+            format_bytecode(
+                "WON'T CONVERT",
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                code,
+            )
+        )
+        msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
+        msg += format_exc()
+        if hasattr(exc, "real_stack"):
+            msg += (
+                "\n"
+                + "=" * 10
+                + " The above exception occurred while processing the following code "
+                + "=" * 10
+                + "\n\n"
+            )
+            stack_above_dynamo = []
+            if frame is not None:
+                stack_above_dynamo = filter_stack(extract_stack(frame))
+
+            msg += "".join(
+                format_list(stack_above_dynamo + list(reversed(get_real_stack(exc))))
+            )
+            msg += "\n"
+            msg += "=" * 10
+
     else:
         msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
  line {code.co_firstlineno} \ndue to: \n{format_exc(limit=-1)}"

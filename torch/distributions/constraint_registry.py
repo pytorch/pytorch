@@ -70,9 +70,9 @@ import numbers
 from torch.distributions import constraints, transforms
 
 __all__ = [
-    "ConstraintRegistry",
-    "biject_to",
-    "transform_to",
+    'ConstraintRegistry',
+    'biject_to',
+    'transform_to',
 ]
 
 
@@ -80,7 +80,6 @@ class ConstraintRegistry:
     """
     Registry to link constraints to transforms.
     """
-
     def __init__(self):
         self._registry = {}
         super().__init__()
@@ -110,12 +109,9 @@ class ConstraintRegistry:
         if isinstance(constraint, constraints.Constraint):
             constraint = type(constraint)
 
-        if not isinstance(constraint, type) or not issubclass(
-            constraint, constraints.Constraint
-        ):
-            raise TypeError(
-                f"Expected constraint to be either a Constraint subclass or instance, but got {constraint}"
-            )
+        if not isinstance(constraint, type) or not issubclass(constraint, constraints.Constraint):
+            raise TypeError('Expected constraint to be either a Constraint subclass or instance, '
+                            'but got {}'.format(constraint))
 
         self._registry[constraint] = factory
         return factory
@@ -144,8 +140,7 @@ class ConstraintRegistry:
             factory = self._registry[type(constraint)]
         except KeyError:
             raise NotImplementedError(
-                f"Cannot transform {type(constraint).__name__} constraints"
-            ) from None
+                f'Cannot transform {type(constraint).__name__} constraints') from None
         return factory(constraint)
 
 
@@ -157,7 +152,6 @@ transform_to = ConstraintRegistry()
 # Registration Table
 ################################################################################
 
-
 @biject_to.register(constraints.real)
 @transform_to.register(constraints.real)
 def _transform_to_real(constraint):
@@ -168,16 +162,14 @@ def _transform_to_real(constraint):
 def _biject_to_independent(constraint):
     base_transform = biject_to(constraint.base_constraint)
     return transforms.IndependentTransform(
-        base_transform, constraint.reinterpreted_batch_ndims
-    )
+        base_transform, constraint.reinterpreted_batch_ndims)
 
 
 @transform_to.register(constraints.independent)
 def _transform_to_independent(constraint):
     base_transform = transform_to(constraint.base_constraint)
     return transforms.IndependentTransform(
-        base_transform, constraint.reinterpreted_batch_ndims
-    )
+        base_transform, constraint.reinterpreted_batch_ndims)
 
 
 @biject_to.register(constraints.positive)
@@ -193,23 +185,15 @@ def _transform_to_positive(constraint):
 @transform_to.register(constraints.greater_than)
 @transform_to.register(constraints.greater_than_eq)
 def _transform_to_greater_than(constraint):
-    return transforms.ComposeTransform(
-        [
-            transforms.ExpTransform(),
-            transforms.AffineTransform(constraint.lower_bound, 1),
-        ]
-    )
+    return transforms.ComposeTransform([transforms.ExpTransform(),
+                                        transforms.AffineTransform(constraint.lower_bound, 1)])
 
 
 @biject_to.register(constraints.less_than)
 @transform_to.register(constraints.less_than)
 def _transform_to_less_than(constraint):
-    return transforms.ComposeTransform(
-        [
-            transforms.ExpTransform(),
-            transforms.AffineTransform(constraint.upper_bound, -1),
-        ]
-    )
+    return transforms.ComposeTransform([transforms.ExpTransform(),
+                                        transforms.AffineTransform(constraint.upper_bound, -1)])
 
 
 @biject_to.register(constraints.interval)
@@ -218,22 +202,15 @@ def _transform_to_less_than(constraint):
 @transform_to.register(constraints.half_open_interval)
 def _transform_to_interval(constraint):
     # Handle the special case of the unit interval.
-    lower_is_0 = (
-        isinstance(constraint.lower_bound, numbers.Number)
-        and constraint.lower_bound == 0
-    )
-    upper_is_1 = (
-        isinstance(constraint.upper_bound, numbers.Number)
-        and constraint.upper_bound == 1
-    )
+    lower_is_0 = isinstance(constraint.lower_bound, numbers.Number) and constraint.lower_bound == 0
+    upper_is_1 = isinstance(constraint.upper_bound, numbers.Number) and constraint.upper_bound == 1
     if lower_is_0 and upper_is_1:
         return transforms.SigmoidTransform()
 
     loc = constraint.lower_bound
     scale = constraint.upper_bound - constraint.lower_bound
-    return transforms.ComposeTransform(
-        [transforms.SigmoidTransform(), transforms.AffineTransform(loc, scale)]
-    )
+    return transforms.ComposeTransform([transforms.SigmoidTransform(),
+                                        transforms.AffineTransform(loc, scale)])
 
 
 @biject_to.register(constraints.simplex)
@@ -266,27 +243,29 @@ def _transform_to_corr_cholesky(constraint):
 
 @biject_to.register(constraints.cat)
 def _biject_to_cat(constraint):
-    return transforms.CatTransform(
-        [biject_to(c) for c in constraint.cseq], constraint.dim, constraint.lengths
-    )
+    return transforms.CatTransform([biject_to(c)
+                                    for c in constraint.cseq],
+                                   constraint.dim,
+                                   constraint.lengths)
 
 
 @transform_to.register(constraints.cat)
 def _transform_to_cat(constraint):
-    return transforms.CatTransform(
-        [transform_to(c) for c in constraint.cseq], constraint.dim, constraint.lengths
-    )
+    return transforms.CatTransform([transform_to(c)
+                                    for c in constraint.cseq],
+                                   constraint.dim,
+                                   constraint.lengths)
 
 
 @biject_to.register(constraints.stack)
 def _biject_to_stack(constraint):
     return transforms.StackTransform(
-        [biject_to(c) for c in constraint.cseq], constraint.dim
-    )
+        [biject_to(c)
+         for c in constraint.cseq], constraint.dim)
 
 
 @transform_to.register(constraints.stack)
 def _transform_to_stack(constraint):
     return transforms.StackTransform(
-        [transform_to(c) for c in constraint.cseq], constraint.dim
-    )
+        [transform_to(c)
+         for c in constraint.cseq], constraint.dim)

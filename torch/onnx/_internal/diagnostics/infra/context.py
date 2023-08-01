@@ -255,8 +255,6 @@ class DiagnosticContext:
             raise TypeError(
                 f"Expected diagnostic of type {Diagnostic}, got {type(diagnostic)}"
             )
-        if self.options.warnings_as_errors and diagnostic.level == infra.Level.WARNING:
-            diagnostic.level = infra.Level.ERROR
         self.diagnostics.append(diagnostic)
         self.logger.log(diagnostic.level, diagnostic.message)
         self.logger.log(diagnostic.level, diagnostic.additional_message)
@@ -264,9 +262,9 @@ class DiagnosticContext:
     def log_and_raise_if_error(self, diagnostic: Diagnostic) -> None:
         self.log(diagnostic)
         if diagnostic.level == infra.Level.ERROR:
-            if diagnostic.source_exception is not None:
-                raise diagnostic.source_exception
-            raise RuntimeErrorWithDiagnostic(diagnostic)
+            raise RuntimeErrorWithDiagnostic(
+                diagnostic
+            ) from diagnostic.source_exception
 
     @contextlib.contextmanager
     def add_inflight_diagnostic(

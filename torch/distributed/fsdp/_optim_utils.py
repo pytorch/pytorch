@@ -29,7 +29,7 @@ from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _get_module_fsdp_state_if_fully_sharded_module,
     _get_param_to_fqns,
-    _module_handle,
+    _module_handles,
     _named_parameters_with_duplicates,
     clean_tensor_name,
 )
@@ -446,7 +446,7 @@ def _flatten_optim_state_dict(
             for fqn in fqns:
                 if not unflat_osd_state[fqn]:
                     continue
-                for state_name in unflat_osd_state[fqn].keys():
+                for state_name, param_state in unflat_osd_state[fqn].items():
                     unflat_osd_state[fqn][state_name] = _broadcast_state(
                         fsdp_state, unflat_osd_state[fqn][state_name], group=group
                     )
@@ -1432,9 +1432,13 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         if fsdp_state is None:
             return
         _lazy_init(fsdp_state, module)
-        handle = _module_handle(fsdp_state, module)
-        if not handle:
+        handles = _module_handles(fsdp_state, module)
+        assert (
+            len(handles) < 2
+        ), f"Assumes at most 1 FlatParamHandle but got {len(handles)} handles"
+        if not handles:
             return
+        handle = handles[0]
         flat_param = handle.flat_param
         fsdp_param_info = FSDPParamInfo(fsdp_state, handle, {})
         # NOTE: `idx` indexes into the data structures *without* padding

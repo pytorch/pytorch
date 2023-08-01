@@ -318,7 +318,9 @@ class NamedMemberAccessor:
             # Swap back if any key is missing when allow_missing is False
             for name, orig_tensor in orig_named_tensors.items():
                 self.swap_tensor(name, orig_tensor, allow_missing=True)
-            raise RuntimeError(f"Missing key(s): {', '.join(map(repr, missing_keys))}.")
+            raise RuntimeError(
+                "Missing key(s): {}.".format(", ".join(map(repr, missing_keys)))
+            )
         return orig_named_tensors, missing_keys
 
     def check_keys(self, keys: Iterable[str]) -> Tuple[List[str], List[str]]:

@@ -62,7 +62,7 @@ TEST(BackendCuttingTest, unit) {
 TEST(BackendCuttingTest, line) {
   caffe2::NetDef net;
   net.add_external_input("X");
-  // Adding weights as external inputs to test weight absorption
+  // Adding weights as external intputs to test weight absorption
   net.add_external_input("W0");
   net.add_external_input("W1");
   net.add_external_input("b0");

@@ -7,7 +7,6 @@ import re
 import torch
 import unittest
 import itertools
-import weakref
 
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
@@ -810,7 +809,7 @@ class TestForeach(TestCase):
                 kwargs["weight"] = args[1]
                 ref_kwargs["weight"] = args[1]
 
-            if dtype in integral_types() or dtype == torch.bool:
+            if dtype in integral_types() or dtype == torch.bool or (not self.is_cuda and dtype == torch.half):
                 with self.assertRaises(RuntimeError):
                     wrapped_op(inputs, self.is_cuda, is_fastpath, **kwargs)
                 return
@@ -915,104 +914,6 @@ class TestForeach(TestCase):
         self.assertIsNone(sample.input[1].grad)
 
     @ops(
-        filter(
-            lambda op: op.backward_requires_result,
-            foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
-        ),
-        dtypes=(torch.float32,),
-    )
-    def test_lifetime_of_grad_fn_when_result_is_saved(self, device, dtype, op):
-
-        def get_ref(func, sample):
-            class Foo:
-                pass
-
-            out = func((sample.input, *sample.args), is_cuda=False, is_fastpath=False, **sample.kwargs)
-            foo = Foo()
-            meta_dict = out[0].grad_fn.metadata
-            meta_dict[0] = foo
-            ref = weakref.ref(foo)
-            return out, ref
-
-        def _test(func, sample):
-            out, ref = get_ref(func, sample)
-            self.assertIsNotNone(ref())
-            del out
-            self.assertIsNone(ref())
-
-        func = self._get_funcs(op)[0]
-        for sample in op.sample_inputs(device, dtype, requires_grad=True, num_input_tensors=[1]):
-            for key in ("is_fastpath", "disable_fastpath"):
-                if key in sample.kwargs:
-                    del sample.kwargs[key]
-            # note: `_foreach_pow.Scalar` and `_foreach_pow.ScalarList` don't depend on `result`
-            # see: https://github.com/pytorch/pytorch/blob/5403c7770cd9cdc05f6c216d593ea8e8ae328ff3/tools/autograd/derivatives.yaml#L3048-L3049  # noqa: B950
-            if op.name == "_foreach_pow":
-                if (
-                    (isinstance(sample.args[0], list) and isinstance(sample.args[0][0], Number))
-                    or (isinstance(sample.args[0], Number) and not isinstance(sample.args[0], float))
-                ):
-                    continue
-                if isinstance(sample.args[0], float):
-                    new_args = (sample.input,)
-                    sample.input = sample.args[0]
-                    sample.args = new_args
-            _test(func, sample)
-
-    @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
-        dtypes=OpDTypes.supported,
-        allowed_dtypes=(torch.float64, torch.complex128),
-    )
-    def test_outplace_forward_mode_AD(self, device, dtype, op):
-        if not op.supports_forward_ad:
-            self.skipTest("forward AD not supported")
-
-        # note(crcrpar): without this, some unary functions fail, unlike inplace and/or complex.
-        if dtype == torch.float64 and op.name in (
-            "_foreach_acos", "_foreach_asin", "_foreach_log10", "_foreach_log1p", "_foreach_log2",
-            "_foreach_log", "_foreach_pow", "_foreach_sqrt",
-        ):
-            value_range = {"low": 0.5, "high": 1.0}
-        else:
-            value_range = {}
-        for sample in op.sample_inputs(
-            device, dtype, requires_grad=True, num_input_tenosrs=[5], same_size=True, **value_range,
-        ):
-            # Skip `_foreach_pow.ScalarAndTensor(Scalar, Tensor[])`
-            if op.name == "_foreach_pow" and isinstance(sample.input, Number):
-                continue
-
-            def func(*tensorlist):
-                kwargs = {"alpha": sample.kwargs["alpha"]} if "alpha" in sample.kwargs else {}
-                return op.method_variant(tensorlist, *sample.args, **kwargs)
-
-            working_sample, err_msg_pattern = check_forward_mode_AD_sample(op, sample, dtype, False)
-            if not working_sample:
-                if not err_msg_pattern:
-                    # lhs of float64 and rhs of complex.
-                    continue
-                with self.assertRaisesRegex(RuntimeError, re.escape(err_msg_pattern)):
-                    gradcheck(
-                        func,
-                        sample.input,
-                        raise_exception=True,
-                        check_forward_ad=True,
-                        check_batched_forward_grad=False,
-                        check_backward_ad=False,
-                        check_batched_grad=False,
-                    )
-            else:
-                gradcheck(
-                    func,
-                    sample.input,
-                    raise_exception=True,
-                    check_forward_ad=True,
-                    check_backward_ad=False,
-                    check_batched_grad=False,
-                )
-
-    @ops(
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
         dtypes=OpDTypes.supported,
         allowed_dtypes=(torch.float64, torch.complex128),
@@ -1020,6 +921,36 @@ class TestForeach(TestCase):
     def test_inplace_forward_mode_AD(self, device, dtype, op):
         if not op.supports_forward_ad:
             self.skipTest("forward AD not supported")
+
+        # note(crcrpar): The combinations below are failing in its forward path,
+        # which is before forward-mode AD happens. This function gates the combinations where
+        # - subtraction with Scalar/ScalarList of boolean value:
+        # - combinations where the in-place op in questions tries to write out complex result
+        #   into float storage (= `self`)
+        def check_sample_eligibility(op, sample, dtype):
+            if (
+                op.name == "_foreach_sub"
+                and (
+                    (isinstance(sample.args[0], list) and any(isinstance(a, bool) for a in sample.args[0]))
+                    or isinstance(sample.args[0], bool)
+                )
+            ):
+                return False, _BOOL_SUB_ERR_MSG
+            rhs_arg_has_complex_number = sample.args and ((
+                isinstance(sample.args[0], list)
+                and any(isinstance(a, complex) for a in sample.args[0])
+            ) or (
+                isinstance(sample.args[0], complex)
+            ))
+            if dtype == torch.float64 and rhs_arg_has_complex_number:
+                if op.name in ("_foreach_add", "_foreach_sub", "_foreach_mul", "_foreach_div"):
+                    return False, "result type ComplexDouble can't be cast to the desired output type Double"
+                if op.name in ("_foreach_clamp_max", "_foreach_clamp_min"):
+                    return False, "clamp is not supported for complex types"
+                if op.name == "_foreach_pow":
+                    return False, "Found dtype Double but expected ComplexDouble"
+
+            return True, ""
 
         for sample in op.sample_inputs(
             device, dtype, requires_grad=True, num_input_tensors=[5], same_size=True,
@@ -1031,7 +962,7 @@ class TestForeach(TestCase):
                 op.inplace_variant(tuple(t.clone() for t in tensorlist), *sample.args, **kwargs)
                 return tensorlist
 
-            working_sample, err_msg_pattern = check_forward_mode_AD_sample(op, sample, dtype, True)
+            working_sample, err_msg_pattern = check_sample_eligibility(op, sample, dtype)
             if not working_sample:
                 with self.assertRaisesRegex(RuntimeError, re.escape(err_msg_pattern)):
                     gradcheck(
@@ -1071,48 +1002,16 @@ class TestForeach(TestCase):
         num_tensors_seen = 0
         for (device, dtype), ([l1, l2, l3], indices) in grouped_tensors.items():
             for t in itertools.chain(l1, l3):
-                self.assertEqual(t.device, device)
-                self.assertEqual(t.dtype, dtype)
+                self.assertEquals(t.device, device)
+                self.assertEquals(t.dtype, dtype)
                 num_tensors_seen += 1
             self.assertEqual(len(l1), len(l2))
             self.assertTrue(all(p is None for p in l2))
             for i, index in enumerate(indices):
-                self.assertEqual(l1[i], list1[index])
-                self.assertEqual(l2[i], list2[index])
-                self.assertEqual(l3[i], list3[index])
-        self.assertEqual(num_tensors_seen, 2 * num_tensors_per_list)
-
-
-# TODO(crcrpar): Hide this inside torch/testing/_internal.
-# would end up adding another layer to `foreach_inputs_sample_func.__call__`
-# so that we can use this function as something like the first argument of `filter` function.
-# Even after moving this function to testing, I personally think it'd be better to check the error message.
-def check_forward_mode_AD_sample(op, sample, dtype, is_inplace):
-    if (
-        op.name == "_foreach_sub"
-        and (
-            (isinstance(sample.args[0], list) and any(isinstance(a, bool) for a in sample.args[0]))
-            or isinstance(sample.args[0], bool)
-        )
-    ):
-        return False, _BOOL_SUB_ERR_MSG
-    rhs_arg_has_complex_number = sample.args and ((
-        isinstance(sample.args[0], list)
-        and any(isinstance(a, complex) for a in sample.args[0])
-    ) or (
-        isinstance(sample.args[0], complex)
-    ))
-    if rhs_arg_has_complex_number and dtype == torch.float64:
-        if op.name in ("_foreach_clamp_max", "_foreach_clamp_min"):
-            return False, "clamp is not supported for complex types"
-        if not is_inplace:
-            return False, ""
-        else:
-            if op.name == "_foreach_pow":
-                return False, "Found dtype Double but expected ComplexDouble"
-            if op.name in ("_foreach_add", "_foreach_sub", "_foreach_mul", "_foreach_div"):
-                return False, "result type ComplexDouble can't be cast to the desired output type Double"
-    return True, ""
+                self.assertEquals(l1[i], list1[index])
+                self.assertEquals(l2[i], list2[index])
+                self.assertEquals(l3[i], list3[index])
+        self.assertEquals(num_tensors_seen, 2 * num_tensors_per_list)
 
 
 instantiate_device_type_tests(TestForeach, globals())

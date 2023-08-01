@@ -25,6 +25,7 @@ def render(fh, data, depth, is_list_member=False):
     indentation = " " * INDENTATION_WIDTH * depth
 
     if is_dict(data):
+
         tuples = list(data.items())
         if type(data) is not OrderedDict:
             tuples.sort()

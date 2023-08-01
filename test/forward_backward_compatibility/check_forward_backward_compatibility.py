@@ -267,14 +267,14 @@ ALLOW_LIST = [
     ("aten::_scaled_dot_product_attention", datetime.date(2023, 8, 1)),
     ("aten::_chunk_grad_outputs_efficient_attention", datetime.date(2023, 8, 1)),
     ("aten::_scaled_dot_product_flash_attention", datetime.date(2023, 5, 15)),
-    ("aten::_scaled_dot_product_efficient_attention", datetime.date(2023, 8, 15)),
-    ("aten::_scaled_dot_product_efficient_attention_backward", datetime.date(2023, 8, 15)),
+    ("aten::_scaled_dot_product_efficient_attention", datetime.date(2023, 7, 1)),
+    ("aten::_scaled_dot_product_efficient_attention_backward", datetime.date(2023, 7, 1)),
     ("aten::_sparse_mask_helper", datetime.date(2023, 3, 15)),
     ("aten::_fused_sdp_choice", datetime.date(2023, 3, 15)),
     ("aten::_flash_attention_forward", datetime.date(2023, 5, 15)),
     ("aten::_flash_attention_backward", datetime.date(2023, 5, 15)),
     ("aten::_efficient_attention_forward", datetime.date(2023, 7, 1)),
-    ("aten::_efficient_attention_backward", datetime.date(2023, 8, 1)),
+    ("aten::_efficient_attention_backward", datetime.date(2023, 7, 1)),
     ("mkldnn::_convolution_pointwise.binary", datetime.date(2022, 12, 15)),
     ("prim::CudaFusionIvalGuard", datetime.date(2023, 2, 1)),
     ("prim::CudaFusionGuard", datetime.date(2023, 2, 1)),
@@ -312,8 +312,7 @@ ALLOW_LIST = [
     ("aten::to_sparse_csc.out", datetime.date(2023, 12, 31)),
     ("aten::to_sparse_csr.out", datetime.date(2023, 12, 31)),
     ("aten::_structured_sparse_linear", datetime.date(2023, 12, 31)),
-    ("aten::batch_norm_backward_elemt.out", datetime.date(2023, 12, 31)),
-    ("aten::batch_norm_backward_elemt", datetime.date(2023, 12, 31)),
+
 ]
 
 ALLOW_LIST_COMPILED = [
@@ -501,7 +500,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     existing_schema_dict = {}
     slist = []
-    with open(args.existing_schemas) as f:
+    with open(args.existing_schemas, "r") as f:
         while True:
             line = f.readline()
             if not line:

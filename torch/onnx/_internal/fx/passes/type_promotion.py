@@ -1217,7 +1217,7 @@ class TypePromotionTable:
             ValueError: If the rule is invalid.
         """
         if not rule.is_valid():
-            raise ValueError(f"Invalid type promotion rule: {rule}")
+            raise ValueError("Invalid type promotion rule: {}".format(rule))
         self._rule_table[f"{rule.namespace}.{rule.op_name}"] = rule
 
     @_beartype.beartype
@@ -1613,6 +1613,19 @@ class InsertTypePromotion(_pass.Transform):
             diagnostic_context, module, type_promotion_table or TypePromotionTable()
         )
 
+    def _detect_fake_mode(self) -> Optional[fake_tensor.FakeTensorMode]:
+        """Detect fake mode from the graph.
+
+        Scan through all nodes in graph and their meta['val'] to detect fake mode.
+        """
+        fake_tensors = []
+        for node in self.module.graph.nodes:
+            try:
+                fake_tensors.append(_fake_tensor_from_node_val(node))
+            except RuntimeError:
+                continue
+        return torch._dynamo.utils.detect_fake_mode(fake_tensors)
+
     def _fetch_fake_args(self) -> Sequence[Optional[fake_tensor.FakeTensor]]:
         """Fetch fake args from fx graph.
 
@@ -1648,11 +1661,12 @@ class InsertTypePromotion(_pass.Transform):
         )
         assert not kwargs, "`kwargs` is not supported"
 
+        fake_tensor_mode = self._detect_fake_mode() or fake_tensor.FakeTensorMode(
+            allow_non_fake_inputs=True
+        )
         fake_args = self._fetch_fake_args()
-        fake_mode = self.fake_mode
-        assert fake_mode is not None, "Cannot detect fake_mode."
 
-        with fake_mode, fx_traceback.preserve_node_meta():
+        with fake_tensor_mode, fx_traceback.preserve_node_meta():
             self.interpreter.run(*fake_args)
 
         return self.module

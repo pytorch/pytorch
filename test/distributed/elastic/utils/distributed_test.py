@@ -32,7 +32,7 @@ def _create_c10d_store_mp(is_server, server_addr, port, world_size, wait_for_wor
     if store is None:
         raise AssertionError()
 
-    store.set(f"test_key/{os.getpid()}", b"test_value")
+    store.set(f"test_key/{os.getpid()}", "test_value".encode("UTF-8"))
 
 
 if IS_WINDOWS or IS_MACOS:

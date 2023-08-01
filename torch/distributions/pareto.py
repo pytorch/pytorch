@@ -4,8 +4,7 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, ExpTransform
 from torch.distributions.utils import broadcast_all
 
-__all__ = ["Pareto"]
-
+__all__ = ['Pareto']
 
 class Pareto(TransformedDistribution):
     r"""
@@ -22,7 +21,7 @@ class Pareto(TransformedDistribution):
         scale (float or Tensor): Scale parameter of the distribution
         alpha (float or Tensor): Shape parameter of the distribution
     """
-    arg_constraints = {"alpha": constraints.positive, "scale": constraints.positive}
+    arg_constraints = {'alpha': constraints.positive, 'scale': constraints.positive}
 
     def __init__(self, scale, alpha, validate_args=None):
         self.scale, self.alpha = broadcast_all(scale, alpha)
@@ -57,4 +56,4 @@ class Pareto(TransformedDistribution):
         return constraints.greater_than_eq(self.scale)
 
     def entropy(self):
-        return (self.scale / self.alpha).log() + (1 + self.alpha.reciprocal())
+        return ((self.scale / self.alpha).log() + (1 + self.alpha.reciprocal()))

@@ -1,3 +1,5 @@
+import sympy
+
 from .. import config
 from ..utils import instance_descriptor
 from ..virtualized import V
@@ -30,12 +32,17 @@ def config_of(args):
         if isinstance(x, TensorArg):
             return x.buffer not in V.graph.unaligned_buffers
         if isinstance(x, SizeArg):
-            # TODO(voz): These are kinda redundant, if we can solve out statically_known_multiple_of with
-            # _maybe_evaluate_static...
-            if x.name.startswith("load_seed_offset"):
-                return False
+            if isinstance(x.expr, (int, sympy.Integer)):
+                # TODO(voz): These are kinda redundant, if we can solve out statically_known_multiple_of with
+                # _maybe_evaluate_static...
+                if x.name.startswith("load_seed_offset"):
+                    return False
+                else:
+                    return V.graph.sizevars.statically_known_multiple_of(
+                        x.expr, ALIGNMENT
+                    )
             else:
-                return V.graph.sizevars.statically_known_multiple_of(x.expr, ALIGNMENT)
+                return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
     if config.triton.divisible_by_16:

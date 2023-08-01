@@ -2540,19 +2540,19 @@ for padding_mode, cpp_padding_mode in zip(
         output_size = (2, 3) + tuple(p + 1 for p in padding)  # simplified from `(4 + 2 * p - 3) // 2 + 1`
         new_module_tests.append(
             dict(
-                module_name=f'Conv{d}d',
+                module_name='Conv{}d'.format(d),
                 constructor_args=(2, 3, 3, 2, padding, 1, 1, True, padding_mode),
-                cpp_constructor_args=f'''torch::nn::Conv{d}dOptions(2, 3, 3)
+                cpp_constructor_args='''torch::nn::Conv{}dOptions(2, 3, 3)
                                         .stride(2)
-                                        .padding({cpp_padding})
+                                        .padding({})
                                         .dilation(1)
                                         .groups(1)
                                         .bias(true)
-                                        .padding_mode({cpp_padding_mode})''',
+                                        .padding_mode({})'''.format(d, cpp_padding, cpp_padding_mode),
                 input_size=input_size,
                 output_size=output_size,
                 cudnn=True,
-                desc=f'{padding_mode}_stride2_pad2',
+                desc='{}_stride2_pad2'.format(padding_mode),
                 with_tf32=True,
                 tf32_precision=0.05
             ),
@@ -3906,7 +3906,7 @@ regression_criterion_no_batch = [
 reductions = ['none', 'mean', 'sum']
 for name, reduction in product(regression_criterion_no_batch, reductions):
     regression_test_info = dict(
-        fullname=f"{name}_no_batch_dim_{reduction}",
+        fullname="{}_no_batch_dim_{}".format(name, reduction),
         constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
         input_size=(3, ),
         target_size=(3, ),
@@ -3959,7 +3959,7 @@ reductions = ['none', 'mean', 'sum']
 for (name, input_fn, target_fn), reduction in product(classification_criterion_no_batch,
                                                       reductions):
     classification_test_info = dict(
-        fullname=f"{name}_no_batch_dim_{reduction}",
+        fullname="{}_no_batch_dim_{}".format(name, reduction),
         constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
         input_fn=lambda f=input_fn: f(),
         target_fn=lambda f=target_fn: f(),
@@ -4152,7 +4152,7 @@ class TestBase:
                 self._arg_cache[name] = self._extra_kwargs[fn_name]()
             else:
                 assert size_name in self._extra_kwargs, \
-                    f"Missing `{name}`, `{size_name}` or `{fn_name}` for {self.get_name()}"
+                    "Missing `{}`, `{}` or `{}` for {}".format(name, size_name, fn_name, self.get_name())
 
                 def map_tensor_sizes(sizes):
                     if isinstance(sizes, list):
@@ -4281,7 +4281,7 @@ class ModuleTest(TestBase):
         type_map = {torch.double: torch.float}
         cpu_input_tuple = cpu_input if isinstance(cpu_input, tuple) else (cpu_input,)
 
-        is_any_input_complex = any(isinstance(t, torch.Tensor) and t.dtype.is_complex for t in cpu_input_tuple)
+        is_any_input_complex = any((isinstance(t, torch.Tensor) and t.dtype.is_complex for t in cpu_input_tuple))
 
         gpu_input_tuple = to_gpu(cpu_input_tuple, type_map=type_map)
 
