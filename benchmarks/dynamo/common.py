@@ -1120,21 +1120,6 @@ class AOTInductorModelCache:
     def load(cls, model, example_inputs, eager_forward):
         key = id(model)
         if key not in cls.cache:
-            # AOTInductorModel relies on the caller to pass in output_tensors,
-            # so we need to explicitly allocate output tensors here.
-            output_tensors = []
-            # TODO: we should be able to do this by querying AOTInductorModel
-            example_outputs = eager_forward(
-                copy.deepcopy(model), clone_inputs(example_inputs)
-            )
-
-            if isinstance(example_outputs, dict):
-                # Workaround Huggingface output type issue ModelOutput
-                example_outputs = dict(example_outputs)
-            example_outputs, output_spec = pytree.tree_flatten(example_outputs)
-            for output in example_outputs:
-                output_tensors.append(torch.empty_like(output))
-
             # Register the output dataclass to pytree
             example_outputs = eager_forward(
                 copy.deepcopy(model), clone_inputs(example_inputs)
@@ -1151,6 +1136,17 @@ class AOTInductorModelCache:
             all_args = (*param_buffer_values, *flat_example_inputs)
             # AOT compile into a .so
             so_path = torch._inductor.aot_compile(exported.graph_module, all_args)
+
+            output_node = list(exported.graph.nodes)[-1]
+            output_tensors = [
+                torch.empty(
+                    node.meta["val"].size(),
+                    dtype=node.meta["val"].dtype,
+                    layout=node.meta["val"].layout,
+                    device=node.meta["val"].device,
+                )
+                for node in output_node.args[0]
+            ]
 
             # Use a utility function for easier benchmarking
             source = """
@@ -1176,7 +1172,7 @@ class AOTInductorModelCache:
                 "module": module,
                 "exported": exported,
                 "output_tensors": output_tensors,
-                "output_spec": output_spec,
+                "output_spec": exported.call_spec.out_spec,
             }
             cls.cache[key] = value
 
