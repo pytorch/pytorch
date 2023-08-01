@@ -1,15 +1,17 @@
 # Owner(s): ["module: dynamo"]
+import dataclasses
 import unittest
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._export import export, dynamic_dim
+from torch._export import export, dynamic_dim, DEFAULT_EXPORT_DYNAMO_CONFIG
 from torch._export.utils import register_dataclass_as_pytree_node
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils._pytree import tree_flatten, tree_unflatten, LeafSpec, TreeSpec
 from functorch.experimental.control_flow import map
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 
@@ -418,6 +420,41 @@ class TestExport(TestCase):
 
         unflat = tree_unflatten(flat, spec)
         self.assertEqual(unflat, inp)
+
+    def test_export_dynamo_config(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(input_size=4, hidden_size=5, num_layers=1)
+
+            def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+                return self.lstm(inputs)
+
+
+        config = DEFAULT_EXPORT_DYNAMO_CONFIG
+        mod = MyModule()
+
+        @contextmanager
+        def _patch_config(kwargs):
+            orig_config_dict = dataclasses.asdict(config)
+
+            try:
+                for k, v in kwargs.items():
+                    setattr(config, k, v)
+                yield
+            finally:
+                for k, v in orig_config_dict.items():
+                    setattr(config, k, v)
+
+        inp = (torch.rand(5, 4), )
+        exported_program = export(mod, inp)
+
+        with _patch_config({"allow_rnn": False}):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "TorchDynamo purposely graph breaks on RNN, GRU, LSTMs"
+            ):
+                _ = export(mod, inp)
 
 
 if __name__ == '__main__':
