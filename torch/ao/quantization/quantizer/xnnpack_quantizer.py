@@ -224,7 +224,19 @@ def _is_annotated(nodes: List[Node]):
     return annotated
 
 
-def _get_module_name_filter(name: str):
+def _get_module_name_filter(module_name: str):
+    """Get the module_name_filter function for a given module name, the filter accepts
+    a node and checks if the node comes from a module that has certain module name
+
+    For example:
+        node: linear_op = call_function[...](...)  # comes from a module with name blocks.sub.linear1
+
+
+    >> module_name_filter = _get_module_name_filter("blocks.sub")
+    >> print(module_name_filter(node))
+    True  # the node is from "blocks.sub" based on the fully qualified name "blocks.sub.linear1"
+    """
+
     def module_name_filter(n: Node) -> bool:
         # example: {
         #    'L__self___sub': ("L['self'].sub", <class '....Sub'>),
@@ -234,12 +246,23 @@ def _get_module_name_filter(name: str):
         names = [
             n[len("L__self___") :].replace("_", ".") for n in nn_module_stack.keys()
         ]
-        return name in names
+        return module_name in names
 
     return module_name_filter
 
 
 def _get_module_type_filter(tp: Callable):
+    """Get the module_type_filter function for a given module type, the filter accepts
+    a node and checks if the node comes from a module that has certain module type
+
+    For example:
+        node: linear_op = call_function[...](...)  # comes from a module with type Block -> Sub -> Linear
+
+
+    >> module_type_filter = _get_module_type_filter(Sub)  # submodule with type `Sub`, under the `Block` submodule
+    >> print(module_type_filter(node))
+    True  # the node is from the submodule `Sub` (same for `Block` and `Linear` as well)
+    """
     def module_type_filter(n: Node) -> bool:
         # example: {'L__self___sub': ("L['self'].sub", <class '....Sub'>), 'L__self___sub_linear': ("L['self'].sub.linear", <class 'torch.nn.modules.linear.Linear'>)}
         nn_module_stack = n.meta["nn_module_stack"]
@@ -330,7 +353,7 @@ class XNNPACKQuantizer(Quantizer):
         if config is None:
             return model
 
-        assert config is not None
+        # assert config is not None
 
         self._annotate_linear(model, config, filter_fn)
         self._annotate_conv2d_patterns(model, config, filter_fn)
@@ -448,7 +471,7 @@ class XNNPACKQuantizer(Quantizer):
         Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
         """
         fused_partitions = find_sequential_partitions(
-            gm, [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU]
+            gm, [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU], filter_fn
         )
         for fused_partition in fused_partitions:
             conv_partition, bn_partition, relu_partition = fused_partition
@@ -503,7 +526,7 @@ class XNNPACKQuantizer(Quantizer):
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         fused_partitions = find_sequential_partitions(
-            gm, [torch.nn.Conv2d, torch.nn.ReLU]
+            gm, [torch.nn.Conv2d, torch.nn.ReLU], filter_fn
         )
         for fused_partition in fused_partitions:
             conv_partition, relu_partition = fused_partition
@@ -799,10 +822,10 @@ class XNNPACKQuantizer(Quantizer):
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         self._annotate_input_out_obs_sharing_op(
-            torch.nn.modules.Hardtanh, gm, quantization_config
+            torch.nn.modules.Hardtanh, gm, quantization_config, filter_fn
         )
         self._annotate_input_out_obs_sharing_op(
-            torch.nn.modules.ReLU6, gm, quantization_config
+            torch.nn.modules.ReLU6, gm, quantization_config, filter_fn
         )
 
     def _annotate_mean(
@@ -811,7 +834,9 @@ class XNNPACKQuantizer(Quantizer):
         quantization_config: QuantizationConfig,
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
-        self._annotate_input_out_obs_sharing_op(torch.mean, gm, quantization_config)
+        self._annotate_input_out_obs_sharing_op(
+            torch.mean, gm, quantization_config, filter_fn
+        )
 
     def _annotate_adaptive_avg_pool2d(
         self,
@@ -820,7 +845,7 @@ class XNNPACKQuantizer(Quantizer):
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         self._annotate_input_out_obs_sharing_op(
-            torch.nn.AdaptiveAvgPool2d, gm, quantization_config
+            torch.nn.AdaptiveAvgPool2d, gm, quantization_config, filter_fn
         )
 
     def _annotate_add_patterns(
@@ -829,8 +854,8 @@ class XNNPACKQuantizer(Quantizer):
         quantization_config: QuantizationConfig,
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
-        self._annotate_add_relu(gm, quantization_config)
-        self._annotate_add(gm, quantization_config)
+        self._annotate_add_relu(gm, quantization_config, filter_fn)
+        self._annotate_add(gm, quantization_config, filter_fn)
 
     def _annotate_add_relu(
         self,
@@ -838,7 +863,9 @@ class XNNPACKQuantizer(Quantizer):
         quantization_config: QuantizationConfig,
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
-        fused_partitions = find_sequential_partitions(gm, [torch.add, torch.nn.ReLU])
+        fused_partitions = find_sequential_partitions(
+            gm, [torch.add, torch.nn.ReLU], filter_fn
+        )
         for fused_partition in fused_partitions:
             add_partition, relu_partition = fused_partition
             if len(relu_partition.output_nodes) > 1:
