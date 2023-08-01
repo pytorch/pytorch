@@ -320,6 +320,7 @@ class TestExport(TestCase):
                 self.assertTrue("source_fn" in node.meta)
                 self.assertTrue("nn_module_stack" in node.meta)
 
+
     def test_error_does_not_reference_eager_fallback(self):
         def fn_ddo(x):
             y = x.nonzero()
@@ -455,6 +456,79 @@ class TestExport(TestCase):
                 "TorchDynamo purposely graph breaks on RNN, GRU, LSTMs"
             ):
                 _ = export(mod, inp)
+
+    def test_module(self):
+
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x):
+                a, b = x
+                a_conv = self.conv(a)
+                a_linear = self.linear(a_conv)
+                b_conv = self.conv(b)
+                b_linear = self.linear(b_conv)
+                return (a_linear.cos() + b_linear.sin(), a_linear.sin() + b_linear.cos())
+
+        inp_container = ((torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),)
+
+        ep = export(Foo(), inp_container)
+        ep_rexported = export(ep.module(), inp_container)
+
+        inp_test = ((torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),)
+
+        self.assertTrue(torch.allclose(ep(*inp_test)[0], ep_rexported(*inp_test)[0]))
+        self.assertTrue(torch.allclose(ep(*inp_test)[1], ep_rexported(*inp_test)[1]))
+
+    def test_module_with_dict_container_inp_out(self):
+
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x):
+                a1, a2 = x["a"]
+                b = x["b"]
+                a1_conv = self.conv(a1)
+                a1_linear = self.linear(a1_conv)
+                a2_conv = self.conv(a2)
+                a2_linear = self.linear(a2_conv)
+                b_conv = self.conv(b)
+                b_linear = self.linear(b_conv)
+                return {"a": a1_linear.cos() + b_linear.sin(), "b": a2_linear.sin() + b_linear.cos()}
+
+        inp_container = ({"a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)), "b": torch.randn(20, 16, 50, 100)},)
+
+        ep = export(Foo(), inp_container)
+        ep_rexported = export(ep.module(), inp_container)
+
+        inp_test = ({"a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)), "b": torch.randn(20, 16, 50, 100)},)
+
+        self.assertTrue(torch.allclose(ep(*inp_test)["a"], ep_rexported(*inp_test)["a"]))
+        self.assertTrue(torch.allclose(ep(*inp_test)["b"], ep_rexported(*inp_test)["b"]))
 
 
 if __name__ == '__main__':
