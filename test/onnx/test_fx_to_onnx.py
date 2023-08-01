@@ -225,6 +225,20 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             expected_node="aten.add.Tensor",
         )
 
+    def test_aten_clone_does_not_raise_warnings_of_lack_of_memory_format(self):
+        class CustomModule(torch.nn.Module):
+            def forward(self, input):
+                return torch.ops.aten.clone(input, memory_format=torch.preserve_format)
+
+        x = torch.tensor(3)
+        export_output = dynamo_export(CustomModule(), x)
+        assert_has_diagnostics(
+            export_output.diagnostic_context,
+            diagnostics.rules.find_opschema_matched_symbolic_function,
+            diagnostics.levels.NONE,
+            expected_node="aten.clone.default",
+        )
+
     def test_aten_div_tensor_mode_does_not_finds_perfect_match_due_to_extra_kwargs(
         self,
     ):
@@ -236,7 +250,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         x = torch.tensor(3, dtype=torch.float32)
         export_output = dynamo_export(CustomModule(), x)
-
         assert_has_diagnostics(
             export_output.diagnostic_context,
             diagnostics.rules.find_opschema_matched_symbolic_function,

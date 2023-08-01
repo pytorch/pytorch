@@ -179,7 +179,6 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
             "device",
             "requires_grad",
             "pin_memory",
-            "memory_format",
             "implicit",
         }:
             continue
@@ -190,6 +189,9 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
                 continue
             else:
                 value = int(jit_type_utils.JitScalarType.from_dtype(value).onnx_type())
+        if key == "memory_format":
+            # memory_format is not supported by onnxscript.
+            value = str(value)
         filtered[key] = value
     return filtered
 
