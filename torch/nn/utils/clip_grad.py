@@ -73,7 +73,11 @@ def clip_grad_norm_(
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
     for ((device, _), ([grads], _)) in grouped_grads.items():  # type: ignore[assignment]
         if (foreach is None or foreach) and _has_foreach_support(grads, device=device):  # type: ignore[arg-type]
-            torch._foreach_mul_(grads, clip_coef_clamped.to(device))  # type: ignore[call-overload]
+            # Note: `aten._foreach_mul_` does not have an overlaod that takes in a single Tensor "other" today.
+            # However, it does have a `_foreach_mul_.List` overload that takes a list of tensors.
+            # The list here is to force us to go down the tensor list overload,
+            # that way we avoid the Scalar overload (which would cause a H2D sync).
+            torch._foreach_mul_(grads, [clip_coef_clamped.to(device)])  # type: ignore[call-overload]
         elif foreach:
             raise RuntimeError(f'foreach=True was passed, but can\'t use the foreach API on {device.type} tensors')
         else:
