@@ -234,12 +234,12 @@ static void random_full_64_bits_range_kernel(TensorIteratorBase& iter, c10::opti
 
 } // namespace (anonymous)
 
-ALSO_REGISTER_AVX512_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel);
+REGISTER_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(cauchy_stub, &cauchy_kernel);
+REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(exponential_stub, &exponential_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(geometric_stub, &geometric_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(log_normal_stub, &log_normal_kernel);
+REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
+REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
 REGISTER_DISPATCH(normal_stub, &normal_kernel);
 REGISTER_DISPATCH(uniform_stub, &uniform_kernel);
 REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
