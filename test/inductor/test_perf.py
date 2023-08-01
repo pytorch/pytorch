@@ -103,13 +103,11 @@ class EstimateSnodeRuntimeTests(TestCase):
 
     def test_conv(self):
         print("========================================4. test_conv")
-        def f(x):
-            filters = torch.randn(8, 4, 3, 3)
-            inputs = torch.randn(1, 4, 5, 5)
-            return torch.nn.functional.conv2d(inputs, filters, padding=1)
+        def f(x, y):
+            return torch.nn.functional.conv2d(x, y, padding=1)
 
-        inp = (T(10, 10, 3),)
-        self.assertExpectedInline(count_numel(f, *inp), """988""")
+        inp = (T(1, 4, 5, 5, grad=True), T(8, 4, 3, 3))
+        self.assertExpectedInline(count_numel(f, *inp), """588""")
 
 
 class NumBytesMetricTests(TestCase):

@@ -3076,9 +3076,15 @@ class ExternKernelAlloc(ExternKernel):
         super().__init__(
             None, layout, self.unwrap_storage(inputs), constant_args, kwargs or {}
         )
+        print("=======================================")
+        print(f"layout={layout}")
+        print(f"inputs={inputs}")
         self.name = V.graph.register_buffer(self)
+        print(f"kernel={kernel}, cpp_kernel={cpp_kernel}")
         self.kernel = cpp_kernel if V.graph.cpp_wrapper else kernel
+        print(f"chosen kernel={self.kernel}")
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
+        print("=======================================")
 
     def should_allocate(self):
         return False

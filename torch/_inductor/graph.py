@@ -913,6 +913,12 @@ class GraphLowering(torch.fx.Interpreter):
     # temporary code structure
     from .scheduler import BaseSchedulerNode
 
+    def get_hardware_specs(self):
+        # TODO: figure out how to get hardware specs
+        gpu_memory_bandwidth = 1555 * 2**30  # 1555 GBps for A100
+        gpu_flops = 312**12  # 312 TFLOPS for A100
+        return (gpu_flops, gpu_memory_bandwidth)
+
     def estimate_snode_runtime(self, snode: BaseSchedulerNode, rwbytes: int) -> int:
         from .ir import CollectiveKernel, ComputedBuffer
         from .scheduler import ExternKernelSchedulerNode, FusedSchedulerNode
@@ -920,9 +926,7 @@ class GraphLowering(torch.fx.Interpreter):
         print("GraphLowering::estimate_snode_runtime called")
         print(snode.debug_str())
 
-        # TODO: figure out how to get hardware specs
-        gpu_memory_bandwidth = 1, 555 * 2**30  # 1555 GBps for A100
-        gpu_flops_per_second = 312**12  # 312 TFLOPs for A100
+        gpu_flops, gpu_memory_bandwidth = self.get_hardware_specs()
 
         # TODO: figure out which ir.Buffer types are compute vs memory bounded
         if (
@@ -935,7 +939,31 @@ class GraphLowering(torch.fx.Interpreter):
             snode, ExternKernelSchedulerNode
         ):  # compute bounded for large tensors
             # matmul and conv, compute bound
-            pass
+
+            from torch.utils.flop_counter import conv_flop
+
+            if getattr(snode.node, "kernel", "") == "extern_kernels.convolution":
+                extern_kernel_alloc = snode.node  # ExternKernelAlloc
+                inputs = extern_kernel_alloc.inputs
+                assert len(inputs) == 2
+
+                x_shape = inputs[0].get_size()
+                w_shape = inputs[1].get_size()
+                out_shape = snode.node.get_size()
+                return 1/gpu_flops * conv_flop(
+                    x_shape=x_shape,
+                    w_shape=w_shape,
+                    out_shape=out_shape,
+                    transposed=False,
+                    _bias = None,
+                    _stride = None,
+                    _padding = None,
+                    _dilation = None
+                )
+
+                # TODO: handle backward, transpose
+            else:
+                pass
 
         # TODO: add support for more snodes/irnodes
 
