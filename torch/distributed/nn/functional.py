@@ -101,6 +101,25 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=group.WORLD):
     return _Reduce_Scatter.apply(op, group, output, *input_list)
 
 
+def _reduce_scatter_base(output, input, op=ReduceOp.SUM, group=group.WORLD):
+    """
+    Reduces, then scatters a list of tensors to all processes in a group.
+
+    Arguments:
+        output (Tensor): Output tensor.
+        input_list (list[Tensor]): List of tensors to reduce and scatter.
+        op (optional): One of the values from
+            ``torch.distributed.ReduceOp``
+            enum.  Specifies an operation used for element-wise reductions.
+        group (ProcessGroup, optional): The process group to work on.
+
+    Returns:
+        Tensor: Output of the collective.
+
+    """
+    return _ReduceScatterBase.apply(output, input, op, group)
+
+
 def all_gather(tensor, group=group.WORLD):
     """
     Gathers tensors from the whole group in a list.
@@ -364,6 +383,30 @@ class _AllGatherBase(Function):
         else:
             raise RuntimeError("Backend not supported!")
         return (None, gx, None)
+
+class _ReduceScatterBase(Function):
+    @staticmethod
+    def forward(ctx, output_tensor, input_tensor, op, group):
+        ctx.group = group
+        dist._reduce_scatter_base(output_tensor, input_tensor, op=op, group=group)
+        return output_tensor
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
+            world_size = dist.get_world_size(group=ctx.group)
+            out_size = list(grad_output.size())
+            if out_size[0] % world_size != 0:
+                raise RuntimeError(
+                    f'Tensor with dimensions: {out_size} does '
+                    f'not have first dimension divisible by world_size: {world_size}'
+                )
+            out_size[0] = out_size[0] * dist.get_world_size(group=ctx.group)
+            gx = torch.empty(out_size, device=grad_output.device, dtype=grad_output.dtype)
+            dist._all_gather_base(gx, grad_output, group=group)
+        else:
+            raise RuntimeError("Backend not supported!")
+        return (None, gx, None, None)
 
 class _AlltoAll(Function):
     @staticmethod
