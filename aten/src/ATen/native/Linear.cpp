@@ -54,8 +54,8 @@ static inline bool parseLinearFlatten3d() {
   return bool(value);
 }
 
-// `_flatten_3d_linear` flattens the first two dimensions of the input tensor
-// before passing it to linear operation, if the input tensor is 3D
+// `_flatten_nd_linear` flattens all but the last dimension of the input tensor
+// before passing it to linear operation
 static inline Tensor _flatten_nd_linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
     const auto input_sizes = input.sym_sizes();
     const auto result = at::addmm(bias, input.reshape_symint({-1, input_sizes.at(input_sizes.size() -1)}), weight.t());
