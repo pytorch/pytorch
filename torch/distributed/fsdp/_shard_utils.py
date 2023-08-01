@@ -148,7 +148,6 @@ def _create_chunk_sharded_tensor(
     )
 
 
-@no_type_check
 def _create_chunk_dtensor(
     tensor: torch.Tensor,
     rank: int,
