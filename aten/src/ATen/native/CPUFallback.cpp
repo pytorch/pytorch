@@ -108,6 +108,22 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
       auto cpu_ivalue = c10::IValue(c10::List<at::Tensor>(to_cpu(ivalue.toTensorList().vec())));
       tensorlist_cpu_args.push_back(cpu_ivalue);
       (*stack)[arguments_begin + idx] = std::move(cpu_ivalue);
+      tensorlist_args.push_back(ivalue.toTensorList());
+    } else if (ivalue.isOptionalTensorList()) {
+      auto opt_tensors = ivalue.toOptionalTensorList().vec();
+      std::vector<at::Tensor> need_convert_tensors;
+      std::vector<int> need_convert_tensors_index;
+      for (auto i : c10::irange(opt_tensors.size())) {
+        if (!opt_tensors[i].has_value() || !opt_tensors[i]->defined()) continue;
+        need_convert_tensors.push_back(opt_tensors[i].value());
+        need_convert_tensors_index.push_back(i);
+      }
+      auto cpu_tensors = to_cpu(need_convert_tensors);
+      for (const auto i : c10::irange(need_convert_tensors_index.size())) {
+        auto idx = need_convert_tensors_index[i];
+        opt_tensors[idx] = cpu_tensors[i];
+      }
+      (*stack)[arguments_begin + idx] = std::move(c10::IValue(c10::List<c10::optional<at::Tensor>>(opt_tensors)));
     }
   }
   // XLA requires all of the tensor arguments to be gathered up and converted to CPU together.
