@@ -181,7 +181,11 @@ void initJITBindings(PyObject* module) {
       const auto& originalMsg = e.getOriginalMsg();
       JITException::setCaughtOriginalMsg(originalMsg.value_or(""));
       JITException::setCaughtPythonClassName(className.value_or(""));
-      exc(e.what());
+      // If we still had the py::exception<JITException> object, we could
+      // just call it. But we must get a handle to leak it and there is no
+      // way I can find to re-create it from the handle. So setting the
+      // exception manually
+      PyErr_SetString(exc.ptr(), e.what());
     }
   });
 
