@@ -272,6 +272,10 @@ capture_autograd_function = True
 # enable/disable dynamo tracing for `torch.func` transforms
 capture_func_transforms = True
 
+# simulates what would happen if we didn't have support for BUILD_SET opcode,
+# used for testing
+inject_BUILD_SET_unimplemented_TESTING_ONLY = False
+
 _autograd_backward_strict_mode_banned_ops = [
     "stride",
     "requires_grad",
