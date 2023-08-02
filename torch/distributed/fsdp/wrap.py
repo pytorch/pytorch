@@ -30,7 +30,7 @@ __all__ = [
     "size_based_auto_wrap_policy",
     "enable_wrap",
     "wrap",
-    "LambdaWrapPolicy",
+    "CustomPolicy",
     "ModuleWrapPolicy",
 ]
 
@@ -105,7 +105,7 @@ def _run_mixed_precision_override_policy(
     root_module: nn.Module,
     module_classes: Iterable[Type[nn.Module]],
     ignored_modules: Set[nn.Module],
-    fsdp_kwargs: Dict[str, Any],
+    root_kwargs: Dict[str, Any],
     target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]],
 ):
     module_classes_tuple = tuple(set(module_classes))
@@ -114,7 +114,9 @@ def _run_mixed_precision_override_policy(
             continue
         elif isinstance(module, module_classes_tuple):
             # This policy overrides any existing policy
-            target_module_to_kwargs[module] = fsdp_kwargs
+            if module not in target_module_to_kwargs:
+                # Only inherit from the root kwargs if not already specified
+                target_module_to_kwargs[module] = root_kwargs
             target_module_to_kwargs[module]["mixed_precision"] = None
     return target_module_to_kwargs
 
@@ -128,10 +130,10 @@ def always_wrap_policy(*args, **kwargs) -> bool:
     return True
 
 
-class _WrapPolicy(ABC):
+class _Policy(ABC):
     """
-    This defines an abstract base class that represents a policy for auto
-    wrapping with a module-level API.
+    This defines an abstract base class that represents a policy for applying
+    a module-level API.
     """
 
     @abstractmethod
@@ -180,10 +182,10 @@ def _module_wrap_policy(
     return isinstance(module, tuple(module_classes))
 
 
-class ModuleWrapPolicy(_WrapPolicy):
+class ModuleWrapPolicy(_Policy):
     """
-    This policy wraps every module of the specified module classes, passing in
-    the kwargs given to the root.
+    This policy applies to every module of the specified module classes,
+    passing in the kwargs given to the root.
     """
 
     def __init__(self, module_classes: Iterable[Type[nn.Module]]):
@@ -211,16 +213,29 @@ class ModuleWrapPolicy(_WrapPolicy):
         return super().__repr__() + f"({self._module_classes_str})"
 
 
-class LambdaWrapPolicy(_WrapPolicy):
+class CustomPolicy(_Policy):
     """
     This policy takes in a lambda function that maps a given ``nn.Module`` to
-    either ``False``, ``True``, or a FSDP kwarg dictionary.
+    either ``False``, ``True``, or a kwarg dictionary.
     - If the function returns ``False`` or an empty dictionary, then the module
-      is not wrapped.
-    - If the function returns ``True``, then the module is wrapped using the
-      root's kwargs.
-    - If the function returns a non-empty dictionary, then the module is
-      wrapped, and the dictionary overrides the root's kwargs.
+      does not have the API applied.
+    - If the function returns ``True``, then the module has the API applied
+      with the root's kwargs.
+    - If the function returns a non-empty dictionary, then the module has the
+      API applied, and the dictionary overrides the root's kwargs.
+
+    Example::
+
+        >>> # xdoctest: +SKIP("undefined variables")
+        >>> model = init_transformer_model(...)
+        >>> def lambda_fn(module: nn.Module):
+        >>>     if module is model.lm_head:
+        >>>         return {"sharding_strategy": ShardingStrategy.SHARD_GRAD_OP}
+        >>>     elif isinstance(module, TransformerBlock):
+        >>>         return True
+        >>>     return False
+        >>> policy = CustomPolicy(lambda_fn)
+        >>> fsdp_model = FSDP(model, auto_wrap_policy=policy)
     """
 
     def __init__(self, lambda_fn: Callable[[nn.Module], Union[bool, Dict[str, Any]]]):
@@ -230,7 +245,7 @@ class LambdaWrapPolicy(_WrapPolicy):
         self,
         root_module: nn.Module,
         ignored_modules: Set[nn.Module],
-        root_fsdp_kwargs: Dict[str, Any],
+        root_kwargs: Dict[str, Any],
     ) -> Dict[nn.Module, Dict[str, Any]]:
         target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]] = {}
         for module in root_module.modules():
@@ -239,17 +254,17 @@ class LambdaWrapPolicy(_WrapPolicy):
             res = self._lambda_fn(module)
             if not isinstance(res, (dict, bool)):
                 raise ValueError(
-                    "The lambda_fn passed to LambdaWrapPolicy should return "
-                    f"False/True or an FSDP kwarg dict, but it returned {res}"
+                    "The lambda_fn passed to CustomPolicy should return "
+                    f"False/True or a kwarg dict, but it returned {res}"
                 )
             if not res:
                 continue
-            fsdp_kwargs = copy.copy(root_fsdp_kwargs)
+            kwargs = copy.copy(root_kwargs)
             if isinstance(res, dict):
-                # Override the root FSDP kwargs with the ones specified by the
+                # Override the root kwargs with the ones specified by the
                 # lambda function
-                fsdp_kwargs.update(res)
-            target_module_to_kwargs[module] = fsdp_kwargs
+                kwargs.update(res)
+            target_module_to_kwargs[module] = kwargs
         return target_module_to_kwargs
 
 

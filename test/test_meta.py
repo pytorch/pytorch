@@ -635,7 +635,6 @@ meta_function_expected_failures = {
     torch._segment_reduce : {f64, f16, bf16, f32},
     torch.cholesky : {f64, f32, c128, c64},
     torch.cholesky_inverse : {f64, f32, c128, c64},
-    torch.cholesky_solve : {f64, f32, c128, c64},
     torch.linalg.eig : {f64, f32, c128, c64},
     torch.linalg.eigvals : {f64, f32, c128, c64},
     torch.linalg.lstsq : {f64, f32, c128, c64},
@@ -809,8 +808,6 @@ meta_dispatch_expected_failures = {
     aten.cholesky.out : {c64, c128, f64, f32},
     aten.cholesky_inverse.default : {c64, c128, f64, f32},
     aten.cholesky_inverse.out : {c64, c128, f64, f32},
-    aten.cholesky_solve.default : {c64, c128, f64, f32},
-    aten.cholesky_solve.out : {c64, c128, f64, f32},
     aten.geqrf.default : {c64, c128, f64, f32},
     aten.linalg_eig.default : {c64, c128, f64, f32},
     aten.linalg_lstsq.default : {c64, c128, f64, f32},
@@ -1343,7 +1340,7 @@ def print_op_str_if_not_supported(op_str):
 if __name__ == "__main__":
     COMPARE_XLA = os.getenv('PYTORCH_COMPARE_XLA', None)
     if COMPARE_XLA is not None:
-        with open(COMPARE_XLA, "r") as f:
+        with open(COMPARE_XLA) as f:
             d = yaml.load(f, Loader=YamlLoader)
             ops = d.get("full_codegen", []) + d.get("supported", []) + d.get("autograd", [])
             for op_str in ops:
@@ -1352,7 +1349,7 @@ if __name__ == "__main__":
 
     COMPARE_TEXT = os.getenv('PYTORCH_COMPARE_TEXT', None)
     if COMPARE_TEXT is not None:
-        with open(COMPARE_TEXT, "r") as f:
+        with open(COMPARE_TEXT) as f:
             for op_str in f:
                 print_op_str_if_not_supported(op_str.strip())
         sys.exit(0)

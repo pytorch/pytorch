@@ -212,7 +212,7 @@ def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> Set[str]:
 def parse_tags_yaml(path: str) -> Set[str]:
     global _GLOBAL_PARSE_TAGS_YAML_CACHE
     if path not in _GLOBAL_PARSE_TAGS_YAML_CACHE:
-        with open(path, "r") as f:
+        with open(path) as f:
             es = yaml.load(f, Loader=LineLoader)
             _GLOBAL_PARSE_TAGS_YAML_CACHE[path] = parse_tags_yaml_struct(es, path=path)
 
@@ -233,7 +233,7 @@ def parse_native_yaml(
 
         # if a loaded yaml is provided, use that instead of reading from path
         if loaded_yaml is None:
-            with open(path, "r") as f:
+            with open(path) as f:
                 es = yaml.load(f, Loader=LineLoader)
         else:
             es = loaded_yaml

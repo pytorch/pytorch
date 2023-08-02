@@ -1,6 +1,7 @@
 import functools
 import torch
 import torch.distributed as dist
+from typing import Optional
 
 
 class DefaultState:
@@ -127,7 +128,7 @@ def _low_precision_hook(prec: torch.dtype, state: LowPrecisionState, grad: torch
         allreduce_hook(state, grad)
         _decompress(state, grad)
 
-def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor = None):
+def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: Optional[torch.Tensor] = None):
     r"""
     This FSDP communication hook implements a simple gradient compression
     approach that casts ``grad`` to half-precision floating-point format (``torch.float16``).
@@ -144,7 +145,7 @@ def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: tor
     fp16_hook = functools.partial(_low_precision_hook, torch.float16)
     return fp16_hook(state, grad, output)
 
-def bf16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor = None):
+def bf16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: Optional[torch.Tensor] = None):
     r"""
     This FSDP communication hook implements a simple gradient compression
     approach that casts ``grad`` to half-precision floating-point format (``torch.float16``).

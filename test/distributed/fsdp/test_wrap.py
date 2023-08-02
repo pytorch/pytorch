@@ -16,15 +16,16 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     BackwardPrefetch,
     CPUOffload,
     FullyShardedDataParallel as FSDP,
+    MixedPrecision,
     ShardingStrategy,
 )
 from torch.distributed.fsdp.wrap import (
     _or_policy,
+    _Policy,
     _wrap_module_cls_individually,
-    _WrapPolicy,
     always_wrap_policy,
+    CustomPolicy,
     enable_wrap,
-    LambdaWrapPolicy,
     ModuleWrapPolicy,
     size_based_auto_wrap_policy,
     transformer_auto_wrap_policy,
@@ -459,9 +460,7 @@ class TestAutoWrap(TestCase):
         )
         self._test_transformer_wrapping(auto_wrap_policy)
 
-    def _test_transformer_wrapping(
-        self, auto_wrap_policy: Union[Callable, _WrapPolicy]
-    ):
+    def _test_transformer_wrapping(self, auto_wrap_policy: Union[Callable, _Policy]):
         fsdp_kwargs = {"auto_wrap_policy": auto_wrap_policy}
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
@@ -483,17 +482,18 @@ class TestAutoWrap(TestCase):
                 self.assertFalse(isinstance(module, FSDP))
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "Requires at least 2 GPUs")
-    def test_lambda_wrap_policy(self):
+    def test_custom_policy(self):
         """
-        Tests ``LambdaWrapPolicy`` with both a lambda function that uses
-        uniform kwargs (so only returns ``False`` or ``True``) and a lambda
-        function that uses non-uniform kwargs (so returns a dict to override
-        the root kwargs).
+        Tests ``CustomPolicy`` with both a lambda function that uses uniform
+        kwargs (so only returns ``False`` or ``True``) and a lambda function
+        that uses non-uniform kwargs (so returns a dict to override the root
+        kwargs).
         """
         for use_uniform_kwargs in [False, True]:
-            self._test_lambda_wrap_policy(use_uniform_kwargs)
+            self._test_custom_policy(use_uniform_kwargs)
 
-    def _test_lambda_wrap_policy(self, use_uniform_kwargs: bool):
+    def _test_custom_policy(self, use_uniform_kwargs: bool):
+        print(f"use_uniform_kwargs={use_uniform_kwargs}")
         model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
@@ -526,11 +526,18 @@ class TestAutoWrap(TestCase):
                     }
                 return False
 
-        policy = LambdaWrapPolicy(lambda_fn)
+        policy = CustomPolicy(lambda_fn)
         # Use a size-2 dummy PG to avoid clamping the sharding strategy to
         # `NO_SHARD` as for a size-1 PG
         process_group = DummyProcessGroup(rank=0, size=2)
-        model = FSDP(model, process_group=process_group, auto_wrap_policy=policy)
+        fp16_mp = MixedPrecision(param_dtype=torch.float16)
+        fp32_mp = MixedPrecision()
+        model = FSDP(
+            model,
+            process_group=process_group,
+            auto_wrap_policy=policy,
+            mixed_precision=fp16_mp,
+        )
         encoder_layers = set(model.module.transformer.encoder.layers)
         decoder_layers = set(model.module.transformer.decoder.layers)
         bn = model.module.bn
@@ -557,18 +564,23 @@ class TestAutoWrap(TestCase):
                 self.assertTrue(isinstance(module, FSDP))
                 self.assertEqual(module.sharding_strategy, bn_strategy)
                 self.assertEqual(module.backward_prefetch, bn_prefetch)
+                # We currently override batch norm modules to use fp32
+                self.assertEqual(module.mixed_precision, fp32_mp)
             elif module in encoder_layers:
                 self.assertTrue(isinstance(module, FSDP))
                 self.assertEqual(module.sharding_strategy, encoder_strategy)
                 self.assertEqual(module.backward_prefetch, encoder_prefetch)
+                self.assertEqual(module.mixed_precision, fp16_mp)
             elif module in decoder_layers:
                 self.assertTrue(isinstance(module, FSDP))
                 self.assertEqual(module.sharding_strategy, decoder_strategy)
                 self.assertEqual(module.backward_prefetch, decoder_prefetch)
+                self.assertEqual(module.mixed_precision, fp16_mp)
             elif module is model:
                 self.assertTrue(isinstance(module, FSDP))
                 self.assertEqual(module.sharding_strategy, root_strategy)
                 self.assertEqual(module.backward_prefetch, root_prefetch)
+                self.assertEqual(module.mixed_precision, fp16_mp)
             else:
                 self.assertFalse(isinstance(module, FSDP))
 
@@ -813,8 +825,8 @@ class TestAutoWrap(TestCase):
                 return True
             return False
 
-        lambda_wrap_policy_uniform = LambdaWrapPolicy(lambda_fn_uniform)
-        lambda_wrap_policy_nonuniform = LambdaWrapPolicy(lambda_fn_nonuniform)
+        lambda_wrap_policy_uniform = CustomPolicy(lambda_fn_uniform)
+        lambda_wrap_policy_nonuniform = CustomPolicy(lambda_fn_nonuniform)
 
         for use_orig_params, policy in itertools.product(
             [True, False],
@@ -826,7 +838,7 @@ class TestAutoWrap(TestCase):
         ):
             self._test_frozen_params(use_orig_params, policy)
 
-    def _test_frozen_params(self, use_orig_params: bool, policy: _WrapPolicy):
+    def _test_frozen_params(self, use_orig_params: bool, policy: _Policy):
         model = LoraModel().cuda()
         msg = "layers.0.attn has both parameters with requires_grad=True and False. "
         if use_orig_params:
