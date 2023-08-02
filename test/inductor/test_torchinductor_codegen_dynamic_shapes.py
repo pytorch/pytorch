@@ -11,7 +11,6 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -286,9 +285,6 @@ test_failures = {
     "test_aliased_buffer_reuse_dynamic_shapes": TestFailure(("cpu",)),
 }
 
-if TEST_WITH_ROCM:
-    # aten.miopen_batch_norm is not registered for lowering
-    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure("cuda")
 
 DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
     CommonTemplate, xfail_prop="_expected_failure_codegen_dynamic"
