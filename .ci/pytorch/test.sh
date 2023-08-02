@@ -341,7 +341,7 @@ test_perf_for_dashboard() {
     modes+=(inference)
   fi
   # TODO: All the accuracy tests can be skipped once the CI accuracy checking is stable enough
-  local targets=(accuracy performance)
+  local targets=(accuracy)
 
   for mode in "${modes[@]}"; do
     if [[ "$mode" == "inference" ]]; then
@@ -395,6 +395,8 @@ test_perf_for_dashboard() {
       fi
     done
   done
+  # Hacky way to feed H100 data into a one-time dashboard
+  cp benchmarks/dynamo/h100/*.csv "$TEST_REPORTS_DIR"
 }
 
 test_single_dynamo_benchmark() {
