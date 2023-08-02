@@ -23,7 +23,7 @@ TCustomFloat = TypeVar("TCustomFloat", bound=Union[FLOAT16, FLOAT, DOUBLE, BFLOA
 
 class TestRegistration(common_utils.TestCase):
     def setUp(self) -> None:
-        self.registry = torch.onnx.OnnxRegistry(opset_version=18)
+        self.registry = torch.onnx.OnnxRegistry()
         self.custom_domain = onnxscript.values.Opset(domain="custom", version=1)
 
     def tearDown(self) -> None:
@@ -82,7 +82,7 @@ class TestRegistration(common_utils.TestCase):
 @common_utils.instantiate_parametrized_tests
 class TestDispatcher(common_utils.TestCase):
     def setUp(self):
-        self.registry = torch.onnx.OnnxRegistry(opset_version=18)
+        self.registry = torch.onnx.OnnxRegistry()
         # TODO: remove this once we have a better way to do this
         logger = logging.getLogger("TestDispatcher")
         self.diagnostic_context = infra.DiagnosticContext(
