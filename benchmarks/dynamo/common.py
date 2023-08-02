@@ -262,6 +262,7 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     # https://github.com/pytorch/pytorch/issues/103760
     "dlrm",
     "hf_T5_generate",
+    "hf_Bert", # Could not validate constraint RelaxedUnspecConstraint(L['input_ids'].size()[0]) as L['input_ids'].size()[0] was inferred to be constant (4)
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [

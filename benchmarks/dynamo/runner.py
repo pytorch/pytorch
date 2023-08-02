@@ -591,6 +591,8 @@ def get_metric_title(metric):
         return "Peak Memory Compression Ratio"
     elif metric == "abs_latency":
         return "Absolute latency (ms)"
+    elif metric == "mfu":
+        return "Analytic FLOP measurements in TF/s"
     raise RuntimeError("unknown metric")
 
 
@@ -629,6 +631,7 @@ class ParsePerformanceLogs(Parser):
             "abs_latency",
             "compilation_latency",
             "compression_ratio",
+            "mfu"
         ]
         self.bottom_k = 50
         self.parse()
@@ -665,6 +668,7 @@ class ParsePerformanceLogs(Parser):
                     "abs_latency",
                     "compilation_latency",
                     "compression_ratio",
+                    "mfu",
                 ],
                 header=None,
                 engine="python",
@@ -863,14 +867,22 @@ class ParsePerformanceLogs(Parser):
             peak_memory_caption, self.memory, "compression_ratio"
         )
 
+        mfu_caption = (
+            "Max Flop Utilization for Analytic Flops in TF/s (higher is better)\n"
+        )
+
+        mfu_summary = self.exec_summary_text(mfu_caption, self.mfu, "mfu")
+
         str_io.write(
             "To measure performance, compilation latency and memory footprint reduction, "
             "we remove the models that fail accuracy checks.\n\n"
         )
+
         str_io.write(passrate_summary)
         str_io.write(speedup_summary)
         str_io.write(comp_time_summary)
         str_io.write(peak_memory_summary)
+        str_io.write(mfu_summary)
         self.executive_summary = str_io.getvalue()
 
     def flag_bad_entries(self, suite, metric, flag_fn):
