@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import tempfile
 import contextlib
 import io
 import itertools
@@ -72,7 +73,7 @@ def export_to_onnx(
     onnx.checker.check_model(onnx_model)
     return onnx_model
 
-
+@common_utils.instantiate_parametrized_tests
 class TestONNXExport(pytorch_test_common.ExportTestCase):
     def test_fuse_addmm(self):
         class AddmmModel(torch.nn.Module):
@@ -1182,6 +1183,22 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 do_constant_folding=True,
             )
 
+    @common_utils.parametrize("fp8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    def test_fp8_export(self, fp8_dtype: torch.dtype):
+        class Model(torch.nn.Module):
+            def forward(
+                self,
+                x
+            ):
+                return x.to(torch.float32)
+
+        x = torch.randn(2, 3).to(fp8_dtype)
+
+        with tempfile.NamedTemporaryFile() as model_proto_file:
+            torch.onnx.export(
+                Model(), x, model_proto_file.name, opset_version=18
+            )
+            onnx.checker.check_model(model_proto_file.name)
 
 class TestQuantizeEagerONNXExport(common_utils.TestCase):
     def _test_lower_graph_impl(self, model, data):
