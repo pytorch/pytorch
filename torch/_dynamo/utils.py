@@ -1646,11 +1646,7 @@ def to_numpy_helper(value):
 def numpy_to_tensor(value):
     """Convert tnp.ndarray to tensor, leave other types intact. If a list/tuple, loop through it to convert."""
     if isinstance(value, np.ndarray):
-<<<<<<< HEAD
         return numpy_to_tensor(tnp.array(value, dtype=str(value.dtype)))
-=======
-        return numpy_to_tensor(tnp.array(value))
->>>>>>> 4f7b3b5474c1fdebeb7580803dce657e6e36c6e4
     if isinstance(value, tnp.ndarray):
         return value.tensor
     elif isinstance(value, (tuple, list)):
