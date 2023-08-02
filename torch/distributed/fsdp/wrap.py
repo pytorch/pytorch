@@ -126,10 +126,10 @@ def always_wrap_policy(*args, **kwargs) -> bool:
     return True
 
 
-class _WrapPolicy(ABC):
+class _Policy(ABC):
     """
-    This defines an abstract base class that represents a policy for auto
-    wrapping with a module-level API.
+    This defines an abstract base class that represents a policy for applying
+    a module-level API.
     """
 
     @abstractmethod
@@ -178,10 +178,10 @@ def _module_wrap_policy(
     return isinstance(module, tuple(module_classes))
 
 
-class ModuleWrapPolicy(_WrapPolicy):
+class ModuleWrapPolicy(_Policy):
     """
-    This policy wraps every module of the specified module classes, passing in
-    the kwargs given to the root.
+    This policy applies to every module of the specified module classes,
+    passing in the kwargs given to the root.
     """
 
     def __init__(self, module_classes: Iterable[Type[nn.Module]]):

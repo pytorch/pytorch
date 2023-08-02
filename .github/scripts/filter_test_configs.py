@@ -319,12 +319,12 @@ def process_jobs(
     try:
         # The job name from github is in the PLATFORM / JOB (CONFIG) format, so breaking
         # it into its two components first
-        current_platform, _ = [n.strip() for n in job_name.split(JOB_NAME_SEP, 1) if n]
+        current_platform, _ = (n.strip() for n in job_name.split(JOB_NAME_SEP, 1) if n)
     except ValueError as error:
         warnings.warn(f"Invalid job name {job_name}, returning")
         return test_matrix
 
-    for _, record in download_json(url=url, headers={}).items():
+    for record in download_json(url=url, headers={}).values():
         (
             author,
             _,
@@ -446,7 +446,12 @@ def set_output(name: str, val: Any) -> None:
         print(f"::set-output name={name}::{val}")
 
 
-def parse_reenabled_issues(s: str) -> List[str]:
+def parse_reenabled_issues(s: Optional[str]) -> List[str]:
+    # NB: When the PR body is empty, GitHub API returns a None value, which is
+    # passed into this function
+    if not s:
+        return []
+
     # The regex is meant to match all *case-insensitive* keywords that
     # GitHub has delineated would link PRs to issues, more details here:
     # https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue.

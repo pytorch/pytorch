@@ -61,9 +61,7 @@ class GenOperatorsYAMLTest(unittest.TestCase):
         filtered_configs = list(filter(filter_func, config))
         assert (
             len(filtered_configs) == 2
-        ), "Expected 2 elements in filtered_configs, but got {}".format(
-            len(filtered_configs)
-        )
+        ), f"Expected 2 elements in filtered_configs, but got {len(filtered_configs)}"
 
     def test_verification_success(self):
         filter_func = make_filter_from_options(

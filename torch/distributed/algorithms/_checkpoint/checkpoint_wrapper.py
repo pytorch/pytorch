@@ -283,7 +283,7 @@ def apply_activation_checkpointing(
     """
     # TODO: Importing inside function to avoid circular import issue between FSDP and
     # checkpoint_wrapper. This can be resolved once wrap() APIs are decoupled from FSDP code.
-    from torch.distributed.fsdp.wrap import _recursive_wrap, lambda_auto_wrap_policy, _WrapPolicy
+    from torch.distributed.fsdp.wrap import _recursive_wrap, lambda_auto_wrap_policy, _Policy
     from torch.distributed.fsdp._wrap_utils import _construct_wrap_fn, _post_order_apply
 
     policy = (
@@ -292,7 +292,7 @@ def apply_activation_checkpointing(
         else partial(lambda_auto_wrap_policy, lambda_fn=check_fn)
     )
     if not callable(policy):
-        if not isinstance(policy, _WrapPolicy):
+        if not isinstance(policy, _Policy):
             raise ValueError(
                 f"Expected {policy} to be callable or be a pre-defined wrap policy"
             )

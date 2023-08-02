@@ -10,20 +10,20 @@ class _Union:
     @classmethod
     def create(cls, **kwargs):
         assert len(kwargs) == 1
-        return cls(**{**{f.name: None for f in fields(cls)}, **kwargs})
+        return cls(**{**{f.name: None for f in fields(cls)}, **kwargs})  # type: ignore[arg-type]
 
     def __post_init__(self):
-        assert sum(1 for f in fields(self) if getattr(self, f.name) is not None) == 1
+        assert sum(1 for f in fields(self) if getattr(self, f.name) is not None) == 1  # type: ignore[arg-type, misc]
 
     @property
     def value(self):
-        val = next((getattr(self, f.name) for f in fields(self) if getattr(self, f.name) is not None), None)
+        val = next((getattr(self, f.name) for f in fields(self) if getattr(self, f.name) is not None), None)  # type: ignore[arg-type]
         assert val is not None
         return val
 
     @property
     def type(self):
-        val_type = next((f.name for f in fields(self) if getattr(self, f.name) is not None), None)
+        val_type = next((f.name for f in fields(self) if getattr(self, f.name) is not None), None)  # type: ignore[arg-type]
         assert val_type is not None
         return val_type
 
