@@ -1719,14 +1719,14 @@ void do_avg_pool_nhwc_on_AVX_n(
       // first quantize using AVX2 or AVX512 using 32 lanes, then 8, finally falls
       // back to single
 #ifdef CPU_CAPABILITY_AVX2
-      QuantizeAvx2<T>(
+      QuantizeAvx2<typename T::underlying>(
           (float*)acc_buffer_fp,
           o_p + c,
           cend * vec_width,
           multiplier,
           output_zero_point);
 #else
-      QuantizeAvx512<T>(
+      QuantizeAvx512<typename T::underlying>(
           (float*)acc_buffer_fp,
           o_p + c,
           cend * vec_width,
@@ -2135,8 +2135,7 @@ void qavg_pool2d_nhwc_kernel(
       0,
       count_include_pad,
       divisor_override);
-    }
-  );
+  });
 }
 
 void qavg_pool3d_nhwc_kernel(
@@ -2184,8 +2183,7 @@ void qavg_pool3d_nhwc_kernel(
       padD,
       count_include_pad,
       divisor_override);
-    }
-  );
+  });
 }
 
 template <typename T>

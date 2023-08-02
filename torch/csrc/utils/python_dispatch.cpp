@@ -22,6 +22,7 @@
 #include <torch/csrc/utils/python_raii.h>
 
 #include <iostream>
+#include <utility>
 
 namespace py = pybind11;
 
@@ -192,10 +193,10 @@ static torch::_RegisterOrVerify register_or_verify() {
 static py::object ophandle_call_boxed(
     const c10::OperatorHandle& handle,
     py::args args,
-    py::kwargs kwargs) {
+    const py::kwargs& kwargs) {
   auto stack = torch::jit::createStackForSchema(
       handle.schema(),
-      args,
+      std::move(args),
       kwargs,
       /*self=*/c10::nullopt);
   {
@@ -306,7 +307,7 @@ void initDispatchBindings(PyObject* module) {
           py::arg("debug") = "impl_t_t")
       .def(
           "impl",
-          [](py::object self,
+          [](const py::object& self,
              const char* name,
              // TODO: empty string no longer works
              c10::DispatchKey dispatch,
@@ -332,7 +333,9 @@ void initDispatchBindings(PyObject* module) {
           py::arg("func"))
       .def(
           "define",
-          [](py::object self, const char* schema, const char* alias_analysis) {
+          [](const py::object& self,
+             const char* schema,
+             const char* alias_analysis) {
             auto parsed_schema =
                 torch::schema(schema, parseAliasAnalysisKind(alias_analysis));
             self.cast<torch::Library&>().def(

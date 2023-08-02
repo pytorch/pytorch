@@ -144,7 +144,7 @@ def increment_version(tensor):
     """
     torch._C._increment_version(tensor)
 
-class saved_tensors_hooks():
+class saved_tensors_hooks:
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
 
     Use this context-manager to define how intermediary results of an operation
@@ -434,7 +434,7 @@ def _get_tid(t) -> Tuple[int, int, int]:
 def _get_sid(t) -> Tuple[int, int]:
     return (t.data_ptr(), t._version)
 
-class _Handle():
+class _Handle:
     pass
 
 class _swap_with_cloned(saved_tensors_hooks):
@@ -509,7 +509,7 @@ class _CloneArgBeforeMutateMode(TorchDispatchMode):
         rs = func(*args, **kwargs)
         return rs
 
-class _AllowMutationOnSavedContext():
+class _AllowMutationOnSavedContext:
     def __init__(self):
         self.cloned: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self.original: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()

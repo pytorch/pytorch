@@ -3,6 +3,7 @@ import contextlib
 import itertools
 
 import torch
+from torch._dynamo import config as dynamo_config
 
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
@@ -48,7 +49,7 @@ binary_list = {
 
 
 @config.patch({"freezing": True})
-class TestPaternMatcher(TestCase):
+class TestPatternMatcherBase(TestCase):
     def _check_unary_is_decomposed(self, unary_fn):
         return not any(
             isinstance(unary_fn, fn)
@@ -106,6 +107,8 @@ class TestPaternMatcher(TestCase):
             for op in exclude_ops:
                 self.assertNotIn(op, source_code)
 
+
+class TestPatternMatcher(TestPatternMatcherBase):
     def test_conv2d_unary_cpu(self):
         class M(torch.nn.Module):
             def __init__(
@@ -371,7 +374,7 @@ class TestPaternMatcher(TestCase):
     def test_conv2d_add_scalar(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
                 )
@@ -473,7 +476,7 @@ class TestPaternMatcher(TestCase):
         # we can't do the fusion when add's inputs are same tensor.
         class Model2(torch.nn.Module):
             def __init__(self):
-                super(Model2, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
                 )
@@ -487,7 +490,7 @@ class TestPaternMatcher(TestCase):
         # we can't do the fusion when add's inputs are mixed dtype.
         class Model3(torch.nn.Module):
             def __init__(self):
-                super(Model3, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
                 )
@@ -523,7 +526,7 @@ class TestPaternMatcher(TestCase):
     def test_reproduce_99842_issue(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)
 
             def forward(self, input_tensor):
@@ -535,6 +538,30 @@ class TestPaternMatcher(TestCase):
         mod = Model().eval()
         include_ops = ["mkldnn._convolution_pointwise_.binary"]
         self._test_code_common(mod, (input,), include_ops, [])
+
+
+@dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
+class TestDynamicPatternMatcher(TestPatternMatcherBase):
+    test_conv2d_unary_dynamic_shapes = TestPatternMatcher.test_conv2d_unary_cpu
+    test_conv2d_binary_dynamic_shapes = TestPatternMatcher.test_conv2d_binary
+    test_linear_unary_dynamic_shapes = TestPatternMatcher.test_linear_unary
+
+    def test_conv_transpose2d_dynamic_shapes(self):
+        # We don't support conv_transpose2d for now.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_transpose2d = torch.nn.ConvTranspose2d(
+                    3, 16, 3, stride=2, padding=1
+                )
+
+            def forward(self, x):
+                return self.conv_transpose2d(x)
+
+        x_shape = (1, 3, 28, 28)
+        mod = M().eval()
+        v = torch.randn(x_shape, dtype=torch.float32)
+        self._test_common(mod, (v,), 0, 0)
 
 
 if __name__ == "__main__":
