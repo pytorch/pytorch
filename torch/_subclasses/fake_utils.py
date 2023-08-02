@@ -144,7 +144,10 @@ class CrossRefFakeMode(TorchDispatchMode):
                             r_out, fake_out, check_strides=self.check_strides
                         )
                     except Exception as e:
-                        raise RuntimeError(
-                            f"{context} mismatched tensor metadata for output[{idx}]: {e}"
-                        ) from e
+                        error_message = (
+                            f"{context} mismatched tensor metadata: {e}"
+                            if len(r_flat) == 1
+                            else f"{context} mismatched tensor metadata for output[{idx}]: {e}"
+                        )
+                        raise RuntimeError(error_message) from e
         return r
