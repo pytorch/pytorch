@@ -64,6 +64,7 @@ def check_codegen(
         example_inputs = tuple(copy_fn(x) for x in example_inputs)
 
     torch._dynamo.reset()
+    torch._inductor.metrics.reset()
 
     called = False
 
@@ -253,9 +254,6 @@ test_failures = {
     "test_rand_like_deterministic_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
-    "test_scheduler_vertical_fusion1_dynamic_shapes": TestFailure(
-        ("cpu", "cuda"), is_skip=True
-    ),
     "test_slice_mutation2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_softmax_one_kernel_loop_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
@@ -269,7 +267,6 @@ test_failures = {
         ("cpu", "cuda"), is_skip=True
     ),
     "test_unspec_inputs_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_vertical_fusion1_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_zero_dim_reductions_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),

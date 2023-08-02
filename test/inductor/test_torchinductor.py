@@ -6699,8 +6699,6 @@ class CommonTemplate:
         """
         Causes a @pointwise(size_hints) where size_hints is 2D
         """
-        torch._inductor.metrics.generated_kernel_count = 0
-
         def fn(input, offsets, add_value):
             return torch.ops.prims._inductor_bucketize(input, offsets) + add_value
 
