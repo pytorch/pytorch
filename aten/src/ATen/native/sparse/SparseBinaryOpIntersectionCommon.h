@@ -264,6 +264,11 @@ void _sparse_binary_op_intersection_kernel_impl(
 
     auto hash = at::empty({probably_coalesced._nnz()}, indices.options().dtype(kLong));
 
+    if (indices.numel() == 0) {
+      hash.zero_();
+      return hash;
+    }
+
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .add_output(hash)
