@@ -19,6 +19,7 @@ from torch import nn
 
 from torch._subclasses import fake_tensor
 from torch.onnx._internal import _beartype
+from torch.onnx._internal.exporter import ResolvedExportOptions
 from torch.onnx._internal.fx import (
     fx_symbolic_graph_extractor,
     patcher,
@@ -144,15 +145,18 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
 
+        export_options = torch.onnx.ExportOptions(
+            opset_version=self.opset_version,
+            op_level_debug=self.op_level_debug,
+        )
+        # TODO: Remove ResolvedExportOptions when dynamic shape API is public
+        export_options = ResolvedExportOptions(export_options)
+        export_options.dynamic_shapes = self.dynamic_shapes
         export_output = torch.onnx.dynamo_export(
             func,
             tensor_x,
             8.0,
-            export_options=torch.onnx.ExportOptions(
-                opset_version=self.opset_version,
-                op_level_debug=self.op_level_debug,
-                dynamic_shapes=self.dynamic_shapes,
-            ),
+            export_options=export_options,
         )
         onnx_format_args = export_output.adapt_torch_inputs_to_onnx(tensor_x, 8.0)
         ref_outputs = export_output.adapt_torch_outputs_to_onnx(func(tensor_x, 8.0))
@@ -618,7 +622,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
                 options = torch.onnx.ExportOptions(
                     opset_version=self.opset_version,
-                    dynamic_shapes=self.dynamic_shapes,
                     op_level_debug=self.op_level_debug,
                 )
                 export_options = torch.onnx._internal.exporter.ResolvedExportOptions(
@@ -627,6 +630,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 export_options.fx_tracer = (
                     fx_symbolic_graph_extractor.FXSymbolicTracer()
                 )
+                export_options.dynamic_shapes = self.dynamic_shapes
                 export_output = torch.onnx.dynamo_export(
                     fake_model,
                     *fake_args,
@@ -836,11 +840,12 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 # Export the model with fake inputs and parameters
                 export_options = torch.onnx.ExportOptions(
                     opset_version=self.opset_version,
-                    dynamic_shapes=self.dynamic_shapes,
                     op_level_debug=self.op_level_debug,
                     fake_context=fake_context,
                 )
-
+                # TODO: Remove ResolvedExportOptions when dynamic shape API is public
+                export_options = ResolvedExportOptions(export_options)
+                export_options.dynamic_shapes = self.dynamic_shapes
                 if export_within_fake_mode:
                     export_output = torch.onnx.dynamo_export(
                         fake_model,

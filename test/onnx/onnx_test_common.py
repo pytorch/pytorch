@@ -232,15 +232,20 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         # Feed args and kwargs into exporter.
         # Note that exporter should flatten kwargs into positional args the exported model;
         # since ONNX doesn't represent kwargs.
+        export_options = torch.onnx.ExportOptions(
+            opset_version=opset_version,
+            op_level_debug=self.op_level_debug,
+        )
+        # TODO: Remove ResolvedExportOptions when dynamic shape API is public
+        export_options = torch.onnx._internal.exporter.ResolvedExportOptions(
+            export_options
+        )
+        export_options.dynamic_shapes = self.dynamic_shapes
         export_output = torch.onnx.dynamo_export(
             ref_model,
             *ref_input_args,
             **ref_input_kwargs,
-            export_options=torch.onnx.ExportOptions(
-                opset_version=opset_version,
-                op_level_debug=self.op_level_debug,
-                dynamic_shapes=self.dynamic_shapes,
-            ),
+            export_options=export_options,
         )
 
         if verbose:

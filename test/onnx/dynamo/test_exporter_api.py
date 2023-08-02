@@ -40,8 +40,6 @@ class TestExportOptionsAPI(common_utils.TestCase):
         with self.assertRaises(expected_exception_type):
             ExportOptions(opset_version="3000")  # type: ignore[arg-type]
         with self.assertRaises(expected_exception_type):
-            ExportOptions(dynamic_shapes=2)  # type: ignore[arg-type]
-        with self.assertRaises(expected_exception_type):
             ExportOptions(logger="DEBUG")  # type: ignore[arg-type]
         with self.assertRaises(expected_exception_type):
             ResolvedExportOptions(options=12)  # type: ignore[arg-type]
@@ -51,11 +49,14 @@ class TestExportOptionsAPI(common_utils.TestCase):
         self.assertFalse(options.dynamic_shapes)
 
     def test_dynamic_shapes_explicit(self):
-        options = ResolvedExportOptions(ExportOptions(dynamic_shapes=None))
+        options = ResolvedExportOptions(ExportOptions())
+        options.dynamic_shapes = None
         self.assertFalse(options.dynamic_shapes)
-        options = ResolvedExportOptions(ExportOptions(dynamic_shapes=True))
+        options = ResolvedExportOptions(ExportOptions())
+        options.dynamic_shapes = True
         self.assertTrue(options.dynamic_shapes)
-        options = ResolvedExportOptions(ExportOptions(dynamic_shapes=False))
+        options = ResolvedExportOptions(ExportOptions())
+        options.dynamic_shapes = False
         self.assertFalse(options.dynamic_shapes)
 
     def test_logger_default(self):
@@ -82,7 +83,6 @@ class TestDynamoExportAPI(common_utils.TestCase):
                 export_options=ExportOptions(
                     opset_version=17,
                     logger=logging.getLogger(),
-                    dynamic_shapes=True,
                 ),
             ),
             ExportOutput,

@@ -83,13 +83,6 @@ class ExportOptions:
     supported ONNX opset version. The default version will increment over time as
     ONNX continues to evolve."""
 
-    dynamic_shapes: Optional[bool] = None
-    """Shape information hint for input/output tensors.
-
-    - ``None``: the exporter determines the most compatible setting.
-    - ``True``: all input shapes are considered dynamic.
-    - ``False``: all input shapes are considered static."""
-
     op_level_debug: Optional[bool] = None
     """Whether to export the model with op-level debug information by evaluating
     ops through ONNX Runtime."""
@@ -107,13 +100,11 @@ class ExportOptions:
         self,
         *,
         opset_version: Optional[int] = None,
-        dynamic_shapes: Optional[bool] = None,
         op_level_debug: Optional[bool] = None,
         logger: Optional[logging.Logger] = None,
         fake_context: Optional[ONNXFakeContext] = None,
     ):
         self.opset_version = opset_version
-        self.dynamic_shapes = dynamic_shapes
         self.op_level_debug = op_level_debug
         self.logger = logger
         self.fake_context = fake_context
@@ -127,12 +118,19 @@ class ResolvedExportOptions(ExportOptions):
 
     # Public attributes MUST be redefined below without ``Optional[]`` from ``ExportOptions``
     opset_version: int
-    dynamic_shapes: bool
     op_level_debug: bool
     logger: logging.Logger
     fake_context: ONNXFakeContext
 
     # Private only attributes
+    dynamic_shapes: bool
+    """Whether to export the model with dynamic shapes.
+
+    - ``None``: the exporter determines the most compatible setting.
+    - ``True``: all input shapes are considered dynamic.
+    - ``False``: all input shapes are considered static.
+    """
+
     decomposition_table: Dict[torch._ops.OpOverload, Callable]
     """A dictionary that maps operators to their decomposition functions."""
 
@@ -178,7 +176,6 @@ class ResolvedExportOptions(ExportOptions):
                 return fallback
 
             self.opset_version = resolve(options.opset_version, _DEFAULT_OPSET_VERSION)
-            self.dynamic_shapes = resolve(options.dynamic_shapes, False)
             import torch.onnx._internal.fx.dynamo_graph_extractor as dynamo_graph_extractor  # TODO: Prevent circular dep
 
             self.fx_tracer = dynamo_graph_extractor.DynamoExport()
@@ -195,6 +192,9 @@ class ResolvedExportOptions(ExportOptions):
             self.diagnostic_context = infra.DiagnosticContext(
                 "torch.onnx.dynamo_export", torch.__version__, logger=self.logger
             )
+
+            # TODO: Redesign this once Dynamo has a stable API to control dynamic shapes.
+            self.dynamic_shapes = False
 
             # TODO(titaiwang): When OnnxRegistry is exposed, users should only control
             # the opset_version with registry, instead of ExportOptions.
