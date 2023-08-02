@@ -5489,6 +5489,22 @@ class TestNLLLoss(TestCaseMPS):
 
         helper(1, 1, 4, 5)
 
+    def test_clamp_fp16_fp32(self):
+        cpu_x = torch.randn(10, device='cpu', dtype=torch.float, requires_grad=False)
+        x = cpu_x.detach().clone().to('mps')
+
+        dtype = torch.float16
+
+        clamp_min_vals_mps = torch.ones(10, device="mps").to(torch.float16)
+        clamp_max_vals_mps = torch.ones(10, device="mps").to(torch.float16) * 10
+        clamp_result_mps = torch.clamp(x, clamp_min_vals_mps, clamp_max_vals_mps)
+
+        clamp_min_vals_cpu = torch.ones(10, device="cpu").to(torch.float16)
+        clamp_max_vals_cpu = torch.ones(10, device="cpu").to(torch.float16) * 10
+        clamp_result_cpu = torch.clamp(cpu_x, clamp_min_vals_cpu, clamp_max_vals_cpu)
+
+        self.assertEqual(clamp_result_mps, clamp_result_cpu)
+
     # Test clamp_min
     def test_clamp_min(self):
         def helper(n, c, h, w):
