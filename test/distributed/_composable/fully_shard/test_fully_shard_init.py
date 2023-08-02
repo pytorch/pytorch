@@ -11,7 +11,7 @@ import torch.nn as nn
 from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened, clean_tensor_name
-from torch.distributed.fsdp.wrap import _FSDPPolicy, ModuleWrapPolicy
+from torch.distributed.fsdp.wrap import _Policy, ModuleWrapPolicy
 from torch.testing._internal.common_dist_composable import (
     CompositeParamModel,
     NestedSequentialModel,
@@ -54,7 +54,7 @@ class TestInitialization(FSDPTest):
             self._test_policy,
         )
 
-    def _test_policy(self, policy: Optional[_FSDPPolicy]):
+    def _test_policy(self, policy: Optional[_Policy]):
         use_nested_sequential_model = "Sequential" in getattr(
             policy, "_module_classes_str", ""
         )
