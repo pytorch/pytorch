@@ -410,6 +410,16 @@ class BuiltinVariable(VariableTracker):
     def as_python_constant(self):
         return self.fn
 
+    def as_proxy(self):
+        DTYPE = {
+            bool: torch.bool,
+            int: torch.int64,
+            float: torch.float64,
+        }
+        if self.fn in DTYPE:
+            return DTYPE[self.fn]
+        return super().as_proxy()
+
     def reconstruct(self, codegen):
         name = self.fn.__name__
         assert self.fn.__module__ == "builtins"
