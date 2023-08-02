@@ -176,7 +176,18 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         same FSDP unit. If enhanced shared parameter support is needed for your
         use case, please ping https://github.com/pytorch/pytorch/issues/77724
 
-    .. note:
+    .. warning::
+        FSDP has some constraints on freezing parameters (i.e. setting
+        ``param.requires_grad=False``). For ``use_orig_params=False``, each
+        FSDP instance must manage parameters that are all frozen or all
+        non-frozen. For ``use_orig_params=True``, FSDP supports mixing frozen
+        and non-frozen, but we recommend not doing so since then the gradient
+        memory usage will be higher than expected (namely, equivalent to not
+        freezing those parameters). This means that ideally, frozen parameters
+        should be isolated into their own ``nn.Module`` s and wrapped
+        separately with FSDP.
+
+    .. note::
         Attempting to run the forward pass of a submodule that is contained in an
         FSDP instance is not supported and will result in errors. This is because the
         submodule's parameters will be sharded, but it itself is not an FSDP instance,
