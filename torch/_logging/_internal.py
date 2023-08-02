@@ -46,6 +46,9 @@ class LogRegistry:
     # logging format string for artifacts
     artifact_log_formatters: Dict[str, logging.Formatter] = field(default_factory=dict)
 
+    # logging groups, format is group_name: {logger/artifact_name: level/enabled}
+    log_groups: Dict[str, Dict[str, Union[int, bool]]] = field(default_factory=dict)
+
     def is_artifact(self, name):
         return name in self.artifact_names
 
@@ -67,6 +70,9 @@ class LogRegistry:
 
         if log_format is not None:
             self.artifact_log_formatters[name] = logging.Formatter(log_format)
+
+    def register_log_group(self, group_name, log_settings):
+        self.log_groups[group_name] = log_settings
 
     # register the qualified name of an artifact log
     # this is needed to know which logs need to be reset
@@ -117,18 +123,6 @@ class LogState:
 
 log_registry = LogRegistry()
 log_state = LogState()
-
-# Groups of logging configurations that can be used with `set_logs`.
-# Format is a dict of logging group name -> set_logs keyword arguments.
-LOG_GROUPS = {
-    "default": {
-        "graph_breaks": True,
-        "recompiles": True,
-        "dynamic": logging.INFO,
-        "guards": True,
-        "trace_source": True,
-    },
-}
 
 
 def set_logs(
@@ -306,7 +300,7 @@ def set_logs(
     modules = modules or {}
 
     def _set_logs(**kwargs):
-        for group, config in LOG_GROUPS.items():
+        for group, config in log_registry.log_groups.items():
             if kwargs.pop(group, False):
                 for name, val in config.items():
                     kwargs[name] = val
@@ -411,6 +405,19 @@ def register_artifact(setting_name, off_by_default=False, log_format=None):
     log_registry.register_artifact_name(setting_name, off_by_default, log_format)
 
 
+def register_log_group(group_name, log_settings):
+    """
+    Enables a log group to be controlled by the env var and user API with group_name.
+    A log group functions as an alias to a predetermined set of logging settings.
+    Args:
+        group_name: The shorthand name used in the env var and user API.
+        log_settings: A dictionary of log settings that group_name is associated with.
+            Entries should be in the form name: value, where name is a log name or log artifact,
+            and value is the log level or the enabled bool, respectively.
+    """
+    log_registry.register_log_group(group_name, log_settings)
+
+
 def getArtifactLogger(module_qname, artifact_name):
     if artifact_name not in log_registry.artifact_names:
         raise ValueError(
@@ -462,7 +469,7 @@ def _invalid_settings_err_msg(settings):
             ["all"],
             log_registry.log_alias_to_log_qname.keys(),
             log_registry.artifact_names,
-            LOG_GROUPS.keys(),
+            log_registry.log_groups.keys(),
         )
     )
     msg = (
@@ -503,8 +510,8 @@ def _parse_log_settings(settings):
         if name == "all":
             for log_qname in log_registry.get_log_qnames():
                 log_state.enable_log(log_qname, level)
-        elif name in LOG_GROUPS:
-            for key, arg in LOG_GROUPS[name].items():
+        elif name in log_registry.log_groups:
+            for key, arg in log_registry.log_groups[name].items():
                 if log_registry.is_log(key):
                     log_qname = log_registry.log_alias_to_log_qname[key]
                     log_state.enable_log(log_qname, arg)
@@ -522,7 +529,7 @@ def _parse_log_settings(settings):
             log_state.enable_log(log_qname, level)
         elif log_registry.is_artifact(name):
             log_state.enable_artifact(name)
-        elif name == "all" or name in LOG_GROUPS:
+        elif name == "all" or name in log_registry.log_groups:
             continue
         elif _is_valid_module(name):
             if not _has_registered_parent(name):

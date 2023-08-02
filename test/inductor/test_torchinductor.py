@@ -2831,7 +2831,6 @@ class CommonTemplate:
         )
 
     # From yolov3
-    @skipIfRocm
     def test_batch_norm_2d_2(self):
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -4110,7 +4109,7 @@ class CommonTemplate:
         inputs = (rand_strided((8,), (1,), device=self.device),)
         self.assertTrue(same(fn(*inputs), 2 * inputs[0]))
 
-    @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
+    @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_strided_inputs(self):
         @torch._dynamo.optimize("inductor")
@@ -4123,7 +4122,7 @@ class CommonTemplate:
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
-    @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
+    @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_input_mutation1(self):
         def fn(a):
@@ -4962,7 +4961,7 @@ class CommonTemplate:
         def fn(a):
             return torch.nn.functional.dropout(a, 0.55, True)
 
-        for cg in [False, True] if not torch.version.hip else [False]:
+        for cg in [False, True]:
             with patch.object(config.triton, "cudagraphs", cg):
                 torch._dynamo.reset()
 
@@ -5963,9 +5962,7 @@ class CommonTemplate:
         else:
             contexts = [
                 contextlib.nullcontext,
-                lambda: config.patch(
-                    {"triton.cudagraphs": True if not torch.version.hip else False}
-                ),
+                lambda: config.patch({"triton.cudagraphs": True}),
             ]
 
         for context in contexts:
