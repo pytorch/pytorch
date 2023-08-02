@@ -1,7 +1,8 @@
 import torch
 
+
 class WrapperModule:
-    """ Wraps the instance of wrapped_type.
+    """Wraps the instance of wrapped_type.
     For graph_mode traces the instance of wrapped_type.
     Randomaly initializes num_params tensors with single float element.
     Args:
@@ -19,6 +20,7 @@ class WrapperModule:
         save:
             - In graph mode, whether graph is to be saved.
     """
+
     def __init__(self, wrapped_type, module_config, debug, save=False):
         pt_fn = module_config.pt_fn
         self.module = wrapped_type(pt_fn)
@@ -32,8 +34,10 @@ class WrapperModule:
                 file_name = self.module_name + "_" + pt_fn.__name__ + ".pt"
                 torch.jit.save(self.module, file_name)
                 print(f"Generated graph is saved in {file_name}")
-        print(f"Benchmarking module {self.module_name} with fn {pt_fn.__name__}: Graph mode:{module_config.graph_mode}")
-        if (debug and isinstance(self.module, torch.jit.ScriptModule)):
+        print(
+            f"Benchmarking module {self.module_name} with fn {pt_fn.__name__}: Graph mode:{module_config.graph_mode}"
+        )
+        if debug and isinstance(self.module, torch.jit.ScriptModule):
             print(self.module.graph)
             print(self.module.code)
 
