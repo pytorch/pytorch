@@ -10,6 +10,7 @@ from typing import (
     runtime_checkable,
     Set,
     Tuple,
+    Type,
     TYPE_CHECKING,
     Union,
 )
@@ -81,6 +82,10 @@ def from_torch_dtype_to_abbr(dtype: Optional[torch.dtype]) -> str:
     return _TORCH_DTYPE_TO_ABBREVIATION.get(dtype, "")
 
 
+def from_scalar_type_to_torch_dtype(scalar_type: type) -> Optional[torch.dtype]:
+    return _SCALAR_TYPE_TO_TORCH_DTYPE.get(scalar_type)
+
+
 # NOTE: this is a mapping from torch dtype to a set of compatible onnx types
 # It's used in dispatcher to find the best match overload for the input dtypes
 _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: Dict[
@@ -105,15 +110,28 @@ _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: Dict[
     torch.complex128: {"tensor(double)"},
 }
 
+_PYTHON_TYPE_TO_TORCH_DTYPE = {
+    bool: torch.bool,
+    int: torch.int64,
+    float: torch.float32,
+    complex: torch.complex32,
+}
+
 _COMPLEX_TO_FLOAT: Dict[torch.dtype, torch.dtype] = {
     torch.complex32: torch.float16,
     torch.complex64: torch.float32,
     torch.complex128: torch.float64,  # NOTE: ORT doesn't support torch.float64
 }
+
 _SYM_TYPE_TO_TORCH_DTYPE = {
     torch.SymInt: torch.int64,
     torch.SymFloat: torch.float32,
     torch.SymBool: torch.bool,
+}
+
+_SCALAR_TYPE_TO_TORCH_DTYPE: Dict[Type, torch.dtype] = {
+    **_PYTHON_TYPE_TO_TORCH_DTYPE,
+    **_SYM_TYPE_TO_TORCH_DTYPE,
 }
 
 _TORCH_DTYPE_TO_ABBREVIATION = {

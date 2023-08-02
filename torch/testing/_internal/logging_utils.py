@@ -4,6 +4,7 @@ import os
 import contextlib
 import torch._logging
 import torch._logging._internal
+from torch._dynamo.utils import LazyString
 import logging
 
 @contextlib.contextmanager
@@ -122,6 +123,23 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
         cls._exit_stack.close()
         torch._logging._internal.log_state.clear()
         torch._logging._init_logs()
+
+    def getRecord(self, records, m):
+        record = None
+        for r in records:
+            # NB: not r.msg because it looks like 3.11 changed how they
+            # structure log records
+            if m in r.getMessage():
+                self.assertIsNone(
+                    record,
+                    msg=LazyString(
+                        lambda: f"multiple matching records: {record} and {r} among {records}"
+                    ),
+                )
+                record = r
+        if record is None:
+            self.fail(f"did not find record with {m} among {records}")
+        return record
 
     # This patches the emit method of each handler to gather records
     # as they are emitted
