@@ -16,10 +16,16 @@ from torch._inductor.codegen.common import (
 )
 from torch.testing._internal.common_utils import IS_MACOS
 
-from .extension_backends.extension_codegen_backend import (
-    ExtensionScheduling,
-    ExtensionWrapperCodegen,
-)
+try:
+    from .extension_backends.extension_codegen_backend import (
+        ExtensionScheduling,
+        ExtensionWrapperCodegen,
+    )
+except ImportError:
+    from extension_backends.extension_codegen_backend import (
+        ExtensionScheduling,
+        ExtensionWrapperCodegen,
+    )
 
 try:
     try:
