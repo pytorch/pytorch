@@ -6696,9 +6696,7 @@ class CommonTemplate:
 
     @patch.object(config.triton, "autotune_pointwise", True)
     def test_inductor_bucketize_add_autotune(self):
-        """
-        Causes a @pointwise(size_hints) where size_hints is 2D
-        """
+        # Causes a @pointwise(size_hints) where size_hints is 2D
 
         def fn(input, offsets, add_value):
             return torch.ops.prims._inductor_bucketize(input, offsets) + add_value
