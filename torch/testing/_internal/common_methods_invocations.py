@@ -20893,11 +20893,3 @@ def skipOps(test_case_name, base_test_name, to_skip):
     def wrapped(fn):
         return fn
     return wrapped
-
-def skipOpsIfTorchDynamo(test_case_name, base_test_name, to_skip):
-    if TEST_WITH_TORCHDYNAMO:
-        return skipOps(test_case_name, base_test_name, to_skip)
-
-    def wrapped(fn):
-        return fn
-    return wrapped
