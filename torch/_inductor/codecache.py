@@ -956,7 +956,13 @@ def compile_file(input_path, output_path, cmd) -> None:
         else:
             subprocess.check_output(cmd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
-        raise exc.CppCompileError(cmd, e.output) from e
+        output = e.output.decode("utf-8")
+        if "'omp.h' file not found" in output and sys.platform == "darwin":
+            output = (
+                output
+                + "\n\nTry setting OMP_PREFIX; see https://github.com/pytorch/pytorch/issues/95708"
+            )
+        raise exc.CppCompileError(cmd, output) from e
 
 
 class CppCodeCache:
