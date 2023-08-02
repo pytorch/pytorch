@@ -60,16 +60,16 @@ class TestPaternMatcher(TestCase):
 
         args_list = [
             (
-                torch.randn(8,8, device="cuda"),
-                torch.randint(-128, 127, (8,8), dtype=torch.int8, device="cuda")
+                torch.randn(8, 8, device="cuda"),
+                torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
             ),
             (
-                torch.randn(8,2, device="cuda", dtype=torch.bfloat16),
-                torch.randint(-128, 127, (2,8), dtype=torch.int8, device="cuda")
+                torch.randn(8, 2, device="cuda", dtype=torch.bfloat16),
+                torch.randint(-128, 127, (2, 8), dtype=torch.int8, device="cuda"),
             ),
             (
-                torch.randn(8,5, device="cuda", dtype=torch.float16),
-                torch.randint(0, 255, (5,2), dtype=torch.uint8, device="cuda")
+                torch.randn(8, 5, device="cuda", dtype=torch.float16),
+                torch.randint(0, 255, (5, 2), dtype=torch.uint8, device="cuda"),
             ),
         ]
 
@@ -87,24 +87,24 @@ class TestPaternMatcher(TestCase):
     @inductor_config.patch(use_mixed_mm=True)
     def test_mixed_mm2(self):
         def fn(a, b, c, d):
-            return torch.mm(a, b.to(a.dtype))*c+d
+            return torch.mm(a, b.to(a.dtype)) * c + d
 
         args_list = [
             (
-                torch.randn(8,8, device="cuda"),
-                torch.randint(-128, 127, (8,8), dtype=torch.int8, device="cuda"),
+                torch.randn(8, 8, device="cuda"),
+                torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
                 torch.randn(8, device="cuda"),
-                torch.randn(8, device="cuda")
+                torch.randn(8, device="cuda"),
             ),
             (
-                torch.randn(8,2, device="cuda", dtype=torch.bfloat16),
-                torch.randint(-128, 127, (2,8), dtype=torch.int8, device="cuda"),
+                torch.randn(8, 2, device="cuda", dtype=torch.bfloat16),
+                torch.randint(-128, 127, (2, 8), dtype=torch.int8, device="cuda"),
                 torch.randn(8, device="cuda", dtype=torch.bfloat16),
                 torch.randn(8, device="cuda", dtype=torch.bfloat16),
             ),
             (
-                torch.randn(8,5, device="cuda", dtype=torch.float16),
-                torch.randint(0, 255, (5,2), dtype=torch.uint8, device="cuda"),
+                torch.randn(8, 5, device="cuda", dtype=torch.float16),
+                torch.randint(0, 255, (5, 2), dtype=torch.uint8, device="cuda"),
                 torch.randn(2, device="cuda", dtype=torch.float16),
                 torch.randn(2, device="cuda", dtype=torch.float16),
             ),
@@ -125,8 +125,8 @@ class TestPaternMatcher(TestCase):
             return torch.mm(a, b.to(a.dtype))
 
         args = (
-            torch.randn(8,8, device="cuda"),
-            torch.randint(-128, 127, (8,8), dtype=torch.int8, device="cuda")
+            torch.randn(8, 8, device="cuda"),
+            torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
         )
         torch._dynamo.reset()
         counters.clear()
