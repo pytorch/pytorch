@@ -187,7 +187,7 @@ function calculate_fragmentation(blocks, sorted_segments) {
       sum_squared_free += (seg.addr + seg.size - addr) ** 2;
     }
   }
-  console.log(sum_squared_free / (total_size**2))
+  console.log(sum_squared_free / total_size ** 2);
 }
 
 function MemoryView(outer, stack_info, snapshot, device) {
@@ -210,7 +210,13 @@ function MemoryView(outer, stack_info, snapshot, device) {
       continue;
     }
     sorted_segments.push(
-      Segment(seg.address, seg.total_size, seg.stream, seg.frames || [], seg.version),
+      Segment(
+        seg.address,
+        seg.total_size,
+        seg.stream,
+        seg.frames || [],
+        seg.version,
+      ),
     );
     for (const b of seg.blocks) {
       if (b.state !== 'active_pending_free' && b.state !== 'active_allocated') {
@@ -504,7 +510,9 @@ function MemoryView(outer, stack_info, snapshot, device) {
         .enter()
         .append('rect')
         .attr('x', x =>
-          xScale(x.segment.offset + (x.addr - x.segment.addr) + x.requested_size),
+          xScale(
+            x.segment.offset + (x.addr - x.segment.addr) + x.requested_size,
+          ),
         )
         .attr('y', x => yScale(x.segment.row))
         .attr('width', x => xScale(x.size - x.requested_size))
@@ -642,7 +650,7 @@ function annotate_snapshot(snapshot) {
           break;
       }
       if ('category' in t && !snapshot.categories.includes(t.category)) {
-        snapshot.categories.push(t.category)
+        snapshot.categories.push(t.category);
       }
       t.idx = new_trace.length;
       new_trace.push(t);
@@ -672,8 +680,11 @@ function annotate_snapshot(snapshot) {
     }
   }
 
-  if (snapshot.categories.length > 0 && !snapshot.categories.includes('unknown')) {
-    snapshot.categores.push('unknown')
+  if (
+    snapshot.categories.length > 0 &&
+    !snapshot.categories.includes('unknown')
+  ) {
+    snapshot.categores.push('unknown');
   }
 }
 
@@ -865,19 +876,19 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
   }
 
   function add_allocation(elem) {
-    let element_obj = elements[elem]
+    const element_obj = elements[elem];
     const size = element_obj.size;
     current.push(elem);
-    let color = elem
+    let color = elem;
     if (snapshot.categories.length > 0) {
-      color = snapshot.categories.indexOf(element_obj.category || 'unknown')
+      color = snapshot.categories.indexOf(element_obj.category || 'unknown');
     }
     const e = {
       elem,
       timesteps: [timestep],
       offsets: [total_mem],
       size,
-      color: color,
+      color,
     };
     current_data.push(e);
     data.push(e);
@@ -1156,27 +1167,31 @@ function MiniMap(mini_svg, plot, data, left_pad, width, height = 70) {
 }
 
 function Legend(plot_svg, categories) {
-    let xstart = 100
-    let ystart = 5
-    plot_svg.append('g').selectAll('rect')
+  const xstart = 100;
+  const ystart = 5;
+  plot_svg
+    .append('g')
+    .selectAll('rect')
     .data(categories)
     .enter()
     .append('rect')
     .attr('x', (c, i) => xstart)
-    .attr('y', (c, i) => ystart + i*15)
+    .attr('y', (c, i) => ystart + i * 15)
     .attr('width', 10)
     .attr('height', 10)
-    .attr('fill', (c, i) => schemeTableau10[i % schemeTableau10.length])
-    plot_svg.append('g').selectAll('text')
+    .attr('fill', (c, i) => schemeTableau10[i % schemeTableau10.length]);
+  plot_svg
+    .append('g')
+    .selectAll('text')
     .data(categories)
     .enter()
     .append('text')
     .attr('x', (c, i) => xstart + 20)
-    .attr('y', (c, i) => ystart + i*15 + 8)
-    .attr("font-family", "helvetica")
+    .attr('y', (c, i) => ystart + i * 15 + 8)
+    .attr('font-family', 'helvetica')
     .attr('font-size', 10)
-    .text((c) => c)
-    return {}
+    .text(c => c);
+  return {};
 }
 
 function create_trace_view(
@@ -1219,7 +1234,7 @@ function create_trace_view(
   const plot = MemoryPlot(plot_svg, data, left_pad, 1024, 576);
 
   if (snapshot.categories.length !== 0) {
-      Legend(plot_svg.append('g'), snapshot.categories);
+    Legend(plot_svg.append('g'), snapshot.categories);
   }
 
   const mini_svg = grid_container
@@ -1474,28 +1489,33 @@ function unpickle(buffer) {
 
 function decode_base64(input) {
   function decode_char(i, shift) {
-    const nChr = input.charCodeAt(i)
-    const r = nChr > 64 && nChr < 91
-      ? nChr - 65
-      : nChr > 96 && nChr < 123
-      ? nChr - 71
-      : nChr > 47 && nChr < 58
-      ? nChr + 4
-      : nChr === 43
-      ? 62
-      : nChr === 47
-      ? 63
-      : 0;
-    return r << shift
+    const nChr = input.charCodeAt(i);
+    const r =
+      nChr > 64 && nChr < 91
+        ? nChr - 65
+        : nChr > 96 && nChr < 123
+        ? nChr - 71
+        : nChr > 47 && nChr < 58
+        ? nChr + 4
+        : nChr === 43
+        ? 62
+        : nChr === 47
+        ? 63
+        : 0;
+    return r << shift;
   }
-  let output = new Uint8Array(input.length / 4 * 3)
+  const output = new Uint8Array((input.length / 4) * 3);
   for (let i = 0, j = 0; i < input.length; i += 4, j += 3) {
-      let u24 = decode_char(i, 18) + decode_char(i + 1, 12) + decode_char(i + 2, 6) + decode_char(i + 3)
-    output[j] = u24 >> 16
-    output[j+1] = (u24 >> 8) & 0xFF
-    output[j+2] = u24 & 0xFF;
+    const u24 =
+      decode_char(i, 18) +
+      decode_char(i + 1, 12) +
+      decode_char(i + 2, 6) +
+      decode_char(i + 3);
+    output[j] = u24 >> 16;
+    output[j + 1] = (u24 >> 8) & 0xff;
+    output[j + 2] = u24 & 0xff;
   }
-  return output.buffer
+  return output.buffer;
 }
 
 const kinds = {
@@ -1510,6 +1530,17 @@ const snapshot_to_loader = {};
 const snapshot_to_url = {};
 const selection_to_div = {};
 
+const style = `
+pre {
+  margin: 0px;
+}
+html, body {
+  height: 100%;
+  overflow: clip;
+}`;
+
+const head = d3.select('head');
+head.append('style').text(style);
 const body = d3.select('body');
 const snapshot_select = body.append('select');
 const view = body.append('select');
@@ -1583,7 +1614,7 @@ body.on('dragover', e => {
 body.on('drop', () => {
   console.log(event.dataTransfer.files);
   Array.from(event.dataTransfer.files).forEach(file => {
-    add_snapshot(file.name, (unique_name) => {
+    add_snapshot(file.name, unique_name => {
       const reader = new FileReader();
       reader.onload = e => {
         finished_loading(unique_name, e.target.result);
@@ -1592,13 +1623,16 @@ body.on('drop', () => {
     });
   });
   event.preventDefault();
-  snapshot_select.node().selectedIndex = snapshot_select.node().options.length - 1;
+  snapshot_select.node().selectedIndex =
+    snapshot_select.node().options.length - 1;
   selected_change();
 });
 
 selection_to_div[''] = body
   .append('div')
-  .text('Drag and drop a file to load a local snapshot. No data from the snapshot is uploaded.');
+  .text(
+    'Drag and drop a file to load a local snapshot. No data from the snapshot is uploaded.',
+  );
 
 let next_unique_n = 1;
 function add_snapshot(name, loader) {
@@ -1616,7 +1650,7 @@ function finished_loading(name, data) {
 
 export function add_remote_files(files) {
   files.forEach(f =>
-    add_snapshot(f.name, (unique_name) => {
+    add_snapshot(f.name, unique_name => {
       console.log('fetching', f.url);
       fetch(f.url)
         .then(x => x.arrayBuffer())
@@ -1629,10 +1663,10 @@ export function add_remote_files(files) {
 }
 
 export function add_local_files(files, view_value) {
-  view.node().value = view_value
+  view.node().value = view_value;
   files.forEach(f =>
-    add_snapshot(f.name, (unique_name) => {
-      finished_loading(unique_name, decode_base64(f.base64))
+    add_snapshot(f.name, unique_name => {
+      finished_loading(unique_name, decode_base64(f.base64));
     }),
   );
   if (files.length > 0) {
