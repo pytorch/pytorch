@@ -68,8 +68,7 @@ ARG CUDA_VERSION=11.7
 ARG CUDA_CHANNEL=nvidia
 ARG INSTALL_CHANNEL=pytorch-nightly
 # Automatically set by buildx
-RUN /opt/conda/bin/conda install -y conda=23.5.2
-RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION}
+RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION} conda=23.5.2
 ARG TARGETPLATFORM
 
 RUN echo ${TARGETPLATFORM}
