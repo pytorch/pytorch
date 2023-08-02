@@ -737,35 +737,6 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 return TupleVariable([TupleVariable(items), aux])
 
 
-def to_python_ints(const_or_tuple_variable, tx):
-    from . import ConstantVariable
-
-    if not isinstance(const_or_tuple_variable, (ConstantVariable, TupleVariable)):
-        raise UserError(
-            UserErrorType.INVALID_INPUT,
-            f"argnums is expected to be int or tuple of ints. Got {const_or_tuple_variable}.",
-        )
-
-    if isinstance(const_or_tuple_variable, ConstantVariable):
-        if not isinstance(const_or_tuple_variable.value, (int, tuple)):
-            raise UserError(
-                UserErrorType.INVALID_INPUT,
-                f"argnums is expected to be int or tuple of ints. Got {const_or_tuple_variable}.",
-            )
-        return const_or_tuple_variable.value
-    else:
-        const_vars = const_or_tuple_variable.unpack_var_sequence(tx)
-        if not all(
-            isinstance(var, ConstantVariable) and isinstance(var.value, int)
-            for var in const_vars
-        ):
-            raise UserError(
-                UserErrorType.INVALID_INPUT,
-                f"argnums is expected to contain int only. Got {const_vars}.",
-            )
-        return tuple(var.value for var in const_vars)
-
-
 class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -790,6 +761,11 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         randomness = args[3]
         chunk_size = args[4]
         batch_input_args = args[5:]
+
+        if isinstance(in_dims, SymNodeVariable) or isinstance(
+            out_dims, SymNodeVariable
+        ):
+            unimplemented("torch.func.vmap: in_dims or out_dims is symbolic.")
 
         if kwargs:
             unimplemented(
@@ -882,6 +858,26 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         actual_in_dims = tuple(
             pytree.tree_map(lambda x: x.value, updated_in_dims.items)
         )
+
+        def to_python_ints(const_or_tuple_variable, tx):
+            if not isinstance(
+                const_or_tuple_variable, (ConstantVariable, TupleVariable)
+            ):
+                unimplemented("torch.func.vmap: in_dims is not int or tuple")
+
+            if isinstance(const_or_tuple_variable, ConstantVariable):
+                if not isinstance(const_or_tuple_variable.value, (int, tuple)):
+                    unimplemented("torch.func.vmap: in_dims is not int or tuple")
+                return const_or_tuple_variable.value
+            else:
+                const_vars = const_or_tuple_variable.unpack_var_sequence(tx)
+                if not all(
+                    isinstance(var, ConstantVariable) and isinstance(var.value, int)
+                    for var in const_vars
+                ):
+                    unimplemented("torch.func.vmap: in_dims is not int or tuple")
+                return tuple(var.value for var in const_vars)
+
         out_dims_v = to_python_ints(out_dims, tx)
         example_value = torch._functorch.vmap.vmap_impl(
             torch.fx.GraphModule(tx.output.nn_modules, body_graph),

@@ -2603,6 +2603,26 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
+    def test_vmap_symint_in_dims_graph_break(self):
+        counters.clear()
+
+        def identity(x):
+            return x
+
+        def wrapper_fn(x, in_dims):
+            return torch.func.vmap(identity, in_dims)(x)
+
+        x = torch.randn(3, 3, 3, 3)
+        opt = torch.compile(wrapper_fn, backend="eager", fullgraph=False, dynamic=True)
+        expected = wrapper_fn(x, 0), wrapper_fn(x, 1), wrapper_fn(x, 2)
+        actual = opt(x, 0), opt(x, 1), opt(x, 2)
+        self.assertEqual(expected, actual)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"torch.func.vmap: in_dims or out_dims is symbolic.": 2},
+        )
+
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
