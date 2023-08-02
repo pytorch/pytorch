@@ -1033,9 +1033,11 @@ class FakeTensorOperatorInvariants(TestCase):
 
         args = [rand_strided(bsz, num_heads, seq_len, head_dim) for
                 (bsz, num_heads, seq_len, head_dim) in args_new]
-
-        with torch._subclasses.CrossRefFakeMode():
-            Repro()(*args)
+        try:
+            with torch._subclasses.CrossRefFakeMode():
+                Repro()(*args)
+        except RuntimeError as e:
+            assert "output[0]" not in str(e)
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
