@@ -519,7 +519,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             # TODO: don't readd symint if we already have it in graph
             # (this is harmless because we do remove the unused ones later)
             proxy = self.root_tracer.create_graph_input(
-                str(s.node.expr), torch.SymInt, before=True,
+                str(s.node.expr),
+                torch.SymInt,
+                before=True,
                 source=prop(arg.source),
             )
             proxy.node.meta["grapharg"] = GraphArg(
