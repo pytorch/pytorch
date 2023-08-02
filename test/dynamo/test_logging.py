@@ -12,6 +12,8 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.distributed as dist
 
+from torch._dynamo.testing import skipIfNotPy311
+
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_utils import find_free_port
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -108,22 +110,22 @@ class LoggingTests(LoggingTestCase):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(torch.ones(1000, 1000))
         self.assertEqual(len([r for r in records if ".__bytecode" in r.name]), 0)
-        self.assertEqual(len([r for r in records if ".__trace_source" in r.name]), 0)
+        self.assertEqual(len([r for r in records if ".__output_code" in r.name]), 0)
 
-    @make_logging_test(dynamo=logging.ERROR)
+    @make_logging_test()
     def test_dynamo_error(self, records):
         try:
             fn_opt = torch._dynamo.optimize("inductor")(dynamo_error_fn)
             fn_opt(*ARGS)
         except Exception:
             pass
-        self.assertEqual(len(records), 1)
+        self.assertEqual(len(records), 2)
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
     test_inductor_debug = within_range_record_test(3, 15, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 4, inductor=logging.INFO)
 
-    @make_logging_test(dynamo=logging.ERROR)
+    @make_logging_test()
     def test_inductor_error(self, records):
         exitstack = contextlib.ExitStack()
         import torch._inductor.lowering
@@ -146,7 +148,7 @@ class LoggingTests(LoggingTestCase):
             fn_opt(*ARGS)
         except Exception:
             pass
-        self.assertEqual(len(records), 1)
+        self.assertEqual(len(records), 2)
         self.assertIsInstance(records[0].msg, str)
 
         exitstack.close()
@@ -157,7 +159,7 @@ class LoggingTests(LoggingTestCase):
     def test_ddp_graphs(self, records):
         class ToyModel(torch.nn.Module):
             def __init__(self):
-                super(ToyModel, self).__init__()
+                super().__init__()
                 self.layers = torch.nn.Sequential(
                     torch.nn.Linear(1024, 1024),
                     torch.nn.Linear(1024, 1024),
@@ -257,6 +259,24 @@ class LoggingTests(LoggingTestCase):
         self.assertIsNotNone(handler)
         self.assertIn("[INFO]", handler.format(records[0]))
         self.assertEqual("custom format", handler.format(records[1]))
+
+    @make_logging_test(dynamo=logging.INFO)
+    def test_multiline_format(self, records):
+        dynamo_log = logging.getLogger(torch._dynamo.__name__)
+        dynamo_log.info("test\ndynamo")
+        dynamo_log.info("%s", "test\ndynamo")
+        dynamo_log.info("test\n%s", "test\ndynamo")
+        self.assertEqual(len(records), 3)
+        # unfortunately there's no easy way to test the final formatted log other than
+        # to ask the dynamo logger's handler to format it.
+        for handler in dynamo_log.handlers:
+            if torch._logging._internal._is_torch_handler(handler):
+                break
+        self.assertIsNotNone(handler)
+        for record in records:
+            r = handler.format(record)
+            for l in r.splitlines():
+                self.assertIn("[INFO]", l)
 
     test_trace_source_simple = within_range_record_test(1, 100, trace_source=True)
 
@@ -367,6 +387,131 @@ class LoggingTests(LoggingTestCase):
             if "concrete" in line:
                 self.assertIsNotNone(re.search(r"\(concrete\): \(\d+, \d+\)", line))
 
+    def test_invalid_artifact_flag(self):
+        with self.assertRaises(ValueError):
+            torch._logging.set_logs(aot_graphs=5)
+
+    @requires_distributed()
+    def test_distributed_rank_logging(self):
+        env = dict(os.environ)
+        env["TORCH_LOGS"] = "dynamo"
+        stdout, stderr = self.run_process_no_exception(
+            """\
+import torch.distributed as dist
+import logging
+from torch.testing._internal.distributed.fake_pg import FakeStore
+store = FakeStore()
+dist.init_process_group("fake", rank=0, world_size=2, store=store)
+dynamo_log = logging.getLogger("torch._dynamo")
+dynamo_log.info("woof")
+print("arf")
+""",
+            env=env,
+        )
+        self.assertIn("[rank0]:", stderr.decode("utf-8"))
+
+    @skipIfNotPy311
+    @make_logging_test(trace_call=True)
+    def test_trace_call(self, records):
+        def fn(x, y):
+            return (x * 2) @ (y * 3)
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(torch.randn(10, 20), torch.randn(20, 30))
+
+        self.assertEqual(len(records), 3)
+        # only get last 2 lines
+        messages = [
+            "\n".join(record.getMessage().split("\n")[-2:]) for record in records
+        ]
+        self.assertExpectedInline(
+            messages[0],
+            """\
+            return (x * 2) @ (y * 3)
+                    ~~^~~""",
+        )
+        self.assertExpectedInline(
+            messages[1],
+            """\
+            return (x * 2) @ (y * 3)
+                              ~~^~~""",
+        )
+        self.assertExpectedInline(
+            messages[2],
+            """\
+            return (x * 2) @ (y * 3)
+                   ~~~~~~~~^~~~~~~~~""",
+        )
+
+    @skipIfNotPy311
+    @make_logging_test(trace_call=True)
+    def test_trace_call_inline_call(self, records):
+        def g(x):
+            return x * 2
+
+        def f(x):
+            return g(g(x))
+
+        fn_opt = torch._dynamo.optimize("eager")(f)
+        fn_opt(torch.randn(3, 3))
+
+        self.assertEqual(len(records), 4)
+        messages = [
+            "\n".join(record.getMessage().split("\n")[-2:]) for record in records
+        ]
+        self.assertExpectedInline(
+            messages[0],
+            """\
+            return g(g(x))
+                     ~^^^""",
+        )
+        self.assertExpectedInline(
+            messages[1],
+            """\
+            return x * 2
+                   ~~^~~""",
+        )
+        self.assertExpectedInline(
+            messages[2],
+            """\
+            return g(g(x))
+                   ~^^^^^^""",
+        )
+        self.assertExpectedInline(
+            messages[3],
+            """\
+            return x * 2
+                   ~~^~~""",
+        )
+
+    @skipIfNotPy311
+    @make_logging_test(trace_call=True)
+    def test_trace_call_graph_break(self, records):
+        def fn(x):
+            x = x * 2
+            torch._dynamo.graph_break()
+            return x * 3
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(torch.randn(3, 3))
+
+        self.assertEqual(len(records), 2)
+        messages = [
+            "\n".join(record.getMessage().split("\n")[-2:]) for record in records
+        ]
+        self.assertExpectedInline(
+            messages[0],
+            """\
+            x = x * 2
+                ~~^~~""",
+        )
+        self.assertExpectedInline(
+            messages[1],
+            """\
+            return x * 3
+                   ~~^~~""",
+        )
+
 
 # single record tests
 exclusions = {
@@ -380,6 +525,7 @@ exclusions = {
     "perf_hints",
     "not_implemented",
     "trace_source",
+    "trace_call",
     "custom_format_test_artifact",
 }
 for name in torch._logging._internal.log_registry.artifact_names:

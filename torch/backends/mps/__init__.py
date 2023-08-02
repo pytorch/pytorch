@@ -13,13 +13,13 @@ def is_built() -> bool:
     return torch._C._has_mps
 
 
-@_lru_cache()
+@_lru_cache
 def is_available() -> bool:
     r"""Returns a bool indicating if MPS is currently available."""
     return torch._C._mps_is_available()
 
 
-@_lru_cache()
+@_lru_cache
 def is_macos13_or_newer(minor: int = 0) -> bool:
     r"""Returns a bool indicating whether MPS is running on MacOS 13 or newer."""
     return torch._C._mps_is_on_macos_13_or_newer(minor)

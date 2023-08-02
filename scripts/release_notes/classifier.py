@@ -1,20 +1,20 @@
 import argparse
-from pathlib import Path
-import torch
-import torchtext
-from torchtext.functional import to_tensor
-import torch.nn as nn
-import torch.nn.functional as F
-from typing import List, Dict
-import pandas as pd
-from dataclasses import dataclass
 import math
 import pickle
 import random
-from tqdm import tqdm
+from dataclasses import dataclass
 from itertools import chain
+from pathlib import Path
+from typing import Dict, List
 
 import common
+import pandas as pd
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torchtext
+from torchtext.functional import to_tensor
+from tqdm import tqdm
 
 
 XLMR_BASE = torchtext.models.XLMR_BASE_ENCODER
@@ -24,6 +24,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 HAS_IMBLEARN = False
 try:
     import imblearn
+
     HAS_IMBLEARN = True
 except ImportError:
     HAS_IMBLEARN = False
@@ -37,12 +38,14 @@ UNKNOWN_TOKEN = "<Unknown>"
 
 
 def truncate_file(file: Path, max_len: int = 5):
-    return ('/').join(file.parts[:max_len])
+    return ("/").join(file.parts[:max_len])
 
 
 def build_file_set(all_files: List[Path], max_len: int):
     truncated_files = [truncate_file(file, max_len) for file in all_files]
     return set(truncated_files)
+
+
 @dataclass
 class CommitClassifierInputs:
     title: List[str]
@@ -62,7 +65,13 @@ class CategoryConfig:
 
 
 class CommitClassifier(nn.Module):
-    def __init__(self, encoder_base: torchtext.models.XLMR_BASE_ENCODER, author_map: Dict[str, int], file_map: [str, int], config: CategoryConfig):
+    def __init__(
+        self,
+        encoder_base: torchtext.models.XLMR_BASE_ENCODER,
+        author_map: Dict[str, int],
+        file_map: [str, int],
+        config: CategoryConfig,
+    ):
         super().__init__()
         self.encoder = encoder_base.get_model().requires_grad_(False)
         self.transform = encoder_base.transform()
@@ -72,7 +81,9 @@ class CommitClassifier(nn.Module):
         self.num_authors = len(author_map)
         self.num_files = len(file_map)
         self.embedding_table = nn.Embedding(self.num_authors, config.embedding_dim)
-        self.file_embedding_bag = nn.EmbeddingBag(self.num_files, config.file_embedding_dim, mode='sum')
+        self.file_embedding_bag = nn.EmbeddingBag(
+            self.num_files, config.file_embedding_dim, mode="sum"
+        )
         self.dense_title = nn.Linear(config.input_dim, config.inner_dim)
         self.dense_files = nn.Linear(config.file_embedding_dim, config.inner_dim)
         self.dense_author = nn.Linear(config.embedding_dim, config.inner_dim)
@@ -97,10 +108,22 @@ class CommitClassifier(nn.Module):
         files: list[str] = input_batch.files
         batch_file_indexes = []
         for file in files:
-            paths = [truncate_file(Path(file_part), MAX_LEN_FILE) for file_part in file.split(" ")]
-            batch_file_indexes.append([self.file_map.get(file, self.file_map[UNKNOWN_TOKEN]) for file in paths])
+            paths = [
+                truncate_file(Path(file_part), MAX_LEN_FILE)
+                for file_part in file.split(" ")
+            ]
+            batch_file_indexes.append(
+                [
+                    self.file_map.get(file, self.file_map[UNKNOWN_TOKEN])
+                    for file in paths
+                ]
+            )
 
-        flat_indexes = torch.tensor(list(chain.from_iterable(batch_file_indexes)), dtype=torch.long, device=device)
+        flat_indexes = torch.tensor(
+            list(chain.from_iterable(batch_file_indexes)),
+            dtype=torch.long,
+            device=device,
+        )
         offsets = [0]
         offsets.extend(len(files) for files in batch_file_indexes[:-1])
         offsets = torch.tensor(offsets, dtype=torch.long, device=device)
@@ -114,7 +137,10 @@ class CommitClassifier(nn.Module):
 
         # Add author embedding
         authors: List[str] = input_batch.author
-        author_ids = [self.author_map.get(author, self.author_map[UNKNOWN_TOKEN]) for author in authors]
+        author_ids = [
+            self.author_map.get(author, self.author_map[UNKNOWN_TOKEN])
+            for author in authors
+        ]
         author_ids = torch.tensor(author_ids).to(device)
         author_embed = self.embedding_table(author_ids)
         author_embed = self.dense_author(author_embed)
@@ -138,18 +164,24 @@ class CommitClassifier(nn.Module):
 
 
 def get_train_val_data(data_folder: Path, regen_data: bool, train_percentage=0.95):
-    if not regen_data and Path(data_folder / "train_df.csv").exists() and Path(data_folder / "val_df.csv").exists():
+    if (
+        not regen_data
+        and Path(data_folder / "train_df.csv").exists()
+        and Path(data_folder / "val_df.csv").exists()
+    ):
         train_data = pd.read_csv(data_folder / "train_df.csv")
         val_data = pd.read_csv(data_folder / "val_df.csv")
         return train_data, val_data
     else:
         print("Train, Val, Test Split not found generating from scratch.")
         commit_list_df = pd.read_csv(data_folder / "commitlist.csv")
-        test_df = commit_list_df[commit_list_df['category'] == 'Uncategorized']
-        all_train_df = commit_list_df[commit_list_df['category'] != 'Uncategorized']
+        test_df = commit_list_df[commit_list_df["category"] == "Uncategorized"]
+        all_train_df = commit_list_df[commit_list_df["category"] != "Uncategorized"]
         # We are going to drop skip from training set since it is so imbalanced
-        print("We are removing skip categories, YOU MIGHT WANT TO CHANGE THIS, BUT THIS IS A MORE HELPFUL CLASSIFIER FOR LABELING.")
-        all_train_df = all_train_df[all_train_df['category'] != 'skip']
+        print(
+            "We are removing skip categories, YOU MIGHT WANT TO CHANGE THIS, BUT THIS IS A MORE HELPFUL CLASSIFIER FOR LABELING."
+        )
+        all_train_df = all_train_df[all_train_df["category"] != "skip"]
         all_train_df = all_train_df.sample(frac=1).reset_index(drop=True)
         split_index = math.floor(train_percentage * len(all_train_df))
         train_df = all_train_df[:split_index]
@@ -165,30 +197,32 @@ def get_train_val_data(data_folder: Path, regen_data: bool, train_percentage=0.9
 
 def get_author_map(data_folder: Path, regen_data, assert_stored=False):
     if not regen_data and Path(data_folder / "author_map.pkl").exists():
-        with open(data_folder / "author_map.pkl", 'rb') as f:
+        with open(data_folder / "author_map.pkl", "rb") as f:
             return pickle.load(f)
     else:
         if assert_stored:
             raise FileNotFoundError(
-                "Author map not found, you are loading for inference you need to have an author map!")
+                "Author map not found, you are loading for inference you need to have an author map!"
+            )
         print("Regenerating Author Map")
         all_data = pd.read_csv(data_folder / "commitlist.csv")
         authors = all_data.author.unique().tolist()
         authors.append(UNKNOWN_TOKEN)
         author_map = {author: i for i, author in enumerate(authors)}
-        with open(data_folder / "author_map.pkl", 'wb') as f:
+        with open(data_folder / "author_map.pkl", "wb") as f:
             pickle.dump(author_map, f)
         return author_map
 
 
-
 def get_file_map(data_folder: Path, regen_data, assert_stored=False):
     if not regen_data and Path(data_folder / "file_map.pkl").exists():
-        with open(data_folder / "file_map.pkl", 'rb') as f:
+        with open(data_folder / "file_map.pkl", "rb") as f:
             return pickle.load(f)
     else:
         if assert_stored:
-            raise FileNotFoundError("File map not found, you are loading for inference you need to have a file map!")
+            raise FileNotFoundError(
+                "File map not found, you are loading for inference you need to have a file map!"
+            )
         print("Regenerating File Map")
         all_data = pd.read_csv(data_folder / "commitlist.csv")
         # Lets explore files
@@ -201,9 +235,10 @@ def get_file_map(data_folder: Path, regen_data, assert_stored=False):
         all_files.append(Path(UNKNOWN_TOKEN))
         file_set = build_file_set(all_files, MAX_LEN_FILE)
         file_map = {file: i for i, file in enumerate(file_set)}
-        with open(data_folder / "file_map.pkl", 'wb') as f:
+        with open(data_folder / "file_map.pkl", "wb") as f:
             pickle.dump(file_map, f)
         return file_map
+
 
 #  Generate a dataset for training
 
@@ -222,7 +257,9 @@ def generate_batch(batch):
     files = list(files)
     author = list(author)
     category = list(category)
-    targets = torch.tensor([common.categories.index(cat) for cat in category]).to(device)
+    targets = torch.tensor([common.categories.index(cat) for cat in category]).to(
+        device
+    )
     return CommitClassifierInputs(title, files, author), targets
 
 
@@ -251,6 +288,7 @@ def balance_dataset(dataset: List):
     category = [common.categories.index(cat) for cat in category]
     inpt_data = list(zip(title, files, author))
     from imblearn.over_sampling import RandomOverSampler
+
     # from imblearn.under_sampling import RandomUnderSampler
     rus = RandomOverSampler(random_state=42)
     X, y = rus.fit_resample(inpt_data, category)
@@ -265,6 +303,7 @@ def balance_dataset(dataset: List):
 
 def gen_class_weights(dataset: List):
     from collections import Counter
+
     epsilon = 1e-1
     title, files, author, category = zip(*dataset)
     category = [common.categories.index(cat) for cat in category]
@@ -274,8 +313,13 @@ def gen_class_weights(dataset: List):
     least_common = counter.most_common()[-percentile_33:]
     smoothed_top = sum(i[1] + epsilon for i in most_common) / len(most_common)
     smoothed_bottom = sum(i[1] + epsilon for i in least_common) / len(least_common) // 3
-    class_weights = torch.tensor([1.0 / (min(max(counter[i], smoothed_bottom), smoothed_top) + epsilon)
-                                 for i in range(len(common.categories))], device=device)
+    class_weights = torch.tensor(
+        [
+            1.0 / (min(max(counter[i], smoothed_bottom), smoothed_top) + epsilon)
+            for i in range(len(common.categories))
+        ],
+        device=device,
+    )
     return class_weights
 
 
@@ -287,7 +331,9 @@ def train(save_path: Path, data_folder: Path, regen_data: bool, resample: bool):
     classifier_config = CategoryConfig(common.categories)
     author_map = get_author_map(data_folder, regen_data)
     file_map = get_file_map(data_folder, regen_data)
-    commit_classifier = CommitClassifier(XLMR_BASE, author_map, file_map, classifier_config).to(device)
+    commit_classifier = CommitClassifier(
+        XLMR_BASE, author_map, file_map, classifier_config
+    ).to(device)
 
     # Lets train this bag of bits
     class_weights = gen_class_weights(train_zip_list)
@@ -320,7 +366,9 @@ def train(save_path: Path, data_folder: Path, regen_data: bool, resample: bool):
             start = end
 
         val_l = eval_step(val_batch, commit_classifier, loss)
-        tqdm.write(f"Finished epoch {i} with a train loss of: {l.item()} and a val_loss of: {val_l.item()}")
+        tqdm.write(
+            f"Finished epoch {i} with a train loss of: {l.item()} and a val_loss of: {val_l.item()}"
+        )
 
     with torch.no_grad():
         commit_classifier.eval()
@@ -335,22 +383,39 @@ def train(save_path: Path, data_folder: Path, regen_data: bool, resample: bool):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Tool to create a classifier for helping to categorize commits')
+    parser = argparse.ArgumentParser(
+        description="Tool to create a classifier for helping to categorize commits"
+    )
 
-    parser.add_argument('--train', action='store_true', help='Train a new classifier')
+    parser.add_argument("--train", action="store_true", help="Train a new classifier")
     parser.add_argument("--commit_data_folder", default="results/classifier/")
-    parser.add_argument('--save_path', default='results/classifier/commit_classifier.pt')
-    parser.add_argument('--regen_data', action='store_true',
-                        help="Regenerate the training data, helps if labeld more examples and want to re-train.")
-    parser.add_argument('--resample', action='store_true',
-                        help="Resample the training data to be balanced. (Only works if imblearn is installed.)")
+    parser.add_argument(
+        "--save_path", default="results/classifier/commit_classifier.pt"
+    )
+    parser.add_argument(
+        "--regen_data",
+        action="store_true",
+        help="Regenerate the training data, helps if labeld more examples and want to re-train.",
+    )
+    parser.add_argument(
+        "--resample",
+        action="store_true",
+        help="Resample the training data to be balanced. (Only works if imblearn is installed.)",
+    )
     args = parser.parse_args()
 
     if args.train:
-        train(Path(args.save_path), Path(args.commit_data_folder), args.regen_data, args.resample)
+        train(
+            Path(args.save_path),
+            Path(args.commit_data_folder),
+            args.regen_data,
+            args.resample,
+        )
         return
 
-    print("Currently this file only trains a new classifier please pass in --train to train a new classifier")
+    print(
+        "Currently this file only trains a new classifier please pass in --train to train a new classifier"
+    )
 
 
 if __name__ == "__main__":

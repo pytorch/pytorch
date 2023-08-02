@@ -11,7 +11,7 @@ except ImportError:
     _opt_einsum = None
 
 
-@_lru_cache()
+@_lru_cache
 def is_available() -> bool:
     r"""Returns a bool indicating if opt_einsum is currently available."""
     return _opt_einsum is not None

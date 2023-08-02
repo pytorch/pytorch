@@ -240,7 +240,7 @@ class OperatorInputsLoader:
     def __init__(self, json_file_path):
         self.operator_db = defaultdict(Counter)
 
-        with open(json_file_path, "r") as f:
+        with open(json_file_path) as f:
             lines = f.readlines()
 
         i = 0
@@ -306,7 +306,7 @@ class OperatorInputsLoader:
         ), f"Could not find {op}, must provide overload"
 
         count = 0
-        for _, counter in self.operator_db[str(op)].items():
+        for counter in self.operator_db[str(op)].values():
             count += counter
         return count
 

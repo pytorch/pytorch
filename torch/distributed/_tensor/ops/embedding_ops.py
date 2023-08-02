@@ -86,6 +86,11 @@ def embedding_dense_backward_rules(op_schema: OpSchema) -> OutputSharding:
         return OutputSharding(
             output_spec=DTensorSpec(mesh=indices.mesh, placements=[_Partial()])
         )
+    elif all(placement.is_replicate() for placement in indices.placements):
+        # BWD for colwise sharding case
+        return OutputSharding(
+            output_spec=DTensorSpec(mesh=indices.mesh, placements=[Shard(1)])
+        )
     else:
         raise NotImplementedError(
             "Unsupported embedding dense backward schema:\n"
