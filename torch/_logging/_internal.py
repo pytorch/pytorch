@@ -124,7 +124,7 @@ LOG_GROUPS = {
     "default": {
         "graph_breaks": True,
         "recompiles": True,
-        "dynamic": logging.DEBUG,
+        "dynamic": logging.INFO,
         "guards": True,
         "trace_source": True,
     },
@@ -307,10 +307,9 @@ def set_logs(
 
     def _set_logs(**kwargs):
         for group, config in LOG_GROUPS.items():
-            if group in kwargs:
+            if kwargs.pop(group, False):
                 for name, val in config.items():
                     kwargs[name] = val
-                kwargs.pop(group)
 
         default_level = kwargs.pop("all", None)
         if default_level:
