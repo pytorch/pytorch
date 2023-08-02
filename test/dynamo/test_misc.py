@@ -1380,6 +1380,19 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(type(r), np.ndarray)
         self.assertEqual(r, x >= 3)
 
+    def test_numpy_min(self):
+        x = np.arange(10)
+
+        @torch.compile
+        def fn(y):
+            return min(y, 3), min(y, y - 1)
+
+        r1, r2 = fn(x)
+        self.assertEqual(type(r1), np.ndarray)
+        self.assertEqual(type(r2), np.ndarray)
+        self.assertEqual(r1, np.minimum(x, 3))
+        self.assertEqual(r2, np.minimum(x, x - 1))
+
     def test_graph_break_correctly_when_passing_numpy_ndarray_to_torch_function(self):
         # from transformers/models/big_bird/modeling_big_bird.py
         def fn(x: int, y: torch.Tensor):
