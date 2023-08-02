@@ -118,7 +118,7 @@ function formatAddr(event) {
 }
 function formatEvent(event) {
   const stream =
-    event.stream === 0 ? '' : `\n              (stream ${event.stream})`;
+    event.stream === null ? '' : `\n              (stream ${event.stream})`;
   switch (event.action) {
     case 'oom':
       return `OOM (requested ${formatSize(event.size)}, CUDA has ${formatSize(
@@ -657,6 +657,14 @@ function annotate_snapshot(snapshot) {
     }
   }
   snapshot.device_traces = new_traces;
+  // if every event was on the default stream, we elide stream printing
+  if (next_stream == 1) {
+    for (const device_trace of snapshot.device_traces) {
+      for (const t of device_trace) {
+        t.stream = null;
+      }
+    }
+  }
 
   for (const seg of snapshot.segments) {
     seg.stream = stream_name(seg.stream);
@@ -964,7 +972,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
       let text = `${formatAddr(elem)} ${formatSize(elem.size)} allocation (${
         elem.size
       } bytes)`;
-      if (elem.stream !== 0) {
+      if (elem.stream !== null) {
         text = `${text}, stream ${elem.stream}`;
       }
       if (!elem.action.includes('alloc')) {
