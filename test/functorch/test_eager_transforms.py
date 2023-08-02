@@ -32,13 +32,13 @@ from functorch.experimental import replace_all_batch_norm_modules_
 from torch._C import _ExcludeDispatchKeyGuard, DispatchKeySet, DispatchKey
 
 import functorch
-from functorch import (
-    grad, vjp, vmap, jacrev, jacfwd, grad_and_value, hessian,
-    jvp, make_functional, make_functional_with_buffers,
-    combine_state_for_ensemble, make_fx
+from torch.func import (
+    grad, vjp, vmap, jacrev, jacfwd, grad_and_value, hessian, jvp
 )
+from torch.fx.experimental.proxy_tensor import make_fx
+
 from torch._functorch.make_functional import (
-    functional_init, functional_init_with_buffers,
+    make_functional, make_functional_with_buffers, combine_state_for_ensemble, functional_init, functional_init_with_buffers,
 )
 from torch._functorch.eager_transforms import _slice_argnums
 from functorch.experimental import functionalize
@@ -3064,9 +3064,10 @@ class TestComposability(TestCase):
     def test_deprecation_vmap(self, device):
         x = torch.randn(3, device=device)
 
+        deprecated_vmap = functorch.vmap
         # functorch version of the API is deprecated
         with self.assertWarnsRegex(UserWarning, "Please use torch.vmap"):
-            vmap(torch.sin)
+            deprecated_vmap(torch.sin)
 
         # the non-functorch version is not deprecated
         with warnings.catch_warnings():
