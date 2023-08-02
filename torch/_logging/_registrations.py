@@ -1,6 +1,4 @@
-import logging
-
-from ._internal import register_artifact, register_log, register_log_group
+from ._internal import register_artifact, register_log
 
 register_log("dynamo", "torch._dynamo")
 register_log("aot", "torch._functorch.aot_autograd")
@@ -27,14 +25,3 @@ register_artifact("schedule", off_by_default=True)
 register_artifact("perf_hints", off_by_default=True)
 
 register_artifact("custom_format_test_artifact", log_format="")
-
-register_log_group(
-    "default",
-    {
-        "graph_breaks": True,
-        "recompiles": True,
-        "dynamic": logging.INFO,
-        "guards": True,
-        "trace_source": True,
-    },
-)

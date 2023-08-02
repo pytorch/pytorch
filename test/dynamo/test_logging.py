@@ -541,8 +541,8 @@ print("arf")
                    ~~^~~""",
         )
 
-    @make_logging_test(default=True)
-    def test_default_log_group(self, records):
+    @make_logging_test(**torch._logging.DEFAULT_LOGGING)
+    def test_default_logging(self, records):
         def fn(a):
             if a.sum() < 0:
                 a = torch.sin(a)
