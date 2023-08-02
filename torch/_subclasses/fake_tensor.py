@@ -1028,16 +1028,6 @@ class FakeTensor(torch.Tensor):
     def from_tensor(t, fake_mode):
         return fake_mode.from_tensor(t)
 
-    # FakeTensorMode is meant to be a singleton, so deepcopying
-    # should not introduce a fresh mode.
-    # This just implements the "default" deepcopy, but without deepcopying
-    # the fake_mode.
-    def __deepcopy__(self, memo):
-        result = torch.Tensor.__deepcopy__(self, memo)
-        assert isinstance(result, FakeTensor)
-        result.fake_mode = self.fake_mode
-        return result
-
     @classmethod
     @count
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -1491,6 +1481,7 @@ class FakeTensorMode(TorchDispatchMode):
                 not isinstance(x, FakeTensor)
                 and type(x) is not torch.Tensor
                 and type(x) is not torch.nn.Parameter
+                and type(x) is not torch.nn.Buffer
             )
 
         return [
