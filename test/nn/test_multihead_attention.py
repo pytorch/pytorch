@@ -118,7 +118,7 @@ class TestMultiheadAttentionNN(NNTestCase):
                                         saved_kv=False, same_embed_dim=False,
                                         average_attn_weights=average_attn_weights):
             for _ in range(100):
-                batch_sz, seq_len = [random.randint(2, 10) for r in range(2)]
+                batch_sz, seq_len = (random.randint(2, 10) for r in range(2))
                 d_head = random.randint(3, 10)
                 nheads = random.randint(2, 5) * 2
                 d_model = d_head * nheads

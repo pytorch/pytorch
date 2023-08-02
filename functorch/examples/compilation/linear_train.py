@@ -18,7 +18,7 @@ def bench(f, iters=100, warmup=10):
     begin = time.time()
     for _ in range(iters):
         f()
-    print((time.time() - begin))
+    print(time.time() - begin)
 
 
 class Foo(nn.Module):
