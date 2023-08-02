@@ -29,6 +29,7 @@ from common_utils import (
     xfail,
     skip,
     skipOps,
+    skipOpsIfTorchDynamo,
     tol1,
     tol2,
     opsToleranceOverride,
@@ -689,6 +690,9 @@ class TestOperators(TestCase):
         # Greatest relative difference: 1.7933241714393998e-06 at index (2, 4) (up to 1.3e-06 allowed)
         # The failure occurred for item [0]
         xfail('masked.prod')
+    }))
+    @skipOpsIfTorchDynamo('TestOperators', 'test_vjpvjp', vjp_fail.union({
+        skip('index_reduce'),  # double backward  not really supported
     }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
         tol1('nn.functional.conv_transpose3d',
