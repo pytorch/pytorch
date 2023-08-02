@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import inspect
 from typing import (
@@ -187,16 +188,20 @@ class DynamoExport(exporter.FXGraphExtractor):
 
         # Translate callable to FX graph.
         #
-        fake_mode = options.fake_context.fake_mode if options.fake_context else None
-        fx_mode = "symbolic" if options.dynamic_shapes else "fake"
-        graph_module, graph_guard = torch._dynamo.export(
-            wrapped_model,
-            tracing_mode=fx_mode,
-            fake_mode=fake_mode,  # type: ignore[arg-type]
-        )(
-            *model_args,
-            **model_kwargs,
+        fake_mode = (
+            options.fake_context.fake_mode
+            if options.fake_context
+            else contextlib.nullcontext()
         )
+        fx_mode = "symbolic" if options.dynamic_shapes else "fake"
+        with fake_mode:  # type: ignore[attr-defined]
+            graph_module, graph_guard = torch._dynamo.export(
+                wrapped_model,
+                tracing_mode=fx_mode,
+            )(
+                *model_args,
+                **model_kwargs,
+            )
         del graph_guard  # Unused
         torch._dynamo.reset()
 
