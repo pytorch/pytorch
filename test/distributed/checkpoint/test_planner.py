@@ -4,6 +4,7 @@ import sys
 
 import torch
 from torch.distributed.checkpoint.planner import LoadItemType, WriteItemType
+from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
 
 from torch.distributed._shard.sharded_tensor import (
     Shard,
@@ -86,8 +87,16 @@ class TestSavePlan(TestCase):
             "st": st
         }
         plan = create_default_local_save_plan(state_dict, False)
-        self.assertEqual(1, len(plan.items))
-        wi = plan.items[0]
+        self.assertEqual(2, len(plan.items))
+
+        tensor_wi = plan.items[0]
+        self.assertEqual(tensor_wi.index, MetadataIndex("tensor", [0]))
+        self.assertEqual(tensor_wi.tensor_data.size, tensor.size())
+        self.assertEqual(tensor_wi.tensor_data.properties, TensorProperties.create_from_tensor(tensor))
+        self.assertEqual(tensor_wi.tensor_data.chunk.offsets, torch.Size([0]))
+        self.assertEqual(tensor_wi.tensor_data.chunk.sizes, torch.Size([10]))
+
+        wi = plan.items[1]
         self.assertEqual(wi.index, MetadataIndex("st", [8]))
         self.assertEqual(wi.type, WriteItemType.SHARD)
         self.assertEqual(wi.tensor_data.size, st.size())
@@ -124,6 +133,7 @@ class TestSavePlan(TestCase):
                 return create_default_local_save_plan(state_dict, rank == 0)
 
         all_plans = [create_data(0), create_data(1), create_data(2), create_data(3)]
+        all_plans = dedup_tensors(all_plans)
         final_plans, metadata = create_default_global_save_plan(all_plans=all_plans)
 
         # The default global plan updates all indexes to include hints

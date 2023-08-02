@@ -294,7 +294,7 @@ def create_default_local_save_plan(
         if isinstance(obj, DTensor):
             if obj.device_mesh.get_coordinate() is not None:
                 requests += _create_write_items(fqn, obj)
-        elif isinstance(obj, (ShardedTensor)) or is_coordinator:
+        elif isinstance(obj, torch.Tensor) or is_coordinator:
             requests += _create_write_items(fqn, obj)
 
     return SavePlan(requests)
