@@ -76,6 +76,7 @@ SKIP = {
     "fambench_xlmr",
     # TIMEOUT, https://github.com/pytorch/pytorch/issues/98467
     "tacotron2",
+    "hf_Bert",  # Could not validate constraint RelaxedUnspecConstraint(L['input_ids'].size()[0]) as L['input_ids'].size()[0] was inferred to be constant (4)
 }
 
 SKIP_FOR_CPU = {
