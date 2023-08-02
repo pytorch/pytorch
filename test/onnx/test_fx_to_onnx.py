@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import tempfile
+import unittest
 
 import onnx
 import pytorch_test_common
@@ -211,6 +212,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
     # TODO: When registry is public, add a custom op cases to replace
     # aten::add
+    # Temporarily disable this test since updates in ONNXScript annotating correct
+    # overload names for `aten::add` resolves this warning.
+    # The test will be properly fixed w/ new onnx registry api in
+    # https://github.com/pytorch/pytorch/pull/106140
+    @unittest.expectedFailure
     def test_dispatch_overload_fall_back_default_raise_diagnostic_warning(self):
         class TraceModel(torch.nn.Module):
             def forward(self, input):
