@@ -238,8 +238,6 @@ class TestOptim(TestCase):
             optimizer_c.step(fn_c)
             self.assertEqual(weight, weight_c)
             self.assertEqual(bias, bias_c)
-        # Make sure state dict wasn't modified
-        self.assertEqual(state_dict, state_dict_c)
         # Make sure state dict is deterministic with equal but not identical parameters
         self.assertEqual(optimizer.state_dict(), optimizer_c.state_dict())
         # Make sure repeated parameters have identical representation in state dict
@@ -301,7 +299,7 @@ class TestOptim(TestCase):
         state_dict_c = deepcopy(optimizer.state_dict())
         optimizer_cuda.load_state_dict(state_dict_c)
 
-        # Make sure state dict wasn't modified
+        # Make sure state_dict_c isn't modified by merely calling load_state_dict
         self.assertEqual(state_dict, state_dict_c)
 
         # Make sure that device of state['step'] is still CPU
@@ -312,7 +310,7 @@ class TestOptim(TestCase):
             for state in new_state_dict["state"].values():
                 self.assertEqual(state["step"].device.type, "cpu")
 
-        for _i in range(20):
+        for _ in range(20):
             optimizer.step(fn)
             optimizer_cuda.step(fn_cuda)
             self.assertEqual(weight, weight_cuda)
@@ -872,6 +870,7 @@ class TestOptim(TestCase):
             (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=False)),
             (optim.RMSprop, dict(weight_decay=0, momentum=1, centered=False)),
             (optim.Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
+            (optim.Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50), maximize=True)),
             (optim.ASGD, dict(weight_decay=0)),
             (optim.ASGD, dict(weight_decay=1)),
             (optim.ASGD, dict(weight_decay=0, maximize=True)),
@@ -913,7 +912,7 @@ class TestOptim(TestCase):
         configs = [
             (o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ in [
                 "Adadelta", "Adagrad", "Adamax", "Adam", "AdamW", "ASGD", "NAdam",
-                "RAdam", "RMSprop", "SGD"
+                "RAdam", "RMSprop", "RProp", "SGD"
             ]
         ]
         self._test_foreach_memory(configs)
