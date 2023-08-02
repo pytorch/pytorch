@@ -23,6 +23,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
+from torch.distributed._tensor import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_WRAPPED_MODULE,
     ActivationWrapper,
@@ -422,6 +423,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         ignored_states: Union[
             Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
         ] = None,
+        _device_mesh: DeviceMesh = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -437,7 +439,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # Note that this is done before auto_wrapping, so that child FSDP modules simply pick up
         # the same process group state as the root FSDP module.
         _init_process_group_state(
-            self, process_group, sharding_strategy, auto_wrap_policy
+            self, process_group, sharding_strategy, auto_wrap_policy, _device_mesh
         )
         if auto_wrap_policy is not None:
             root_kwargs = {
