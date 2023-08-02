@@ -1369,6 +1369,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(r, x * 3)
         del x
 
+    def test_numpy_gt(self):
+        x = np.arange(10)
+
+        @torch.compile
+        def fn(y):
+            return y >= 3
+
+        r = fn(x)
+        self.assertEqual(type(r), np.ndarray)
+        self.assertEqual(r, x >= 3)
+
     def test_graph_break_correctly_when_passing_numpy_ndarray_to_torch_function(self):
         # from transformers/models/big_bird/modeling_big_bird.py
         def fn(x: int, y: torch.Tensor):
