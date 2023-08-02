@@ -96,13 +96,8 @@ class OnnxRegistry:
 
     """
 
-    def __init__(self, opset_version: int = _DEFAULT_OPSET_VERSION) -> None:
-        """Initializes the registry.
-
-        Args:
-            opset_version: The opset version to use for the registry.
-
-        """
+    def __init__(self) -> None:
+        """Initializes the registry"""
         self._registry: Dict[
             registration.OpName, List[registration.SymbolicFunction]
         ] = defaultdict(list)
@@ -113,12 +108,11 @@ class OnnxRegistry:
         )
 
         # opset_version is unused for now, since torchlib only supports opset18.
-        if opset_version != _DEFAULT_OPSET_VERSION:
-            warnings.warn(
-                "Torchlib only supports opset version 18 for now. If you need to use a \
-                different opset version, please register them with register_custom_op."
-            )
-        self._opset_version = opset_version
+        self._opset_version = _DEFAULT_OPSET_VERSION
+        warnings.warn(
+            f"Torchlib only supports opset version {self._opset_version} for now. If you need to use a \
+            different opset version, please register them with register_custom_op."
+        )
 
         # Initialize registry from torchlib
         self._initiate_registry_from_torchlib(registration.default_registry)
