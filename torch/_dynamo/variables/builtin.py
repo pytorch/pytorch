@@ -1339,11 +1339,12 @@ class BuiltinVariable(VariableTracker):
             return ConstantVariable(op(left._underlying_items, right._underlying_items))
 
         if isinstance(left, TensorVariable):
-            from .builder import wrap_fx_proxy
+            from .builder import wrap_fx_proxy_cls
 
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
-            return wrap_fx_proxy(
+            return wrap_fx_proxy_cls(
+                type(left),  # handle Ndarrays and Tensors
                 tx,
                 op(left.as_proxy(), right.as_proxy()),
             )
