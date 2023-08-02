@@ -10,7 +10,7 @@ from torch._prims_common import (
 import torch._prims_common as utils
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
-from typing import Callable, Sequence, Tuple, NamedTuple, overload
+from typing import Callable, Sequence, Tuple, NamedTuple, Optional, overload
 import inspect
 from functools import wraps
 import warnings
@@ -48,18 +48,16 @@ def _maybe_convert_to_dtype(a, dtype):
         return None
 
     raise ValueError(
-        "Received type {0} that is neither a tensor or a number!".format(type(a))
+        f"Received type {type(a)} that is neither a tensor or a number!"
     )
 
 
 def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
     if not isinstance(a, Number):
-        msg = "Found unknown type {0} when trying to convert scalars!".format(type(a))
+        msg = f"Found unknown type {type(a)} when trying to convert scalars!"
         raise ValueError(msg)
     if not utils.is_weakly_lesser_type(type(a), typ):
-        msg = "Scalar {0} of type {1} cannot be safely cast to type {2}!".format(
-            a, type(a), typ
-        )
+        msg = f"Scalar {a} of type {type(a)} cannot be safely cast to type {typ}!"
         raise ValueError(msg)
 
     return typ(a)
@@ -97,7 +95,7 @@ class elementwise_type_promotion_wrapper:
         self,
         *,
         type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
-        type_promoting_args: Sequence[str] = None,
+        type_promoting_args: Optional[Sequence[str]] = None,
     ):
         self.type_promoting_arg_names = type_promoting_args
         self.type_promotion_kind = type_promotion_kind
@@ -169,7 +167,7 @@ def _safe_copy_out(
 ):
     # Checks same device
     if copy_from.device != copy_to.device:
-        msg = "Attempting to copy from device {0} to device {1}, but cross-device copies are not allowed!".format(
+        msg = "Attempting to copy from device {} to device {}, but cross-device copies are not allowed!".format(
             copy_from.device, copy_to.device
         )
         raise RuntimeError(msg)

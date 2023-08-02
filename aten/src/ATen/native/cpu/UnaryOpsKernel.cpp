@@ -179,6 +179,18 @@ static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
       });
 }
 
+#if !defined(C10_MOBILE)
+#define _AT_DISPATCH_ABS_TYPES(TYPE, NAME, ...)                   \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                   \
+            kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn,       \
+            TYPE, NAME, __VA_ARGS__)
+#else
+#define _AT_DISPATCH_ABS_TYPES(TYPE, NAME, ...)          \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(          \
+            kHalf, kBFloat16,                            \
+            TYPE, NAME, __VA_ARGS__)
+#endif
+
 static void abs_kernel(TensorIteratorBase& iter) {
   auto dtype = iter.dtype();
   if (dtype == kComplexHalf) {
@@ -186,7 +198,7 @@ static void abs_kernel(TensorIteratorBase& iter) {
     using opmath_t = at::opmath_type<scalar_t>;
     cpu_kernel(iter, [=](scalar_t a) -> scalar_t { return abs_impl(opmath_t{a}); });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "abs_cpu", [&]() {
+    _AT_DISPATCH_ABS_TYPES(iter.dtype(), "abs_cpu", [&]() {
       cpu_kernel_vec(
           iter,
           [=](scalar_t a) -> scalar_t { return abs_impl(a); },
