@@ -15,7 +15,7 @@ from torch.ao.quantization import (
     ObserverOrFakeQuantize,
     QConfigMapping,
 )
-from torch.ao.quantization.pt2e.quantizer import (
+from torch.ao.quantization.quantizer import (
     ComposableQuantizer,
     DerivedQuantizationSpec,
     EmbeddingQuantizer,
@@ -27,10 +27,10 @@ from torch.ao.quantization.pt2e.quantizer import (
     Quantizer,
     SharedQuantizationSpec,
 )
-from torch.ao.quantization.pt2e.quantizer.composable_quantizer import (  # noqa: F811
+from torch.ao.quantization.quantizer.composable_quantizer import (  # noqa: F811
     ComposableQuantizer,
 )
-from torch.ao.quantization.pt2e.quantizer.xnnpack_quantizer import (
+from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
 )
 from torch.ao.quantization.quantize_pt2e import (
@@ -273,7 +273,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
                     node_occurrence[ns.call_function(v)] = expected_node_occurrence[k]
             self.checkGraphModuleNodes(m_fx, expected_node_occurrence=node_occurrence)
             fx_quant_output = m_fx(*example_inputs)
-            self.assertTrue(torch.allclose(fx_quant_output, pt2_quant_output))
+            self.assertEqual(fx_quant_output, pt2_quant_output)
 
     def _verify_symmetric_qnnpack_qat_numerics(
         self,
@@ -1149,6 +1149,92 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.mean.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        ]
+        self._test_quantizer(m, example_inputs, quantizer, node_occurrence, node_list)
+
+    def test_xnnpack_quantizer_set_module_name(self):
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.sub = Sub()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.sub(x)
+                return x
+
+        m = M().eval()
+        example_inputs = (torch.randn(3, 5),)
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_module_name("sub", operator_config)
+        node_occurrence = {
+            torch.ops.aten.addmm.default: 2,
+            # input and output for the second linear
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+        }
+        node_list = [
+            # first linear is not quantized
+            torch.ops.aten.addmm.default,
+            # second linear is quantized
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.addmm.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        ]
+        self._test_quantizer(m, example_inputs, quantizer, node_occurrence, node_list)
+
+    def test_xnnpack_quantizer_set_module_type(self):
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.sub = Sub()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.sub(x)
+                return x
+
+        m = M().eval()
+        example_inputs = (torch.randn(3, 5),)
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_module_type(Sub, operator_config)
+        node_occurrence = {
+            torch.ops.aten.addmm.default: 2,
+            # input and output for the second linear
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+        }
+        node_list = [
+            # first linear is not quantized
+            torch.ops.aten.addmm.default,
+            # second linear is quantized
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.addmm.default,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
         ]

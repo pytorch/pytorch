@@ -752,12 +752,12 @@ void LibUVStoreDaemon::init(const TCPStoreOptions& opts) {
         uv_err_name(res),
         uv_strerror(res));
 
-    auto port = get_socket_port(&server);
+    port_ = get_socket_port(&server);
     TORCH_CHECK(
-        port == opts.port,
+        port_ == opts.port,
         "listen fd {} is bound to port {}, expected to be bound to port {}",
         *opts.masterListenFd,
-        port,
+        port_,
         opts.port);
 
     return;
@@ -818,6 +818,7 @@ bool LibUVStoreDaemon::tryListen(bool use_ipv6) {
         use_ipv6,
         uv_strerror(res));
   }
+  port_ = get_socket_port(&server);
   return res == 0;
 }
 

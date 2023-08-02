@@ -3,6 +3,7 @@ import functools
 import itertools
 import logging
 import os
+import traceback
 import weakref
 from dataclasses import dataclass
 from functools import partial
@@ -23,7 +24,11 @@ from torch._prims_common import (
 )
 from torch._subclasses.meta_utils import MetaConverter
 from torch._utils import render_call
-from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
+from torch.fx.experimental.symbolic_shapes import (
+    DimConstraint,
+    DimDynamic,
+    free_symbols,
+)
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
@@ -515,7 +520,15 @@ def nonzero(fake_mode, func, arg):
         # disjoint with what can actually occur.  But this is fine:
         # remember, the hypothesis is that if your later code works
         # with N >= 2, it will work with N = 1 and N = 0.
-        constrain_range(nnz, min=2, max=sys.maxsize - 1)
+        maxval = sys.maxsize - 1
+        if not free_symbols(arg.numel()):
+            # Don't upgrade the range if numel is less than two, since we then
+            # have an empty range which makes things go explodey.  We also
+            # don't allow for 2 because that would specialize the unbacked
+            # SymInt to 2, which is also likely to be buggy.
+            if arg.numel() >= 2:
+                maxval = arg.numel()
+        constrain_range(nnz, min=2, max=maxval)
 
         arg._nonzero_memo = nnz
         arg._nonzero_memo_vc = arg._version
@@ -548,6 +561,8 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
     with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
 
+    if out is new_kwargs["input"]:
+        return out  # copy_
     return FakeTensor(fake_mode, out, out_device)
 
 
@@ -569,10 +584,21 @@ def index_tensor(fake_mode, func, *args, **kwargs):
         return out.to(out_device)
 
 
+# Can take mixed meta/non-meta arguments; the meta registration
+# will roughly do the right thing even when given real devices
+@register_op_impl(aten._embedding_bag.default)
+def embedding_bag(fake_mode, func, *args, **kwargs):
+    from torch._meta_registrations import meta_embedding_bag
+
+    with fake_mode:
+        return meta_embedding_bag(*args, **kwargs)
+
+
 # takes in multiple-devices, dont default to default device handling
 @register_op_impl(aten.index_put.default)
 @register_op_impl(aten._unsafe_index_put.default)
 @register_op_impl(aten.copy.default)
+@register_op_impl(aten.copy_.default)
 @register_op_impl(aten.slice_scatter.default)
 def multi_device_op_default(fake_mode, func, *args, **kwargs):
     return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
@@ -1167,6 +1193,8 @@ class FakeTensorMode(TorchDispatchMode):
 
         self.shape_env = shape_env
 
+        self.stack = "".join(traceback.format_stack())
+
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         assert self not in _get_current_dispatch_mode_stack(), func
@@ -1395,13 +1423,19 @@ class FakeTensorMode(TorchDispatchMode):
                 if op_impl_out != NotImplemented:
                     return op_impl_out
 
-        def can_fallback(func: OpOverload):
+        def can_run_unsafe_fallback(func: OpOverload):
             if not self.allow_fallback_kernels:
                 return False
             # It's OK to try the fallback for built-in ops (e.g. aten, prims)
             # because we control and test these but the fallback leads to unexpected behavior
             # in user-defined custom ops
-            return func.namespace in {
+            #
+            # WARNING: DO NOT add any additional namespaces/operators here if they refer to operators
+            # outside of the pytorch/pytorch library! Any pre-existing things here
+            # are either in the pytorch/pytorch library or have been grandfathered in.
+            # The fallback does not always work and MAY CRASH and emit unreadable error messages
+            # so it should not be allowed by default.
+            allowed_namespaces = {
                 "debugprims",
                 "prims",
                 "aten",
@@ -1409,8 +1443,14 @@ class FakeTensorMode(TorchDispatchMode):
                 "vision",
                 "torchtext",
                 "torchaudio",
-                "fbgemm",
             }
+            grandfathered_ops_FIXME = {
+                "fbgemm::gmm",
+            }
+            return (
+                func.namespace in allowed_namespaces
+                or func.name() in grandfathered_ops_FIXME
+            )
 
         # run kernel registered to meta for func, which include
         # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
@@ -1419,7 +1459,7 @@ class FakeTensorMode(TorchDispatchMode):
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             # no meta kernel registered, fallback to kernel for the device
-            if has_symbolic_sizes or not can_fallback(func):
+            if has_symbolic_sizes or not can_run_unsafe_fallback(func):
                 raise UnsupportedOperatorException(func)
             return run_fallback_kernel(self, func, args, kwargs, not_implemented_error)
 
@@ -1441,6 +1481,7 @@ class FakeTensorMode(TorchDispatchMode):
                 not isinstance(x, FakeTensor)
                 and type(x) is not torch.Tensor
                 and type(x) is not torch.nn.Parameter
+                and type(x) is not torch.nn.Buffer
             )
 
         return [

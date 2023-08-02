@@ -16,6 +16,7 @@ constexpr int64_t kShortStoreTimeoutMillis = 100;
 constexpr int defaultTimeout = 20;
 
 c10::intrusive_ptr<c10d::TCPStore> _createServer(
+    bool useLibUV,
     int numWorkers = 1,
     int timeout = defaultTimeout) {
   return c10::make_intrusive<c10d::TCPStore>(
@@ -25,15 +26,18 @@ c10::intrusive_ptr<c10d::TCPStore> _createServer(
           /* isServer */ true,
           numWorkers,
           /* waitWorkers */ false,
-          /* timeout */ std::chrono::seconds(timeout)});
+          /* timeout */ std::chrono::seconds(timeout),
+          /* multiTenant */ false,
+          /* masterListenFd */ c10::nullopt,
+          /* useLibUV*/ useLibUV});
 }
 
 // Different ports for different tests.
-void testHelper(const std::string& prefix = "") {
+void testHelper(bool useLibUV, const std::string& prefix = "") {
   constexpr auto numThreads = 16;
   constexpr auto numWorkers = numThreads + 1;
 
-  auto serverTCPStore = _createServer(numWorkers);
+  auto serverTCPStore = _createServer(useLibUV, numWorkers);
 
   auto serverStore =
       c10::make_intrusive<c10d::PrefixStore>(prefix, serverTCPStore);
@@ -153,11 +157,19 @@ void testHelper(const std::string& prefix = "") {
 }
 
 TEST(TCPStoreTest, testHelper) {
-  testHelper();
+  testHelper(false);
+}
+
+TEST(TCPStoreTest, testHelperUV) {
+  testHelper(true);
 }
 
 TEST(TCPStoreTest, testHelperPrefix) {
-  testHelper("testPrefix");
+  testHelper(false, "testPrefix");
+}
+
+TEST(TCPStoreTest, testHelperPrefixUV) {
+  testHelper(true, "testPrefix");
 }
 
 TEST(TCPStoreTest, testCleanShutdown) {
@@ -192,10 +204,11 @@ TEST(TCPStoreTest, testCleanShutdown) {
   clientThread.join();
 }
 
-TEST(TCPStoreTest, testMultiTenantStores) {
+void testMultiTenantStores(bool libUV) {
   c10d::TCPStoreOptions opts{};
   opts.isServer = true;
   opts.multiTenant = true;
+  opts.useLibUV = libUV;
 
   // Construct two server stores on the same port.
   auto store1 = c10::make_intrusive<c10d::TCPStore>("localhost", opts);
@@ -210,4 +223,12 @@ TEST(TCPStoreTest, testMultiTenantStores) {
 
   c10d::test::set(*store1, "key0", "value0");
   c10d::test::check(*store1, "key0", "value0");
+}
+
+TEST(TCPStoreTest, testMultiTenantStores) {
+  testMultiTenantStores(false);
+}
+
+TEST(TCPStoreTest, testMultiTenantStoresUV) {
+  testMultiTenantStores(true);
 }
