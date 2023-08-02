@@ -2138,7 +2138,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         class MockModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.mods = [SubModule().cuda() for _ in range(num_of_submodule)]
+                self.mods = [SubModule() for _ in range(num_of_submodule)]
 
             def forward(self, x):
                 for mod in self.mods:
@@ -2153,7 +2153,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         ):
             cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
             opt_mod = torch.compile(mod, backend=cnts)
-            x = torch.randn(*size, device="cuda")
+            x = torch.randn(*size)
             opt_mod(x)
             self.assertEqual(cnts.frame_count, 2 * num_of_submodule)
 
