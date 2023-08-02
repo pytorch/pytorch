@@ -29,6 +29,11 @@ from torch.onnx._internal.fx import (
 if TYPE_CHECKING:
     import onnxscript  # type: ignore[import]
 
+# For beartype
+from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
+    graph_building as onnxscript_graph_building,
+)
+
 
 @_beartype.beartype
 def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
@@ -592,7 +597,9 @@ class _OnnxSchemaChecker:
     def _match_onnx_attribute_type(
         self,
         attribute_name: str,
-        attribute: fx_type_utils.Argument,
+        attribute: Union[
+            fx_type_utils.Argument, onnxscript_graph_building.TorchScriptTensor
+        ],
         is_sequence: bool = False,
     ) -> bool:
         if isinstance(attribute, (int, float, bool, str)):
