@@ -7,6 +7,8 @@ import operator
 import types
 from typing import Dict, List
 
+import numpy as np
+
 import torch
 from torch import sym_float, sym_int
 
@@ -664,9 +666,10 @@ class BuiltinVariable(VariableTracker):
 
             # Dynamic input does not get resolved, rather, gets stored as call_function
             if isinstance(a, SymNodeVariable) or isinstance(b, SymNodeVariable):
-                from .builder import wrap_fx_proxy
+                from .builder import wrap_fx_proxy_cls
 
-                return wrap_fx_proxy(
+                return wrap_fx_proxy_cls(
+                    type(a),
                     tx=tx,
                     proxy=tx.output.create_proxy(
                         "call_function",
@@ -678,13 +681,20 @@ class BuiltinVariable(VariableTracker):
 
             # convert min/max to torch ops
             if b.is_python_constant():
+                if isinstance(a, variables.NumpyNdarrayVariable):
+                    fn = variables.NumpyVariable(np.clip)
+                else:
+                    fn = variables.TorchVariable(torch.clamp)
                 kwargs = {"min": b} if (self.fn is max) else {"max": b}
-                result = variables.TorchVariable(torch.clamp).call_function(
-                    tx, [a], kwargs
-                )
+                result = fn.call_function(tx, [a], kwargs)
             else:
-                fn = {max: torch.maximum, min: torch.minimum}[self.fn]
-                result = variables.TorchVariable(fn).call_function(tx, [a, b], {})
+                if isinstance(a, variables.NumpyNdarrayVariable):
+                    fn = {max: np.maximum, min: np.minimum}[self.fn]
+                    fn = variables.NumpyVariable(fn)
+                else:
+                    fn = {max: torch.maximum, min: torch.minimum}[self.fn]
+                    fn = variables.TorchVariable(fn)
+                result = fn.call_function(tx, [a, b], {})
 
             # return unspec if both a, b are unspec or const
             if all(
