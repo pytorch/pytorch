@@ -117,7 +117,7 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
   } else {                                                              \
   }
 
-// Uncomment the the next line to print DEBUG messages
+// Uncomment next line to print DEBUG_TRACE messages
 // #define TORCHDYNAMO_DEBUG 1
 
 #ifdef TORCHDYNAMO_DEBUG
@@ -335,8 +335,6 @@ inline static PyObject* get_nn_module_if_frame_is_method_of_nn_module(THP_EVAL_A
   if (self_object == NULL) {
     return NULL;
   }
-  // TODO - Do I need this?
-  Py_INCREF(self_object);
   if (is_nn_module_instance(self_object)) {
     return self_object;
   }
@@ -453,6 +451,10 @@ inline static void set_cache_entry_on_code(PyCodeObject* code, CacheEntry* extra
 }
 
 inline static void set_cache_entry(THP_EVAL_API_FRAME_OBJECT* frame, CacheEntry* cache_entry) {
+  if (cache_entry == NULL || cache_entry == SKIP_CODE) {
+    set_cache_entry_on_code(frame->f_code, cache_entry);
+    return;
+  }
   // TODO(jansel): would it be faster to bypass this?
   PyObject* nn_module = get_nn_module_if_frame_is_method_of_nn_module(frame);
   if (nn_module != NULL) {
@@ -948,7 +950,7 @@ static PyObject* reset_code(PyObject* dummy, PyObject* code) {
 
   PyObject* extra = NULL;
   _PyCode_GetExtra((PyObject*)code, cache_entry_extra_index, (void*)&extra);
-  if (extra != NULL) {
+  if (extra != NULL && extra != SKIP_CODE) {
     if (PyObject_IsInstance(extra, (PyObject *)&CacheEntryWrapperType)) {
       CacheEntry* e = ((CacheEntryPyWrapper*)extra)->cache_entry;
       destroy_cache_entry(e);

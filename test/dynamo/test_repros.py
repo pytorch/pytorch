@@ -1120,7 +1120,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """2""")
+            # The model makes a deepcopy of nn module, so each one is cache
+            # separately.
+            self.assertExpectedInline(cnt.frame_count, """11""")
         else:
             self.assertExpectedInline(cnt.frame_count, """3""")
 
