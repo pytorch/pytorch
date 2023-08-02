@@ -1654,7 +1654,6 @@ exclude_patterns = [
     'torch/_export/serde/upgrade.py',
     'torch/_export/trace.py',
     'torch/_export/verifier.py',
-    'torch/_export/workflow.py',
     'torch/_functorch/__init__.py',
     'torch/_functorch/aot_autograd.py',
     'torch/_functorch/apis.py',
