@@ -36,7 +36,6 @@ jobs:
           { config: "inductor_torchbench_dynamic", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
         ]}
-    env:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
   linux-bionic-cuda11_8-py3_10-gcc7-inductor-test:
@@ -47,7 +46,6 @@ jobs:
       build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm86
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.test-matrix }}
-    env:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
   linux-bionic-cuda11_8-py3_10-gcc7-inductor-build-gcp:
@@ -61,7 +59,6 @@ jobs:
         { include: [
           { config: "inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
         ]}
-    env:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
   linux-bionic-cuda11_8-py3_10-gcc7-inductor-test-gcp:
@@ -73,8 +70,6 @@ jobs:
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build-gcp.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build-gcp.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
-
-    env:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
   linux-focal-cpu-py3_8-gcc7-inductor-build:
