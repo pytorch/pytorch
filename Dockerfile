@@ -74,10 +74,10 @@ ARG TARGETPLATFORM
 # On arm64 we can only install wheel packages.
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  pip3 instal torch --index-url https://download.pytorch.org/whl/cpu/ ;; \
-         *)              /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch torchvision torchaudio "pytorch-cuda=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  ;; \
+         *)              /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch  "pytorch-cuda=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  ;; \
     esac && \
     /opt/conda/bin/conda clean -ya
-RUN /opt/conda/bin/pip install torchelastic
+# RUN /opt/conda/bin/pip install torchelastic
 
 FROM ${BASE_IMAGE} as official
 ARG PYTORCH_VERSION
