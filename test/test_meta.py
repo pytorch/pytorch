@@ -617,7 +617,6 @@ meta_function_expected_failures = {
     torch.masked_select : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
-    torch.ormqr : {f64, c64, c128, f32},
     torch.Tensor.item : {f64, i32, c128, i64, i16, f16, u8, c32, c64, bf16, b8, i8, f32},
     torch.bincount : {i32, i64, u8, i16, i8},
     torch.frexp : {f64, f16, bf16, f32},
@@ -715,7 +714,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.histc: {i16, i32, i64, i8},  # aten::histc, aten::histc.out
     torch.kthvalue: {f16},  # aten::kthvalue.values
     torch.median: {f16},  # aten::median, aten::median.dim_values
-    torch.ormqr: {f32, f64},  # aten::ormqr, aten::ormqr.out
 }
 
 meta_function_device_expected_failures_only_outplace['cuda'] = {
@@ -809,8 +807,6 @@ meta_dispatch_expected_failures = {
     aten.masked_select.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.nonzero.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, c32, b8, i16, u8},
     aten.nonzero.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, c32, b8, i16, u8},
-    aten.ormqr.default : {c64, c128, f64, f32},
-    aten.ormqr.out : {c64, c128, f64, f32},
     aten.tensordot.out : {c64, i8, f64, c128, i64, bf16, f32, i32, i16, u8},
     aten._to_sparse.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten._to_sparse.sparse_dim : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
@@ -890,8 +886,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.median.default: {f16},  # aten::median
     aten.median.dim: {f16},  # aten::median.dim_values
     aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
-    aten.ormqr.default: {f32, f64},  # aten::ormqr
-    aten.ormqr.out: {f32, f64},  # aten::ormqr.out
     aten.rrelu_with_noise.default: {f16},  # aten::rrelu_with_noise
     aten.tensordot.out: {f16},  # aten::tensordot.out
     aten.unique_consecutive.default: {f16},  # aten::unique_consecutive
