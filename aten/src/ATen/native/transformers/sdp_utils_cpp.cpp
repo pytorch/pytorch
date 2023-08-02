@@ -225,7 +225,7 @@ bool check_requires_grad_and_nested_cpp(sdp_params params, bool debug) {
 }
 
 bool check_for_attn_mask_cpp(sdp_params params, bool debug) {
-  if (params.has_attn_mask) {
+  if (params.attn_mask.has_value()) {
     if (debug) {
       TORCH_WARN("Both fused kernels do not support non-null attn_mask.");
     }

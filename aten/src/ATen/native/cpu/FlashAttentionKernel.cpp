@@ -137,8 +137,8 @@ void cpu_flash_attention(
     int64_t i = 0, j = 0, k = 0;
     data_index_init(begin, i, batchSize, j, num_head, k, qSlice);
     int ompIdx = at::get_thread_num();
-    for (const auto x : c10::irange(begin, end)) {
-      (void)x; // Suppress unused variable
+    for (const auto z : c10::irange(begin, end)) {
+      (void)z; // Suppress unused variable
       int64_t m = k * qSplitSize;
       int64_t qBlockSize = std::min(qSplitSize, qSize - m);
       // Initialize max and sum
@@ -357,19 +357,20 @@ void cpu_flash_attention_backward(
     int64_t i = 0, j = 0;
     data_index_init(begin, i, batchSize, j, num_head);
     int ompIdx = at::get_thread_num();
-    accum_t dsum[qSplitSize];
+    at::Tensor dsum = at::empty({qSplitSize}, query.options().dtype(accumulate_dtype));
+    accum_t* dsum_data = dsum.data_ptr<accum_t>();
     accum_t* attn_block = attn_data + ompIdx * qSplitSize * kvSplitSize;
     scalar_t* attn_reduced_block = is_reduced_type ? attn_reduced_data + ompIdx * qSplitSize * kvSplitSize : nullptr;
     accum_t* grad_attn_block = grad_attn_data + ompIdx * qSplitSize * kvSplitSize;
     scalar_t* grad_attn_reduced_block = is_reduced_type ? grad_attn_reduced_data + ompIdx * qSplitSize * kvSplitSize : nullptr;
-    for (const auto x : c10::irange(begin, end)) {
-      (void)x; // Suppress unused variable
+    for (const auto z : c10::irange(begin, end)) {
+      (void)z; // Suppress unused variable
       // rowsum of grad_out * out
       for (int64_t m = 0; m < qSize; m += qSplitSize) {
         int64_t qBlockSize = std::min(qSplitSize, qSize - m);
         // dsum <- rowsum(grad_out * out)
         for (const auto row : c10::irange(qBlockSize)) {
-          dsum[row] = vec::map2_reduce_all<scalar_t>(
+          *(dsum_data + row) = vec::map2_reduce_all<scalar_t>(
             [](Vec x, Vec y) { return x * y; },
             [](Vec x, Vec y) { return x + y; },
             grad_out_data + i * grad_oStrideB + j * grad_oStrideH + (m + row) * grad_oStrideM,
@@ -458,7 +459,7 @@ void cpu_flash_attention_backward(
             kvBlockSize);
           // grad_attn <- attn * (grad_attn - dsum)
           for (const auto row : c10::irange(qBlockSize)) {
-            accum_t d = dsum[row];
+            accum_t d = *(dsum_data + row);
             vec::map2<accum_t>(
               [d](Vec attn, Vec grad_attn) { return attn * (grad_attn - Vec(d)); },
               grad_attn_block + row * kvBlockSize,

@@ -386,6 +386,9 @@ def break_graph_if_unsupported(*, push):
             state = self.copy_graphstate()
             reason = None
             try:
+                TracingContext.set_current_loc(
+                    self.f_code.co_filename, self.lineno, self.f_code.co_name
+                )
                 return inner_fn(self, inst)
             except Unsupported as excp:
                 if self.has_backedge() and self.should_compile_partial_graph():
@@ -411,7 +414,8 @@ def break_graph_if_unsupported(*, push):
 
                 log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
 
-                user_stack = [self.frame_summary()] + list(reversed(excp.real_stack))
+                user_stack = excp.real_stack
+                # TODO: Also report the traceback from the parent frame
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
                 frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
                 # torch._dynamo.explain() formats this a little nicer, and presents a slightly
@@ -422,7 +426,7 @@ def break_graph_if_unsupported(*, push):
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
                     graph_break_log.debug(
-                        "Graph break: %s from user code at %s",
+                        "Graph break: %s from user code at:\n%s",
                         excp,
                         user_stack_formatted,
                     )
@@ -684,18 +688,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
-        except BackendCompilerFailed:
-            raise
-        except Unsupported as exc:
-            exc.real_stack.append(self.frame_summary())
+        except Unsupported:
             if self.empty_checkpoint():
+                log.debug("empty checkpoint")
                 raise
             log.debug("step triggered compile", exc_info=True)
-        except Exception as exc:
-            real_stack = getattr(exc, "real_stack", [])
-            real_stack.append(self.frame_summary())
-            exc.real_stack = real_stack  # type: ignore[attr-defined]
-            raise
 
         # generate code from checkpoint
         assert not self.output.output_instructions
@@ -712,7 +709,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
 
     def run_ctx_mgr(self):
-        return contextlib.nullcontext()
+        # NB: Don't push the top level frame summary; set_current_loc will
+        # take care of it.  However, DO make sure we attach real_stack to
+        # exceptions
+        return TracingContext.current_frame(None)
 
     def run(self):
         with self.run_ctx_mgr():
@@ -1276,6 +1276,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(ListVariable(items, mutable_local=MutableLocal(), **options))
 
     def BUILD_SET(self, inst):
+        if config.inject_BUILD_SET_unimplemented_TESTING_ONLY:
+            unimplemented("missing: BUILD_SET")
         items = self.popn(inst.argval)
         options = VariableTracker.propagate(items)
         new_set = SetVariable(self, items, mutable_local=MutableLocal(), **options)
