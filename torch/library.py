@@ -55,7 +55,7 @@ class Library:
         weakref.finalize(self, _del_library, _impls, self._op_impls)
 
     def __repr__(self):
-        return "Library(kind={}, ns={}, dispatch_key={})>".format(self.kind, self.ns, self.dispatch_key)
+        return f"Library(kind={self.kind}, ns={self.ns}, dispatch_key={self.dispatch_key})>"
 
     def define(self, schema, alias_analysis=""):
         r'''Defines a new operator and its semantics in the ns namespace.
@@ -75,7 +75,7 @@ class Library:
         # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
         # AliasAnalysis type in C++
         if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
-            raise RuntimeError("Invalid alias_analysis type {}".format(alias_analysis))
+            raise RuntimeError(f"Invalid alias_analysis type {alias_analysis}")
         return self.m.define(schema, alias_analysis)
 
     def impl(self, op_name, fn, dispatch_key=''):
@@ -94,7 +94,7 @@ class Library:
             >>> my_lib.impl("div.Tensor", div_cpu, "CPU")
         '''
         if not callable(fn):
-            raise TypeError("Input function is required to be a callable but found type {}".format(type(fn)))
+            raise TypeError(f"Input function is required to be a callable but found type {type(fn)}")
         if dispatch_key == '':
             dispatch_key = self.dispatch_key
 

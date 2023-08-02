@@ -277,6 +277,9 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
         # _forward_cls is defined by derived class
         return self._forward_cls.jvp(self, *args)  # type: ignore[attr-defined]
 
+    def _compiled_autograd_key(self):
+        return self._forward_cls._compiled_autograd_key(self)  # type: ignore[attr-defined]
+
 
 class FunctionMeta(type):
     """Function metaclass.
@@ -290,7 +293,7 @@ class FunctionMeta(type):
         backward_fn = type(name + 'Backward', (BackwardCFunction,), {'_forward_cls': cls})
         cls._backward_cls = backward_fn
 
-        super(FunctionMeta, cls).__init__(name, bases, attrs)
+        super().__init__(name, bases, attrs)
 
 
 class _SingleLevelFunction(_C._FunctionBase, FunctionCtx, _HookMixin, metaclass=FunctionMeta):
