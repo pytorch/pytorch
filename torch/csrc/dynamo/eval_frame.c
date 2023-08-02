@@ -59,6 +59,24 @@ static PyObject* THPPyInterpreterFrame_f_lasti(THPPyInterpreterFrame* self, PyOb
   return PyLong_FromLong(_PyInterpreterFrame_LASTI(self->frame));
 }
 
+static PyObject* THPPyInterpreterFrame_f_lineno(THPPyInterpreterFrame* self, PyObject* _noargs) {
+  if (!self->frame->frame_obj) {
+    return PyLong_FromLong(self->frame->f_code->co_firstlineno);
+  }
+  int lineno = PyFrame_GetLineNumber(self->frame->frame_obj);
+  if (lineno < 0) {
+    Py_RETURN_NONE;
+  }
+  return PyLong_FromLong(lineno);
+}
+
+static PyObject* THPPyInterpreterFrame_f_back(THPPyInterpreterFrame* self, PyObject* _noargs) {
+  if (!self->frame->frame_obj) {
+    Py_RETURN_NONE;
+  }
+  return (PyObject*)PyFrame_GetBack(self->frame->frame_obj);
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {
     {"f_func", (getter)THPPyInterpreterFrame_f_func, NULL, NULL, NULL},
@@ -69,6 +87,8 @@ static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {
     {"frame_obj", (getter)THPPyInterpreterFrame_frame_obj, NULL, NULL, NULL},
     {"previous", (getter)THPPyInterpreterFrame_previous, NULL, NULL, NULL},
     {"f_lasti", (getter)THPPyInterpreterFrame_f_lasti, NULL, NULL, NULL},
+    {"f_lineno", (getter)THPPyInterpreterFrame_f_lineno, NULL, NULL, NULL},
+    {"f_back", (getter)THPPyInterpreterFrame_f_back, NULL, NULL, NULL},
     {NULL}};
 
 static PyTypeObject THPPyInterpreterFrameType = {

@@ -411,6 +411,36 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             torch.utils.rename_privateuse1_backend('foo')
             a = torch.empty([2, 3, 4, 5], device="foo", names=["N", "C", "H", "W"])
 
+        # Not an open registration test - this file is just very convenient
+        # for testing torch.compile on custom C++ operators
+        def test_compile_autograd_function_returns_self():
+            x_ref = torch.randn(4, requires_grad=True)
+            out_ref = self.module.custom_autograd_fn_returns_self(x_ref)
+            out_ref.sum().backward()
+
+            x_test = x_ref.clone().detach().requires_grad_(True)
+            f_compiled = torch.compile(self.module.custom_autograd_fn_returns_self)
+            out_test = f_compiled(x_test)
+            out_test.sum().backward()
+
+            self.assertEqual(out_ref, out_test)
+            self.assertEqual(x_ref.grad, x_test.grad)
+
+        # Not an open registration test - this file is just very convenient
+        # for testing torch.compile on custom C++ operators
+        def test_compile_autograd_function_aliasing():
+            x_ref = torch.randn(4, requires_grad=True)
+            out_ref = torch.ops._test_funcs.custom_autograd_fn_aliasing(x_ref)
+            out_ref.sum().backward()
+
+            x_test = x_ref.clone().detach().requires_grad_(True)
+            f_compiled = torch.compile(torch.ops._test_funcs.custom_autograd_fn_aliasing)
+            out_test = f_compiled(x_test)
+            out_test.sum().backward()
+
+            self.assertEqual(out_ref, out_test)
+            self.assertEqual(x_ref.grad, x_test.grad)
+
         test_base_device_registration()
         test_before_common_registration()
         test_common_registration()
@@ -426,6 +456,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_storage_type()
         test_open_device_faketensor()
         test_open_device_named_tensor()
+
+        test_compile_autograd_function_returns_self()
+        test_compile_autograd_function_aliasing()
 
 
 if __name__ == "__main__":
