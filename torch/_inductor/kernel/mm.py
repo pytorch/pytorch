@@ -1,6 +1,7 @@
 import logging
 
 import torch
+from .. import config as inductor_config
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
