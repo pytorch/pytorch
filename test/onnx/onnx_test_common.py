@@ -82,6 +82,39 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
     return verification.verify(*args, options=options, **kwargs)
 
 
+def assert_dynamic_shapes(
+    export_output: torch.onnx.ExportOutput, dynamic_shapes: Optional[bool]
+):
+    """Assert whether the exported model has dynamic shapes or not.
+
+    Args:
+        export_output (torch.onnx.ExportOutput): The output of torch.onnx.dynamo_export.
+        dynamic_shapes (Optional[bool], optional): Whether the exported model has dynamic shapes or not.
+            When True, raises if graph inputs don't have at least one dynamic dimension
+            When False, raises if graph inputs have at least one dynamic dimension.
+            When None, no check is performed. Defaults to None.
+
+    Raises:
+        AssertionError: If the exported model has dynamic shapes and dynamic_shapes is False and vice-versa.
+    """
+
+    if dynamic_shapes is None:
+        return
+
+    model_proto = export_output.model_proto
+    # Process graph inputs
+    dynamic_inputs = []
+    for inp in model_proto.graph.input:
+        dynamic_inputs += [
+            dim
+            for dim in inp.type.tensor_type.shape.dim
+            if dim.dim_value == 0 and dim.dim_param != ""
+        ]
+    assert dynamic_shapes == (
+        len(dynamic_inputs) > 0
+    ), "Dynamic shape check failed for graph inputs"
+
+
 def parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
     """Combine class name with the parameterized arguments.
 
@@ -176,6 +209,8 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         self,
         model: _ModelType,
         input_args: Sequence[_InputArgsType],
+        *,
+        dynamic_shapes: Optional[bool],
         input_kwargs: Optional[Mapping[str, _InputArgsType]] = None,
         rtol: Optional[float] = 1e-3,
         atol: Optional[float] = 1e-7,
@@ -196,6 +231,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         Args:
             model (_ModelType): PyTorch model
             input_args (Sequence[_InputArgsType]): torch input arguments
+            dynamic_shapes (bool): Whether the model has dynamic shapes.
             input_kwargs (Mapping[str, _InputArgsType]): torch input kwargs
             rtol (float, optional): relative tolerance. Defaults to 1e-3.
             atol (float, optional): absolute tolerance. Defaults to 1e-7.
@@ -242,6 +278,8 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 dynamic_shapes=self.dynamic_shapes,
             ),
         )
+
+        assert_dynamic_shapes(export_output, dynamic_shapes)
 
         if verbose:
             export_output.diagnostic_context.dump(

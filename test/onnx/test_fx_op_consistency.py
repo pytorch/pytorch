@@ -625,6 +625,7 @@ def _run_test_output_match(
     device: str,
     dtype: torch.dtype,
     op: opinfo_core.OpInfo,
+    dynamic_shapes: bool,
 ):
     # device is provided by instantiate_device_type_tests, but we only want to run in cpu.
     assert device == "cpu"
@@ -661,7 +662,7 @@ def _run_test_output_match(
                     atol = None
                 # Run the test
                 test_suite.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-                    model, inputs, rtol=rtol, atol=atol
+                    model, inputs, dynamic_shapes=dynamic_shapes, rtol=rtol, atol=atol
                 )
 
 
@@ -697,7 +698,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     )
     def test_output_match(self, device: str, dtype: torch.dtype, op):
         """Test the ONNX exporter."""
-        _run_test_output_match(self, device, dtype, op)
+        _run_test_output_match(self, device, dtype, op, self.dynamic_shapes)
 
     @common_device_type.ops(
         [op for op in OPS_DB if op.name in COMPLEX_TESTED_OPS],
@@ -705,7 +706,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     )
     def test_output_match_complex(self, device: str, dtype: torch.dtype, op):
         """Test the ONNX exporter with complex dtype."""
-        _run_test_output_match(self, device, dtype, op)
+        _run_test_output_match(self, device, dtype, op, self.dynamic_shapes)
 
 
 for opset in onnx_test_common.FX_TESTED_OPSETS:

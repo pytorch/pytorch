@@ -88,7 +88,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
 
-        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,))
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            func, (tensor_x,), dynamic_shapes=self.dynamic_shapes
+        )
 
     @pytorch_test_common.xfail(
         "AssertionError: Dynamo input/output is not consistent with traced input/output. "
@@ -122,14 +124,19 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         tensor_x = torch.randn(1, 2, 3, dtype=torch.float32)
 
         # Test without providing optional kwarg.
-        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,))
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            func, (tensor_x,), dynamic_shapes=self.dynamic_shapes
+        )
         # Test with only positional args.
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            func, (tensor_x, torch.tensor(8.0))
+            func, (tensor_x, torch.tensor(8.0)), dynamic_shapes=self.dynamic_shapes
         )
         # Test while specifying optional kwarg.
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            func, (tensor_x,), {"b": torch.tensor(5.0)}
+            func,
+            (tensor_x,),
+            input_kwargs={"b": torch.tensor(5.0)},
+            dynamic_shapes=self.dynamic_shapes,
         )
 
     @pytorch_test_common.xfail(
@@ -154,6 +161,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 dynamic_shapes=self.dynamic_shapes,
             ),
         )
+        onnx_test_common.assert_dynamic_shapes(export_output, self.dynamic_shapes)
         onnx_format_args = export_output.adapt_torch_inputs_to_onnx(tensor_x, 8.0)
         ref_outputs = export_output.adapt_torch_outputs_to_onnx(func(tensor_x, 8.0))
         ort_outputs = onnx_test_common.run_ort(export_output, onnx_format_args)
@@ -195,7 +203,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             [torch.randn(3), torch.randn(3), torch.randn(3)],
         ]
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            func, (x_dict, y_tuple, z_list)
+            func, (x_dict, y_tuple, z_list), dynamic_shapes=self.dynamic_shapes
         )
 
     def test_func_with_nested_output_structure(self):
@@ -211,7 +219,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3)
         y = torch.randn(3)
         z = torch.randn(3)
-        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (x, y, z))
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            func, (x, y, z), dynamic_shapes=self.dynamic_shapes
+        )
 
     def test_mnist(self):
         class MNISTModel(nn.Module):
@@ -237,7 +247,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            MNISTModel(), (tensor_x,)
+            MNISTModel(), (tensor_x,), dynamic_shapes=self.dynamic_shapes
         )
 
     def test_log_sigmoid(self):
@@ -252,7 +262,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return self.m(x)
 
         input = torch.randn(2)
-        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(Model(), (input,))
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            Model(), (input,), dynamic_shapes=self.dynamic_shapes
+        )
 
     @skip_if_no_torchvision
     def test_resnet18(self):
@@ -268,8 +280,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         dummy_input = torch.randn(1, 3, 224, 224)
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            model,
-            (dummy_input,),
+            model, (dummy_input,), dynamic_shapes=self.dynamic_shapes
         )
 
     @pytorch_test_common.xfail(
@@ -285,6 +296,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             model,
             (dummy_input,),
+            dynamic_shapes=self.dynamic_shapes,
             additional_test_inputs=[((test_inputs,),)],
             rtol=1e-3,
             atol=1e-5,
@@ -303,6 +315,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             DynamicAdd(),
             (x, y),
+            dynamic_shapes=self.dynamic_shapes,
             additional_test_inputs=[((another_x, another_y),)],
         )
 
@@ -324,7 +337,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         input_y = torch.randn(1, 4)
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            DynamicAdd(), (x, y), additional_test_inputs=[((input_x, input_y),)]
+            DynamicAdd(),
+            (x, y),
+            dynamic_shapes=self.dynamic_shapes,
+            additional_test_inputs=[((input_x, input_y),)],
         )
 
     def test_matmul(self):
@@ -338,7 +354,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         input_y = torch.randn(2, 4, 4)
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            DynamicMatMul(), (x, y), additional_test_inputs=[((input_x, input_y),)]
+            DynamicMatMul(),
+            (x, y),
+            dynamic_shapes=self.dynamic_shapes,
+            additional_test_inputs=[((input_x, input_y),)],
         )
 
     @pytorch_test_common.skip_dynamic_fx_test(
@@ -356,6 +375,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             test(),
             (x,),
+            dynamic_shapes=self.dynamic_shapes,
             additional_test_inputs=[((y,),)],
         )
 
@@ -374,6 +394,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             TransposeModule(),
             (x,),
+            dynamic_shapes=self.dynamic_shapes,
             additional_test_inputs=[((y,),)],
         )
 
@@ -388,10 +409,16 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         d3 = torch.tensor([3])
         d4 = torch.tensor([4])
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            Squeeze(), (d1, d4), additional_test_inputs=[((d3, d4),)]
+            Squeeze(),
+            (d1, d4),
+            dynamic_shapes=self.dynamic_shapes,
+            additional_test_inputs=[((d3, d4),)],
         )
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            Squeeze(), (d3, d4), additional_test_inputs=[((d1, d3),)]
+            Squeeze(),
+            (d3, d4),
+            dynamic_shapes=self.dynamic_shapes,
+            additional_test_inputs=[((d1, d3),)],
         )
 
     def test_slice(self):
@@ -407,6 +434,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             DynamicSliceExportMod(),
             (x,),
+            dynamic_shapes=self.dynamic_shapes,
             additional_test_inputs=[((y,),)],
         )
 
@@ -417,7 +445,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return x
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            MutationModel(), (torch.randn(12),), has_mutation=True
+            MutationModel(),
+            (torch.randn(12),),
+            dynamic_shapes=self.dynamic_shapes,
+            has_mutation=True,
         )
 
     def test_arange(self):
@@ -434,6 +465,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             ArangeModel(),
             (x,),
+            dynamic_shapes=self.dynamic_shapes,
             additional_test_inputs=[((y,),)],
         )
 
@@ -452,6 +484,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             Model(),
             (x,),
+            dynamic_shapes=self.dynamic_shapes,
             additional_test_inputs=[((x2,),)],
         )
 
@@ -469,6 +502,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             Model(),
             (x,),
+            dynamic_shapes=self.dynamic_shapes,
             additional_test_inputs=[((x2,),)],
         )
 
@@ -486,6 +520,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             Model(),
             (x,),
+            dynamic_shapes=self.dynamic_shapes,
             additional_test_inputs=[((x2,),)],
         )
 
@@ -503,7 +538,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             ViewModel(),
             (x,),
-            # additional_test_inputs=[((y,),)],
+            dynamic_shapes=None,  # This test always generate static shape
+            # additional_test_inputs=[((y,),)],  # TODO: Without `additional_test_inputs` arg, dynamic shape cannot be verified
         )
 
     def test_flatten_dynamic_axes(self):
@@ -516,7 +552,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(5, 5, 4, 5)
         model = MyModule()
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            model, (x,), additional_test_inputs=[((y,),)]
+            model,
+            (x,),
+            dynamic_shapes=self.dynamic_shapes,
+            additional_test_inputs=[((y,),)],
         )
 
     def test_none_input(self):
@@ -529,7 +568,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return x + y + z
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            NoneInputModel(), (torch.randn(1, 2), None, torch.randn(1, 2))
+            NoneInputModel(),
+            (torch.randn(1, 2), None, torch.randn(1, 2)),
+            dynamic_shapes=self.dynamic_shapes,
         )
 
     def test_operator_with_data_dependent_output(self):
@@ -538,7 +579,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             return x + torch.full(x.shape, torch.tensor(torch.finfo(x.dtype).min))
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            func, (torch.randn(3, 4),)
+            func, (torch.randn(3, 4),), dynamic_shapes=self.dynamic_shapes
         )
 
     def test_operator_with_scalar_output(self):
@@ -546,7 +587,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             return x.item() + y
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            func, (torch.tensor([1]), torch.randn(3, 4))
+            func,
+            (torch.tensor([1]), torch.randn(3, 4)),
+            dynamic_shapes=self.dynamic_shapes,
         )
 
     def test_operator_with_dynamic_output_shape(self):
@@ -554,7 +597,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             return x.nonzero()
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            func, (torch.randn(3, 4),)
+            func, (torch.randn(3, 4),), dynamic_shapes=self.dynamic_shapes
         )
 
     def test_gpt2_tiny(self):
@@ -568,7 +611,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         another_inputs = tokenizer("Another Hello world!", return_tensors="pt")
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            model, [], inputs, additional_test_inputs=[((), another_inputs)]
+            model,
+            [],
+            input_kwargs=inputs,
+            dynamic_shapes=self.dynamic_shapes,
+            additional_test_inputs=[((), another_inputs)],
         )
 
     def test_prims_device_put(self):
@@ -579,7 +626,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return x
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            CustomModule(), (torch.randn(1, 2, 3),)
+            CustomModule(), (torch.randn(1, 2, 3),), dynamic_shapes=self.dynamic_shapes
         )
 
     @_beartype.beartype
@@ -589,6 +636,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         create_model: Callable,
         create_args: Callable,
         create_pytorch_only_kwargs: Callable,
+        dynamic_shapes: bool,
     ):
         """Test helper for large-scale exporter.
 
@@ -597,6 +645,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_model: A function that creates a model. It should always create the same model.
             create_args: A function that creates random input arguments for the model.
             create_pytorch_only_kwargs: A function that creates kwargs for calling PyTorch model with real tensors.
+            dynamic_shapes: Whether dynamic shapes is enabled or not.
 
         This test contains several steps.
 
@@ -659,6 +708,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 )
 
                 onnx_model = export_output.model_proto
+
+            onnx_test_common.assert_dynamic_shapes(export_output, dynamic_shapes)
 
             # Tasks done by the following block.
             #  1. Iterate through all tensors stored in ctx.paths (the file content is loaded torch.load)
@@ -742,6 +793,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_model,
             create_args,
             create_pytorch_only_extra_kwargs,
+            dynamic_shapes=self.dynamic_shapes,
         )
 
     @pytorch_test_common.skip_dynamic_fx_test(
@@ -768,6 +820,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_model,
             create_args,
             create_pytorch_only_extra_kwargs,
+            dynamic_shapes=self.dynamic_shapes,
         )
 
 
@@ -816,6 +869,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         create_kwargs: Callable,
         load_checkpoint_during_init: bool,
         export_within_fake_mode: bool,
+        dynamic_shapes: bool,
     ):
         """Test helper for FakeTensorMode-enabled exporter.
 
@@ -827,6 +881,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             load_checkpoint_during_init: Whether to load a checkpoint during model initialization.
                 (after or during model creation, but before exporting starts)
             export_within_fake_mode: Whether to call torch.onnx._dynamo_export within torch._subclasses.FakeTensorMode
+            dynamic_shapes: Whether dynamic shapes is enabled or not.
 
         This test contains several steps.
 
@@ -878,6 +933,8 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 export_output = torch.onnx.dynamo_export(
                     fake_model, *fake_args, **fake_kwargs, export_options=export_options
                 )
+
+            onnx_test_common.assert_dynamic_shapes(export_output, dynamic_shapes)
 
             with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
                 export_output.save(
@@ -932,6 +989,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_kwargs,
             load_checkpoint_during_init=self.load_checkpoint_during_init,
             export_within_fake_mode=self.export_within_fake_mode,
+            dynamic_shapes=self.dynamic_shapes,
         )
 
     def test_large_scale_exporter_with_tiny_gpt2(self):
@@ -957,6 +1015,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_kwargs,
             load_checkpoint_during_init=self.load_checkpoint_during_init,
             export_within_fake_mode=self.export_within_fake_mode,
+            dynamic_shapes=self.dynamic_shapes,
         )
 
     def test_large_scale_exporter_with_toy_mlp(self):
@@ -994,6 +1053,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_kwargs,
             load_checkpoint_during_init=self.load_checkpoint_during_init,
             export_within_fake_mode=self.export_within_fake_mode,
+            dynamic_shapes=self.dynamic_shapes,
         )
 
 
