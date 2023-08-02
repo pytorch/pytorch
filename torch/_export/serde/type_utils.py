@@ -26,6 +26,22 @@ class NotSure:
 
 
 def check(v: object, t: object) -> Union[Succeed, Fail, NotSure]:
+    """
+    Tries to decide if v is of type t
+
+    Succeeds
+        - when v is a simple Python value (e.g., ints, floats, nested built-in structs like Dict, Set, List, Union)
+          and v's type matches t
+        - or when `isinstance(v, t)`
+
+    Fails
+        - when v is a simple Python value (as described above)
+          and v's type does not match t
+
+    Gives NotSure
+        - when the type of v is not included in this logic
+    """
+
     head, args = deconstruct(t)
     if head == List:
         assert isinstance(v, list), f"Expected {v} to be a list, but got {type(v).__name__}."
