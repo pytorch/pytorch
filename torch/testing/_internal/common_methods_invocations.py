@@ -8780,6 +8780,15 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
     ),
+
+    ForeachFuncInfo(
+        'sign',
+        dtypes=floating_types_and(torch.bool, torch.bfloat16, torch.half),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
+    ),
 ]
 
 foreach_binary_op_db: List[OpInfo] = [
@@ -20769,7 +20778,7 @@ python_ref_db = [
         torch_opinfo_name="stft",
         supports_nvfuser=False,
         skips=[
-            # no _refs support for aten.pad
+            # RuntimeError: no _refs support for aten.pad
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref'
             ),
@@ -20779,12 +20788,12 @@ python_ref_db = [
         "_refs.istft",
         torch_opinfo_name="istft",
         supports_nvfuser=False,
-        # skips=[
-        #     # no _refs support for torch.view_as_real
-        #     DecorateInfo(
-        #         unittest.expectedFailure, 'TestCommon', 'test_python_ref'
-        #     ),
-        # ]
+        skips=[
+            # RuntimeError: no _refs support for aten.unfold_backward
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref'
+            ),
+        ]
     ),
 ]
 python_ref_db += opinfo.definitions.python_ref_db

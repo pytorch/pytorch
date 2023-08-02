@@ -3359,7 +3359,7 @@ def istft(
             lambda: "Complex windows are incompatible with return_complex=False",
         )
         if not onesided_:
-            input = aten.slice(input, dim=-1, start=0, end=n_fft // 2 + 1)
+            input = input.narrow(dim=-1, start=0, length=n_fft // 2 + 1)
         input = torch.fft.irfft(input, dim=-1, norm=norm)
 
     assert input.size(2) == n_fft
@@ -3387,16 +3387,18 @@ def istft(
     if length is not None:
         end = start + length
     elif center:
-        end = -(n_fft // 2)
+        end = expected_output_signal_len - (n_fft // 2)
     else:
         end = expected_output_signal_len
 
-    y = aten.slice(y, dim=1, start=start, end=end, step=1)
-    window_envelop = aten.slice(window_envelop, dim=1, start=start, end=end, step=1)
+    length = max(0, end - start)
+    y = y.narrow(dim=1, start=start, length=length)
+    window_envelop = window_envelop.narrow(dim=1, start=start, length=length)
 
     window_envelop_lowest = window_envelop.abs().min().lt(1e-11)
     torch._check(
-        not window_envelop_lowest.item(), lambda: "window overlap add min less than 1e-11"
+        not window_envelop_lowest.item(),
+        lambda: "window overlap add min less than 1e-11",
     )
 
     y = y / window_envelop

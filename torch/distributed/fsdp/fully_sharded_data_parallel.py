@@ -1735,7 +1735,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         Rank0 only and CPU only can be specified via :meth:`state_dict_type` to
         avoid OOM.
 
-        For sharded optimizer state_dict, all states are unflattend but sharded.
+        For sharded optimizer state_dict, all states are unflattened but sharded.
         CPU only can be specified via :meth:`state_dict_type` to further save
         memory.
 
