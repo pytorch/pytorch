@@ -1050,7 +1050,9 @@ def emit_body(
             for foreach_arg, ref_arg in zip(
                 f.func.arguments.flat_non_out, info.func.func.arguments.flat_non_out
             ):
-                foreach_arg_type = getattr(foreach_arg.type, "elem", foreach_arg.type)
+                foreach_arg_type = foreach_arg.type
+                if isinstance(foreach_arg_type, ListType):
+                    foreach_arg_type = foreach_arg_type.elem
                 assert foreach_arg_type == ref_arg.type
                 inplace_foreacharg2refarg[foreach_arg] = ref_arg
                 refargname2inplace_foreacharg[ref_arg.name] = foreach_arg
