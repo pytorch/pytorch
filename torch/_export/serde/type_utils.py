@@ -15,6 +15,9 @@ class Fail:
     def __repr__(self) -> str:
         return f"Fail(msg={self.msg})"
 
+    def __eq__(self, other: object) -> bool:
+        return type(other) == Fail and self.msg == other.msg
+
 
 class NotSure:
     def __init__(self, v: object, t: object) -> None:
@@ -23,6 +26,28 @@ class NotSure:
 
     def __repr__(self) -> str:
         return f"NotSure(v={self.v}, t={self.t})"
+
+    def __eq__(self, other: object) -> bool:
+        return type(other) == NotSure and self.v == other.v and self.t == other.t
+
+
+def pp(t: object) -> str:
+    """
+    pretty print a type object
+    """
+
+    head, args = deconstruct(t)
+    if head == list:
+        return f"List[{pp(args[0])}]"
+    elif head == set:
+        return f"Set[{pp(args[0])}]"
+    elif head == dict:
+        return f"Dict[{pp(args[0])}, {pp(args[1])}]"
+    elif head == Union:
+        args_str = ", ".join(pp(arg) for arg in args)
+        return f"Union[{args_str}]"
+    else:
+        return t.__name__
 
 
 def check(v: object, t: object) -> Union[Succeed, Fail, NotSure]:
@@ -43,39 +68,42 @@ def check(v: object, t: object) -> Union[Succeed, Fail, NotSure]:
     """
 
     head, args = deconstruct(t)
-    if head == List:
-        assert isinstance(v, list), f"Expected {v} to be a list, but got {type(v).__name__}."
+    if head == list:
+        if not isinstance(v, list):
+            return Fail(msg=[f"Expected {v} to be a list, but got {type(v).__name__}."])
         element_type = args[0]
         for element in v:
             check_result = check(element, element_type)
             if isinstance(check_result, Fail):
-                return Fail([f"{v} is not a {t}."] + check_result.msg)
+                return Fail([f"{v} is not a {pp(t)}."] + check_result.msg)
         return Succeed()
-    elif head is Dict:
-        assert isinstance(v, dict), f"Expected {v} to be a dict, but got {type(v).__name}."
+    elif head == dict:
+        if not isinstance(v, dict):
+            return Fail(msg=[f"Expected {v} to be a dict, but got {type(v).__name__}."])
         key_type, val_type = args[0], args[1]
         for key, val in v.items():
             check_result = check(key, key_type)
             if isinstance(check_result, Fail):
-                return Fail([f"{v} is not a {t}."] + check_result.msg)
+                return Fail([f"{v} is not a {pp(t)}."] + check_result.msg)
             check_result = check(val, val_type)
             if isinstance(check_result, Fail):
-                return Fail([f"{v} is not a {t}."] + check_result.msg)
+                return Fail([f"{v} is not a {pp(t)}."] + check_result.msg)
         return Succeed()
-    elif head is Set:
-        assert isinstance(v, set), f"Expected {v} to be a set, but got {type(v).__name__}."
+    elif head == set:
+        if not isinstance(v, set):
+            return Fail(msg=[f"Expected {v} to be a set, but got {type(v).__name__}."])
         element_type = args[0]
         for element in v:
             check_result = check(element, element_type)
             if isinstance(check_result, Fail):
-                return Fail([f"{v} is not a {t}."] + check_result.msg)
+                return Fail([f"{v} is not a {pp(t)}."] + check_result.msg)
         return Succeed()
-    elif head is Union:
+    elif head == Union:
         for arg in args:
             check_result = check(v, arg)
             if isinstance(check_result, Succeed):
                 return Succeed()
-        return Fail([f"{v} is not of type {t}."])
+        return Fail([f"{v} is not of type {pp(t)}."])
     elif head in [int, float, str, bool] or inspect.isclass(head):
         if isinstance(v, head):
             return Succeed()

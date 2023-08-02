@@ -1,5 +1,5 @@
 from typing import List, Union, Dict
-from torch._export.serde.type_utils import check, Succeed, Fail
+from torch._export.serde.type_utils import check, Succeed, Fail, NotSure
 from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
@@ -7,21 +7,52 @@ from torch.testing._internal.common_utils import (
 
 
 class JustATest:
-    pass
+    def __repr__(self) -> str:
+        return "JustATest()"
 
 
 class JustAnotherTest:
-    pass
+    def __repr__(self) -> str:
+        return "JustAnotherTest()"
 
 
 class TestUnionTypeCheck(TestCase):
     """The _Union"""
 
-    def test_type_utils_check(self):
+    def test_type_utils_check_lists(self):
+        """
+        Tests various list values
+        Demonstrates the structure of error messages
+        """
+
+        self.assertEqual(check([[42, 120], [10, 5]], List[List[int]]), Succeed())
+
         self.assertEqual(
             check(["yada", "hurray"], List[int]),
-            Succeed()
+            Fail(
+                [
+                    "['yada', 'hurray'] is not a List[int].",
+                    "Expected int from yada, but got str."
+                ]
+            )
         )
+
+        self.assertEqual(
+            check([[42, 120], [10, "im_a_str"]], List[List[int]]),
+            Fail(
+                [
+                    "[[42, 120], [10, 'im_a_str']] is not a List[List[int]].",
+                    "[10, 'im_a_str'] is not a List[int].",
+                    "Expected int from im_a_str, but got str."
+                ]
+            )
+        )
+
+
+    def test_type_utils_check(self) -> None:
+        """
+        Tests dictionaries, unions, and classes
+        """
 
         self.assertEqual(
             check({"python": "py", "racket": "rkt"}, Union[List[int], Dict[str, str], float]),
@@ -29,13 +60,25 @@ class TestUnionTypeCheck(TestCase):
         )
 
         self.assertEqual(
+            check({"five": 5}, Union[List[int], Dict[str, str], float]),
+            Fail(
+                ["{'five': 5} is not of type Union[List[int], Dict[str, str], float]."]
+            )
+        )
+
+        self.assertEqual(
             check(JustATest(), JustATest),
             Succeed()
         )
 
-        failed_check = check(JustATest(), JustAnotherTest)
-        self.assertTrue(isinstance(failed_check, Fail))
-        self.assertIn("Expected JustAnotherTest", failed_check.msg[0])
+        self.assertEqual(
+            check(JustATest(), JustAnotherTest),
+            Fail(["Expected JustAnotherTest from JustATest(), but got JustATest."])
+        )
+
+        self.assertEqual(
+            check("fourty_two", 42), NotSure(v="fourty_two", t=42)
+        )
 
 
 if __name__ == '__main__':
