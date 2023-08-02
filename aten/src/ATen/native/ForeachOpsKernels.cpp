@@ -43,6 +43,7 @@
 #include <ATen/ops/_foreach_reciprocal_native.h>
 #include <ATen/ops/_foreach_round_native.h>
 #include <ATen/ops/_foreach_sigmoid_native.h>
+#include <ATen/ops/_foreach_sign_native.h>
 #include <ATen/ops/_foreach_sin_native.h>
 #include <ATen/ops/_foreach_sinh_native.h>
 #include <ATen/ops/_foreach_sqrt_native.h>
@@ -305,6 +306,7 @@ FOREACH_UNARY_OP(frac);
 FOREACH_UNARY_OP(trunc);
 FOREACH_UNARY_OP(reciprocal);
 FOREACH_UNARY_OP(sigmoid);
+FOREACH_UNARY_OP(sign);
 
 FOREACH_POINTWISE_OP_SCALAR(addcdiv);
 FOREACH_POINTWISE_OP_SCALAR(addcmul);
