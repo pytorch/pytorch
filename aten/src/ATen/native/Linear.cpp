@@ -84,7 +84,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
     // Fused op is marginally faster.
     return at::addmm(*bias, input, weight.t());
   }
-  if ((input_dim == 3 || input_dim == 4) && bias->defined() && !input.is_xla()) {
+  if (bias->defined() && !input.is_xla()) {
     // Also hit the fused path for contiguous 3D input, if not using xla
     // backend. Reshaping/flattening has some performance implications on xla.
     if (input.is_contiguous()) {
