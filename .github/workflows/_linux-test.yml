@@ -40,9 +40,9 @@ on:
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
-        description: | 
-          HF Auth token to avoid rate limits when downloading models or datasets from hub 
-  
+        description: |
+          HF Auth token to avoid rate limits when downloading models or datasets from hub
+
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
