@@ -391,12 +391,6 @@ static PyTypeObject CacheEntryWrapperType = {
 };
 
 inline static CacheEntry* get_cache_entry(THP_EVAL_API_FRAME_OBJECT* frame) {
-  PyObject* extra = NULL;
-  _PyCode_GetExtra((PyObject*)frame->f_code, cache_entry_extra_index, (void*)&extra);
-  if (extra == NULL || extra == SKIP_CODE) {
-    return (CacheEntry*)extra;
-  }
-
   // The cache lives on the extra segment of code object. However, what goes in
   // the extra segment depends on the code object itself. It can be one of the
   // two types - CacheEntryPyWrapper or a PyDict[nn_mmodule,
@@ -410,8 +404,24 @@ inline static CacheEntry* get_cache_entry(THP_EVAL_API_FRAME_OBJECT* frame) {
   //
   // If the frame is not a method of a nn.Module instance, we just store the
   // CacheEntry object directly on the extra segment.
-  PyObject* nn_module = get_nn_module_if_frame_is_method_of_nn_module(frame);
-  if (nn_module != NULL) {
+
+  PyObject* extra = NULL;
+  _PyCode_GetExtra((PyObject*)frame->f_code, cache_entry_extra_index, (void*)&extra);
+  if (extra == NULL || extra == SKIP_CODE) {
+    return (CacheEntry*)extra;
+  }
+
+  if (PyObject_IsInstance(extra, (PyObject *)&CacheEntryWrapperType)) {
+    return ((CacheEntryPyWrapper*)extra)->cache_entry;
+  }
+
+  if (PyDict_Check(extra)) {
+    PyObject* nn_module = get_nn_module_if_frame_is_method_of_nn_module(frame);
+    if (nn_module == NULL) {
+      fprintf(stderr, "Unable to get nn.Module for frame. Failing.\n");
+      return NULL;
+    }
+
     // TODO - the callback is set to NULL. Currently, there is a callback in
     // CheckFnManager invalidate, which should track the garbage collection of nn
     // modules. However, we can't fully rely on that one to call reset_code
@@ -434,7 +444,6 @@ inline static CacheEntry* get_cache_entry(THP_EVAL_API_FRAME_OBJECT* frame) {
     CacheEntryPyWrapper* cache_entry_wrapper = (CacheEntryPyWrapper*)PyDict_GetItem(nn_module_to_cache_entry_map, nn_module_weakref);
     return cache_entry_wrapper->cache_entry;
   }
-
   CacheEntryPyWrapper* cache_entry_wrapper = (CacheEntryPyWrapper*)extra;
   return cache_entry_wrapper->cache_entry;
 }
