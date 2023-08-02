@@ -28,6 +28,7 @@ class Vectorized<int64_t> {
   using vec_internal_type = vint64;
   using vec_internal_mask_type = vbool64;
   using size_type = int;
+  using ElementType = signed long long;
   static constexpr size_type size() {
     return 4;
   }
@@ -37,7 +38,7 @@ class Vectorized<int64_t> {
   C10_ALWAYS_INLINE Vectorized(vint64 v1, vint64 v2) : _vec0{v1}, _vec1{v2} {}
   C10_ALWAYS_INLINE Vectorized(vbool64 v1, vbool64 v2) : _vecb0{v1}, _vecb1{v2} {}
   C10_ALWAYS_INLINE Vectorized(int64_t scalar)
-      : _vec0{vec_splats(scalar)}, _vec1{vec_splats(scalar)} {}
+      : _vec0{vec_splats((ElementType)scalar)}, _vec1{(vint64)vec_splats((ElementType)scalar)} {}
   C10_ALWAYS_INLINE Vectorized(
       int64_t scalar1,
       int64_t scalar2,
