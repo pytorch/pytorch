@@ -184,7 +184,9 @@ def _validate_frozen_params(
                     raise ValueError(msg)
 
 
-def _get_post_order_named_modules(root_module: nn.Module) -> List[nn.Module]:
+def _get_post_order_named_modules(
+    root_module: nn.Module,
+) -> List[Tuple[str, nn.Module]]:
     """
     This returns the named modules following a post-order traversal, which is a
     valid reverse topological sort. We achieve this using the reverse of a
