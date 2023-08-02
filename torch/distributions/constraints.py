@@ -215,8 +215,7 @@ class _IndependentConstraint(Constraint):
         return result
 
     def __repr__(self):
-        return "{}({}, {})".format(self.__class__.__name__[1:], repr(self.base_constraint),
-                                   self.reinterpreted_batch_ndims)
+        return f"{self.__class__.__name__[1:]}({repr(self.base_constraint)}, {self.reinterpreted_batch_ndims})"
 
 
 class _Boolean(Constraint):
@@ -258,7 +257,7 @@ class _IntegerInterval(Constraint):
 
     def __repr__(self):
         fmt_string = self.__class__.__name__[1:]
-        fmt_string += '(lower_bound={}, upper_bound={})'.format(self.lower_bound, self.upper_bound)
+        fmt_string += f'(lower_bound={self.lower_bound}, upper_bound={self.upper_bound})'
         return fmt_string
 
 
@@ -277,7 +276,7 @@ class _IntegerLessThan(Constraint):
 
     def __repr__(self):
         fmt_string = self.__class__.__name__[1:]
-        fmt_string += '(upper_bound={})'.format(self.upper_bound)
+        fmt_string += f'(upper_bound={self.upper_bound})'
         return fmt_string
 
 
@@ -296,7 +295,7 @@ class _IntegerGreaterThan(Constraint):
 
     def __repr__(self):
         fmt_string = self.__class__.__name__[1:]
-        fmt_string += '(lower_bound={})'.format(self.lower_bound)
+        fmt_string += f'(lower_bound={self.lower_bound})'
         return fmt_string
 
 
@@ -321,7 +320,7 @@ class _GreaterThan(Constraint):
 
     def __repr__(self):
         fmt_string = self.__class__.__name__[1:]
-        fmt_string += '(lower_bound={})'.format(self.lower_bound)
+        fmt_string += f'(lower_bound={self.lower_bound})'
         return fmt_string
 
 
@@ -338,7 +337,7 @@ class _GreaterThanEq(Constraint):
 
     def __repr__(self):
         fmt_string = self.__class__.__name__[1:]
-        fmt_string += '(lower_bound={})'.format(self.lower_bound)
+        fmt_string += f'(lower_bound={self.lower_bound})'
         return fmt_string
 
 
@@ -355,7 +354,7 @@ class _LessThan(Constraint):
 
     def __repr__(self):
         fmt_string = self.__class__.__name__[1:]
-        fmt_string += '(upper_bound={})'.format(self.upper_bound)
+        fmt_string += f'(upper_bound={self.upper_bound})'
         return fmt_string
 
 
@@ -373,7 +372,7 @@ class _Interval(Constraint):
 
     def __repr__(self):
         fmt_string = self.__class__.__name__[1:]
-        fmt_string += '(lower_bound={}, upper_bound={})'.format(self.lower_bound, self.upper_bound)
+        fmt_string += f'(lower_bound={self.lower_bound}, upper_bound={self.upper_bound})'
         return fmt_string
 
 
@@ -391,7 +390,7 @@ class _HalfOpenInterval(Constraint):
 
     def __repr__(self):
         fmt_string = self.__class__.__name__[1:]
-        fmt_string += '(lower_bound={}, upper_bound={})'.format(self.lower_bound, self.upper_bound)
+        fmt_string += f'(lower_bound={self.lower_bound}, upper_bound={self.upper_bound})'
         return fmt_string
 
 

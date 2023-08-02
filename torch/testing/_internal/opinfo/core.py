@@ -859,9 +859,7 @@ class OpInfo:
     def __post_init__(self):
         self._original_opinfo_args = asdict(self).copy()
 
-        assert self.dtypes is not None, "OpInfo for {0} has no dtypes!".format(
-            self.name
-        )
+        assert self.dtypes is not None, f"OpInfo for {self.name} has no dtypes!"
 
         dtypes_args = (self.dtypes, self.dtypesIfCUDA, self.dtypesIfROCM)
 
@@ -874,10 +872,7 @@ class OpInfo:
 
         # Attribute to verify dynamic_dtypes are used.
         self.dynamic_dtypes = any(
-            (
-                isinstance(dtypes, utils._dynamic_dispatch_dtypes)
-                for dtypes in dtypes_args
-            )
+            isinstance(dtypes, utils._dynamic_dispatch_dtypes) for dtypes in dtypes_args
         )
 
         if self.dynamic_dtypes:
@@ -1346,7 +1341,7 @@ class OpInfo:
             if self.variant_test_name
             else ""
         )
-        return "{}{}".format(self.name.replace(".", "_"), variant)
+        return f"{self.name.replace('.', '_')}{variant}"
 
 
 def _generate_reduction_inputs(device, dtype, requires_grad, **kwargs):
@@ -2683,6 +2678,7 @@ class ForeachFuncInfo(OpInfo):
         supports_autograd=False,
         supports_scalar_self_arg=False,
         supports_forward_ad=False,
+        backward_requires_result=False,
         **kwargs,
     ):
         (
@@ -2716,6 +2712,7 @@ class ForeachFuncInfo(OpInfo):
 
         self.ref_inplace = torch_ref_inplace
         self.supports_alpha_param = supports_alpha_param
+        self.backward_requires_result = backward_requires_result
 
         if name == "norm":
             self.ref = torch.linalg.vector_norm

@@ -2,6 +2,7 @@
 
 import json
 import os
+import warnings
 
 from dataclasses import dataclass
 from typing import Any, Callable, cast, Dict, List, Optional, Tuple
@@ -143,3 +144,26 @@ def gh_post_commit_comment(
 def gh_delete_comment(org: str, repo: str, comment_id: int) -> None:
     url = f"https://api.github.com/repos/{org}/{repo}/issues/comments/{comment_id}"
     gh_fetch_url(url, method="DELETE")
+
+
+def gh_fetch_merge_base(org: str, repo: str, base: str, head: str) -> str:
+    merge_base = ""
+    # Get the merge base using the GitHub REST API. This is the same as using
+    # git merge-base without the need to have git. The API doc can be found at
+    # https://docs.github.com/en/rest/commits/commits?apiVersion=2022-11-28#compare-two-commits
+    try:
+        json_data = gh_fetch_url(
+            f"https://api.github.com/repos/{org}/{repo}/compare/{base}...{head}",
+            headers={"Accept": "application/vnd.github.v3+json"},
+            reader=json.load,
+        )
+        if json_data:
+            merge_base = json_data.get("merge_base_commit", {}).get("sha", "")
+        else:
+            warnings.warn(
+                f"Failed to get merge base for {base}...{head}: Empty response"
+            )
+    except Exception as error:
+        warnings.warn(f"Failed to get merge base for {base}...{head}: {error}")
+
+    return merge_base

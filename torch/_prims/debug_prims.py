@@ -27,7 +27,7 @@ def load_tensor_reader(loc):
 
 def register_debug_prims():
     @custom_op("debugprims::load_tensor")
-    def load_tensor(
+    def load_tensor(  # type: ignore[empty-body]
         name: str,
         size: Sequence[int],
         stride: Sequence[int],

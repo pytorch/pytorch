@@ -79,7 +79,7 @@ def set_per_process_memory_fraction(fraction) -> None:
     if not isinstance(fraction, float):
         raise TypeError('Invalid type for fraction argument, must be `float`')
     if fraction < 0 or fraction > 2:
-        raise ValueError('Invalid fraction value: {}. Allowed range: 0~2'.format(fraction))
+        raise ValueError(f'Invalid fraction value: {fraction}. Allowed range: 0~2')
 
     torch._C._mps_setMemoryFraction(fraction)
 

@@ -110,8 +110,7 @@ class ConstraintRegistry:
             constraint = type(constraint)
 
         if not isinstance(constraint, type) or not issubclass(constraint, constraints.Constraint):
-            raise TypeError('Expected constraint to be either a Constraint subclass or instance, '
-                            'but got {}'.format(constraint))
+            raise TypeError(f'Expected constraint to be either a Constraint subclass or instance, but got {constraint}')
 
         self._registry[constraint] = factory
         return factory

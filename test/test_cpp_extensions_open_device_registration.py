@@ -15,13 +15,7 @@ from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
-TEST_CUDNN = False
 TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
-if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
-    CUDNN_HEADER_EXISTS = os.path.isfile(os.path.join(CUDA_HOME, "include/cudnn.h"))
-    TEST_CUDNN = (
-        TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
-    )
 
 
 def remove_build_path():
@@ -33,7 +27,7 @@ def remove_build_path():
         shutil.rmtree(default_build_root, ignore_errors=True)
 
 
-class DummyModule(object):
+class DummyModule:
 
     @staticmethod
     def device_count() -> int:
@@ -381,7 +375,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             foo_storage = foo_tensor.storage()
             self.assertEqual(foo_storage.type(), "torch.storage.TypedStorage")
 
-            class CustomFloatStorage():
+            class CustomFloatStorage:
                 @property
                 def __module__(self):
                     return "torch." + torch._C._get_privateuse1_backend_name()

@@ -81,3 +81,24 @@ void pushPyOutToStack(
     torch::jit::Stack* stack,
     py::object out,
     const char* msg);
+
+inline PyObject* THPVariable_WrapList(
+    const torch::autograd::variable_list& inputs) {
+  PyObject* pyinput = PyList_New(inputs.size());
+  for (const auto i : c10::irange(inputs.size())) {
+    PyList_SET_ITEM(pyinput, i, THPVariable_Wrap(inputs[i]));
+  }
+  return pyinput;
+}
+
+inline torch::autograd::variable_list THPVariable_UnpackList(
+    PyObject* pyresult) {
+  TORCH_CHECK(PyList_CheckExact(pyresult));
+  auto result_len = PyList_GET_SIZE(pyresult);
+  torch::autograd::variable_list result;
+  result.reserve(result_len);
+  for (const auto i : c10::irange(result_len)) {
+    result.emplace_back(THPVariable_Unpack(PyList_GET_ITEM(pyresult, i)));
+  }
+  return result;
+}

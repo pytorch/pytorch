@@ -29,8 +29,7 @@ class LRScheduler:
 
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
-            raise TypeError('{} is not an Optimizer'.format(
-                type(optimizer).__name__))
+            raise TypeError(f'{type(optimizer).__name__} is not an Optimizer')
         self.optimizer = optimizer
 
         # Initialize epoch and base learning rates
@@ -115,13 +114,11 @@ class LRScheduler:
         """
         if is_verbose:
             if epoch is None:
-                print('Adjusting learning rate'
-                      ' of group {} to {:.4e}.'.format(group, lr))
+                print(f'Adjusting learning rate of group {group} to {lr:.4e}.')
             else:
                 epoch_str = ("%.2f" if isinstance(epoch, float) else
                              "%.5d") % epoch
-                print('Epoch {}: adjusting learning rate'
-                      ' of group {} to {:.4e}.'.format(epoch_str, group, lr))
+                print(f'Epoch {epoch_str}: adjusting learning rate of group {group} to {lr:.4e}.')
 
 
     def step(self, epoch=None):
@@ -215,8 +212,7 @@ class LambdaLR(LRScheduler):
             self.lr_lambdas = [lr_lambda] * len(optimizer.param_groups)
         else:
             if len(lr_lambda) != len(optimizer.param_groups):
-                raise ValueError("Expected {} lr_lambdas, but got {}".format(
-                    len(optimizer.param_groups), len(lr_lambda)))
+                raise ValueError(f"Expected {len(optimizer.param_groups)} lr_lambdas, but got {len(lr_lambda)}")
             self.lr_lambdas = list(lr_lambda)
         super().__init__(optimizer, last_epoch, verbose)
 
@@ -299,8 +295,7 @@ class MultiplicativeLR(LRScheduler):
             self.lr_lambdas = [lr_lambda] * len(optimizer.param_groups)
         else:
             if len(lr_lambda) != len(optimizer.param_groups):
-                raise ValueError("Expected {} lr_lambdas, but got {}".format(
-                    len(optimizer.param_groups), len(lr_lambda)))
+                raise ValueError(f"Expected {len(optimizer.param_groups)} lr_lambdas, but got {len(lr_lambda)}")
             self.lr_lambdas = list(lr_lambda)
         super().__init__(optimizer, last_epoch, verbose)
 
@@ -970,14 +965,12 @@ class ReduceLROnPlateau:
 
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
-            raise TypeError('{} is not an Optimizer'.format(
-                type(optimizer).__name__))
+            raise TypeError(f'{type(optimizer).__name__} is not an Optimizer')
         self.optimizer = optimizer
 
         if isinstance(min_lr, (list, tuple)):
             if len(min_lr) != len(optimizer.param_groups):
-                raise ValueError("expected {} min_lrs, got {}".format(
-                    len(optimizer.param_groups), len(min_lr)))
+                raise ValueError(f"expected {len(optimizer.param_groups)} min_lrs, got {len(min_lr)}")
             self.min_lrs = list(min_lr)
         else:
             self.min_lrs = [min_lr] * len(optimizer.param_groups)
@@ -1039,8 +1032,7 @@ class ReduceLROnPlateau:
                 if self.verbose:
                     epoch_str = ("%.2f" if isinstance(epoch, float) else
                                  "%.5d") % epoch
-                    print('Epoch {}: reducing learning rate'
-                          ' of group {} to {:.4e}.'.format(epoch_str, i, new_lr))
+                    print(f'Epoch {epoch_str}: reducing learning rate of group {i} to {new_lr:.4e}.')
 
     @property
     def in_cooldown(self):
@@ -1197,8 +1189,7 @@ class CyclicLR(LRScheduler):
 
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
-            raise TypeError('{} is not an Optimizer'.format(
-                type(optimizer).__name__))
+            raise TypeError(f'{type(optimizer).__name__} is not an Optimizer')
         self.optimizer = optimizer
 
         base_lrs = self._format_param('base_lr', optimizer, base_lr)
@@ -1257,8 +1248,7 @@ class CyclicLR(LRScheduler):
         """Return correctly formatted lr/momentum for each param group."""
         if isinstance(param, (list, tuple)):
             if len(param) != len(optimizer.param_groups):
-                raise ValueError("expected {} values for {}, got {}".format(
-                    len(optimizer.param_groups), name, len(param)))
+                raise ValueError(f"expected {len(optimizer.param_groups)} values for {name}, got {len(param)}")
             return param
         else:
             return [param] * len(optimizer.param_groups)
@@ -1366,11 +1356,11 @@ class CosineAnnealingWarmRestarts(LRScheduler):
 
     def __init__(self, optimizer, T_0, T_mult=1, eta_min=0, last_epoch=-1, verbose=False):
         if T_0 <= 0 or not isinstance(T_0, int):
-            raise ValueError("Expected positive integer T_0, but got {}".format(T_0))
+            raise ValueError(f"Expected positive integer T_0, but got {T_0}")
         if T_mult < 1 or not isinstance(T_mult, int):
-            raise ValueError("Expected integer T_mult >= 1, but got {}".format(T_mult))
+            raise ValueError(f"Expected integer T_mult >= 1, but got {T_mult}")
         if not isinstance(eta_min, (float, int)):
-            raise ValueError("Expected float or int eta_min, but got {} of type {}".format(eta_min, type(eta_min)))
+            raise ValueError(f"Expected float or int eta_min, but got {eta_min} of type {type(eta_min)}")
         self.T_0 = T_0
         self.T_i = T_0
         self.T_mult = T_mult
@@ -1425,7 +1415,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
                 self.T_i = self.T_i * self.T_mult
         else:
             if epoch < 0:
-                raise ValueError("Expected non-negative epoch, but got {}".format(epoch))
+                raise ValueError(f"Expected non-negative epoch, but got {epoch}")
             if epoch >= self.T_0:
                 if self.T_mult == 1:
                     self.T_cur = epoch % self.T_0
@@ -1581,8 +1571,7 @@ class OneCycleLR(LRScheduler):
 
         # Validate optimizer
         if not isinstance(optimizer, Optimizer):
-            raise TypeError('{} is not an Optimizer'.format(
-                type(optimizer).__name__))
+            raise TypeError(f'{type(optimizer).__name__} is not an Optimizer')
         self.optimizer = optimizer
 
         # Validate total_steps
@@ -1590,13 +1579,13 @@ class OneCycleLR(LRScheduler):
             raise ValueError("You must define either total_steps OR (epochs AND steps_per_epoch)")
         elif total_steps is not None:
             if total_steps <= 0 or not isinstance(total_steps, int):
-                raise ValueError("Expected positive integer total_steps, but got {}".format(total_steps))
+                raise ValueError(f"Expected positive integer total_steps, but got {total_steps}")
             self.total_steps = total_steps
         else:
             if epochs <= 0 or not isinstance(epochs, int):
-                raise ValueError("Expected positive integer epochs, but got {}".format(epochs))
+                raise ValueError(f"Expected positive integer epochs, but got {epochs}")
             if steps_per_epoch <= 0 or not isinstance(steps_per_epoch, int):
-                raise ValueError("Expected positive integer steps_per_epoch, but got {}".format(steps_per_epoch))
+                raise ValueError(f"Expected positive integer steps_per_epoch, but got {steps_per_epoch}")
             self.total_steps = epochs * steps_per_epoch
 
         if three_phase:
@@ -1643,11 +1632,11 @@ class OneCycleLR(LRScheduler):
 
         # Validate pct_start
         if pct_start < 0 or pct_start > 1 or not isinstance(pct_start, float):
-            raise ValueError("Expected float between 0 and 1 pct_start, but got {}".format(pct_start))
+            raise ValueError(f"Expected float between 0 and 1 pct_start, but got {pct_start}")
 
         # Validate anneal_strategy
         if anneal_strategy not in ['cos', 'linear']:
-            raise ValueError("anneal_strategy must by one of 'cos' or 'linear', instead got {}".format(anneal_strategy))
+            raise ValueError(f"anneal_strategy must by one of 'cos' or 'linear', instead got {anneal_strategy}")
         elif anneal_strategy == 'cos':
             self.anneal_func = self._annealing_cos
         elif anneal_strategy == 'linear':
@@ -1684,8 +1673,7 @@ class OneCycleLR(LRScheduler):
         """Return correctly formatted lr/momentum for each param group."""
         if isinstance(param, (list, tuple)):
             if len(param) != len(optimizer.param_groups):
-                raise ValueError("expected {} values for {}, got {}".format(
-                    len(optimizer.param_groups), name, len(param)))
+                raise ValueError(f"expected {len(optimizer.param_groups)} values for {name}, got {len(param)}")
             return param
         else:
             return [param] * len(optimizer.param_groups)

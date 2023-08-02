@@ -6,8 +6,10 @@ from functools import partial
 from typing import Any, Callable, Dict, List, Set, Tuple, Type, Union
 
 import torch.nn as nn
-from torch.distributed.fsdp._common_utils import _get_module_fsdp_state
-from torch.distributed.fsdp._utils import _override_module_mixed_precision
+from torch.distributed.fsdp._common_utils import (
+    _get_module_fsdp_state,
+    _override_module_mixed_precision,
+)
 
 from torch.distributed.fsdp.wrap import (
     _construct_wrap_fn,
@@ -104,7 +106,7 @@ def _auto_wrap(
         )
         recursive_wrap_kwargs["auto_wrap_policy"] = policy
         _warn_on_overridden_mixed_precision(overridden_module_classes)
-    _recursive_wrap(**recursive_wrap_kwargs, **fsdp_kwargs)
+    _recursive_wrap(**recursive_wrap_kwargs, **fsdp_kwargs)  # type: ignore[arg-type]
 
 
 def _check_nested_wrapping(root_module: nn.Module):
@@ -141,10 +143,9 @@ def _validate_frozen_params(
     requirement is strict for ``use_orig_params=False`` (hard error) and highly
     recommended for ``use_orig_params=True`` (user warning).
     """
-    topo_sorted_named_modules = _get_topo_sorted_named_modules(root_module)
-    reverse_topo_sorted_named_modules = reversed(topo_sorted_named_modules)
+    post_order_named_modules = _get_post_order_named_modules(root_module)
     visited_modules: Set[nn.Module] = set()
-    for module_name, module in reverse_topo_sorted_named_modules:
+    for module_name, module in post_order_named_modules:
         if module in modules_to_wrap:
             param_to_fqn = _get_managed_param_to_fqn(
                 module, ignored_params, visited_modules, module_name
@@ -183,13 +184,14 @@ def _validate_frozen_params(
                     raise ValueError(msg)
 
 
-def _get_topo_sorted_named_modules(root_module: nn.Module) -> List[nn.Module]:
+def _get_post_order_named_modules(root_module: nn.Module) -> List[nn.Module]:
     """
-    We use a stack-based DFS instead of ``root_module.named_modules()`` to get
-    the topological order since reversing the DFS order gives the modules in
-    registration order at each level in the module tree (as opposed to in
-    reverse), which allows us to error/warn on the first registered module that
-    violates the condition.
+    This returns the named modules following a post-order traversal, which is a
+    valid reverse topological sort. We achieve this using the reverse of a
+    stack-based DFS order instead of reversing ``root_module.named_modules()``
+    since the former gives the modules in registration order at each level in
+    the module tree (as opposed to the reverse), which allows us to error/warn
+    on the first registered module that violates the condition.
 
     For example, consider the following module structure:
         M(
@@ -205,10 +207,11 @@ def _get_topo_sorted_named_modules(root_module: nn.Module) -> List[nn.Module]:
     """
     visited_modules = {root_module}
     stack = [("", root_module)]
-    topo_sorted_named_modules: List[Tuple[str, nn.Module]] = []
+    # Append and reverse at the end for linear-time algorithm
+    reverse_post_order_named_modules: List[Tuple[str, nn.Module]] = []
     while stack:
         module_name, module = stack.pop()
-        topo_sorted_named_modules.append((module_name, module))
+        reverse_post_order_named_modules.append((module_name, module))
         for child_module_name, child_module in module.named_children():
             if child_module is None:  # only for overrides of `named_children()`
                 continue
@@ -217,7 +220,8 @@ def _get_topo_sorted_named_modules(root_module: nn.Module) -> List[nn.Module]:
                 if module_name != "":
                     child_module_name = module_name + "." + child_module_name
                 stack.append((child_module_name, child_module))
-    return topo_sorted_named_modules
+    post_order_named_modules = reversed(reverse_post_order_named_modules)
+    return post_order_named_modules
 
 
 def _get_managed_param_to_fqn(

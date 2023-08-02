@@ -15,13 +15,14 @@ onto your local file system is to send it to GitHub Gist:
 See also scripts/analysis/run_test_csv.sh
 """
 
+import argparse
 import csv
 import subprocess
 import sys
-import argparse
 
-parser = argparse.ArgumentParser(description=__doc__,
-    formatter_class=argparse.RawDescriptionHelpFormatter)
+parser = argparse.ArgumentParser(
+    description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+)
 parser.add_argument("--log-url", type=str, default="", help="URL of raw logs")
 parser.add_argument("file", help="pytest CSV file to format")
 args = parser.parse_args()

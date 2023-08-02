@@ -108,18 +108,16 @@ def _create_rearrange_callable(
 
     custom_rearrange_callable_name = "do_rearrange"
     custom_rearrange_callable_code = (
-        (
-            f"def {custom_rearrange_callable_name}(tensor):\n"
-            f"    {comma_separate(first_class_dims)} = dims({n_dims})\n"
-            + (
-                "".join(f"    {dim}.size = {length}\n" for (dim, length) in specified_lengths)
-                if specified_lengths else ""
-            )
-            + f"    tensor = tensor[{comma_separate(left_dims)}].order({comma_separate(right_dims)})\n"
-            + (
-                f"    return tensor.sum({comma_separate([anon_dims])}, keepdim=False)\n"
-                if anon_dims else "    return tensor\n"
-            )
+        f"def {custom_rearrange_callable_name}(tensor):\n"
+        f"    {comma_separate(first_class_dims)} = dims({n_dims})\n"
+        + (
+            "".join(f"    {dim}.size = {length}\n" for (dim, length) in specified_lengths)
+            if specified_lengths else ""
+        )
+        + f"    tensor = tensor[{comma_separate(left_dims)}].order({comma_separate(right_dims)})\n"
+        + (
+            f"    return tensor.sum({comma_separate([anon_dims])}, keepdim=False)\n"
+            if anon_dims else "    return tensor\n"
         )
     )
 
