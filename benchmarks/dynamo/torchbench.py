@@ -76,6 +76,8 @@ SKIP = {
     "fambench_xlmr",
     # TIMEOUT, https://github.com/pytorch/pytorch/issues/98467
     "tacotron2",
+    # takes too long, extreme slowdown (< .001)
+    "maml",
 }
 
 SKIP_FOR_CPU = {
