@@ -315,7 +315,7 @@ class TestFSDPMixedPrecision(FSDPTest):
         for x in args:
             if isinstance(x, torch.Tensor):
                 tensors.append(x)
-        for _, x in kwargs.items():
+        for x in kwargs.values():
             if isinstance(x, torch.Tensor):
                 tensors.append(x)
 

@@ -51,7 +51,7 @@ class ContinuousBernoulli(ExponentialFamily):
             # close to 0 and 1, later on; otherwise the clamped 'probs' would always pass
             if validate_args is not None:
                 if not self.arg_constraints['probs'].check(self.probs).all():
-                    raise ValueError("The parameter {} has invalid values".format('probs'))
+                    raise ValueError("The parameter probs has invalid values")
             self.probs = clamp_probs(self.probs)
         else:
             is_scalar = isinstance(logits, Number)

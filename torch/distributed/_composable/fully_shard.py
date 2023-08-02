@@ -33,7 +33,7 @@ from torch.distributed.fsdp.api import (
     MixedPrecision,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.wrap import _WrapPolicy
+from torch.distributed.fsdp.wrap import _Policy
 
 
 @contract(state_cls=_FSDPState)
@@ -41,7 +41,7 @@ def fully_shard(
     module: nn.Module,
     *,
     process_group: Optional[dist.ProcessGroup] = None,
-    policy: Optional[_WrapPolicy] = None,
+    policy: Optional[_Policy] = None,
     strategy: Optional[ShardingStrategy] = None,
     mixed_precision: Optional[MixedPrecision] = None,
     cpu_offload: Optional[CPUOffload] = None,
@@ -59,15 +59,13 @@ def fully_shard(
     """
     torch._C._log_api_usage_once("torch.distributed.fully_shard")
     # Enforce the new auto wrap policy
-    if policy is not None and not isinstance(policy, _WrapPolicy):
-        raise ValueError(f"Expects an `_WrapPolicy` but got {policy}")
+    if policy is not None and not isinstance(policy, _Policy):
+        raise ValueError(f"Expects a `_Policy` but got {policy}")
     state = fully_shard.state(module)
     state = _init_ignored_module_states(state, module, ignored_modules, ignored_states)
     state = _init_device_handle(state, module, state._ignored_params, device_id)
     _annotate_modules_for_dynamo(module, state._ignored_modules, True)
-    state = _init_process_group_state(
-        state, process_group, ShardingStrategy.FULL_SHARD, policy
-    )
+    state = _init_process_group_state(state, process_group, strategy, policy)
     if policy is not None:
         fsdp_kwargs = {
             "process_group": process_group,
@@ -120,7 +118,7 @@ def fully_shard(
     _insert_module_state(module, state)
     for submodule in module.modules():
         if (
-            submodule in state._fully_sharded_module_to_handles
+            submodule in state._fully_sharded_module_to_handle
             and _get_module_state(submodule) is None
         ):
             _insert_module_state(submodule, state)

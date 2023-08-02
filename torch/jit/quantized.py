@@ -136,20 +136,17 @@ class QuantizedRNNCellBase(torch.jit.ScriptModule):
     def check_forward_input(self, input):
         if input.size(1) != self.input_size:
             raise RuntimeError(
-                "input has inconsistent input_size: got {}, expected {}".format(
-                    input.size(1), self.input_size))
+                f"input has inconsistent input_size: got {input.size(1)}, expected {self.input_size}")
 
     @torch.jit.script_method
     def check_forward_hidden(self, input: Tensor, hx: Tensor, hidden_label: str = '') -> None:
         if input.size(0) != hx.size(0):
             raise RuntimeError(
-                "Input batch size {} doesn't match hidden{} batch size {}".format(
-                    input.size(0), hidden_label, hx.size(0)))
+                f"Input batch size {input.size(0)} doesn't match hidden{hidden_label} batch size {hx.size(0)}")
 
         if hx.size(1) != self.hidden_size:
             raise RuntimeError(
-                "hidden{} has inconsistent hidden_size: got {}, expected {}".format(
-                    hidden_label, hx.size(1), self.hidden_size))
+                f"hidden{hidden_label} has inconsistent hidden_size: got {hx.size(1)}, expected {self.hidden_size}")
 
     # TODO: for some reason weak_script_method causes a destruction of the
     # module to occur, which in turn frees the packed_ih object via its DataPtr
@@ -203,7 +200,7 @@ class QuantizedRNNCell(QuantizedRNNCellBase):
         else:
             ret = input  # TODO: remove when jit supports exception flow
             raise RuntimeError(
-                "Unknown nonlinearity: {}".format(self.nonlinearity))
+                f"Unknown nonlinearity: {self.nonlinearity}")
         return ret
 
 
@@ -284,7 +281,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
             raise RuntimeError('Only LSTM or GRU is supported for QuantizedRNN')
 
         if dtype != torch.int8 and dtype != torch.float16:
-            raise RuntimeError('Unsupported dtype: {}'.format(dtype))
+            raise RuntimeError(f'Unsupported dtype: {dtype}')
 
         self.all_weights = []
         for layer in range(self.num_layers):
@@ -294,8 +291,8 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                 suffix = '_reverse' if direction == 1 else ''
 
                 def get_weight_bias(ihhh):
-                    weight_name = 'weight_{}_l{}{}'.format(ihhh, layer, suffix)
-                    bias_name = 'bias_{}_l{}{}'.format(ihhh, layer, suffix)
+                    weight_name = f'weight_{ihhh}_l{layer}{suffix}'
+                    bias_name = f'bias_{ihhh}_l{layer}{suffix}'
 
                     weight = getattr(other, weight_name)
                     bias = getattr(other, bias_name)
@@ -316,7 +313,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                     cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
                         packed_ih, packed_hh)
 
-                setattr(self, 'cell_params_{}_{}'.format(layer, suffix), cell_params)
+                setattr(self, f'cell_params_{layer}_{suffix}', cell_params)
                 self.all_weights.append(cell_params)
 
     @torch.jit.script_method
@@ -324,12 +321,10 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
         expected_input_dim = 2 if batch_sizes is not None else 3
         if input.dim() != expected_input_dim:
             raise RuntimeError(
-                'input must have {} dimensions, got {}'.format(
-                    expected_input_dim, input.dim()))
+                f'input must have {expected_input_dim} dimensions, got {input.dim()}')
         if self.input_size != input.size(-1):
             raise RuntimeError(
-                'input.size(-1) must be equal to input_size. Expected {}, got {}'.format(
-                    self.input_size, input.size(-1)))
+                f'input.size(-1) must be equal to input_size. Expected {self.input_size}, got {input.size(-1)}')
 
     @torch.jit.script_method
     def get_expected_hidden_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:
@@ -551,7 +546,7 @@ def quantize_linear_modules(module, dtype=torch.int8):
             return QuantizedLinearFP16(module)
         else:
             raise RuntimeError(
-                "Unsupported dtype: {}".format(dtype))
+                f"Unsupported dtype: {dtype}")
     return module
 
 
@@ -570,7 +565,7 @@ def quantize_rnn_modules(module, dtype=torch.int8):
         setattr(module, name, mod)
     if isinstance(module, torch.nn.LSTM):
         if dtype != torch.int8 and dtype != torch.float16:
-            raise RuntimeError("Unsupported dtype: {}".format(dtype))
+            raise RuntimeError(f"Unsupported dtype: {dtype}")
         return QuantizedLSTM(module, dtype)
     if isinstance(module, torch.nn.GRU):
         return QuantizedGRU(module)

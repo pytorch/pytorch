@@ -48,12 +48,11 @@ from torch.distributed.fsdp.api import (
 )
 from torch.distributed.fsdp.flat_param import (
     _FSDP_USE_FULL_PREC_IN_EVAL,
-    _HandlesKey,
     FlatParameter,
     FlatParamHandle,
     HandleShardingStrategy,
 )
-from torch.distributed.fsdp.wrap import _WrapPolicy
+from torch.distributed.fsdp.wrap import _Policy
 from torch.distributed.utils import _sync_params_and_buffers
 from torch.utils.hooks import RemovableHandle
 
@@ -98,7 +97,7 @@ def _init_process_group_state(
     state: _FSDPState,
     process_group: ProcessGroupType,
     sharding_strategy: ShardingStrategy,
-    policy: Optional[_WrapPolicy],
+    policy: Optional[_Policy],
 ) -> _FSDPState:
     if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
         if process_group is None and policy is None:
@@ -412,14 +411,12 @@ def _init_core_state(
     )
     # Mapping from fully sharded module to the handles it is responsible to
     # unshard and reshard (see [Note: Fully Sharded Module])
-    _fully_sharded_module_to_handles: Dict[
-        nn.Module, List[FlatParamHandle]
-    ] = collections.defaultdict(list)
-    state._fully_sharded_module_to_handles = _fully_sharded_module_to_handles
+    _fully_sharded_module_to_handle: Dict[nn.Module, FlatParamHandle] = dict()
+    state._fully_sharded_module_to_handle = _fully_sharded_module_to_handle
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
-    # handles in `state._handles`
-    _handles: List[FlatParamHandle] = []
-    state._handles = _handles
+    # handles in `state._handle`
+    _handle: FlatParamHandle = None
+    state._handle = _handle
     params: List[FlatParameter] = []
     state.params = params
     return state
@@ -436,11 +433,11 @@ def _init_runtime_state(
     _post_forward_handles: List[RemovableHandle] = []
     state._post_forward_handles = _post_forward_handles
     state._sync_gradients = True
-    state._communication_hook = _get_default_comm_hook(state.sharding_strategy)
-    state._communication_hook_state = _get_default_comm_hook_state(state.process_group)
+    state._comm_hook = _get_default_comm_hook(state.sharding_strategy)
+    state._comm_hook_state = _get_default_comm_hook_state(state.process_group)
     state._hook_registered = False
     # Used to prevent running the pre-backward hook multiple times
-    _ran_pre_backward_hook: Dict[_HandlesKey, bool] = {}
+    _ran_pre_backward_hook: Dict[FlatParamHandle, bool] = {}
     state._ran_pre_backward_hook = _ran_pre_backward_hook
     return state
 
@@ -453,13 +450,13 @@ def _init_prefetching_state(
 ) -> _FSDPState:
     state.backward_prefetch = backward_prefetch
     state.forward_prefetch = forward_prefetch
-    _handles_prefetched: Dict[_HandlesKey, bool] = {}
+    _handles_prefetched: Dict[FlatParamHandle, bool] = {}
     state._handles_prefetched = _handles_prefetched
     # Used for guarding against mistargeted backward prefetches
-    _needs_pre_backward_unshard: Dict[_HandlesKey, bool] = {}
+    _needs_pre_backward_unshard: Dict[FlatParamHandle, bool] = {}
     state._needs_pre_backward_unshard = _needs_pre_backward_unshard
     # Used for guarding against mistargeted forward prefetches
-    _needs_pre_forward_unshard: Dict[_HandlesKey, bool] = {}
+    _needs_pre_forward_unshard: Dict[FlatParamHandle, bool] = {}
     state._needs_pre_forward_unshard = _needs_pre_forward_unshard
     # The data structures use tuples of handles to generalize over the case
     # where a module's forward involves multiple handles.
@@ -542,17 +539,10 @@ def _init_param_handle_from_params(
         state._use_orig_params,
     )
     handle.shard()
-    assert handle not in state._handles
+    assert not state._handle
     state.params.append(handle.flat_param)
-    state._handles.append(handle)
-    state._fully_sharded_module_to_handles[handle._fully_sharded_module].append(handle)
-    num_fully_sharded_module_handles = len(
-        state._fully_sharded_module_to_handles[handle._fully_sharded_module]
-    )
-    assert num_fully_sharded_module_handles == 1, (
-        "The current design assumes a module manages at most one "
-        f"`FlatParamHandle` but got {num_fully_sharded_module_handles}"
-    )
+    state._handle = handle
+    state._fully_sharded_module_to_handle[handle._fully_sharded_module] = handle
     cpu_device = torch.device("cpu")
     if state.cpu_offload.offload_params and handle.flat_param.device != cpu_device:
         handle.flat_param_to(cpu_device)

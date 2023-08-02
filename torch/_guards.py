@@ -4,6 +4,7 @@ import dataclasses
 import enum
 import functools
 import logging
+import threading
 import traceback
 import unittest.mock
 import weakref
@@ -394,6 +395,7 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 
     _supported_global_states = {
         "grad_enabled",
+        "torch_function_enabled",
         "autocast_enabled",
         "autocast_cpu_enabled",
         "autocast_gpu_dtype",
@@ -439,7 +441,7 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.dynamo_guards = state.dynamo_guards
 
 
-_CURRENT_TRACING_CONTEXT = None
+_TLS = threading.local()
 
 """
 TracingContext is the source of truth for all currently accumulated information
@@ -470,7 +472,7 @@ class TracingContext:
 
     @staticmethod
     def get() -> Optional["TracingContext"]:
-        return _CURRENT_TRACING_CONTEXT
+        return getattr(_TLS, "tracing_context", None)
 
     def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
@@ -482,6 +484,16 @@ class TracingContext:
         # this is only set after aot_autograd
         self.fw_metadata = None
         self.params_flat = None
+        # this is for extended return calling convention from backend
+        # compiler to aot_autograd
+        # Per output, what the compiler specified stride of the output is,
+        # or None if no stride is known.  This is always the HINT, it
+        # is never a SymInt (it would be better if it was a SymInt, but
+        # I can't conveniently get this from Inductor atm.  Also, be
+        # careful not to accidentally induce guards on the SymInt if
+        # you ever do change this in aot_autograd.py; you should check
+        # on permutations preferentially.)
+        self.output_strides: Optional[List[Optional[List[int]]]] = None
 
     @staticmethod
     def extract_stack():
@@ -521,6 +533,20 @@ class TracingContext:
             tc.frame_summary_stack.pop()
 
     @staticmethod
+    @contextlib.contextmanager
+    def report_output_strides():
+        tc = TracingContext.get()
+        if tc is None:
+            yield None
+            return
+        old_output_strides = tc.output_strides
+        tc.output_strides = []
+        try:
+            yield tc.output_strides
+        finally:
+            tc.output_strides = old_output_strides
+
+    @staticmethod
     def set_current_loc(filename, lineno, frame_name):
         tc = TracingContext.get()
         assert (
@@ -538,13 +564,12 @@ Calls to TracingContext.get() while not under a `with tracing()` context will re
 
 @contextmanager
 def tracing(context: TracingContext):
-    global _CURRENT_TRACING_CONTEXT
-    old_context = _CURRENT_TRACING_CONTEXT
-    _CURRENT_TRACING_CONTEXT = context
+    old_context = getattr(_TLS, "tracing_context", None)
+    _TLS.tracing_context = context
     try:
-        yield _CURRENT_TRACING_CONTEXT
+        yield context
     finally:
-        _CURRENT_TRACING_CONTEXT = old_context
+        _TLS.tracing_context = old_context
 
 
 # Subclasses can be found in torch/_dynamo/source.py
@@ -613,9 +638,11 @@ def detect_fake_mode(inputs: Any = None):
     if fake_modes:
         fake_mode, desc1, i1 = fake_modes[0]
         for m, desc2, i2 in fake_modes[1:]:
-            assert (
-                fake_mode is m
-            ), f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}"
+            assert fake_mode is m, (
+                f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
+                f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
+                f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
+            )
         return fake_mode
     else:
         return None

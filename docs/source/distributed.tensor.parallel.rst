@@ -53,13 +53,11 @@ used for input/output preparation:
 .. autofunction::  make_output_shard_1d
 .. autofunction::  make_output_tensor
 
-Currently, there are some constraints which makes it hard for the `nn.MultiheadAttention`
-module to work out of box for Tensor Parallelism, so we built this multihead_attention
-module for Tensor Parallelism users. Also, in ``parallelize_module``, we automatically
-swap ``nn.MultiheadAttention`` to this custom module when specifying ``PairwiseParallel``.
+Currently, there are some constraints which makes it hard for the ``MultiheadAttention``
+module to work out of box for Tensor Parallelism, so we recommend users to try ``ColwiseParallel``
+and ``RowwiseParallel`` for each parameter. There might be some code changes needed now
+since we are parallelizing on the head dim of the ``MultiheadAttention`` module.
 
-.. autoclass:: torch.distributed.tensor.parallel.multihead_attention_tp.TensorParallelMultiheadAttention
-  :members:
 
 We also enabled 2D parallelism to integrate with ``FullyShardedDataParallel``.
 Users just need to call the following API explicitly:

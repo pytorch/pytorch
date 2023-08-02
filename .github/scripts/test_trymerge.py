@@ -11,7 +11,7 @@ import json
 import os
 import warnings
 from hashlib import sha256
-from typing import Any, Dict, List, Optional
+from typing import Any, cast, Dict, List, Optional
 from unittest import main, mock, TestCase
 from urllib.error import HTTPError
 
@@ -26,11 +26,13 @@ from trymerge import (
     gh_get_team_members,
     gh_graphql,
     GitHubPR,
+    is_broken_trunk,
     main as trymerge_main,
     MandatoryChecksMissingError,
     MergeRule,
     PostCommentError,
     read_merge_rules,
+    remove_job_name_suffix,
     validate_revert,
 )
 
@@ -112,7 +114,7 @@ def mocked_rockset_results(head_sha: str, merge_base: str, num_retries: int = 3)
 
 
 def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
-    class Object(object):
+    class Object:
         def __init__(self) -> None:
             self.revert = revert
             self.force = force
@@ -490,13 +492,165 @@ class TestTryMerge(TestCase):
         self.assertEqual(pr.get_changed_submodules(), ["third_party/kineto"])
         self.assertFalse(pr.has_invalid_submodule_updates())
 
+    def test_remove_job_name_suffix(self, *args: Any) -> None:
+        test_cases = [
+            {
+                "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 1, 5, linux.g5.4xlarge.nvidia.gpu)",
+                "expected": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default)",
+            },
+            {
+                "name": "android-emulator-build-test / build-and-test (default, 1, 1, ubuntu-20.04-16x)",
+                "expected": "android-emulator-build-test / build-and-test (default)",
+            },
+            {
+                "name": "linux-focal-rocm5.4.2-py3.8 / build",
+                "expected": "linux-focal-rocm5.4.2-py3.8 / build",
+            },
+            {
+                "name": "libtorch-cpu-shared-with-deps-release-build",
+                "expected": "libtorch-cpu-shared-with-deps-release-build",
+            },
+            {
+                "name": "manywheel-py3_8-cuda11_8-test / test",
+                "expected": "manywheel-py3_8-cuda11_8-test / test",
+            },
+            {
+                "name": "lintrunner / linux-job",
+                "expected": "lintrunner / linux-job",
+            },
+            {
+                "name": "Test `run_test.py` is usable without boto3/rockset",
+                "expected": "Test `run_test.py` is usable without boto3/rockset",
+            },
+        ]
+
+        for case in test_cases:
+            self.assertEqual(case["expected"], remove_job_name_suffix(case["name"]))
+
+    def test_is_broken_trunk(self, *args: Any) -> None:
+        test_cases: List[Dict[str, Any]] = [
+            {
+                "head_job": None,
+                "base_jobs": {
+                    "job_a": {
+                        "conclusion": "success",
+                        "failure_captures": ["a", "b"],
+                    },
+                    "job_b": {
+                        "conclusion": "failure",
+                        "failure_captures": ["a", "b"],
+                    },
+                },
+                "expected": False,
+                "description": "Invalid input - head job",
+            },
+            {
+                "head_job": {
+                    "conclusion": "failure",
+                    "failure_captures": ["a", "b"],
+                },
+                "base_jobs": None,
+                "expected": False,
+                "description": "Invalid input - base jobs",
+            },
+            {
+                "head_job": {
+                    "conclusion": "failure",
+                    "failure_captures": ["a", "b"],
+                },
+                "base_jobs": {},
+                "expected": False,
+                "description": "Invalid input - empty base jobs",
+            },
+            {
+                "head_job": {
+                    "conclusion": "failure",
+                    "failure_captures": ["x", "y"],
+                },
+                "base_jobs": {
+                    "job_a": {
+                        "conclusion": "success",
+                        "failure_captures": ["a", "b"],
+                    },
+                    "job_b": {
+                        "conclusion": "failure",
+                        "failure_captures": ["x", "y"],
+                    },
+                },
+                "expected": True,
+                "description": "Found a match",
+            },
+            {
+                "head_job": {
+                    "conclusion": "success",
+                    "failure_captures": ["x", "y"],
+                },
+                "base_jobs": {
+                    "job_a": {
+                        "conclusion": "success",
+                        "failure_captures": ["a", "b"],
+                    },
+                    "job_b": {
+                        "conclusion": "failure",
+                        "failure_captures": ["x", "y"],
+                    },
+                },
+                "expected": False,
+                "description": "Not found - different conclusion",
+            },
+            {
+                "head_job": {
+                    "conclusion": "failure",
+                    "failure_captures": ["a", "b"],
+                },
+                "base_jobs": {
+                    "job_a": {
+                        "conclusion": "success",
+                        "failure_captures": ["a", "b"],
+                    },
+                    "job_b": {
+                        "conclusion": "failure",
+                        "failure_captures": ["x", "y"],
+                    },
+                },
+                "expected": False,
+                "description": "Not found - different captured failures",
+            },
+        ]
+
+        for case in test_cases:
+            self.assertEqual(
+                case["expected"], is_broken_trunk(case["head_job"], case["base_jobs"])
+            )
+
+    def test_get_merge_base(
+        self,
+        mock_gh_graphql: Any,
+        mock_get_rockset_results: Any,
+        mock_read_flaky_rules: Any,
+    ) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 104121)
+
+        mock_merge_base = "mocked-sha"
+        with mock.patch(
+            "trymerge.gh_fetch_merge_base", return_value=mock_merge_base
+        ) as mocked_gh_fetch_merge_base:
+            self.assertEqual(mock_merge_base, pr.get_merge_base())
+
+            # Make sure that consecutive calls will use the same merge base instead of
+            # making another query
+            self.assertEqual(mock_merge_base, pr.get_merge_base())
+            mocked_gh_fetch_merge_base.assert_called_once()
+
 
 @mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+@mock.patch("trymerge.gh_fetch_merge_base", return_value="")
 class TestBypassFailures(TestCase):
     def test_get_classifications(self, *args: Any) -> None:
         flaky_rules = [
-            FlakyRule("distributed", ["##[error]The operation was canceled."])
+            # Try a regex rule
+            FlakyRule("distributed", ["##\\[error\\]The operation [wW]as .+"])
         ]
         pr = GitHubPR("pytorch", "pytorch", 92863)
         checks = pr.get_checkrun_conclusions()
@@ -520,6 +674,12 @@ class TestBypassFailures(TestCase):
         )
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 0)
+
+        # Not set any threshold, defaults to -1 to ignore all flaky and broken trunk failures
+        pending, failed = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+
         pending, failed = categorize_checks(
             checks, list(checks.keys()), ok_failed_checks_threshold=1
         )
@@ -543,13 +703,66 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 0)
 
+    def test_get_classifications_pending_unstable(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 105998)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
+        )
+        pending, failed = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=1
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+
+    def test_get_classifications_broken_trunk(self, *args: Any) -> None:
+        # The mock merge base is the actual value returned by gh_fetch_merge_base
+        test_cases = [
+            {
+                # This PR had one broken trunk failure but it was run on a different shard
+                # than the one on the base commit. This should still count as broken trunk
+                "pr_num": 104214,
+                "mock_merge_base": "436d035dc74db9c703297a62163b0cad0c546665",
+            },
+            {
+                # This PR had one broken trunk failure and it used ghstack
+                "pr_num": 105145,
+                "mock_merge_base": "194fe1d12f9860734cc28ed21bdabda2fbb06336",
+            },
+        ]
+
+        for case in test_cases:
+            pr_num = case["pr_num"]
+            mock_merge_base = case["mock_merge_base"]
+
+            pr = GitHubPR("pytorch", "pytorch", cast(int, pr_num))
+            with mock.patch(
+                "trymerge.gh_fetch_merge_base", return_value=mock_merge_base
+            ) as mocked_gh_fetch_merge_base:
+                checks = pr.get_checkrun_conclusions()
+                checks = get_classifications(
+                    checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
+                )
+
+                pending, failed = categorize_checks(checks, list(checks.keys()))
+                self.assertTrue(len(pending) == 0)
+                self.assertTrue(len(failed) == 0)
+
+                # When the ok_failed_checks_threshold is set to 0, the broken trunk failure
+                # won't be ignored
+                pending, failed = categorize_checks(
+                    checks, list(checks.keys()), ok_failed_checks_threshold=0
+                )
+                self.assertTrue(len(pending) == 0)
+                self.assertTrue(len(failed) == 1)
+
     def test_ignore_current(self, *args: Any) -> None:
         # Test various interactions of the failure classifier, mostly that
         # ignore current checks takes precedence over classifications for flaky
         # or broken trunk
 
         flaky_rules = [
-            FlakyRule("distributed", ["##[error]The operation was canceled."])
+            FlakyRule("distributed", ["##\\[error\\]The operation was canceled."])
         ]
         flaky = (
             "pull / linux-focal-py3.7-gcc7 / test (distributed, 1, 2, linux.2xlarge)"
