@@ -72,7 +72,7 @@ RUN /opt/conda/bin/conda update -y conda
 RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION}
 ARG TARGETPLATFORM
 
-RUN echo TARGETPLATFORM
+RUN echo ${TARGETPLATFORM}
 # On arm64 we can only install wheel packages.
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  pip install torch --index-url https://download.pytorch.org/whl/cpu/ ;; \
