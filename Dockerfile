@@ -72,11 +72,11 @@ RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERS
 ARG TARGETPLATFORM
 
 # On arm64 we can only install wheel packages.
-#RUN case ${TARGETPLATFORM} in \
-#         "linux/arm64")  pip3 instal torch --index-url https://download.pytorch.org/whl/cpu/ ;; \
- #        *)              /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch  "pytorch-cuda=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  ;; \
- #   esac && \
-#    /opt/conda/bin/conda clean -ya
+RUN case ${TARGETPLATFORM} in \
+         "linux/arm64")  pip instal torch --index-url https://download.pytorch.org/whl/cpu/ ;; \
+         *)              pip instal torch --index-url https://download.pytorch.org/whl/cpu/  ;; \
+    esac && \
+    /opt/conda/bin/conda clean -ya
 # RUN /opt/conda/bin/pip install torchelastic
 
 FROM ${BASE_IMAGE} as official
