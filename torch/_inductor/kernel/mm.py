@@ -1,7 +1,6 @@
 import logging
 
 import torch
-from .. import config as inductor_config
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -62,6 +61,8 @@ mm_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k, other=0.)
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
+        if B_PROLOGUE_CAST_TYPE is not None:
+            b = b.to(B_PROLOGUE_CAST_TYPE)
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
@@ -199,3 +200,17 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     return autotune_select_algorithm(
         "addmm", choices, [inp_expanded, mat1, mat2], layout
     )
+
+def tuned_mixed_mm(mat1, mat2, mat2_dtype):
+    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
+    # options to tune from
+    choices = []
+    b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
+    for config in mm_configs(m, n, k):
+        mm_template.maybe_append_choice(
+            choices,
+            (mat1, mat2),
+            layout,
+            **mm_options(config, k, layout, b_prologue_cast_type),
+        )
+    return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)

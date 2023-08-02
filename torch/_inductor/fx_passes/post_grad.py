@@ -62,10 +62,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
-
         group_batch_fusion_post_grad_passes(gm.graph)
         remove_extra_clones(gm.graph)
-
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
         if is_inference:
@@ -150,6 +148,22 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
 )
 def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
+
+
+@register_lowering_pattern(
+    CallFunction(
+        aten.mm,
+        KeywordArg("mat1"),
+        CallFunction(
+            prims.convert_element_type.default,
+            KeywordArg("mat2"),
+            KeywordArg("mat2_dtype"),
+        ),
+    ),
+    extra_check=lambda x: config.use_mixed_mm
+)
+def mixed_mm(match: Match, mat1, mat2, mat2_dtype):
+    return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)
 
 
 @register_graph_pattern(

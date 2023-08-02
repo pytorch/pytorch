@@ -1744,6 +1744,40 @@ class CommonTemplate:
             ),
             check_lowp=False,
         )
+    @config.patch(use_mixed_mm=True)
+    def test_mixed_mm(self):
+        def fn(a, b):
+            return (
+                torch.mm(a, b.to(a.dtype))
+            )
+        if self.device == "cuda":
+            self.common(
+                fn,
+                (
+                    torch.randn(8, 8),
+                    torch.randint(-128,127, (8,8), dtype=torch.int8),
+                ),
+                check_lowp=True,
+            )
+
+
+    @config.patch(use_mixed_mm=True)
+    def test_mixed_mm2(self):
+        def fn(a, b, scale, bias):
+            return (
+                torch.mm(a, b.to(a.dtype))*scale+bias
+            )
+        if self.device == "cuda":
+            self.common(
+                fn,
+                (
+                    torch.randn(8, 8),
+                    torch.randint(-128,127, (8,8), dtype=torch.int8),
+                    torch.randn(8),
+                    torch.randn(8),
+                ),
+                check_lowp=True,
+            )
 
     def test_scalar_input(self):
         def fn(x, y):

@@ -57,6 +57,9 @@ batch_fusion = False
 # enable reordering pass
 reordering = True
 
+# enable usage of torch._inductor.kernel.mm.tuned_mixed_mm
+use_mixed_mm = False
+
 # AOTInductor output path
 # If an absolute path is specified, the generated lib files will be stored under the directory;
 # If a relative path is specified, it will be used as a subdirectory under the default caching path;

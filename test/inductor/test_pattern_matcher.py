@@ -53,6 +53,90 @@ class TestPaternMatcher(TestCase):
             self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
             self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 3)
 
+    @inductor_config.patch(use_mixed_mm=True)
+    def test_mixed_mm(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        args_list = [
+            (
+                torch.randn(8,8, device="cuda"),
+                torch.randint(-128, 127, (8,8), dtype=torch.int8, device="cuda")
+            ),
+            (
+                torch.randn(8,2, device="cuda", dtype=torch.bfloat16),
+                torch.randint(-128, 127, (2,8), dtype=torch.int8, device="cuda")
+            ),
+            (
+                torch.randn(8,5, device="cuda", dtype=torch.float16),
+                torch.randint(0, 255, (5,2), dtype=torch.uint8, device="cuda")
+            ),
+        ]
+
+        for args in args_list:
+            torch._dynamo.reset()
+            counters.clear()
+            ref = fn(*args)
+            test, (code,) = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(ref, test)
+            actual, (code,) = run_and_get_code(torch.compile(fn), *args)
+            self.assertTrue("mixed_mm" in code)
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+
+    @inductor_config.patch(use_mixed_mm=True)
+    def test_mixed_mm2(self):
+        def fn(a, b, c, d):
+            return torch.mm(a, b.to(a.dtype))*c+d
+
+        args_list = [
+            (
+                torch.randn(8,8, device="cuda"),
+                torch.randint(-128, 127, (8,8), dtype=torch.int8, device="cuda"),
+                torch.randn(8, device="cuda"),
+                torch.randn(8, device="cuda")
+            ),
+            (
+                torch.randn(8,2, device="cuda", dtype=torch.bfloat16),
+                torch.randint(-128, 127, (2,8), dtype=torch.int8, device="cuda"),
+                torch.randn(8, device="cuda", dtype=torch.bfloat16),
+                torch.randn(8, device="cuda", dtype=torch.bfloat16),
+            ),
+            (
+                torch.randn(8,5, device="cuda", dtype=torch.float16),
+                torch.randint(0, 255, (5,2), dtype=torch.uint8, device="cuda"),
+                torch.randn(2, device="cuda", dtype=torch.float16),
+                torch.randn(2, device="cuda", dtype=torch.float16),
+            ),
+        ]
+
+        for args in args_list:
+            torch._dynamo.reset()
+            counters.clear()
+            ref = fn(*args)
+            test, (code,) = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(ref, test)
+            actual, (code,) = run_and_get_code(torch.compile(fn), *args)
+            self.assertTrue("mixed_mm" in code)
+
+    @inductor_config.patch(use_mixed_mm=False)
+    def test_mixed_mm3(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        args = (
+            torch.randn(8,8, device="cuda"),
+            torch.randint(-128, 127, (8,8), dtype=torch.int8, device="cuda")
+        )
+        torch._dynamo.reset()
+        counters.clear()
+        ref = fn(*args)
+        test, (code,) = run_and_get_code(torch.compile(fn), *args)
+        torch.testing.assert_close(ref, test)
+        actual, (code,) = run_and_get_code(torch.compile(fn), *args)
+        self.assertFalse("mixed_mm" in code)
+
+
     def test_addmm(self):
         def fn(a, b, c):
             return torch.add(a, torch.mm(b, c)), torch.mm(b, c) + a
