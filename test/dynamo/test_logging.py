@@ -11,11 +11,11 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.distributed as dist
-
 from torch._dynamo.testing import skipIfNotPy311
 
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_utils import find_free_port
+
+from torch.testing._internal.common_utils import find_free_port, munge_exc
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import (
     LoggingTestCase,
@@ -119,7 +119,21 @@ class LoggingTests(LoggingTestCase):
             fn_opt(*ARGS)
         except Exception:
             pass
-        self.assertEqual(len(records), 2)
+        record = self.getRecord(records, "WON'T CONVERT")
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            """\
+WON'T CONVERT dynamo_error_fn test_logging.py line N
+due to:
+Traceback (most recent call last):
+torch._dynamo.exc.TorchRuntimeError: Failed running call_method add(*(FakeTensor(..., size=(1000, 1000), grad_fn=<MulBackward0>), FakeTensor(..., size=(10, 10))), **{}):
+Attempting to broadcast a dimension of length 10 at -1! Mismatching argument at index 1 had torch.Size([10, 10]); but expected shape should be broadcastable to [1000, 1000]
+
+from user code:
+   File "test_logging.py", line N, in dynamo_error_fn
+    output = output.add(torch.ones(10, 10))
+""",  # noqa: B950
+        )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
     test_inductor_debug = within_range_record_test(3, 15, inductor=logging.DEBUG)
@@ -148,8 +162,23 @@ class LoggingTests(LoggingTestCase):
             fn_opt(*ARGS)
         except Exception:
             pass
-        self.assertEqual(len(records), 2)
-        self.assertIsInstance(records[0].msg, str)
+        record = self.getRecord(records, "WON'T CONVERT")
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            """\
+WON'T CONVERT inductor_error_fn test_logging.py line N
+due to:
+Traceback (most recent call last):
+  File "test_logging.py", line N, in throw
+    raise AssertionError()
+torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
+LoweringException: AssertionError:
+  target: aten.round.default
+  args[0]: TensorBox(StorageBox(
+    InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
+  ))
+""",
+        )
 
         exitstack.close()
 

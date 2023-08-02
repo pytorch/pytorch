@@ -116,6 +116,11 @@ struct C10_API Device final {
     return type_ == DeviceType::XLA;
   }
 
+  /// Return true if the device is of MTIA type.
+  bool is_mtia() const noexcept {
+    return type_ == DeviceType::MTIA;
+  }
+
   /// Return true if the device is of HPU type.
   bool is_hpu() const noexcept {
     return type_ == DeviceType::HPU;
