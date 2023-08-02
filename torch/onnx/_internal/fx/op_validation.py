@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Sequence, Tuple, Union
 
 import onnxscript  # type: ignore[import]
-from onnxscript import evaluator  # type: ignore[import]
+from onnxscript import evaluator, values  # type: ignore[import]
 
 import torch
 import torch.fx
@@ -359,7 +359,7 @@ def _convert_torch_args_to_onnxfunction_args(
                 tagged_kwargs[param.name] = _convert_tensor_to_numpy(kwargs[param.name])
             else:
                 tagged_kwargs[param.name] = kwargs[param.name]
-        elif param.default is not object():
+        elif param.default is not values._EmptyDefault:
             # User did not provide the input/attribute
             if fill_defaults:
                 tagged_kwargs[param.name] = param.default

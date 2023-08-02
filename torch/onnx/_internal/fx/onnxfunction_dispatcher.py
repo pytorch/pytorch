@@ -29,6 +29,8 @@ from torch.onnx._internal.fx import (
 if TYPE_CHECKING:
     import onnxscript  # type: ignore[import]
 
+from onnxscript import values  # type: ignore[import]
+
 # For beartype
 from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
     graph_building as onnxscript_graph_building,
@@ -746,7 +748,6 @@ class _OnnxSchemaChecker:
         onnx_attributes: Dict[str, Any] = dict()
         # NOTE: We need to copy kwargs because we will mutate it
         copy_kwargs = kwargs.copy()
-
         for i, param in enumerate(param_schemas):
             if param.is_variadic_input:
                 # Exhaust all remaining args
@@ -765,7 +766,7 @@ class _OnnxSchemaChecker:
                     copy_kwargs.pop(param.name)
                 else:
                     onnx_attributes[param.name] = copy_kwargs[param.name]
-            elif param.is_attribute and param.default is not object():
+            elif param.is_attribute and param.default is not values._EmptyDefault:
                 # User did not provide the attribute
                 if fill_defaults:
                     onnx_attributes[param.name] = param.default
