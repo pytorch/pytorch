@@ -201,11 +201,7 @@ class _ConstantPadNd(Module):
         super().__init__()
         self.value = value
 
-    def _check_input_dim(self, input):
-        raise NotImplementedError
-
     def forward(self, input: Tensor) -> Tensor:
-        self._check_input_dim(input)
         return F.pad(input, self.padding, 'constant', self.value)
 
     def extra_repr(self) -> str:
@@ -262,12 +258,6 @@ class ConstantPad1d(_ConstantPadNd):
         super().__init__(value)
         self.padding = _pair(padding)
 
-    def _check_input_dim(self, input):
-        if input.dim() != 2 and input.dim() != 3:
-            raise ValueError(
-                f"expected 2D or 3D input (got {input.dim()}D input)"
-            )
-
 
 class ConstantPad2d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with a constant value.
@@ -319,12 +309,6 @@ class ConstantPad2d(_ConstantPadNd):
         super().__init__(value)
         self.padding = _quadruple(padding)
 
-    def _check_input_dim(self, input):
-        if input.dim() != 3 and input.dim() != 4:
-            raise ValueError(
-                f"expected 3D or 4D input (got {input.dim()}D input)"
-            )
-
 
 class ConstantPad3d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with a constant value.
@@ -365,22 +349,12 @@ class ConstantPad3d(_ConstantPadNd):
         super().__init__(value)
         self.padding = _ntuple(6)(padding)
 
-    def _check_input_dim(self, input):
-        if input.dim() != 4 and input.dim() != 5:
-            raise ValueError(
-                f"expected 4D or 5D input (got {input.dim()}D input)"
-            )
-
 
 class _ReflectionPadNd(Module):
     __constants__ = ['padding']
     padding: Sequence[int]
 
-    def _check_input_dim(self, input):
-        raise NotImplementedError
-
     def forward(self, input: Tensor) -> Tensor:
-        self._check_input_dim(input)
         return F.pad(input, self.padding, 'reflect')
 
     def extra_repr(self) -> str:
@@ -426,12 +400,6 @@ class ReflectionPad1d(_ReflectionPadNd):
     def __init__(self, padding: _size_2_t) -> None:
         super().__init__()
         self.padding = _pair(padding)
-
-    def _check_input_dim(self, input):
-        if input.dim() != 2 and input.dim() != 3:
-            raise ValueError(
-                f"expected 2D or 3D input (got {input.dim()}D input)"
-            )
 
 
 class ReflectionPad2d(_ReflectionPadNd):
@@ -484,12 +452,6 @@ class ReflectionPad2d(_ReflectionPadNd):
     def __init__(self, padding: _size_4_t) -> None:
         super().__init__()
         self.padding = _quadruple(padding)
-
-    def _check_input_dim(self, input):
-        if input.dim() != 3 and input.dim() != 4:
-            raise ValueError(
-                f"expected 3D or 4D input (got {input.dim()}D input)"
-            )
 
 
 class ReflectionPad3d(_ReflectionPadNd):
@@ -544,22 +506,12 @@ class ReflectionPad3d(_ReflectionPadNd):
         super().__init__()
         self.padding = _ntuple(6)(padding)
 
-    def _check_input_dim(self, input):
-        if input.dim() != 4 and input.dim() != 5:
-            raise ValueError(
-                f"expected 4D or 5D input (got {input.dim()}D input)"
-            )
-
 
 class _ReplicationPadNd(Module):
     __constants__ = ['padding']
     padding: Sequence[int]
 
-    def _check_input_dim(self, input):
-        raise NotImplementedError
-
     def forward(self, input: Tensor) -> Tensor:
-        self._check_input_dim(input)
         return F.pad(input, self.padding, 'replicate')
 
     def extra_repr(self) -> str:
@@ -605,12 +557,6 @@ class ReplicationPad1d(_ReplicationPadNd):
     def __init__(self, padding: _size_2_t) -> None:
         super().__init__()
         self.padding = _pair(padding)
-
-    def _check_input_dim(self, input):
-        if input.dim() != 2 and input.dim() != 3:
-            raise ValueError(
-                f"expected 2D or 3D input (got {input.dim()}D input)"
-            )
 
 
 class ReplicationPad2d(_ReplicationPadNd):
@@ -664,12 +610,6 @@ class ReplicationPad2d(_ReplicationPadNd):
         super().__init__()
         self.padding = _quadruple(padding)
 
-    def _check_input_dim(self, input):
-        if input.dim() != 3 and input.dim() != 4:
-            raise ValueError(
-                f"expected 3D or 4D input (got {input.dim()}D input)"
-            )
-
 
 class ReplicationPad3d(_ReplicationPadNd):
     r"""Pads the input tensor using replication of the input boundary.
@@ -710,12 +650,6 @@ class ReplicationPad3d(_ReplicationPadNd):
     def __init__(self, padding: _size_6_t) -> None:
         super().__init__()
         self.padding = _ntuple(6)(padding)
-
-    def _check_input_dim(self, input):
-        if input.dim() != 4 and input.dim() != 5:
-            raise ValueError(
-                f"expected 4D or 5D input (got {input.dim()}D input)"
-            )
 
 
 class ZeroPad1d(ConstantPad1d):
@@ -770,12 +704,6 @@ class ZeroPad1d(ConstantPad1d):
     def extra_repr(self) -> str:
         return f'{self.padding}'
 
-    def _check_input_dim(self, input):
-        if input.dim() != 2 and input.dim() != 3:
-            raise ValueError(
-                f"expected 2D or 3D input (got {input.dim()}D input)"
-            )
-
 class ZeroPad2d(ConstantPad2d):
     r"""Pads the input tensor boundaries with zero.
 
@@ -829,12 +757,6 @@ class ZeroPad2d(ConstantPad2d):
     def extra_repr(self) -> str:
         return f'{self.padding}'
 
-    def _check_input_dim(self, input):
-        if input.dim() != 3 and input.dim() != 4:
-            raise ValueError(
-                f"expected 3D or 4D input (got {input.dim()}D input)"
-            )
-
 class ZeroPad3d(ConstantPad3d):
     r"""Pads the input tensor boundaries with zero.
 
@@ -876,9 +798,3 @@ class ZeroPad3d(ConstantPad3d):
 
     def extra_repr(self) -> str:
         return f'{self.padding}'
-
-    def _check_input_dim(self, input):
-        if input.dim() != 4 and input.dim() != 5:
-            raise ValueError(
-                f"expected 4D or 5D input (got {input.dim()}D input)"
-            )
