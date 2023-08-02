@@ -7,7 +7,7 @@
 #include <unordered_set>
 
 #include "caffe2/core/operator.h"
-#include "caffe2/core/static_tracepoint.h"
+#include "c10/util/static_tracepoint.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
