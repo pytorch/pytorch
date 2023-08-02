@@ -5,7 +5,6 @@
 
 import contextlib
 import copy
-import functools
 from abc import ABC, abstractmethod
 from typing import (
     Any,
@@ -100,27 +99,6 @@ def _construct_wrap_fn(
     return fn
 
 
-def _run_module_wrap_policy(
-    root_module: nn.Module,
-    module_classes: Iterable[Type[nn.Module]],
-    ignored_modules: Set[nn.Module],
-    fsdp_kwargs: Dict[str, Any],
-) -> Dict[nn.Module, Dict[str, Any]]:
-    """
-    TODO: To match the existing ``ModuleWrapPolicy`` behavior, every wrapped
-    module shares the same FSDP kwargs.
-    """
-    module_classes_tuple = tuple(set(module_classes))
-    target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]] = {}
-    for module in root_module.modules():
-        if module in ignored_modules:
-            continue
-        elif isinstance(module, module_classes_tuple):
-            # Shallow copy to avoid coupling changes across modules
-            target_module_to_kwargs[module] = copy.copy(fsdp_kwargs)
-    return target_module_to_kwargs
-
-
 def _run_mixed_precision_override_policy(
     root_module: nn.Module,
     module_classes: Iterable[Type[nn.Module]],
@@ -148,18 +126,23 @@ def always_wrap_policy(*args, **kwargs) -> bool:
     return True
 
 
-class _FSDPPolicy(ABC):
+class _Policy(ABC):
     """
-    This defines an abstract base class that represents an FSDP policy for
-    constructing ``FlatParameter`` s.
+    This defines an abstract base class that represents a policy for applying
+    a module-level API.
     """
 
-    # The motivation for this abstract base class is to hide the interface
-    # expected by `_recursive_wrap()` from users (i.e. the `recurse` argument).
-
-    @property
     @abstractmethod
-    def policy(self) -> Callable:
+    def _run_policy(
+        self,
+        root_module: nn.Module,
+        ignored_modules: Set[nn.Module],
+        root_kwargs: Dict[str, Any],
+    ) -> Dict[nn.Module, Dict[str, Any]]:
+        """
+        This should return a dict ``target_module_to_kwargs`` that maps from
+        each target module to wrap to its kwargs.
+        """
         ...
 
 
@@ -195,21 +178,32 @@ def _module_wrap_policy(
     return isinstance(module, tuple(module_classes))
 
 
-class ModuleWrapPolicy(_FSDPPolicy):
-    """This is a wrapper around :func:`_module_wrap_policy`."""
+class ModuleWrapPolicy(_Policy):
+    """
+    This policy applies to every module of the specified module classes,
+    passing in the kwargs given to the root.
+    """
 
     def __init__(self, module_classes: Iterable[Type[nn.Module]]):
         module_classes_set = set(module_classes)
-        self._policy: Callable = functools.partial(
-            _module_wrap_policy,
-            module_classes=module_classes_set,
-        )
         self._module_classes = module_classes_set
         self._module_classes_str = str(module_classes_set)
 
-    @property
-    def policy(self):
-        return self._policy
+    def _run_policy(
+        self,
+        root_module: nn.Module,
+        ignored_modules: Set[nn.Module],
+        root_kwargs: Dict[str, Any],
+    ) -> Dict[nn.Module, Dict[str, Any]]:
+        module_classes = tuple(self._module_classes)
+        target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]] = {}
+        for module in root_module.modules():
+            if module in ignored_modules:
+                continue
+            elif isinstance(module, module_classes):
+                # Shallow copy to avoid coupling changes across modules
+                target_module_to_kwargs[module] = copy.copy(root_kwargs)
+        return target_module_to_kwargs
 
     def __repr__(self) -> str:
         return super().__repr__() + f"({self._module_classes_str})"
