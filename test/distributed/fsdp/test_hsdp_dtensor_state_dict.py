@@ -45,12 +45,6 @@ class TestDummyModel(torch.nn.Module):
     def get_input(self):
         return torch.rand(4, 8, device="cuda")
 
-import torch.distributed as dist
-
-def p0(line):
-    if dist.get_rank() == 0:
-        print(line)
-
 
 class TestDtensorShardedOptimStateDict(DTensorTestBase):
     @property
@@ -80,7 +74,6 @@ class TestDtensorShardedOptimStateDict(DTensorTestBase):
             ),
         )
         dtensor_osd = FSDP.optim_state_dict(model, optim)
-        p0(f"dtensor_osd:{dtensor_osd}")
 
         FSDP.set_state_dict_type(
             model,
@@ -90,7 +83,6 @@ class TestDtensorShardedOptimStateDict(DTensorTestBase):
             ),
         )
         sharded_tensor_osd = FSDP.optim_state_dict(model, optim)
-        p0(f"sharded_tensor_osd:{sharded_tensor_osd}")
 
         for dtensor_osd_state, sharded_tensor_osd_state in zip(
             dtensor_osd["state"].items(), sharded_tensor_osd["state"].items()
@@ -184,7 +176,11 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
         # and check whether they are identical
         mesh_tensor = torch.arange(self.world_size).view(2, -1)
         device_mesh = DeviceMesh(self.device_type, mesh_tensor)
-        model = FSDP(TestDummyModel().cuda(), _device_mesh=device_mesh, sharding_strategy=ShardingStrategy.HYBRID_SHARD)
+        model = FSDP(
+            TestDummyModel().cuda(),
+            _device_mesh=device_mesh,
+            sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+        )
         model(model.get_input()).sum().backward()
 
         FSDP.set_state_dict_type(
@@ -224,9 +220,13 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_model_load_state_dict(self, offload_to_cpu):
-        mesh_tensor = torch.arange(self.world_size)
+        mesh_tensor = torch.arange(self.world_size).view(2, -1)
         device_mesh = DeviceMesh(self.device_type, mesh_tensor)
-        model = FSDP(TestDummyModel().cuda(), _device_mesh=device_mesh)
+        model = FSDP(
+            TestDummyModel().cuda(),
+            _device_mesh=device_mesh,
+            sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+        )
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
 
         FSDP.set_state_dict_type(

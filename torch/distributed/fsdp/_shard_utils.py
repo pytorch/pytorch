@@ -173,5 +173,5 @@ def _create_chunk_dtensor(
     # FSDP placements: [Shard(0)]
     # HSDP placements: [Replicate(), Shard(0)]
     placements = [Replicate() for _ in range(device_mesh.ndim)]
-    placements[-1] = shard_placement  # type: ignore
+    placements[-1] = shard_placement  # type: ignore[misc]
     return DTensor.from_local(local_tensor, device_mesh, placements)

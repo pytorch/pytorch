@@ -11,8 +11,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.autograd.graph import register_multi_grad_hook
-from torch.distributed import get_backend, get_world_size
-from torch.distributed._tensor import DeviceMesh
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _assert_in_training_states,
