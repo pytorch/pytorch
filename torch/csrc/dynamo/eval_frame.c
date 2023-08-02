@@ -117,6 +117,9 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
   } else {                                                              \
   }
 
+// Uncomment the the next line to print DEBUG messages
+// #define TORCHDYNAMO_DEBUG 1
+
 #ifdef TORCHDYNAMO_DEBUG
 
 #define DEBUG_CHECK(cond) CHECK(cond)
@@ -390,8 +393,8 @@ static PyTypeObject CacheEntryWrapperType = {
 inline static CacheEntry* get_cache_entry(THP_EVAL_API_FRAME_OBJECT* frame) {
   PyObject* extra = NULL;
   _PyCode_GetExtra((PyObject*)frame->f_code, cache_entry_extra_index, (void*)&extra);
-  if (extra == NULL) {
-    return NULL;
+  if (extra == NULL || extra == SKIP_CODE) {
+    return (CacheEntry*)extra;
   }
 
   // The cache lives on the extra segment of code object. However, what goes in
