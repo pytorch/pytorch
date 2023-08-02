@@ -403,7 +403,7 @@ class _ReduceScatterBase(Function):
                 )
             out_size[0] = out_size[0] * dist.get_world_size(group=ctx.group)
             gx = torch.empty(out_size, device=grad_output.device, dtype=grad_output.dtype)
-            dist._all_gather_base(gx, grad_output, group=group)
+            dist._all_gather_base(gx, grad_output.contiguous(), group=ctx.group)
         else:
             raise RuntimeError("Backend not supported!")
         return (None, gx, None, None)

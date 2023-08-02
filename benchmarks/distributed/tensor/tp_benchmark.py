@@ -26,8 +26,10 @@ import torch.multiprocessing as mp
 from torch.distributed._tensor import (
     DeviceMesh,
 )
+import contextlib
 from torch.distributed.tensor.parallel import (
     PairwiseParallel,
+    SequenceParallel,
     parallelize_module,
 )
 from torch.distributed.nn.functional import (
@@ -51,12 +53,32 @@ def cleanup():
 class MLPModel(nn.Module):
     def __init__(self, dim_size):
         super(MLPModel, self).__init__()
-        self.net1 = nn.Linear(10, dim_size)
+        self.net1 = nn.Linear(128, dim_size)
         self.relu = nn.ReLU()
-        self.net2 = nn.Linear(dim_size, 5)
+        self.net2 = nn.Linear(dim_size, 128)
 
     def forward(self, x):
         return self.net2(self.relu(self.net1(x)))
+
+
+@contextlib.contextmanager
+def maybe_run_profiler(args, path):
+    if args.dump_profiler:
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            schedule=torch.profiler.schedule(wait=1, warmup=2, active=2, repeat=1),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(path),
+            profile_memory=True,
+            with_stack=True,
+            record_shapes=True,
+        ) as torch_profiler:
+            yield torch_profiler
+    else:
+        torch_profiler = contextlib.nullcontext()
+        yield torch_profiler
 
 
 def run_tp(rank, args):
@@ -78,49 +100,58 @@ def run_tp(rank, args):
     # Control group to mimic Megatron.
     model = MLPModel(dim_size // tp_degree).cuda(rank)
     optimizer = torch.optim.SGD(model.parameters(), lr=LR)
-
-    t0 = time.perf_counter()
-    for _ in range(args.iter_nums):
-        inp = torch.rand(20, 10).cuda(rank)
-        if args.sequence_parallel:
-            output = torch.empty_like(inp)
-            inp = _all_gather_base(output, inp)
-        output = model(inp)
-        if args.sequence_parallel:
-            output = all_reduce(output)
-        else:
-            output_rs = torch.empty(output.size(0) // tp_degree, *output.size()[1:], device=output.device)
-            output = _reduce_scatter_base(output_rs, output)
-        output.sum().backward()
-        optimizer.step()
+    inp = torch.rand(128, 128).cuda(rank)
+    torch.distributed.barrier()
+    with maybe_run_profiler(args, "./control/") as torch_profiler:
+        for i in range(args.iter_nums):
+            if args.sequence_parallel:
+                output = torch.empty(inp.size(0) * tp_degree, *inp.size()[1:], device=inp.device)
+                input = _all_gather_base(output, inp)
+            output = model(input)
+            if args.sequence_parallel:
+                output_rs = torch.empty(output.size(0) // tp_degree, *output.size()[1:], device=output.device)
+                output = _reduce_scatter_base(output_rs, output)
+            else:
+                output = all_reduce(output)
+            output.sum().backward()
+            optimizer.step()
+            if args.dump_profiler:
+                torch_profiler.step()
+            if i == 0:
+                t0 = time.perf_counter()
     torch.distributed.barrier()
     t1 = time.perf_counter()
     control_group = t1 - t0
+    if rank == 0:
+        print(f"Elapsed time for control group: {control_group:.6f}")
 
     # create model and move it to GPU with id rank
-    model = MLPModel().cuda(rank)
+    model = MLPModel(dim_size).cuda(rank)
     # Create a optimizer for the parallelized module.
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=LR)
     # Parallelize the module based on the given Parallel Style.
     parallel_style = SequenceParallel() if args.sequence_parallel else PairwiseParallel()
     model = parallelize_module(model, device_mesh, parallel_style)
+    optimizer = torch.optim.SGD(model.parameters(), lr=LR)
 
     # Perform a num of iterations of forward/backward
     # and optimizations for the sharded module.
-    t0 = time.perf_counter()
-    for _ in range(args.iter_nums):
-        inp = torch.rand(20, 10).cuda(rank)
-        output = model(inp)
-        output.sum().backward()
-        optimizer.step()
+    torch.distributed.barrier()
+    with maybe_run_profiler(args, "./test/") as torch_profiler:
+        for i in range(args.iter_nums):
+            output = model(inp)
+            output.sum().backward()
+            optimizer.step()
+            if args.dump_profiler:
+                torch_profiler.step()
+            if i == 0:
+                t0 = time.perf_counter()
     torch.distributed.barrier()
     t1 = time.perf_counter()
     test_group = t1 - t0
 
     if rank == 0:
-        print(f"Elapsed time for control group: {control_group:0.4f}")
-        print(f"Elapsed time for test group: {test_group:0.4f}")
+        print(f"Elapsed time for test group: {test_group:.6f}")
 
     cleanup()
 
@@ -143,45 +174,6 @@ def main():
     )
     args = parser.parse_args()
     run_tp_mp(run_tp, args)
-
-
-
-
-    # output = allgather_run("nvidia-smi topo -m")
-    # if not allequal(output):
-    #     print('Output of "nvidia-smi topo -m" differs between machines')
-    #     sys.exit(1)
-
-    # if args.rank == 0:
-    #     print("-----------------------------------")
-    #     print("PyTorch distributed benchmark suite")
-    #     print("-----------------------------------")
-    #     print("")
-    #     print(f"* PyTorch version: {torch.__version__}")
-    #     print(f"* CUDA version: {torch.version.cuda}")
-    #     print(f"* Distributed backend: {args.distributed_backend}")
-    #     print("")
-    #     print("--- nvidia-smi topo -m ---")
-    #     print("")
-    #     print(output[0])
-    #     print("--------------------------")
-    #     print("")
-
-    # torch.cuda.set_device(dist.get_rank() % 8)
-    # device = torch.device("cuda:%d" % (dist.get_rank() % 8))
-
-    # benchmark_results = []
-    # for benchmark in benchmarks:
-    #     if args.rank == 0:
-    #         print(f"\nBenchmark: {str(benchmark)}")
-    #     result = sweep(benchmark)
-    #     benchmark_results.append(
-    #         {
-    #             "model": benchmark.model,
-    #             "batch_size": benchmark.batch_size,
-    #             "result": result,
-    #         }
-    #     )
 
 
 if __name__ == "__main__":
