@@ -222,7 +222,7 @@ def _get_post_order_named_modules(
                 if module_name != "":
                     child_module_name = module_name + "." + child_module_name
                 stack.append((child_module_name, child_module))
-    post_order_named_modules = reversed(reverse_post_order_named_modules)
+    post_order_named_modules = list(reversed(reverse_post_order_named_modules))
     return post_order_named_modules
 
 
