@@ -1110,7 +1110,7 @@ def forward(self, primals_1, primals_2):
             # Note: in our test, the add() is important because we need the graph inputs to be non-leaves so we can mutate them.
             x = base.add(1)
             inp1 = x[0]
-            inp2 = x[1]
+            inp2 = x[0]
             return [base], [inp1, inp2]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
@@ -1131,6 +1131,34 @@ def forward(self, primals_1, primals_2):
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
+
+    # Partially addresses https://github.com/pytorch/pytorch/issues/106457
+    def test_input_mutation_false_aliasing(self):
+        def f(a, b):
+            a.mul_(3)
+            b.mul_(2)
+            return a + b
+
+        def inp_callable(req_grad):
+            base = torch.ones(4, 4, requires_grad=req_grad)
+            x = base.add(1)
+            # create two non-contiguous views that share storage, but are actually non-overlapping
+            a = x[:, 0:2]
+            b = x[:, 2:4]
+            return [base], [a, b]
+
+        fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
+
+        # Important characteristic: the graph takes in 2 inputs!
+        # That shows that we didn't try to run our complicated synthetic base logic,
+        # because we successfully detected false aliasing across the two inputs.
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, arg0_1, arg1_1):
+    mul = torch.ops.aten.mul.Tensor(arg0_1, 3);  arg0_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(mul, mul_1)
+    return (mul, mul_1, add)""")
 
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
@@ -1184,11 +1212,11 @@ def forward(self, primals_1, primals_2):
             return a + b
 
         def inp_callable(req_grad):
-            base = torch.ones(2, 2, requires_grad=req_grad)
+            base = torch.ones(4, 2, requires_grad=req_grad)
             # Note: in our test, the add() is important because we need the graph inputs to be non-leaves so we can mutate them.
             x = base.add(1)
             inp1 = x[0]
-            inp2 = x[1]
+            inp2 = x[0]
             return [base], [inp1, inp2]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
@@ -1204,7 +1232,7 @@ def forward(self, primals_1):
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
     as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 2)
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
     add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_2 = as_strided_5 = None
     return [as_strided_scatter, add_1]""")  # noqa: B950
 
