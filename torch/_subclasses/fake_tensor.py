@@ -561,6 +561,8 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
     with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
 
+    if out is new_kwargs["input"]:
+        return out  # copy_
     return FakeTensor(fake_mode, out, out_device)
 
 
@@ -596,6 +598,7 @@ def embedding_bag(fake_mode, func, *args, **kwargs):
 @register_op_impl(aten.index_put.default)
 @register_op_impl(aten._unsafe_index_put.default)
 @register_op_impl(aten.copy.default)
+@register_op_impl(aten.copy_.default)
 @register_op_impl(aten.slice_scatter.default)
 def multi_device_op_default(fake_mode, func, *args, **kwargs):
     return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
@@ -1478,6 +1481,7 @@ class FakeTensorMode(TorchDispatchMode):
                 not isinstance(x, FakeTensor)
                 and type(x) is not torch.Tensor
                 and type(x) is not torch.nn.Parameter
+                and type(x) is not torch.nn.Buffer
             )
 
         return [
