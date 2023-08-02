@@ -519,7 +519,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
     auto k = key.view({key.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
     auto v = value.view({value.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
 
-    sdp::sdp_params kernel_params{q, k, v, mask.has_value(), 0.0, false};
+    sdp::sdp_params kernel_params{q, k, v, mask, 0.0, false};
     auto backend = select_sdp_backend(kernel_params);
     // strides from packed projection for nested tensors when seq_len is 1 will be
     // and will trigger a contiguous call in the kernel, so we prevent this
@@ -752,7 +752,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
-  sdp::sdp_params kernel_params{query_, key, value, attn_mask_.has_value(), dropout_p, is_causal};
+  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal};
   auto backend = select_sdp_backend(kernel_params);
   if (backend == sdp::SDPBackend::error) {
     TORCH_CHECK(

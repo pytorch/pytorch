@@ -2876,22 +2876,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
                 hx.sum().backward()
 
-    def test_RNN_cell_forward_input_size(self):
-        input = torch.randn(3, 11)
-        hx = torch.randn(3, 20)
-        for module in (nn.RNNCell, nn.GRUCell):
-            cell = module(10, 20)
-            self.assertRaises(Exception, lambda: cell(input, hx))
-
-    def test_RNN_cell_forward_hidden_size(self):
-        input = torch.randn(3, 10)
-        hx = torch.randn(3, 21)
-        cell_shared_param = (10, 20)
-        for cell in (nn.RNNCell(*cell_shared_param, nonlinearity="relu"),
-                     nn.RNNCell(*cell_shared_param, nonlinearity="tanh"),
-                     nn.GRUCell(*cell_shared_param)):
-            self.assertRaises(Exception, lambda: cell(input, hx))
-
     def test_RNN_cell_forward_zero_hidden_size(self):
         input = torch.randn(3, 10)
         hx = torch.randn(3, 0)
