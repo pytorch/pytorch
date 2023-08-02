@@ -4,6 +4,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch import _prims
 from torch._C import DispatchKey
+from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._ops import HigherOrderOperator
 
 from torch._prims_common import CUDARngStateHelper, make_contiguous_strides_for
@@ -168,10 +169,9 @@ def register_run_and_save_rng_state_op():
     run_and_save_rng_state.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
     run_and_save_rng_state.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
 
-    @run_and_save_rng_state.py_impl(DispatchKey.Autograd)
-    def impl_autograd(op, *args, **kwargs):
-        with torch._C._AutoDispatchBelowAutograd():
-            return run_and_save_rng_state(op, *args, **kwargs)
+    run_and_save_rng_state.py_impl(DispatchKey.Autograd)(
+        autograd_not_implemented(run_and_save_rng_state, deferred_error=True)
+    )
 
     @run_and_save_rng_state.py_impl(DispatchKey.CUDA)
     def impl_cuda(op, *args, **kwargs):
@@ -222,10 +222,9 @@ def register_run_with_rng_state_op():
     run_with_rng_state.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
     run_with_rng_state.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
 
-    @run_with_rng_state.py_impl(DispatchKey.Autograd)
-    def impl_autograd(rng_state, op, *args, **kwargs):
-        with torch._C._AutoDispatchBelowAutograd():
-            return run_with_rng_state(rng_state, op, *args, **kwargs)
+    run_with_rng_state.py_impl(DispatchKey.Autograd)(
+        autograd_not_implemented(run_with_rng_state, deferred_error=True)
+    )
 
     @run_with_rng_state.py_impl(DispatchKey.CUDA)
     def impl_cuda(rng_state, op, *args, **kwargs):
