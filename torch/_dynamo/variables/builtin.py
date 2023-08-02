@@ -544,13 +544,6 @@ class BuiltinVariable(VariableTracker):
                         need_unwrap=need_unwrap,
                         **options,
                     )
-                elif check_numpy_ndarray_args(args, kwargs):
-                    return wrap_fx_proxy_cls(
-                        variables.NumpyNdarrayVariable,
-                        tx,
-                        proxy,
-                        **options,
-                    )
                 elif all(isinstance(x, SymNodeVariable) for x in args):
                     return SymNodeVariable.create(tx, proxy, None, **options)
                 else:
@@ -560,7 +553,11 @@ class BuiltinVariable(VariableTracker):
                         args[0], variables.UnspecializedPythonVariable
                     ):
                         args[0] = args[0].convert_to_constant(tx)
-                    return wrap_fx_proxy(tx, proxy, **options)
+                    if check_numpy_ndarray_args(args, kwargs):
+                        cls = variables.NumpyNdarrayVariable
+                    else:
+                        cls = variables.TensorVariable
+                    return wrap_fx_proxy_cls(cls, tx, proxy, **options)
 
             except NotImplementedError:
                 unimplemented(f"partial tensor op: {self} {args} {kwargs}")
