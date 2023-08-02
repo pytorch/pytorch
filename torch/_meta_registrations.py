@@ -4470,7 +4470,9 @@ def meta__scaled_dot_product_flash(
     query_t = query.transpose(1, 2)
     query_reshaped = query_t.reshape(Nnz_q, num_heads, head_dim)
     attention = torch.empty_like(query_reshaped, device=query.device)
-    attention = attention.view(batch_size, max_seqlen_batch_q, num_heads, head_dim).transpose(1,2)
+    attention = attention.view(
+        batch_size, max_seqlen_batch_q, num_heads, head_dim
+    ).transpose(1, 2)
 
     max_seqlen_q = math.ceil(max_seqlen_batch_q / 16) * 16
     logsumexp = torch.empty(
