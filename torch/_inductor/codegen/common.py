@@ -103,6 +103,25 @@ def boolean_ops():
     )
 
 
+DTYPE_TO_COMPUTATION_DTYPE = {
+    torch.bfloat16: torch.float,
+    torch.float16: torch.float,
+    **{
+        dtype: dtype
+        for dtype in [
+            torch.bool,
+            torch.float32,
+            torch.float64,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.uint8,
+        ]
+    },
+}
+
+
 class DataTypePropagation:
     def __init__(self, body) -> None:
         self.body = body
@@ -150,7 +169,6 @@ class DataTypePropagation:
                 return None
 
         if node.target in (
-            "constant",
             "to_dtype",
             "index_expr",
         ):
@@ -178,6 +196,9 @@ class DataTypePropagation:
 
         if node.target == "reduction":
             return node.args[1]
+
+        if node.target == "constant":
+            return DTYPE_TO_COMPUTATION_DTYPE[node.args[-1]]
 
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
