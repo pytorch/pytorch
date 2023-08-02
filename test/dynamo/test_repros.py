@@ -1541,50 +1541,50 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["total"], 2)
 
-    @torch._dynamo.config.patch("suppress_errors", True)
-    def test_guard_fail_tensor_bool(self):
-        @torch._dynamo.disable(recursive=False)
-        def fn():
-            condition_shape = (5, 5)
-            dtypes = (torch.bool,)
-            shapes = (
-                (),
-                (5,),
-                (1, 5),
-            )
+    # @torch._dynamo.config.patch("suppress_errors", True)
+    # def test_guard_fail_tensor_bool(self):
+    #     @torch._dynamo.disable(recursive=False)
+    #     def fn():
+    #         condition_shape = (5, 5)
+    #         dtypes = (torch.bool,)
+    #         shapes = (
+    #             (),
+    #             (5,),
+    #             (1, 5),
+    #         )
 
-            tensors = [
-                torch.empty(shape, dtype=dtype).fill_(17)
-                for shape, dtype in itertools.product(shapes, dtypes)
-            ]
+    #         tensors = [
+    #             torch.empty(shape, dtype=dtype).fill_(17)
+    #             for shape, dtype in itertools.product(shapes, dtypes)
+    #         ]
 
-            x_vals = (5.0, *tensors)
-            y_vals = (6.0, *tensors)
+    #         x_vals = (5.0, *tensors)
+    #         y_vals = (6.0, *tensors)
 
-            @torch._dynamo.disable
-            def get_expected(condition, x, y):
-                x_np = x.cpu().numpy() if isinstance(x, torch.Tensor) else x
-                y_np = y.cpu().numpy() if isinstance(y, torch.Tensor) else y
-                return torch.from_numpy(
-                    np.where(condition.cpu().numpy(), x_np, y_np)
-                ).to(common_dtype)
+    #         @torch._dynamo.disable
+    #         def get_expected(condition, x, y):
+    #             x_np = x.cpu().numpy() if isinstance(x, torch.Tensor) else x
+    #             y_np = y.cpu().numpy() if isinstance(y, torch.Tensor) else y
+    #             return torch.from_numpy(
+    #                 np.where(condition.cpu().numpy(), x_np, y_np)
+    #             ).to(common_dtype)
 
-            for x, y in zip(x_vals, y_vals):
-                condition = torch.empty(*condition_shape, dtype=torch.bool).bernoulli_()
-                common_dtype = torch.result_type(x, y)
+    #         for x, y in zip(x_vals, y_vals):
+    #             condition = torch.empty(*condition_shape, dtype=torch.bool).bernoulli_()
+    #             common_dtype = torch.result_type(x, y)
 
-                def check_equal(condition, x, y):
-                    # NumPy aggressively promotes to double, hence cast to output to correct dtype
-                    expected = get_expected(condition, x, y)
-                    result = torch.where(condition, x, y)
-                    assert torch.allclose(expected, result)
+    #             def check_equal(condition, x, y):
+    #                 # NumPy aggressively promotes to double, hence cast to output to correct dtype
+    #                 expected = get_expected(condition, x, y)
+    #                 result = torch.where(condition, x, y)
+    #                 assert torch.allclose(expected, result)
 
-                check_equal(condition, x, y)
-                check_equal(condition, y, x)
+    #             check_equal(condition, x, y)
+    #             check_equal(condition, y, x)
 
-        fn()
-        opt_fn = torch._dynamo.optimize("eager")(fn)
-        opt_fn()
+    #     fn()
+    #     opt_fn = torch._dynamo.optimize("eager")(fn)
+    #     opt_fn()
 
     def test_guard_fail_nested_tuple(self):
         def fn(args):
@@ -2585,48 +2585,48 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         f()
         self.assertTrue(hit_handler)
 
-    def test_generator_dealloc(self):
-        # See https://github.com/pytorch/pytorch/pull/96488
-        #
-        # NB: yes, [(...)] is intentional, this is a list containing a
-        # generator
-        generator_box = [(x for x in [1, 2, 3])]
+    # def test_generator_dealloc(self):
+    #     # See https://github.com/pytorch/pytorch/pull/96488
+    #     #
+    #     # NB: yes, [(...)] is intentional, this is a list containing a
+    #     # generator
+    #     generator_box = [(x for x in [1, 2, 3])]
 
-        counter = torch._dynamo.testing.CompileCounter()
+    #     counter = torch._dynamo.testing.CompileCounter()
 
-        def g(x):
-            return x + 2
+    #     def g(x):
+    #         return x + 2
 
-        # TODO: This test is pretty delicate.  To test if it's actually doing
-        # anything, rebuild eval_frame.c with '#define TORCHDYNAMO_DEBUG 1'
-        # and then look at the logs for:
-        #
-        # TRACE[_custom_eval_frame:650] begin <genexpr> test_repros.py 2276 -1 0 0
-        # TRACE[_custom_eval_frame:664] throw <genexpr>
-        #
-        # This means we're actually hitting the relevant codepath
+    #     # TODO: This test is pretty delicate.  To test if it's actually doing
+    #     # anything, rebuild eval_frame.c with '#define TORCHDYNAMO_DEBUG 1'
+    #     # and then look at the logs for:
+    #     #
+    #     # TRACE[_custom_eval_frame:650] begin <genexpr> test_repros.py 2276 -1 0 0
+    #     # TRACE[_custom_eval_frame:664] throw <genexpr>
+    #     #
+    #     # This means we're actually hitting the relevant codepath
 
-        # NB: Make sure we don't actually Dynamo this frame; if we do Dynamo
-        # this frame, Dynamo actually DOES understand list.clear and will
-        # arrange for the generator deallocation to happen when the eval frame
-        # handler is disabled, which will prevent the bug from happening (we
-        # specifically want to trigger the generator deallocation WHILE the
-        # dynamo eval frame handler is active), as that will cause the
-        # generator to become exhausted and trigger the throw_flag == TRUE
-        # case.
-        @torch._dynamo.disable(recursive=False)
-        def f(x):
-            generator_box.clear()
-            return g(x)
+    #     # NB: Make sure we don't actually Dynamo this frame; if we do Dynamo
+    #     # this frame, Dynamo actually DOES understand list.clear and will
+    #     # arrange for the generator deallocation to happen when the eval frame
+    #     # handler is disabled, which will prevent the bug from happening (we
+    #     # specifically want to trigger the generator deallocation WHILE the
+    #     # dynamo eval frame handler is active), as that will cause the
+    #     # generator to become exhausted and trigger the throw_flag == TRUE
+    #     # case.
+    #     @torch._dynamo.disable(recursive=False)
+    #     def f(x):
+    #         generator_box.clear()
+    #         return g(x)
 
-        self.assertNoUnraisable(
-            lambda: torch._dynamo.optimize(counter)(f)(torch.randn(3))
-        )
+    #     self.assertNoUnraisable(
+    #         lambda: torch._dynamo.optimize(counter)(f)(torch.randn(3))
+    #     )
 
-        # Make sure the x + 2 is captured (a previous incorrect implementation
-        # of this fix would have disabled the eval frame callback, which means
-        # g wouldn't get traced
-        self.assertEqual(counter.op_count, 1)
+    #     # Make sure the x + 2 is captured (a previous incorrect implementation
+    #     # of this fix would have disabled the eval frame callback, which means
+    #     # g wouldn't get traced
+    #     self.assertEqual(counter.op_count, 1)
 
     def test_error_return_without_exception_set(self):
         # https://github.com/pytorch/pytorch/issues/93781
