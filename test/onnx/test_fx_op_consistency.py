@@ -353,6 +353,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
     ),
     xfail(
+        "nn.functional.adaptive_avg_pool1d",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten::div.Tensor_mode"),
+    ),
+    xfail(
         "nn.functional.adaptive_avg_pool2d",
         reason=onnx_test_common.reason_onnx_script_does_not_support("RecursionError: \
             maximum recursion depth exceeded while calling a Python object"),

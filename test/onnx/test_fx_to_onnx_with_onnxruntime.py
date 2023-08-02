@@ -657,7 +657,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     *fake_args,
                     export_options=export_options,
                 )
-
                 onnx_model = export_output.model_proto
 
             # Tasks done by the following block.

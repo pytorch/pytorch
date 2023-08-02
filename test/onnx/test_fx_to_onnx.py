@@ -145,7 +145,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return torch.sum(values)
 
         x = torch.arange(1.0, 6.0, requires_grad=True)
-        _ = dynamo_export(TopKModel(), x, export_options=self.export_options)
+        export_output = dynamo_export(
+            TopKModel(), x, export_options=self.export_options
+        )
 
     def test_unsupported_indices_fake_tensor_generated_with_op_level_debug(self):
         class EmbedModelWithoutPaddingIdx(torch.nn.Module):
@@ -229,6 +231,20 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             diagnostics.rules.find_operator_overloads_in_onnx_registry,
             diagnostics.levels.WARNING,
             expected_node="aten.add.Tensor",
+        )
+
+    def test_aten_clone_does_not_raise_warning_of_lack_of_memory_format(self):
+        class CustomModule(torch.nn.Module):
+            def forward(self, input):
+                return torch.ops.aten.clone(input, memory_format=torch.preserve_format)
+
+        x = torch.tensor(3)
+        export_output = dynamo_export(CustomModule(), x)
+        assert_has_diagnostics(
+            export_output.diagnostic_context,
+            diagnostics.rules.find_opschema_matched_symbolic_function,
+            diagnostics.levels.NONE,
+            expected_node="aten.clone.default",
         )
 
     def test_dynamo_export_retains_readable_parameter_and_buffer_names(self):

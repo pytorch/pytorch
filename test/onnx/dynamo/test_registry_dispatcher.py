@@ -270,11 +270,15 @@ class TestDispatcher(common_utils.TestCase):
         custom_domain = onnxscript.values.Opset(domain="custom", version=1)
 
         @onnxscript.script(custom_domain)
-        def test_custom_op(x: TCustomFloat, y: TCustomFloat) -> TCustomFloat:
+        def test_custom_op(
+            x: TCustomFloat, y: TCustomFloat, alpha: int = 1
+        ) -> TCustomFloat:
             return op.Add(x, y)
 
         @onnxscript.script(custom_domain)
-        def test_default_op(x: TCustomFloat, y: TCustomFloat) -> TCustomFloat:
+        def test_default_op(
+            x: TCustomFloat, y: TCustomFloat, alpha: int = 1
+        ) -> TCustomFloat:
             return op.Add(x, y)
 
         op_full_name = "test::test_op"

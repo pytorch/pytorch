@@ -218,7 +218,7 @@ class OnnxFunctionDispatcher:
                 RuntimeError: If there are no overloaded functions available for the given FX node.
         """
         # TODO(justinchuby): Cache the OnnxSchemaChecker  so we don't need to run the init logic everytime
-        overload_match_ranking: Dict[registration.SymbolicFunction, int] = {}
+        overload_match_ranking: Dict[registration.SymbolicFunction, Optional[int]] = {}
         diagnostic = diagnostic_context.inflight_diagnostic()
 
         # Iterate the overloaded functions in reverse order to prioritize the custom ones
@@ -233,15 +233,33 @@ class OnnxFunctionDispatcher:
                 return symbolic_function.onnx_function
             # Record the match score for the nearest match if it's not the perfect match
             overload_match_ranking[symbolic_function] = function_opschema.match_score
+        # NOTE: If there is no perfect match, find the nearest match among the nearest matche candidates
+        # If there is no nearest match, raise an error
+        overload_match_ranking = {
+            k: v for k, v in overload_match_ranking.items() if v is not None
+        }
+        if not overload_match_ranking:
+            # If there are no overloaded functions available for the given FX node, raise an
+            # unsupported error
+            op_full_name = self._get_aten_name(
+                node, diagnostic_context
+            ).qualified_name()
+            diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
+                diagnostics.rules.no_symbolic_function_for_call_function,
+                diagnostics.levels.ERROR,
+                f"Cannot find any perfect/nearest match of symbolic function for {op_full_name},"
+                f"which should be registered under {node.target}.",
+                unsupported_fx_node=node,
+            )
+            diagnostic_context.log(diagnostic)
+            raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
 
-        # NOTE: If the perfect match is not found, find the nearest match
         diagnostic.with_additional_message(
             "### Exact match is not found!\n"
             "Cannot find a perfect match of symbolic overload, "
             "a nearest match is found. Please check the ONNX output carefully. \n",
         )
         diagnostic.level = diagnostics.levels.WARNING
-
         # NOTE: Tie breaker: if there are multiple nearest matches, we will choose the one
         # that is custom first
         symbolic_function_list: List[registration.SymbolicFunction] = sorted(
@@ -493,11 +511,14 @@ class _OnnxSchemaChecker:
             for constraint in self.op_schema.type_constraints
         }
         self.attributes = self.op_schema.attributes
-        self._matching_score: int = 0
+        self._matching_score: Optional[int] = None
 
     @property
-    def match_score(self) -> int:
+    def match_score(self) -> Optional[int]:
         """The matching score of the OnnxSchemaChecker .
+
+        NOTE: If this remains None, it means the matching score has not been calculated,
+        and it's not a nearest match candidate.
 
         Returns:
             The matching score of the OnnxSchemaChecker .
@@ -537,30 +558,45 @@ class _OnnxSchemaChecker:
             self.param_schema,
             args,
             kwargs,
-            fill_defaults=False,  # NOTE: We don't want to change inputs
+            fill_defaults=True,  # fill defaults for optional arguments to match
         )
-
-        # TODO(titaiwang): Currently the functions in torchlib are manully annotated,
-        # so there are quite a few functions that wrongly annotated or strctly annotated.
-        # The matching system relax the match while we fix them in the future.
-        self._record_matching_score(function_inputs, function_attributes)
-
         diagnostic.with_additional_message("### Checking perfect match...\n")
         diagnostic.with_additional_message(
             f"{diagnostics.format_argument(self.onnxfunction)}"
         )
-        diagnostic.with_additional_message(f"match score: {self.match_score}\n")
-
+        # NOTE: The first stage, check if the input number and attribute names match the
+        # OpSchema. If it's not, we know the function is not eligible to be a perfect
+        # match, and even a nearest match.
         if len(function_inputs) != len(self.op_schema.inputs):
             diagnostic.with_additional_message(
                 f"#### Failed: input number mismatch! \n"
                 f"Actual {len(function_inputs)} vs expected {len(self.op_schema.inputs)}\n"
             )
+            diagnostic.with_additional_message(
+                "The function is not a nearest match candidate.\n"
+            )
             return False
+
+        if set(function_attributes) != set(self.attributes):
+            diagnostic.with_additional_message(
+                f"#### Failed: attribute mismatch! \n"
+                f"Actual {set(function_attributes)} vs\n"
+                f"expected {set(self.attributes)}\n"
+            )
+            diagnostic.with_additional_message(
+                "The function is not a nearest match candidate.\n"
+            )
+            return False
+        # NOTE: The second stage, The dtypes of inputs and attributes should be in the
+        # type constraints of the OpSchema. If they are not, we know the function is not
+        # eligible to be a perfect match, but can be a nearest match candidate.
         for schema_input, torch_input in zip(self.op_schema.inputs, function_inputs):
             torch_input_compatible_types = _find_onnx_data_type(torch_input)
             allowed_types = self.type_constraints[schema_input.type_str]
-            if not allowed_types.intersection(torch_input_compatible_types):
+            if not allowed_types.intersection(torch_input_compatible_types) and not any(
+                fx_type_utils.is_optional_onnx_dtype_str(onnx_type_str)
+                for onnx_type_str in allowed_types
+            ):
                 # If torch_input_compatible_types isn't in allowed_types
                 # of this input defined in the OpSchema, we know the function
                 # and the input are not compatible
@@ -569,18 +605,10 @@ class _OnnxSchemaChecker:
                     f"Actual {torch_input_compatible_types} vs\n"
                     f"expected {allowed_types}\n"
                 )
+                # NOTE: If it's only type mismatch, this is still a candidate for nearest match.
+                self._record_matching_score(function_inputs, function_attributes)
+                diagnostic.with_additional_message(f"match score: {self.match_score}\n")
                 return False
-        # Check attributes keys are the same
-        if set(function_attributes) != set(self.attributes):
-            # If the attributes of the OpSchema and the attributes don't match,
-            # we know the function and the input are not compatible
-            diagnostic.with_additional_message(
-                f"#### Failed: attribute mismatch! \n"
-                f"Actual {set(function_attributes)} vs\n"
-                f"expected {set(self.attributes)}\n"
-            )
-            return False
-        # Check attribute dtypes
         for attribute_name, attribute in function_attributes.items():
             if not self._match_onnx_attribute_type(attribute_name, attribute):
                 # If the attribute type of the OpSchema and the attribute type don't match,
@@ -590,6 +618,12 @@ class _OnnxSchemaChecker:
                     f"Actual {type(attribute)} vs\n"
                     f"expected {self.attributes[attribute_name].type}\n"
                 )
+                # TODO: Currently the functions in torchlib are manully annotated,
+                # so there are quite a few functions that wrongly annotated or strctly annotated.
+                # The matching system relax the match while we fix them in the future.
+                # NOTE: If it's only type mismatch, this is still a candidate for nearest match.
+                self._record_matching_score(function_inputs, function_attributes)
+                diagnostic.with_additional_message(f"match score: {self.match_score}\n")
                 return False
         return True
 
@@ -645,7 +679,7 @@ class _OnnxSchemaChecker:
         Returns:
             True if the inputs match the requirements, False otherwise.
         """
-
+        self._matching_score = 0
         # If they have different length of arguments, the score would be lower to those
         # functions which have the same length of arguments.
         for schema_input, torch_input in zip(self.op_schema.inputs, inputs):
@@ -710,6 +744,8 @@ class _OnnxSchemaChecker:
 
         onnx_inputs: List[Any] = []
         onnx_attributes: Dict[str, Any] = dict()
+        # NOTE: We need to copy kwargs because we will mutate it
+        copy_kwargs = kwargs.copy()
 
         for i, param in enumerate(param_schemas):
             if param.is_variadic_input:
@@ -722,15 +758,28 @@ class _OnnxSchemaChecker:
                     onnx_inputs.append(args[i])
                 else:
                     onnx_attributes[param.name] = args[i]
-            elif param.name in kwargs:
+            elif param.name in copy_kwargs:
                 if param.is_input:
-                    onnx_inputs.append(kwargs[param.name])
+                    # Move the input from kwargs to inputs
+                    onnx_inputs.append(copy_kwargs[param.name])
+                    copy_kwargs.pop(param.name)
                 else:
-                    onnx_attributes[param.name] = kwargs[param.name]
+                    onnx_attributes[param.name] = copy_kwargs[param.name]
             elif param.is_attribute and param.default is not object():
                 # User did not provide the attribute
                 if fill_defaults:
                     onnx_attributes[param.name] = param.default
+            # optional input
+            elif param.is_input:
+                # TODO: support optional input default in onnx-script?
+                if fill_defaults:
+                    onnx_inputs.append(None)
+
+        # pick up extra kwargs if it's not None. None is not expected
+        # as an attribute value in torchlib.
+        for k, v in copy_kwargs.items():
+            if k not in onnx_attributes and v is not None:
+                onnx_attributes[k] = v
 
         return onnx_inputs, onnx_attributes
 
