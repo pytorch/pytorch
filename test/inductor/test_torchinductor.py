@@ -6699,6 +6699,7 @@ class CommonTemplate:
         """
         Causes a @pointwise(size_hints) where size_hints is 2D
         """
+
         def fn(input, offsets, add_value):
             return torch.ops.prims._inductor_bucketize(input, offsets) + add_value
 
