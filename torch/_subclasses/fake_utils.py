@@ -120,7 +120,9 @@ class CrossRefFakeMode(TorchDispatchMode):
                     f"{f_output_alias_each_other} != {r_output_alias_each_other}"
                 )
 
-            for idx, (r_out, fake_out) in enumerate(zip(tree_flatten(r)[0], tree_flatten(fake_r)[0])):
+            for idx, (r_out, fake_out) in enumerate(
+                zip(tree_flatten(r)[0], tree_flatten(fake_r)[0])
+            ):
                 r_is_ten = isinstance(r_out, torch.Tensor)
                 assert r_is_ten == isinstance(
                     fake_out, torch.Tensor
