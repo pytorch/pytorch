@@ -1,5 +1,5 @@
 import torch
-from typing import cast, Iterable, List, Union
+from typing import Iterable, List, Union
 from . import _lazy_init, _lazy_call, device_count, current_device
 from .. import Tensor
 
@@ -56,7 +56,7 @@ def set_rng_state(new_state: Tensor, device: Union[int, str, torch.device] = 'cu
         device = torch.device('cuda', device)
 
     def cb():
-        idx = cast(torch.device, device).index
+        idx = device.index
         if idx is None:
             idx = current_device()
         default_generator = torch.cuda.default_generators[idx]

@@ -17,9 +17,9 @@ def check_decomposition_has_type_annotations(f):
     sig = inspect.signature(f)
     for param in sig.parameters.values():
         assert param.annotation != inspect_empty, \
-            "No signature on param {name} for function {func}".format(name=param.name, func=f.name)
+            f"No signature on param {param.name} for function {f.name}"
 
-    assert sig.return_annotation != inspect_empty, "No return annotation for function {func}".format(func=f.name)
+    assert sig.return_annotation != inspect_empty, f"No return annotation for function {f.name}"
 
 def signatures_match(decomposition_sig, torch_op_sig):
     decomp_params = decomposition_sig.parameters
@@ -61,7 +61,7 @@ def register_decomposition(aten_op, registry=None):
         assert isinstance(aten_op, torch._ops.OpOverload)
 
         # Need unique name for jit function serialization
-        assert f.__name__ not in function_name_set, "Duplicated function name {}".format(f.__name__)
+        assert f.__name__ not in function_name_set, f"Duplicated function name {f.__name__}"
         function_name_set.add(f.__name__)
 
         scripted_func = torch.jit.script(f)

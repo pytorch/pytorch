@@ -417,7 +417,7 @@ class TestPythonRegistration(TestCase):
 
         out = getattr(torch.ops, self.test_ns).sqsum.default(s0, s1)
         out_val = shape_env.evaluate_expr(out.node.expr)
-        self.assertEquals(out_val, 13)
+        self.assertEqual(out_val, 13)
 
     def test_register_functional_op_error_cases(self):
         lib = Library(self.test_ns, "FRAGMENT")
