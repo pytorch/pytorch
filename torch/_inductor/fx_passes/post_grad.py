@@ -162,7 +162,7 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
             KeywordArg("mat2_dtype"),
         ),
     ),
-    extra_check=lambda x: config.use_mixed_mm
+    extra_check=lambda x: config.use_mixed_mm,
 )
 def mixed_mm(match: Match, mat1, mat2, mat2_dtype):
     return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)

@@ -136,7 +136,6 @@ class TestPaternMatcher(TestCase):
         actual, (code,) = run_and_get_code(torch.compile(fn), *args)
         self.assertFalse("mixed_mm" in code)
 
-
     def test_addmm(self):
         def fn(a, b, c):
             return torch.add(a, torch.mm(b, c)), torch.mm(b, c) + a
