@@ -29,6 +29,7 @@ FROM dev-base as conda
 ARG PYTHON_VERSION=3.8
 # Automatically set by buildx
 ARG TARGETPLATFORM
+
 # translating Docker's TARGETPLATFORM into miniconda arches
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  MINICONDA_ARCH=aarch64  ;; \
@@ -71,6 +72,7 @@ RUN /opt/conda/bin/conda update -y conda
 RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION}
 ARG TARGETPLATFORM
 
+RUN echo TARGETPLATFORM
 # On arm64 we can only install wheel packages.
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  pip install torch --index-url https://download.pytorch.org/whl/cpu/ ;; \
