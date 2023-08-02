@@ -1629,6 +1629,9 @@ def main():
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
 
+    # Setting env variable here so that even if run_test.py is directly invoked,
+    # it will skip CPU/Meta device types
+    os.environ["PYTORCH_TESTING_DEVICE_ONLY_FOR"] = "cuda"
     if options.dynamo:
         os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
     elif options.inductor:
