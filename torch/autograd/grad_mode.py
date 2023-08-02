@@ -1,10 +1,17 @@
-import torch
 from typing import Any, Optional
+
+import torch
 
 from torch.utils._contextlib import _DecoratorContextManager
 
-__all__ = ['no_grad', 'enable_grad', 'set_grad_enabled',
-           'inference_mode', 'set_multithreading_enabled']
+__all__ = [
+    "no_grad",
+    "enable_grad",
+    "set_grad_enabled",
+    "inference_mode",
+    "set_multithreading_enabled",
+]
+
 
 class no_grad(_DecoratorContextManager):
     r"""Context-manager that disables gradient calculation.
@@ -53,6 +60,7 @@ class no_grad(_DecoratorContextManager):
         >>> a.requires_grad
         True
     """
+
     def __init__(self) -> None:
         if not torch._jit_internal.is_scripting():
             super().__init__()
@@ -105,6 +113,7 @@ class enable_grad(_DecoratorContextManager):
         True
 
     """
+
     def __enter__(self) -> None:
         self.prev = torch.is_grad_enabled()
         torch._C._set_grad_enabled(True)
@@ -213,6 +222,7 @@ class inference_mode(_DecoratorContextManager):
         False
 
     """
+
     def __init__(self, mode: bool = True) -> None:
         if not torch._jit_internal.is_scripting():
             super().__init__()
@@ -290,7 +300,9 @@ class _force_original_view_tracking(_DecoratorContextManager):
         self.mode = mode
 
     def __enter__(self) -> None:
-        self._force_original_view_tracking_context = torch._C._ViewReplayEnabled(self.mode)
+        self._force_original_view_tracking_context = torch._C._ViewReplayEnabled(
+            self.mode
+        )
         self._force_original_view_tracking_context.__enter__()
 
     def __exit__(self, *args) -> None:
@@ -298,6 +310,7 @@ class _force_original_view_tracking(_DecoratorContextManager):
 
     def clone(self):
         return self.__class__(self.mode)
+
 
 class _unsafe_preserve_version_counter(_DecoratorContextManager):
     r"""DO NOT USE THIS UNLESS YOU KNOW EXACTLY WHAT YOU'RE DOING!

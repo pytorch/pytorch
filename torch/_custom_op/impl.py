@@ -2,6 +2,7 @@ import contextlib
 import dataclasses
 import functools
 import inspect
+import sys
 import typing
 import weakref
 
@@ -210,7 +211,7 @@ class CustomOp:
                 f"that already has a {kind} impl registered from Python at "
                 f"{location}. This is not supported."
             )
-        frame = inspect.stack()[stacklevel]
+        frame = inspect.getframeinfo(sys._getframe(stacklevel))
         location = f"{frame.filename}:{frame.lineno}"
         self._impls[kind] = FuncAndLocation(func, location)
 

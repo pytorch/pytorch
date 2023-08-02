@@ -2,6 +2,7 @@ import functools
 import logging
 import math
 import numbers
+import typing
 
 import torch
 import torch._decomp as decomp
@@ -397,6 +398,38 @@ def _foreach_lerp_scalar(start_tensors, end_tensors, weight):
         aten._foreach_mul.Scalar(
             aten._foreach_sub.List(end_tensors, start_tensors), weight
         ),
+    )
+
+
+@aten.miopen_batch_norm.default.py_impl(torch._C.DispatchKey.Autograd)
+@register_decomposition(aten.miopen_batch_norm)
+def miopen_batch_norm(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    bias: typing.Optional[torch.Tensor],
+    running_mean: typing.Optional[torch.Tensor],
+    running_var: typing.Optional[torch.Tensor],
+    training: bool,
+    exponential_average_factor: float,
+    epsilon: float,
+):
+    a, b, c = aten.native_batch_norm(
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        training,
+        exponential_average_factor,
+        epsilon,
+    )
+
+    if training:
+        return (a, b, c)
+    return (
+        a,
+        weight.new_zeros((0,)),
+        weight.new_zeros((0,)),
     )
 
 
