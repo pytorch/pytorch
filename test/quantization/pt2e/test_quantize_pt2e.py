@@ -991,8 +991,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_xnnpack_quantizer_conv(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         example_inputs = (torch.randn(1, 3, 5, 5),)
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
@@ -1017,8 +1017,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_xnnpack_quantizer_linear(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         m_eager = TestHelperModules.TwoLinearModule().eval()
 
         # Test with 2d inputs
@@ -1047,8 +1047,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_xnnpack_quantizer_conv_linear_no_permute(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 5,
@@ -1072,8 +1072,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_xnnpack_quantizer_conv_linear(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
 
         # Test with 2d inputs
         example_inputs = (torch.randn(2, 3, 4, 4),)
@@ -1097,8 +1097,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_xnnpack_quantizer_linear_with_dynamic_shape(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         m_eager = TestHelperModules.TwoLinearModule().eval()
 
         # Test with 2d inputs
@@ -1125,8 +1125,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_xnnpack_quantizer_obs_sharing_ops(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         m = TestHelperModules.Conv2dWithObsSharingOps().eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
         node_occurrence = {
@@ -1177,8 +1177,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = M().eval()
         example_inputs = (torch.randn(3, 5),)
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_module_name("sub", operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_module_name("sub", quantization_config)
         node_occurrence = {
             torch.ops.aten.addmm.default: 2,
             # input and output for the second linear
@@ -1220,8 +1220,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = M().eval()
         example_inputs = (torch.randn(3, 5),)
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_module_type(Sub, operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_module_type(Sub, quantization_config)
         node_occurrence = {
             torch.ops.aten.addmm.default: 2,
             # input and output for the second linear
@@ -1242,8 +1242,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_propagate_annotation(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         m = TestHelperModules.Conv2dPropAnnotaton().eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
@@ -1282,10 +1282,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_xnnpack_quantizer_dynamic_linear(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(
+        quantization_config = get_symmetric_quantization_config(
             is_per_channel=True, is_dynamic=True
         )
-        quantizer.set_global(operator_config)
+        quantizer.set_global(quantization_config)
         m_eager = TestHelperModules.TwoLinearModule().eval()
 
         node_occurrence = {
@@ -1325,10 +1325,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_xnnpack_quantizer_dynamic_linear_with_conv(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(
+        quantization_config = get_symmetric_quantization_config(
             is_per_channel=False, is_dynamic=True
         )
-        quantizer.set_global(operator_config)
+        quantizer.set_global(quantization_config)
         m_eager = TestHelperModules.ConvLinearWPermute().eval()
 
         node_occurrence = {
@@ -1365,13 +1365,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_composable_quantizer_linear_conv(self):
         dynamic_quantizer = XNNPACKQuantizer()
-        operator_config_dynamic = get_symmetric_quantization_config(
+        quantization_config_dynamic = get_symmetric_quantization_config(
             is_per_channel=False, is_dynamic=True
         )
-        dynamic_quantizer.set_global(operator_config_dynamic)
+        dynamic_quantizer.set_global(quantization_config_dynamic)
         static_quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        static_quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        static_quantizer.set_global(quantization_config)
         # Note that dynamic quantization must be applied first here.
         # this is because static quantizer also quantizes linear with static qspec
         # and if we apply static_quantizer first then dynamic_quantizer cannot be applied
@@ -1433,8 +1433,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 pass
 
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         bad_quantizer = BadQuantizer()
         composable_quantizer = ComposableQuantizer([quantizer, bad_quantizer])
         m_eager = TestHelperModules.ConvLinearWPermute().eval()
@@ -1557,13 +1557,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         embedding_quantizer = EmbeddingQuantizer()
         dynamic_quantizer = XNNPACKQuantizer()
-        operator_config_dynamic = get_symmetric_quantization_config(
+        quantization_config_dynamic = get_symmetric_quantization_config(
             is_per_channel=True, is_dynamic=True
         )
-        dynamic_quantizer.set_global(operator_config_dynamic)
+        dynamic_quantizer.set_global(quantization_config_dynamic)
         static_quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        static_quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        static_quantizer.set_global(quantization_config)
         composed_quantizer = ComposableQuantizer(
             [embedding_quantizer, dynamic_quantizer, static_quantizer]
         )
@@ -1859,8 +1859,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 return x + y
 
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         m_eager = M().eval()
 
         example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
@@ -1882,8 +1882,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 return x + y
 
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         m_eager = M().eval()
 
         example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
@@ -1961,10 +1961,10 @@ class TestQuantizePT2EOps(QuantizationTestCase):
                 tracing_mode="real",
             )
             quantizer = XNNPACKQuantizer()
-            operator_config = get_symmetric_quantization_config(
+            quantization_config = get_symmetric_quantization_config(
                 is_per_channel=False, is_dynamic=False
             )
-            quantizer.set_global(operator_config)
+            quantizer.set_global(quantization_config)
             model_graph = prepare_pt2e(model_graph, quantizer)
             model_graph(*example_inputs)
             model_graph = convert_pt2e(model_graph)
@@ -2025,10 +2025,10 @@ class TestQuantizePT2EOps(QuantizationTestCase):
                 tracing_mode="real",
             )
             quantizer = XNNPACKQuantizer()
-            operator_config = get_symmetric_quantization_config(
+            quantization_config = get_symmetric_quantization_config(
                 is_per_channel=False, is_dynamic=False
             )
-            quantizer.set_global(operator_config)
+            quantizer.set_global(quantization_config)
             model_graph = prepare_pt2e(model_graph, quantizer)
             model_graph(*example_inputs)
             model_graph = convert_pt2e(model_graph)
@@ -2053,8 +2053,8 @@ class TestQuantizePT2EModels(PT2EQuantizationTestCase):
             )
 
             quantizer = XNNPACKQuantizer()
-            operator_config = get_symmetric_quantization_config(is_per_channel=True)
-            quantizer.set_global(operator_config)
+            quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+            quantizer.set_global(quantization_config)
             m = prepare_pt2e(m, quantizer)
             # checking that we inserted observers correctly for maxpool operator (input and
             # output share observer instance)
