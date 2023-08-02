@@ -47,7 +47,11 @@ on:
           An option JSON description of what test configs to run later on. This
           is moved here from the Linux test workflow so that we can apply filter
           logic using test-config labels earlier and skip unnecessary builds
-
+      HUGGING_FACE_HUB_TOKEN:
+        type: string
+        default: ""
+        description: |
+          HF authentication token to download real weights without rate limit
     outputs:
       docker-image:
         value: ${{ jobs.build.outputs.docker-image }}
@@ -55,9 +59,6 @@ on:
       test-matrix:
         value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
-
-env:
-  HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
 jobs:
   build:
@@ -133,6 +134,8 @@ jobs:
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
