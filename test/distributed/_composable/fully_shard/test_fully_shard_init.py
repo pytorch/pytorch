@@ -9,11 +9,12 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._composable import fully_shard
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import BackwardPrefetch, FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened, clean_tensor_name
-from torch.distributed.fsdp.wrap import _Policy, ModuleWrapPolicy
+from torch.distributed.fsdp.wrap import _Policy, CustomPolicy, ModuleWrapPolicy
 from torch.testing._internal.common_dist_composable import (
     CompositeParamModel,
+    FakeSequential,
     NestedSequentialModel,
     UnitModule,
 )
@@ -43,12 +44,21 @@ class TestInitialization(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_policy(self):
         """Tests passing a ``policy`` for pseudo-auto-wrapping."""
+
+        def lambda_fn(module: nn.Module):
+            if isinstance(module, nn.Sequential):
+                return True
+            elif isinstance(module, FakeSequential):
+                return {"backward_prefetch": BackwardPrefetch.BACKWARD_POST}
+            return False
+
         self.run_subtests(
             {
                 "policy": [
                     None,
                     ModuleWrapPolicy({UnitModule}),
                     ModuleWrapPolicy({nn.Sequential}),
+                    CustomPolicy(lambda_fn),
                 ],
             },
             self._test_policy,
@@ -139,6 +149,20 @@ class TestInitialization(FSDPTest):
         for submodule in composable_module.modules():
             composable_module_classes.add(type(submodule))
         self.assertEqual(local_module_classes, composable_module_classes)
+
+        # Check that the composable module has the same FSDP states with the
+        # same attributes (mainly checking backward prefetch since the lambda
+        # wrap policy overrides it for `FakeSequential`)
+        wrapper_states = traversal_utils._get_fsdp_states(fsdp_wrapped_model)
+        composable_states = traversal_utils._get_fsdp_states(composable_module)
+        self.assertEqual(len(wrapper_states), len(composable_states))
+        for wrapper_state, composable_state in zip(wrapper_states, composable_states):
+            self.assertEqual(
+                wrapper_state.sharding_strategy, composable_state.sharding_strategy
+            )
+            self.assertEqual(
+                wrapper_state.backward_prefetch, composable_state.backward_prefetch
+            )
 
     @skip_if_lt_x_gpu(2)
     def test_device_id(self):

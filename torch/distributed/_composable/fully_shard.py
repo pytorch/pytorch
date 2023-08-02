@@ -67,7 +67,7 @@ def fully_shard(
     _annotate_modules_for_dynamo(module, state._ignored_modules, True)
     state = _init_process_group_state(state, process_group, strategy, policy)
     if policy is not None:
-        fsdp_kwargs = {
+        root_kwargs = {
             "process_group": process_group,
             "strategy": strategy,
             "mixed_precision": mixed_precision,
@@ -80,13 +80,13 @@ def fully_shard(
             "ignored_states": ignored_states,
         }
         if strategy in HYBRID_SHARDING_STRATEGIES:
-            fsdp_kwargs["process_group"] = (state.process_group, state._inter_node_pg)
+            root_kwargs["process_group"] = (state.process_group, state._inter_node_pg)
         _auto_wrap(
             module,
             policy,
             state._ignored_modules,
             state._ignored_params,
-            fsdp_kwargs,
+            root_kwargs,
             fully_shard,
         )
     state = _init_core_state(
