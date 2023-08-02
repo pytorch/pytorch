@@ -454,6 +454,7 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
       " milliseconds before timing out.");
 
   LOG(ERROR) << exceptionMsg;
+  std::this_thread::sleep_for(std::chrono::milliseconds(10 * kWatchdogThreadSleepMillis));
   std::exception_ptr exception_ptr =
       std::make_exception_ptr(std::runtime_error(exceptionMsg));
   setException(exception_ptr);
