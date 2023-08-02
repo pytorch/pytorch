@@ -737,6 +737,35 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 return TupleVariable([TupleVariable(items), aux])
 
 
+def to_python_ints(const_or_tuple_variable, tx):
+    from . import ConstantVariable
+
+    if not isinstance(const_or_tuple_variable, (ConstantVariable, TupleVariable)):
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            f"argnums is expected to be int or tuple of ints. Got {const_or_tuple_variable}.",
+        )
+
+    if isinstance(const_or_tuple_variable, ConstantVariable):
+        if not isinstance(const_or_tuple_variable.value, (int, tuple)):
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                f"argnums is expected to be int or tuple of ints. Got {const_or_tuple_variable}.",
+            )
+        return const_or_tuple_variable.value
+    else:
+        const_vars = const_or_tuple_variable.unpack_var_sequence(tx)
+        if not all(
+            isinstance(var, ConstantVariable) and isinstance(var.value, int)
+            for var in const_vars
+        ):
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                f"argnums is expected to contain int only. Got {const_vars}.",
+            )
+        return tuple(var.value for var in const_vars)
+
+
 class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -853,10 +882,11 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         actual_in_dims = tuple(
             pytree.tree_map(lambda x: x.value, updated_in_dims.items)
         )
+        out_dims_v = to_python_ints(out_dims, tx)
         example_value = torch._functorch.vmap.vmap_impl(
             torch.fx.GraphModule(tx.output.nn_modules, body_graph),
             actual_in_dims,
-            out_dims.value,
+            out_dims_v,
             randomness.value,
             chunk_size.value,
             *fake_batched_fn_args,

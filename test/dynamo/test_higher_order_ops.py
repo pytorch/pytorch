@@ -2255,6 +2255,48 @@ class GraphModule(torch.nn.Module):
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(actual, expected)
 
+    def test_vmap_two_inputs_tuple_in_dims(self):
+        in_dims = (0, 1)
+
+        def fn(x, y):
+            return torch.func.vmap(
+                lambda x, y: x.sum(0) + x.sum(1) + y, in_dims=in_dims
+            )(x, y)
+
+        x = torch.randn(3, 3, 3)
+        y = torch.randn(3, 3)
+        wrapped_gm = self._compile_check(fn, (x, y))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
+
+        select = l_x_.select(0, 0)
+        select_1 = l_y_.select(1, 0)
+        vmap_body_0 = self.vmap_body_0
+        vmap_proxy = torch.func.vmap(vmap_body_0, (0, 1), 0, 'error');  vmap_body_0 = None
+        call = vmap_proxy.__call__(l_x_, l_y_);  vmap_proxy = l_x_ = l_y_ = None
+        return (call,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, select, select_1):
+            sum_1 = select.sum(0)
+            sum_2 = select.sum(1);  select = None
+            add = sum_1 + sum_2;  sum_1 = sum_2 = None
+            add_1 = add + select_1;  add = select_1 = None
+            return add_1
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
     def test_vmap_over_vmap_two_inputs(self):
         def fn(x, y):
             return torch.func.vmap(torch.func.vmap(lambda x, y: x + y, in_dims=1))(x, y)
@@ -2385,6 +2427,43 @@ class GraphModule(torch.nn.Module):
 
         def fn(x):
             return torch.vmap(lambda x: (x.sum(0), x.sum(1)), out_dims=(1, 0))(x)
+
+        wrapped_gm = self._compile_check(fn, (x,))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
+
+        select = l_x_.select(0, 0)
+        vmap_body_0 = self.vmap_body_0
+        vmap_proxy = torch.func.vmap(vmap_body_0, (0,), (1, 0), 'error');  vmap_body_0 = None
+        call = vmap_proxy.__call__(l_x_);  vmap_proxy = l_x_ = None
+        getitem = call[0]
+        getitem_1 = call[1];  call = None
+        return (getitem, getitem_1)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, select):
+            sum_1 = select.sum(0)
+            sum_2 = select.sum(1);  select = None
+            return (sum_1, sum_2)
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_vmap_multiple_outputs_out_dims_tuple(self):
+        x = torch.ones(2, 4, 3)
+        out_dims = (1, 0)
+
+        def fn(x):
+            return torch.vmap(lambda x: (x.sum(0), x.sum(1)), out_dims=out_dims)(x)
 
         wrapped_gm = self._compile_check(fn, (x,))
 
