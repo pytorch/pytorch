@@ -3,8 +3,8 @@ from torch.fx import GraphModule
 from ..utils import (
     get_aten_graph_module,
     remove_tensor_overload_for_qdq_ops,
-    replace_literals_with_new_placeholders,
-    replace_literals_with_existing_placeholders,
+    _replace_literals_with_new_placeholders,
+    _replace_literals_with_existing_placeholders,
 )
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
 from torch.fx.subgraph_rewriter import replace_pattern
@@ -103,62 +103,67 @@ _QUANTIZED_MAX_POOL2D_EXAMPLE_INPUTS = (
     torch.randint(-128, 127, (1, 3, 3, 3), dtype=torch.int8),
     torch.randn(1, dtype=torch.float),
     torch.zeros(1, dtype=torch.int),
+    torch.tensor([-128], dtype=torch.int),
+    torch.tensor([127], dtype=torch.int),
     torch.randn(1, dtype=torch.float),
     torch.zeros(1, dtype=torch.int),
     torch.tensor([-128], dtype=torch.int),
     torch.tensor([127], dtype=torch.int),
 )
 
-def _qdq_quantized_max_pool2d(x_i8, x_scale, x_zero_point, out_scale, out_zero_point, quant_min, quant_max):
+def _qdq_quantized_max_pool2d(x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, out_scale, out_zero_point, out_quant_min, out_quant_max):
     kernel_size = 1
     stride = 1
     padding = 0
     dilation = 1
     ceil_mode = False
-    x_fp32 = torch.ops.quantized_decomposed.dequantize_per_tensor(x_i8, x_scale, x_zero_point, quant_min, quant_max, torch.int8)
+    x_fp32 = torch.ops.quantized_decomposed.dequantize_per_tensor(x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, torch.int8)
     out_fp32, _ = torch.ops.aten.max_pool2d_with_indices.default(x_fp32, kernel_size, stride, padding, dilation, ceil_mode)
-    out_i8 = torch.ops.quantized_decomposed.quantize_per_tensor(out_fp32, out_scale, out_zero_point, quant_min, quant_max, torch.int8)
+    out_i8 = torch.ops.quantized_decomposed.quantize_per_tensor(out_fp32, out_scale, out_zero_point, out_quant_min, out_quant_max, torch.int8)
     return out_i8
 
-def _reference_quantized_max_pool2d(x_i8, x_scale, x_zero_point, out_scale, out_zero_point, quant_min, quant_max):
+def _reference_quantized_max_pool2d(x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, out_scale, out_zero_point, out_quant_min, out_quant_max):
     kernel_size = 1
     stride = 1
     padding = 0
     dilation = 1
     ceil_mode = False
-    acc_i8, _ = torch.ops.aten.max_pool2d_with_indices.default(x_i8, kernel_size, stride, padding, dilation, ceil_mode)
-    acc_i32 = acc_i8.to(torch.int32)
-    # TODO: use mul.Scalar, need to change how we handle literal args
-    output_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, acc_i32, (x_scale / out_scale))
-    output_i8 = output_i32 - (x_zero_point * x_scale / out_scale + out_zero_point)
-    output_i8 = output_i8.to(torch.int8)
-    return output_i8
+    # to preserve x_quant_min, x_quant_max in the graph for pattern matching
+    x_i8 = torch.clamp(x_i8, x_quant_min, x_quant_max)
+    x_i32 = x_i8.to(torch.int32)
+    out_i32, _ = torch.ops.aten.max_pool2d_with_indices.default(x_i32 - x_zero_point, kernel_size, stride, padding, dilation, ceil_mode)
+    out_fp32 = out_i32 * (x_scale / out_scale) + out_zero_point
+    out_fp32 = torch.clamp(out_fp32, out_quant_min, out_quant_max)
+    out_i8 = out_fp32.to(torch.int8)
+    return out_i8
 
 _QUANTIZED_ADAPTIVE_AVG_POOL2D_EXAMPLE_INPUTS = (
     torch.randint(-128, 127, (1, 3, 3, 3), dtype=torch.int8),
     torch.randn(1, dtype=torch.float),
     torch.zeros(1, dtype=torch.int),
+    torch.tensor([-128], dtype=torch.int),
+    torch.tensor([127], dtype=torch.int),
     torch.randn(1, dtype=torch.float),
     torch.zeros(1, dtype=torch.int),
     torch.tensor([-128], dtype=torch.int),
     torch.tensor([127], dtype=torch.int),
 )
 
-def _qdq_quantized_adaptive_avg_pool2d(x_i8, x_scale, x_zero_point, out_scale, out_zero_point, quant_min, quant_max):
-    output_size = (1, 1)
-    x_fp32 = torch.ops.quantized_decomposed.dequantize_per_tensor(x_i8, x_scale, x_zero_point, quant_min, quant_max, torch.int8)
+def _qdq_quantized_adaptive_avg_pool2d(x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, out_scale, out_zero_point, out_quant_min, out_quant_max):
+    output_size = (3, 3)
+    x_fp32 = torch.ops.quantized_decomposed.dequantize_per_tensor(x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, torch.int8)
     out_fp32 = torch.ops.aten.adaptive_avg_pool2d(x_fp32, output_size)
-    out_i8 = torch.ops.quantized_decomposed.quantize_per_tensor(out_fp32, out_scale, out_zero_point, quant_min, quant_max, torch.int8)
+    out_i8 = torch.ops.quantized_decomposed.quantize_per_tensor(out_fp32, out_scale, out_zero_point, out_quant_min, out_quant_max, torch.int8)
     return out_i8
 
-def _reference_quantized_adaptive_avg_pool2d(x_i8, x_scale, x_zero_point, out_scale, out_zero_point, quant_min, quant_max):
-    output_size = (1, 1)
+def _reference_quantized_adaptive_avg_pool2d(x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, out_scale, out_zero_point, out_quant_min, out_quant_max):
+    output_size = (3, 3)
+    x_i8 = torch.clamp(x_i8, x_quant_min, x_quant_max)
     x_i32 = x_i8.to(torch.int32)
-    # TODO: use mul.Scalar, need to change how literal args are handled
-    x_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, x_i32, (x_scale / out_scale))
-    acc_i32 = torch.ops.aten._adaptive_avg_pool2d(x_i32, output_size)
-    acc_i32 = acc_i32 - x_zero_point * x_scale / out_scale + out_zero_point # int32 constant
-    out_i8 = torch.ops.aten.clamp(acc_i32, quant_min, quant_max).to(torch.int8)
+    out_i32 = torch.ops.aten.adaptive_avg_pool2d(x_i32, output_size)
+    out_fp32 = out_i32 * (x_scale / out_scale) + out_zero_point
+    out_fp32 = torch.clamp(out_fp32, out_quant_min, out_quant_max)
+    out_i8 = out_fp32.to(torch.int8)
     return out_i8
 
 _QUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS = (
@@ -253,7 +258,7 @@ def _reference_dequantize_per_channel_int8(x_i8, scales, zero_points, ch_axis, q
     return out_fp32
 
 def _replace_ph_qdq_per_channel_replacement(gm: torch.fx.GraphModule):
-    return replace_literals_with_existing_placeholders(
+    return _replace_literals_with_existing_placeholders(
         gm,
         exclude_literals=[-1],
         literal_to_ph_idx={1: 3, -128: 4, 127:5}
@@ -263,8 +268,8 @@ def _replace_ph_qdq_per_channel_replacement(gm: torch.fx.GraphModule):
 _EXAMPLE_INPUTS_PATTERN_AND_REPLACEMENTS = [
     (_QUANTIZED_ADD_OR_ADD_RELU_EXAMPLE_INPUTS, _qdq_quantized_add_relu, _reference_quantized_add_relu, None, None),
     (_QUANTIZED_ADD_OR_ADD_RELU_EXAMPLE_INPUTS, _qdq_quantized_add, _reference_quantized_add, None, None),
-    (_QUANTIZED_MAX_POOL2D_EXAMPLE_INPUTS, _qdq_quantized_max_pool2d, _reference_quantized_max_pool2d, replace_literals_with_new_placeholders, replace_literals_with_new_placeholders),
-    (_QUANTIZED_ADAPTIVE_AVG_POOL2D_EXAMPLE_INPUTS, _qdq_quantized_adaptive_avg_pool2d, _reference_quantized_adaptive_avg_pool2d, replace_literals_with_new_placeholders, replace_literals_with_new_placeholders),
+    (_QUANTIZED_MAX_POOL2D_EXAMPLE_INPUTS, _qdq_quantized_max_pool2d, _reference_quantized_max_pool2d, _replace_literals_with_new_placeholders, _replace_literals_with_new_placeholders),
+    (_QUANTIZED_ADAPTIVE_AVG_POOL2D_EXAMPLE_INPUTS, _qdq_quantized_adaptive_avg_pool2d, _reference_quantized_adaptive_avg_pool2d, _replace_literals_with_new_placeholders, _replace_literals_with_new_placeholders),
     (_QUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS, _quantize_per_tensor_int8, _reference_quantize_per_tensor_int8, None, None),
     (_DEQUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS, _dequantize_per_tensor_int8, _reference_dequantize_per_tensor_int8, None, None),
     (_QUANTIZE_PER_CHANNEL_INT8_EXAMPLE_INPUTS, _quantize_per_channel_int8, _reference_quantize_per_channel_int8, _replace_ph_qdq_per_channel_replacement, _replace_ph_qdq_per_channel_replacement),

@@ -1,5 +1,4 @@
 import collections
-import inspect
 import logging
 
 import math
@@ -12,7 +11,6 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.variables import UserFunctionVariable
-from torch._dynamo.variables.user_defined import ProcessGroupVariable
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
@@ -35,7 +33,8 @@ from .ctx_manager import (
     NullContextVariable,
     TorchFunctionDisableVariable,
 )
-from .distributed import is_from_local
+from .dicts import ConstDictVariable
+from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
 from .tensor import TensorWithTFOverrideVariable
@@ -81,22 +80,9 @@ constant_fold_functions = [
     torch._C._get_privateuse1_backend_name,
 ]
 
-constant_processgroup_functions = []
 
 if torch.distributed.is_available():
     constant_fold_functions.append(torch.distributed.is_initialized)
-
-    from torch.distributed.distributed_c10d import (
-        _get_group_tag,
-        get_process_group_ranks,
-    )
-
-    constant_processgroup_functions.extend(
-        [
-            get_process_group_ranks,
-            _get_group_tag,
-        ]
-    )
 
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
@@ -224,6 +210,7 @@ class TorchVariable(VariableTracker):
             CUDAStreamContextVariable,
             CUDAStreamVariable,
             DeterministicAlgorithmsVariable,
+            DisabledSavedTensorsHooksVariable,
             GradModeVariable,
             SymNodeVariable,
             TensorVariable,
@@ -329,6 +316,11 @@ class TorchVariable(VariableTracker):
             return ConstantVariable(
                 torch.are_deterministic_algorithms_enabled(), **options
             ).add_guards(DeterministicAlgorithmsVariable._guards_singleton)
+        elif self.value is torch.autograd.graph.disable_saved_tensors_hooks:
+            assert len(args) == 1
+            return DisabledSavedTensorsHooksVariable.create(
+                tx, args[0].as_python_constant(), **options
+            )
         elif self.value is torch._C._is_torch_function_enabled:
             assert not (args or kwargs)
             return ConstantVariable(
@@ -525,6 +517,21 @@ class TorchVariable(VariableTracker):
                 **options,
             )
         elif (
+            self.value is torch.ops.aten.sym_size
+            and len(args) == 2
+            and len(kwargs) == 0
+            and isinstance(args[0], TensorVariable)
+        ):
+            # we see this when retracing already traced code
+            return args[0].call_method(tx, "size", [args[1]], {})
+        elif (
+            self.value is torch.ops.aten.sym_stride
+            and len(args) == 2
+            and len(kwargs) == 0
+            and isinstance(args[0], TensorVariable)
+        ):
+            return args[0].call_method(tx, "stride", [args[1]], {})
+        elif (
             self.value == torch.addcdiv
             and len(args) == 3
             and "value" in kwargs
@@ -539,10 +546,7 @@ class TorchVariable(VariableTracker):
             return TorchVariable(torch.add, **options).call_function(
                 tx, [args[0], result], {}
             )
-        elif (
-            inspect.isfunction(self.value)
-            and self.value in constant_processgroup_functions
-        ):
+        elif is_constant_pg_functions(self.value):
             # becuase the input is a "ProcessGroupVariable", we'll be guarding on its
             # ID_MATCH based on how it was constructed.
 
@@ -594,7 +598,41 @@ class TorchVariable(VariableTracker):
             if len(args) != 2:
                 unimplemented("Unsupported unflatten with len(args) != 2")
 
-            return torch.utils._pytree.tree_unflatten(args[0], args[1].value)
+            unflattened = torch.utils._pytree.tree_unflatten(args[0], args[1].value)
+
+            def _wrap_in_dynamo_variables(container):
+                if isinstance(container, VariableTracker):
+                    return container
+
+                if isinstance(container, list):
+                    return ListVariable(
+                        [_wrap_in_dynamo_variables(elem) for elem in container],
+                        **options,
+                    )
+
+                if isinstance(container, tuple):
+                    return TupleVariable(
+                        [_wrap_in_dynamo_variables(elem) for elem in container],
+                        **options,
+                    )
+
+                if isinstance(container, dict):
+                    return ConstDictVariable(
+                        {k: _wrap_in_dynamo_variables(v) for k, v in container.items()},
+                        type(container),
+                        **options,
+                    )
+
+            return _wrap_in_dynamo_variables(unflattened)
+
+        elif self.value == torch.fx._pytree.tree_flatten_spec:
+            if len(args) != 2:
+                unimplemented("Unsupported flatten_spec with len(args) != 2")
+
+            flattened, spec = torch.fx._pytree.tree_flatten_spec(args[0], args[1].value)
+            return TupleVariable(
+                [ListVariable(flattened), ConstantVariable(spec)], **options
+            )
         elif self.value == torch.utils._pytree.tree_map_only:
             if len(args) != 3:
                 unimplemented("Unsupported tree_map_only with len(args) != 3")

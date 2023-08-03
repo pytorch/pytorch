@@ -1485,10 +1485,49 @@ class TestProfiler(TestCase):
                     events = j["traceEvents"]
 
                     for e in events:
-                        self.assertNotEqual(getattr(e, "cat", None), "fwdbwd")
+                        self.assertNotEqual(e.get("cat", None), "fwdbwd")
         finally:
             torch._C._profiler._set_fwd_bwd_enabled_val(True)
 
+    # This test is broken on Windows, the likely reason is that kineto/CUPTI
+    # is not supported that particular environment. Once the CI stabilizes
+    # we can narrow the condition so Windows is checked as well (TODO)
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(IS_WINDOWS, "Test does not work on Windows")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_cuda_sync_events(self):
+        device = torch.device("cuda:0")
+        t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
+
+        def workload() -> None:
+            torch.add(t1, t2)
+            torch.cuda.synchronize()
+            torch.add(t1, t2)
+
+        def trace_and_check(exp_config: Optional[_ExperimentalConfig]) -> None:
+            with _profile(use_kineto=True, use_cuda=True,
+                          experimental_config=exp_config,
+                          ) as prof:
+                workload()
+
+            with TemporaryFileName(mode="w+") as fname:
+                # fname = "/tmp/kineto_out.json"
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    j = json.load(f)
+                    cats = {e.get("cat", None) for e in j["traceEvents"]}
+            self.assertTrue("cuda_sync" in cats, "Expected to find cuda_sync event"
+                            f" found = {cats}")
+
+        print("Testing enable_cuda_sync_events in _ExperimentalConfig")
+        trace_and_check(exp_config=_ExperimentalConfig(enable_cuda_sync_events=True))
+
+        print("Testing _profiler._set_cuda_sync_enabled_val()")
+        try:
+            torch._C._profiler._set_cuda_sync_enabled_val(True)
+            trace_and_check(exp_config=None)
+        finally:
+            torch._C._profiler._set_cuda_sync_enabled_val(False)
 
     def test_profiler_type(self):
         profiler_type = torch._C._autograd._profiler_type
@@ -1522,7 +1561,7 @@ class TestProfiler(TestCase):
                 model(inputs)
             for event in prof.profiler.kineto_results.events():
                 corr_id = event.correlation_id()
-                if (corr_id):
+                if (corr_id) and event.device_type() == DeviceType.CPU:
                     self.assertTrue(corr_id not in id_uniqueness_set)
                     id_uniqueness_set.add(corr_id)
                     self.assertTrue(corr_id < uint32_max)
