@@ -125,14 +125,14 @@ cublasHandle_t getCurrentCUDABlasHandle() {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   }
 #endif
-#if defined(USE_ROCM) && ROCM_VERSION >= 30800
-  rocblas_atomics_mode rocblas_mode;
+#if defined(USE_ROCM)
+  hipblasAtomicsMode_t hipblas_mode;
   if (at::globalContext().deterministicAlgorithms()) {
-    rocblas_mode = rocblas_atomics_not_allowed;
+    hipblas_mode = HIPBLAS_ATOMICS_NOT_ALLOWED;
   } else {
-    rocblas_mode = rocblas_atomics_allowed;
+    hipblas_mode = HIPBLAS_ATOMICS_ALLOWED;
   }
-  TORCH_CUDABLAS_CHECK(rocblas_set_atomics_mode(handle, rocblas_mode));
+  TORCH_CUDABLAS_CHECK(hipblasSetAtomicsMode(handle, hipblas_mode));
 #endif
   return handle;
 }
