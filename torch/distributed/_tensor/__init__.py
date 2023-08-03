@@ -1,13 +1,16 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import copy
 from typing import Optional, Sequence
 
 # Import all builtin dist tensor ops
 import torch
 import torch.distributed._tensor.ops
+import torch.distributed._tensor.random as random
 from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import distribute_module, distribute_tensor, DTensor
 from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
-from torch.distributed._tensor.placement_types import Placement, Replicate, Shard
+from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Replicate, Shard
+from torch.fx.passes.shape_prop import TensorMetadata
 
 # All public APIs from dtensor package
 __all__ = [
@@ -205,6 +208,39 @@ def full(
         device_mesh=device_mesh,
         placements=placements,
     )
+
+
+def rand(
+    *size,
+    requires_grad: bool = False,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device_mesh: Optional[DeviceMesh] = None,
+    placements: Optional[Sequence[Placement]] = None,
+) -> DTensor:
+    """
+    """
+    torch_size = _normalize_to_torch_size(size)
+
+    # this tensor meta is not used except `shape`
+    tensor_meta = TensorMetadata(
+        torch_size, dtype, requires_grad, (0,), None, False, {}
+    )
+    spec = DTensorSpec(device_mesh, copy.deepcopy(placements), tensor_meta=tensor_meta)
+    # TODO: we need to unify the initialization of tracker at multiple places
+    if random.is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
+        random._rng_tracker = random.OffsetBasedRNGTracker()
+
+    with random._rng_tracker._distribute_region(spec):
+        return _dtensor_init_helper(
+            torch.rand,
+            torch_size,
+            dtype=dtype,
+            layout=layout,
+            requires_grad=requires_grad,
+            device_mesh=device_mesh,
+            placements=placements,
+        )
 
 
 def zeros(
