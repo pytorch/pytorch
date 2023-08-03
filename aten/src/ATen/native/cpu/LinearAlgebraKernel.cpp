@@ -86,5 +86,4 @@ void addr_kernel(TensorIterator &iter,
 } // anonymous namespace
 
 REGISTER_DISPATCH(addr_stub, &addr_kernel);
-
 } // namespace at::native

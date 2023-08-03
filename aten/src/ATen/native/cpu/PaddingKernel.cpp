@@ -710,6 +710,7 @@ void replication_pad3d_backward_kernel_impl(
 
 } // anonymous namespace
 
+// reflection padding
 REGISTER_DISPATCH(reflection_pad1d_kernel, &reflection_pad1d_kernel_impl);
 REGISTER_DISPATCH(reflection_pad1d_backward_kernel, &reflection_pad1d_backward_kernel_impl);
 REGISTER_DISPATCH(reflection_pad2d_kernel, &reflection_pad2d_kernel_impl);

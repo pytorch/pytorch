@@ -1317,6 +1317,17 @@ REGISTER_DISPATCH(fmin_stub, &fmin_kernel);
 REGISTER_DISPATCH(copysign_stub, &copysign_kernel);
 REGISTER_DISPATCH(remainder_stub, &remainder_kernel);
 REGISTER_DISPATCH(fmod_stub, &fmod_kernel);
+REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel);
+REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel);
+REGISTER_DISPATCH(chebyshev_polynomial_t_stub, &chebyshev_polynomial_t_kernel);
+REGISTER_DISPATCH(chebyshev_polynomial_v_stub, &chebyshev_polynomial_v_kernel);
+REGISTER_DISPATCH(chebyshev_polynomial_w_stub, &chebyshev_polynomial_w_kernel);
+REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_kernel);
+REGISTER_DISPATCH(legendre_polynomial_p_stub, &legendre_polynomial_p_kernel);
+REGISTER_DISPATCH(shifted_chebyshev_polynomial_t_stub, &shifted_chebyshev_polynomial_t_kernel);
+REGISTER_DISPATCH(shifted_chebyshev_polynomial_u_stub, &shifted_chebyshev_polynomial_u_kernel);
+REGISTER_DISPATCH(shifted_chebyshev_polynomial_v_stub, &shifted_chebyshev_polynomial_v_kernel);
+REGISTER_DISPATCH(shifted_chebyshev_polynomial_w_stub, &shifted_chebyshev_polynomial_w_kernel);
 
 ALSO_REGISTER_AVX512_DISPATCH(atan2_stub, &atan2_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
@@ -1332,22 +1343,12 @@ ALSO_REGISTER_AVX512_DISPATCH(lcm_stub, &lcm_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(hypot_stub, &hypot_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(igamma_stub, &igamma_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(igammac_stub, &igammac_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(nextafter_stub, &nextafter_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(heaviside_stub, &heaviside_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(xlogy_stub, &xlogy_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(xlog1py_stub, &xlog1py_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(zeta_stub, &zeta_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(chebyshev_polynomial_t_stub, &chebyshev_polynomial_t_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(chebyshev_polynomial_v_stub, &chebyshev_polynomial_v_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(chebyshev_polynomial_w_stub, &chebyshev_polynomial_w_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(legendre_polynomial_p_stub, &legendre_polynomial_p_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(shifted_chebyshev_polynomial_t_stub, &shifted_chebyshev_polynomial_t_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(shifted_chebyshev_polynomial_u_stub, &shifted_chebyshev_polynomial_u_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(shifted_chebyshev_polynomial_v_stub, &shifted_chebyshev_polynomial_v_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(shifted_chebyshev_polynomial_w_stub, &shifted_chebyshev_polynomial_w_kernel);
 
 } // namespace at::native
+

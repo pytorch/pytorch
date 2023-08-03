@@ -617,7 +617,6 @@ void LayerNormBackwardKernelImpl(
 
 } // namespace
 
-// These kernels are slower with AVX512 than with AVX2.
 REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
 REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);
 

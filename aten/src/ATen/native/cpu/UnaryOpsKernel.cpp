@@ -744,9 +744,7 @@ REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
 REGISTER_DISPATCH(abs_stub, &CPU_CAPABILITY::abs_kernel);
 REGISTER_DISPATCH(angle_stub, &CPU_CAPABILITY::angle_kernel);
 REGISTER_DISPATCH(neg_stub, &CPU_CAPABILITY::neg_kernel);
-REGISTER_DISPATCH(sign_stub, &CPU_CAPABILITY::sign_kernel);
 REGISTER_DISPATCH(signbit_stub, &CPU_CAPABILITY::signbit_kernel);
-REGISTER_DISPATCH(sgn_stub, &CPU_CAPABILITY::sgn_kernel);
 REGISTER_DISPATCH(bitwise_not_stub, &CPU_CAPABILITY::bitwise_not_kernel);
 REGISTER_DISPATCH(logical_not_stub, &CPU_CAPABILITY::logical_not_kernel);
 REGISTER_DISPATCH(conj_physical_stub, &CPU_CAPABILITY::conj_kernel);
@@ -755,6 +753,8 @@ REGISTER_DISPATCH(frac_stub, &CPU_CAPABILITY::frac_kernel);
 REGISTER_DISPATCH(special_entr_stub, &CPU_CAPABILITY::entr_kernel);
 REGISTER_DISPATCH(special_i0e_stub, &CPU_CAPABILITY::i0e_kernel);
 REGISTER_DISPATCH(special_ndtri_stub, &CPU_CAPABILITY::ndtri_kernel);
+REGISTER_DISPATCH(special_modified_bessel_k0_stub, &CPU_CAPABILITY::modified_bessel_k0_kernel);
+REGISTER_DISPATCH(special_modified_bessel_k1_stub, &CPU_CAPABILITY::modified_bessel_k1_kernel);
 IMPLEMENT_FLOAT_KERNEL(ceil)
 REGISTER_DISPATCH(ceil_stub, &CPU_CAPABILITY::ceil_kernel);
 IMPLEMENT_FLOAT_KERNEL(floor)
@@ -771,6 +771,8 @@ REGISTER_DISPATCH(i0_stub, &CPU_CAPABILITY::i0_kernel);
 
 // The following kernels are compute-intensive & are compiled with both AVX512
 // & AVX2
+ALSO_REGISTER_AVX512_DISPATCH(sign_stub, &CPU_CAPABILITY::sign_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(sgn_stub, &CPU_CAPABILITY::sgn_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(reciprocal_stub, &CPU_CAPABILITY::reciprocal_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(exp2_stub, &CPU_CAPABILITY::exp2_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(sigmoid_stub, &CPU_CAPABILITY::sigmoid_kernel);
@@ -796,8 +798,6 @@ ALSO_REGISTER_AVX512_DISPATCH(special_bessel_y0_stub, &CPU_CAPABILITY::bessel_y0
 ALSO_REGISTER_AVX512_DISPATCH(special_bessel_y1_stub, &CPU_CAPABILITY::bessel_y1_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(special_modified_bessel_i0_stub, &CPU_CAPABILITY::modified_bessel_i0_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(special_modified_bessel_i1_stub, &CPU_CAPABILITY::modified_bessel_i1_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(special_modified_bessel_k0_stub, &CPU_CAPABILITY::modified_bessel_k0_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(special_modified_bessel_k1_stub, &CPU_CAPABILITY::modified_bessel_k1_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(nan_to_num_stub, &CPU_CAPABILITY::nan_to_num_kernel);
 
 STATIC_IMPLEMENT_COMPLEX_KERNEL(acos)

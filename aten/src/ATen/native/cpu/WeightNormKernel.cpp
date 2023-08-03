@@ -443,7 +443,6 @@ void weight_norm_backward_kernel(
 
 } // anonymous namespace
 
-// These kernels are slower with AVX512 than with AVX2.
 REGISTER_DISPATCH(weight_norm_stub, &weight_norm_kernel);
 REGISTER_DISPATCH(weight_norm_backward_stub, &weight_norm_backward_kernel);
 
