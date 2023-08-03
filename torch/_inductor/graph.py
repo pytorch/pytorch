@@ -26,11 +26,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir, metrics
-from .codegen.common import (
-    get_scheduling_for_device,
-    get_wrapper_codegen_for_device,
-    register_backend_for_device,
-)
 from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
@@ -150,17 +145,6 @@ class GraphLowering(torch.fx.Interpreter):
         stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride
 
-    def init_backend_registration(self):
-        if get_scheduling_for_device("cpu") is None:
-            from .codegen.cpp import CppScheduling
-
-            register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
-
-        if get_scheduling_for_device("cuda") is None:
-            from .codegen.triton import TritonScheduling
-
-            register_backend_for_device("cuda", TritonScheduling, WrapperCodeGen)
-
     def __init__(
         self,
         gm: torch.fx.GraphModule,
@@ -230,7 +214,6 @@ class GraphLowering(torch.fx.Interpreter):
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs = False
-        self.init_backend_registration()
 
     @staticmethod
     def decide_layout_opt(gm) -> bool:
@@ -884,20 +867,7 @@ class GraphLowering(torch.fx.Interpreter):
                 )
                 return
 
-        device_types = self.device_types.copy()
-        # In terms of some operations that don't have input tensors, we need to
-        # check the deivce of the buffers.
-        for buffer in self.buffers:
-            device_types.add(buffer.get_device().type)
-        device_types.discard("cpu")
-        # TODO(Eikan): Only support mixing cpu and other device now.
-        assert len(device_types) <= 1, "Does not support mixing {}".format(
-            "+".join(device_types)
-        )
-        only_cpu = len(device_types) == 0
-        device_type = "cpu" if only_cpu else device_types.pop()
-        wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
-        self.wrapper_code = wrapper_code_gen_cls()
+        self.wrapper_code = WrapperCodeGen()
 
     def codegen(self):
         from .scheduler import Scheduler

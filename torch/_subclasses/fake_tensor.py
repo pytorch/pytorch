@@ -428,7 +428,7 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     )
 
 
-def unsupported_complex_op(op):
+def stride_incorrect_op(op):
     if op.namespace not in ("aten", "prims"):
         return False
     if op is aten._fft_c2c.default:
@@ -440,16 +440,23 @@ def unsupported_complex_op(op):
     return False
 
 
-@register_op_impl(unsupported_complex_op)
-def fft_stride_workaround(fake_mode, func, *args, **kwargs):
-    # This is a workaround for the FFT meta implmentations having incorrect strides
-    def extractor(input, *args, **kwargs):
-        return input
+# These operators have meta implementations with incorrect strides
+@register_op_impl(stride_incorrect_op)
+def wordaround_stride_incorrect_op(fake_mode, func, *args, **kwargs):
+    # This is a workaround for meta implmentations with incorrect strides
 
-    input = extractor(*args, **kwargs)
-    if not input._has_symbolic_sizes_strides and fake_mode.allow_fallback_kernels:
-        # For static shapes, we can fall back to eager for the real strides
-        return run_fallback_kernel(fake_mode, func, args, kwargs, None)
+    def is_symbolic(x):
+        if isinstance(x, FakeTensor):
+            return x._has_symbolic_sizes_strides
+        if isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            return True
+        return False
+
+    # For static shapes, we can fall back to eager for the real strides
+    if fake_mode.allow_fallback_kernels:
+        require_dynamic = any(is_symbolic(x) for x in itertools.chain(args, kwargs.values()))
+        if not require_dynamic:
+            return run_fallback_kernel(fake_mode, func, args, kwargs, None)
 
     raise UnsupportedOperatorException(func)
 
@@ -1032,6 +1039,16 @@ class FakeTensor(torch.Tensor):
     def from_tensor(t, fake_mode):
         return fake_mode.from_tensor(t)
 
+    # FakeTensorMode is meant to be a singleton, so deepcopying
+    # should not introduce a fresh mode.
+    # This just implements the "default" deepcopy, but without deepcopying
+    # the fake_mode.
+    def __deepcopy__(self, memo):
+        result = torch.Tensor.__deepcopy__(self, memo)
+        assert isinstance(result, FakeTensor)
+        result.fake_mode = self.fake_mode
+        return result
+
     @classmethod
     @count
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -1401,9 +1418,9 @@ class FakeTensorMode(TorchDispatchMode):
         # TODO - we should be use the prim aten impl
         # TODO - fix prims complex ops
         if (
-            func.namespace == "prims"
+            "prims::" in func._schema.name
             and hasattr(func, "prim_meta_impl")
-            and not unsupported_complex_op(func)
+            and not stride_incorrect_op(func)
         ):
             with self:
                 return func.prim_meta_impl(*args, **kwargs)

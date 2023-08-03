@@ -8780,15 +8780,6 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
     ),
-
-    ForeachFuncInfo(
-        'sign',
-        dtypes=floating_types_and(torch.bool, torch.bfloat16, torch.half),
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
-        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
-        supports_autograd=True,
-        supports_forward_ad=True,
-    ),
 ]
 
 foreach_binary_op_db: List[OpInfo] = [
@@ -20782,7 +20773,7 @@ python_ref_db = [
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref'
             ),
-        ]
+        ],
     ),
     PythonRefInfo(
         "_refs.istft",
@@ -20793,7 +20784,7 @@ python_ref_db = [
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref'
             ),
-        ]
+        ],
     ),
 ]
 python_ref_db += opinfo.definitions.python_ref_db

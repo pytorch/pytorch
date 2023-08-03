@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List
 
 import torch
 from torch.ao.quantization.quantizer.quantizer import (
@@ -16,7 +16,7 @@ __all__ = [
 ]
 
 
-def get_input_act_qspec(quantization_config: Optional[QuantizationConfig]):
+def get_input_act_qspec(quantization_config: QuantizationConfig):
     if quantization_config is None:
         return None
     if quantization_config.input_activation is None:
@@ -29,7 +29,7 @@ def get_input_act_qspec(quantization_config: Optional[QuantizationConfig]):
     return quantization_spec
 
 
-def get_output_act_qspec(quantization_config: Optional[QuantizationConfig]):
+def get_output_act_qspec(quantization_config: QuantizationConfig):
     if quantization_config is None:
         return None
     if quantization_config.output_activation is None:
@@ -42,7 +42,7 @@ def get_output_act_qspec(quantization_config: Optional[QuantizationConfig]):
     return quantization_spec
 
 
-def get_weight_qspec(quantization_config: Optional[QuantizationConfig]):
+def get_weight_qspec(quantization_config: QuantizationConfig):
     if quantization_config is None:
         return None
     assert quantization_config is not None
@@ -59,7 +59,7 @@ def get_weight_qspec(quantization_config: Optional[QuantizationConfig]):
     return quantization_spec
 
 
-def get_bias_qspec(quantization_config: Optional[QuantizationConfig]):
+def get_bias_qspec(quantization_config: QuantizationConfig):
     if quantization_config is None:
         return None
     assert quantization_config is not None

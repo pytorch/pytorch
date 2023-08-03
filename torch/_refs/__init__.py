@@ -3387,7 +3387,7 @@ def istft(
     if length is not None:
         end = start + length
     elif center:
-        end = expected_output_signal_len - (n_fft // 2)
+        end = expected_output_signal_len - n_fft // 2
     else:
         end = expected_output_signal_len
 
@@ -3398,7 +3398,7 @@ def istft(
     window_envelop_lowest = window_envelop.abs().min().lt(1e-11)
     torch._check(
         not window_envelop_lowest.item(),
-        lambda: "window overlap add min less than 1e-11",
+        lambda: "window overlap add min less than 1e-11"
     )
 
     y = y / window_envelop
