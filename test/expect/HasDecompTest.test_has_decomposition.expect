@@ -284,6 +284,9 @@ aten::_foreach_round_
 aten::_foreach_sigmoid
 aten::_foreach_sigmoid.out
 aten::_foreach_sigmoid_
+aten::_foreach_sign
+aten::_foreach_sign.out
+aten::_foreach_sign_
 aten::_foreach_sin
 aten::_foreach_sin.out
 aten::_foreach_sin_
