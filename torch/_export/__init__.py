@@ -145,6 +145,10 @@ def export(
     constraints = constraints or []
     kwargs = kwargs or {}
 
+    if not isinstance(args, tuple):
+        raise UserError(UserErrorType.INVALID_INPUT,
+                        f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}")
+
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
         try:
             gm_torch_level, _ = torch._dynamo.export(
