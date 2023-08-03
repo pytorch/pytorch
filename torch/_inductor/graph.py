@@ -45,6 +45,7 @@ from .lowering import (
 from .sizevars import SizeVarAllocator
 from .utils import (
     convert_shape_to_inductor,
+    delete_cache_on_self,
     gather_origins,
     get_dtype_size,
     get_sympy_Expr_dtype,
@@ -642,6 +643,9 @@ class GraphLowering(torch.fx.Interpreter):
 
     def finalize(self):
         for buf in self.buffers:
+            delete_cache_on_self(buf)
+            if isinstance(buf, ir.ComputedBuffer):
+                delete_cache_on_self(buf.data)
             buf.decide_layout()
 
     def run_node(self, n: torch.fx.Node):
