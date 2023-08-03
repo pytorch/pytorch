@@ -221,7 +221,11 @@ def inner_compile_with_cpp_wrapper(inner_compile):
                 real_inputs = [
                     materialize(x)
                     for x in [
-                        *torch._guards.TracingContext.get().params_flat,
+                        *[
+                            param
+                            for param in torch._guards.TracingContext.get().params_flat
+                            if param is not None
+                        ],
                         *V.real_inputs,
                     ]
                 ]
@@ -325,9 +329,18 @@ def compile_fx_inner(
             if isinstance(t, torch.Tensor)
         )
 
+        # doesnt work for non-trees because the warmup run would apply mutation twice
+        if config.triton.cudagraph_trees:
+            # checking if mutation is only on paramameters/static inputs
+            has_mutation = not all(
+                idx < num_fixed for idx in compiled_graph.mutated_input_idxs
+            )
+        else:
+            has_mutation = len(compiled_graph.mutated_inputs) != 0
+
         cudagraph_tests = [
             (set(compiled_graph.device_types) == {"cuda"}, "non-cuda device in graph"),
-            (not compiled_graph.mutated_inputs, "mutated inputs"),
+            (not has_mutation, "mutated inputs"),
             (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
             (not complex_memory_overlap_inputs, "complex memory overlap"),
             (
@@ -394,7 +407,7 @@ def compile_fx_inner(
             if len(set(compiled_graph.device_types)) > 1:
                 perf_hint_log.warning("skipping cudagraphs due to multiple devices")
             elif set(compiled_graph.device_types) == {"cuda"}:
-                if compiled_graph.mutated_inputs:
+                if has_mutation:
                     perf_hint_log.warning("skipping cudagraphs due to input mutation")
                 elif complex_memory_overlap_inputs:
                     perf_hint_log.warning(
@@ -529,6 +542,7 @@ def fx_codegen_and_compile(
                 device_types=graph.device_types,
                 device_idxs=graph.device_idxs,
                 mutated_inputs=graph.mutated_inputs,
+                mutated_input_idxs=graph.mutated_input_idxs,
             )
     return compiled_graph
 
@@ -767,6 +781,9 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
+_in_aot_compilation = BoxedBool(False)
+
+
 def compile_fx_aot(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
@@ -787,12 +804,13 @@ def compile_fx_aot(
             "aot_inductor_output_path": code_hash(model_.code),
         }
 
-    return compile_fx(
-        model_,
-        example_inputs_,
-        inner_compile=functools.partial(inner_compile, aot_mode=True),
-        config_patches=config_patches,
-    )
+    with unittest.mock.patch.object(_in_aot_compilation, "value", True):
+        return compile_fx(
+            model_,
+            example_inputs_,
+            inner_compile=functools.partial(inner_compile, aot_mode=True),
+            config_patches=config_patches,
+        )
 
 
 _graph_counter = itertools.count(0)
@@ -833,9 +851,16 @@ def fw_compiler_freezing(
     # for freezing, all graph outputs should be user visible
     *_, model_outputs_node = opt_model.graph.nodes
     model_outputs = model_outputs_node.args[0]
-    user_visible_outputs = [n.name for n in model_outputs]
+    user_visible_outputs = [
+        n.name for n in model_outputs if isinstance(n, torch.fx.Node)
+    ]
 
     # constant params will be real tensors, not fake
+    params_flat = torch._guards.TracingContext.get().params_flat
+    for i in range(len(params_flat)):
+        if i not in preserved_arg_indices:
+            params_flat[i] = None
+
     with unittest.mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(
             opt_model,
@@ -849,11 +874,10 @@ def fw_compiler_freezing(
             user_visible_outputs=user_visible_outputs,
         )
 
-    # Need to drop the args we have constant-ified.
-    params_flat = torch._guards.TracingContext.get().params_flat
-    for i in range(len(params_flat)):
-        if i not in preserved_arg_indices:
-            params_flat[i] = None
+    # aot_inductor codegens a call that takes in just the inputs, so we don't return a wrapper
+    # that drops constant-ified params
+    if _in_aot_compilation:
+        return optimized_function
 
     def wrapper(args):
         args_new = [args[i] for i in preserved_arg_indices]
@@ -861,6 +885,7 @@ def fw_compiler_freezing(
         return optimized_function(args_new)
 
     wrapper._boxed_call = True
+
     return wrapper
 
 
@@ -1014,9 +1039,6 @@ def compile_fx(
     fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
 
     if config.freezing and not torch.is_grad_enabled():
-        decompositions = dict(decompositions)
-        del decompositions[torch.ops.aten._native_batch_norm_legit_no_training.default]
-
         inference_compiler = functools.partial(
             fw_compiler_freezing,
             dynamo_model=model_,

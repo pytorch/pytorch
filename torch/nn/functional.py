@@ -474,7 +474,7 @@ def fractional_max_pool2d_with_indices(
             _random_samples=_random_samples,
         )
     if output_size is None and output_ratio is None:
-        raise ValueError("fractional_max_pool2d requires specifying either " "an output_size or an output_ratio")
+        raise ValueError("fractional_max_pool2d requires specifying either an output_size or an output_ratio")
     if output_size is None:
         assert output_ratio is not None
         if len(output_ratio) > 2:
@@ -580,7 +580,7 @@ def fractional_max_pool3d_with_indices(
             _random_samples=_random_samples,
         )
     if output_size is None and output_ratio is None:
-        raise ValueError("fractional_max_pool3d requires specifying either " "an output_size or an output_ratio")
+        raise ValueError("fractional_max_pool3d requires specifying either an output_size or an output_ratio")
     if output_size is None:
         assert output_ratio is not None
         _output_ratio = _triple(output_ratio)
@@ -4516,7 +4516,7 @@ squeezed (see :func:`torch.squeeze`), resulting in the
 output tensor having 1 fewer dimension.
 
 .. math ::
-    \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
+    \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2, \epsilon) \cdot \max(\Vert x_2 \Vert _2, \epsilon)}
 
 Supports :ref:`type promotion <type-promotion-doc>`.
 

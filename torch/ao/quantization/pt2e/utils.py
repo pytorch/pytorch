@@ -10,6 +10,8 @@ from torch.nn.utils.fusion import fuse_conv_bn_weights
 import copy
 import operator
 from typing import Any, Callable, Dict, Optional, Tuple
+from torch.fx.node import map_arg
+from torch.utils._pytree import LeafSpec
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
@@ -141,9 +143,10 @@ def get_aten_graph_module(
     import torch._dynamo
     aten_pattern, _ = torch._dynamo.export(
         pattern,
-        *copy.deepcopy(example_inputs),
         aten_graph=True,
         tracing_mode="real",
+    )(
+        *copy.deepcopy(example_inputs),
         **kwargs,
     )
     aten_pattern.graph.eliminate_dead_code()
@@ -238,10 +241,6 @@ def _replace_dropout_for_eval(m: GraphModule):
     )
     m.recompile()
 
-
-from torch.fx.node import map_arg
-from torch.utils._pytree import LeafSpec
-
 def _is_literal(arg):
     if isinstance(arg, (int, float)):
         return True
@@ -249,7 +248,31 @@ def _is_literal(arg):
         return all(map(_is_literal, arg))
     return False
 
-def replace_literals_with_new_placeholders(gm, merge_dup=False, exclude_literals=None):
+def _replace_literals_with_new_placeholders(gm, merge_dup=False, exclude_literals=None):
+    """Replace the literals in the graph with placeholder nodes, so that the literal arguments
+    in the graph can be matched and replaced
+
+    To use this, the pattern and replacement graph should have the exact same number of literal args
+    and they should be used in the exact same order.
+
+    For example:
+    pattern:
+    def forward(self, x):
+        return x + 3
+
+    replacement:
+    def forward(self, x):
+        return x - 3
+
+    after this pass, we'll have:
+    pattern:
+    def forward(self, x, scalar):
+        return x + scalar
+
+    replacement:
+    def forward(self, x, scalar):
+        return x - scalar
+    """
     last_ph = None
     cnt = 0
     literal_to_ph = {}
@@ -282,7 +305,7 @@ def replace_literals_with_new_placeholders(gm, merge_dup=False, exclude_literals
     return gm
 
 
-def replace_literals_with_existing_placeholders(gm, exclude_literals, literal_to_ph_idx):
+def _replace_literals_with_existing_placeholders(gm, exclude_literals, literal_to_ph_idx):
     if exclude_literals is None:
         exclude_literals = []
 
