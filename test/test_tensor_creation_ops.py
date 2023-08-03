@@ -509,11 +509,48 @@ class TestTensorCreation(TestCase):
         x = torch.zeros((0), device=device)
         y = torch.randn((4, 6), device=device)
 
+        # Test concat on dimension 0
         w = y.view(-1).clone()
         a = torch.cat([w[:2], w[4:6]])
         b = torch.cat([w[:2], w[4:6]], out=w[6:10])
+        # Note that there is no guarantee that slicing here will result in
+        # contiguous tensors
         self.assertEqual(a, b)
+        self.assertEqual(a, w[6:10])
         self.assertEqual(w[:6], y.view(-1)[:6])
+        # If inputs are contiguous tensors, then fast concat paths will be invoked
+        a_fastcat = torch.cat([w[:2].contiguous(), w[4:6].contiguous()])
+        self.assertEqual(a_fastcat, a)
+        # Test concat on dimension 1
+        w = y.clone()
+        w_slices = torch.tensor_split(w, (2, 4), dim=1)
+        # Note that the tensor in w_slices[] here may not be a contiguous
+        # tensor and we need to make sure this is not broken by fast concat
+        b = torch.cat([w_slices[0], w_slices[1]], dim=1)
+        expected_b = torch.index_select(w, 1, torch.tensor([0, 1, 2, 3]))
+        self.assertEqual(b, expected_b)
+        # If inputs are contiguous tensors, then fast concat paths will be invoked
+        b_fastcat = torch.cat([w_slices[0].contiguous(), w_slices[1].contiguous()], dim=1)
+        self.assertEqual(b_fastcat, expected_b)
+        # Finally, we need to make sure backward is not broken
+        a = torch.randn((4, 3), device=device, requires_grad=True)
+        b = torch.randn((2, 3), device=device, requires_grad=True)
+        c = torch.randn((5, 3), device=device, requires_grad=True)
+        d = torch.randn((5, 2), device=device, requires_grad=True)
+        expected_a_grad = torch.ones((4, 3), device=device)
+        expected_b_grad = torch.ones((2, 3), device=device)
+        expected_c_grad = torch.ones((5, 3), device=device)
+        expected_d_grad = torch.ones((5, 2), device=device)
+        # All the new tensors should be contiguous here. Let us make sure
+        # to explicitly set them contiguous to enforce fast cat
+        dim0_cat = torch.cat([a.contiguous(), b.contiguous()], dim = 0)
+        dim0_cat.sum().backward()
+        self.assertEqual(a.grad, expected_a_grad)
+        self.assertEqual(b.grad, expected_b_grad)
+        dim1_cat = torch.cat([c.contiguous(), d.contiguous()], dim = 1)
+        dim1_cat.sum().backward()
+        self.assertEqual(c.grad, expected_c_grad)
+        self.assertEqual(d.grad, expected_d_grad)
 
         # Case:
         # Reference: https://github.com/pytorch/pytorch/issues/49878

@@ -549,6 +549,45 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
 }
 
+static void fastCatOutDim0(const Tensor& out, const MaterializedITensorListRef& inputs) {
+  auto outBytes = out.nbytes();
+  char* dataPtr = reinterpret_cast<char*>(out.data_ptr());
+  size_t totalBytes = 0;
+  for (const Tensor& input : inputs) {
+    TORCH_CHECK(outBytes >= totalBytes);
+    std::memcpy(dataPtr + totalBytes, input.data_ptr(), input.nbytes());
+    totalBytes += input.nbytes();
+  }
+  TORCH_CHECK(outBytes == totalBytes);
+}
+
+static void fastCatOutDim1(const Tensor& out, const MaterializedITensorListRef& inputs) {
+  auto outBytes = out.nbytes();
+  char* outputDataPtr = reinterpret_cast<char*>(out.data_ptr());
+  size_t sliceBytes = 0;
+  size_t offsetInSlice = 0;
+  for (const Tensor& input : inputs) {
+    sliceBytes += input.nbytes() / input.size(0);
+  }
+  for (const Tensor& input : inputs) {
+    size_t inputBytes = input.nbytes();
+    char* inputDataPtr = reinterpret_cast<char*>(input.data_ptr());
+    size_t inputSliceBytes = input.nbytes() / input.size(0);
+    for (auto s = 0; s < input.size(0); ++s) {
+      auto destOffset = sliceBytes * s + offsetInSlice;
+      auto srcOffset = inputSliceBytes * s;
+      TORCH_CHECK(destOffset + inputSliceBytes <= outBytes);
+      TORCH_CHECK(srcOffset + inputSliceBytes <= inputBytes);
+      std::memcpy(
+          outputDataPtr + destOffset,
+          inputDataPtr + srcOffset,
+          inputSliceBytes);
+    }
+    offsetInSlice += inputSliceBytes;
+  }
+  TORCH_CHECK(offsetInSlice == sliceBytes);
+}
+
 TORCH_IMPL_FUNC(cat_out_cpu)
 (const ITensorListRef& tensors,
  int64_t dim,
@@ -564,10 +603,24 @@ TORCH_IMPL_FUNC(cat_out_cpu)
 
   auto materialized = tensors.materialize();
 
-  // fast path for single thread when both inputs and result are contiguous and not empty
   bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
   ScalarType dtype = materialized[valid].get().scalar_type();
   bool serial_dtype = at::isFloatingType(dtype);
+
+  // fast path for single thread when both inputs and result are contiguous and
+  // not empty, and concat dim is 0 or 1
+  if (all_contiguous && all_same_dtype && result.is_contiguous(memory_format) &&
+      serial_dtype) {
+    if (dim == 0) {
+      fastCatOutDim0(result, materialized);
+      return;
+    } else if (dim == 1) {
+      fastCatOutDim1(result, materialized);
+      return;
+    }
+  }
+
+  // fast path for single thread when both inputs and result are contiguous and not empty
   if (use_serial_kernel && all_contiguous && all_same_dtype && serial_dtype) {
     cat_serial_stub(kCPU, result, materialized, dim);
     return;
