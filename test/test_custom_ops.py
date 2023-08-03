@@ -9,9 +9,9 @@ import re
 import typing
 
 import torch._custom_ops as custom_ops
-import torch.testing._internal.optests as optests
 
 import torch.testing._internal.custom_op_db
+import torch.testing._internal.optests as optests
 from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp
