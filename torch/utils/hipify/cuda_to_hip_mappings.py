@@ -40,6 +40,9 @@ except (FileNotFoundError, PermissionError, NotADirectoryError):
 
 rocm_version = (0, 0, 0)
 rocm_version_h = f"{rocm_path}/include/rocm-core/rocm_version.h"
+if not os.path.isfile(rocm_version_h):
+    rocm_version_h = f"{rocm_path}/include/rocm_version.h"
+
 # The file could be missing due to 1) ROCm version < 5.2, or 2) no ROCm install.
 if os.path.isfile(rocm_version_h):
     RE_MAJOR = re.compile(r"#define\s+ROCM_VERSION_MAJOR\s+(\d+)")
