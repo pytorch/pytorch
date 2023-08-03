@@ -32,6 +32,7 @@ def aot_autograd_check(
         args,
         kwargs,
         dynamic,
+        check_gradients=True,
         assert_raises_regex_fn=assert_raises_regex,
         assert_equals_fn=torch.testing._comparison.assert_close,
         try_check_data_specialization=False):
@@ -67,10 +68,12 @@ def aot_autograd_check(
     compiled_f = compiled_function(
         func_no_tensors, nop, nop, dynamic=dynamic, partition_fn=min_cut_rematerialization_partition)
 
-    any_tensor_requires_grad = pytree.tree_any_only(torch.Tensor, lambda x: x.requires_grad, args)
     out = wrapper_set_seed(func_no_tensors, args)
-    any_output_requires_grad = pytree.tree_any_only(torch.Tensor, lambda x: x.requires_grad, out)
-    if not any_tensor_requires_grad or not any_output_requires_grad:
+    if check_gradients == "auto":
+        any_tensor_requires_grad = pytree.tree_any_only(torch.Tensor, lambda x: x.requires_grad, args)
+        any_output_requires_grad = pytree.tree_any_only(torch.Tensor, lambda x: x.requires_grad, out)
+        check_gradients = any_tensor_requires_grad and any_output_requires_grad
+    if not check_gradients:
         compiled_out = wrapper_set_seed(compiled_f, args)
         assert_equals_fn(compiled_out, out, msg=outputs_msg)
         return
