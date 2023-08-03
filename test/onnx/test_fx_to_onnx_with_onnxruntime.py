@@ -532,6 +532,31 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             NoneInputModel(), (torch.randn(1, 2), None, torch.randn(1, 2))
         )
 
+    def test_operator_with_data_dependent_output(self):
+        def func(x):
+            # Repro from llama. Emits `torch.ops.aten._local_scalar_dense`.
+            return x + torch.full(x.shape, torch.tensor(torch.finfo(x.dtype).min))
+
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            func, (torch.randn(3, 4),)
+        )
+
+    def test_operator_with_scalar_output(self):
+        def func(x, y):
+            return x.item() + y
+
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            func, (torch.tensor([1]), torch.randn(3, 4))
+        )
+
+    def test_operator_with_dynamic_output_shape(self):
+        def func(x):
+            return x.nonzero()
+
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            func, (torch.randn(3, 4),)
+        )
+
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
         # Download pytorch model
