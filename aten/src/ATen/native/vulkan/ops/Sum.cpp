@@ -40,7 +40,11 @@ Tensor sum_dim(
   // Create the output texture
   std::vector<int64_t> output_size = self.sizes().vec();
   uint32_t dim_size = output_size[dim];
-  output_size.erase(output_size.begin() + dim);
+  if (keepdim) {
+    output_size[dim] = 1;
+  } else {
+    output_size.erase(output_size.begin() + dim);
+  }
 
   ScalarType type = self.scalar_type();
   if (dtype.has_value()) {
@@ -74,7 +78,7 @@ Tensor sum_dim(
 
   context->submit_compute_job(
       // shader descriptor
-      VK_KERNEL(sum_dim),
+      keepdim ? VK_KERNEL(sum_dim_keepdim) : VK_KERNEL(sum_dim),
       // pipeline barrier
       pipeline_barrier,
       // global work group size
@@ -102,9 +106,6 @@ Tensor sum_dim_IntList(
   TORCH_CHECK(
       opt_dim.has_value(),
       "Vulkan sum.dim_IntList without a dim arg is not implemented");
-  TORCH_CHECK(
-      keepdim == false,
-      "Vulkan sum.dim_IntList with keepdim=true is not implemented");
 
   std::set<int64_t> dims_set;
   if (opt_dim.has_value()) {
