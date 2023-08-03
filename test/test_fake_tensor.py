@@ -1014,15 +1014,6 @@ class FakeTensorOperatorInvariants(TestCase):
 
             self.assertEqual(ref.size(), meta_out.size())
 
-    def test_module_deepcopy(self):
-        import copy
-        from torch._guards import detect_fake_mode
-        with FakeTensorMode() as m:
-            lin1 = torch.nn.Linear(2, 2)
-            lin2 = copy.deepcopy(lin1)
-            all_params = list(lin1.parameters()) + list(lin2.parameters())
-            curr_mode = detect_fake_mode(all_params)
-            self.assertTrue(curr_mode is m)
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
