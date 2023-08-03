@@ -3015,7 +3015,7 @@ def _nll_loss_forward(
                 1,
             ] * n_dims
             shape[channel_dim] = weight.shape[0]
-            w = weight.reshape(shape)
+            w = weight.view(shape)
         else:
             w = weight
         self = self * w
