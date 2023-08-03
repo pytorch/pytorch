@@ -271,11 +271,24 @@ def _get_param_to_fqns(
     dedup_shared_params: bool = True,
 ) -> Dict[nn.Parameter, List[str]]:
     """
-    Constructs a mapping from parameter to a list of its FQNs. Each normal
-    parameter maps to a singleton list containing its FQN, while each
+    Constructs a mapping from parameter to a list of its \"canonical\" FQNs. Here,
+    we use canonical to mean the fully-qualified name assigned to the parameter
+    based on its position in the original nn.Module hierarchy before any wrapper
+    or parallelism has been applied to it. This is in contrast to FQNs that may be
+    generated after parallelisms or wrappers have been applied to the model.
+
+    Each normal parameter maps to a singleton list containing its FQN, while each
     ``FlatParameter`` maps to a list of its original parameter FQNs, which may
-    have length greater than one. All FQNs are prefixed starting from
-    ``model``.
+    have length greater than one.  All FQNs are prefixed starting from ``model``.
+
+    In the case where FSDP was applied with ``use_orig_params=True``, there should be no
+    ``FlatParameter`` s registered to the model's modules and this mapping will only
+    contain mappings from ``nn.Parameter`` s to singleton FQN lists.
+
+    It is only in the case where FSDP was applied with ``use_orig_params=False`` where
+    a ``FlatParameter`` will be registered in place of the original parameters and there
+    will be mappings from each ``FlatParameter`` to lists of FQNs corresponding to the
+    original parameters.
 
     Args:
         model (torch.nn.Module): Root module (which may or may not be a
