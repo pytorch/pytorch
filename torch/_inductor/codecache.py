@@ -686,22 +686,9 @@ def use_fb_internal_macros():
         return ""
 
 
-def use_standard_sys_dir_headers():
-    if config.is_fbcode():
-        return "-nostdinc"
-    else:
-        return ""
-
-
 def get_include_and_linking_paths(
     include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, cuda=False, aot_mode=False
 ):
-    if (
-        config.is_fbcode()
-        and "CUDA_HOME" not in os.environ
-        and "CUDA_PATH" not in os.environ
-    ):
-        os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
     from torch.utils import cpp_extension
 
     macros = ""
@@ -781,13 +768,6 @@ def get_include_and_linking_paths(
     if config.is_fbcode():
         ipaths.append(build_paths.sleef())
         ipaths.append(build_paths.openmp())
-        ipaths.append(build_paths.gcc_include())
-        ipaths.append(build_paths.libgcc())
-        ipaths.append(build_paths.libgcc_x86_64())
-        ipaths.append(build_paths.libgcc_backward())
-        ipaths.append(build_paths.glibc())
-        ipaths.append(build_paths.linux_kernel())
-        ipaths.append(build_paths.gcc_install_tools_include())
         # We also need to bundle includes with absolute paths into a remote directory
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
@@ -819,23 +799,21 @@ def cpp_compile_command(
             # We need to copy any absolute-path torch includes
             inp_name = os.path.basename(input)
             out_name = os.path.basename(output)
-        linker_paths = [os.path.dirname(build_paths.ld()), build_paths.glibc_lib()]
-        linker_paths = " ".join(["-B" + p for p in linker_paths])
+        linker_path = f"-B{os.path.dirname(build_paths.ld())}"
     else:
         inp_name = input
         out_name = output
-        linker_paths = ""  # let the compiler pick
+        linker_path = ""  # let the compiler pick
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
             {cpp_compiler()} {inp_name} {get_shared(shared)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
-            {ipaths} {lpaths} {libs} {macros} {linker_paths}
+            {ipaths} {lpaths} {libs} {macros} {linker_path}
             {optimization_flags()}
             {use_custom_generated_macros()}
             {use_fb_internal_macros()}
-            {use_standard_sys_dir_headers()}
             -o {out_name}
         """,
     ).strip()
