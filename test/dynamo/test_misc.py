@@ -6562,6 +6562,29 @@ def ___make_guard_fn():
         # Nothing to compile here
         self.assertEqual(counter.frame_count, 0)
 
+    def test_inline_closure_not_loaded_by_parent(self):
+        def outer(a):
+            return a + 1
+
+        def indirect(x):
+            return direct(x)
+
+        def direct(x):
+            def deep2(c):
+                return outer(c)
+
+            def deep(c):
+                return deep2(c)
+
+            return deep(x)
+
+        x = torch.randn(3)
+        eager = indirect(x)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(indirect)(x)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
