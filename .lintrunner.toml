@@ -155,7 +155,7 @@ init_command = [
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
     'numpy==1.24.3',
-    'expecttest==0.1.3',
+    'expecttest==0.1.6',
     'mypy==1.4.1',
     'types-requests==2.27.25',
     'types-PyYAML==6.0.7',
