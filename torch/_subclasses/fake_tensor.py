@@ -1548,14 +1548,14 @@ class FakeTensorMode(TorchDispatchMode):
                         f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"
                     )
                 if not self.allow_non_fake_inputs:
+                    if x.fake_mode is not self:
+                        raise AssertionError("Mixing fake modes NYI")
                     raise Exception(
                         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
                         f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
                     )
 
                 x = converter(self, x)
-            else:
-                assert x.fake_mode is self, "Mixing fake modes NYI"
 
             flat_arg_fake_tensors.append(x)
             return x
