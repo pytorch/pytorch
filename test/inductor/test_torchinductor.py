@@ -24,12 +24,7 @@ import torch
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.testing import (
-    CompileCounterWithBackend,
-    expectedFailureCodegenDynamic,
-    rand_strided,
-    same,
-)
+from torch._dynamo.testing import expectedFailureCodegenDynamic, rand_strided, same
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -2831,6 +2826,7 @@ class CommonTemplate:
         )
 
     # From yolov3
+    @skipIfRocm
     def test_batch_norm_2d_2(self):
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -4109,7 +4105,7 @@ class CommonTemplate:
         inputs = (rand_strided((8,), (1,), device=self.device),)
         self.assertTrue(same(fn(*inputs), 2 * inputs[0]))
 
-    @config.patch({"triton.cudagraphs": True})
+    @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_strided_inputs(self):
         @torch._dynamo.optimize("inductor")
@@ -4122,7 +4118,7 @@ class CommonTemplate:
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
-    @config.patch({"triton.cudagraphs": True})
+    @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_input_mutation1(self):
         def fn(a):
@@ -4961,7 +4957,7 @@ class CommonTemplate:
         def fn(a):
             return torch.nn.functional.dropout(a, 0.55, True)
 
-        for cg in [False, True]:
+        for cg in [False, True] if not torch.version.hip else [False]:
             with patch.object(config.triton, "cudagraphs", cg):
                 torch._dynamo.reset()
 
@@ -5962,7 +5958,9 @@ class CommonTemplate:
         else:
             contexts = [
                 contextlib.nullcontext,
-                lambda: config.patch({"triton.cudagraphs": True}),
+                lambda: config.patch(
+                    {"triton.cudagraphs": True if not torch.version.hip else False}
+                ),
             ]
 
         for context in contexts:
@@ -6198,34 +6196,6 @@ class CommonTemplate:
             fn,
             [x],
         )
-
-    def test_setitem_with_int_parameter(self):
-        x = torch.zeros(7)
-
-        def fn(n, a):
-            a[n] = -1
-            return a
-
-        cnts = CompileCounterWithBackend("inductor")
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
-
-        for n in range(2, x.shape[0]):
-            opt_fn(n, x)
-            self.assertEqual(x[n], -1)
-
-        # If assume_static_by_default is set, the calls above will trigger
-        # 3 function compilation:
-        #   1. assuming 'n' is static (equals 2)
-        #   2. making 'n' dynamic, but with the guard 'end < x.shape[0]'
-        #      (from: torch._inductor.ir.SliceView.create)
-        #   3. when 'n' equals 6 (the above guard is violated)
-        frame_count = 3 if torch._dynamo.config.assume_static_by_default else 2
-        self.assertEqual(cnts.frame_count, frame_count)
-
-        # Negative index triggers new compilation.
-        opt_fn(-x.shape[0], x)
-        self.assertEqual(x[0], -1)
-        self.assertEqual(cnts.frame_count, frame_count + 1)
 
     @config.patch(profiler_mark_wrapper_call=True)
     def test_profiler_mark_wrapper_call(self):

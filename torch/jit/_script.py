@@ -126,7 +126,7 @@ Attribute.__doc__ = """
         del AttributeModule
         del m
 
-    Note: it's now preferred to instead use type annotations instead of `torch.jit.Attribute`:
+    Note: it's now preferred to instead use type annotations instead of `torch.jit.Annotate`:
 
     .. testcode::
 
