@@ -180,8 +180,8 @@ class TestFSDPMiscMultiProcess(FSDPTest):
             loss.backward()
 
             # self.a receives grad, self.b does not
-            a_grad = fsdp.module.a._handles[0].flat_param.grad
-            b_grad = fsdp.module.b._handles[0].flat_param.grad
+            a_grad = fsdp.module.a._handle.flat_param.grad
+            b_grad = fsdp.module.b._handle.flat_param.grad
             self.assertIsNotNone(a_grad)
             self.assertIsNone(b_grad)
 
@@ -213,13 +213,15 @@ class TestFSDPMiscMultiProcess(FSDPTest):
                 return (a, b)
 
         def _check_resharded(fsdp_module):
-            for handle in fsdp_module._handles:
-                param = handle.flat_param
-                if handle.uses_sharded_strategy:
-                    full_param = param._full_param_padded
-                    self.assertEqual(full_param.storage().size(), 0)
+            handle = fsdp_module._handle
+            if not handle:
+                return
+            param = handle.flat_param
+            if handle.uses_sharded_strategy:
+                full_param = param._full_param_padded
+                self.assertEqual(full_param.storage().size(), 0)
 
-                self.assertEqual(param.data_ptr(), param._local_shard.data_ptr())
+            self.assertEqual(param.data_ptr(), param._local_shard.data_ptr())
 
         def _check_equal(local, fsdp):
             with FSDP.summon_full_params(fsdp):
@@ -347,8 +349,8 @@ class TestFSDPMiscMultiProcess(FSDPTest):
 
                 # Overlapped optimizer FSDP module should have sharded_grad as None.
                 for fsdp_unit in FSDP.fsdp_modules(fsdp_overlap):
-                    handles = fsdp_unit._handles
-                    for handle in handles:
+                    handle = fsdp_unit._handle
+                    if handle:
                         handle_grad = handle.sharded_grad
                         self.assertEqual(
                             None,
@@ -453,11 +455,11 @@ class TestFSDPMiscMultiProcess(FSDPTest):
 
         # Check that `device_id` with `sync_module_states=True` works
         nested_wrapped_module = init_nested_wrapped_module()
-        nested_wrapped_module.register_buffer(
-            "buf", torch.ones((2, 2), device="cpu") * self.rank
+        nested_wrapped_module.buf = nn.Buffer(
+            torch.ones((2, 2), device="cpu") * self.rank
         )
-        nested_wrapped_module.module[0].register_buffer(
-            "buf", torch.ones((3, 2), device="cpu") * self.rank
+        nested_wrapped_module.module[0].buf = nn.Buffer(
+            torch.ones((3, 2), device="cpu") * self.rank
         )
         nested_wrapped_module = FSDP(
             nested_wrapped_module,
@@ -705,7 +707,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
                 torch.manual_seed(rank)
                 torch.cuda.manual_seed(rank)
                 self.lin = nn.Linear(10, 10, bias=False)
-                self.register_buffer("buffer", torch.ones(1) * rank)
+                self.buffer = nn.Buffer(torch.ones(1) * rank)
 
         m = MyModel(self.rank).cuda()
         _assert_module_states(

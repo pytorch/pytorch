@@ -11,4 +11,5 @@ class NAdam(Optimizer):
         eps: float = ...,
         weight_decay: float = ...,
         momentum_decay: float = ...,
+        decoupled_weight_decay: bool = ...,
     ) -> None: ...
