@@ -1037,7 +1037,11 @@ def _post_backward_final_callback(
         fsdp_state.training_state = TrainingState.IDLE
         handle = fsdp_state._handle
         if handle:
+            handle._ran_pre_backward_hook = False
+            handle._needs_pre_backward_unshard = False
+            handle._post_forward_index = None
             handle._training_state = HandleTrainingState.IDLE
+            handle._prefetched = False
     # Reset for cases like one forward and multiple backwards
     root_state._post_backward_callback_queued = False
 
