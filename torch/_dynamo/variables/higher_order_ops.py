@@ -666,15 +666,37 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # For has_aux=False, Tuple[gradients of inputs indicated by argnums].
         # For has_aux=True, Tuple[Tuple[gradients of inputs indicated by argnums], aux values]
         # NOTE: example_value should match `grad_output`.
-        if isinstance(argnums.value, int):
-            example_value = (
-                args[argnums.value].as_proxy().node.meta["example_value"].contiguous()
-            )
-        else:
-            example_value = tuple(
-                args[idx].as_proxy().node.meta["example_value"].contiguous()
-                for idx in argnums.value
-            )
+        def _from_args(idx):
+            return args[idx].as_proxy().node.meta["example_value"].contiguous()
+
+        def to_python_ints(argnums):
+            if not isinstance(argnums, (ConstantVariable, TupleVariable)):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"argnums is expected to be int or tuple of ints. Got {argnums}.",
+                )
+
+            if isinstance(argnums, ConstantVariable):
+                if not isinstance(argnums.value, (int, tuple)):
+                    raise UserError(
+                        UserErrorType.INVALID_INPUT,
+                        f"argnums is expected to be int or tuple of ints. Got {argnums}.",
+                    )
+                return argnums.value
+            else:
+                const_vars = argnums.unpack_var_sequence(tx)
+                if not all(
+                    isinstance(var, ConstantVariable) and isinstance(var.value, int)
+                    for var in const_vars
+                ):
+                    raise UserError(
+                        UserErrorType.INVALID_INPUT,
+                        f"argnums is expected to contain int only. Got {const_vars}.",
+                    )
+                return tuple(var.value for var in const_vars)
+
+        argnums_v = to_python_ints(argnums)
+        example_value = pytree.tree_map(_from_args, argnums_v)
 
         if has_aux.value:
             # case : has_aux = True
@@ -691,12 +713,12 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Call contiguous on all the computed grads.
         if not has_aux.value:
-            if isinstance(argnums.value, int):
+            if isinstance(argnums_v, int):
                 return fx_proxy.call_method(tx, "contiguous", (), {})
             else:
                 grads = fx_proxy
                 items = []
-                for idx in range(len(argnums.value)):
+                for idx in range(len(argnums_v)):
                     proxy = grads.call_method(
                         tx, "__getitem__", (ConstantVariable(idx),), {}
                     ).call_method(tx, "contiguous", (), {})
@@ -706,11 +728,11 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # fx_proxy -> Tuple(grads, aux)
             grads = fx_proxy.call_method(tx, "__getitem__", (ConstantVariable(0),), {})
             aux = fx_proxy.call_method(tx, "__getitem__", (ConstantVariable(1),), {})
-            if isinstance(argnums.value, int):
+            if isinstance(argnums_v, int):
                 return TupleVariable([grads.call_method(tx, "contiguous", (), {}), aux])
             else:
                 items = []
-                for idx in range(len(argnums.value)):
+                for idx in range(len(argnums_v)):
                     proxy = grads.call_method(
                         tx, "__getitem__", (ConstantVariable(idx),), {}
                     ).call_method(tx, "contiguous", (), {})
