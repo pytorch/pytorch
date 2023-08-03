@@ -445,8 +445,6 @@ def _init_runtime_state(
     state._comm_hook = None
     state._comm_hook_state = None
     # Used to prevent running the pre-backward hook multiple times
-    _ran_pre_backward_hook: Dict[FlatParamHandle, bool] = {}
-    state._ran_pre_backward_hook = _ran_pre_backward_hook
     return state
 
 

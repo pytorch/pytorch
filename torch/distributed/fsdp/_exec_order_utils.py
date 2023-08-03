@@ -144,6 +144,7 @@ class _ExecOrderData:
             return
         # Only record the first usage of a handles key
         if handle._post_forward_index:
+            self.handles_post_forward_order.append(handle)
             return
         index = len(self.handles_post_forward_order)
         handle._post_forward_index = index
