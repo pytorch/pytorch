@@ -98,6 +98,8 @@ class ExportPassBase(PassBase):
 
                     try:
                         assert self.fake_tensor_mode is not None
+                        # TODO we should allocate static shapes
+                        # for param/buffer values
                         fake_tensor = self.fake_tensor_mode.from_tensor(x)
                     except UnsupportedFakeTensorException:
                         # TODO: This is just a workaround to get over the
