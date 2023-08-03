@@ -31,6 +31,8 @@ from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp._common_utils import (
     _FSDPDeviceHandle,
     _named_parameters_with_duplicates,
+    _no_dispatch_record_stream,
+    _same_storage_as_data_ptr,
     _set_fsdp_flattened,
     HandleTrainingState,
 )
@@ -38,7 +40,6 @@ from torch.distributed.utils import _alloc_storage, _free_storage, _p_assert
 from torch.nn.parameter import _ParameterMeta  # type: ignore[attr-defined]
 
 from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
-from ._utils import _no_dispatch_record_stream, _same_storage_as_data_ptr
 
 __all__ = [
     "FlatParameter",
@@ -342,7 +343,7 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
         r._is_flat_param = True  # type: ignore[attr-defined]
         return r
 
-    # NB: This is not a regular method, because FlatParameter are not actually
+    # NB: This is not a regular method, because FlatParameters are not actually
     # instances of this class (see __new__ above).  So you must indirectly
     # call this directly through the classmethod.
     @classmethod

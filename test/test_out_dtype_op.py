@@ -141,7 +141,7 @@ class TestOutDtypeOp(TestCase):
             )
 
         inp = (torch.randn(5, 5, requires_grad=True), torch.randn(5, 5, requires_grad=True))
-        with self.assertRaisesRegex(RuntimeError, "Autograd is not supported for out_dtype"):
+        with self.assertRaisesRegex(RuntimeError, "Autograd not implemented for out_dtype"):
             f(*inp)
 
         with torch.no_grad():
