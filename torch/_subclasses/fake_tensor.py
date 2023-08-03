@@ -454,7 +454,9 @@ def wordaround_stride_incorrect_op(fake_mode, func, *args, **kwargs):
 
     # For static shapes, we can fall back to eager for the real strides
     if fake_mode.allow_fallback_kernels:
-        require_dynamic = any(is_symbolic(x) for x in itertools.chain(args, kwargs.values()))
+        require_dynamic = any(
+            is_symbolic(x) for x in itertools.chain(args, kwargs.values())
+        )
         if not require_dynamic:
             return run_fallback_kernel(fake_mode, func, args, kwargs, None)
 
