@@ -25,7 +25,7 @@ def autograd_registration_check(op, args, kwargs):
 
     Example usage:
         >>> x = torch.randn(3, requires_grad=True)
-        >>> check_autograd_registration(torch.ops.aten.sin.default, (x,), {})
+        >>> autograd_registration_check(torch.ops.aten.sin.default, (x,), {})
 
     It is important that you pass us at least one Tensor that has
     requires_grad=True so that the autograd path gets exercised,
