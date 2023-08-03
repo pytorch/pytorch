@@ -2627,12 +2627,13 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3, 3, 3)
         opt = torch.compile(wrapper_fn, backend="eager", fullgraph=False, dynamic=True)
         expected = wrapper_fn(x, 0), wrapper_fn(x, 1), wrapper_fn(x, 2)
+        # Third invocation of `opt` makes `in_dims` as SymInt.
         actual = opt(x, 0), opt(x, 1), opt(x, 2)
         self.assertEqual(expected, actual)
         self.assertEqual(len(counters["graph_break"]), 1)
         self.assertEqual(
             dict(counters["graph_break"]),
-            {"torch.func.vmap: in_dims or out_dims is symbolic.": 2},
+            {"torch.func.vmap: in_dims is not an int or tuple variable.": 2},
         )
 
 

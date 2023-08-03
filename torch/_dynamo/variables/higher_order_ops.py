@@ -784,10 +784,11 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         chunk_size = args[4]
         batch_input_args = args[5:]
 
-        if isinstance(in_dims, SymNodeVariable) or isinstance(
-            out_dims, SymNodeVariable
-        ):
-            unimplemented("torch.func.vmap: in_dims or out_dims is symbolic.")
+        if not isinstance(in_dims, (ConstantVariable, TupleVariable)):
+            unimplemented("torch.func.vmap: in_dims is not an int or tuple variable.")
+
+        if not isinstance(out_dims, (ConstantVariable, TupleVariable)):
+            unimplemented("torch.func.vmap: out_dims is not an int or tuple variable.")
 
         if kwargs:
             unimplemented(
@@ -881,30 +882,10 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             pytree.tree_map(lambda x: x.value, updated_in_dims.items)
         )
 
-        def to_python_ints(const_or_tuple_variable, tx):
-            if not isinstance(
-                const_or_tuple_variable, (ConstantVariable, TupleVariable)
-            ):
-                unimplemented("torch.func.vmap: in_dims is not int or tuple")
-
-            if isinstance(const_or_tuple_variable, ConstantVariable):
-                if not isinstance(const_or_tuple_variable.value, (int, tuple)):
-                    unimplemented("torch.func.vmap: in_dims is not int or tuple")
-                return const_or_tuple_variable.value
-            else:
-                const_vars = const_or_tuple_variable.unpack_var_sequence(tx)
-                if not all(
-                    isinstance(var, ConstantVariable) and isinstance(var.value, int)
-                    for var in const_vars
-                ):
-                    unimplemented("torch.func.vmap: in_dims is not int or tuple")
-                return tuple(var.value for var in const_vars)
-
-        out_dims_v = to_python_ints(out_dims, tx)
         example_value = torch._functorch.vmap.vmap_impl(
             torch.fx.GraphModule(tx.output.nn_modules, body_graph),
             actual_in_dims,
-            out_dims_v,
+            out_dims.as_python_constant(),
             randomness.value,
             chunk_size.value,
             *fake_batched_fn_args,
