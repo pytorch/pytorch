@@ -450,6 +450,7 @@ from torch._C._autograd import (
     _enable_profiler,
     _enable_profiler_legacy,
     _enable_record_function,
+    _get_sequence_nr,
     _kineto_step,
     _KinetoEvent,
     _pop_saved_tensors_default_hooks,

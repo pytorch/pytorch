@@ -1851,15 +1851,21 @@ class GraphModule(torch.nn.Module):
     def test_grad_two_tensor_all_grad_has_aux(self):
         counters.clear()
 
+        nums = (0, 1)
+
         def fn(x, y):
             return ((x.sin() + y).sum(), x.cos())
 
-        def wrapper_fn(x, y):
+        def wrapper_fn_const_var(x, y):
             return torch.func.grad(fn, argnums=(0, 1), has_aux=True)(x, y)
+
+        def wrapper_fn_tuple_var(x, y):
+            return torch.func.grad(fn, argnums=nums, has_aux=True)(x, y)
 
         y = torch.randn(3, 3, 3)
         x = torch.randn(3, 3, 3)
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x, y))
+        wrapped_gm_const_var = self._grad_compile_check(wrapper_fn_const_var, (x, y))
+        wrapped_gm_tuple_var = self._grad_compile_check(wrapper_fn_tuple_var, (x, y))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -1894,8 +1900,14 @@ class GraphModule(torch.nn.Module):
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
 """
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+        actual_const_var = normalize_gm(
+            wrapped_gm_const_var.print_readable(print_output=False)
+        )
+        actual_tuple_var = normalize_gm(
+            wrapped_gm_tuple_var.print_readable(print_output=False)
+        )
+        self.assertExpectedInline(actual_const_var, expected)
+        self.assertExpectedInline(actual_tuple_var, expected)
 
     def test_grad_over_grad(self):
         counters.clear()
