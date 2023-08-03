@@ -727,7 +727,7 @@ class LocalElasticAgentTest(unittest.TestCase):
 
             rank, failure = cm.exception.get_first_failure()
             failure_data = failure.error_file_data["message"]
-            with open(replyfile, "r") as fp:
+            with open(replyfile) as fp:
                 data = json.load(fp)["message"]
 
                 # ran two; both failed; first failure is either rank 0 or 1
