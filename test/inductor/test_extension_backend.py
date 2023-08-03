@@ -7,10 +7,6 @@ import unittest
 import torch
 import torch._dynamo
 import torch.utils.cpp_extension
-from extension_backends.extension_codegen_backend import (
-    ExtensionScheduling,
-    ExtensionWrapperCodegen,
-)
 from torch._C import FileCheck
 from torch._inductor import metrics
 from torch._inductor.codegen.common import (
@@ -19,6 +15,17 @@ from torch._inductor.codegen.common import (
     register_backend_for_device,
 )
 from torch.testing._internal.common_utils import IS_MACOS
+
+try:
+    from .extension_backends.extension_codegen_backend import (
+        ExtensionScheduling,
+        ExtensionWrapperCodegen,
+    )
+except ImportError:
+    from extension_backends.extension_codegen_backend import (
+        ExtensionScheduling,
+        ExtensionWrapperCodegen,
+    )
 
 try:
     try:
