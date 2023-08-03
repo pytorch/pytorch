@@ -1,8 +1,10 @@
-from typing import Optional, Tuple, Union
+import math
 from numbers import Number
+from typing import Optional, Tuple, Union
+
 import torch
 from torch.utils.benchmark import FuzzedTensor
-import math
+
 
 class FuzzedSparseTensor(FuzzedTensor):
     def __init__(
@@ -17,7 +19,7 @@ class FuzzedSparseTensor(FuzzedTensor):
         density: Optional[str] = None,
         coalesced: Optional[str] = None,
         dtype=torch.float32,
-        cuda=False
+        cuda=False,
     ):
         """
         Args:
@@ -48,8 +50,15 @@ class FuzzedSparseTensor(FuzzedTensor):
             cuda:
                 Whether to place the Tensor on a GPU.
         """
-        super().__init__(name=name, size=size, min_elements=min_elements,
-                         max_elements=max_elements, dim_parameter=dim_parameter, dtype=dtype, cuda=cuda)
+        super().__init__(
+            name=name,
+            size=size,
+            min_elements=min_elements,
+            max_elements=max_elements,
+            dim_parameter=dim_parameter,
+            dtype=dtype,
+            cuda=cuda,
+        )
         self._density = density
         self._coalesced = coalesced
         self._sparse_dim = sparse_dim
@@ -69,7 +78,9 @@ class FuzzedSparseTensor(FuzzedTensor):
         """
         if isinstance(size, Number):
             size = [size] * sparse_dim
-        assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
+        assert (
+            all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0
+        ), "invalid arguments"
         v_size = [nnz] + list(size[sparse_dim:])
         if dtype.is_floating_point:
             v = torch.rand(size=v_size, dtype=dtype, device="cpu")
@@ -91,14 +102,16 @@ class FuzzedSparseTensor(FuzzedTensor):
 
     def _make_tensor(self, params, state):
         size, _, _ = self._get_size_and_steps(params)
-        density = params['density']
+        density = params["density"]
         nnz = math.ceil(sum(size) * density)
         assert nnz <= sum(size)
 
-        is_coalesced = params['coalesced']
-        sparse_dim = params['sparse_dim'] if self._sparse_dim else len(size)
+        is_coalesced = params["coalesced"]
+        sparse_dim = params["sparse_dim"] if self._sparse_dim else len(size)
         sparse_dim = len(size) if len(size) < sparse_dim else sparse_dim
-        tensor = self.sparse_tensor_constructor(size, self._dtype, sparse_dim, nnz, is_coalesced)
+        tensor = self.sparse_tensor_constructor(
+            size, self._dtype, sparse_dim, nnz, is_coalesced
+        )
 
         if self._cuda:
             tensor = tensor.cuda()

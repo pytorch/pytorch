@@ -4,13 +4,13 @@ consumed by TensorBoard for visualization."""
 import os
 import time
 
-import torch
-
 from tensorboard.compat import tf
 from tensorboard.compat.proto import event_pb2
 from tensorboard.compat.proto.event_pb2 import Event, SessionLog
 from tensorboard.plugins.projector.projector_config_pb2 import ProjectorConfig
 from tensorboard.summary.writer.event_file_writer import EventFileWriter
+
+import torch
 
 from ._convert_np import make_np
 from ._embedding import get_embedding_info, make_mat, make_sprite, make_tsv, write_pbtxt

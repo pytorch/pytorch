@@ -3,6 +3,7 @@ from typing import Any, Callable, Dict, Protocol, runtime_checkable
 
 class TimerClass(Protocol):
     """This is the portion of the `timeit.Timer` API used by benchmark utils."""
+
     def __init__(
         self,
         stmt: str,
@@ -20,6 +21,7 @@ class TimerClass(Protocol):
 @runtime_checkable
 class TimeitModuleType(Protocol):
     """Modules generated from `timeit_template.cpp`."""
+
     def timeit(self, number: int) -> float:
         ...
 
@@ -30,6 +32,7 @@ class CallgrindModuleType(Protocol):
     These bindings are used to collect Callgrind profiles on earlier versions
     of PyTorch and will eventually be removed.
     """
+
     __file__: str
     __name__: str
 

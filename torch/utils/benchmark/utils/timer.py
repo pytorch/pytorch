@@ -1,22 +1,37 @@
 """Timer class based on the timeit.Timer class, but torch aware."""
 import enum
-import timeit
 import textwrap
-from typing import overload, Any, Callable, Dict, List, NoReturn, Optional, Tuple, Type, Union
+import timeit
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NoReturn,
+    Optional,
+    overload,
+    Tuple,
+    Type,
+    Union,
+)
 
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
-from torch.utils.benchmark.utils._stubs import TimerClass, TimeitModuleType
-from torch.utils.benchmark.utils.valgrind_wrapper import timer_interface as valgrind_timer_interface
+from torch.utils.benchmark.utils._stubs import TimeitModuleType, TimerClass
+from torch.utils.benchmark.utils.valgrind_wrapper import (
+    timer_interface as valgrind_timer_interface,
+)
 
 
 __all__ = ["Timer", "timer", "Language"]
 
 
 if torch.backends.cuda.is_built() and torch.cuda.is_available():
+
     def timer() -> float:
         torch.cuda.synchronize()
         return timeit.default_timer()
+
 else:
     timer = timeit.default_timer
 
@@ -207,9 +222,11 @@ class Timer:
                 )
 
         elif language in (Language.CPP, "cpp", "c++"):
-            assert self._timer_cls is timeit.Timer, "_timer_cls has already been swapped."
+            assert (
+                self._timer_cls is timeit.Timer
+            ), "_timer_cls has already been swapped."
             self._timer_cls = CPPTimer
-            setup = ("" if setup == "pass" else setup)
+            setup = "" if setup == "pass" else setup
             self._language = Language.CPP
             timer_kwargs["global_setup"] = global_setup
 
@@ -268,13 +285,15 @@ class Timer:
             return common.Measurement(
                 number_per_run=number,
                 raw_times=[self._timeit(number=number)],
-                task_spec=self._task_spec
+                task_spec=self._task_spec,
             )
 
     def repeat(self, repeat: int = -1, number: int = -1) -> None:
         raise NotImplementedError("See `Timer.blocked_autorange.`")
 
-    def autorange(self, callback: Optional[Callable[[int, float], NoReturn]] = None) -> None:
+    def autorange(
+        self, callback: Optional[Callable[[int, float], NoReturn]] = None
+    ) -> None:
         raise NotImplementedError("See `Timer.blocked_autorange.`")
 
     def _threaded_measurement_loop(
@@ -284,7 +303,7 @@ class Timer:
         stop_hook: Callable[[List[float]], bool],
         min_run_time: float,
         max_run_time: Optional[float] = None,
-        callback: Optional[Callable[[int, float], NoReturn]] = None
+        callback: Optional[Callable[[int, float], NoReturn]] = None,
     ) -> List[float]:
         total_time = 0.0
         can_stop = False
@@ -321,12 +340,12 @@ class Timer:
         return number
 
     def adaptive_autorange(
-            self,
-            threshold: float = 0.1,
-            *,
-            min_run_time: float = 0.01,
-            max_run_time: float = 10.0,
-            callback: Optional[Callable[[int, float], NoReturn]] = None,
+        self,
+        threshold: float = 0.1,
+        *,
+        min_run_time: float = 0.01,
+        max_run_time: float = 10.0,
+        callback: Optional[Callable[[int, float], NoReturn]] = None,
     ) -> common.Measurement:
         number = self._estimate_block_size(min_run_time=0.05)
 
@@ -336,18 +355,16 @@ class Timer:
         def stop_hook(times: List[float]) -> bool:
             if len(times) > 3:
                 return common.Measurement(
-                    number_per_run=number,
-                    raw_times=times,
-                    task_spec=self._task_spec
+                    number_per_run=number, raw_times=times, task_spec=self._task_spec
                 ).meets_confidence(threshold=threshold)
             return False
+
         times = self._threaded_measurement_loop(
-            number, time_hook, stop_hook, min_run_time, max_run_time, callback=callback)
+            number, time_hook, stop_hook, min_run_time, max_run_time, callback=callback
+        )
 
         return common.Measurement(
-            number_per_run=number,
-            raw_times=times,
-            task_spec=self._task_spec
+            number_per_run=number, raw_times=times, task_spec=self._task_spec
         )
 
     def blocked_autorange(
@@ -400,14 +417,11 @@ class Timer:
             return True
 
         times = self._threaded_measurement_loop(
-            number, time_hook, stop_hook,
-            min_run_time=min_run_time,
-            callback=callback)
+            number, time_hook, stop_hook, min_run_time=min_run_time, callback=callback
+        )
 
         return common.Measurement(
-            number_per_run=number,
-            raw_times=times,
-            task_spec=self._task_spec
+            number_per_run=number, raw_times=times, task_spec=self._task_spec
         )
 
     @overload
@@ -472,7 +486,9 @@ class Timer:
             some basic facilities for analyzing and manipulating results.
         """
         if not isinstance(self._task_spec.stmt, str):
-            raise ValueError("`collect_callgrind` currently only supports string `stmt`")
+            raise ValueError(
+                "`collect_callgrind` currently only supports string `stmt`"
+            )
 
         if repeats is not None and repeats < 1:
             raise ValueError("If specified, `repeats` must be >= 1")
@@ -481,7 +497,7 @@ class Timer:
         # simpler and quicker to raise an exception for a faulty `stmt` or `setup` in
         # the parent process rather than the valgrind subprocess.
         self._timeit(1)
-        is_python = (self._language == Language.PYTHON)
+        is_python = self._language == Language.PYTHON
         assert is_python or not self._globals
         result = valgrind_timer_interface.wrapper_singleton().collect_callgrind(
             task_spec=self._task_spec,
@@ -493,4 +509,4 @@ class Timer:
             retain_out_file=retain_out_file,
         )
 
-        return (result[0] if repeats is None else result)
+        return result[0] if repeats is None else result

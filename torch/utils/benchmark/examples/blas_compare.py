@@ -4,15 +4,15 @@ import itertools as it
 import multiprocessing
 import multiprocessing.dummy
 import os
-import queue
 import pickle
+import queue
 import shutil
 import subprocess
 import sys
 import tempfile
 import threading
 import time
-from typing import Tuple, Dict
+from typing import Dict, Tuple
 
 from . import blas_compare_setup
 
@@ -27,12 +27,14 @@ SCRATCH_DIR = os.path.join(blas_compare_setup.WORKING_ROOT, "scratch")
 BLAS_CONFIGS = (
     ("MKL (2020.3)", blas_compare_setup.MKL_2020_3, None),
     ("MKL (2020.0)", blas_compare_setup.MKL_2020_0, None),
-    ("OpenBLAS", blas_compare_setup.OPEN_BLAS, None)
+    ("OpenBLAS", blas_compare_setup.OPEN_BLAS, None),
 )
 
 
 _RESULT_FILE_LOCK = threading.Lock()
 _WORKER_POOL: queue.Queue[Tuple[str, str, int]] = queue.Queue()
+
+
 def clear_worker_pool():
     while not _WORKER_POOL.empty():
         _, result_file, _ = _WORKER_POOL.get_nowait()
@@ -57,7 +59,9 @@ def fill_core_pool(n: int):
         _WORKER_POOL.put((core_str, result_file, n))
 
 
-def _subprocess_main(seed=0, num_threads=1, sub_label="N/A", result_file=None, env=None):
+def _subprocess_main(
+    seed=0, num_threads=1, sub_label="N/A", result_file=None, env=None
+):
     import torch
     from torch.utils.benchmark import Timer
 
@@ -76,11 +80,12 @@ def _subprocess_main(seed=0, num_threads=1, sub_label="N/A", result_file=None, e
         shapes = (
             # Square MatMul
             ((n, n), (n, n), "(n x n) x (n x n)", "Matrix-Matrix Product"),
-
             # Matrix-Vector product
             ((n, n), (n, 1), "(n x n) x (n x 1)", "Matrix-Vector Product"),
         )
-        for (dtype_name, dtype), (x_shape, y_shape, shape_str, blas_type) in it.product(dtypes, shapes):
+        for (dtype_name, dtype), (x_shape, y_shape, shape_str, blas_type) in it.product(
+            dtypes, shapes
+        ):
             t = Timer(
                 stmt="torch.mm(x, y)",
                 label=f"torch.mm {shape_str} {blas_type} ({dtype_name})",
@@ -111,7 +116,6 @@ def run_subprocess(args):
         env_vars: Dict[str, str] = {
             "PATH": os.getenv("PATH") or "",
             "PYTHONPATH": os.getenv("PYTHONPATH") or "",
-
             # NumPy
             "OMP_NUM_THREADS": str(num_threads),
             "MKL_NUM_THREADS": str(num_threads),
@@ -131,14 +135,13 @@ def run_subprocess(args):
             f"--DETAIL-env {env}",
             env=env_vars,
             stdout=subprocess.PIPE,
-            shell=True
+            shell=True,
         )
 
         with open(result_file, "rb") as f:
             result_bytes = f.read()
 
-        with _RESULT_FILE_LOCK, \
-             open(RESULT_FILE, "ab") as f:
+        with _RESULT_FILE_LOCK, open(RESULT_FILE, "ab") as f:
             f.write(result_bytes)
 
     except KeyboardInterrupt:
@@ -187,9 +190,16 @@ def main():
                 n_trials_done = i + 1
                 time_per_result = (time.time() - start_time) / n_trials_done
                 eta = int((n - n_trials_done) * time_per_result)
-                print(f"\r{i + 1} / {n}    ETA:{datetime.timedelta(seconds=eta)}".ljust(80), end="")
+                print(
+                    f"\r{i + 1} / {n}    ETA:{datetime.timedelta(seconds=eta)}".ljust(
+                        80
+                    ),
+                    end="",
+                )
                 sys.stdout.flush()
-        print(f"\r{n} / {n}  Total time: {datetime.timedelta(seconds=int(time.time() - start_time))}")
+        print(
+            f"\r{n} / {n}  Total time: {datetime.timedelta(seconds=int(time.time() - start_time))}"
+        )
     print()
 
     # Any env will do, it just needs to have torch for benchmark utils.
@@ -198,19 +208,29 @@ def main():
         f"source activate {env_path} && "
         f"python {os.path.abspath(__file__)} "
         "--DETAIL-in-compare",
-        shell=True
+        shell=True,
     )
 
 
 if __name__ == "__main__":
     # These flags are for subprocess control, not controlling the main loop.
     parser = argparse.ArgumentParser()
-    parser.add_argument("--DETAIL-in-subprocess", "--DETAIL_in_subprocess", action="store_true")
-    parser.add_argument("--DETAIL-in-compare", "--DETAIL_in_compare", action="store_true")
+    parser.add_argument(
+        "--DETAIL-in-subprocess", "--DETAIL_in_subprocess", action="store_true"
+    )
+    parser.add_argument(
+        "--DETAIL-in-compare", "--DETAIL_in_compare", action="store_true"
+    )
     parser.add_argument("--DETAIL-seed", "--DETAIL_seed", type=int, default=None)
-    parser.add_argument("--DETAIL-num-threads", "--DETAIL_num_threads", type=int, default=None)
-    parser.add_argument("--DETAIL-sub-label", "--DETAIL_sub_label", type=str, default="N/A")
-    parser.add_argument("--DETAIL-result-file", "--DETAIL_result_file", type=str, default=None)
+    parser.add_argument(
+        "--DETAIL-num-threads", "--DETAIL_num_threads", type=int, default=None
+    )
+    parser.add_argument(
+        "--DETAIL-sub-label", "--DETAIL_sub_label", type=str, default="N/A"
+    )
+    parser.add_argument(
+        "--DETAIL-result-file", "--DETAIL_result_file", type=str, default=None
+    )
     parser.add_argument("--DETAIL-env", "--DETAIL_env", type=str, default=None)
     args = parser.parse_args()
 

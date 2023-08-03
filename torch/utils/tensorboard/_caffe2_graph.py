@@ -3,16 +3,17 @@ import logging
 import os
 import re
 
-from tensorboard.compat.proto.graph_pb2 import GraphDef
-from tensorboard.compat.proto.node_def_pb2 import NodeDef
-from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
+from typing import Dict, List, Set, Tuple
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 
-from typing import Set, Dict, Tuple, List
+from tensorboard.compat.proto.graph_pb2 import GraphDef
+from tensorboard.compat.proto.node_def_pb2 import NodeDef
+from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 
 log = logging.getLogger(__name__)
+
 
 def _make_unique_name(seen: Set[str], name: str, min_version: int = 0):
     """
@@ -116,7 +117,7 @@ def _convert_to_ssa(shapes, blob_name_tracker, ops):
             new_blob_name_tracker[new_name] = blob_name_tracker[name]
         return new_name
 
-    for (op, ssa) in zip(ops, ir.ssa):
+    for op, ssa in zip(ops, ir.ssa):
         assert op is ssa.op
         inputs = list(op.input)
         outputs = list(op.output)

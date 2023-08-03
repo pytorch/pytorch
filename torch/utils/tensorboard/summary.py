@@ -3,7 +3,6 @@ import logging
 import os
 from typing import Optional
 
-import torch
 import numpy as np
 
 from google.protobuf import struct_pb2
@@ -18,6 +17,8 @@ from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 from tensorboard.plugins.custom_scalar import layout_pb2
 from tensorboard.plugins.pr_curve.plugin_data_pb2 import PrCurvePluginData
 from tensorboard.plugins.text.plugin_data_pb2 import TextPluginData
+
+import torch
 
 from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
@@ -45,7 +46,6 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
-
 
 
 # type maps: torch.Tensor type -> (protobuf type, protobuf val field)
@@ -145,7 +145,6 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
       The `Summary` protobufs for Experiment, SessionStartInfo and
         SessionEndInfo
     """
-    import torch
     from tensorboard.plugins.hparams.api_pb2 import (
         DataType,
         Experiment,
@@ -166,6 +165,8 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
         SessionEndInfo,
         SessionStartInfo,
     )
+
+    import torch
 
     # TODO: expose other parameters in the future.
     # hp = HParamInfo(name='lr',display_name='learning rate',
@@ -859,8 +860,9 @@ def _get_tensor_summary(
     Returns:
       Tensor summary with metadata.
     """
-    import torch
     from tensorboard.plugins.mesh import metadata
+
+    import torch
 
     tensor = torch.as_tensor(tensor)
 

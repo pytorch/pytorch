@@ -7,6 +7,7 @@ import sys
 
 import torch.utils.benchmark as benchmark_utils
 
+
 def main():
     add_fuzzer = benchmark_utils.Fuzzer(
         parameters=[
@@ -16,7 +17,8 @@ def main():
                     minval=16,
                     maxval=16 * 1024,
                     distribution="loguniform",
-                ) for i in range(3)
+                )
+                for i in range(3)
             ],
             benchmark_utils.FuzzedParameter(
                 name="dim_parameter",
@@ -33,7 +35,7 @@ def main():
             benchmark_utils.FuzzedParameter(
                 name="coalesced",
                 distribution={True: 0.7, False: 0.3},
-            )
+            ),
         ],
         tensors=[
             [
@@ -45,8 +47,9 @@ def main():
                     sparse_dim="sparse_dim",
                     density="density",
                     dim_parameter="dim_parameter",
-                    coalesced="coalesced"
-                ) for name in ("x", "y")
+                    coalesced="coalesced",
+                )
+                for name in ("x", "y")
             ],
         ],
         seed=0,
@@ -58,16 +61,18 @@ def main():
     for i, (tensors, tensor_properties, _) in enumerate(add_fuzzer.take(n=n)):
         x = tensors["x"]
         y = tensors["y"]
-        shape = ", ".join(tuple(f'{i:>4}' for i in x.shape))
+        shape = ", ".join(tuple(f"{i:>4}" for i in x.shape))
         x_tensor_properties = tensor_properties["x"]
-        description = "".join([
-            f"| {shape:<20} | ",
-            f"{x_tensor_properties['sparsity']:>9.2f} | ",
-            f"{x_tensor_properties['sparse_dim']:>9d} | ",
-            f"{x_tensor_properties['dense_dim']:>9d} | ",
-            f"{('True' if x_tensor_properties['is_hybrid'] else 'False'):>9} | ",
-            f"{('True' if x.is_coalesced() else 'False'):>9} | "
-        ])
+        description = "".join(
+            [
+                f"| {shape:<20} | ",
+                f"{x_tensor_properties['sparsity']:>9.2f} | ",
+                f"{x_tensor_properties['sparse_dim']:>9d} | ",
+                f"{x_tensor_properties['dense_dim']:>9d} | ",
+                f"{('True' if x_tensor_properties['is_hybrid'] else 'False'):>9} | ",
+                f"{('True' if x.is_coalesced() else 'False'):>9} | ",
+            ]
+        )
         timer = benchmark_utils.Timer(
             stmt="torch.sparse.sum(x) + torch.sparse.sum(y)",
             globals=tensors,
@@ -80,7 +85,9 @@ def main():
     print()
 
     # More string munging to make pretty output.
-    print(f"Average attempts per valid config: {1. / (1. - add_fuzzer.rejection_rate):.1f}")
+    print(
+        f"Average attempts per valid config: {1. / (1. - add_fuzzer.rejection_rate):.1f}"
+    )
 
     def time_fn(m):
         return m.mean / m.metadata["nnz"]
@@ -96,6 +103,7 @@ def main():
     print("\n" + template.format("Worst:"))
     for m in measurements[-10:]:
         print(f"{time_fn(m) * 1e9:>5.2f} ns / element     {m.description}")
+
 
 if __name__ == "__main__":
     main()

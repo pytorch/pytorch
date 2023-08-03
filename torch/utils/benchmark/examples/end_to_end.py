@@ -23,12 +23,13 @@ import queue
 import subprocess
 import tempfile
 import textwrap
+from typing import Dict, List, Tuple
 
 import numpy as np
+
 import torch
+from torch.utils.benchmark import Measurement, Timer
 from torch.utils.benchmark.op_fuzzers import unary
-from torch.utils.benchmark import Timer, Measurement
-from typing import Dict, Tuple, List
 
 
 _MAIN, _SUBPROCESS = "main", "subprocess"
@@ -39,10 +40,8 @@ _REF_ENV_TEMPLATE = "ref_{pr}"
 _PR_LIST = (
     # Optimize topk performance for tensor with a large dimension size
     "39850",
-
     # Migrate `var` & `std` to ATen
     "39967",
-
     # Introducing (Const)StridedRandomAccessor + CompositeRandomAccessor + migrate `sort` to ATen (CPU)
     "39744",
 )
@@ -85,10 +84,24 @@ def parse_args():
     parser.add_argument("--test-variance", "--test_variance", action="store_true")
 
     # (Implementation details)
-    parser.add_argument("--DETAIL-context", "--DETAIL_context", type=str, choices=(_MAIN, _SUBPROCESS), default=_MAIN)
-    parser.add_argument("--DETAIL-device", "--DETAIL_device", type=str, choices=(_CPU, _GPU), default=None)
+    parser.add_argument(
+        "--DETAIL-context",
+        "--DETAIL_context",
+        type=str,
+        choices=(_MAIN, _SUBPROCESS),
+        default=_MAIN,
+    )
+    parser.add_argument(
+        "--DETAIL-device",
+        "--DETAIL_device",
+        type=str,
+        choices=(_CPU, _GPU),
+        default=None,
+    )
     parser.add_argument("--DETAIL-env", "--DETAIL_env", type=str, default=None)
-    parser.add_argument("--DETAIL-result-file", "--DETAIL_result_file", type=str, default=None)
+    parser.add_argument(
+        "--DETAIL-result-file", "--DETAIL_result_file", type=str, default=None
+    )
     parser.add_argument("--DETAIL-seed", "--DETAIL_seed", type=int, default=None)
 
     args = parser.parse_args()
@@ -131,13 +144,14 @@ def construct_stmt_and_label(pr, params):
 
 def subprocess_main(args):
     seed = args.DETAIL_seed
-    cuda = (args.DETAIL_device == _GPU)
+    cuda = args.DETAIL_device == _GPU
 
     with open(args.DETAIL_result_file, "ab") as f:
         for dtype_str in _DTYPES_TO_TEST[args.pr]:
             dtype = _DTYPE_STR_TO_DTYPE[dtype_str]
-            iterator = unary.UnaryOpFuzzer(
-                seed=seed, dtype=dtype, cuda=cuda).take(_RUNS_PER_LOOP)
+            iterator = unary.UnaryOpFuzzer(seed=seed, dtype=dtype, cuda=cuda).take(
+                _RUNS_PER_LOOP
+            )
             for i, (tensors, tensor_parameters, params) in enumerate(iterator):
                 params["dtype_str"] = dtype_str
                 stmt, label = construct_stmt_and_label(args.pr, params)
@@ -173,7 +187,8 @@ def _main(args):
         pools[_GPU] = multiprocessing.dummy.Pool(args.num_gpus)
         trials = [
             (seed, envs, pr, True, finished_counts, args.test_variance)
-            for seed in range(_NUM_LOOPS[_GPU])] * _REPLICATES[_GPU]
+            for seed in range(_NUM_LOOPS[_GPU])
+        ] * _REPLICATES[_GPU]
         map_iters[_GPU] = pools[_GPU].imap(map_fn, trials)
 
     if _DEVICES_TO_TEST[args.pr][_CPU]:
@@ -182,7 +197,8 @@ def _main(args):
         pools[_CPU] = multiprocessing.dummy.Pool(cpu_workers)
         trials = [
             (seed, envs, pr, False, finished_counts, args.test_variance)
-            for seed in range(_NUM_LOOPS[_CPU])] * _REPLICATES[_CPU]
+            for seed in range(_NUM_LOOPS[_CPU])
+        ] * _REPLICATES[_CPU]
         map_iters[_CPU] = pools[_CPU].imap(map_fn, trials)
 
     results = []
@@ -191,7 +207,8 @@ def _main(args):
             results.append(r)
             progress = [
                 f"{k}: {v} / {_NUM_LOOPS[k] * _REPLICATES[k]}"
-                for k, v in finished_counts.items()]
+                for k, v in finished_counts.items()
+            ]
             print(f"\r{(' ' * 10).join(progress)}", end="")
     print()
 
@@ -246,10 +263,11 @@ def process_results(results, test_variance):
             flagged_for_removal.add(key)
 
     paired_results = {
-        k: v for k, v in paired_results.items()
-        if k not in flagged_for_removal
+        k: v for k, v in paired_results.items() if k not in flagged_for_removal
     }
-    print(f"{len(flagged_for_removal)} samples were culled, {len(paired_results)} remain")
+    print(
+        f"{len(flagged_for_removal)} samples were culled, {len(paired_results)} remain"
+    )
 
     gpu_results = [(k, v) for k, v in paired_results.items() if k[3]]
     cpu_results = [(k, v) for k, v in paired_results.items() if not k[3]]
@@ -262,12 +280,19 @@ def process_results(results, test_variance):
 
 
 def construct_table(results, device_str, test_variance):
-    device_str = f"== {device_str} {' (Variance Test)' if test_variance else ''}  ".ljust(40, "=")
+    device_str = (
+        f"== {device_str} {' (Variance Test)' if test_variance else ''}  ".ljust(
+            40, "="
+        )
+    )
     print(f"{'=' * 40}\n{device_str}\n{'=' * 40}\n")
-    results = sorted((
-        (key, (r_ref, r_pr), r_pr.median / r_ref.median - 1)
-        for key, (r_ref, r_pr) in results
-    ), key=lambda i: i[2])
+    results = sorted(
+        (
+            (key, (r_ref, r_pr), r_pr.median / r_ref.median - 1)
+            for key, (r_ref, r_pr) in results
+        ),
+        key=lambda i: i[2],
+    )
 
     n = len(results)
     n_regressed = len([i for i in results if i[2] > 0.05])
@@ -278,9 +303,9 @@ def construct_table(results, device_str, test_variance):
         print(f"{legend:<17} {count:>6}  ({count / len(results) * 100:>3.0f}%)")
 
     keys_to_print = (
-        {i[0] for i in results[20:30]} |
-        {i[0] for i in results[int(n // 2 - 5):int(n // 2 + 5)]} |
-        {i[0] for i in results[-30:-20]}
+        {i[0] for i in results[20:30]}
+        | {i[0] for i in results[int(n // 2 - 5) : int(n // 2 + 5)]}
+        | {i[0] for i in results[-30:-20]}
     )
     ellipsis_after = {results[29][0], results[int(n // 2 + 4)][0]}
 
@@ -302,7 +327,9 @@ def construct_table(results, device_str, test_variance):
                 print("...")
         print("[Last twenty omitted (these tend to be noisy) ]")
 
-    print(textwrap.dedent("""
+    print(
+        textwrap.dedent(
+            """
         steps:
             Indicates that `x` is sliced from a larger Tensor. For instance, if
             shape is [12, 4] and steps are [2, 1], then a larger Tensor of size
@@ -315,7 +342,9 @@ def construct_table(results, device_str, test_variance):
             would produce a Tensor with physical memory layout matching logical
             memory layout. (Though still not contiguous if `steps` contains
             non-one elements.)
-        """))
+        """
+        )
+    )
 
     print(f"\nComplete results in: {result_log_file}")
 
@@ -327,7 +356,7 @@ def row_str(rel_diff, diff_seconds, measurement):
     dim = params["dim"]
     x_numel = tensor_parameters["x"]["numel"]
     steps = [params[f"x_step_{i}"] for i in range(dim)]
-    order = tensor_parameters['x']["order"]
+    order = tensor_parameters["x"]["order"]
     order = str("" if all(i == j for i, j in zip(order, range(dim))) else order)
 
     task_specific = ""
@@ -370,7 +399,7 @@ def run(cmd, cuda_visible_devices=""):
             "PATH": os.getenv("PATH", ""),
         },
         stdout=subprocess.PIPE,
-        shell=True
+        shell=True,
     )
 
 
@@ -390,8 +419,11 @@ def map_fn(args):
         for env in envs:
             cmd = _SUBPROCESS_CMD_TEMPLATE.format(
                 source_env=envs[0] if test_variance else env,
-                env=env, pr=pr, device=_GPU if use_gpu else _CPU,
-                result_file=result_file, seed=seed,
+                env=env,
+                pr=pr,
+                device=_GPU if use_gpu else _CPU,
+                result_file=result_file,
+                seed=seed,
             )
             run(cmd=cmd, cuda_visible_devices=gpu if use_gpu else "")
         finished_counts[_GPU if use_gpu else _CPU] += 1
@@ -406,10 +438,12 @@ def map_fn(args):
 
 
 def main(args):
-    test_source([
-        _REF_ENV_TEMPLATE.format(pr=args.pr),
-        _PR_ENV_TEMPLATE.format(pr=args.pr),
-    ])
+    test_source(
+        [
+            _REF_ENV_TEMPLATE.format(pr=args.pr),
+            _PR_ENV_TEMPLATE.format(pr=args.pr),
+        ]
+    )
     _main(args)
 
 

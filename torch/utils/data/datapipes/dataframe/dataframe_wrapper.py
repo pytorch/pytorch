@@ -5,6 +5,7 @@ _WITH_PANDAS = None
 def _try_import_pandas() -> bool:
     try:
         import pandas  # type: ignore[import]
+
         global _pandas
         _pandas = pandas
         return True
@@ -55,7 +56,7 @@ class PandasWrapper:
     def get_item(cls, data, idx):
         if not _with_pandas():
             raise Exception("DataFrames prototype requires pandas to function")
-        return data[idx: idx + 1]
+        return data[idx : idx + 1]
 
     @classmethod
     def get_len(cls, df):

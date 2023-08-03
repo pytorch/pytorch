@@ -2,6 +2,7 @@
 This module converts objects into numpy array.
 """
 import numpy as np
+
 import torch
 
 
