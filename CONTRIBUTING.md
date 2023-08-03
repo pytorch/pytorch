@@ -1070,15 +1070,12 @@ pip3 install lintrunner
 2. Run lintrunner
 ```bash
 # Run lintrunner on the entire codebase
-lintrunner --take CLANG-TIDY --all-files
+lintrunner --take clang-tidy --all-files
 # Run lintrunner on your changes only
-<<<<<<< HEAD
-lintrunner --changed-only
-=======
-lintrunner --take CLANGTIDY
->>>>>>> origin/doc-fix-contributing.md
+lintrunner --take clang-tidy --changed-only
 ```
-This will run a variety of linters on the entire codebase or on your changes only, respectively. 
+
+This will run a variety of linters on the entire codebase or on your changes only, respectively.
 One of the linters that lintrunner runs is clang-tidy.
 
 The reason why LLVM 8 is needed is because it is the version of LLVM that clang-tidy was tested with.
