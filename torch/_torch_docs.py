@@ -3044,6 +3044,7 @@ resolve_neg(input) -> Tensor
 
 Returns a new tensor with materialized negation if :attr:`input`'s negative bit is set to `True`,
 else returns :attr:`input`. The output tensor will always have its negative bit set to `False`.
+
 Args:
     {input}
 
@@ -3054,12 +3055,11 @@ Example::
     >>> z = y.imag
     >>> z.is_neg()
     True
-    >>> out = y.resolve_neg()
+    >>> out = z.resolve_neg()
     >>> out
-    tensor([-1, -2, -3])
+    tensor([-1., -2., 3.])
     >>> out.is_neg()
     False
-
 """.format(
         **common_args
     ),
@@ -9586,6 +9586,7 @@ Rounds elements of :attr:`input` to the nearest integer.
 
 For integer inputs, follows the array-api convention of returning a
 copy of the input tensor.
+The return type of output is same as that of input's dtype.
 
 .. note::
     This function implements the "round half to even" to
@@ -11961,13 +11962,15 @@ Returns a new tensor with the data in :attr:`input` fake quantized using :attr:`
 :attr:`zero_point`, :attr:`quant_min` and :attr:`quant_max`.
 
 .. math::
-    \text{output} = min(
-        \text{quant\_max},
-        max(
-            \text{quant\_min},
-            \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
-        )
-    )
+    \text{output} = (
+        min(
+            \text{quant\_max},
+            max(
+                \text{quant\_min},
+                \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
+            )
+        ) - \text{zero\_point}
+    ) \times \text{scale}
 
 Args:
     input (Tensor): the input value(s), ``torch.float32`` tensor
@@ -11987,7 +11990,7 @@ Example::
     >>> torch.fake_quantize_per_tensor_affine(x, 0.1, 0, 0, 255)
     tensor([0.1000, 1.0000, 0.4000, 0.0000])
     >>> torch.fake_quantize_per_tensor_affine(x, torch.tensor(0.1), torch.tensor(0), 0, 255)
-    tensor([0.6000, 0.4000, 0.0000, 0.0000])
+    tensor([0.1000, 1.0000, 0.4000, 0.0000])
 """,
 )
 
@@ -13604,9 +13607,7 @@ add_docstr(
     r"""
 Generator.manual_seed(seed) -> Generator
 
-Sets the seed for generating random numbers. Returns a `torch.Generator` object.
-It is recommended to set a large seed, i.e. a number that has a good balance of 0
-and 1 bits. Avoid having many 0 bits in the seed.
+Sets the seed for generating random numbers. Returns a `torch.Generator` object. Any 32-bit integer is a valid seed.
 
 Arguments:
     seed (int): The desired seed. Value must be within the inclusive range

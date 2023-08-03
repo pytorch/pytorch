@@ -8,6 +8,8 @@ from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
+import torch
+
 from .codegen.common import index_prevent_reordering
 from .utils import get_dtype_size, sympy_str, sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
@@ -232,14 +234,23 @@ class _RecordLoadStoreInner(V.MockHandler):
         self._writes.add(MemoryDep(name, *self.canonicalize(index)))
         return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
-    def reduction(
-        self, name: str, dtype, src_dtype, reduction_type, index, value
-    ) -> str:
-        return self.store(name, index, f"reduce_{reduction_type})({value})")
+    def store_reduction(self, name: str, index, value) -> str:
+        return self.store(name, index, f"store_reduction({value})")
 
     def index_expr(self, index: sympy.Expr, dtype) -> str:
         self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
         return f"index_expr({sympy_str(index)}, {dtype})"
+
+    def bucketize(
+        self,
+        values,
+        offsets_name: str,
+        offsets_size: sympy.Expr,
+        indexing_dtype: torch.dtype,
+        right: bool,
+    ):
+        self._reads.add(StarDep(offsets_name))
+        return f"bucketize({values}, {offsets_name}, {sympy_str(offsets_size)}, {indexing_dtype}, {right})"
 
 
 class _OpCounter:

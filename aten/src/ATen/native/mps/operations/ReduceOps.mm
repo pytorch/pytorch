@@ -901,7 +901,7 @@ void argmax_argmin_out_mps(const Tensor& input_t,
       MPSGraphTensor* outputClampedTensor =
           [mpsGraph clampWithTensor:outputTensor
                      minValueTensor:[mpsGraph constantWithScalar:0 dataType:MPSDataTypeInt64]
-                     maxValueTensor:[mpsGraph constantWithScalar:LLONG_MAX dataType:MPSDataTypeInt64]
+                     maxValueTensor:[mpsGraph constantWithScalar:0x7FEFFFFFFFFFFFFF dataType:MPSDataTypeInt64]
                                name:nil];
 
       newCachedGraph->inputTensor_ = inputTensor;
@@ -1382,6 +1382,9 @@ TORCH_IMPL_FUNC(all_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
   using namespace mps;
   using CachedGraph = MPSUnaryCachedGraph;
   if (output_t.numel() == 0 || input_t.numel() == 0) {
+    // in line with cpu behaviour and numpy, an empty tensor should return true.
+    // specifying ones forces the output to be true for this case.
+    output_t.fill_(1);
     return;
   }
 

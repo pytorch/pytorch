@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 #
 # PyTorch documentation build configuration file, created by
 # sphinx-quickstart on Fri Dec 23 13:31:47 2016.
@@ -99,7 +98,7 @@ exhale_args = {
     ############################################################################
     # Main library page layout example configuration.                          #
     ############################################################################
-    "afterTitleDescription": textwrap.dedent(u'''
+    "afterTitleDescription": textwrap.dedent('''
         Welcome to the developer reference for the PyTorch C++ API.
     '''),
 }

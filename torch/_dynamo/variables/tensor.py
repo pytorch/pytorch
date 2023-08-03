@@ -7,6 +7,7 @@ import sympy
 
 import torch.fx
 import torch.random
+
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
 from .. import config, variables
@@ -19,6 +20,7 @@ from ..utils import (
     get_custom_getattr,
     get_fake_value,
     get_real_value,
+    guard_if_dyn,
     HAS_NUMPY_TORCH_INTEROP,
     object_has_getattribute,
     product,
@@ -86,7 +88,6 @@ class TensorVariable(VariableTracker):
         stride=None,
         is_contiguous=None,
         specialized_value=None,
-        storage_offset=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -103,7 +104,6 @@ class TensorVariable(VariableTracker):
         self.is_sparse = is_sparse
         self.class_type = class_type
         self.specialized_value = specialized_value
-        self.storage_offset = storage_offset
 
     def as_proxy(self):
         return self.proxy
@@ -152,8 +152,6 @@ class TensorVariable(VariableTracker):
                     if value.is_contiguous(memory_format=x)
                 ]
             )
-            props["storage_offset"] = value.storage_offset()
-
         return props
 
     def dynamic_getattr(self, tx, name):
@@ -231,10 +229,6 @@ class TensorVariable(VariableTracker):
             result = ConstantVariable(self.is_quantized, **options)
         elif name == "is_sparse" and self.is_sparse is not None:
             result = ConstantVariable(self.is_sparse, **options)
-        elif name == "storage_offset":
-            return variables.LambdaVariable(
-                lambda *args, **kwargs: ConstantVariable(self.storage_offset)
-            ).add_options(self)
         elif name == "shape" and self.size is None:
             result = self.call_method(tx, "size", [], {})
         elif name == "ndim" and self.ndim is None:
@@ -350,15 +344,7 @@ class TensorVariable(VariableTracker):
             else:
                 assert not args and not kwargs, f"Tensor.{name}() unhandled args/kwargs"
 
-            dim = None
-            if isinstance(dim_var, SymNodeVariable):
-                # This is because SymNodeVariable intentionally doesn't define
-                # as_python_constant to avoid shunting down some codepaths
-                # that expect consts.   In this case, we know we definitely
-                # want to specialize though.
-                dim = dim_var.evaluate_expr()
-            elif dim_var is not None:
-                dim = dim_var.as_python_constant()
+            dim = guard_if_dyn(dim_var)
 
             def make_const_size_variable(x, **options):
                 return SizeVariable(
@@ -476,20 +462,6 @@ class TensorVariable(VariableTracker):
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable(index, **options)
-        elif name == "storage_offset":
-            # Constant path
-            if self.storage_offset is not None:
-                return ConstantVariable(self.storage_offset, **options)
-            # dyn shapes path
-            return wrap_fx_proxy(
-                tx,
-                tx.output.create_proxy(
-                    "call_method",
-                    name,
-                    *proxy_args_kwargs([self] + list(args), kwargs),
-                ),
-                **options,
-            )
         else:
             constant_result = None
 
@@ -619,6 +591,26 @@ class TensorVariable(VariableTracker):
             )
             result = TorchVariable(torch.any, **options).call_function(tx, [result], {})
             return result.call_method(tx, "item", [], {})
+        elif name == "redistribute":
+            # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
+            # and rewrite args to have only proxyable args, then insert call_function
+            args_as_value = [x.as_python_constant() for x in args]
+
+            def redistribute_fn_with_prim_types(x):
+                return x.redistribute(*args_as_value)
+
+            # attach the same function name for better debugging
+            redistribute_fn_with_prim_types.__name__ = f"prim_{name}"
+
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    redistribute_fn_with_prim_types,
+                    *proxy_args_kwargs([self], {}),
+                ),
+                **options,
+            )
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
@@ -705,6 +697,26 @@ class TensorWithTFOverrideVariable(VariableTracker):
     Represents a tensor subclass instance with a __torch_function__ override.
     """
 
+    @staticmethod
+    def create(
+        tx,
+        tensor_variable,
+        orig_tensor_variable_source,
+        torch_function_fn,
+        subclass_type,
+        **kwargs,
+    ):
+        var = TensorWithTFOverrideVariable(
+            tensor_variable,
+            orig_tensor_variable_source,
+            torch_function_fn,
+            subclass_type,
+            **kwargs,
+        )
+        # stash the subclass type to rewrap an output tensor if needed
+        tx.output.install_global(var.global_class_name(), subclass_type)
+        return var
+
     def __init__(
         self,
         tensor_variable,
@@ -763,6 +775,9 @@ class TensorWithTFOverrideVariable(VariableTracker):
             self.subclass_torch_function__func,
             self.subclass_type,
         )
+
+    def global_class_name(self):
+        return f"__subclass_{self.subclass_type.__name__}"
 
     @staticmethod
     def inline_torch_function_unwrapped(
@@ -968,3 +983,23 @@ class FakeItemVariable(TensorVariable):
     @classmethod
     def from_tensor_variable(cls, tensor_variable):
         return FakeItemVariable(**dict(tensor_variable.__dict__))
+
+
+class TensorSubclassVariable(VariableTracker):
+    def __init__(self, value, *args, **kwargs):
+        self.value = value
+        super().__init__(*args, **kwargs)
+
+    def call_function(
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        if len(args) == 1 and isinstance(args[0], TensorVariable):
+            return TensorWithTFOverrideVariable.create(
+                tx,
+                args[0],
+                args[0].source,
+                self.value.__torch_function__.__func__,
+                self.value,
+            )
+
+        return super().call_function(tx, args, kwargs)

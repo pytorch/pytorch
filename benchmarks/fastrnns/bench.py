@@ -26,7 +26,7 @@ def fit_str(string, colwidth=16):
 
 def to_str(item):
     if isinstance(item, float):
-        return '%.4g' % item
+        return f'{item:.4g}'
     return str(item)
 
 
@@ -187,7 +187,7 @@ def bench(rnn_runners, group_name, print_json=False, sep=' ', **params):
 
 
 def bench_group(model_list, bench_name, bench_group, bench_args):
-    print_stderr('Benchmarking {}s...'.format(bench_name))
+    print_stderr(f'Benchmarking {bench_name}s...')
     nn_results = bench(get_nn_runners(*model_list), bench_group, **bench_args)
     print_stderr('')
     return nn_results

@@ -770,7 +770,7 @@ class MultiProcessTestCase(TestCase):
         for i, p in enumerate(self.processes):
             if p.exitcode is None:
                 raise RuntimeError(
-                    "Process {} timed out after {} seconds".format(i, elapsed_time)
+                    f"Process {i} timed out after {elapsed_time} seconds"
                 )
             self.assertNotEqual(self.TEST_ERROR_EXIT_CODE, p.exitcode)
 
@@ -1102,7 +1102,7 @@ class MultiThreadedTestCase(TestCase):
                     "Caught exception: \n%s exiting thread %s", msg, rank
                 )
                 error_msg += (
-                    "Thread {} exited with exception:\n{}\n".format(rank, msg)
+                    f"Thread {rank} exited with exception:\n{msg}\n"
                 )
             elif isinstance(exc, SystemExit):
                 if type(exc.code) == int and skip_code < 0:

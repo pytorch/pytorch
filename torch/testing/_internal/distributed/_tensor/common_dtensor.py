@@ -61,6 +61,10 @@ class MLPModule(torch.nn.Module):
     def forward(self, x):
         return self.net2(self.relu(self.net1(x)))
 
+    def reset_parameters(self):
+        self.net1.reset_parameters()
+        self.net2.reset_parameters()
+
 
 def skip_unless_torch_gpu(method: T) -> T:
     """

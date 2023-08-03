@@ -738,24 +738,25 @@ class HasDecompTest(TestCase):
         super().setUp()
         self.maxDiff = None
 
-    def test_has_decomposition(self):
+    @staticmethod
+    def _can_appear_in_trace(op: torch._ops.OpOverload) -> bool:
+        has_tensor_arg = any(
+            "Tensor" in str(a.type)
+            for a in itertools.chain(op._schema.arguments, op._schema.returns))
+        if not has_tensor_arg:
+            return False
 
-        def can_appear_in_trace(op) -> bool:
-            has_tensor_arg = any(
-                "Tensor" in str(a.type)
-                for a in itertools.chain(op._schema.arguments, op._schema.returns))
-            if not has_tensor_arg:
+        try:
+            # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
+            return not op.has_kernel_for_dispatch_key(DispatchKey.CompositeImplicitAutograd)
+        except RuntimeError as e:
+            # has_key fails for some jit-registered ops, which shouldn't be
+            # relevant here anyway
+            if 'does not exist' in str(e):
                 return False
+            raise
 
-            try:
-                # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
-                return not op.has_kernel_for_dispatch_key(DispatchKey.CompositeImplicitAutograd)
-            except RuntimeError as e:
-                # has_key fails for some jit-registered ops, which shouldn't be
-                # relevant here anyway
-                if 'does not exist' in str(e):
-                    return False
-                raise
+    def test_has_decomposition(self):
 
         def all_aten_overloads():
             for name in torch._C._dispatch_get_all_op_names():
@@ -777,10 +778,32 @@ class HasDecompTest(TestCase):
         # configurations, so would cause the test to fail
         allow_list = {aten.get_gradients.default}
 
-        overloads_wanting_decomp = {op for op in all_aten_overloads() if can_appear_in_trace(op)}
+        overloads_wanting_decomp = {op for op in all_aten_overloads()
+                                    if self._can_appear_in_trace(op)}
         ops_missing_decomp = overloads_wanting_decomp - decomposition_table.keys()
         ops_missing_decomp -= allow_list
         self.assertExpected("".join(sorted(op.name() + "\n" for op in ops_missing_decomp)))
+
+    def test_aten_core_operators(self):
+        # If a decomposition isn't included in the core decompositions,
+        # then it must decompose a core ATen operator.
+        #
+        # See NOTE [Core ATen Ops]
+        #
+        # If this test fails then either:
+        # - Add the decomposition to torch._decomp.core_aten_decompositions,
+        #   if decomposition should be used by inductor (not a core operator).
+        # - Run this test again with EXPECTTEST_ACCEPT=1 to update the list of
+        #   core ATen operators (and inductor will not use the decomposition).
+
+        # Some decompositions are registered for CompositeImplicitAutograd
+        # operators, which never appear in AOTAutograd's graph so are never used.
+        useful_decomps = {op for op in decomposition_table.keys()
+                          if self._can_appear_in_trace(op)}
+        core_decomps = torch._decomp.core_aten_decompositions().keys()
+        core_aten_ops = useful_decomps - core_decomps
+        self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))
+
 
 if __name__ == "__main__":
     run_tests()

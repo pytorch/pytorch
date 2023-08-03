@@ -45,8 +45,8 @@ LeafValue = Union[
 # Information to maintain user calling/returning specs
 @dataclasses.dataclass
 class CallSpec:
-    in_spec: pytree.TreeSpec
-    out_spec: pytree.TreeSpec
+    in_spec: Optional[pytree.TreeSpec]
+    out_spec: Optional[pytree.TreeSpec]
 
 
 # Extra information for joint graphs
@@ -154,7 +154,7 @@ class ExportedProgram:
                 )
             finally:
                 ix = 0
-                for _, buffer in self.graph_signature.buffers_to_mutate.items():
+                for buffer in self.graph_signature.buffers_to_mutate.values():
                     self.state_dict[buffer] = mutated_buffers[ix]
                     ix += 1
         return res
@@ -205,9 +205,7 @@ class ExportedProgram:
         # separate step. However this requires augmenting pass infra at fx level
         # to operate on `ExportedProgram` instead of `fx.GraphModule`.
         # TODO: Integrate graph signature update into pass run.
-        ep = _update_graph_signature_after_adding_runtime_assertions(
-            old_ep=self, new_ep=ep,
-        )
+        ep = _fixup_graph_signature(old_ep=self, new_ep=ep)
         if functionalize:
             ep = ep.transform(_FunctionalizeSideEffectfulOpsPass())
             ep = _update_graph_signature_after_assertions_functionalization(ep)
@@ -242,21 +240,22 @@ def _update_graph_signature_after_assertions_functionalization(
         else ep
     )
 
-def _update_graph_signature_after_adding_runtime_assertions(
-    old_ep: ExportedProgram,
-    new_ep: ExportedProgram,
+def _fixup_graph_signature(
+    old_ep: ExportedProgram, new_ep: ExportedProgram,
 ) -> ExportedProgram:
     def _get_output_node_names(gm: torch.fx.GraphModule) -> List[FQN]:
         output_node = next(n for n in gm.graph.nodes if n.op == "output")
-        return [str(arg) for arg in output_node.args[0]]
+        return [str(arg) for arg in output_node.args[0]]  # type: ignore[misc]
 
     # Update output names since after adding run time assertions, the names of
     # outputs could change.
-    # The assumption here is that `_AddRuntimeAssertionsForConstraintsPass`:
+    # The assumption here is that the pass:
     # - Won't change graph outputs order semantically so it's possible to create
     #   map from old to new output names based on position.
     # - Will keep input names unchanged so no need to update inputs related
     #   fields (`user_inputs`, `inputs_to_parameters`, `inputs_to_buffers`, ...)
+    # If any pass logic breaks the above assumption, it needs to update the
+    # signature accordingly to maintain the assumption.
     outputs = _get_output_node_names(old_ep.graph_module)
     new_outputs = _get_output_node_names(new_ep.graph_module)
     assert len(outputs) == len(new_outputs)
@@ -264,9 +263,9 @@ def _update_graph_signature_after_adding_runtime_assertions(
     gs = old_ep.graph_signature
     # Need to update graph signature fields related to output since after adding
     # runtime assertions, the output names could change.
-    new_user_outputs = [outputs_map[u] for u in gs.user_outputs]
+    new_user_outputs = [outputs_map[u] for u in gs.user_outputs]  # type: ignore[index]
     new_buffers_to_mutate = {
-        outputs_map[u]: b for u, b in gs.buffers_to_mutate.items()
+        outputs_map[u]: b for u, b in gs.buffers_to_mutate.items()  # type: ignore[index]
     }
 
     return _update_graph_signature(

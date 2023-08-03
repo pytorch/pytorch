@@ -89,9 +89,11 @@ Features described in this documentation are classified by release status:
    torch.amp <amp>
    torch.autograd <autograd>
    torch.library <library>
+   cpu
    cuda
    mps
    torch.backends <backends>
+   export
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
