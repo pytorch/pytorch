@@ -20,7 +20,7 @@ void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedB
   return (void*)alignedAddress;
 }
 
-// Copy sourceBuffer into destBuffer, casting sourceBuffer to src.scalar_type().
+// Copy sourceBuffer into destBuffer, casting sourceBuffer to dst.scalar_type().
 // The shapes and dtypes are taken from dst and src, but their storage pointers are not used.
 void copy_cast_mps(at::Tensor& dst,
                    const at::Tensor& src,
@@ -290,8 +290,19 @@ at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
   if (dst.numel() == 0) {
     dst.resize_as_(src);
   }
+
+  TORCH_CHECK(dst.dim() >= src.dim());
   if (dst.dim() > src.dim()) {
     needs_broadcasting = true;
+  } else {
+    const IntArrayRef src_sizes = src.sizes();
+    const IntArrayRef dst_sizes = dst.sizes();
+    for (const auto j : c10::irange(src.dim())) {
+      if (src_sizes[j] == 1 && dst_sizes[j] != 1) {
+        needs_broadcasting = true;
+        break;
+      }
+    }
   }
 
   if (src.device().type() == at::kMPS && dst.device().type() == at::kCPU) {
