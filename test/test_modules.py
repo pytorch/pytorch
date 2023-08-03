@@ -12,7 +12,7 @@ from torch._subclasses.meta_utils import assert_metadata_eq
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, onlyCUDA, toleranceOverride, tol, skipMeta)
-from torch.testing._internal.common_modules import module_db, modules, TrainEvalMode
+from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
     gradgradcheck)
@@ -764,6 +764,26 @@ class TestModule(TestCase):
                     continue
                 self.assertTrue(p_meta.is_meta)
                 assert_metadata_eq(self.assertEqual, p_meta, p_cpu)
+
+
+    @modules([module for module in module_db if module.module_error_inputs_func is not None])
+    def test_errors(self, device, dtype, module_info, training):
+        module_cls = module_info.module_cls
+        error_inputs = module_info.module_error_inputs_func(module_info, device=device, dtype=dtype,
+                                                            requires_grad=False, training=training)
+        for error_input in error_inputs:
+            module_input = error_input.module_error_input
+            c_args, c_kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            if error_input.error_on == ModuleErrorEnum.CONSTRUCTION_ERROR:
+                with self.assertRaisesRegex(error_input.error_type, error_input.error_regex):
+                    m = module_cls(*c_args, **c_kwargs)
+            elif error_input.error_on == ModuleErrorEnum.FORWARD_ERROR:
+                m = module_cls(*c_args, **c_kwargs)
+                fw_args, fw_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+                with self.assertRaisesRegex(error_input.error_type, error_input.error_regex):
+                    m(*fw_args, **fw_kwargs)
+            else:
+                raise NotImplementedError(f"Unknown error type {error_input.error_on}")
 
 
 instantiate_device_type_tests(TestModule, globals(), allow_mps=True)
