@@ -79,7 +79,6 @@ SKIP = {
     "tacotron2",
     "hf_Bert",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
     "hf_Bert_large",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
-
 }
 
 SKIP_FOR_CPU = {
