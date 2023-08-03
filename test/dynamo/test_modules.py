@@ -341,6 +341,37 @@ class ModuleDict(torch.nn.Module):
         return x
 
 
+class ParameterDict(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ParameterDict(
+            {
+                "0": torch.nn.Parameter(torch.randn(10, 10)),
+            }
+        )
+
+    def forward(self, x):
+        x = self.layers["0"].mm(x)
+        return x
+
+
+class CustomGetItemParameterDict(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ParameterDict(
+            {
+                "0": torch.nn.Parameter(torch.randn(10, 10)),
+            }
+        )
+
+    def __getitem__(self, key: str) -> torch.nn.Module:
+        return self.layers[key]
+
+    def forward(self, x):
+        x = self["0"].mm(x)
+        return x
+
+
 class CustomGetItemModuleDict(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -731,7 +762,7 @@ class ConvTransposeCallForwardDirectly(torch.nn.Module):
 
 class ConvCallSuperForwardDirectly(torch.nn.Conv1d):
     def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
-        super(ConvCallSuperForwardDirectly, self).__init__(
+        super().__init__(
             in_channels=in_channels,
             out_channels=out_channels,
             kernel_size=kernel_size,
@@ -739,13 +770,13 @@ class ConvCallSuperForwardDirectly(torch.nn.Conv1d):
         )
 
     def forward(self, inputs, mask=None):
-        outputs = super(ConvCallSuperForwardDirectly, self).forward(inputs)
+        outputs = super().forward(inputs)
         return outputs
 
 
 class ConvTransposeCallSuperForwardDirectly(torch.nn.ConvTranspose2d):
     def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
-        super(ConvTransposeCallSuperForwardDirectly, self).__init__(
+        super().__init__(
             in_channels=in_channels,
             out_channels=out_channels,
             kernel_size=kernel_size,
@@ -754,7 +785,7 @@ class ConvTransposeCallSuperForwardDirectly(torch.nn.ConvTranspose2d):
 
     def forward(self, x):
         if x.numel() > 0:
-            return super(ConvTransposeCallSuperForwardDirectly, self).forward(x)
+            return super().forward(x)
         output_shape = [
             ((i - 1) * d - 2 * p + (di * (k - 1) + 1) + op)
             for i, p, di, k, d, op in zip(
@@ -884,7 +915,7 @@ class ModuleGuardNameIsValid(torch.nn.ModuleDict):
             self.add_module("l@yer-%d" % (i + 1), BasicModule())
 
     def forward(self, x):
-        for _, layer in self.items():
+        for layer in self.values():
             x = layer(x)
         return x
 
@@ -892,7 +923,7 @@ class ModuleGuardNameIsValid(torch.nn.ModuleDict):
 class SequentialWithDuplicatedModule(torch.nn.Module):
     # Sequential module(self.layer) contains three duplicated ReLU module.
     def __init__(self):
-        super(SequentialWithDuplicatedModule, self).__init__()
+        super().__init__()
         self.relu = torch.nn.ReLU()
         self.layer = torch.nn.Sequential(
             torch.nn.Linear(10, 20),
@@ -909,7 +940,7 @@ class SequentialWithDuplicatedModule(torch.nn.Module):
 
 class SequentialWithDuplicatedModule2(torch.nn.Module):
     def __init__(self):
-        super(SequentialWithDuplicatedModule2, self).__init__()
+        super().__init__()
         self.relu = torch.nn.ReLU()
         self.layer = torch.nn.Sequential(
             collections.OrderedDict(
@@ -999,6 +1030,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_modulelist = make_test(CustomGetItemModuleList())
     test_moduledict = make_test(ModuleDict())
     test_moduledict = make_test(CustomGetItemModuleDict())
+    test_parameterdict = make_test(ParameterDict())
+    test_parameterdict = make_test(CustomGetItemParameterDict())
     test_super1 = make_test(SuperModule())
     test_super2 = make_test(SuperModule2())
     test_super_class_method = make_test(SuperChildCallsClassMethod())

@@ -102,7 +102,7 @@ class CoordinatorBase:
                              'observer throughput': {}}
 
 
-        print("For batch size {0}".format(self.batch_size))
+        print(f"For batch size {self.batch_size}")
         print("\nAgent Latency - ", len(agent_latency_final))
         agent_latency_final = sorted(agent_latency_final)
         for p in [50, 75, 90, 95]:

@@ -1,4 +1,5 @@
 import abc
+import dataclasses
 import enum
 import functools
 import inspect
@@ -42,7 +43,9 @@ def wrap_bound_arg(tx, val, options, source=None):
             **options,
         )
 
-    if variables.ConstantVariable.is_literal(val) or istype(
+    if source is None and isinstance(val, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
+        return variables.UserDefinedObjectVariable(val)
+    elif variables.ConstantVariable.is_literal(val) or istype(
         val, (torch.Size, torch.device, torch.dtype)
     ):
         return variables.ConstantVariable(val, **options)
@@ -59,13 +62,13 @@ def wrap_bound_arg(tx, val, options, source=None):
     elif istensor(val):
         from torch._dynamo.variables.builder import VariableBuilder
 
-        return VariableBuilder(tx, source=source, **options)(val)
+        return VariableBuilder(tx, source=source)(val).add_options(options)
     elif isinstance(val, VariableTracker):
         return val
     else:
         from torch._dynamo.variables.builder import VariableBuilder
 
-        return VariableBuilder(tx, source=source, **options)(val)
+        return VariableBuilder(tx, source=source)(val).add_options(options)
 
 
 def wrap_args_kwargs(tx, result, options):
@@ -79,6 +82,7 @@ def init_cellvars(parent, result, code):
     closure_cells = dict()
     side_effects = parent.output.side_effects
 
+    # for name in itertools.chain(code.co_cellvars, code.co_freevars):
     for name in code.co_cellvars:
         closure_cells[name] = side_effects.track_cell_new()
         if name in result:
@@ -268,7 +272,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     result[name] = out
 
                 else:
-                    unimplemented("inline with __closure__")
+                    from .builder import variable_builder_no_source
+
+                    result[name] = variable_builder_no_source(cell.cell_contents)
 
         return result, closure_cells
 
@@ -457,6 +463,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return self.f_globals
 
     def bind_args(self, parent, args, kwargs):
+        from .misc import InlinedClosureVariable
+
         code = self.get_code()
         func = types.FunctionType(
             code,
@@ -474,9 +482,19 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         closure_cells = init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):
-            assert getattr(self.closure.items[idx], name, name) == name
+            cell = self.closure.items[idx]
+            assert getattr(cell, name, name) == name
             assert name not in result
-            closure_cells[name] = self.closure.items[idx]
+            if isinstance(cell, InlinedClosureVariable):
+                # InlinedClosureVariable's are created from LOAD_CLOSURE's from
+                # InliningInstructionTranslators when the variable name is not found in closure_cells.
+                # They should remain outside of closure_cells, so that our callee (the
+                # InliningInstructionTranslator that traces `func`) handles
+                # the cell correctly - that is, the cell's contents are treated as if they
+                # are local variables, like in UserFunctionVariable's bind_args for freevars.
+                result[name] = parent.symbolic_locals[name]
+            else:
+                closure_cells[name] = self.closure.items[idx]
 
         return result, closure_cells
 

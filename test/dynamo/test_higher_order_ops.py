@@ -11,6 +11,7 @@ import torch._dynamo.config as config
 
 import torch._dynamo.test_case
 import torch._functorch.config
+import torch.nn as nn
 import torch.utils.checkpoint
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
@@ -39,9 +40,7 @@ def normalize_gm(gm_str):
 
 def check_dynamic_shape_capture():
     # This also mirrors config from `test/dynamo/test_dynamic_shapes.py:make_dynamic_cls`
-    if config.assume_static_by_default and config.automatic_dynamic_shapes:
-        return True
-    if not config.assume_static_by_default and not config.automatic_dynamic_shapes:
+    if not config.assume_static_by_default:
         return True
     return False
 
@@ -62,8 +61,24 @@ def count_ops(gm, args, freq, op):
     return gm
 
 
+class Obj:
+    pass
+
+
+class MyModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.existing = torch.nn.Parameter(torch.ones([]))
+
+    def forward(self, x):
+        return self.existing * x
+
+
+global_obj = Obj()
+global_module = MyModule()
 global_var = torch.randn(3)
 global_num = 3.14
+global_list = []
 
 
 def find_first_node(gm, func):
@@ -82,6 +97,24 @@ def op_count(gm):
 
 
 class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
+    def _assert_wrap_fallback(self, func, args, setup=lambda: None):
+        counters.clear()
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        setup()
+        expected = func(*args)
+        setup()
+        result = torch.compile(func, backend=cnt, fullgraph=False)(*args)
+        num_graph_breaks = len(counters["graph_break"].keys())
+        self.assertGreater(num_graph_breaks, 0)
+
+        for gm in backend.graphs:
+            for node in gm.graph.nodes:
+                self.assertFalse(node.target is wrap)
+
+        self.assertEqual(result, expected)
+
     def _test_wrap_simple(self, func, args, expected_num_wrap_args, expected_opcount=1):
         # Given a `func` that has a single call to `wrap`,
         # we check that:
@@ -109,6 +142,50 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         self._test_wrap_simple(f, (x,), 2)
+
+    def test_return_captured_var(self):
+        freevar = torch.randn(3)
+
+        def test(x):
+            return freevar
+
+        def fn(x):
+            return wrap(test, x)
+
+        x = torch.randn(3)
+
+        # Since, `x` is unused, we don't lift it to
+        # be the input.
+        self._test_wrap_simple(fn, (x,), 2)
+
+    def test_return_captured_vars(self):
+        freevar1 = torch.randn(3)
+        freevar2 = torch.randn(3)
+
+        def test(x):
+            return freevar1, freevar2, freevar1
+
+        def fn(x):
+            return wrap(test, x)
+
+        x = torch.randn(3)
+
+        # Since, `x` is unused, we don't lift it to
+        # be the input.
+        self._test_wrap_simple(fn, (x,), 3, 4)
+
+    def test_return_captured_var_used_multiple_times(self):
+        freevar = torch.randn(3)
+
+        def test(x):
+            y = x + freevar
+            return y, freevar
+
+        def fn(x):
+            return wrap(test, x)
+
+        x = torch.randn(3)
+        self._test_wrap_simple(fn, (x,), 3, 3)
 
     def test_capture_untracked_global(self):
         def f(x):
@@ -207,6 +284,23 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(3, 3)
         self._test_wrap_simple(f, (x, y), 3)
 
+    def test_same_freevar_twice(self):
+        free = torch.randn(3)
+
+        def g(x):
+            y = free.sin()
+            z = free.cos()
+            return y, z
+
+        def f(x):
+            return wrap(g, x)
+
+        x = torch.randn(3)
+
+        # Since, `x` is unused, we don't lift it to
+        # be the input.
+        self._test_wrap_simple(f, (x,), 2, 3)
+
     def test_capture_value_created_in_subgraph(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -246,6 +340,572 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(op_count(body_function), 1)
         inner_wrap_node = find_first_node(body_function, wrap)
         self.assertTrue(len(inner_wrap_node.args), 3)
+
+    def test_side_effect_set_new_attr_global_obj(self):
+        def setup():
+            global global_obj
+            global_obj = Obj()
+
+        def f(x):
+            def h(x):
+                def g(x):
+                    global_obj.foo = x + 1
+                    return x.clone()
+
+                y = wrap(g, x)
+                return y + global_obj.foo
+
+            return h(x)
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(f, (x,), setup=setup)
+
+    def test_side_effect_set_existing_attr_global_obj(self):
+        def setup():
+            global global_obj
+            global_obj = Obj()
+            global_obj.foo = nn.Parameter(torch.tensor(4.0))
+
+        def f(x):
+            def h(x):
+                def g(x):
+                    global_obj.foo = x + 1
+                    return x.clone()
+
+                y = wrap(g, x)
+                return y + global_obj.foo
+
+            return h(x)
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(f, (x,), setup=setup)
+
+    def test_side_effect_del_existing_attr_global_obj(self):
+        def setup():
+            global global_obj
+            global_obj = Obj()
+            global_obj.foo = torch.tensor(4.0)
+
+        def f(x):
+            def h(x):
+                def g(x):
+                    del global_obj.foo
+                    return x.clone()
+
+                y = wrap(g, x)
+                return y
+
+            return h(x)
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(f, (x,), setup=setup)
+
+    def test_side_effect_set_new_attr_global_module(self):
+        def setup():
+            global global_module
+            global_module = MyModule()
+
+        def h(x):
+            def g(x):
+                global_module.foo = nn.Parameter(x + 1)
+                return x.clone()
+
+            y = wrap(g, x)
+            return y + global_module.foo
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(h, (x,), setup=setup)
+
+    def test_side_effect_set_existing_attr_global_module(self):
+        def setup():
+            global global_module
+            global_module = MyModule()
+
+        def h(x):
+            def g(x):
+                global_module.existing = nn.Parameter(torch.tensor(4.0))
+                return global_module(x)
+
+            y = wrap(g, x)
+            return y
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(h, (x,), setup=setup)
+
+    def test_side_effect_del_existing_attr_global_module(self):
+        def setup():
+            global global_module
+            global_module = MyModule()
+
+        def h(x):
+            def g(x):
+                del global_module.existing
+                return x.clone()
+
+            y = wrap(g, x)
+            return y
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(h, (x,), setup=setup)
+
+    def test_side_effect_mutate_global_num(self):
+        def setup():
+            global global_num
+            global_num = 3.14
+
+        def f(x):
+            def g(x):
+                global global_num
+                global_num = global_num + 1
+                return x + global_num
+
+            y = wrap(g, x)
+            return y + global_num
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(f, (x,), setup=setup)
+
+    def test_side_effect_mutate_global_num_builtin(self):
+        def setup():
+            global global_num
+            global_num = 3.14
+
+        def f(x):
+            def g(x):
+                global global_num
+                global_num += 1
+                return x + global_num
+
+            y = wrap(g, x)
+            return y + global_num
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(f, (x,), setup=setup)
+
+    def test_side_effect_mutate_global_tensor(self):
+        def setup():
+            global global_var
+            global_var = torch.ones(3)
+
+        def f(x):
+            def g(x):
+                global global_var
+                global_var = global_var + 1
+                return x + global_var
+
+            y = wrap(g, x)
+            return y + global_var
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(f, (x,), setup=setup)
+
+    def test_side_effect_mutate_global_tensor_builtin(self):
+        def setup():
+            global global_var
+            global_var = torch.ones(3)
+
+        def f(x):
+            def g(x):
+                global global_var
+                global_var += 1
+                return x + global_var
+
+            y = wrap(g, x)
+            return y + global_var
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(f, (x,), setup=setup)
+
+    def test_side_effect_mutate_global_list(self):
+        def setup():
+            global global_list
+            global_list = []
+
+        def f(x):
+            def g(x):
+                val = x + 1
+                global_list.append(val)
+                return global_list[-1]
+
+            y = wrap(g, x)
+            z = y + global_list[-1]
+            return z
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(f, (x,), setup=setup)
+
+    def test_side_effect_mutate_nonlocal_num(self):
+        def f(x):
+            def h(x):
+                val = 1
+
+                def g(x):
+                    nonlocal val
+                    val = val + 1
+                    return x + val
+
+                y = wrap(g, x)
+                z = y + val
+                return z
+
+            return h(x)
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(f, (x,))
+
+    def test_side_effect_set_new_attr_nonlocal_obj(self):
+        def f(x):
+            def h(x):
+                obj = Obj()
+
+                def g(x):
+                    obj.val = x.dim()
+                    return x.clone()
+
+                y = wrap(g, x)
+                z = y + obj.val
+                return z
+
+            return h(x)
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(f, (x,))
+
+    def test_side_effect_set_existing_attr_nonlocal_obj(self):
+        def f(x):
+            def h(x):
+                obj = Obj()
+                obj.val = 3
+
+                def g(x):
+                    obj.val = x.dim()
+                    return x.clone()
+
+                y = wrap(g, x)
+                z = y + obj.val
+                return z
+
+            return h(x)
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(f, (x,))
+
+    def test_side_effect_del_existing_attr_nonlocal_obj(self):
+        def f(x):
+            def h(x):
+                obj = Obj()
+                obj.val = 3
+
+                def g(x):
+                    del obj.val
+                    return x.clone()
+
+                y = wrap(g, x)
+                return y
+
+            return h(x)
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(f, (x,))
+
+    def test_side_effect_set_new_attr_nonlocal_module(self):
+        def h(x):
+            obj = MyModule()
+
+            def g(x):
+                obj.val = x.dim()
+                return x.clone()
+
+            y = wrap(g, x)
+            z = y + obj.val
+            return z
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(h, (x,))
+
+    def test_side_effect_set_existing_attr_nonlocal_module(self):
+        def h(x):
+            obj = MyModule()
+
+            def g(x):
+                obj.existing = nn.Parameter(torch.tensor(3.14))
+                return obj(x)
+
+            y = wrap(g, x)
+            return y
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(h, (x,))
+
+    def test_side_effect_del_existing_attr_nonlocal_module(self):
+        def h(x):
+            obj = MyModule()
+
+            def g(x):
+                del obj.existing
+                return x.clone()
+
+            y = wrap(g, x)
+            return y
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(h, (x,))
+
+    def test_side_effect_mutate_nonlocal_tensor(self):
+        def f(x):
+            def h(x):
+                val = torch.tensor(1.0)
+
+                def g(x):
+                    nonlocal val
+                    val = val + 1
+                    return x + val
+
+                y = wrap(g, x)
+                z = y + val
+                return z
+
+            return h(x)
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(f, (x,))
+
+    def test_side_effect_mutate_nonlocal_num_builtin(self):
+        def f(x):
+            def h(x):
+                val = 1
+
+                def g(x):
+                    nonlocal val
+                    val += 1
+                    return x + val
+
+                y = wrap(g, x)
+                z = y + val
+                return z
+
+            return h(x)
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(f, (x,))
+
+    def test_side_effect_mutate_nonlocal_tensor_builtin(self):
+        def f(x):
+            def h(x):
+                val = torch.tensor(1.0)
+
+                def g(x):
+                    nonlocal val
+                    val += 1
+                    return x + val
+
+                y = wrap(g, x)
+                z = y + val
+                return z
+
+            return h(x)
+
+        x = torch.zeros([])
+        self._assert_wrap_fallback(f, (x,))
+
+    def test_side_effect_nonlocal_list_append_graph_break(self):
+        def g(x):
+            y = []
+
+            def f(k):
+                m = k + 1
+                y.append(m)
+                return k
+
+            wrap(f, x)
+            return y[0]
+
+        x = torch.randn(3, 3)
+        self._assert_wrap_fallback(g, (x,))
+
+    def test_side_effect_nested_nonlocal_list_append_graph_break(self):
+        def g(x):
+            def h(x):
+                y = []
+
+                def f(k):
+                    m = k + 1
+                    y.append(m)
+                    return k
+
+                wrap(f, x)
+                return y[0]
+
+            return h(x)
+
+        x = torch.randn(3, 3)
+        self._assert_wrap_fallback(g, (x,))
+
+    def test_side_effect_local_list_append_no_graph_break(self):
+        def g(x):
+            def f(k):
+                y = []
+                y.append(k + 1)
+                return y[0]
+
+            return wrap(f, x)
+
+        x = torch.randn(3, 3)
+        self._test_wrap_simple(g, (x,), 2)
+
+    def test_wrap_kwarg(self):
+        def f(x, y):
+            return wrap(lambda x, y: x + y, x, y=y)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+        self._test_wrap_simple(f, (x, y), 3)
+
+    def test_wrap_kwarg_int(self):
+        def f(x, y):
+            return wrap(lambda x, y: x + y, x, y=y)
+
+        x = torch.randn(3)
+        y = 8
+
+        # When running with dynamic shapes, `y` is captured as SymNodeVariable,
+        # which is not supported currently.
+        err_msg = "HigherOrderOperator with body that accepts non-Tensors as input"
+        err_ctx = (
+            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, err_msg)
+            if check_dynamic_shape_capture()
+            else contextlib.nullcontext()
+        )
+
+        with err_ctx:
+            # int are not passed as argument and directly
+            # baked into the graph.
+            self._test_wrap_simple(f, (x, y), 2)
+
+    def test_wrap_all_kwarg(self):
+        def f(y, x):
+            return wrap(lambda x, y: (x * 2) + y, x=x, y=y)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+
+        self._test_wrap_simple(f, (x, y), 3)
+
+    def test_wrap_kwarg_only(self):
+        def f(x, y):
+            def fn(*, x, y):
+                return (x * 2) + y
+
+            return wrap(fn, x=x, y=y)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+
+        self._test_wrap_simple(f, (x, y), 3)
+
+    def test_wrap_kwarg_default(self):
+        def f(x, y):
+            def fn(*, x, y, z=8):
+                return (x * 2) + y + z
+
+            return wrap(fn, x=x, y=y)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+
+        self._test_wrap_simple(f, (x, y), 3)
+
+    def test_wrap_kwarg_default_if_branch(self):
+        def f(x, y):
+            def fn(*, x, y, z=None):
+                if z is None:
+                    return (x * 2) + y
+                else:
+                    return 2 * x
+
+            return wrap(fn, x=x, y=y)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+
+        self._test_wrap_simple(f, (x, y), 3)
+
+    def test_wrap_kwarg_recompile(self):
+        def f(x, y, z=None):
+            def fn(*, x, y, z=None):
+                if z is None:
+                    return (x * 2) + y
+                else:
+                    return 2 * x
+
+            return wrap(fn, x=x, y=y, z=z)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+
+        counters.clear()
+        opt = torch.compile(f, backend="eager", fullgraph=True)
+        opt(x, y)
+        self.assertEqual(counters["stats"]["calls_captured"], 1)
+
+        # verify that we `don't` recompile
+        opt(x, y)
+        self.assertEqual(counters["stats"]["calls_captured"], 1)
+
+        # When running with dynamic shapes, `z` is captured as SymNodeVariable,
+        # which is not supported currently.
+        err_msg = "HigherOrderOperator with body that accepts non-Tensors as input"
+        err_ctx = (
+            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, err_msg)
+            if check_dynamic_shape_capture()
+            else contextlib.nullcontext()
+        )
+
+        with err_ctx:
+            # verify that we `do` recompile
+            output = opt(x, y, 8)
+            self.assertEqual(counters["stats"]["calls_captured"], 2)
+            self.assertEqual(output, 2 * x)
+
+    def test_wrap_kwarg_default_else_branch(self):
+        def f(x, y, z):
+            def fn(*, x, y, z=None):
+                if z is None:
+                    return (x * 2) + y
+                else:
+                    return 2 * x
+
+            return wrap(fn, x=x, y=y, z=z)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+
+        # When running with dynamic shapes, `z` is captured as SymNodeVariable,
+        # which is not supported currently.
+        err_msg = "HigherOrderOperator with body that accepts non-Tensors as input"
+        err_ctx = (
+            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, err_msg)
+            if check_dynamic_shape_capture()
+            else contextlib.nullcontext()
+        )
+
+        with err_ctx:
+            # expected_num_wrap_args = 2 because in this case,
+            # we take the `else` branch and `y` is not lifted.
+            self._test_wrap_simple(f, (x, y, 8), 2)
+
+    def test_wrap_unsupported_kwarg(self):
+        def f(x, y, z):
+            def fn(*, x, y, z):
+                z1, z2 = z
+                return (x * 2) + y + z1
+
+            return wrap(fn, x=x, y=y, z=z)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+
+        self._assert_wrap_fallback(f, (x, y, (x, y)))
 
     def test_map_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
@@ -439,8 +1099,23 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         res = mod_for_compile(torch.tensor(True), torch.tensor(5))
         res = mod_for_compile(torch.tensor(True), torch.tensor(5))
 
-        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(len(backend.graphs), 0)
         self.assertEqual(res, mod_for_eager(torch.tensor(True), torch.tensor(5)))
+
+    def test_cond_with_constant_pred(self):
+        def test(pred, x):
+            def true_fn(x):
+                return x
+
+            def false_fn(x):
+                return -x
+
+            return control_flow.cond(pred, true_fn, false_fn, [x])
+
+        opt_test = torch.compile(test, backend="eager")
+        inp = torch.ones(3, 3)
+        self.assertTrue(torch.allclose(test(True, inp), opt_test(True, inp)))
+        self.assertTrue(torch.allclose(test(False, inp), opt_test(False, inp)))
 
     def test_map_graph_break(self):
         backend = EagerAndRecordGraphs()
@@ -501,9 +1176,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
         eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
-        # FIXME (tmanlaibaatar) there should really be 4 graph breaks
-        # for now, we just ignore side effects in body.
-        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(len(backend.graphs), 0)
         self.assertEqual(res, eager)
 
     def test_wrap_subgraph_name_is_valid(self):
@@ -569,12 +1242,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         # Numbers don't get lifted, so args is still 2.
         self._test_wrap_simple(f, (x, y), 2)
 
-    # TODO: Ideally we would error out if there are any new live side
-    # effects (for example, if the body function mutates a global variable).
-    # I don't know how to detect this in a robust way, because it conflicts with
-    # benign side effects like storing and loading cells that is necessary for
-    # capturing variables.
-    @unittest.expectedFailure
     def test_side_effect_in_body(self):
         counters.clear()
         backend = EagerAndRecordGraphs()
@@ -595,7 +1262,9 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(y, x)
         self.assertEqual(
             dict(counters["graph_break"]),
-            {"side effects in HigherOrderOperator body": 1},
+            {
+                "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)": 1
+            },
         )
 
     def test_fallback_on_graph_break_simple(self):
@@ -699,24 +1368,26 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         )
 
     def test_fallback_on_nested_tuple_output(self):
-        # We can likely support this in the future, I just don't want to deal
-        # with it right now
         counters.clear()
-        cnt = CompileCounter()
+
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
 
         @torch.compile(backend=cnt)
         def f(x):
-            return wrap(lambda x: ((x.sin(), x.cos()),), x)
+            ((a, b),) = wrap(lambda x: ((x.sin(), x.cos()),), x)
+            return a + b
 
         x = torch.randn(2, 3)
         result = f(x)
 
-        self.assertEqual(result, ((x.sin(), x.cos()),))
-        self.assertEqual(cnt.frame_count, 0)
-        self.assertEqual(
-            dict(counters["graph_break"]),
-            {"HigherOrderOperator body's output must consist of tensors only": 1},
-        )
+        self.assertEqual(result, x.sin() + x.cos())
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(backend.graphs), 1)
+        wrap_node = find_first_node(backend.graphs[0], wrap)
+        self.assertTrue(len(wrap_node.args), 1)
+        body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
+        self.assertEqual(op_count(body_function), 2)
 
     def test_fallback_on_output_with_dict(self):
         # We can likely support this in the future, I just don't want to deal
@@ -774,6 +1445,31 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 return x + y
 
             return g(x)
+
+        def h(x, y):
+            return wrap(f, x, y)
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+        self._test_wrap_simple(h, (x, y), 3)
+
+    def test_internal_nonlocal(self):
+        def f(x, y):
+            w = 1
+
+            def g(x):
+                nonlocal w
+                w = x
+                return x
+
+            def h(x):
+                nonlocal w
+                w = w + 1
+                return x
+
+            g(x)
+            h(x)
+            return w + y
 
         def h(x, y):
             return wrap(f, x, y)
@@ -850,7 +1546,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         for name, module in model.named_children():
             forward_handles[name] = module.register_forward_hook(save_activations)
 
-        @torch.compile(backend="eager", fullgraph=True)
+        @torch.compile(backend="eager")
         def fn(x):
             return wrap(lambda x: model(x), x)
 
@@ -917,8 +1613,6 @@ class GraphModule(torch.nn.Module):
         self.assertExpectedInline(actual, expected)
 
     def test_grad_freevar_tensor(self):
-        # NOTE: Captured variable is treated as side-effect since
-        #       PR https://github.com/pytorch/pytorch/pull/103386
         counters.clear()
         y = torch.randn(3, 3)
 
@@ -930,12 +1624,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3, 3)
         expected = wrapper_fn(x)
-        actual = torch.compile(wrapper_fn, backend="aot_eager")(x)
-        self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(
-            dict(counters["graph_break"]),
-            {"NYI - torch.func.grad(f) where there are side effects in f": 2},
-        )
+        actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(actual, expected)
 
     def test_grad_freevar_python_scalar(self):
@@ -1006,7 +1695,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         l_x_ = L_x_
@@ -1028,9 +1720,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_grad_closure_scalar(self):
         counters.clear()
@@ -1304,7 +1995,9 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 1)
         self.assertEqual(
             dict(counters["graph_break"]),
-            {"NYI - torch.func.grad(f) where there are side effects in f": 2},
+            {
+                "HigherOrderOperator: Mutating a variable not in the current scope (replace_all)": 2
+            },
         )
         self.assertEqual(actual, expected)
 

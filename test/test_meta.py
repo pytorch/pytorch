@@ -607,7 +607,6 @@ RE_NOT_IMPLEMENTED_MSG = re.compile(r"Could not run '([^']+)' with arguments ")
 
 meta_function_expected_failures = {
     torch.Tensor.to_sparse : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
-    torch.allclose : {f64, f16, c128, c64, bf16, f32},
     torch.argwhere : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.combinations : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.corrcoef : {f64, i32, c128, i64, i16, u8, c64, bf16, i8, f32},
@@ -631,13 +630,6 @@ meta_function_expected_failures = {
     torch.mode : {f64, i32, i64, f16, u8, i16, bf16, b8, i8, f32},
     torch.nn.functional.ctc_loss : {f64, f32},
     torch.nn.functional.gaussian_nll_loss : {f16, f64, bf16, f32},
-    torch.nn.functional.max_pool3d : {f64, f32},
-    torch.nn.functional.max_pool3d_with_indices : {f64, f32},
-    torch.nn.functional.max_unpool1d : {f64, f32},
-    torch.nn.functional.max_unpool2d : {f64, f32},
-    torch.nn.functional.max_unpool3d : {f64, f32},
-    torch.nn.functional.multi_margin_loss : {f64, f32},
-    torch.nn.functional.multilabel_margin_loss : {f64, f32},
     torch.nn.functional.one_hot : {i64},
     torch._segment_reduce : {f64, f16, bf16, f32},
     torch.cholesky : {f64, f32, c128, c64},
@@ -725,13 +717,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.histc: {i16, i32, i64, i8},  # aten::histc, aten::histc.out
     torch.kthvalue: {f16},  # aten::kthvalue.values
     torch.median: {f16},  # aten::median, aten::median.dim_values
-    torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
-    torch.nn.functional.max_pool3d_with_indices: {bf16, f16},  # aten::max_pool3d_with_indices
-    torch.nn.functional.max_unpool1d: {f16},  # aten::max_unpool2d
-    torch.nn.functional.max_unpool2d: {f16},  # aten::max_unpool2d
-    torch.nn.functional.max_unpool3d: {f16},  # aten::max_unpool3d
-    torch.nn.functional.multi_margin_loss: {bf16, f16},  # aten::multi_margin_loss
-    torch.nn.functional.multilabel_margin_loss: {bf16, f16},  # aten::multilabel_margin_loss_forward
     torch.ormqr: {f32, f64},  # aten::ormqr, aten::ormqr.out
 }
 
@@ -818,7 +803,6 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
 
 # these always fail
 meta_dispatch_expected_failures = {
-    aten.allclose.default: {f16, bf16, f32, f64, c64, c128},  # NotImplementedError: 'aten::_local_scalar_dense'
     aten.cholesky.default : {c64, c128, f64, f32},
     aten.cholesky.out : {c64, c128, f64, f32},
     aten.cholesky_inverse.default : {c64, c128, f64, f32},
@@ -842,7 +826,6 @@ meta_dispatch_expected_failures = {
     aten._histogramdd_bin_edges.default : {f32, f64},
     aten._histogramdd_from_bin_cts.default : {f32, f64},
     aten._histogramdd_from_bin_tensors.default : {f32, f64},
-    aten._local_scalar_dense.default : {c32, c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten._unique2.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
     aten.bincount.default : {i64, i8, i32, i16, u8},
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
@@ -853,14 +836,9 @@ meta_dispatch_expected_failures = {
     aten.histogram.bin_ct : {f32, f64},
     aten.histogram.bins_tensor : {f32, f64},
     aten.kthvalue.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.max_pool3d_with_indices.default : {f32, f64},
-    aten.max_unpool2d.default : {f32, f64},
-    aten.max_unpool3d.default : {f32, f64},
     aten.median.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.median.dim : {i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.mode.default : {f16, i8, f64, i64, bf16, f32, i32, b8, i16, u8},
-    aten.multi_margin_loss.default : {f32, f64},
-    aten.multilabel_margin_loss_forward.default : {f32, f64},
     aten.nll_loss2d_forward.default : {bf16, f32, f64},
     aten.rrelu_with_noise.default : {bf16, f32, f64},
     aten.segment_reduce.default : {bf16, f32, f16, f64},
@@ -915,13 +893,8 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.linalg_eigvalsh.out: {f32, f64},  # aten::linalg_eigvalsh.out
     aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
     aten.log_sigmoid_forward.output : {bf16, f16, f64, f32},  # aten::log_sigmoid_forward.output
-    aten.max_pool3d_with_indices.default: {bf16, f16},  # aten::max_pool3d_with_indices
-    aten.max_unpool2d.default: {f16},  # aten::max_unpool2d
-    aten.max_unpool3d.default: {f16},  # aten::max_unpool3d
     aten.median.default: {f16},  # aten::median
     aten.median.dim: {f16},  # aten::median.dim_values
-    aten.multi_margin_loss.default: {bf16, f16},  # aten::multi_margin_loss
-    aten.multilabel_margin_loss_forward.default: {bf16, f16},  # aten::multilabel_margin_loss_forward
     aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
@@ -1367,7 +1340,7 @@ def print_op_str_if_not_supported(op_str):
 if __name__ == "__main__":
     COMPARE_XLA = os.getenv('PYTORCH_COMPARE_XLA', None)
     if COMPARE_XLA is not None:
-        with open(COMPARE_XLA, "r") as f:
+        with open(COMPARE_XLA) as f:
             d = yaml.load(f, Loader=YamlLoader)
             ops = d.get("full_codegen", []) + d.get("supported", []) + d.get("autograd", [])
             for op_str in ops:
@@ -1376,7 +1349,7 @@ if __name__ == "__main__":
 
     COMPARE_TEXT = os.getenv('PYTORCH_COMPARE_TEXT', None)
     if COMPARE_TEXT is not None:
-        with open(COMPARE_TEXT, "r") as f:
+        with open(COMPARE_TEXT) as f:
             for op_str in f:
                 print_op_str_if_not_supported(op_str.strip())
         sys.exit(0)

@@ -45,7 +45,7 @@ namespace autograd {
 static constexpr int MAX_DEPTH = 60;
 
 void set_device(int device);
-void validate_outputs(
+TORCH_API void validate_outputs(
     const edge_list& edges,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error);

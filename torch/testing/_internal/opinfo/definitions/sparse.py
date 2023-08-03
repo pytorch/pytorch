@@ -331,7 +331,7 @@ def _validate_sample_input_sparse_reduction_sum(sample, check_validate=False):
     }:
         if (isinstance(dim, int) and (t_inp.dim() != 2 or keepdim)) or (
             isinstance(dim, (list, tuple))
-            and (((t_inp.dim() != 2 and len(dim) != t_inp.dim()) or keepdim))
+            and ((t_inp.dim() != 2 and len(dim) != t_inp.dim()) or keepdim)
         ):
             if layout in {torch.sparse_bsr, torch.sparse_bsc}:
                 return ErrorInput(

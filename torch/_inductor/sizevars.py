@@ -7,6 +7,7 @@ import sympy
 from sympy import Expr
 
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 from .utils import sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
@@ -81,7 +82,6 @@ class SizeVarAllocator:
         Simplify indexing expression with knowledge of the ranges of
         iteration variables.
         """
-        from .ir import FloorDiv, ModularIndexing
 
         expr = join_dimensions(self.simplify(expr))
         original_expr = expr
@@ -265,8 +265,6 @@ class SizeVarAllocator:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
         """
-        if left == right:
-            return True
         return self.is_expr_static_and_true(sympy.Eq(left, right))
 
     # See Note - [On Statically Known]
@@ -301,9 +299,6 @@ class SizeVarAllocator:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
-        if sympy.gcd(numerator, denominator) == denominator:
-            # can prove it symbolically
-            return True
         expr = sympy.Eq(numerator % denominator, 0)
         return self.is_expr_static_and_true(expr)
 
@@ -342,12 +337,10 @@ class SizeVarAllocator:
     def guard_static_shapes(self, left: List[Expr]) -> List[int]:
         return [self.guard_static_shape(x) for x in left]
 
-    def __getitem__(self, val: int) -> Expr:
-        return self.shape_env.duck_int(val)
-
     def size_hint(self, expr: Expr) -> int:
         if not isinstance(expr, Expr):
-            return int(expr)
+            assert isinstance(expr, int)
+            return expr
         free_symbols = expr.free_symbols
         if not free_symbols:
             return int(expr)
@@ -472,8 +465,6 @@ class SizeVarAllocator:
 
 
 def join_dimensions(expr: Expr) -> Expr:
-    from .ir import ModularIndexing
-
     if not isinstance(expr, sympy.Add) or not expr.has(ModularIndexing):
         return expr  # fast exit path
     return _join_dimensions_cached(expr)
@@ -491,8 +482,6 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
 
     This type of pattern can come from view operations
     """
-    from .ir import FloorDiv, ModularIndexing
-
     assert isinstance(expr, sympy.Add)
 
     scale = sympy.Wild("scale", exclude=[0])
@@ -539,7 +528,7 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
 class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
     """
     A wrapper around .virtualize.ops that uses var range information to
-    simplify ir.ModularIndexing/ir.FloorDiv.
+    simplify ModularIndexing/FloorDiv.
     """
 
     def __init__(self, inner, var_ranges: VarRanges):
@@ -555,10 +544,8 @@ class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
     def store(self, name, index, value, mode=None):
         return self._inner.store(name, self._simplify(index), value, mode=mode)
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        return self._inner.reduction(
-            name, dtype, src_dtype, reduction_type, self._simplify(index), value
-        )
+    def store_reduction(self, name, index, value):
+        return self._inner.store_reduction(name, self._simplify(index), value)
 
     def index_expr(self, index, dtype):
         return self._inner.index_expr(self._simplify(index), dtype)

@@ -88,9 +88,9 @@ def sign_certificate_request(path, csr_cert, ca_cert, private_ca_key):
 
 
 ca_key = genrsa(temp_dir + "/ca.key")
-ca_cert = create_cert(temp_dir + "/ca.pem", u"US", u"New York", u"New York", u"Gloo Certificate Authority", ca_key)
+ca_cert = create_cert(temp_dir + "/ca.pem", "US", "New York", "New York", "Gloo Certificate Authority", ca_key)
 
 pkey = genrsa(temp_dir + "/pkey.key")
-csr = create_req(temp_dir + "/csr.csr", u"US", u"California", u"San Francisco", u"Gloo Testing Company", pkey)
+csr = create_req(temp_dir + "/csr.csr", "US", "California", "San Francisco", "Gloo Testing Company", pkey)
 
 cert = sign_certificate_request(temp_dir + "/cert.pem", csr, ca_cert, ca_key)

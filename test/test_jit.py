@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: jit"]
 
 import torch
@@ -1186,9 +1185,14 @@ class TestJit(JitTestCase):
 
     def test_script_backward_twice(self):
         def checkBackwardTwiceScript(fn, inputs, retain_graph_=False):
-            torch._C._jit_set_profiling_executor(False)
+            class jit_profiling_executor_false:
+                def __enter__(self):
+                    torch._C._jit_set_profiling_executor(False)
 
-            with torch.jit.optimized_execution(True):
+                def __exit__(self, *args):
+                    torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
+
+            with jit_profiling_executor_false(), torch.jit.optimized_execution(True):
                 scripted_fn = torch.jit.script(fn, inputs)
                 FileCheck().check("prim::DifferentiableGraph").run(scripted_fn.graph_for(*inputs))
 
@@ -1646,7 +1650,7 @@ graph(%Ra, %Rb):
 
         graph = torch.jit.script(broadcast).graph
         torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
-        FileCheck().check("Double(4, 3, 8, 5, strides=[120, 40, 5, 1], device=cpu)").run(str(graph))
+        FileCheck().check("Float(4, 3, 8, 5, strides=[120, 40, 5, 1], device=cpu)").run(str(graph))
 
     def test_shape_analysis_unsqueeze_in_loop(self):
         input_str = """graph(%x.1 : Tensor):
@@ -2011,32 +2015,32 @@ graph(%Ra, %Rb):
 
         real = torch.ones([1, 2])
         img = torch.ones([1, 2])
-        out = torch.empty([1, 2], dtype=torch.complex128)
+        out = torch.empty([1, 2], dtype=torch.complex64)
         self.checkScript(fn_out, (real, img, out, ))
 
         real = torch.ones([3, 8, 7])
         img = torch.ones([3, 8, 7])
-        out = torch.empty([3, 8, 7], dtype=torch.complex128)
+        out = torch.empty([3, 8, 7], dtype=torch.complex64)
         self.checkScript(fn_out, (real, img, out, ))
 
         real = torch.empty([3, 2, 6])
         img = torch.empty([3, 2, 6])
-        out = torch.empty([3, 2, 6], dtype=torch.complex128)
+        out = torch.empty([3, 2, 6], dtype=torch.complex64)
         self.checkScript(fn_out, (real, img, out, ))
 
         real = torch.zeros([1, 3])
         img = torch.empty([3, 1])
-        out = torch.empty([3, 3], dtype=torch.complex128)
+        out = torch.empty([3, 3], dtype=torch.complex64)
         self.checkScript(fn_out, (real, img, out, ))
 
         real = torch.ones([2, 5])
         img = torch.empty([2, 1])
-        out = torch.empty([2, 5], dtype=torch.complex128)
+        out = torch.empty([2, 5], dtype=torch.complex64)
         self.checkScript(fn_out, (real, img, out, ))
 
         real = torch.ones([2, 5])
         img = torch.zeros([2, 1])
-        out = torch.empty([2, 5], dtype=torch.complex128)
+        out = torch.empty([2, 5], dtype=torch.complex64)
         self.checkScript(fn_out, (real, img, out, ))
 
     def test_einsum(self):
@@ -2892,7 +2896,7 @@ graph(%Ra, %Rb):
 
         with TemporaryFileName() as fname:
             fn.save(fname)
-            with io.open(fname, 'rb') as f:
+            with open(fname, 'rb') as f:
                 self.assertTrue(torch.serialization._is_zipfile(f))
 
     def test_python_bindings(self):
@@ -3282,8 +3286,8 @@ class TestScript(JitTestCase):
                 test_not_const(torch.rand([2, 2]))
 
                 graph_str = torch.jit.last_executed_optimized_graph()
-                FileCheck().check("profiled_type=Double(*, 2, strides=[2, 1], requires_grad=0, device=cpu").run(graph_str)
-                FileCheck().check_not("profiled_type=Double(1, 2, strides=[2, 1], requires_grad=0, device=cpu").run(graph_str)
+                FileCheck().check("profiled_type=Float(*, 2, strides=[2, 1], requires_grad=0, device=cpu").run(graph_str)
+                FileCheck().check_not("profiled_type=Float(1, 2, strides=[2, 1], requires_grad=0, device=cpu").run(graph_str)
 
 
     def test_nested_bailouts(self):
@@ -3949,7 +3953,7 @@ def foo(x):
                 if idx < len(exprs):
                     return get_expr(idx)
                 else:
-                    return 'v{}'.format(idx - len(exprs))
+                    return f'v{idx - len(exprs)}'
 
             for i in range(50):
                 n = None
@@ -3958,12 +3962,12 @@ def foo(x):
                     n = template.count('{}')
 
                 if 'VAR' in template:
-                    src_lines.append('  v{} = {}'.format(n_variables, select_expr_or_var()))
+                    src_lines.append(f'  v{n_variables} = {select_expr_or_var()}')
                     n_variables += 1
                 else:
                     exprs.append(template.format(*(select_expr_or_var() for _ in range(n))))
 
-            src_lines.append('  return ({})\n'.format(''.join('v{},'.format(i) for i in range(n_variables))))
+            src_lines.append('  return ({})\n'.format(''.join(f'v{i},' for i in range(n_variables))))
             return '\n'.join(src_lines)
 
         for i in range(100):
@@ -4387,7 +4391,7 @@ def foo(x):
             return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(foobar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py\", line {}".format(lineno + 1)):
+        with self.assertRaisesRegex(RuntimeError, f"test_jit.py\", line {lineno + 1}"):
             scripted = torch.jit.script(foobar)
 
     def test_file_line_error_class_defn(self):
@@ -4396,7 +4400,7 @@ def foo(x):
                 return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(FooBar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py\", line {}".format(lineno + 2)):
+        with self.assertRaisesRegex(RuntimeError, f"test_jit.py\", line {lineno + 2}"):
             torch.jit.script(FooBar)
 
     def test_file_line_graph(self):
@@ -4406,7 +4410,7 @@ def foo(x):
         scripted = torch.jit.script(foobar)
 
         _, lineno = inspect.getsourcelines(foobar)
-        fc = FileCheck().check('test_jit.py:{}:19'.format(lineno + 1))
+        fc = FileCheck().check(f'test_jit.py:{lineno + 1}:19')
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
@@ -4426,7 +4430,7 @@ def foo(x):
         scripted = torch.jit.load(bytesio)
 
         _, lineno = inspect.getsourcelines(Scripted)
-        fc = FileCheck().check(':{}'.format(lineno + 3))
+        fc = FileCheck().check(f':{lineno + 3}')
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
@@ -4448,7 +4452,7 @@ def foo(xyz):
         scripted = torch.jit.trace(foobar, (torch.rand(3, 4)))
 
         _, lineno = inspect.getsourcelines(foobar)
-        fc = FileCheck().check('test_jit.py:{}:0'.format(lineno + 1))
+        fc = FileCheck().check(f'test_jit.py:{lineno + 1}:0')
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
@@ -4463,7 +4467,7 @@ def foo(xyz):
         loaded = self.getExportImportCopy(ft)
         _, lineno = inspect.getsourcelines(FooTest)
 
-        with self.assertRaisesRegex(RuntimeError, 'test_jit.py\", line {}'.format(lineno + 3)):
+        with self.assertRaisesRegex(RuntimeError, f'test_jit.py\", line {lineno + 3}'):
             loaded(torch.rand(3, 4), torch.rand(30, 40))
 
     def test_serialized_source_ranges_graph(self):
@@ -4477,7 +4481,7 @@ def foo(xyz):
         loaded = self.getExportImportCopy(ft)
         _, lineno = inspect.getsourcelines(FooTest3)
 
-        fc = FileCheck().check('test_jit.py:{}'.format(lineno + 3))
+        fc = FileCheck().check(f'test_jit.py:{lineno + 3}')
         fc.run(loaded.graph)
 
     def test_serialized_source_ranges2(self):
@@ -4489,7 +4493,7 @@ def foo(xyz):
 
         _, lineno = inspect.getsourcelines(FooTest2)
 
-        with self.assertRaisesRegex(torch.jit.Error, 'test_jit.py\", line {}'.format(lineno + 3)):
+        with self.assertRaisesRegex(torch.jit.Error, f'test_jit.py\", line {lineno + 3}'):
             ft = FooTest2()
             loaded = self.getExportImportCopy(ft)
             loaded()
@@ -5721,7 +5725,7 @@ a")
         x = torch.randn(3, 1, 5, requires_grad=True)
         fn = torch.jit.script(fn)
         graph = _propagate_shapes(fn.graph, (x,), False)
-        self.assertTrue(next(graph.outputs()).type().scalarType() == 'Double')
+        self.assertTrue(next(graph.outputs()).type().scalarType() == 'Float')
 
     def test_shape_prop_promotion(self):
         @torch.jit.script
@@ -7235,7 +7239,7 @@ a")
             scope = {}
             execWrapper(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
-            message = 'with code `{} {} {}` and t={}'.format(args[0], op, args[1], tensor)
+            message = f'with code `{args[0]} {op} {args[1]}` and t={tensor}'
             res1 = cu.func(tensor)
             res2 = scope['func'](tensor)
             self.assertEqual(res1, res2, msg=message + "\nres1=" + str(res1) + "\nres2=" + str(res2))
@@ -7323,7 +7327,7 @@ a")
         ops = ['tensor', 'as_tensor']
         inputs = ['[1]', '[False]', '[2.5]', '0.5', '1', 'False', '[[1]]', 'torch.jit.annotate(List[List[int]], [])']
         expected_shape = ["Long(*, device=cpu)", "Bool(*, device=cpu)",
-                          "Double(*, device=cpu)", "Double(device=cpu)",
+                          "Float(*, device=cpu)", "Float(device=cpu)",
                           "Long(device=cpu)", "Bool(device=cpu)", "Long(*, *, device=cpu)"]
 
         for op in ops:
@@ -7333,7 +7337,7 @@ a")
                 exec(code, globals(), scope)
                 cu = torch.jit.CompilationUnit(code)
                 torch._C._jit_pass_complete_shape_analysis(cu.func.graph, (), False)
-                FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(cu.func.graph)
+                FileCheck().check(expect).check(f"aten::{op}").run(cu.func.graph)
 
         @torch.jit.script
         def test_dtype(inp_dtype: torch.dtype):
@@ -7540,7 +7544,7 @@ dedent """
             devices = [t.device]
             if t.device.type == 'cuda':
                 if t.device.index == -1:
-                    devices.append('cuda:{}'.format(torch.cuda.current_device()))
+                    devices.append(f'cuda:{torch.cuda.current_device()}')
                 elif t.device.index == torch.cuda.current_device():
                     devices.append('cuda')
             for device in devices:
@@ -8595,7 +8599,7 @@ dedent """
                     if(not tensor_type.is_floating_point or (dtype is not None and not dtype.is_floating_point)):
                         if op in ['mean', 'softmax', 'log_softmax']:
                             continue
-                    return_line = "torch.tensor({}, dtype={}).{}({}dtype={})".format(tensor_data, tensor_type, op, str_args, dtype)
+                    return_line = f"torch.tensor({tensor_data}, dtype={tensor_type}).{op}({str_args}dtype={dtype})"
                     # uncomment for debugging a failed test:
                     # print("testing {}".format(return_line))
                     code = template.format(return_line=return_line)
@@ -8648,7 +8652,7 @@ dedent """
 
         args = []
         for dtype in dtypes:
-            args = args + ["torch.tensor({}, dtype={})".format(shape, dtype)]
+            args = args + [f"torch.tensor({shape}, dtype={dtype})"]
         args = args + [1, 1.5]
 
         def isBool(arg):
@@ -8665,7 +8669,7 @@ dedent """
                        isinstance(first_arg, int) or
                        (isinstance(first_arg, str) and 'int' in first_arg))):
                         continue
-                    return_line = "torch.{}({}, {})".format(op, first_arg, second_arg)
+                    return_line = f"torch.{op}({first_arg}, {second_arg})"
                     # uncomment for debugging a failed test:
                     # print("testing {}".format(return_line))
                     code = template.format(first_arg, second_arg, op)
@@ -9089,7 +9093,7 @@ dedent """
         @torch.jit.script_method
         def _pack(self):
             self.pack_called.set_(torch.ones(1, dtype=torch.long))
-            self.derived.set_(torch.rand(1, dtype=torch.float).detach())
+            self.derived.set_(torch.rand(1).detach())
 
         @torch.jit.script_method
         def _unpack(self):
@@ -9102,7 +9106,7 @@ dedent """
 
     def test_pack_unpack_state(self):
         sm = TestScript.DerivedStateModule()
-        x = torch.rand(3, 4, dtype=torch.float)
+        x = torch.rand(3, 4)
         torch.testing.assert_close(sm(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
 
         # Test save path
@@ -9268,11 +9272,11 @@ dedent """
 
             @torch.jit.script_method
             def _pack(self):
-                self.buf.set_(torch.zeros(1, dtype=torch.double))
+                self.buf.set_(torch.zeros(1))
 
             @torch.jit.script_method
             def _unpack(self):
-                self.buf.set_(torch.ones(3, 4, dtype=torch.double) * 3)
+                self.buf.set_(torch.ones(3, 4) * 3)
 
             @torch.jit.script_method
             def forward(self, x):
@@ -9286,11 +9290,11 @@ dedent """
 
             @torch.jit.script_method
             def _pack(self):
-                self.buf.set_(torch.zeros(1, dtype=torch.double))
+                self.buf.set_(torch.zeros(1))
 
             @torch.jit.script_method
             def _unpack(self):
-                self.buf.set_(torch.ones(3, 4, dtype=torch.double) * 2)
+                self.buf.set_(torch.ones(3, 4) * 2)
 
             @torch.jit.script_method
             def forward(self, x):
@@ -9304,11 +9308,11 @@ dedent """
 
             @torch.jit.script_method
             def _pack(self):
-                self.buf.set_(torch.zeros(1, dtype=torch.double))
+                self.buf.set_(torch.zeros(1))
 
             @torch.jit.script_method
             def _unpack(self):
-                self.buf.set_(torch.ones(3, 4, dtype=torch.double))
+                self.buf.set_(torch.ones(3, 4))
 
             @torch.jit.script_method
             def forward(self, x):
@@ -10073,13 +10077,13 @@ dedent """
 
         cm = ScriptMod(Mod())
         # specialized tensor in graph
-        FileCheck().check("Double(1, 3, strides=[3, 1], requires_grad=0, device=cpu)").run(cm.forward.graph)
+        FileCheck().check("Float(1, 3, strides=[3, 1], requires_grad=0, device=cpu)").run(cm.forward.graph)
         buffer = io.BytesIO()
         torch.jit.save(cm, buffer)
         buffer.seek(0)
         # when tensor is loaded as constant it isnt specialized
         cm_load = torch.jit.load(buffer)
-        FileCheck().check_not("Double(1, 3)").run(cm_load.forward.graph)
+        FileCheck().check_not("Float(1, 3)").run(cm_load.forward.graph)
 
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_type_annotations_repeated_list(self):
@@ -10215,7 +10219,7 @@ dedent """
         def fn3(x, y, z):
             return fn_varargs(x, y, z)
 
-        x, y, z = [torch.randn(2, 2) for _ in range(3)]
+        x, y, z = (torch.randn(2, 2) for _ in range(3))
         self.checkScript(fn1, (x, y, z), optimize=True)
         self.checkScript(fn2, (x, y, z), optimize=True)
         self.checkScript(fn3, (x, y, z), optimize=True)
@@ -10665,7 +10669,7 @@ dedent """
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
         torch._C._jit_pass_complete_shape_analysis(foo.graph, (a, b), False)
-        FileCheck().check("Double(2, 4, strides=[4, 1], requires_grad=0, device=cpu)").run(str(foo.graph))
+        FileCheck().check("Float(2, 4, strides=[4, 1], requires_grad=0, device=cpu)").run(str(foo.graph))
 
     def test_shape_analysis_loop(self):
         def foo(a, b, x):
@@ -10998,7 +11002,7 @@ dedent """
         self.checkScript(test_rand, ())
         fn = torch.jit.script(test_rand)
         out = fn()
-        self.assertEqual(out.dtype, torch.double)
+        self.assertEqual(out.dtype, torch.get_default_dtype())
         g = fn.graph_for()
         # Testing shape analysis correctly setting type
         if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
@@ -11102,13 +11106,13 @@ dedent """
                 fn = torch.jit.script(test_rand)
                 out = fn()
                 graph_str = torch.jit.last_executed_optimized_graph()
-                self.assertEqual(out.dtype, torch.double)
-                FileCheck().check("Double(3, 4, strides=[4, 1], requires_grad=0, device=cpu)") \
-                           .check_not("Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu)").run(graph_str)
+                self.assertEqual(out.dtype, torch.float)
+                FileCheck().check("Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu)") \
+                           .check_not("Double(3, 4, strides=[4, 1], requires_grad=0, device=cpu)").run(graph_str)
 
             # fn = self.checkScript(test_rand, ())
             # out = fn()
-            # self.assertEqual(out.dtype, torch.double)
+            # self.assertEqual(out.dtype, torch.float)
 
         @torch.jit.script
         def randint():
@@ -12959,7 +12963,7 @@ dedent """
             returns = fn.schema.returns
             self.assertEqual(str(args[0].type), pair[1])
             self.assertEqual(str(args[1].type), "Tuple[Tensor, Tensor]")
-            self.assertEqual(str(returns[0].type), "Tuple[{}, {}]".format(pair[1], pair[1]))
+            self.assertEqual(str(returns[0].type), f"Tuple[{pair[1]}, {pair[1]}]")
 
     def test_bad_multiline_annotations(self):
         with self.assertRaisesRegex(RuntimeError, "Return type line"):
@@ -13565,7 +13569,7 @@ dedent """
             # type: (str) -> Tensor
             return torch.tensor(ord(s))  # noqa: T484
 
-        s = u'\u00a3'.encode('utf8')[:1]
+        s = '\u00a3'.encode()[:1]
         self.checkScript(index_str_to_tensor, (s,))
 
     def test_chr(self):
@@ -14702,7 +14706,7 @@ dedent """
 
         over = Over()
         self.assertEqual(over((x, x)), x + 5)
-        self.assertEqual(over((x)), x + 20)
+        self.assertEqual(over(x), x + 20)
 
         class Unannotated(torch.nn.Module):
             @torch.jit._overload_method  # noqa: F811
@@ -14935,7 +14939,7 @@ dedent """
         value = torch.rand((src_l, bsz, embed_size))
 
         mask = (torch.triu(torch.ones(src_l, src_l)) == 1).transpose(0, 1)
-        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0)).double()
+        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0)).to(torch.get_default_dtype())
 
         jit_out = jit_multihead_attn_forward(query, key, value,
                                              embed_size, nhead,
@@ -16125,7 +16129,7 @@ def add_nn_module_test(*args, **kwargs):
 
             method_args = ', '.join(['self'] + actuals)
             call_args_str = ', '.join(actuals)
-            call = "self.submodule({})".format(call_args_str)
+            call = f"self.submodule({call_args_str})"
             script = script_method_template.format(method_args, call)
 
             submodule_constants = []
@@ -16160,14 +16164,14 @@ def add_nn_module_test(*args, **kwargs):
             return module(*args)
 
         # Set up inputs from tuple of sizes or constructor fn
-        dtype = torch.double
+        dtype = torch.float
         if 'input_fn' in kwargs:
             input = kwargs['input_fn']()
             if isinstance(input, Tensor):
                 input = (input,)
 
             if all(tensor.is_complex() for tensor in input):
-                dtype = torch.cdouble
+                dtype = torch.cfloat
         else:
             input = (kwargs['input_size'],)
 

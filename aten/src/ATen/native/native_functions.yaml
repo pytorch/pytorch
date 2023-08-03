@@ -3233,9 +3233,9 @@
     MkldnnCPU: mkldnn_linear_backward
   autogen: mkldnn_linear_backward.out
 
-- func: _structured_sparse_linear(Tensor input, Tensor weight, Tensor mask_or_meta, *, Tensor? bias=None, str? activation=None) -> (Tensor, Tensor)
+- func: _sparse_semi_structured_linear(Tensor input, Tensor weight, Tensor meta, *, Tensor? bias=None, str? activation=None) -> Tensor
   dispatch:
-    CUDA: _structured_sparse_linear
+    CUDA: _sparse_semi_structured_linear
 
 - func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
 
@@ -4173,7 +4173,7 @@
     CUDA: batch_norm_backward_reduce_cuda
   autogen: batch_norm_backward_reduce.out
 
-- func: batch_norm_backward_elemt(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, Tensor mean_dy, Tensor mean_dy_xmu, Tensor count) -> Tensor
+- func: batch_norm_backward_elemt(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, Tensor sum_dy, Tensor sum_dy_xmu, Tensor count) -> Tensor
   dispatch:
     CUDA: batch_norm_backward_elemt_cuda
   autogen: batch_norm_backward_elemt.out
@@ -4312,7 +4312,7 @@
 
 - func: channel_shuffle(Tensor self, int groups) -> Tensor
   dispatch:
-    CPU: channel_shuffle
+    CPU, CUDA: channel_shuffle
     QuantizedCPU: channel_shuffle_quantized_cpu
   autogen: channel_shuffle.out
 
@@ -6834,7 +6834,7 @@
     SparseCsrCPU, SparseCsrCUDA: sparse_mask_sparse_csr
   autogen: sparse_mask.out
 
-- func: _sparse_mask_projection(Tensor self, Tensor mask) -> Tensor
+- func: _sparse_mask_projection(Tensor self, Tensor mask, bool accumulate_matches=False) -> Tensor
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_mask_projection
@@ -7094,6 +7094,11 @@
     SparseCPU, SparseCUDA: coo_to_sparse_bsc
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_bsc
   autogen: _to_sparse_bsc.out
+
+- func: _to_sparse_semi_structured(Tensor dense) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: _to_sparse_semi_structured
 
 - func: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
@@ -7369,6 +7374,7 @@
     CPU: _local_scalar_dense_cpu
     CUDA: _local_scalar_dense_cuda
     MPS: _local_scalar_dense_mps
+    Meta: _local_scalar_dense_meta
   variants: function
 
 # MPS LSTM implementation
@@ -9248,6 +9254,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: lerp_Scalar
+    MPS: lerp_Scalar_mps
   tags: pointwise
 
 - func: lerp.Tensor_out(Tensor self, Tensor end, Tensor weight, *, Tensor(a!) out) -> Tensor(a!)
@@ -9256,6 +9263,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: lerp_Tensor
+    MPS: lerp_Tensor_mps
   tags: pointwise
 
 - func: lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor
@@ -11794,25 +11802,25 @@
     CPU: max_pool3d_with_indices_backward_cpu
     CUDA: max_pool3d_with_indices_backward_cuda
 
-- func: max_unpool2d.out(Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
+- func: max_unpool2d.out(Tensor self, Tensor indices, SymInt[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: max_unpooling2d_forward_out_cpu
     CUDA: max_unpooling2d_forward_out_cuda
 
-- func: max_unpool2d(Tensor self, Tensor indices, int[2] output_size) -> Tensor
+- func: max_unpool2d(Tensor self, Tensor indices, SymInt[2] output_size) -> Tensor
   python_module: nn
   dispatch:
     CPU: max_unpooling2d_forward_cpu
     CUDA: max_unpooling2d_forward_cuda
 
-- func: max_unpool3d.out(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) out) -> Tensor(a!)
+- func: max_unpool3d.out(Tensor self, Tensor indices, SymInt[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: max_unpooling3d_forward_out_cpu
     CUDA: max_unpooling3d_forward_out_cuda
 
-- func: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
+- func: max_unpool3d(Tensor self, Tensor indices, SymInt[3] output_size, int[3] stride, int[3] padding) -> Tensor
   python_module: nn
   dispatch:
     CPU: max_unpooling3d_forward_cpu
@@ -14161,13 +14169,6 @@
   autogen: scaled_dot_product_attention.out
   tags: nondeterministic_seeded
 
-# TODO: THIS NEEDS TO BE REMOVED BUT PEOPLE HAVE TRAINED THEIR MODELS WITH THIS OP BUILTIN
-- func: _scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=False, bool is_causal=False) -> (Tensor, Tensor)
-  python_module: nn
-  variants: function
-  autogen: _scaled_dot_product_attention.out
-  tags: nondeterministic_seeded
-
 # This aten function is kept so that we can test the choice function from Python
 - func: _fused_sdp_choice(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> int
   dispatch:
@@ -14203,11 +14204,6 @@
   dispatch:
     CUDA: _scaled_dot_product_efficient_attention_backward_cuda
   tags: nondeterministic_seeded
-
-# THIS FUNCTION iS DEPRECATED AND SHOULD BE REMOVED
-- func: _chunk_grad_outputs_efficient_attention(Tensor query, Tensor key, Tensor value, bool is_causal=False) -> bool
-  dispatch:
-    CUDA: _chunk_grad_outputs_efficient_attention
 
 - func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal, bool return_debug_mask, *, float? scale=None) -> (Tensor output, Tensor softmax_logsumexp, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   variants: function

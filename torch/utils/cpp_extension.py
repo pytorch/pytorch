@@ -5,6 +5,7 @@ import importlib.abc
 import os
 import re
 import shlex
+import shutil
 import setuptools
 import subprocess
 import sys
@@ -123,19 +124,18 @@ def _find_rocm_home() -> Optional[str]:
     rocm_home = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH')
     if rocm_home is None:
         # Guess #2
-        try:
-            pipe_hipcc = subprocess.Popen(
-                ["which hipcc | xargs readlink -f"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-            hipcc, _ = pipe_hipcc.communicate()
-            # this will be either <ROCM_HOME>/hip/bin/hipcc or <ROCM_HOME>/bin/hipcc
-            rocm_home = os.path.dirname(os.path.dirname(hipcc.decode(*SUBPROCESS_DECODE_ARGS).rstrip('\r\n')))
+        hipcc_path = shutil.which('hipcc')
+        if hipcc_path is not None:
+            rocm_home = os.path.dirname(os.path.dirname(
+                os.path.realpath(hipcc_path)))
+            # can be either <ROCM_HOME>/hip/bin/hipcc or <ROCM_HOME>/bin/hipcc
             if os.path.basename(rocm_home) == 'hip':
                 rocm_home = os.path.dirname(rocm_home)
-        except Exception:
+        else:
             # Guess #3
-            rocm_home = '/opt/rocm'
-            if not os.path.exists(rocm_home):
-                rocm_home = None
+            fallback_path = '/opt/rocm'
+            if os.path.exists(fallback_path):
+                rocm_home = fallback_path
     if rocm_home and torch.version.hip is None:
         print(f"No ROCm runtime is found, using ROCM_HOME='{rocm_home}'",
               file=sys.stderr)
@@ -150,11 +150,11 @@ def _join_rocm_home(*paths) -> str:
     only once we need to get any ROCm-specific path.
     '''
     if ROCM_HOME is None:
-        raise EnvironmentError('ROCM_HOME environment variable is not set. '
-                               'Please set it to your ROCm install root.')
+        raise OSError('ROCM_HOME environment variable is not set. '
+                      'Please set it to your ROCm install root.')
     elif IS_WINDOWS:
-        raise EnvironmentError('Building PyTorch extensions using '
-                               'ROCm and Windows is not supported.')
+        raise OSError('Building PyTorch extensions using '
+                      'ROCm and Windows is not supported.')
     return os.path.join(ROCM_HOME, *paths)
 
 
@@ -258,6 +258,21 @@ def _accepted_compilers_for_platform() -> List[str]:
     # gnu-c++ and gnu-cc are the conda gcc compilers
     return ['clang++', 'clang'] if IS_MACOS else ['g++', 'gcc', 'gnu-c++', 'gnu-cc', 'clang++', 'clang']
 
+def _maybe_write(filename, new_content):
+    r'''
+    Equivalent to writing the content into the file but will not touch the file
+    if it already had the right content (to avoid triggering recompile).
+    '''
+    if os.path.exists(filename):
+        with open(filename) as f:
+            content = f.read()
+
+        if content == new_content:
+            # The file already contains the right thing!
+            return
+
+    with open(filename, 'w') as source_file:
+        source_file.write(new_content)
 
 def get_default_build_root() -> str:
     r'''
@@ -1088,8 +1103,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
         hipified_sources = set()
         for source in sources:
             s_abs = os.path.abspath(source)
-            hipified_s_abs = (hipify_result[s_abs]["hipified_path"] if (s_abs in hipify_result and
-                              hipify_result[s_abs]["hipified_path"] is not None) else s_abs)
+            hipified_s_abs = (hipify_result[s_abs].hipified_path if (s_abs in hipify_result and
+                              hipify_result[s_abs].hipified_path is not None) else s_abs)
             # setup() arguments must *always* be /-separated paths relative to the setup.py directory,
             # *never* absolute paths
             hipified_sources.add(os.path.relpath(hipified_s_abs, build_dir))
@@ -1417,8 +1432,7 @@ def load_inline(name,
         cpp_sources += module_def
 
     cpp_source_path = os.path.join(build_directory, 'main.cpp')
-    with open(cpp_source_path, 'w') as cpp_source_file:
-        cpp_source_file.write('\n'.join(cpp_sources))
+    _maybe_write(cpp_source_path, "\n".join(cpp_sources))
 
     sources = [cpp_source_path]
 
@@ -1428,8 +1442,7 @@ def load_inline(name,
         cuda_sources.insert(2, '#include <cuda_runtime.h>')
 
         cuda_source_path = os.path.join(build_directory, 'cuda.cu')
-        with open(cuda_source_path, 'w') as cuda_source_file:
-            cuda_source_file.write('\n'.join(cuda_sources))
+        _maybe_write(cuda_source_path, "\n".join(cuda_sources))
 
         sources.append(cuda_source_path)
 
@@ -1504,7 +1517,7 @@ def _jit_compile(name,
                         hipified_sources = set()
                         for source in sources:
                             s_abs = os.path.abspath(source)
-                            hipified_sources.add(hipify_result[s_abs]["hipified_path"] if s_abs in hipify_result else s_abs)
+                            hipified_sources.add(hipify_result[s_abs].hipified_path if s_abs in hipify_result else s_abs)
 
                         sources = list(hipified_sources)
 
@@ -2221,11 +2234,10 @@ def _write_ninja_file(path,
     if with_cuda:
         blocks.append(cuda_compile_rule)
     blocks += [devlink_rule, link_rule, build, devlink, link, default]
-    with open(path, 'w') as build_file:
-        for block in blocks:
-            lines = '\n'.join(block)
-            build_file.write(f'{lines}\n\n')
-
+    content = "\n\n".join("\n".join(b) for b in blocks)
+    # Ninja requires a new lines at the end of the .ninja file
+    content += "\n"
+    _maybe_write(path, content)
 
 def _join_cuda_home(*paths) -> str:
     r'''
@@ -2235,8 +2247,8 @@ def _join_cuda_home(*paths) -> str:
     only once we need to get any CUDA-specific path.
     '''
     if CUDA_HOME is None:
-        raise EnvironmentError('CUDA_HOME environment variable is not set. '
-                               'Please set it to your CUDA install root.')
+        raise OSError('CUDA_HOME environment variable is not set. '
+                      'Please set it to your CUDA install root.')
     return os.path.join(CUDA_HOME, *paths)
 
 

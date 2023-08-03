@@ -143,7 +143,7 @@ class Conf:
 
 
 # TODO This is a hack to special case some configs just for the workflow list
-class HiddenConf(object):
+class HiddenConf:
     def __init__(self, name, parent_build=None, filters=None):
         self.name = name
         self.parent_build = parent_build
@@ -160,7 +160,7 @@ class HiddenConf(object):
     def gen_build_name(self, _):
         return self.name
 
-class DocPushConf(object):
+class DocPushConf:
     def __init__(self, name, parent_build=None, branch="master"):
         self.name = name
         self.parent_build = parent_build

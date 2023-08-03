@@ -5,7 +5,7 @@ import copy
 import functools
 import sys
 from enum import auto, Enum
-from typing import Callable, Iterable, List, Tuple
+from typing import Callable, List, Tuple
 
 import torch
 import torch.distributed as dist
@@ -14,7 +14,7 @@ import torch.nn as nn
 from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _FSDPState
-from torch.distributed.fsdp.flat_param import _HandlesKey, FlatParamHandle
+from torch.distributed.fsdp.flat_param import FlatParamHandle
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_dist_composable import (
     CompositeParamModel,
@@ -147,34 +147,33 @@ class TestRuntime(FSDPTest):
         # assumption about wrapper FQN being a suffix of composable FQN holds
         all_composable_handles = traversal_utils._get_fsdp_handles(composable_module)
         all_wrapped_handles = traversal_utils._get_fsdp_handles(fsdp_wrapped_model)
-        self._check_same_param_handles(all_composable_handles, all_wrapped_handles)
+        for c_handle, w_handle in zip(all_composable_handles, all_wrapped_handles):
+            self._check_same_param_handles(c_handle, w_handle)
         num_handles = len(all_composable_handles)
 
         orig_unshard = torch.distributed.fsdp._runtime_utils._unshard
         orig_reshard = torch.distributed.fsdp._runtime_utils._reshard
-        UnshardReshardEvent = Tuple[str, _HandlesKey]
+        UnshardReshardEvent = Tuple[str, FlatParamHandle]
 
         def patched_unshard(
             unshard_reshard_order: List[UnshardReshardEvent],
             state: _FSDPState,
-            handles: List[FlatParamHandle],
+            handle: FlatParamHandle,
             *args,
             **kwargs,
         ):
-            handles_key = tuple(handles)
-            unshard_reshard_order.append(("unshard", handles_key))
-            return orig_unshard(state, handles, *args, **kwargs)
+            unshard_reshard_order.append(("unshard", handle))
+            return orig_unshard(state, handle, *args, **kwargs)
 
         def patched_reshard(
             unshard_reshard_order: List[UnshardReshardEvent],
             state: _FSDPState,
-            handles: List[FlatParamHandle],
+            handle: FlatParamHandle,
             *args,
             **kwargs,
         ):
-            handles_key = tuple(handles)
-            unshard_reshard_order.append(("reshard", handles_key))
-            return orig_reshard(state, handles, *args, **kwargs)
+            unshard_reshard_order.append(("reshard", handle))
+            return orig_reshard(state, handle, *args, **kwargs)
 
         @contextlib.contextmanager
         def patch_unshard(_patched_unshard: Callable):
@@ -245,8 +244,8 @@ class TestRuntime(FSDPTest):
 
     def _check_same_param_handles(
         self,
-        composable_handles: Iterable[FlatParamHandle],
-        wrapped_handles: Iterable[FlatParamHandle],
+        composable_handle: FlatParamHandle,
+        wrapped_handle: FlatParamHandle,
     ) -> None:
         """
         Checks that ``composable_handles`` matches ``wrapped_handles`` by
@@ -262,15 +261,11 @@ class TestRuntime(FSDPTest):
         parity for wrapping policies, then we can be sure that the handles
         actually match.
         """
-        self.assertEqual(len(composable_handles), len(wrapped_handles))
-        for composable_handle, wrapped_handle in zip(
-            composable_handles, wrapped_handles
-        ):
-            composable_fqns = composable_handle.flat_param._fqns
-            wrapped_fqns = wrapped_handle.flat_param._fqns
-            self.assertEqual(len(composable_fqns), len(wrapped_fqns))
-            for composable_fqn, wrapped_fqn in zip(composable_fqns, wrapped_fqns):
-                self.assertTrue(composable_fqn.endswith(wrapped_fqn))
+        composable_fqns = composable_handle.flat_param._fqns
+        wrapped_fqns = wrapped_handle.flat_param._fqns
+        self.assertEqual(len(composable_fqns), len(wrapped_fqns))
+        for composable_fqn, wrapped_fqn in zip(composable_fqns, wrapped_fqns):
+            self.assertTrue(composable_fqn.endswith(wrapped_fqn))
 
 
 if __name__ == "__main__":

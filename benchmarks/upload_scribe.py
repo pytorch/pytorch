@@ -31,8 +31,7 @@ class ScribeUploader:
                 message['float'][field] = float(value)
             else:
 
-                raise ValueError("Field {} is not currently used, "
-                                 "be intentional about adding new fields".format(field))
+                raise ValueError(f"Field {field} is not currently used, be intentional about adding new fields")
         return message
 
     def _upload_intern(self, messages):
@@ -95,7 +94,7 @@ class PytorchBenchmarkUploader(ScribeUploader):
         for b in pytest_json['benchmarks']:
             test = b['name'].split('[')[0]
             net_name = b['params']['net_name']
-            benchmark_name = '{}[{}]'.format(test, net_name)
+            benchmark_name = f'{test}[{net_name}]'
             executor = b['params']['executor']
             fuser = b['params']['fuser']
             m = self.format_message({

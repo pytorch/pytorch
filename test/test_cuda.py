@@ -1781,7 +1781,7 @@ torch.cuda.synchronize()
                     control = getattr(args[0].to(run_as_type), op)(*cast(args[1:], run_as_type), **add_kwargs)
                 self.assertTrue(type(output_to_compare) == type(control))
                 comparison = compare(output_to_compare, control)
-                self.assertTrue(comparison, "torch.{} result did not match control".format(op))
+                self.assertTrue(comparison, f"torch.{op} result did not match control")
             self.assertTrue(torch.is_autocast_enabled())
         self.assertFalse(torch.is_autocast_enabled())
 
@@ -2727,7 +2727,7 @@ exit(2)
                     stat = stat + pool_string + ".current"
                     current = postcapture_stats[stat] - precapture_stats[stat]
                     self.assertEqual(current, expected, "Pre to post capture delta of " +
-                                     stat + " = {}, expected = {}, numel = {}".format(current, expected, numel))
+                                     stat + f" = {current}, expected = {expected}, numel = {numel}")
 
                 g.replay()
                 self.assertEqual(b.sum().item(), 6 * numel)
@@ -2748,7 +2748,7 @@ exit(2)
                 stat = stat + pool_string + ".current"
                 current = postdel_stats[stat] - precapture_stats[stat]
                 self.assertEqual(current, expected, "Pre capture to post graph delete delta of " +
-                                 stat + " = {}, expected = {}, numel = {}".format(current, expected, numel))
+                                 stat + f" = {current}, expected = {expected}, numel = {numel}")
 
             # del a, b before the next case is essential, otherwise overwriting a and b in the next case
             # can throw off its allocation/deallocation counts.
@@ -3068,10 +3068,10 @@ exit(2)
         # mimicking `_test_graphed_optimizer` maladroitly to pass two param_groups to optimizer.__init__
         n_warmup, n_replay = 3, 2
         for optimizer, second_param_group_capturable in product((torch.optim.Adam, torch.optim.AdamW), (True, False)):
-            ref_p1, param1 = [torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2)]
-            ref_p2, param2 = [torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2)]
-            grads1, grads2 = [[torch.randn_like(param1) for _ in range(n_warmup + n_replay)] for _ in range(2)]
-            ref_grads1, ref_grads2 = [[t.clone() for t in tensors] for tensors in (grads1, grads2)]
+            ref_p1, param1 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
+            ref_p2, param2 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
+            grads1, grads2 = ([torch.randn_like(param1) for _ in range(n_warmup + n_replay)] for _ in range(2))
+            ref_grads1, ref_grads2 = ([t.clone() for t in tensors] for tensors in (grads1, grads2))
             params = [
                 {"params": [param1], "capturable": True},
                 {"params": [param2], "capturable": second_param_group_capturable},
@@ -3313,7 +3313,7 @@ class TestCudaMallocAsync(TestCase):
             if not IS_WINDOWS:
                 with tempfile.NamedTemporaryFile() as f:
                     torch.cuda.memory._save_segment_usage(f.name)
-                    with open(f.name, 'r') as f2:
+                    with open(f.name) as f2:
                         self.assertTrue('test_cuda.py' in f2.read())
 
             del x

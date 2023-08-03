@@ -414,7 +414,8 @@ std::vector<Node*> get_current_graph_task_execution_order() {
 
   const bool check_exec_info = !task->exec_info_.empty();
   std::vector<Node*> out{};
-  std::unordered_set<Node*> seen{};
+  // Do a copy since we mutate it later
+  std::unordered_map<Node*, int> dependencies = task->dependencies_;
 
   auto compare_seq_nr = [](Node* n1, Node* n2) {
     return n1->sequence_nr() < n2->sequence_nr();
@@ -427,16 +428,13 @@ std::vector<Node*> get_current_graph_task_execution_order() {
   }
 
   // Implementation notes:
-  // - Don't need to count dependencies because we have sequence_nr
+  // - We need count dependencies even though we have sequence_nr, because
+  //   in the accumulate_grad case we cannot assume the outputs to have higher
+  //   sequence_nr than the inputs
   // - Don't need to check topological_nr because we have exec_info
   while (!heap.empty()) {
     Node* fn = heap.top();
     heap.pop();
-
-    const bool was_inserted = seen.insert(fn).second;
-    if (!was_inserted) {
-      continue;
-    }
 
     out.push_back(fn);
     for (const auto& edge : fn->next_edges()) {
@@ -450,7 +448,12 @@ std::vector<Node*> get_current_graph_task_execution_order() {
           continue;
         }
       }
-      heap.push(next_ptr);
+      auto it = dependencies.find(edge.function.get());
+      TORCH_INTERNAL_ASSERT(it != dependencies.end());
+      if (--it->second == 0) {
+        dependencies.erase(it);
+        heap.push(next_ptr);
+      }
     }
   }
   return out;
@@ -798,7 +801,7 @@ void validate_outputs(
     std::stringstream ss;
     ss << "invalid number of gradients - expected ";
     ss << edges.size() << ", but got " << grads.size();
-    AT_ERROR(format_error(ss.str()));
+    TORCH_CHECK(false, format_error(ss.str()));
   }
   for (const auto i : c10::irange(grads.size())) {
     const auto& edge = edges[i];
@@ -811,7 +814,7 @@ void validate_outputs(
       // FIXME: TestJit.test_ge_optimized fails this assertion.
       // std::stringstream ss;
       // ss << "undefined gradient at index " << i;
-      // AT_ERROR(format_error(ss.str()));
+      // TORCH_CHECK(false, format_error(ss.str()));
       continue;
     }
 
@@ -820,7 +823,7 @@ void validate_outputs(
         grad = metadata.reduce_grad(grad);
       } else {
         const auto message = metadata.incompatible_shape_error_message(i, grad);
-        AT_ERROR(format_error(message.str()));
+        TORCH_CHECK(false, format_error(message.str()));
       }
     }
 
@@ -839,7 +842,7 @@ void validate_outputs(
       std::stringstream ss;
       ss << "invalid gradient at index " << i << " - expected dtype ";
       ss << metadata.dtype() << " but got " << grad.dtype();
-      AT_ERROR(format_error(ss.str()));
+      TORCH_CHECK(false, format_error(ss.str()));
     }
     if (grad.layout() != metadata.layout()) {
       // TODO: Currently we only support (*, Sparse) combination for
@@ -856,7 +859,7 @@ void validate_outputs(
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - expected layout ";
         ss << metadata.layout() << " but got " << grad.layout();
-        AT_ERROR(format_error(ss.str()));
+        TORCH_CHECK(false, format_error(ss.str()));
       }
     }
 
@@ -871,7 +874,7 @@ void validate_outputs(
           std::stringstream ss;
           ss << "invalid gradient at index " << i << " - expected device ";
           ss << metadata.device() << " but got " << grad.device();
-          AT_ERROR(format_error(ss.str()));
+          TORCH_CHECK(false, format_error(ss.str()));
         }
       }
     }
