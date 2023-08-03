@@ -11,6 +11,7 @@ import os
 import pathlib
 import platform
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -364,6 +365,8 @@ class CompiledFxGraph:
     device_types: Set[str] = field(default_factory=set)
     device_idxs: Set[int] = field(default_factory=set)
     mutated_inputs: Set[str] = field(default_factory=set)
+    mutated_input_idxs: Set[int] = field(default_factory=list)
+
     _boxed_call: bool = None
 
     def __call__(self, inputs) -> Any:
@@ -533,9 +536,11 @@ cdll.LoadLibrary("__lib_path__")
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
             output_path = input_path[:-3] + "so"
-            build_cmd = cpp_compile_command(
-                input_path, output_path, warning_all=False, vec_isa=self
-            ).split(" ")
+            build_cmd = shlex.split(
+                cpp_compile_command(
+                    input_path, output_path, warning_all=False, vec_isa=self
+                )
+            )
             try:
                 # Check build result
                 compile_file(input_path, output_path, build_cmd)
@@ -862,18 +867,24 @@ class AotCodeCache:
                 output_so = os.path.splitext(input_path)[0] + ".so"
 
                 if not os.path.exists(output_so):
-                    cmd = cpp_compile_command(
-                        input=input_path,
-                        output=output_so,
-                        vec_isa=picked_vec_isa,
-                        cuda=cuda,
-                        aot_mode=graph.aot_mode,
-                    ).split(" ")
+                    cmd = shlex.split(
+                        cpp_compile_command(
+                            input=input_path,
+                            output=output_so,
+                            vec_isa=picked_vec_isa,
+                            cuda=cuda,
+                            aot_mode=graph.aot_mode,
+                        )
+                    )
                     log.debug("aot compilation command: %s", " ".join(cmd))
                     try:
                         subprocess.check_call(cmd)
                     except subprocess.CalledProcessError as e:
                         raise exc.CppCompileError(cmd, e.output) from e
+                else:
+                    log.debug(
+                        "aot_inductor dynamic library already exist: %s", output_so
+                    )
 
                 cls.cache[key] = output_so
 
@@ -945,7 +956,13 @@ def compile_file(input_path, output_path, cmd) -> None:
         else:
             subprocess.check_output(cmd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
-        raise exc.CppCompileError(cmd, e.output) from e
+        output = e.output.decode("utf-8")
+        if "'omp.h' file not found" in output and sys.platform == "darwin":
+            output = (
+                output
+                + "\n\nTry setting OMP_PREFIX; see https://github.com/pytorch/pytorch/issues/95708"
+            )
+        raise exc.CppCompileError(cmd, output) from e
 
 
 class CppCodeCache:
@@ -984,9 +1001,11 @@ class CppCodeCache:
             with lock:
                 output_path = input_path[:-3] + "so"
                 if not os.path.exists(output_path):
-                    cmd = cpp_compile_command(
-                        input=input_path, output=output_path, vec_isa=picked_vec_isa
-                    ).split(" ")
+                    cmd = shlex.split(
+                        cpp_compile_command(
+                            input=input_path, output=output_path, vec_isa=picked_vec_isa
+                        )
+                    )
                     compile_file(input_path, output_path, cmd)
                 cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key
@@ -995,7 +1014,7 @@ class CppCodeCache:
 
 
 class PyCodeCache:
-    cache = dict()
+    cache: Dict[Any, types.ModuleType] = dict()
     linemaps = dict()
     clear = staticmethod(cache.clear)
 
