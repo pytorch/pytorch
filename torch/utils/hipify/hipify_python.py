@@ -949,6 +949,7 @@ def preprocessor(
             hipify_result.hipified_path = fin_path
             hipify_result.status = "[skipped, no permissions]"
             hipify_result.current_state = CurrentState.DONE
+            stats['skipped_no_permissions'].append(fin_path)
             return hipify_result
     else:
         hipify_result.hipified_path = fout_path
@@ -1114,12 +1115,15 @@ def hipify(
         clean_ctx = GeneratedFileCleaner(keep_intermediates=True)
 
     # Preprocessing statistics.
-    stats: Dict[str, List] = {"unsupported_calls": [], "kernel_launches": []}
+    stats: Dict[str, List] = {"unsupported_calls": [], "kernel_launches": [], "skipped_no_permissions": []}
 
     for filepath in (all_files if not hipify_extra_files_only else extra_files):
         preprocess_file_and_save_result(output_directory, filepath, all_files, header_include_dirs,
                                         stats, hip_clang_launch, is_pytorch_extension, clean_ctx, show_progress)
 
+    num_skipped_no_permissions = len(stats["skipped_no_permissions"])
+    if num_skipped_no_permissions:
+        print(f"{bcolors.WARNING}Could not hipify {num_skipped_no_permissions} files due to no write permissions")
     print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
 
     # Show detailed summary
