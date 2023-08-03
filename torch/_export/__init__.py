@@ -463,15 +463,13 @@ def aot_compile(
     # Reset the global value
     DECOMP_TABLE = core_aten_decompositions()
 
-    param_buffer_values = list(ep.state_dict.values())
     flat_example_inputs = fx_pytree.tree_flatten_spec(
         combine_args_kwargs(args, kwargs), ep.call_spec.in_spec  # type: ignore[arg-type]
     )
-    all_args = (*param_buffer_values, *flat_example_inputs)
 
     so_path = compile_fx_aot(
-        ep.graph_module,
-        all_args,  # type: ignore[arg-type]
+        ep,
+        flat_example_inputs,  # type: ignore[arg-type]
         config_patches=options,
     )
     return so_path, ep

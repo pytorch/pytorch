@@ -886,6 +886,15 @@ class AotCodeCache:
             extra=cpp_command,
             specified_dir=config.aot_inductor_output_path,
         )
+
+        # Write state dict to a file.
+        # We have to do this hack with torch.nn.Module because torch::load()
+        # cannot directly load Dict[Tensor].
+        path = f"{os.path.splitext(input_path)[0]}_constants.pt"
+        m = torch.nn.Module()
+        m.state_dict = graph.constants
+        torch.jit.save(torch.jit.script(m), path)
+
         if key not in cls.cache:
             from filelock import FileLock
 

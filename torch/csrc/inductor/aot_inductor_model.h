@@ -141,6 +141,7 @@ class AOTInductorModelBase {
   };
 
   std::vector<ParamInfo> inputs_info_;
+  std::map<std::string, at::Tensor> constants_info_;
   std::vector<ParamInfo> outputs_info_;
 
   // Record if the model finishes an inference run so that its owning

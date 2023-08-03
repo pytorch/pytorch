@@ -844,11 +844,17 @@ _in_aot_compilation = BoxedBool(False)
 
 
 def compile_fx_aot(
-    model_: torch.fx.GraphModule,
+    model_: "ExportedProgram",
     example_inputs_: List[torch.Tensor],
     inner_compile: Callable[..., Any] = compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
 ):
+    from torch._export.exported_program import ExportedProgram
+
+    assert isinstance(
+        model_, ExportedProgram
+    ), "Input of compile_fx_aot should be from torch.export. Please call torch._export.aot_compile instead."
+
     config_patches = (
         {"cpp_wrapper": True}
         if config_patches is None
@@ -860,7 +866,7 @@ def compile_fx_aot(
     ):
         config_patches = {
             **config_patches,
-            "aot_inductor_output_path": code_hash(model_.code),
+            "aot_inductor_output_path": code_hash(model_.graph_module.code),
         }
 
     with mock.patch.object(_in_aot_compilation, "value", True):
@@ -915,10 +921,11 @@ def fw_compiler_freezing(
     ]
 
     # constant params will be real tensors, not fake
-    params_flat = torch._guards.TracingContext.get().params_flat
-    for i in range(len(params_flat)):
-        if i not in preserved_arg_indices:
-            params_flat[i] = None
+    if torch._guards.TracingContext.get():
+        params_flat = torch._guards.TracingContext.get().params_flat
+        for i in range(len(params_flat)):
+            if i not in preserved_arg_indices:
+                params_flat[i] = None
 
     with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(
@@ -1143,7 +1150,11 @@ def compile_fx(
     )
     if _in_aot_compilation:
         with V.set_fake_mode(fake_mode), compiled_autograd.disable():
-            return fw_compiler(model_, example_inputs_)
+            # Unlift parameters from the model and remove pytree
+            unlifted_module = model_.module()
+            unlifted_module.graph.set_codegen(torch.fx.CodeGen())
+            unlifted_module.recompile()
+            return inference_compiler(unlifted_module, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(
         tracing_context

@@ -36,6 +36,7 @@ class AOTInductorModelRunner:
             model,
             example_inputs,
         )
+        print(so_path)
 
         # Use a utility function for easier testing
         source = """
@@ -45,7 +46,7 @@ class AOTInductorModelRunner:
 
         void run(
                 const std::vector<at::Tensor>& input_tensors,
-                std::vector<at::Tensor>& output_tensors) {
+                std::vector<at::Tensor>& output_tensors){
             model.run(input_tensors, output_tensors, at::cuda::getCurrentCUDAStream());
         }
         """
@@ -65,12 +66,10 @@ class AOTInductorModelRunner:
         optimized, exported, output_tensors, output_spec = AOTInductorModelRunner.load(
             model, example_inputs, example_outputs
         )
-        param_buffer_values = list(exported.state_dict.values())
         flat_example_inputs = fx_pytree.tree_flatten_spec(
             example_inputs, exported.call_spec.in_spec
         )
-        all_args = (*param_buffer_values, *flat_example_inputs)
-        optimized(all_args, output_tensors)
+        optimized(flat_example_inputs, output_tensors)
         return pytree.tree_unflatten(output_tensors, output_spec)
 
 

@@ -2,6 +2,10 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <map>
+#include <string>
+
+#include <ATen/ATen.h>
 
 #ifdef __GNUC__
 #define AOT_INDUCTOR_EXPORT __attribute__((__visibility__("default")))
@@ -98,5 +102,9 @@ AOTInductorError AOTInductorModelContainerGetMaxOutputShape(
     AOTInductorModelContainerHandle container_handle,
     size_t output_idx,
     AOTInductorParamShape* output_shape);
+
+// Reads the constants used by the model from a file and stores it in memory.
+AOTInductorError AOTInductorModelContainerSetConstants(
+    std::map<std::string, at::Tensor>& constantTensors);
 
 } // extern "C"

@@ -292,9 +292,10 @@ class WrapperCodeGen(CodeGen):
         self.write_header()
         self.write_prefix()
 
-        for name, hashed in V.graph.constant_reprs.items():
-            # include a hash so our code cache gives different constants different files
-            self.write_constant(name, hashed)
+        if not V.graph.aot_mode:
+            for name, hashed in V.graph.constant_reprs.items():
+                # include a hash so our code cache gives different constants different files
+                self.write_constant(name, hashed)
 
         self.allocated = set()
         self.freed = set()
@@ -996,14 +997,20 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     else:
                         self.prefix.writeline(f"at::Tensor {input_key} = args[{idx}];")
 
+            # Append constants as inputs to the graph
             assert all(
                 isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
             ), "Expect all constants to be Tensor"
             for idx, constants_key in enumerate(V.graph.constants.keys()):
-                constants_idx = inputs_len + idx
-                self.prefix.writeline(
-                    f"at::Tensor {constants_key} = args[{constants_idx}];"
-                )
+                if V.graph.aot_mode:
+                    self.prefix.writeline(
+                        f"""at::Tensor {constants_key} = constants_info_["{constants_key}"];"""
+                    )
+                else:
+                    constants_idx = inputs_len + idx
+                    self.prefix.writeline(
+                        f"at::Tensor {constants_key} = args[{constants_idx}];"
+                    )
 
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
@@ -1071,6 +1078,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     self.prefix.writeline(
                         f"outputs_info_[{idx}].shape.emplace_back({size}, {size}, nullptr);"
                     )
+
+            if V.graph.aot_mode:
+                self.prefix.writeline(
+                    "AOTInductorModelContainerSetConstants(constants_info_);"
+                )
 
         self.prefix.writeline("}")
 
