@@ -46,6 +46,6 @@ with open(args.file, "r") as f:
         )
         msg.replace("\t", " ")
         # Feel free to edit this; the idea is to remove prefixes that are
-        # just gooping up the resulting spreadsheet outpu
+        # just gooping up the resulting spreadsheet output
         name = row["name"].replace("test_make_fx_symbolic_exhaustive_", "")
         out.writerow([name, msg, ""])

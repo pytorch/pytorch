@@ -1899,6 +1899,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: cumprod_out
+    MPS: cumprod_out_mps
 
 - func: cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -3843,6 +3844,7 @@
 - func: mkldnn_rnn_layer(Tensor input, Tensor weight0, Tensor weight1, Tensor weight2, Tensor weight3, Tensor hx_, Tensor cx_, bool reverse, int[] batch_sizes, int mode, int hidden_size, int num_layers, bool has_biases, bool bidirectional, bool batch_first, bool train) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
     CPU: mkldnn_rnn_layer
+    MkldnnCPU: mkldnn_rnn_layer
   autogen: mkldnn_rnn_layer.out
 
 - func: mkldnn_rnn_layer_backward(Tensor input, Tensor weight1, Tensor weight2, Tensor weight3, Tensor weight4, Tensor hx_, Tensor cx_tmp, Tensor output, Tensor hy_, Tensor cy_, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, bool reverse, int mode, int hidden_size, int num_layers, bool has_biases, bool train, bool bidirectional, int[] batch_sizes, bool batch_first, Tensor workspace) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)
@@ -10797,6 +10799,21 @@
     CPU: foreach_tensor_sigmoid_slow_
     CUDA: foreach_tensor_sigmoid_cuda_
   autogen: _foreach_sigmoid.out
+
+- func: _foreach_sign(Tensor[] self) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_sign_slow
+    CUDA: foreach_tensor_sign_cuda
+
+- func: _foreach_sign_(Tensor(a!)[] self) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_sign_slow_
+    CUDA: foreach_tensor_sign_cuda_
+  autogen: _foreach_sign.out
 
 - func: _foreach_sin(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
