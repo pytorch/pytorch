@@ -2796,6 +2796,9 @@ aot_autograd_failures = {
     xfail('sparse.sampled_addmm'),
     xfail('normal', 'number_mean'),  # TypeError: randn_like(): argument 'input' (position 1) must be Tensor, not float
     xfail('sparse.mm', 'reduce'),
+    xfail("nn.functional.max_unpool1d"),  # outputs are different
+    xfail("nn.functional.max_unpool2d"),  # outputs are different
+    xfail("nn.functional.max_unpool3d"),  # outputs are different
     skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
     skip('nn.functional.margin_ranking_loss'),  # seems flaky
     skip('linalg.lu_solve'),  # flaky

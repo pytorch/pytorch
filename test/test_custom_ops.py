@@ -9,6 +9,7 @@ import re
 import typing
 
 import torch._custom_ops as custom_ops
+import torch.testing._internal.optests as optests
 
 import torch.testing._internal.custom_op_db
 from functorch import make_fx
@@ -50,6 +51,34 @@ class TestCustomOpTesting(TestCase):
     def get_op(self, qualname):
         ns, name = qualname.split("::")
         return getattr(getattr(torch.ops, ns), name).default
+
+    def test_aot_autograd_check_degenerate_cases(self, device):
+        def simple(x):
+            return x.clone()
+
+        # Should not raise
+        x = torch.randn(3, device=device)
+        optests.aot_autograd_check(simple, (x,), {}, dynamic=True)
+        optests.aot_autograd_check(simple, (x,), {}, dynamic=False)
+
+        def outputs_dont_require_grad(x):
+            return x.detach()
+
+        # Should not raise
+        y = torch.randn(3, device=device, requires_grad=True)
+        optests.aot_autograd_check(outputs_dont_require_grad, (y,), {}, dynamic=True)
+        optests.aot_autograd_check(outputs_dont_require_grad, (y,), {}, dynamic=False)
+
+        def no_outputs(x):
+            return x.detach()
+
+        # Should not raise
+        x = torch.randn(3, device=device, requires_grad=True)
+        y = torch.randn(3, device=device, requires_grad=True)
+        optests.aot_autograd_check(no_outputs, (x,), {}, dynamic=True)
+        optests.aot_autograd_check(no_outputs, (x,), {}, dynamic=False)
+        optests.aot_autograd_check(no_outputs, (y,), {}, dynamic=True)
+        optests.aot_autograd_check(no_outputs, (y,), {}, dynamic=False)
 
     def test_incorrect_schema_mutation(self, device):
         lib = self.lib()
