@@ -1923,6 +1923,30 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.rand((22, 256))
         self.run_test(InputIndexSlice(), (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipScriptTest()  # Torchscript doesn't support 1d index.
+    def test_slice_with_1d_input_index(self):
+        class InputIndexSlice(torch.nn.Module):
+            def forward(self, x, y):
+                x[:y, 0, :] = y
+                return x
+
+        x = torch.zeros((56, 6, 256))
+        y = torch.tensor([5], dtype=torch.int64)
+        self.run_test(InputIndexSlice(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_slice_with_input_step_size(self):
+        class InputIndexSlice(torch.nn.Module):
+            def forward(self, x, y, z):
+                x[:y:z, 0::z, :] = 1
+                return x
+
+        x = torch.zeros((56, 6, 256))
+        y = torch.tensor(5, dtype=torch.int64)
+        z = torch.tensor(2, dtype=torch.int64)
+        self.run_test(InputIndexSlice(), (x, y, z))
+
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipScriptTest()  # scripting tuple/list append
     def test_slice_dynamic(self):
@@ -2607,6 +2631,37 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         x = torch.tensor(np.arange(6.0).reshape(2, 3))
         self.run_test(MyModule(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_randint(self):
+        class RandInt(torch.nn.Module):
+            def forward(self, x):
+                randint = torch.randint(1, 10, x.shape)
+                x = 0 * randint + x
+                return x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandInt(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_randint_value(self):
+        class RandInt(torch.nn.Module):
+            def forward(self, x):
+                # This randint call always returns 3
+                return torch.randint(3, 4, x.shape) + x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandInt(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_randint_like(self):
+        class RandInt(torch.nn.Module):
+            def forward(self, x):
+                # This randint call always returns 3
+                return torch.randint_like(x, 3, 4) + x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandInt(), x)
 
     def test_randn(self):
         class RandN(torch.nn.Module):
@@ -5505,11 +5560,19 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(self, input):
                 return torch.flatten(input)
 
-        x = torch.randint(10, (1, 2, 3, 4))
-        self.run_test(FlattenModel(), x)
+        model = FlattenModel()
 
+        # flatten with 4d input
+        x = torch.randint(10, (1, 2, 3, 4))
+        self.run_test(model, x)
+
+        # flatten with 0d input
+        x = torch.randn([])
+        self.run_test(model, x)
+
+        # flatten with 1d input
         x = torch.randn(4)
-        self.run_test(FlattenModel(), x)
+        self.run_test(model, x)
 
     def test_flatten2d(self):
         class FlattenModel(torch.nn.Module):
@@ -12491,7 +12554,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv_transpose1d(self):
-        model = torch.ao.nn.quantized.ConvTranspose1d(16, 33, 3, stride=2)
+        model = torch.ao.nn.quantized.ConvTranspose1d(
+            16, 33, 3, output_padding=1, stride=2
+        )
         # Manually initialize model weight and bias to random numbers.
         # By default all zeros.
         q_weight = torch.quantize_per_tensor(
@@ -12505,7 +12570,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv_transpose2d(self):
-        model = torch.ao.nn.quantized.ConvTranspose2d(16, 33, 3, stride=2)
+        model = torch.ao.nn.quantized.ConvTranspose2d(
+            16, 33, 3, output_padding=(0, 1), stride=2
+        )
         # Manually initialize model weight and bias to random numbers.
         # By default all zeros.
         q_weight = torch.quantize_per_tensor(
@@ -12521,7 +12588,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfQuantizationBackendQNNPack
     def test_quantized_conv_transpose3d(self):
         model = torch.ao.nn.quantized.ConvTranspose3d(
-            16, 33, [2, 3, 4], stride=[3, 1, 2]
+            16, 33, [2, 3, 4], output_padding=(0, 1, 2), stride=[3, 1, 2]
         )
         # Manually initialize model weight and bias to random numbers.
         # By default all zeros.

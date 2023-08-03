@@ -46,15 +46,26 @@ except ModuleNotFoundError:
     torch_np = None
     HAS_NUMPY_TORCH_INTEROP = False
 
+if HAS_NUMPY:
+    # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TORCH_NP_MODULE` are in sync.
+    NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
+
+if HAS_NUMPY_TORCH_INTEROP:
+    NP_TO_TORCH_NP_MODULE = {
+        np: torch_np,
+        np.fft: torch_np.fft,
+        np.linalg: torch_np.linalg,
+        np.random: torch_np.random,
+    }
+
 import importlib
 
 import torch
 import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
-import torch.utils.checkpoint
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensor, is_fake
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map
 
@@ -767,6 +778,21 @@ def is_safe_constant(v):
     )
 
 
+def guard_if_dyn(arg):
+    from .variables import ConstantVariable, SymNodeVariable
+
+    if isinstance(arg, SymNodeVariable):
+        # This is because SymNodeVariable intentionally doesn't define
+        # as_python_constant to avoid shunting down some codepaths
+        # that expect consts.   In this case, we know we definitely
+        # want to specialize though.
+        return arg.evaluate_expr()
+    elif isinstance(arg, ConstantVariable):
+        return arg.as_python_constant()
+
+    return arg
+
+
 def check_constant_args(args, kwargs):
     return all(x.is_python_constant() for x in itertools.chain(args, kwargs.values()))
 
@@ -829,9 +855,10 @@ def tuple_iterator_getitem(it, index):
 
 
 def enum_repr(value, local):
-    enum_name = str(value)
-
-    name, val = enum_name.split(".")
+    # enum class can override __str__ method. Use __class__ and name attribute
+    # to extract the class name and key name.
+    name = value.__class__.__name__
+    val = value.name
     scope = "L" if local else "G"
     local_name = f'{scope}["{name}"].{val}'
     return local_name
@@ -1056,7 +1083,18 @@ def same(
             log_error("Accuracy failed (numpy): %s != %s", ref, res)
         return r
     elif is_numpy_ndarray(ref):
-        return (type(ref) is type(res)) and (ref == res).all()
+        return (type(ref) is type(res)) and same(
+            torch.as_tensor(ref),
+            torch.as_tensor(res),
+            fp64_ref,
+            cos_similarity=cos_similarity,
+            tol=tol,
+            equal_nan=equal_nan,
+            exact_dtype=exact_dtype,
+            relax_numpy_equality=relax_numpy_equality,
+            ignore_non_fp=ignore_non_fp,
+            log_error=log_error,
+        )
     elif type(ref).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
@@ -1253,7 +1291,7 @@ def get_fake_value(node, tx):
 
     def fake_wrapper(e):
         if isinstance(e, torch.Tensor):
-            assert isinstance(e, FakeTensor)
+            assert is_fake(e)
         return e
 
     def visit(n: torch.fx.Node):
@@ -1590,9 +1628,9 @@ def nnmodule_has_hooks(
 def to_numpy_helper(value):
     """Convert tensor and torch_np.ndarray to numpy.ndarray."""
     if isinstance(value, torch_np.ndarray):
-        return value.tensor.numpy()
+        return to_numpy_helper(value.tensor)
     elif isinstance(value, torch.Tensor):
-        return value.numpy()
+        return value.cpu().numpy()
     elif isinstance(value, (tuple, list)):
         return type(value)(to_numpy_helper(obj) for obj in value)
     else:
@@ -1680,17 +1718,16 @@ def defake(x):
     return y
 
 
-# NB: The dictionary has to be created lazily after TorchPatcher is called so
-# that we pick up the disabled torch.utils.checkpoint wrapper. Therefore, it is
-# sitting in a separate function.
-# We also need the original untouched/ not disabled torch utils checkpoint
-# becuase distributed checkpointed wrappers import these utils before
-# TorchDynamo TorchPatcher runs.
-untouched_torch_utils_checkpoint = torch.utils.checkpoint.checkpoint
+def is_utils_checkpoint(obj):
+    # Lazy import to avoid circular dependenices
+    import torch.utils.checkpoint
+
+    return obj is torch.utils.checkpoint.checkpoint
 
 
-def higher_order_op_converter():
+def build_checkpoint_variable(**options):
     import torch._higher_order_ops.wrap as higher_order_ops
+    from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
 
     # TODO - This is a temporary sitaution where we have two versions of
     # checkpointing implemetation. We will converge on one and remove the other.
@@ -1698,15 +1735,29 @@ def higher_order_op_converter():
     if torch._functorch.config.functionalize_rng_ops:
         activation_checkpoint_op = higher_order_ops.wrap_activation_checkpoint
 
-    return {
-        torch.utils.checkpoint.checkpoint: activation_checkpoint_op,
-        untouched_torch_utils_checkpoint: activation_checkpoint_op,
-    }
+    return TorchHigherOrderOperatorVariable.make(
+        activation_checkpoint_op,
+        **options,
+    )
 
 
-def requires_higher_order_op(obj):
-    return obj in higher_order_op_converter()
+def is_compile_supported(device_type):
+    from .eval_frame import is_dynamo_supported
+
+    compile_supported = is_dynamo_supported()
+    if device_type == "cpu":
+        pass
+    elif device_type == "cuda" and compile_supported:
+        from torch._inductor.utils import has_triton
+
+        compile_supported = has_triton()
+    else:
+        compile_supported = False
+    return compile_supported
 
 
-def get_higher_order_op(obj):
-    return higher_order_op_converter().get(obj)
+def is_guard_failure_reporting_enabled():
+    return (
+        config.report_guard_failures
+        or torch._logging._internal.log_state.is_artifact_enabled("recompiles")
+    )

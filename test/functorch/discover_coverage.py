@@ -84,7 +84,7 @@ denylist = {
 def get_method_only_ops_we_care_about():
     apis = get_public_overridable_apis()
     result = []
-    for key, _ in apis.items():
+    for key in apis.keys():
         if not key.startswith('torch.Tensor'):
             continue
         if key in denylist:
@@ -103,7 +103,7 @@ def get_method_only_ops_we_care_about():
 def get_public_overridable_ops():
     results = get_public_overridable_apis()
     cpy = copy.deepcopy(results)
-    for key, _ in cpy.items():
+    for key in cpy.keys():
         if not key.startswith('torch.Tensor'):
             continue
         api = key.split('.')[2]
@@ -115,7 +115,7 @@ def get_public_overridable_ops():
 def get_public_overridable_outplace_ops():
     results = get_public_overridable_ops()
     cpy = copy.deepcopy(results)
-    for key, _ in cpy.items():
+    for key in cpy.keys():
         # NB: there are no dunder methods bcs we don't document those
         if key.endswith('_'):
             del results[key]
@@ -125,7 +125,7 @@ def get_public_overridable_outplace_ops():
 def get_public_overridable_outplace_we_care_about():
     results = get_public_overridable_outplace_ops()
     cpy = copy.deepcopy(results)
-    for key, _ in cpy.items():
+    for key in cpy.keys():
         # quantization
         if 'quant' in key or '.q_' in key:
             del results[key]
@@ -178,7 +178,7 @@ def get_ops_covered_by_opinfos():
 factory_fns = {
     'tensor', 'zeros', 'ones', 'randn', 'arange', 'rand', 'empty', 'randperm',
     'linspace', 'logspace', 'hann_window', 'full', 'eye', 'blackman_window',
-    'barlett_window', 'randint', 'range', 'arange',
+    'barlett_window', 'randint', 'range',
 }
 
 

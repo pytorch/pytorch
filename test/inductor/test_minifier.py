@@ -4,7 +4,6 @@ import unittest
 from unittest.mock import patch
 
 import torch
-import torch._dynamo
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.utils

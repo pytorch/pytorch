@@ -23,6 +23,7 @@ inductor_decompositions = get_decompositions(
         aten.bitwise_and_,
         aten.bitwise_or_,
         aten.clamp_min_,
+        aten.dist,
         aten.empty_like,
         aten.flip,
         aten.lcm,
@@ -147,17 +148,6 @@ def all(input):
 @register_decomposition([aten.all.dim])
 def all_dim(input, dim, keepdim=False):
     return torch.logical_not(torch.any(torch.logical_not(input), dim, keepdim))
-
-
-# NB: this decomposition is not stride accurate, do not put it in the main
-# library
-@register_decomposition(aten.copy)
-def copy(self, src, non_blocking=False):
-    intermediate = src.to(self, non_blocking)
-    if self.size() != intermediate.size():
-        return aten.expand_copy.default(intermediate, self.size())
-    else:
-        return intermediate
 
 
 @register_decomposition([aten.baddbmm])
@@ -366,6 +356,16 @@ def _foreach_addcmul_scalar(self, left_tensors, right_tensors, scalar=1):
 def _foreach_addcdiv_scalar(self, left_tensors, right_tensors, scalar=1):
     return aten._foreach_add.List(
         self, aten._foreach_div.List(left_tensors, right_tensors), alpha=scalar
+    )
+
+
+@register_decomposition(aten._foreach_lerp.Scalar)
+def _foreach_lerp_scalar(start_tensors, end_tensors, weight):
+    return aten._foreach_add.List(
+        start_tensors,
+        aten._foreach_mul.Scalar(
+            aten._foreach_sub.List(end_tensors, start_tensors), weight
+        ),
     )
 
 

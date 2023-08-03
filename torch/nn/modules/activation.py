@@ -1526,7 +1526,10 @@ class Softmax2d(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        assert input.dim() == 4 or input.dim() == 3, 'Softmax2d requires a 3D or 4D tensor as input'
+        if input.dim() not in (3, 4):
+            raise ValueError(
+                "Softmax2d: expected input to be 3D or 4D, got {}D instead".format(input.dim())
+            )
         return F.softmax(input, -3, _stacklevel=5)
 
 

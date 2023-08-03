@@ -78,8 +78,7 @@ from torch.testing._internal import composite_compliance
 from torch.utils._pytree import tree_flatten
 from torch.utils._python_dispatch import TorchDispatchMode
 
-# TODO: fixme https://github.com/pytorch/pytorch/issues/68972
-torch.set_default_dtype(torch.float32)
+assert torch.get_default_dtype() == torch.float32
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
@@ -158,7 +157,7 @@ class TestCommon(TestCase):
             if isinstance(result, torch.Tensor):
                 self.assertTrue(result.device == cuda_device)
             elif is_iterable_of_tensors(result):
-                self.assertTrue(all((t.device == cuda_device for t in result)))
+                self.assertTrue(all(t.device == cuda_device for t in result))
             else:
                 self.skipTest(
                     "Skipped! Only supports single tensor or iterable of tensor outputs."
@@ -220,7 +219,7 @@ class TestCommon(TestCase):
             self.assertTrue(False)
 
         for file_name in files:
-            with open(os.path.join(pytorch_dir, file_name), "r") as f:
+            with open(os.path.join(pytorch_dir, file_name)) as f:
                 lines = f.read()
                 matches = regex.findall(lines)
                 for match in matches:
@@ -254,7 +253,6 @@ class TestCommon(TestCase):
     # This test runs in double and complex double precision because
     # NumPy does computation internally using double precision for many functions
     # resulting in possible equality check failures.
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
@@ -300,7 +298,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
     # See https://github.com/pytorch/pytorch/issues/78050 for a discussion of stride propagation.
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -463,7 +460,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namesapce are remapped to the refs namespace (torch.foo becomes refs.foo).
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -476,7 +472,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are preserved (torch.foo remains torch.foo).
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -587,7 +582,6 @@ class TestCommon(TestCase):
     # TODO: get working with Windows by addressing failing operators
     # TODO: get working with ASAN by addressing failing operators
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
@@ -729,7 +723,7 @@ class TestCommon(TestCase):
                     return (out.stride(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple((t.stride() for t in out))
+                return tuple(t.stride() for t in out)
 
             # Extracts data pointers from a tensor or iterable of tensors into a tuple
             # NOTE: only extracts on the CPU and CUDA device types since some
@@ -742,7 +736,7 @@ class TestCommon(TestCase):
                     return (out.data_ptr(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple((t.data_ptr() for t in out))
+                return tuple(t.data_ptr() for t in out)
 
             @suppress_warnings
             def _compare_out(transform, *, compare_strides_and_data_ptrs=True):
@@ -757,7 +751,7 @@ class TestCommon(TestCase):
                 self.assertEqual(expected, out)
 
                 if compare_strides_and_data_ptrs:
-                    stride_msg = "Strides are not the same! Original strides were {0} and strides are now {1}".format(
+                    stride_msg = "Strides are not the same! Original strides were {} and strides are now {}".format(
                         original_strides, final_strides
                     )
                     self.assertEqual(original_strides, final_strides, msg=stride_msg)
@@ -849,7 +843,7 @@ class TestCommon(TestCase):
                     return (out.stride(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple((t.stride() for t in out))
+                return tuple(t.stride() for t in out)
 
             # Extracts data pointers from a tensor or iterable of tensors into a tuple
             # NOTE: only extracts on the CPU and CUDA device types since some
@@ -862,7 +856,7 @@ class TestCommon(TestCase):
                     return (out.data_ptr(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple((t.data_ptr() for t in out))
+                return tuple(t.data_ptr() for t in out)
 
             def _compare_out(transform, *, compare_strides_and_data_ptrs=True):
                 out = _apply_out_transform(transform, expected)
@@ -875,7 +869,7 @@ class TestCommon(TestCase):
                 self.assertEqual(expected, out)
 
                 if compare_strides_and_data_ptrs:
-                    stride_msg = "Strides are not the same! Original strides were {0} and strides are now {1}".format(
+                    stride_msg = "Strides are not the same! Original strides were {} and strides are now {}".format(
                         original_strides, final_strides
                     )
                     self.assertEqual(original_strides, final_strides, msg=stride_msg)
@@ -1270,7 +1264,6 @@ class TestCommon(TestCase):
 
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipMeta
     @onlyNativeDeviceTypes
     @ops(ops_and_refs, dtypes=OpDTypes.none)
@@ -1397,20 +1390,20 @@ class TestCommon(TestCase):
 
         # Partially supporting a dtype is not an error, but we print a warning
         if (len(partially_supported_forward) + len(partially_supported_backward)) > 0:
-            msg = "Some dtypes for {0} on device type {1} are only partially supported!\n".format(
+            msg = "Some dtypes for {} on device type {} are only partially supported!\n".format(
                 op.name, device_type
             )
             if len(partially_supported_forward) > 0:
                 msg = (
                     msg
-                    + "The following dtypes only worked on some samples during forward: {0}.\n".format(
+                    + "The following dtypes only worked on some samples during forward: {}.\n".format(
                         partially_supported_forward
                     )
                 )
             if len(partially_supported_backward) > 0:
                 msg = (
                     msg
-                    + "The following dtypes only worked on some samples during backward: {0}.\n".format(
+                    + "The following dtypes only worked on some samples during backward: {}.\n".format(
                         partially_supported_backward
                     )
                 )
@@ -1433,34 +1426,34 @@ class TestCommon(TestCase):
                 return
 
         # Generates error msg
-        msg = "The supported dtypes for {0} on device type {1} are incorrect!\n".format(
+        msg = "The supported dtypes for {} on device type {} are incorrect!\n".format(
             op.name, device_type
         )
         if len(supported_but_unclaimed_forward) > 0:
             msg = (
                 msg
-                + "The following dtypes worked in forward but are not listed by the OpInfo: {0}.\n".format(
+                + "The following dtypes worked in forward but are not listed by the OpInfo: {}.\n".format(
                     supported_but_unclaimed_forward
                 )
             )
         if len(supported_but_unclaimed_backward) > 0:
             msg = (
                 msg
-                + "The following dtypes worked in backward but are not listed by the OpInfo: {0}.\n".format(
+                + "The following dtypes worked in backward but are not listed by the OpInfo: {}.\n".format(
                     supported_but_unclaimed_backward
                 )
             )
         if len(claimed_but_unsupported_forward) > 0:
             msg = (
                 msg
-                + "The following dtypes did not work in forward but are listed by the OpInfo: {0}.\n".format(
+                + "The following dtypes did not work in forward but are listed by the OpInfo: {}.\n".format(
                     claimed_but_unsupported_forward
                 )
             )
         if len(claimed_but_unsupported_backward) > 0:
             msg = (
                 msg
-                + "The following dtypes did not work in backward but are listed by the OpInfo: {0}.\n".format(
+                + "The following dtypes did not work in backward but are listed by the OpInfo: {}.\n".format(
                     claimed_but_unsupported_backward
                 )
             )

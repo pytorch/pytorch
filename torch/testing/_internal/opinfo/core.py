@@ -859,9 +859,7 @@ class OpInfo:
     def __post_init__(self):
         self._original_opinfo_args = asdict(self).copy()
 
-        assert self.dtypes is not None, "OpInfo for {0} has no dtypes!".format(
-            self.name
-        )
+        assert self.dtypes is not None, f"OpInfo for {self.name} has no dtypes!"
 
         dtypes_args = (self.dtypes, self.dtypesIfCUDA, self.dtypesIfROCM)
 
@@ -874,10 +872,7 @@ class OpInfo:
 
         # Attribute to verify dynamic_dtypes are used.
         self.dynamic_dtypes = any(
-            (
-                isinstance(dtypes, utils._dynamic_dispatch_dtypes)
-                for dtypes in dtypes_args
-            )
+            isinstance(dtypes, utils._dynamic_dispatch_dtypes) for dtypes in dtypes_args
         )
 
         if self.dynamic_dtypes:

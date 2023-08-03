@@ -23,7 +23,7 @@ hf_Bert,pass,0
 hf_Bert_large,pass,0
 hf_DistilBert,pass,0
 hf_GPT2,pass,0
-hf_Reformer,pass,27
+hf_Reformer,pass,26
 hf_T5_large,pass_due_to_skip,0
 lennard_jones,pass,0
 llama,fail_accuracy,0
