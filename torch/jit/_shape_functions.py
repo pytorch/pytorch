@@ -292,7 +292,7 @@ def max_pool2d(
 
     assert (
         len(padding) == 1 or len(padding) == 2
-    ), "max_pool2d: padding must be either be a single int, or a tuple of two ints"
+    ), "max_pool2d: padding must either be a single int, or a tuple of two ints"
     padH = padding[0]
     padW = padH if len(padding) == 1 else padding[1]
 

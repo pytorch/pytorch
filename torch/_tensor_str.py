@@ -330,7 +330,12 @@ def _tensor_str(self, indent):
     if self.is_neg():
         self = self.resolve_neg()
 
-    if self.dtype is torch.float16 or self.dtype is torch.bfloat16:
+    if self.dtype in [
+        torch.float16,
+        torch.bfloat16,
+        torch.float8_e5m2,
+        torch.float8_e4m3fn,
+    ]:
         self = self.float()
 
     if self.dtype is torch.complex32:

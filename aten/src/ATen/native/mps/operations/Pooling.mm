@@ -70,7 +70,7 @@ static void pool2d_template(const Tensor& input,
               ": stride must either be omitted, a single int, or a tuple of two ints")
   TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
               op_name,
-              ": padding must be either be a single int, or a tuple of two ints");
+              ": padding must either be a single int, or a tuple of two ints");
   TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
               op_name,
               ": dilation must be either a single int, or a tuple of two ints");
@@ -253,21 +253,17 @@ static void avg_pool2d_template(const Tensor& input,
                     "not supported on MPS backend. ",
                     "Falling back on CPU. This may have performance implications.");
     if (!is_backward_pass) {
-      const_cast<Tensor&>(output) =
-          at::avg_pool2d(input.to("cpu"), kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
-              .clone()
-              .to("mps");
+      output.copy_(at::avg_pool2d(
+          input.to("cpu"), kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override));
     } else {
-      const_cast<Tensor&>(output) = at::avg_pool2d_backward(grad_output.to("cpu"),
-                                                            input.to("cpu"),
-                                                            kernel_size,
-                                                            stride,
-                                                            padding,
-                                                            ceil_mode,
-                                                            count_include_pad,
-                                                            divisor_override)
-                                        .clone()
-                                        .to("mps");
+      output.copy_(at::avg_pool2d_backward(grad_output.to("cpu"),
+                                           input.to("cpu"),
+                                           kernel_size,
+                                           stride,
+                                           padding,
+                                           ceil_mode,
+                                           count_include_pad,
+                                           divisor_override));
     }
     return;
   }

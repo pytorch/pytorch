@@ -30,7 +30,11 @@ on:
 
 env:
   # Needed for conda builds
+  {%- if "aarch64" in build_environment %}
+  ALPINE_IMAGE: "arm64v8/alpine"
+  {%- else %}
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+  {%- endif %}
   ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
   BINARY_ENV_FILE: /tmp/env
@@ -50,6 +54,10 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:!{{ upload.binary_env_as_input(config) }}
+      {%- if "aarch64" in build_environment %}
+      runs_on: linux.t4g.2xlarge
+      ALPINE_IMAGE: "arm64v8/alpine"
+      {%- endif %}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
       {%- if config.pytorch_extra_install_requirements is defined %}
@@ -57,7 +65,6 @@ jobs:
       {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: !{{ config["build_name"] }}-build
@@ -66,7 +73,10 @@ jobs:
     with:!{{ upload.binary_env_as_input(config) }}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
-      {%- if config["gpu_arch_type"] == "rocm" %}
+      {%- if "aarch64" in build_environment %}
+      runs_on: linux.t4g.2xlarge
+      ALPINE_IMAGE: "arm64v8/alpine"
+      {%- elif config["gpu_arch_type"] == "rocm" %}
       runs_on: linux.rocm.gpu
       {%- elif config["gpu_arch_type"] == "cuda" %}
       runs_on: linux.4xlarge.nvidia.gpu
@@ -105,4 +115,4 @@ jobs:
 {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config) }}
 {%- endif %}
-{%- endfor %}
+{% endfor %}

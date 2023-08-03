@@ -93,6 +93,13 @@ struct THPFunction {
   // Default is true.
   bool materialize_grads;
 
+  // boolean indicating whether to materialize output grad tensors
+  // corresponding to non-differentiable outputs. Normally, someone would
+  // already get this behavior by switching off materialize_grads,
+  // but there are certain use cases where that is not feasible:
+  // https://github.com/pytorch/pytorch/pull/98659#pullrequestreview-1376822560
+  bool materialize_non_diff_grads;
+
   std::vector<torch::autograd::VariableInfo> output_info;
   std::vector<torch::autograd::VariableInfo> input_info;
   std::vector<torch::autograd::SavedVariable> saved_variables;

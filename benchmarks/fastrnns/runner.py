@@ -11,7 +11,7 @@ from .factory import (dropoutlstm_creator, imagenet_cnn_creator,
                       varlen_lstm_creator, varlen_pytorch_lstm_creator)
 
 
-class DisableCuDNN():
+class DisableCuDNN:
     def __enter__(self):
         self.saved = torch.backends.cudnn.enabled
         torch.backends.cudnn.enabled = False
@@ -20,7 +20,7 @@ class DisableCuDNN():
         torch.backends.cudnn.enabled = self.saved
 
 
-class DummyContext():
+class DummyContext:
     def __enter__(self):
         pass
 
@@ -28,7 +28,7 @@ class DummyContext():
         pass
 
 
-class AssertNoJIT():
+class AssertNoJIT:
     def __enter__(self):
         import os
         enabled = os.environ.get('PYTORCH_JIT', 1)

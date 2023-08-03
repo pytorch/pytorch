@@ -31,8 +31,8 @@ class WrapperModule:
             if save:
                 file_name = self.module_name + "_" + pt_fn.__name__ + ".pt"
                 torch.jit.save(self.module, file_name)
-                print("Generated graph is saved in {}".format(file_name))
-        print("Benchmarking module {} with fn {}: Graph mode:{}".format(self.module_name, pt_fn.__name__, module_config.graph_mode))
+                print(f"Generated graph is saved in {file_name}")
+        print(f"Benchmarking module {self.module_name} with fn {pt_fn.__name__}: Graph mode:{module_config.graph_mode}")
         if (debug and isinstance(self.module, torch.jit.ScriptModule)):
             print(self.module.graph)
             print(self.module.code)

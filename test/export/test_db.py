@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
 import unittest
-from dataclasses import dataclass
 
 import torch._dynamo as torchdynamo
 from torch._export import export
@@ -18,25 +17,13 @@ from torch.testing._internal.common_utils import (
 )
 
 
-@dataclass
-class _DynamoConfig:
-    capture_scalar_outputs: bool = True
-    capture_dynamic_output_shape_ops: bool = True
-    guard_nn_modules: bool = True
-    dynamic_shapes: bool = True
-    specialize_int: bool = True
-    allow_rnn: bool = True
-    verbose: bool = True
-    assume_static_by_default: bool = False
-
-
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class ExampleTests(TestCase):
     # TODO Maybe we should make this tests actually show up in a file?
     @parametrize(
         "name,case",
         filter_examples_by_support_level(SupportLevel.SUPPORTED).items(),
-        name_fn=lambda name, case: "case_{}".format(name),
+        name_fn=lambda name, case: f"case_{name}",
     )
     def test_exportdb_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
@@ -64,7 +51,7 @@ class ExampleTests(TestCase):
     @parametrize(
         "name,case",
         filter_examples_by_support_level(SupportLevel.NOT_SUPPORTED_YET).items(),
-        name_fn=lambda name, case: "case_{}".format(name),
+        name_fn=lambda name, case: f"case_{name}",
     )
     def test_exportdb_not_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
@@ -86,7 +73,7 @@ class ExampleTests(TestCase):
             ).items()
             for rewrite_case in get_rewrite_cases(case)
         ],
-        name_fn=lambda name, case: "case_{}_{}".format(name, case.name),
+        name_fn=lambda name, case: f"case_{name}_{case.name}",
     )
     def test_exportdb_not_supported_rewrite(
         self, name: str, rewrite_case: ExportCase

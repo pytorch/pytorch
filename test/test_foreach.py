@@ -1002,16 +1002,16 @@ class TestForeach(TestCase):
         num_tensors_seen = 0
         for (device, dtype), ([l1, l2, l3], indices) in grouped_tensors.items():
             for t in itertools.chain(l1, l3):
-                self.assertEquals(t.device, device)
-                self.assertEquals(t.dtype, dtype)
+                self.assertEqual(t.device, device)
+                self.assertEqual(t.dtype, dtype)
                 num_tensors_seen += 1
             self.assertEqual(len(l1), len(l2))
             self.assertTrue(all(p is None for p in l2))
             for i, index in enumerate(indices):
-                self.assertEquals(l1[i], list1[index])
-                self.assertEquals(l2[i], list2[index])
-                self.assertEquals(l3[i], list3[index])
-        self.assertEquals(num_tensors_seen, 2 * num_tensors_per_list)
+                self.assertEqual(l1[i], list1[index])
+                self.assertEqual(l2[i], list2[index])
+                self.assertEqual(l3[i], list3[index])
+        self.assertEqual(num_tensors_seen, 2 * num_tensors_per_list)
 
 
 instantiate_device_type_tests(TestForeach, globals())

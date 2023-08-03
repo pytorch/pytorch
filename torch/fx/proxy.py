@@ -258,6 +258,9 @@ class TracerBase:
         elif isinstance(a, range):
             return range(self.create_arg(a.start), self.create_arg(a.stop), self.create_arg(a.step))
 
+        elif isinstance(a, torch._ops.OpOverload):
+            return a
+
         if isinstance(a, Proxy):
             # base case: we unwrap the Proxy object
             return a.node

@@ -791,8 +791,9 @@ class QuantizationTestCase(TestCase):
                     (exp_type_end_b is act_type_end_b)
                 self.assertTrue(
                     types_match,
-                    'Type mismatch at %s: expected %s, got %s' %
-                    (k, (exp_type_start_a, exp_type_end_a, exp_type_start_b, exp_type_end_b),
+                    'Type mismatch at {}: expected {}, got {}'.format(
+                        k,
+                        (exp_type_start_a, exp_type_end_a, exp_type_start_b, exp_type_end_b),
                         (act_type_start_a, act_type_end_a, act_type_start_b, act_type_end_b))
                 )
 
@@ -1601,7 +1602,7 @@ class NormalizationTestModel(torch.nn.Module):
         super().__init__()
         self.quant = torch.ao.quantization.QuantStub()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
-        self.layer_norm = torch.nn.LayerNorm((8))
+        self.layer_norm = torch.nn.LayerNorm(8)
         self.group_norm = torch.nn.GroupNorm(2, 8)
         self.instance_norm1d = torch.nn.InstanceNorm1d(8)
         self.instance_norm2d = torch.nn.InstanceNorm2d(8)

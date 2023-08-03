@@ -230,6 +230,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return input_metadata_[index];
   }
 
+  // Danger: not thread safe, caller must protect with lock
+  InputMetadata& mutable_input_metadata(size_t index) {
+    return input_metadata_[index];
+  }
+
   /**
    * Note: Function Streams
    * A function's stream (for a given device type) is the stream of the first
@@ -730,6 +735,21 @@ edge_list collect_next_edges(Variables&&... variables) {
   make.apply(std::forward<Variables>(variables)...);
   return std::move(make.next_edges);
 }
+
+struct TypeAndSize {
+  TypeAndSize() : options(at::TensorOptions()) {}
+  /* implicit */
+  TypeAndSize(const at::Tensor& t)
+      : sym_sizes(t.sym_sizes().vec()), options(t.options()) {}
+
+  at::Tensor zeros() {
+    return at::zeros_symint(sym_sizes, options);
+  }
+
+  std::vector<c10::SymInt> sym_sizes;
+  at::TensorOptions options;
+};
+
 } // namespace autograd
 } // namespace torch
 

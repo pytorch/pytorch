@@ -54,4 +54,4 @@ if __name__ == "__main__":
     total_time_s = (time.time() - s)
     total_time_per_iter_s = total_time_s / NUM_BENCHMARK_ITERS
     achieved_bandwidth = (total_bytes * BYTES_TO_MB) / total_time_per_iter_s
-    print("Time:{} Achieved Bandwidth:{} MB/s".format(total_time_per_iter_s, achieved_bandwidth))
+    print(f"Time:{total_time_per_iter_s} Achieved Bandwidth:{achieved_bandwidth} MB/s")

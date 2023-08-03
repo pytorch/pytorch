@@ -14,43 +14,12 @@ on:
 # The names of steps that actually test the code should be suffixed with `(nonretryable)`.
 # When any other step fails, it's job will be retried once by retryBot.
 jobs:
-  docker-image:
-    name: docker-image
-    if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.2xlarge]
-    timeout-minutes: 30
-    outputs:
-      docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          submodules: false
-
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-
-      - name: Calculate docker image
-        id: calculate-docker-image
-        uses: ./.github/actions/calculate-docker-image
-        with:
-          docker-image-name: 'pytorch-linux-focal-linter'
-          # TODO: This flag is needed to make the Docker image available on ECR
-          # to avoid "Requested image not found" error for linter workflow. The
-          # longer term fix would be to refactor linter so that building the new
-          # image and running lint are done in the same runner like _linux-build
-          skip_push: false
-
-      - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
-        if: always()
-
   lintrunner:
-    needs: docker-image
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@use-shareable-gha-calculate-docker-image
     with:
       runner: linux.2xlarge
-      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      docker-image: pytorch-linux-focal-linter
+      fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
@@ -93,11 +62,11 @@ jobs:
         exit $RC
 
   quick-checks:
-    needs: docker-image
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@use-shareable-gha-calculate-docker-image
     with:
       runner: linux.2xlarge
-      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      docker-image: pytorch-linux-focal-linter
+      fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
@@ -147,11 +116,11 @@ jobs:
           bash .github/scripts/pr-sanity-check.sh
 
   workflow-checks:
-    needs: docker-image
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@use-shareable-gha-calculate-docker-image
     with:
       runner: linux.2xlarge
-      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      docker-image: pytorch-linux-focal-linter
+      fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
@@ -182,11 +151,11 @@ jobs:
         exit $RC
 
   toc:
-    needs: docker-image
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@use-shareable-gha-calculate-docker-image
     with:
       runner: linux.2xlarge
-      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      docker-image: pytorch-linux-focal-linter
+      fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
@@ -220,11 +189,10 @@ jobs:
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    needs: docker-image
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@use-shareable-gha-calculate-docker-image
     with:
       runner: linux.2xlarge
-      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |

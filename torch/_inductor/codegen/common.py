@@ -13,6 +13,7 @@ from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import metrics
 from ..utils import (
@@ -130,13 +131,13 @@ class DataTypePropagation:
         if node.target in (
             "load",
             "store",
+            "store_reduction",
         ):
             buf_name = node.args[1]
             return V.graph.get_dtype(buf_name)
 
         if node.target == "reduction":
-            _, _, dtype, _, _, _, _ = node.args
-            return dtype
+            return node.args[1]
 
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
@@ -596,8 +597,10 @@ class CSEVariable:
     See example of TritonCSEVariable in triton.py
     """
 
-    def __init__(self, name):
+    def __init__(self, name, bounds: ValueRanges):
+        assert isinstance(bounds, ValueRanges)
         self.name = name
+        self.bounds = bounds
 
     def __str__(self):
         return self.name
@@ -667,6 +670,8 @@ class CSE:
         self,
         buffer: IndentedBuffer,
         expr: typing.Union[str, CSEVariable, OpsValue],
+        *,
+        bounds: ValueRanges = ValueRanges.unknown(),
         write=True,
         assignment=True,
     ) -> CSEVariable:
@@ -676,11 +681,15 @@ class CSE:
         assert isinstance(expr, (str, CSEVariable)), type(expr)
         assert write or assignment
         if isinstance(expr, CSEVariable):
+            # If the expressions were always created with all the information, we could
+            # assert expr.bounds == bounds, but sometimes the expression is created
+            # with the loose ValueRanges.unknown(), so we need to tighten the bounds
+            expr.bounds = expr.bounds.tighten(bounds)
             return expr
         cache_key = expr
         var = self.cache.get(cache_key, None)
         if not var:
-            var = self.newvar() if assignment else None
+            var = self.newvar(bounds) if assignment else None
             self.cache[cache_key] = var
             if write:
                 if V.kernel.current_node:
@@ -692,12 +701,14 @@ class CSE:
                 else:
                     line = f"{expr}{self.suffix}"
                 buffer.writeline(line)
+        else:
+            var.bounds = var.bounds.tighten(bounds)
 
         return var
 
-    def newvar(self) -> CSEVariable:
+    def newvar(self, bounds: ValueRanges = ValueRanges.unknown()) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
-        var = V.kernel.create_cse_var(var_name)
+        var = V.kernel.create_cse_var(var_name, bounds)
         self.varname_map[var_name] = var
         return var
 
@@ -731,13 +742,16 @@ class Kernel(CodeGen):
         self.stores = IndentedBuffer()
         self.cse = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
-        self.current_node = None
         self.store_buffer_names = set()
+        # set in set_current_node
+        self.current_node = None
+        self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
 
     @contextlib.contextmanager
     def set_current_node(self, node):
         prior = self.current_node
         self.current_node = node
+        self.node_to_bounds = node._body.bounds().get_bounds()
         try:
             yield
         finally:
@@ -776,10 +790,26 @@ class Kernel(CodeGen):
         finally:
             self.loads = prior
 
+    def store_reduction(self, name, index, value):
+        raise NotImplementedError()
+
     def store(self, name, index, value, mode=None):
         raise NotImplementedError()
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+    def reduction(self, dtype, src_dtype, reduction_type, value):
+        raise NotImplementedError()
+
+    def bucketize(
+        self,
+        values,
+        offsets_name: str,
+        offsets_size: sympy.Expr,
+        indexing_dtype: torch.dtype,
+        right: bool,
+    ):
+        """
+        See [Note: Inductor bucketize op]
+        """
         raise NotImplementedError()
 
     def __enter__(self):
@@ -789,8 +819,18 @@ class Kernel(CodeGen):
             @staticmethod
             def __getattr__(name):
                 def inner(*args, **kwargs):
+                    # TritonTemplateKernel has no current_node
+                    buf_bounds = ValueRanges.unknown()
+                    if hasattr(V.interpreter, "current_node"):
+                        fx_node = V.interpreter.current_node
+                        buf_bounds = self.node_to_bounds.get(
+                            fx_node, ValueRanges.unknown()
+                        )
+
                     csevar = self.cse.generate(
-                        self.compute, getattr(parent_handler, name)(*args, **kwargs)
+                        self.compute,
+                        getattr(parent_handler, name)(*args, **kwargs),
+                        bounds=buf_bounds,
                     )
                     csevar.update_on_args(name, args, kwargs)
                     return csevar
@@ -827,10 +867,44 @@ class Kernel(CodeGen):
                     return self.store(name, index, value, mode=mode)
 
             @staticmethod
-            def reduction(name, dtype, src_dtype, reduction_type, index, value):
+            def store_reduction(name, index, value):
                 self.store_buffer_names.add(name)
-                return self.reduction(
-                    name, dtype, src_dtype, reduction_type, index, value
+                self.cse.store_cache[name] = value
+                if self.current_node:
+                    for other_name in self.current_node.get_mutations():
+                        self.cse.store_cache[other_name] = value
+
+                if name not in V.graph.removed_buffers:
+                    return self.store_reduction(name, index, value)
+
+            @staticmethod
+            def reduction(dtype, src_dtype, reduction_type, value):
+                return self.reduction(dtype, src_dtype, reduction_type, value)
+
+            @staticmethod
+            def bucketize(
+                values,
+                offsets_name: str,
+                offsets_size: sympy.Expr,
+                indexing_dtype: torch.dtype,
+                right: bool,
+            ):
+                """
+                [Note: Inductor bucketize op]
+
+                Given values (tensor) and offsets_name (reference to the name of a 1D
+                tensor), calculate the bucket that each value belongs to.
+
+                e.g. for values [-1, 0, 1, 2, 3, 4, 5, 9], offsets [0, 4, 4, 8], right=True
+                return =        [ 0, 1, 1, 1, 1, 3, 3, 4].
+
+                When right == False, bucket i refers to range (offsets[i], offsets[i+1]].
+                When right == True,  bucket i refers to range [offsets[i], offsets[i+1]).
+
+                Offsets must be non-decreasing or the result is undefined.
+                """
+                return self.bucketize(
+                    values, offsets_name, offsets_size, indexing_dtype, right
                 )
 
         super().__enter__()
@@ -875,5 +949,3 @@ class OptimizationContext:
 
     # Load uint8 value as float32
     is_load_uint8_as_float: bool = False
-    # Store float32 value as uint8
-    is_store_float_as_uint8: bool = False

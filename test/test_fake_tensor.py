@@ -205,6 +205,11 @@ class FakeTensorTest(TestCase):
 
         self.assertTrue(isinstance(out, FakeTensor))
 
+    def test_full(self):
+        # Test torch.full returns tensor with correct dtype
+        with torch._subclasses.CrossRefFakeMode():
+            y = torch.full((4, 4), 1)
+
     def check_function_with_fake(self, fn):
         out = fn()
         with torch._subclasses.FakeTensorMode():
@@ -846,7 +851,7 @@ class FakeTensorConverterTest(TestCase):
         self.assertEqual(out.device.type, "cpu")
 
     def test_multiple_modes(self):
-        t = torch.rand(([4]))
+        t = torch.rand([4])
         t2 = torch.rand([4])
         with FakeTensorMode() as m:
             with FakeTensorMode() as m2:

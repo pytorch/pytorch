@@ -64,7 +64,7 @@ assume_static_by_default = True
 # with assume_static_by_default=True.
 # With this flag enabled, we always compile a frame as fully static for the first time, and, if we fail
 # any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
-automatic_dynamic_shapes = False
+automatic_dynamic_shapes = True
 
 # Typically, if you mark_dynamic a dimension, we will error if the dimension
 # actually ended up getting specialized.  This knob changes the behavior so
@@ -129,6 +129,7 @@ skipfiles_inline_module_allowlist = {
     torch._decomp,
     torch.utils._contextlib,
     torch.utils._pytree,
+    torch.sparse,
 }
 
 # If a string representing a PyTorch module is in this ignorelist,
@@ -235,6 +236,15 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 
 # trace through numpy ndarray as tensor and try to translate numpy function to torch function.
 numpy_ndarray_as_tensor = False
+
+# Uses z3 for validating the guard optimizations transformations.
+translation_validation = (
+    os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION", "0") == "1"
+)
+# Timeout (in milliseconds) for z3 finding a solution.
+translation_validation_timeout = int(
+    os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION_TIMEOUT", "600000")
+)
 
 
 def is_fbcode():
