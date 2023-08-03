@@ -4649,9 +4649,9 @@ def logspace(
     assert not isinstance(base, complex)  # for mypy
     if base < 0:
         raise NotImplementedError
-    ret = torch.linspace(
-        start,
-        end,
+    ret = torch.linspace(  # type: ignore[misc]
+        start,  # type: ignore[arg-type]
+        end,  # type: ignore[arg-type]
         steps,  # type: ignore[arg-type]
         dtype=torch.float64,
         layout=layout,

@@ -68,25 +68,31 @@ def check_inplace_broadcast(self_shape, *args_shape):
         lambda: f"output with shape {self_shape} doesn't match the broadcast shape {broadcasted_shape}",
     )
 
+
 @register_meta(
-    [aten.linspace.default,
-     aten.linspace.out,
-     aten.linspace.Tensor,
-     aten.linspace.Tensor_out,
-     aten.logspace.default,
-     aten.logspace.out,
-     aten.logspace.Tensor,
-     aten.logspace.Tensor_out
-     ]
+    [
+        aten.linspace.default,
+        aten.linspace.out,
+        aten.linspace.Tensor,
+        aten.linspace.Tensor_out,
+        aten.logspace.default,
+        aten.logspace.out,
+        aten.logspace.Tensor,
+        aten.logspace.Tensor_out,
+    ]
 )
 @out_wrapper()
-def meta_linspace_logspace(start, end, steps, base=None,
-    dtype = None,
-    device = None,
-    layout = torch.strided,
-    pin_memory = False,
-    requires_grad = False):
-
+def meta_linspace_logspace(
+    start,
+    end,
+    steps,
+    base=None,
+    dtype=None,
+    device=None,
+    layout=torch.strided,
+    pin_memory=False,
+    requires_grad=False,
+):
     if isinstance(start, torch.Tensor):
         torch._check(
             start.dim() == 0,
@@ -123,22 +129,19 @@ def meta_linspace_logspace(start, end, steps, base=None,
     torch._check(steps >= 0, lambda: "number of steps must be non-negative")
 
     return torch.empty(
-        (steps,),
+        (steps,),  # type: ignore[arg-type]
         dtype=dtype,
         layout=layout,
         device="meta",
         pin_memory=pin_memory,
-        requires_grad=requires_grad
-    )  # type: ignore[arg-type]
+        requires_grad=requires_grad,
+    )
+
 
 @register_meta([aten.allclose.default])
-def allclose(
-    a,
-    b,
-    rtol: float = 1e-05,
-    atol: float = 1e-08,
-    equal_nan: bool = False):
+def allclose(a, b, rtol: float = 1e-05, atol: float = 1e-08, equal_nan: bool = False):
     a.new_empty((), dtype=torch.bool)
+
 
 @register_meta([aten.take.default, aten.take.out])
 @out_wrapper()
@@ -5263,7 +5266,7 @@ def activate_meta():
             # have CompositeImplicitAutograd kernels.
             # Instead, we should be letting those decompositions run, and writing meta kernels
             # only for the base operators.
-            #if op_overload in global_decomposition_table["meta"]:
+            # if op_overload in global_decomposition_table["meta"]:
             #    raise RuntimeError(
             #        f"{op_overload} is a CompositeImplicitAutograd op, we shouldn't "
             #        "register meta function for it. Instead, we should let the decomposition run and write "

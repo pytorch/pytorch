@@ -11187,6 +11187,8 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_linspace,
            sample_inputs_func=sample_inputs_linspace,
            skips=(
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # Tests that assume input is a tensor or sequence of tensors
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
@@ -11214,6 +11216,8 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_linspace,
            sample_inputs_func=sample_inputs_logspace,
            skips=(
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # Tests that assume input is a tensor or sequence of tensors
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
