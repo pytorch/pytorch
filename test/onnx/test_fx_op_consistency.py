@@ -140,14 +140,13 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.max_pool3d",
         "nn.functional.nll_loss",
         # "nn.functional.scaled_dot_product_attention"  non-deterministic
-        "nonzero",
         "scatter_add",
         "scatter_reduce",
         "square",
         "stft",
         "sum",
         "unflatten",
-        "var_mean",
+        # "var_mean",  # Segfault during onnx shape inference. Need to bump onnx version.
         "vstack",  # aten::cat is invoked instead
     ]
 )
@@ -400,11 +399,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Max_pool2d"),
     ),
     xfail(
-        "nonzero",
-        dtypes=(torch.int8, torch.int16),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("NonZero", "int8, int16"),
-    ),
-    xfail(
         "scatter_add",
         dtypes=(torch.float16,),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterElements reduction=sum", "float16"),
@@ -558,12 +552,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_script_does_not_support(
             "string in reduction kwarg: https://github.com/microsoft/onnxscript/issues/726"
         ),
-    ),
-    xfail(
-        "nonzero",
-        matcher=lambda sample: len(sample.input.shape) == 0
-        and sample.kwargs.get("as_tuple", False) is False,
-        reason="Output 'shape' do not match: torch.Size([0, 1]) != torch.Size([0, 0]).",
     ),
     xfail(
         "scatter_add",

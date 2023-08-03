@@ -5078,7 +5078,7 @@ In-place version of :meth:`~Tensor.t`
 add_docstr_all(
     "tile",
     r"""
-tile(dims) -> Tensor
+tile(*reps) -> Tensor
 
 See :func:`torch.tile`
 """,

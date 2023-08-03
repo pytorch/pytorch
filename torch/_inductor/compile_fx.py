@@ -221,11 +221,7 @@ def inner_compile_with_cpp_wrapper(inner_compile):
                 real_inputs = [
                     materialize(x)
                     for x in [
-                        *[
-                            param
-                            for param in torch._guards.TracingContext.get().params_flat
-                            if param is not None
-                        ],
+                        *torch._guards.TracingContext.get().params_flat,
                         *V.real_inputs,
                     ]
                 ]
@@ -781,9 +777,6 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
-_in_aot_compilation = BoxedBool(False)
-
-
 def compile_fx_aot(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
@@ -804,13 +797,12 @@ def compile_fx_aot(
             "aot_inductor_output_path": code_hash(model_.code),
         }
 
-    with unittest.mock.patch.object(_in_aot_compilation, "value", True):
-        return compile_fx(
-            model_,
-            example_inputs_,
-            inner_compile=functools.partial(inner_compile, aot_mode=True),
-            config_patches=config_patches,
-        )
+    return compile_fx(
+        model_,
+        example_inputs_,
+        inner_compile=functools.partial(inner_compile, aot_mode=True),
+        config_patches=config_patches,
+    )
 
 
 _graph_counter = itertools.count(0)
@@ -856,11 +848,6 @@ def fw_compiler_freezing(
     ]
 
     # constant params will be real tensors, not fake
-    params_flat = torch._guards.TracingContext.get().params_flat
-    for i in range(len(params_flat)):
-        if i not in preserved_arg_indices:
-            params_flat[i] = None
-
     with unittest.mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(
             opt_model,
@@ -874,10 +861,11 @@ def fw_compiler_freezing(
             user_visible_outputs=user_visible_outputs,
         )
 
-    # aot_inductor codegens a call that takes in just the inputs, so we don't return a wrapper
-    # that drops constant-ified params
-    if _in_aot_compilation:
-        return optimized_function
+    # Need to drop the args we have constant-ified.
+    params_flat = torch._guards.TracingContext.get().params_flat
+    for i in range(len(params_flat)):
+        if i not in preserved_arg_indices:
+            params_flat[i] = None
 
     def wrapper(args):
         args_new = [args[i] for i in preserved_arg_indices]
@@ -885,7 +873,6 @@ def fw_compiler_freezing(
         return optimized_function(args_new)
 
     wrapper._boxed_call = True
-
     return wrapper
 
 
