@@ -558,7 +558,9 @@ static void fastCatOutDim0(const Tensor& out, const MaterializedITensorListRef& 
       continue;
     }
     TORCH_CHECK(outBytes >= totalBytes);
-    std::memcpy(dataPtr + totalBytes, input.data_ptr(), input.nbytes());
+    if (input.nbytes() > 0) {
+      std::memcpy(dataPtr + totalBytes, input.data_ptr(), input.nbytes());
+    }
     totalBytes += input.nbytes();
   }
   TORCH_CHECK(outBytes == totalBytes);
@@ -587,10 +589,12 @@ static void fastCatOutDim1(const Tensor& out, const MaterializedITensorListRef& 
       auto srcOffset = inputSliceBytes * s;
       TORCH_CHECK(destOffset + inputSliceBytes <= outBytes);
       TORCH_CHECK(srcOffset + inputSliceBytes <= inputBytes);
-      std::memcpy(
+      if (inputSliceBytes > 0) {
+        std::memcpy(
           outputDataPtr + destOffset,
           inputDataPtr + srcOffset,
           inputSliceBytes);
+      }
     }
     offsetInSlice += inputSliceBytes;
   }
