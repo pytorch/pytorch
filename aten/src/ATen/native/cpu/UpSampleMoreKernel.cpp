@@ -768,7 +768,6 @@ void upsample_trilinear3d_backward_kernel_impl(
 
 } // anonymous namespace
 
-// These kernels are slower with AVX512 than with AVX2.
 REGISTER_DISPATCH(upsample_nearest1d_backward_kernel, &upsample_nearest1d_backward_kernel_impl);
 REGISTER_DISPATCH(_upsample_nearest_exact1d_backward_kernel, &_upsample_nearest_exact1d_backward_kernel_impl);
 REGISTER_DISPATCH(upsample_nearest2d_backward_kernel, &upsample_nearest2d_backward_kernel_impl);

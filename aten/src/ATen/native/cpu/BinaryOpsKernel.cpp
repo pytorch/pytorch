@@ -1351,4 +1351,3 @@ ALSO_REGISTER_AVX512_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_k
 ALSO_REGISTER_AVX512_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_kernel);
 
 } // namespace at::native
-

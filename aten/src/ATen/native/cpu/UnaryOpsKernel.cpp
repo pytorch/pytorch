@@ -713,6 +713,14 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
   }                                                                                 \
   }
 
+#define IMPLEMENT_FLOAT_KERNEL_WITHOUT_AVX512(op)                                   \
+  IMPLEMENT_FLOAT_KERNEL(op)                                                        \
+  REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
+
+#define IMPLEMENT_FLOAT_KERNEL_WITH_AVX512(op)                                      \
+  IMPLEMENT_FLOAT_KERNEL(op)                                                        \
+  ALSO_REGISTER_AVX512_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
+
 #define IMPLEMENT_COMPLEX_KERNEL(op)                                                             \
   inline namespace CPU_CAPABILITY {                                                              \
   void op##_kernel(TensorIteratorBase& iter) {                                                   \
@@ -725,6 +733,14 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
   }                                                                                              \
   }
 
+#define IMPLEMENT_COMPLEX_KERNEL_WITHOUT_AVX512(op)                            \
+  IMPLEMENT_COMPLEX_KERNEL(op)                                                 \
+  REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
+
+#define IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(op)                               \
+  IMPLEMENT_COMPLEX_KERNEL(op)                                                 \
+  ALSO_REGISTER_AVX512_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
+
 #define STATIC_IMPLEMENT_COMPLEX_KERNEL(op)                                                      \
   inline namespace CPU_CAPABILITY {                                                              \
   static void op##_kernel(TensorIteratorBase& iter) {                                            \
@@ -736,6 +752,14 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
     iter.cast_outputs();                                                                         \
   }                                                                                              \
   }
+
+#define STATIC_IMPLEMENT_COMPLEX_KERNEL_WITHOUT_AVX512(op)                     \
+  STATIC_IMPLEMENT_COMPLEX_KERNEL(op)                                          \
+  REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
+
+#define STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(op)                        \
+  STATIC_IMPLEMENT_COMPLEX_KERNEL(op)                                          \
+  ALSO_REGISTER_AVX512_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
 
 } // CPU_CAPABILITY namespace
 
@@ -755,18 +779,12 @@ REGISTER_DISPATCH(special_i0e_stub, &CPU_CAPABILITY::i0e_kernel);
 REGISTER_DISPATCH(special_ndtri_stub, &CPU_CAPABILITY::ndtri_kernel);
 REGISTER_DISPATCH(special_modified_bessel_k0_stub, &CPU_CAPABILITY::modified_bessel_k0_kernel);
 REGISTER_DISPATCH(special_modified_bessel_k1_stub, &CPU_CAPABILITY::modified_bessel_k1_kernel);
-IMPLEMENT_FLOAT_KERNEL(ceil)
-REGISTER_DISPATCH(ceil_stub, &CPU_CAPABILITY::ceil_kernel);
-IMPLEMENT_FLOAT_KERNEL(floor)
-REGISTER_DISPATCH(floor_stub, &CPU_CAPABILITY::floor_kernel);
-IMPLEMENT_FLOAT_KERNEL(round)
-REGISTER_DISPATCH(round_stub, &CPU_CAPABILITY::round_kernel);
-IMPLEMENT_COMPLEX_KERNEL(sqrt)
-REGISTER_DISPATCH(sqrt_stub, &CPU_CAPABILITY::sqrt_kernel);
-IMPLEMENT_FLOAT_KERNEL(trunc)
-REGISTER_DISPATCH(trunc_stub, &CPU_CAPABILITY::trunc_kernel);
-IMPLEMENT_FLOAT_KERNEL(i0)
-REGISTER_DISPATCH(i0_stub, &CPU_CAPABILITY::i0_kernel);
+IMPLEMENT_FLOAT_KERNEL_WITHOUT_AVX512(ceil);
+IMPLEMENT_FLOAT_KERNEL_WITHOUT_AVX512(floor);
+IMPLEMENT_FLOAT_KERNEL_WITHOUT_AVX512(round);
+IMPLEMENT_COMPLEX_KERNEL_WITHOUT_AVX512(sqrt);
+IMPLEMENT_FLOAT_KERNEL_WITHOUT_AVX512(trunc);
+IMPLEMENT_FLOAT_KERNEL_WITHOUT_AVX512(i0);
 
 
 // The following kernels are compute-intensive & are compiled with both AVX512
@@ -800,39 +818,22 @@ ALSO_REGISTER_AVX512_DISPATCH(special_modified_bessel_i0_stub, &CPU_CAPABILITY::
 ALSO_REGISTER_AVX512_DISPATCH(special_modified_bessel_i1_stub, &CPU_CAPABILITY::modified_bessel_i1_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(nan_to_num_stub, &CPU_CAPABILITY::nan_to_num_kernel);
 
-STATIC_IMPLEMENT_COMPLEX_KERNEL(acos)
-ALSO_REGISTER_AVX512_DISPATCH(acos_stub, &CPU_CAPABILITY::acos_kernel);
-STATIC_IMPLEMENT_COMPLEX_KERNEL(asin)
-ALSO_REGISTER_AVX512_DISPATCH(asin_stub, &CPU_CAPABILITY::asin_kernel);
-STATIC_IMPLEMENT_COMPLEX_KERNEL(atan)
-ALSO_REGISTER_AVX512_DISPATCH(atan_stub, &CPU_CAPABILITY::atan_kernel);
-STATIC_IMPLEMENT_COMPLEX_KERNEL(cos)
-ALSO_REGISTER_AVX512_DISPATCH(cos_stub, &CPU_CAPABILITY::cos_kernel);
-IMPLEMENT_FLOAT_KERNEL(erf)
-ALSO_REGISTER_AVX512_DISPATCH(erf_stub, &CPU_CAPABILITY::erf_kernel);
-IMPLEMENT_FLOAT_KERNEL(erfc)
-ALSO_REGISTER_AVX512_DISPATCH(erfc_stub, &CPU_CAPABILITY::erfc_kernel);
-IMPLEMENT_FLOAT_KERNEL(erfinv)
-ALSO_REGISTER_AVX512_DISPATCH(erfinv_stub, &CPU_CAPABILITY::erfinv_kernel);
-STATIC_IMPLEMENT_COMPLEX_KERNEL(exp)
-ALSO_REGISTER_AVX512_DISPATCH(exp_stub, &CPU_CAPABILITY::exp_kernel);
-STATIC_IMPLEMENT_COMPLEX_KERNEL(expm1)
-ALSO_REGISTER_AVX512_DISPATCH(expm1_stub, &CPU_CAPABILITY::expm1_kernel);
-STATIC_IMPLEMENT_COMPLEX_KERNEL(log)
-ALSO_REGISTER_AVX512_DISPATCH(log_stub, &CPU_CAPABILITY::log_kernel);
-STATIC_IMPLEMENT_COMPLEX_KERNEL(log10)
-ALSO_REGISTER_AVX512_DISPATCH(log10_stub, &CPU_CAPABILITY::log10_kernel);
-STATIC_IMPLEMENT_COMPLEX_KERNEL(log1p)
-ALSO_REGISTER_AVX512_DISPATCH(log1p_stub, &CPU_CAPABILITY::log1p_kernel);
-STATIC_IMPLEMENT_COMPLEX_KERNEL(log2)
-ALSO_REGISTER_AVX512_DISPATCH(log2_stub, &CPU_CAPABILITY::log2_kernel);
-STATIC_IMPLEMENT_COMPLEX_KERNEL(sin)
-ALSO_REGISTER_AVX512_DISPATCH(sin_stub, &CPU_CAPABILITY::sin_kernel);
-STATIC_IMPLEMENT_COMPLEX_KERNEL(tan)
-ALSO_REGISTER_AVX512_DISPATCH(tan_stub, &CPU_CAPABILITY::tan_kernel);
-STATIC_IMPLEMENT_COMPLEX_KERNEL(tanh)
-ALSO_REGISTER_AVX512_DISPATCH(tanh_stub, &CPU_CAPABILITY::tanh_kernel);
-IMPLEMENT_FLOAT_KERNEL(lgamma)
-ALSO_REGISTER_AVX512_DISPATCH(lgamma_stub, &CPU_CAPABILITY::lgamma_kernel);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(acos);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(asin);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(atan);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(cos);
+IMPLEMENT_FLOAT_KERNEL_WITH_AVX512(erf);
+IMPLEMENT_FLOAT_KERNEL_WITH_AVX512(erfc);
+IMPLEMENT_FLOAT_KERNEL_WITH_AVX512(erfinv);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(exp);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(expm1);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(log);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(log10);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(log1p);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(log2);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(sin);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(tan);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(tanh);
+IMPLEMENT_FLOAT_KERNEL_WITH_AVX512(lgamma);
 
 } // namespace at::native
