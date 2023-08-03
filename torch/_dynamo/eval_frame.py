@@ -1081,7 +1081,9 @@ def export(
                 with torch.fx.traceback.preserve_node_meta():
                     return torch.fx.Interpreter(graph).run(*args)
 
-            with maybe_disable_fake_tensor_mode(), enable_python_dispatcher(), fake_mode:
+            with maybe_disable_fake_tensor_mode(), enable_python_dispatcher(), (
+                fake_mode
+            ):
                 try:
                     graph = make_fx(
                         graph_with_interpreter,
