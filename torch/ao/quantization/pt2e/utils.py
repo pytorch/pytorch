@@ -10,6 +10,8 @@ from torch.nn.utils.fusion import fuse_conv_bn_weights
 import copy
 import operator
 from typing import Any, Callable, Dict, Optional, Tuple
+from torch.fx.node import map_arg
+from torch.utils._pytree import LeafSpec
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
@@ -141,9 +143,10 @@ def get_aten_graph_module(
     import torch._dynamo
     aten_pattern, _ = torch._dynamo.export(
         pattern,
-        *copy.deepcopy(example_inputs),
         aten_graph=True,
         tracing_mode="real",
+    )(
+        *copy.deepcopy(example_inputs),
         **kwargs,
     )
     aten_pattern.graph.eliminate_dead_code()
@@ -238,11 +241,31 @@ def _replace_dropout_for_eval(m: GraphModule):
     )
     m.recompile()
 
+def _replace_literals_with_placeholders(gm):
+    """Replace the literals in the graph with placeholder nodes, so that the literal arguments
+    in the graph can be matched and replaced
 
-from torch.fx.node import map_arg
-from torch.utils._pytree import LeafSpec
+    To use this, the pattern and replacement graph should have the exact same number of literal args
+    and they should be used in the exact same order.
 
-def replace_literals_with_placeholders(gm):
+    For example:
+    pattern:
+    def forward(self, x):
+        return x + 3
+
+    replacement:
+    def forward(self, x):
+        return x - 3
+
+    after this pass, we'll have:
+    pattern:
+    def forward(self, x, scalar):
+        return x + scalar
+
+    replacement:
+    def forward(self, x, scalar):
+        return x - scalar
+    """
     last_ph = None
 
     def _is_literal(arg):
