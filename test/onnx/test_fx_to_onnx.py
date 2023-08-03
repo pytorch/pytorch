@@ -46,6 +46,7 @@ def assert_has_diagnostics(
     )
 
 
+@common_utils.instantiate_parametrized_tests
 class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     def setUp(self):
         super().setUp()
@@ -83,7 +84,20 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         self.assertNotIsInstance(tensor_x, fake_tensor.FakeTensor)
         self.assertNotIsInstance(tensor_y, fake_tensor.FakeTensor)
 
-    def test_mnist_exported_with_no_warnings_on_get_attr_node_in_op_level_debug(self):
+    @common_utils.parametrize(
+        "diagnostic_rule",
+        [
+            common_utils.subtest(
+                diagnostics.rules.find_opschema_matched_symbolic_function,
+                name="optional_inputs",
+            ),
+            common_utils.subtest(
+                diagnostics.rules.op_level_debugging,
+                name="get_attr_node_in_op_level_debug",
+            ),
+        ],
+    )
+    def test_mnist_exported_with_no_warnings(self, diagnostic_rule):
         class MNISTModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -110,12 +124,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             MNISTModel(), tensor_x, export_options=ExportOptions(op_level_debug=True)
         )
 
-        # NOTE: This additional test makes sure that op level debug supports `get_attr`
-        # fx.Node, also known as weight in PyTorch. aten.convolution.default is one of
-        # the nodes that has weight attribute.
         assert_has_diagnostics(
             export_output.diagnostic_context,
-            diagnostics.rules.op_level_debugging,
+            diagnostic_rule,
             diagnostics.levels.NONE,
             expected_node="aten.convolution.default",
         )

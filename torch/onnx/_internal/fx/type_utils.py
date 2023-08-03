@@ -47,7 +47,8 @@ def from_sym_value_to_torch_dtype(sym_value: SYM_VALUE_TYPE) -> torch.dtype:
 def is_optional_onnx_dtype_str(onnx_type_str: str) -> bool:
     optional_onnx_dtype_str = {
         f"optional({value})"
-        for value in _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS.values()
+        for value_set in _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS.values()
+        for value in value_set
     }
     return onnx_type_str in optional_onnx_dtype_str
 
