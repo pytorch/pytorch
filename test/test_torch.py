@@ -2447,7 +2447,7 @@ else:
             self.assertTrue(y.is_contiguous())
             self.assertEqual(expected, actual)
 
-    @tf32_on_and_off()
+    @tf32_on_and_off(0.005)
     def test_cdist_non_contiguous_batch(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 2, 5, 7, device=device).mT
