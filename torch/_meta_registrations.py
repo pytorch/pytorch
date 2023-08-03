@@ -3136,17 +3136,26 @@ def meta_nansum(input, dims=None, keepdim=False, *, dtype=None):
     return input.new_empty(output_shape, dtype=output_dtype)
 
 
-@register_meta(aten.nanmedian.default)
-def meta_nanmedian(input):
+@register_meta([aten.median.default, aten.nanmedian.default])
+def meta_median(input):
     output_shape = utils.compute_reduction_output_shape(
         input.shape, tuple(range(input.dim()))
     )
     return input.new_empty(output_shape)
 
 
-@register_meta([aten.nanmedian.dim, aten.nanmedian.dim_values])
+@register_meta(
+    [
+        aten.median.dim,
+        aten.median.dim_values,
+        aten.nanmedian.dim,
+        aten.nanmedian.dim_values,
+    ]
+)
 @out_wrapper("values", "indices")
-def meta_nanmedian_dim(input, dim=-1, keepdim=False):
+def meta_median_dim(input, dim=-1, keepdim=False):
+    if device_hint(input) == "cuda":
+        utils.alert_not_deterministic("median CUDA with indices output")
     dim = utils.reduction_dims(input.shape, (dim,))
     output_shape = _compute_reduction_shape(input, dim, keepdim)
     return (
