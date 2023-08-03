@@ -65,7 +65,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
         group_batch_fusion_post_grad_passes(gm.graph)
         remove_extra_clones(gm.graph)
-
+        import pdb
+        pdb.set_trace()
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
         if is_inference:
@@ -152,6 +153,57 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
 """
+    this is used to unpack a [K,N] int4 tensor from a [K/2, N] int4x2 tensor
+    (both represented with int8 tensors) where every other row of the int4
+    is packed with the row above as:
+    int4x2[k,n] = 8+int4[2*k,n]+(int4[2*k+1,n]<<4)
+
+    unpack formulas:
+    int4[2*k,n]=(int4x2[k,n]&0xF)- 8
+    int4[2*k+1,n]=int4x2[k,n]>>4
+
+    thus matching on unpack formula:
+    torch.mm(mat1, torch.cat(((mat2 & 0xF)-8, mat2>>4),1).reshape(mat2_mm_shape).to(mat2_dtype))
+"""
+@register_lowering_pattern(
+    CallFunction(
+        aten.mm,
+        KeywordArg("mat1"),
+        CallFunction(
+            prims.convert_element_type.default,
+            CallFunction(
+                prims.reshape,
+                CallFunction(
+                    aten.cat,
+                    ListOf(
+                        CallFunction(
+                            prims.sub,
+                            CallFunction(
+                                prims.bitwise_and,
+                                KeywordArg("mat2"),
+                                0xF,
+                            ),
+                            8,
+                        ),
+                        CallFunction(
+                            aten.__rshift__.Scalar,
+                            KeywordArg("mat2"),
+                            4,
+                        )
+                    ),
+                    1,
+                ),
+                KeywordArg("mat2_mm_shape"),
+            ),
+            KeywordArg("mat2_dtype"),
+        ),
+    ),
+    extra_check=lambda x: config.use_mixed_mm,
+)
+def mixed_int4x2_mm(match: Match, mat1, mat2, mat2_mm_shape, mat2_dtype):
+    return inductor.kernel.unpack_mixed_mm.tuned_int4x2_mixed_mm(mat1, mat2, mat2_mm_shape, mat2_dtype)
+
+"""
     torch.mm(mat1, mat2.to(mat2_dtype))
 """
 @register_lowering_pattern(
@@ -171,7 +223,6 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
 )
 def mixed_mm(match: Match, mat1, mat2, mat2_dtype):
     return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)
-
 
 @register_graph_pattern(
     CallFunction(

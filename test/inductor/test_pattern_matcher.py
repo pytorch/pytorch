@@ -153,6 +153,29 @@ class TestPaternMatcher(TestCase):
         actual, (code,) = run_and_get_code(torch.compile(fn), *args)
         self.assertFalse("mixed_mm" in code)
 
+    def test_int4x2_mixed_mm(self):
+        def fn(a, b):
+            return torch.mm(a, torch.cat(((b & 0xF)-8, b>>4),1).reshape(-1, b.shape[1]).to(a.dtype))
+
+        args_list = [
+            (
+                torch.randn(8, 8, device="cuda"),
+                torch.randint(-128, 127, (4, 8), dtype=torch.int8, device="cuda"),
+            ),
+        ]
+
+        for args in args_list:
+            torch._dynamo.reset()
+            counters.clear()
+            ref = fn(*args)
+            test, (code,) = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(ref, test)
+            actual, (code,) = run_and_get_code(torch.compile(fn), *args)
+            print(code)
+            self.assertTrue("int4x2_mixed_mm" in code)
+            # self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
+            # self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+
     def test_addmm(self):
         def fn(a, b, c):
             return torch.add(a, torch.mm(b, c)), torch.mm(b, c) + a
