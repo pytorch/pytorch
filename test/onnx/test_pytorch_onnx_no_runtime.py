@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import tempfile
 import contextlib
 import io
 import itertools
@@ -1194,11 +1193,14 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
         x = torch.randn(2, 3).to(fp8_dtype)
 
-        with tempfile.NamedTemporaryFile() as model_proto_file:
-            torch.onnx.export(
-                Model(), x, model_proto_file.name, opset_version=18
-            )
-            onnx.checker.check_model(model_proto_file.name)
+        f = io.BytesIO()
+        torch.onnx.export(Model(), x, f, opset_version=19)
+        onnx.checker.check_model(f.getvalue())
+
+        onnx_type = {torch.float8_e4m3fn: 17, torch.float8_e5m2: 19}  # From https://github.com/onnx/onnx/blob/main/onnx/onnx.proto3#L512-L521
+        loaded_model = onnx.load_from_string(f.getvalue())
+        self.assertEqual(loaded_model.graph.input[0].type.tensor_type.elem_type, onnx_type[fp8_dtype])
+
 
 class TestQuantizeEagerONNXExport(common_utils.TestCase):
     def _test_lower_graph_impl(self, model, data):
