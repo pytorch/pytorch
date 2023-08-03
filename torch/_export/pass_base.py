@@ -21,7 +21,7 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils import _pytree as pytree
 
 
-__all__ = ["ExportPassBase"]
+__all__ = ["_ExportPassBase"]
 
 
 Argument = Any
@@ -34,7 +34,7 @@ class ExportPassBaseError(RuntimeError):
     pass
 
 
-class ExportPassBase(PassBase):
+class _ExportPassBase(PassBase):
     """
     Interpreter-based pass class to help users maintain the IR spec while writing
     transformations.
@@ -47,9 +47,9 @@ class ExportPassBase(PassBase):
 
     class ExportTracer(PythonKeyTracer):
         """
-        Tracer used to create nodes during the retracing part of the ExportPassBase
+        Tracer used to create nodes during the retracing part of the Expo_ExportPassBasertPassBase
         """
-        def __init__(self, callback: "ExportPassBase", codegen: CodeGen) -> None:
+        def __init__(self, callback: "_ExportPassBase", codegen: CodeGen) -> None:
             super().__init__()
             self.callback = callback
             self.root = torch.nn.Module()
@@ -140,9 +140,9 @@ class ExportPassBase(PassBase):
 
     class ExportInterpreter(fx.Interpreter):
         """
-        Interpreter to callback on any ExportPassBase functions
+        Interpreter to callback on any _ExportPassBase functions
         """
-        def __init__(self, callback: "ExportPassBase", gm: fx.GraphModule) -> None:
+        def __init__(self, callback: "_ExportPassBase", gm: fx.GraphModule) -> None:
             super().__init__(gm)
             self.callback = callback
             self.node: torch.fx.Node = next(iter(gm.graph.nodes))
@@ -228,15 +228,15 @@ class ExportPassBase(PassBase):
 
     def __init_subclass__(cls, **kwargs):
         if hasattr(cls, "ExportInterpreter"):
-            ExportPassBase.ExportInterpreter = cls.ExportInterpreter  # type: ignore[misc]
+            _ExportPassBase.ExportInterpreter = cls.ExportInterpreter  # type: ignore[misc]
         if hasattr(cls, "ExportTracer"):
-            ExportPassBase.ExportTracer = cls.ExportTracer  # type: ignore[misc]
+            _ExportPassBase.ExportTracer = cls.ExportTracer  # type: ignore[misc]
 
     def __init__(self) -> None:
         self.interpreter = torch.fx.Interpreter(
             torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         )
-        self.tracer = ExportPassBase.ExportTracer(self, CodeGen())
+        self.tracer = _ExportPassBase.ExportTracer(self, CodeGen())
         self.fake_tensor_mode: Optional[FakeTensorMode] = None
         self._initialized = True
         self.node_debug_str: typing.Optional[str] = None
@@ -369,11 +369,11 @@ class ExportPassBase(PassBase):
     def call_submodule(
         self, graph_module: fx.GraphModule, inputs: Tuple[Argument, ...]
     ) -> PassResult:
-        prev_tracer, self.tracer = self.tracer, ExportPassBase.ExportTracer(
+        prev_tracer, self.tracer = self.tracer, _ExportPassBase.ExportTracer(
             self, graph_module.graph._codegen
         )
         self.tracer.fake_tensor_mode = prev_tracer.fake_tensor_mode
-        interpreter = ExportPassBase.ExportInterpreter(self, graph_module)
+        interpreter = _ExportPassBase.ExportInterpreter(self, graph_module)
         prev_interpreter, self.interpreter = self.interpreter, torch.fx.Interpreter(
             torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         )
