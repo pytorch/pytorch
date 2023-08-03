@@ -38,14 +38,10 @@ def aot_autograd_check(
         try_check_data_specialization=False):
     """Compares func(*args, **kwargs) in eager-mode to under AOTAutograd.
 
-    Compares outputs and (if possible) gradients produced by AOTAutograd
-    against eager-mode PyTorch.
+    Compares outputs and (if check_gradients=True) gradients produced by
+    AOTAutograd against eager-mode PyTorch.
 
-    We assume that:
-    - func(*args, **kwargs) succeeds in eager-mode PyTorch
-    - If any inputs have requires_grad=True and at least one output has
-      requires_grad=True, then computing gradients of
-      func(*args, **kwargs) succeeds in eager-mode PyTorch
+    We assume that func(*args, **kwargs) succeeds in eager-mode PyTorch.
 
     """
     flat_args, args_spec = pytree.tree_flatten((args, kwargs))
@@ -120,7 +116,7 @@ def _test_aot_autograd_forwards_backwards_helper(
             raise
 
         # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
-        if orig_grad and all(x is None for x in orig_grad):
+        if all(x is None for x in orig_grad):
             with assert_raises_regex_fn(RuntimeError, 'does not require grad and does not have a grad_fn'):
                 call_forwards_backwards(compiled_f, args)
             return

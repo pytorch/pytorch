@@ -2887,7 +2887,7 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
         t_kwargs = sample_input.kwargs
         try:
             aot_autograd_check(
-                op.op, t_args, t_kwargs, dynamic,
+                op.op, t_args, t_kwargs, dynamic, True,
                 self.assertRaisesRegex, self.assertEqual,
                 try_check_data_specialization=try_check_data_specialization)
         except DynamicOutputShapeException:
