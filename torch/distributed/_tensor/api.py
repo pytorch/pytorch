@@ -203,7 +203,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         )
         # deepcopy and set spec
         r._spec = DTensorSpec(
-            device_mesh, copy.deepcopy(placements), tensor_meta=tensor_meta
+            device_mesh, placements, tensor_meta=tensor_meta
         )
         r._local_tensor = local_tensor
         return r

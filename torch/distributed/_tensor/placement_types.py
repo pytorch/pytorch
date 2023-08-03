@@ -390,7 +390,13 @@ class DTensorSpec:
             isinstance(__o, DTensorSpec)
             and self.mesh == __o.mesh
             and self.placements == __o.placements
-            and self.tensor_meta == __o.tensor_meta
+            # perf hack to avoid redistribute due to memory_format to be None.
+            and self.tensor_meta.shape == __o.tensor_meta.shape
+            and self.tensor_meta.dtype == __o.tensor_meta.dtype
+            and self.tensor_meta.requires_grad == __o.tensor_meta.requires_grad
+            and self.tensor_meta.stride == __o.tensor_meta.stride
+            and self.tensor_meta.is_quantized == __o.tensor_meta.is_quantized
+            and self.tensor_meta.qparams == __o.tensor_meta.qparams
         )
 
     @property
