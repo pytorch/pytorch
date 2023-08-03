@@ -31,6 +31,8 @@ ScalarName = Literal[
     "QUInt8",
     "QInt32",
     "BFloat16",
+    "Float8E5M2",
+    "Float8E4M3FN",
     "Undefined",
 ]
 
@@ -51,6 +53,8 @@ TorchName = Literal[
     "quint8",
     "qint32",
     "bfloat16",
+    "float8_e5m2",
+    "float8_e4m3fn",
 ]
 
 
@@ -91,7 +95,7 @@ class JitScalarType(enum.IntEnum):
     QINT32 = enum.auto()  # 14
     BFLOAT16 = enum.auto()  # 15
     FLOAT8E5M2 = enum.auto()  # 16
-    FLOAT8E4M3 = enum.auto()  # 17
+    FLOAT8E4M3FN = enum.auto()  # 17
     UNDEFINED = enum.auto()  # 18
 
     @classmethod
@@ -279,7 +283,7 @@ _SCALAR_TYPE_TO_NAME: Dict[JitScalarType, ScalarName] = {
     JitScalarType.QINT32: "QInt32",
     JitScalarType.BFLOAT16: "BFloat16",
     JitScalarType.FLOAT8E5M2: "Float8E5M2",
-    JitScalarType.FLOAT8E4M3: "Float8E4M3",
+    JitScalarType.FLOAT8E4M3FN: "Float8E4M3FN",
     JitScalarType.UNDEFINED: "Undefined",
 }
 
@@ -304,8 +308,8 @@ _SCALAR_TYPE_TO_TORCH_NAME: Dict[JitScalarType, TorchName] = {
     JitScalarType.QUINT8: "quint8",
     JitScalarType.QINT32: "qint32",
     JitScalarType.BFLOAT16: "bfloat16",
-    JitScalarType.FLOAT8E5M2: "Float8_e5m2fn",
-    JitScalarType.FLOAT8E4M3: "Float8_e4m3fn",
+    JitScalarType.FLOAT8E5M2: "float8_e5m2",
+    JitScalarType.FLOAT8E4M3FN: "float8_e4m3fn",
 }
 
 _TORCH_NAME_TO_SCALAR_TYPE: Dict[TorchName, JitScalarType] = {
@@ -331,7 +335,7 @@ _SCALAR_TYPE_TO_ONNX = {
     JitScalarType.QUINT8: _C_onnx.TensorProtoDataType.UINT8,
     JitScalarType.QINT32: _C_onnx.TensorProtoDataType.INT32,
     JitScalarType.FLOAT8E5M2: _C_onnx.TensorProtoDataType.FLOAT8E5M2,
-    JitScalarType.FLOAT8E4M3: _C_onnx.TensorProtoDataType.FLOAT8E4M3FN,
+    JitScalarType.FLOAT8E4M3FN: _C_onnx.TensorProtoDataType.FLOAT8E4M3FN,
 }
 
 # source of truth is
@@ -354,7 +358,7 @@ _SCALAR_TYPE_TO_DTYPE = {
     JitScalarType.QINT32: torch.qint32,
     JitScalarType.BFLOAT16: torch.bfloat16,
     JitScalarType.FLOAT8E5M2: torch.float8_e5m2,
-    JitScalarType.FLOAT8E4M3: torch.float8_e4m3fn,
+    JitScalarType.FLOAT8E4M3FN: torch.float8_e4m3fn,
 }
 
 _DTYPE_TO_SCALAR_TYPE = {v: k for k, v in _SCALAR_TYPE_TO_DTYPE.items()}
