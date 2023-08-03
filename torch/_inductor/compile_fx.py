@@ -790,11 +790,17 @@ _in_aot_compilation = BoxedBool(False)
 
 
 def compile_fx_aot(
-    model_: torch.fx.GraphModule,
+    model_: "ExportedProgram",
     example_inputs_: List[torch.Tensor],
     inner_compile=compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
 ):
+    from torch._export.exported_program import ExportedProgram
+
+    assert isinstance(
+        model_, ExportedProgram
+    ), "Input of compile_fx_aot should be from torch.export"
+
     config_patches = (
         {"cpp_wrapper": True}
         if config_patches is None
@@ -806,7 +812,7 @@ def compile_fx_aot(
     ):
         config_patches = {
             **config_patches,
-            "aot_inductor_output_path": code_hash(model_.code),
+            "aot_inductor_output_path": code_hash(model_.graph_module.code),
         }
 
     with unittest.mock.patch.object(_in_aot_compilation, "value", True):
@@ -861,12 +867,13 @@ def fw_compiler_freezing(
     ]
 
     # constant params will be real tensors, not fake
-    params_flat = torch._guards.TracingContext.get().params_flat
-    for i in range(len(params_flat)):
-        if i not in preserved_arg_indices:
-            params_flat[i] = None
+    if torch._guards.TracingContext.get():
+        params_flat = torch._guards.TracingContext.get().params_flat
+        for i in range(len(params_flat)):
+            if i not in preserved_arg_indices:
+                params_flat[i] = None
 
-    with unittest.mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
+    with unittest.mock.patch.object(V.fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(
             opt_model,
             aot_example_inputs,
@@ -922,9 +929,14 @@ def compile_fx(
                 "triton.unique_kernel_names": True,
             }
         ), V.set_real_inputs(example_inputs_):
+            fake_inputs = [
+                node.meta["val"]
+                for node in model_.graph.nodes
+                if node.op == "placeholder"
+            ]
             return compile_fx(
                 model_,
-                example_inputs_,
+                fake_inputs,
                 inner_compile=inner_compile_with_cpp_wrapper(inner_compile),
                 decompositions=decompositions,
             )
@@ -1043,7 +1055,17 @@ def compile_fx(
 
     fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
 
-    if config.freezing and not torch.is_grad_enabled():
+    if _in_aot_compilation and config.freezing and not torch.is_grad_enabled():
+        inference_compiler = functools.partial(
+            fw_compiler_freezing,
+            dynamo_model=model_,
+            num_example_inputs=num_example_inputs,
+            inner_compile=inner_compile,
+            cudagraphs=cudagraphs,
+            graph_id=graph_id,
+            forward_device=forward_device,
+        )
+    elif config.freezing and not torch.is_grad_enabled():
         inference_compiler = functools.partial(
             fw_compiler_freezing,
             dynamo_model=model_,
@@ -1086,7 +1108,7 @@ def compile_fx(
     )
     if _in_aot_compilation:
         with V.set_fake_mode(fake_mode), compiled_autograd.disable():
-            return fw_compiler(model_, example_inputs_)
+            return inference_compiler(model_.graph_module, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(
         tracing_context

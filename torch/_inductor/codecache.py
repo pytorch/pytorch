@@ -886,6 +886,13 @@ class AotCodeCache:
             extra=cpp_command,
             specified_dir=config.aot_inductor_output_path,
         )
+
+        # Write constants to file
+        torch.save(
+            list(graph.constants.values()),
+            f"{os.path.splitext(input_path)[0]}_constants.pkl",
+        )
+
         if key not in cls.cache:
             from filelock import FileLock
 

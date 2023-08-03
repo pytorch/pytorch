@@ -12,6 +12,7 @@ from torch._functorch.compile_utils import fx_graph_cse
 
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
 from torch._inductor.fx_passes.post_grad import view_to_reshape
+from torch._inductor.virtualized import V
 
 from . import config
 
@@ -72,6 +73,40 @@ def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
     preserved_arg_indices.extend(range(len(flat_params), len(params)))
     # is this necessary ?
     gm.recompile()
+    return preserved_arg_indices
+
+
+def replace_exported_params_with_constants(gm, ep) -> List[int]:
+    """
+    Replaces the parameters of a PyTorch GraphModule with constants wherever possible.
+    Returns a list of indices representing the input parameters that were not converted to constants.
+    """
+    param_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    flat_named_params = list(ep.state_dict.items())
+    preserved_arg_indices = []
+    for i, (param_name, param) in enumerate(flat_named_params):
+        if param_name in ep.graph_signature.buffers_to_mutate:
+            preserved_arg_indices.append(i)
+            continue
+        else:
+            replace_node_with_constant(gm, param_nodes[i], param)
+
+            # Remove these from the original exported graph to reflect the freezing
+            del ep.state_dict[param_name]
+            if param_name in ep.graph_signature.parameters:
+                ep.graph_signature.parameters.remove(param_name)
+            if param_name in ep.graph_signature.buffers:
+                ep.graph_signature.buffers.remove(param_name)
+
+    # add on non param inputs
+    preserved_arg_indices.extend(range(len(flat_named_params), len(param_nodes)))
+    # is this necessary ?
+    gm.recompile()
+
+    # Update the real inputs so later the cpp_wrapper can get the correct inputs
+    if V.real_inputs:
+        V.set_real_inputs(tuple(V.real_inputs[ind] for ind in preserved_arg_indices))
+
     return preserved_arg_indices
 
 
@@ -210,13 +245,20 @@ def freeze(
     # See the details in fx_codegen_and_compile of compile_fx.py.
     view_to_reshape(aot_autograd_gm)
 
-    fw_metadata = torch._guards.TracingContext.get().fw_metadata
-    params_flat = torch._guards.TracingContext.get().params_flat
-    assert fw_metadata is not None and params_flat is not None
+    from torch._export.exported_program import ExportedProgram
 
-    preserved_arg_indices = replace_params_with_constants(
-        aot_autograd_gm, params_flat, fw_metadata
-    )
+    if isinstance(dynamo_gm, ExportedProgram):
+        preserved_arg_indices = replace_exported_params_with_constants(
+            aot_autograd_gm, dynamo_gm
+        )
+    else:
+        fw_metadata = torch._guards.TracingContext.get().fw_metadata
+        params_flat = torch._guards.TracingContext.get().params_flat
+        assert fw_metadata is not None and params_flat is not None
+
+        preserved_arg_indices = replace_params_with_constants(
+            aot_autograd_gm, params_flat, fw_metadata
+        )
 
     # TODO - further restrict cse ? right now needed to dedup aliasing ops
     cse_graph = fx_graph_cse(aot_autograd_gm.graph)

@@ -391,8 +391,13 @@ def aot_compile(
     )
     all_args = (*param_buffer_values, *flat_example_inputs)
 
+    if options is None:
+        options = {"freezing": True}
+    else:
+        options["freezing"] = True
+
     so_path = compile_fx_aot(
-        ep.graph_module,
+        ep,
         all_args,  # type: ignore[arg-type]
         config_patches=options,
     )

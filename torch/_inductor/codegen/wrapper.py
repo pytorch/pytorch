@@ -996,6 +996,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     else:
                         self.prefix.writeline(f"at::Tensor {input_key} = args[{idx}];")
 
+            # Append constants as inputs to the graph
             assert all(
                 isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
             ), "Expect all constants to be Tensor"
