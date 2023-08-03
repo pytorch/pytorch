@@ -30,7 +30,74 @@
 namespace at::native {
 namespace mps {
 
-// The c++ gamma functions that I've ported here come from https://www.johndcook.com/Gamma.cpp.
+    const float PSI_10 = 2.25175258906672110764;
+
+    kernel void digamma (device {0} *input [[buffer(0)]],
+                        device {1} *output [[buffer(1)]],
+                        uint id [[thread_position_in_grid]]) {
+        if (x < 0) {
+            if (x == trunc(x)) {
+                // As per C++ standard for gamma related functions and SciPy,
+                // If the argument is a negative integer, NaN is returned
+                output[id] = NAN;
+                }
+            else {
+                // Extracts the fractional part of x as r, since tan(pi * r) is more numerically
+                // accurate than tan(pi * x). While these operations are mathematically equivalent
+                // since both x and r are in radians and tan() has a periodicity of pi, in practice
+                // the computation of pi * x is a source of error (when |x| > 1).
+                float q, r;
+                r = std::modf(x, &q);
+                output[id] = calc_digamma_positive_domain(1 - x) - M_PI_BF / tan(M_PI_BF * r);
+            }
+
+  }
+
+    }
+
+    /*
+ * This function is derived from the implementation of the digamma function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
+ */
+float calc_digamma_positive_domain(git x) {
+  // [C++ Standard Reference: Gamma Function] https://en.cppreference.com/w/cpp/numeric/math/tgamma
+  if (x == 0) {
+    // As per C++ standard for gamma related functions and SciPy,
+    // If the argument is ±0, ±∞ is returned
+    return std::copysign(INFINITY, -x);
+  }
+
+  // Push x to be >= 10
+  double result = 0;
+  while (x < 10) {
+    result -= 1 / x;
+    x += 1;
+  }
+  if (x == 10) {
+    return result + PSI_10;
+  }
+
+  // Compute asymptotic digamma
+  static const double A[] = {
+      8.33333333333333333333E-2,
+      -2.10927960927960927961E-2,
+      7.57575757575757575758E-3,
+      -4.16666666666666666667E-3,
+      3.96825396825396825397E-3,
+      -8.33333333333333333333E-3,
+      8.33333333333333333333E-2,
+  };
+
+  double y = 0;
+  if (x < 1.0e17) {
+    double z = 1.0 / (x * x);
+    y = z * polevl(z, A, 6);
+  }
+  return result + log(x) - (0.5 / x) - y;
+}
+
+// The gamma function approximations come from John D Cook's
+// c++ implementation:  https://www.johndcook.com/Gamma.cpp.
 
 static const char* GAMMA_OPS_TEMPLATE = R"METAL(
 #include <metal_stdlib>
@@ -39,6 +106,11 @@ using namespace metal;
 constant float EULER_MASCHERONI = 0.577215664901532860606512090;
 
 constant float HALF_LOG_TWO_PI = 0.91893853320467274178032973640562;
+
+constant float LOG_PI = 1.14472988584940017414342735135305;
+
+constant float PI = 3.141592653589793238462643383279502;
+
 
 // numerator coefficients for approximation over the interval (1,2)
 constant float GAMMA_NUMERATOR_COEF[8] =
@@ -79,9 +151,9 @@ constant float LGAMMA_EXPANSION_COEF[8] =
 		-3617.0/122400.0
     }};
 
-float LogGamma({0} x);
+float LogGamma(float x);
 
-float Gamma({0} x) {{
+float Gamma(float x) {{
     if (x < 0.001) {{
         // For small x, 1/Gamma(x) has power series x + gamma x^2  - ...
         // So in this range, 1/Gamma(x) = x + gamma x^2 with error on the order of x^3.
@@ -143,36 +215,57 @@ float Gamma({0} x) {{
     }}
 }}
 
-float LogGamma({0} x) {{
+float LogGamma(float x) {{
+
+    float logGamma;
+
+    bool is_negative = (x < 0);
+    if (is_negative)
+    {{
+        x = -x;
+    }}
+    if (x == 0)
+    {{
+        return INFINITY;
+    }}
     if (x < 12.0)
     {{
-        return log(fabs(Gamma(x)));
+        logGamma = log(fabs(Gamma(x)));
     }}
-
-	// Abramowitz and Stegun 6.1.41
-    // Asymptotic series should be good to at least 11 or 12 figures
-    // For error analysis, see Whittiker and Watson
-    // A Course in Modern Analysis (1927), page 252
-
-    float z = 1.0 / (x*x);
-    float sum = LGAMMA_EXPANSION_COEF[7];
-
-    for (int i=6; i >= 0; i--)
+    else
     {{
-        sum *= z;
-        sum += LGAMMA_EXPANSION_COEF[i];
-    }}
-    float series = sum/x;
+        // Abramowitz and Stegun 6.1.41
+        // Asymptotic series should be good to at least 11 or 12 figures
+        // For error analysis, see Whittiker and Watson
+        // A Course in Modern Analysis (1927), page 252
 
-    float logGamma = (x - 0.5) * log(static_cast<{0}>(x)) - x + HALF_LOG_TWO_PI + series;
-	return logGamma;
+        float z = 1.0 / (x*x);
+        float sum = LGAMMA_EXPANSION_COEF[7];
+
+        for (int i=6; i >= 0; i--)
+        {{
+            sum *= z;
+            sum += LGAMMA_EXPANSION_COEF[i];
+        }}
+        float series = sum/x;
+
+        logGamma = (x - 0.5) * log(x) - x + HALF_LOG_TWO_PI + series;
+    }}
+
+    if (is_negative)
+    {{
+        return LOG_PI - logGamma - log(fabs(x * sin(x * PI))); // Reflection Formula
+    }}
+
+    return logGamma;
+
 }}
 
 
 kernel void lgamma(device {0} *input [[buffer(0)]],
                    device {1} *output [[buffer(1)]],
                    uint id [[thread_position_in_grid]]) {{
-    output[id] = LogGamma(input[id]);
+    output[id] = LogGamma(static_cast<float>(input[id]));
 }}
 
 )METAL";
@@ -233,20 +326,24 @@ TORCH_IMPL_FUNC(lgamma_out_mps)(const Tensor& self, const Tensor& output_) {
   if (length == 0) {
     return;
   }
-  using namespace mps;
-  @autoreleasepool {
 
-    id<MTLDevice> device = MPSDevice::getInstance()->device();
-    id<MTLComputePipelineState> cplState =
-        getCPLState(device,
-                    scalarToMetalTypeString(self.scalar_type()),
-                    scalarToMetalTypeString(output.scalar_type()),
-                    "lgamma");
-
-    if (!self.is_contiguous()) {
+  if (!self.is_contiguous()) {
       output = output.contiguous();
       needs_output_copy = true;
     }
+
+  using namespace mps;
+
+  std::string input_type = scalarToMetalTypeString(self.scalar_type());
+  std::string output_type = scalarToMetalTypeString(output.scalar_type());
+
+  @autoreleasepool {
+
+    id<MTLDevice> device = MPSDevice::getInstance()->device();
+    id<MTLComputePipelineState> cplState = getCPLState(device,
+                                                        input_type,
+                                                        output_type,
+                                                        "lgamma");
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
