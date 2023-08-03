@@ -89,8 +89,7 @@ class ConstDictVariable(VariableTracker):
             assert not (args or kwargs)
             return TupleVariable(
                 [
-                    SetVariable(
-                        tx=tx,
+                    TupleVariable(
                         items=[
                             ConstDictVariable._key_to_var(
                                 tx,
@@ -99,7 +98,6 @@ class ConstDictVariable(VariableTracker):
                             ),
                             v,
                         ],
-                        mutable_local=MutableLocal(),
                         **options,
                     )
                     for k, v in val.items()
