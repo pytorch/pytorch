@@ -3136,17 +3136,28 @@ def meta_nansum(input, dims=None, keepdim=False, *, dtype=None):
     return input.new_empty(output_shape, dtype=output_dtype)
 
 
-@register_meta(aten.nanmedian.default)
-def meta_nanmedian(input):
+@register_meta([aten.median.default, aten.nanmedian.default])
+def meta_median(input):
     output_shape = utils.compute_reduction_output_shape(
         input.shape, tuple(range(input.dim()))
     )
     return input.new_empty(output_shape)
 
 
-@register_meta([aten.nanmedian.dim, aten.nanmedian.dim_values])
+@register_meta(
+    [
+        aten.median.dim,
+        aten.median.dim_values,
+        aten.nanmedian.dim,
+        aten.nanmedian.dim_values,
+        aten.mode.default,
+        aten.mode.values,
+    ]
+)
 @out_wrapper("values", "indices")
-def meta_nanmedian_dim(input, dim=-1, keepdim=False):
+def meta_median_mode_dim(input, dim=-1, keepdim=False):
+    if device_hint(input) == "cuda":
+        utils.alert_not_deterministic("median CUDA with indices output")
     dim = utils.reduction_dims(input.shape, (dim,))
     output_shape = _compute_reduction_shape(input, dim, keepdim)
     return (
@@ -4465,19 +4476,15 @@ def meta__scaled_dot_product_flash(
     head_dim = query.size(3)
 
     max_seqlen_batch_k = key.size(2)
-
-    query = query.transpose(1, 2)
-    key = key.transpose(1, 2)
-    value = value.transpose(1, 2)
-
     Nnz_q = batch_size * max_seqlen_batch_q
 
-    output = torch.empty(
-        (Nnz_q, num_heads, head_dim), dtype=query.dtype, device=query.device
-    )
-    output = output.view(batch_size, max_seqlen_batch_q, num_heads, head_dim).transpose(
-        1, 2
-    )
+    query_t = query.transpose(1, 2)
+    query_reshaped = query_t.reshape(Nnz_q, num_heads, head_dim)
+    attention = torch.empty_like(query_reshaped, device=query.device)
+    attention = attention.view(
+        batch_size, max_seqlen_batch_q, num_heads, head_dim
+    ).transpose(1, 2)
+
     max_seqlen_q = math.ceil(max_seqlen_batch_q / 16) * 16
     logsumexp = torch.empty(
         (batch_size, num_heads, max_seqlen_q),
@@ -4512,7 +4519,7 @@ def meta__scaled_dot_product_flash(
     # it's possible we'll need to have some special handling in inductor for sdpa
 
     return (
-        output,
+        attention,
         logsumexp,
         cumulative_sequence_length_q,
         cumulative_sequence_length_k,

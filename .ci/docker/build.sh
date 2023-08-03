@@ -288,6 +288,15 @@ case "$image" in
     VISION=yes
     TRITON=yes
     ;;
+  pytorch-linux-jammy-py3-clang12-asan)
+    ANACONDA_PYTHON_VERSION=3.9
+    CLANG_VERSION=12
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    CONDA_CMAKE=yes
+    TRITON=yes
+    ;;
   pytorch-linux-focal-linter)
     # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
     # We will need to update mypy version eventually, but that's for another day. The task

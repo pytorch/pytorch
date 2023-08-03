@@ -121,6 +121,7 @@ class TestCase(TorchTestCase):
 
     def setUp(self):
         torch._dynamo.reset()
+        torch._inductor.metrics.reset()
         super().setUp()
         self._start = time.perf_counter()
 
