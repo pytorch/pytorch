@@ -65,6 +65,7 @@ std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
   auto startCore = [&opts]() {
     auto daemon = opts.useLibUV ? create_libuv_tcpstore_backend(opts)
                                 : create_tcpstore_backend(opts);
+    daemon->start();
     return std::make_shared<TCPServer>(daemon->port(), std::move(daemon));
   };
 
