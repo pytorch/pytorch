@@ -1331,7 +1331,6 @@ class TestIndexing(TestCase):
     @onlyCUDA
     def test_cuda_broadcast_index_use_deterministic_algorithms(self, device):
         with DeterministicGuard(True):
-
             idx1 = torch.tensor([0])
             idx2 = torch.tensor([2, 6])
             
