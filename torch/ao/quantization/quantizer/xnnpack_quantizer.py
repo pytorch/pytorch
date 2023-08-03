@@ -251,6 +251,31 @@ def _get_module_name_filter(module_name: str):
     return module_name_filter
 
 
+def _get_module_type_filter(tp: Callable):
+    """Get the module_type_filter function for a given module type, the filter accepts
+    a node and checks if the node comes from a module that has certain module type
+
+    For example:
+        node: linear_op = call_function[...](...)  # comes from a module with type Block -> Sub -> Linear
+
+
+    >> module_type_filter = _get_module_type_filter(Sub)  # submodule with type `Sub`, under the `Block` submodule
+    >> print(module_type_filter(node))
+    True  # the node is from the submodule `Sub` (same for `Block` and `Linear` as well)
+    """
+
+    def module_type_filter(n: Node) -> bool:
+        # example: {
+        #     'L__self___sub': ("L['self'].sub", <class '....Sub'>),
+        #     'L__self___sub_linear': ("L['self'].sub.linear", <class 'torch.nn.modules.linear.Linear'>)
+        # }
+        nn_module_stack = n.meta["nn_module_stack"]
+        types = [t for _, t in nn_module_stack.values()]
+        return tp in types
+
+    return module_type_filter
+
+
 class XNNPACKQuantizer(Quantizer):
     supported_config_and_operators = _get_supported_config_and_operators()
 
@@ -258,6 +283,7 @@ class XNNPACKQuantizer(Quantizer):
         super().__init__()
         self.global_config: Optional[QuantizationConfig] = None
         self.operator_type_config: Dict[str, Optional[QuantizationConfig]] = {}
+        self.module_type_config: Dict[Callable, Optional[QuantizationConfig]] = {}
         self.module_name_config: Dict[str, Optional[QuantizationConfig]] = {}
 
     @classmethod
@@ -295,6 +321,16 @@ class XNNPACKQuantizer(Quantizer):
         self, operator_type: str, quantization_config: QuantizationConfig
     ) -> XNNPACKQuantizer:
         self.operator_type_config[operator_type] = quantization_config
+        return self
+
+    def set_module_type(
+        self, module_type: Callable, quantization_config: QuantizationConfig
+    ):
+        """Set quantization_config for a submodule with type: `module_type`, for example:
+        quantizer.set_module_name(Sub) or quantizer.set_module_name(nn.Linear), it will quantize all supported operator/operator
+        patterns in the submodule with this module type with the given `quantization_config`
+        """
+        self.module_type_config[module_type] = quantization_config
         return self
 
     def set_module_name(
@@ -348,6 +384,12 @@ class XNNPACKQuantizer(Quantizer):
             self._annotate_all_patterns(
                 model, config, _get_module_name_filter(module_name)
             )
+
+        for module_type, config in self.module_type_config.items():
+            self._annotate_all_patterns(
+                model, config, _get_module_type_filter(module_type)
+            )
+
         self._annotate_all_patterns(model, self.global_config)
         return model
 
@@ -356,6 +398,9 @@ class XNNPACKQuantizer(Quantizer):
     ) -> torch.fx.GraphModule:
         for module_name, config in self.module_name_config.items():
             self._annotate_linear(model, config, _get_module_name_filter(module_name))
+
+        for module_type, config in self.module_type_config.items():
+            self._annotate_linear(model, config, _get_module_type_filter(module_type))
 
         self._annotate_linear(model, self.global_config)
         return model
