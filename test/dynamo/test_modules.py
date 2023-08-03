@@ -1455,7 +1455,7 @@ class MockModule(torch.nn.Module):
         super().__init__()
         self.relu = torch.nn.ReLU()
         self.linear = torch.nn.Linear(10, 10)
-        self.register_buffer("buf0", torch.randn(10, 10))
+        self.buf0 = torch.nn.Buffer(torch.randn(10, 10))
 
     def forward(self, x):
         return self.relu(self.linear(x) + self.buf0)
@@ -1504,7 +1504,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
-                self.register_buffer("buf0", torch.randn(10, 10))
+                self.buf0 = torch.nn.Buffer(torch.randn(10, 10))
 
             def forward(self, x):
                 return self.r(torch.sin(x)) + self.buf0
@@ -1531,7 +1531,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
-                self.register_buffer("buf0", torch.randn(10, 10))
+                self.register_buffer("buf0", torch.nn.Buffer(torch.randn(10, 10)))
                 self.register_parameter(
                     name="param0", param=torch.nn.Parameter(torch.randn(10, 10))
                 )
