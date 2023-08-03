@@ -14,7 +14,7 @@ import tempfile
 import time
 from datetime import datetime
 from distutils.version import LooseVersion
-from typing import Any, cast, Dict, List, Optional, Union
+from typing import Any, cast, Dict, List, Optional, Tuple, Union
 
 import pkg_resources
 
@@ -1465,7 +1465,7 @@ def do_sharding(
 
 def run_test_module(
     test: Union[ShardedTest, str], test_directory: str, options
-) -> Optional[str]:
+) -> Optional[Tuple[str, str]]:
     maybe_set_hip_visible_devies()
 
     # Printing the date here can help diagnose which tests are slow
@@ -1486,17 +1486,17 @@ def run_test_module(
         # return code -N, where N is the signal number.
         signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
         message += f" Received signal: {signal_name}"
-    return message
+    return test, message
 
 
 def run_tests(
-    selected_tests: List[ShardedTest], test_directory: str, options, group_name: str
+    selected_tests: List[ShardedTest],
+    test_directory: str,
+    options,
+    failures: List[Tuple[str, str]],
 ) -> None:
-    failure_messages = []
-
     if len(selected_tests) == 0:
-        print_to_stderr(f"No tests in group `{group_name}`")
-        return failure_messages
+        return
 
     # parallel = in parallel with other files
     # serial = this file on it's own.  The file might still be run in parallel with itself (ex test_ops)
@@ -1522,15 +1522,16 @@ def run_tests(
         # Take the conftest file from the test directory
         shutil.copy(os.path.join(test_directory, "conftest.py"), cpp_conftest_file)
 
-    def handle_error_messages(err_message):
-        if err_message is None:
+    def handle_error_messages(failure):
+        if failure is None:
             return False
-        failure_messages.append(err_message)
+        failures.append(failure)
+        _, err_message = failure
         print_to_stderr(err_message)
         return True
 
-    def parallel_test_completion_callback(err_message):
-        test_failed = handle_error_messages(err_message)
+    def parallel_test_completion_callback(failure):
+        test_failed = handle_error_messages(failure)
         if (
             test_failed
             and not options.continue_through_error
@@ -1556,10 +1557,10 @@ def run_tests(
         if (
             not options.continue_through_error
             and not RERUN_DISABLED_TESTS
-            and len(failure_messages) != 0
+            and len(failures) != 0
         ):
             raise RuntimeError(
-                "\n".join(failure_messages)
+                "\n".join(x[1] for x in failures)
                 + "\n\nTip: You can keep running tests even on failure by "
                 "passing --keep-going to run_test.py.\n"
                 "If running on CI, add the 'keep-going' label to "
@@ -1570,8 +1571,8 @@ def run_tests(
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
-            err_message = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_error_messages(err_message)
+            test, err_message = run_test_module(test, test_directory, options_clone)
+            test_failed = handle_error_messages((test, err_message))
             if (
                 test_failed
                 and not options.continue_through_error
@@ -1583,7 +1584,7 @@ def run_tests(
         pool.terminate()
         pool.join()
 
-    return failure_messages
+    return
 
 
 def check_pip_packages() -> None:
@@ -1619,6 +1620,12 @@ def main():
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
         (prioritized_tests, general_tests) = get_reordered_tests(general_tests)
+
+    metrics_dict = {
+        "prioritized_tests": prioritized_tests,
+        "general_tests": general_tests,
+        "cpp": options.cpp,
+    }
 
     test_times_dict = download_test_times(TEST_TIMES_FILE)
     prioritized_tests = do_sharding(
@@ -1656,28 +1663,17 @@ def main():
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
-    failure_messages = []
-    experiment_dict = {
-        "prioritized_tests_len": len(prioritized_tests),
-        "general_tests_len": len(general_tests),
-        "cpp": options.cpp,
-    }
+    failures = []
     start_time = time.time()
-
     # First run the prioritized tests, then the remaining tests.
     try:
-        failure_messages = run_tests(
-            prioritized_tests, test_directory, options, "Prioritized tests"
-        )
-        experiment_dict["prioritized_failure_messages_len"] = len(failure_messages)
-        experiment_dict["general_start_time"] = time.time() - start_time
-        general_failure_messages = run_tests(
-            general_tests, test_directory, options, "General tests"
-        )
-        experiment_dict["end_time"] = time.time() - start_time
-        experiment_dict["general_failure_messages_len"] = len(general_failure_messages)
+        run_tests(prioritized_tests, test_directory, options, failures)
+        metrics_dict["prioritized_failures"] = [x[0] for x in failures]
+        metrics_dict["general_start_time"] = time.time() - start_time
+        run_tests(general_tests, test_directory, options, failures)
+        metrics_dict["general_end_time"] = time.time() - start_time
+        metrics_dict["all_failures"] = [x[0] for x in failures]
 
-        failure_messages += general_failure_messages
     finally:
         if options.coverage:
             from coverage import Coverage
@@ -1692,10 +1688,10 @@ def main():
                     cov.html_report()
 
         if IS_CI and HAVE_TEST_SELECTION_TOOLS:
-            emit_metric("cats_td_experiment_1", experiment_dict)
+            emit_metric("cats_td_experiment_1", metrics_dict)
 
-    if len(failure_messages) != 0:
-        for err in failure_messages:
+    if len(failures) != 0:
+        for _, err in failures:
             print_to_stderr(err)
 
         # A disabled test is expected to fail, so there is no need to report a failure here
