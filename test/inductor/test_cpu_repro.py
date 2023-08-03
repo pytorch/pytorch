@@ -15,6 +15,7 @@ from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import codecache, config, metrics
+from torch._inductor.codegen.common import OptimizationContext
 from torch._inductor.codegen.cpp import (
     CppOverrides,
     CppVecKernelChecker,
@@ -1560,6 +1561,17 @@ class CPUReproTests(TestCase):
             shape_env=None,
             num_static_inputs=0,
         )
+
+        def set_opt_dtype(graph):
+            for node in graph.nodes:
+                if node.target == "constant":
+                    if OptimizationContext.key in node.meta:
+                        opt_ctx = node.meta[OptimizationContext.key]
+                    else:
+                        opt_ctx = OptimizationContext()
+                    opt_ctx.dtype = node.args[-1]
+                    node.meta[OptimizationContext.key] = opt_ctx
+
         with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
             graph_lowering
         ):
@@ -1570,48 +1582,56 @@ class CPUReproTests(TestCase):
             ) as vec_checker:
                 i32_iinfo = np.iinfo(np.int32)
                 f32_iinfo = np.finfo(np.float32)
+                set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max
                 )
                 self.assertTrue(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
+                set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min
                 )
                 self.assertTrue(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
+                set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.min, np.inf
                 )
                 self.assertTrue(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
+                set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.min, -np.inf
                 )
                 self.assertTrue(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
+                set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.min - 1, f32_iinfo.min
                 )
                 self.assertFalse(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
+                set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.max + 1, f32_iinfo.max
                 )
                 self.assertFalse(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
+                set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min * (1 + 1e-5)
                 )
                 self.assertFalse(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
+                set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max * (1 + 1e-5)
                 )
@@ -2281,6 +2301,22 @@ class CPUReproTests(TestCase):
             ],
         )
         self.assertEqual(metrics.generated_kernel_count, 1)
+
+    def test_scalar_mul_bfloat16(self):
+        def f(x):
+            return torch.ops.aten.mul.Tensor(x, 1.7015043497085571)
+
+        metrics.reset()
+        x = torch.randn(4, 5, dtype=torch.bfloat16)
+        self.common(f, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_bf16_zeros(self):
+        def fn():
+            x = torch.zeros(1, 1, 32, dtype=torch.bfloat16)
+            return x
+
+        self.common(fn, ())
 
 
 if __name__ == "__main__":
