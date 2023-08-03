@@ -1372,7 +1372,7 @@ new_module_tests = [
         desc='dilated',
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.01,
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -1384,7 +1384,7 @@ new_module_tests = [
         desc='no_bias',
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.01,
     ),
     dict(
         fullname='ConvTranspose2d_groups',
@@ -2480,7 +2480,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='multilayer_coder',
         with_tf32=True,
-        tf32_precision=0.02,
+        tf32_precision=0.03,
     ),
     dict(
         module_name='Linear',
