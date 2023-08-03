@@ -103,8 +103,7 @@ def cache_dir():
         # Use fsspec to handle the directory
         fs = fsspec.filesystem(cache_dir.split(':')[0])
         # Create the directory if it does not exist
-        if not fs.exists(cache_dir):
-            fs.mkdir(cache_dir)
+        fs.makedirs(cache_dir, exist_ok=True)
     else:
         # Use standard os library for local files
         os.makedirs(cache_dir, exist_ok=True)
