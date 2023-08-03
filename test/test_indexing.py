@@ -1333,24 +1333,25 @@ class TestIndexing(TestCase):
         with DeterministicGuard(True):
             idx1 = torch.tensor([0])
             idx2 = torch.tensor([2, 6])
+            idx3 = torch.tensor([1, 5, 7])
             
             tensor_a = torch.rand(13, 11, 12, 13, 12).cpu()
             tensor_b = tensor_a.to(device=device)
             tensor_a[idx1] = 1.0
             tensor_a[idx1, :, idx2, idx2, :] = 2.0
-            tensor_a[:, idx1, idx2, :, idx2] = 3.0
+            tensor_a[:, idx1, idx3, :, idx3] = 3.0
             tensor_b[idx1] = 1.0
             tensor_b[idx1, :, idx2, idx2, :] = 2.0
-            tensor_b[:, idx1, idx2, :, idx2] = 3.0
+            tensor_b[:, idx1, idx3, :, idx3] = 3.0
             self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
 
             tensor_a = torch.rand(10, 11).cpu()
             tensor_b = tensor_a.to(device=device)
-            tensor_a[idx1] = 1.0
+            tensor_a[idx3] = 1.0
             tensor_a[idx2, :] = 2.0
             tensor_a[:, idx2] = 3.0
             tensor_a[:, idx1] = 4.0
-            tensor_b[idx1] = 1.0
+            tensor_b[idx3] = 1.0
             tensor_b[idx2, :] = 2.0
             tensor_b[:, idx2] = 3.0
             tensor_b[:, idx1] = 4.0
