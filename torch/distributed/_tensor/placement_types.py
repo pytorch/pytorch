@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
+import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 
 from torch.distributed._tensor.device_mesh import DeviceMesh
@@ -198,8 +199,8 @@ class Shard(Placement):
             )
             tensor = torch.cat(scattered_list, dim=self.dim)
 
-        output = mesh.reduce_scatter(
-            tensor, op=reduce_op, mesh_dim=mesh_dim, scatter_dim=self.dim
+        output = funcol.reduce_scatter_tensor(
+            tensor, reduce_op.name, scatter_dim=self.dim, group=(mesh, mesh_dim)
         )
 
         if is_padded:
@@ -243,10 +244,10 @@ class Shard(Placement):
             local_tensor = self._pad_tensor(local_tensor, pad_size)
         local_tensor = local_tensor.contiguous()
 
-        result = mesh.all_gather(
-            tensor=local_tensor,
-            mesh_dim=mesh_dim,
+        result = funcol.all_gather_tensor(
+            local_tensor,
             gather_dim=self.dim,
+            group=(mesh, mesh_dim),
         )
 
         # Unpad the tensor if the input tensor was padded
@@ -329,7 +330,9 @@ class _Partial(Placement):
     def _to_replicate(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        return mesh.all_reduce(tensor, self.reduce_op, mesh_dim=mesh_dim)
+        return funcol.all_reduce(
+            tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim)
+        )
 
     def _to_shard(
         self,

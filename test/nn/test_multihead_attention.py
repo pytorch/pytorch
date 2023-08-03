@@ -591,6 +591,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         """
         if device not in ['cpu', 'cuda']:
             self.skipTest("Fastpath only runs on CPU and CUDA.")
+
         with torch.autocast(device_type=device, enabled=False):
             embed_dim = 16
             num_heads = 8
@@ -602,7 +603,9 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
             attn_mask = torch.randint(0, 2, (src_len, src_len)).bool().to(device)
             key_padding_mask = torch.randint(0, 2, (batch_size, src_len)).bool().to(device)
 
-            with mock.patch('torch._native_multi_head_attention') as fastpath_mock:
+            with mock.patch('torch._native_multi_head_attention', new=mock.MagicMock(
+                    return_value=(torch.Tensor(), torch.Tensor()))
+            ) as fastpath_mock:
                 # Compute attention on the fast path
                 mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True, device=device).eval()
                 mta_model.training = False

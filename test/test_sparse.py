@@ -3700,6 +3700,17 @@ class TestSparse(TestSparseBase):
 
             self.assertRaisesRegex(RuntimeError, 'mat1 dtype Double does not match mat2 dtype Float', different_dtypes)
 
+        def test_backward_noncontiguous():
+            # Sparse.mm backward used to wrong with non-contiguous grads,
+            # see https://github.com/pytorch/pytorch/issues/102493.
+            n_reps = 7
+            for _ in range(n_reps):
+                A = torch.eye(5).to_sparse().requires_grad_(True)
+                B = torch.eye(5).to_sparse()
+                out = torch.sparse.mm(A, B)
+                out.coalesce().values().sum().backward()
+                self.assertEqual(A.grad, A)
+
         for n in range(2, 5):
             for m in range(2, 8):
                 for p in range(2, 8):
@@ -3708,6 +3719,7 @@ class TestSparse(TestSparseBase):
         test_sparse_matmul(2, 0, [0, 0], [0, 0])
         test_sparse_matmul(2, 0, [0, 10], [10, 0])
         test_error_cases()
+        test_backward_noncontiguous()
 
     @coalescedonoff
     @dtypes(torch.double)

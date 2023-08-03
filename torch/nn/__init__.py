@@ -1,5 +1,6 @@
 from .modules import *  # noqa: F403
 from .parameter import (
+    Buffer as Buffer,
     Parameter as Parameter,
     UninitializedParameter as UninitializedParameter,
     UninitializedBuffer as UninitializedBuffer,
