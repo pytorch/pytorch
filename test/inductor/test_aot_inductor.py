@@ -91,10 +91,10 @@ class AotInductorTests(TestCase):
                 return c
 
         model = Repro()
-        example_inputs = [
+        example_inputs = (
             torch.randn(10, 10, device="cuda"),
             torch.randn(10, 10, device="cuda"),
-        ]
+        )
         expected = model(*example_inputs)
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
@@ -114,10 +114,10 @@ class AotInductorTests(TestCase):
                 return x_sigmoid, y_getitem
 
         model = Repro()
-        example_inputs = [
+        example_inputs = (
             torch.randn(10, 10, device="cuda"),
             torch.randn(10, 10, device="cuda"),
-        ]
+        )
         expected = model(*example_inputs)
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))

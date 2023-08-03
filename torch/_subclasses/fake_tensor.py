@@ -1452,16 +1452,29 @@ class FakeTensorMode(TorchDispatchMode):
                 or func.name() in grandfathered_ops_FIXME
             )
 
+        def maybe_run_unsafe_fallback(error=None):
+            # no meta kernel registered, fallback to kernel for the device
+            if has_symbolic_sizes or not can_run_unsafe_fallback(func):
+                raise UnsupportedOperatorException(func)
+            if error is None:
+                error = UnsupportedOperatorException(func)
+            return run_fallback_kernel(self, func, args, kwargs, error)
+
+        # Optimization: If there is no Meta kernel, it takes a surprisingly long
+        # amount of time to catch the NotImplementedError, so we check it here.
+        if not torch._C._dispatch_has_computed_kernel_for_dispatch_key(
+            func.name(), "Meta"
+        ):
+            return maybe_run_unsafe_fallback()
+
         # run kernel registered to meta for func, which include
         # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
+        # It's possible that the kernel will return NotImplementedError
         try:
             with in_kernel_invocation_manager(self):
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
-            # no meta kernel registered, fallback to kernel for the device
-            if has_symbolic_sizes or not can_run_unsafe_fallback(func):
-                raise UnsupportedOperatorException(func)
-            return run_fallback_kernel(self, func, args, kwargs, not_implemented_error)
+            return maybe_run_unsafe_fallback(not_implemented_error)
 
         return self.wrap_meta_outputs_with_default_device_logic(r, func, args, kwargs)
 
