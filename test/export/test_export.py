@@ -530,6 +530,15 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(ep(*inp_test)["a"], ep_rexported(*inp_test)["a"]))
         self.assertTrue(torch.allclose(ep(*inp_test)["b"], ep_rexported(*inp_test)["b"]))
 
+    def test_args_type_checked(self):
+        def fn(x):
+            return x + 1
+
+        inp = torch.rand(2, 2)
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "to be a tuple"):
+            # Intentionally not wrapping `inp` in a tuple to trigger the error
+            _ = export(fn, inp)
+
 
 if __name__ == '__main__':
     run_tests()
