@@ -16,7 +16,18 @@ import warnings
 import weakref
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 from unittest.mock import patch
 
 import torch
@@ -228,7 +239,7 @@ class _TorchDynamoContext:
         if config.raise_on_ctx_manager_usage:
             raise RuntimeError(
                 "torch._dynamo.optimize(...) is used with a context manager. "
-                "Please refer to https://github.com/pytorch/torchdynamo#usage-example "
+                "Please refer to https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html "
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
         self.on_enter()
@@ -831,6 +842,13 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         return r
 
 
+class ExportResult(NamedTuple):
+    graph_module: torch.fx.GraphModule
+    guards: Set[_guards.Guard]
+    # NB: Do not add new fields without overriding __iter__; people are
+    # destructuring so it is BC-breaking
+
+
 def export(
     f: Callable[..., Any],
     *extra_args,
@@ -842,9 +860,8 @@ def export(
     tracing_mode: str = "symbolic",
     constraints: Optional[List[Constraint]] = None,
     assume_static_by_default: bool = False,
-    fake_mode: fake_tensor.FakeTensorMode = None,
     **extra_kwargs,
-) -> Callable[..., Tuple[torch.fx.GraphModule, Set[_guards.Guard]]]:
+) -> Callable[..., ExportResult]:
     """
     Export an input function f to a format that can be executed outside of PyTorch using the FX graph.
 
@@ -866,10 +883,6 @@ def export(
 
         tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
 
-        fake_mode (fake_tensor.FakeTensorMode): Use this fake_mode instead of creating an internal one.
-        Useful during symbolic tracing, when user input is already fakefied. Implies free fake tensors
-        are allowed on `make_fx`. `fake_mode` must contain a valid (not None) `shape_env` instance.
-
     Returns:
         A function that given args and kwargs, returns a tuple of (graph, guards)
         Graph: An FX graph representing the execution of the input PyTorch function with the provided arguments and options.
@@ -884,12 +897,10 @@ def export(
     Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
     """
     # Deal with "local variable referenced before assignment"
-    _fake_mode = fake_mode
     _f = f
     _assume_static_by_default = assume_static_by_default
 
     def inner(*args, **kwargs):
-        fake_mode = _fake_mode
         f = _f
         assume_static_by_default = _assume_static_by_default
         check_if_dynamo_supported()
@@ -903,14 +914,11 @@ def export(
         f = innermost_fn(f)
         call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
         original_signature = inspect.signature(call_to_inspect)
-        assert (
-            not fake_mode or fake_mode.shape_env is not None
-        ), "The specified fake_mode must contain a valid shape_env"
         graph = None
         out_guards = None
         graph_captured_input = None
         graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
-        fake_mode = fake_mode or _guards.detect_fake_mode(args)
+        fake_mode = _guards.detect_fake_mode(args)
         _allow_fake_constant: bool = (
             fake_mode is not None
         )  # Allow fake constants during symbolic tracing
@@ -1195,7 +1203,7 @@ def export(
         )
 
         new_graph.recompile()
-        return (new_graph, out_guards)
+        return ExportResult(new_graph, out_guards)
 
     if extra_args or extra_kwargs:
         warnings.warn(

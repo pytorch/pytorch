@@ -144,7 +144,7 @@ class TestEnvironment:
         implied = implied_by_fn()
         enabled = enabled or implied
         if include_in_repro and (env_var is not None) and (enabled != default) and not implied:
-            TestEnvironment.repro_env_vars[name] = env_var_val
+            TestEnvironment.repro_env_vars[env_var] = env_var_val
 
         # export flag globally for convenience
         assert name not in globals(), f"duplicate definition of flag '{name}'"
@@ -1323,10 +1323,11 @@ def skipIfNotMiopenSuggestNHWC(fn):
 def setLinalgBackendsToDefaultFinally(fn):
     @wraps(fn)
     def _fn(*args, **kwargs):
+        _preferred_backend = torch.backends.cuda.preferred_linalg_library()
         try:
             fn(*args, **kwargs)
         finally:
-            torch.backends.cuda.preferred_linalg_library('default')
+            torch.backends.cuda.preferred_linalg_library(_preferred_backend)
     return _fn
 
 
@@ -1856,7 +1857,7 @@ def print_repro_on_failure(repro_str):
         # NB: Hacking the exception args is the cleanest way I've found to append
         # failure reproduction info without poisoning the stack trace.
         if len(e.args) >= 1:
-            e.args = (e.args[0] + f"\n{repro_str}",) + e.args[1:]
+            e.args = (str(e.args[0]) + f"\n{repro_str}",) + e.args[1:]
         raise
 
 #  "min_satisfying_examples" setting has been deprecated in hypothesis
@@ -3253,8 +3254,10 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         )
 
         if error_metas:
+            # See [ErrorMeta Cycles]
+            error_metas = [error_metas]
             # TODO: compose all metas into one AssertionError
-            raise error_metas[0].to_error(
+            raise error_metas.pop()[0].to_error(
                 # This emulates unittest.TestCase's behavior if a custom message passed and
                 # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
                 # is True (default)
@@ -4622,3 +4625,31 @@ def make_lazy_class(cls):
 @make_lazy_class
 class LazyVal:
     pass
+
+
+def munge_exc(e, suppress_suffix=True, file=None):
+    if file is None:
+        file = inspect.stack()[1].filename  # skip one frame
+
+    s = str(e)
+
+    # Remove everything that looks like stack frames in NOT this file
+    def repl_frame(m):
+        if m.group(1) != file:
+            return ""
+        # Don't accept top-level, even for this script, these will wobble
+        # depending on how the testing script was invoked
+        if m.group(2) == "<module>":
+            return ""
+
+        return m.group(0)
+
+    s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n    .+\n( +[~^]+ *\n)?', repl_frame, s)
+    s = re.sub(r"line \d+", "line N", s)
+    s = re.sub(file, os.path.basename(file), s)
+    s = re.sub(os.path.join(os.path.dirname(torch.__file__), ""), "", s)
+    s = re.sub(r"\\", "/", s)  # for Windows
+    if suppress_suffix:
+        s = re.sub(r"\nSet TORCH_LOGS.+", "", s, flags=re.DOTALL)
+    s = re.sub(r" +$", "", s, flags=re.M)
+    return s

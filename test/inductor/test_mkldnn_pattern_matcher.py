@@ -530,36 +530,46 @@ class TestPatternMatcher(TestPatternMatcherBase):
         class M(torch.nn.Module):
             def __init__(
                 self,
+                kwargs,
             ):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     3, 64, 7, bias=True, stride=2, padding=3, dilation=1
                 )
                 self.relu = torch.nn.ReLU()
-                self.maxpool = torch.nn.MaxPool2d(3, stride=2, padding=1)
+                self.maxpool = torch.nn.MaxPool2d(3, **kwargs)
 
             def forward(self, x):
                 return self.maxpool(self.relu(self.conv(x)))
 
-        mod = M().eval()
-        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
-        # Totally 6 pattern_matcher_count, 31 pattern_matcher_nodes
-        # 1. Pair of to_int8 and to_fp32 * 3, matched in pointless_convert pass at
-        #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
-        # 2. Dequant-conv pattern matched in quantization weight prepack * 1
-        #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
-        # 3. qconv2d_relu fusion in post-grad fusion pass * 1
-        #    [qconv2d_pointwise_default, relu, mul_2, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
-        # 4. qmaxpool2d * 1
-        #    [convert_element_type_3, sub_1, mul_3, max_pool2d_with_indices, getitem, mul_4, round_3, add_2,
-        #    clamp_min_2, clamp_max_2, convert_element_type_4]
-        self._test_common(
-            mod,
-            (v,),
-            6,
-            31,
-            check_quantization=True,
-        )
+        kwargs_list = [
+            {"stride": 2},
+            {"stride": 2, "padding": 1},
+            {"stride": 2, "padding": 1, "dilation": 1},
+            {"stride": 2, "padding": 1, "dilation": 1, "ceil_mode": False},
+        ]
+        for kwargs in kwargs_list:
+            mod = M(kwargs).eval()
+            v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
+                1
+            )
+            # Totally 6 pattern_matcher_count, 31 pattern_matcher_nodes
+            # 1. Pair of to_int8 and to_fp32 * 3, matched in pointless_convert pass at
+            #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+            # 2. Dequant-conv pattern matched in quantization weight prepack * 1
+            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+            # 3. qconv2d_relu fusion in post-grad fusion pass * 1
+            #    [qconv2d_pointwise_default, relu, mul_2, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
+            # 4. qmaxpool2d * 1
+            #    [convert_element_type_3, sub_1, mul_3, max_pool2d_with_indices, getitem, mul_4, round_3, add_2,
+            #    clamp_min_2, clamp_max_2, convert_element_type_4]
+            self._test_common(
+                mod,
+                (v,),
+                6,
+                31,
+                check_quantization=True,
+            )
 
     # https://github.com/pytorch/pytorch/issues/99841.
     def test_hardtanh_pattern_fallback(self):
