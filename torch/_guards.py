@@ -480,6 +480,12 @@ class TracingContext:
         self.global_context = GlobalContext()
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
+        # This is morally part of frame_summary_stack, but it is kept separate
+        # for clarity.  As we process a frame, this variable gets updated
+        # to keep track of what line we are in the function.  We make a
+        # function call, this gets cleared and the frame location is pushed
+        # to frame_summary_stack (prepping this variable for the inner frame's
+        # progress)
         self.loc_in_frame = None
         # this is only set after aot_autograd
         self.fw_metadata = None
@@ -517,20 +523,37 @@ class TracingContext:
         with unittest.mock.patch.object(
             tc, "frame_summary_stack", []
         ), unittest.mock.patch.object(tc, "loc_in_frame", None):
-            yield
+            try:
+                yield
+            except Exception as e:
+                # Prevent real_stack from getting attached
+                if not hasattr(e, "real_stack"):
+                    e.real_stack = None  # type: ignore[attr-defined]
+                raise
 
     @staticmethod
     @contextlib.contextmanager
     def current_frame(frame_summary):
+        # frame_summary can be None to solely take advantage of real_stack
+        # attachment to thrown exceptions
         tc = TracingContext.get()
         assert (
             tc is not None
         ), "Frame context manager must be called within an ongoing trace."
-        tc.frame_summary_stack.append(frame_summary)
+        if frame_summary is not None:
+            tc.frame_summary_stack.append(frame_summary)
+        old = tc.loc_in_frame
+        tc.loc_in_frame = None
         try:
             yield
+        except Exception as e:
+            if not hasattr(e, "real_stack"):
+                e.real_stack = tc.extract_stack()  # type: ignore[attr-defined]
+            raise
         finally:
-            tc.frame_summary_stack.pop()
+            if frame_summary is not None:
+                tc.frame_summary_stack.pop()
+            tc.loc_in_frame = old
 
     @staticmethod
     @contextlib.contextmanager
@@ -568,6 +591,10 @@ def tracing(context: TracingContext):
     _TLS.tracing_context = context
     try:
         yield context
+    except Exception as e:
+        if not hasattr(e, "real_stack"):
+            e.real_stack = context.extract_stack()  # type: ignore[attr-defined]
+        raise
     finally:
         _TLS.tracing_context = old_context
 
