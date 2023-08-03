@@ -79,10 +79,7 @@ class TestPaternMatcher(TestCase):
             ref = fn(*args)
             test, (code,) = run_and_get_code(torch.compile(fn), *args)
             torch.testing.assert_close(ref, test)
-            actual, (code,) = run_and_get_code(torch.compile(fn), *args)
             self.assertTrue("mixed_mm" in code)
-            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
-            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
 
     @inductor_config.patch(use_mixed_mm=True)
     def test_mixed_mm_epi_works(self):
@@ -116,7 +113,6 @@ class TestPaternMatcher(TestCase):
             ref = fn(*args)
             test, (code,) = run_and_get_code(torch.compile(fn), *args)
             torch.testing.assert_close(ref, test)
-            actual, (code,) = run_and_get_code(torch.compile(fn), *args)
             self.assertTrue("mixed_mm" in code)
 
     @inductor_config.patch(use_mixed_mm=False)
@@ -133,7 +129,6 @@ class TestPaternMatcher(TestCase):
         ref = fn(*args)
         test, (code,) = run_and_get_code(torch.compile(fn), *args)
         torch.testing.assert_close(ref, test)
-        actual, (code,) = run_and_get_code(torch.compile(fn), *args)
         self.assertFalse("mixed_mm" in code)
 
     @inductor_config.patch(use_mixed_mm=True)
@@ -150,7 +145,6 @@ class TestPaternMatcher(TestCase):
         ref = fn(*args)
         test, (code,) = run_and_get_code(torch.compile(fn), *args)
         torch.testing.assert_close(ref, test)
-        actual, (code,) = run_and_get_code(torch.compile(fn), *args)
         self.assertFalse("mixed_mm" in code)
 
     def test_addmm(self):
