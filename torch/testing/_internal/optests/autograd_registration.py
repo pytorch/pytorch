@@ -27,10 +27,6 @@ def autograd_registration_check(op, args, kwargs):
         >>> x = torch.randn(3, requires_grad=True)
         >>> autograd_registration_check(torch.ops.aten.sin.default, (x,), {})
 
-    It is important that you pass us at least one Tensor that has
-    requires_grad=True so that the autograd path gets exercised,
-    otherwise, this check may erroneously pass.
-
     Here are some best practices if you do find your autograd is
     registered incorrectly:
     - If the operator is composite (i.e. consists of other PyTorch ops)
@@ -74,13 +70,13 @@ def autograd_registration_check(op, args, kwargs):
     # constructing true in-place or out variants), but we defer that
     # responsibility to a different test (schema_check).
 
-    # If no inputs require grad, we are unable to perform this test, so we
-    # just succeed.
-    # Modifying the inputs to require grad may lead to invalid inputs
-    # (ops like batch_norm yell if a buffer requires grad).
     all_args = (args, kwargs)
     if not pytree.tree_any_only(torch.Tensor, lambda x: x.requires_grad, all_args):
-        return
+        raise RuntimeError(
+            "autograd_registration_check: no inputs have requires_grad=True so "
+            "we are unable to actually perform this test. Please pass inputs "
+            "that do require grad."
+        )
 
     # Determine which AutogradBACKEND key to check
     flat_args, _ = pytree.tree_flatten(all_args)
