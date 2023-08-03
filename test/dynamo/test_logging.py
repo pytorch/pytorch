@@ -556,6 +556,8 @@ exclusions = {
     "trace_source",
     "trace_call",
     "custom_format_test_artifact",
+    "onnx",
+    "onnx_diagnostics",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
