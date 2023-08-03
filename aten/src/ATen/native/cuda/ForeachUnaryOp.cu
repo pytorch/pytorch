@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/ForeachUtils.h>
-#include <c10/util/TypeSafeSignMath.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -29,7 +28,6 @@
 #include <ATen/ops/_foreach_reciprocal_native.h>
 #include <ATen/ops/_foreach_round_native.h>
 #include <ATen/ops/_foreach_sigmoid_native.h>
-#include <ATen/ops/_foreach_sign_native.h>
 #include <ATen/ops/_foreach_sin_native.h>
 #include <ATen/ops/_foreach_sinh_native.h>
 #include <ATen/ops/_foreach_sqrt_native.h>
@@ -297,18 +295,10 @@ struct Reciprocal {
   }
 };
 
-template <typename T>
-struct Sign {
-  C10_DEVICE T operator()(T t) const {
-    return c10::signum<T>(t);
-  }
-};
-
 OP_CUSTOM_FUNCTOR(floating_half_bfloat16, sigmoid, Sigmoid)
 OP_CUSTOM_FUNCTOR(floating_half_bfloat16, round, Round)
 OP_CUSTOM_FUNCTOR(floating_half_bfloat16, frac, Trunc)
 OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, reciprocal, Reciprocal)
-OP_CUSTOM_FUNCTOR(floating_half_bfloat16, sign, Sign)
 
 // note(mkozuki): tensor dtype checks of `neg` kernels.
 // Since `check_foreach_api_restrictions` don't require all the tensors to have

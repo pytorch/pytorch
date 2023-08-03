@@ -1,7 +1,6 @@
 import itertools
-from typing import Any, List, OrderedDict, Set, Optional, Callable
+from typing import Any, List, OrderedDict, Set
 import operator
-from torch.fx import Node
 
 import torch
 
@@ -85,7 +84,6 @@ def find_sequential_partitions(
     gm: torch.fx.GraphModule,
     partition_types: List[Any],
     include_functional_equivalent=True,
-    filter_fn: Optional[Callable[[Node], bool]] = None,
 ):
     if not _valid_type_sequence(partition_types):
         raise ValueError(
@@ -95,7 +93,7 @@ def find_sequential_partitions(
     typed_partitions: OrderedDict[Any, List[SourcePartition]] = OrderedDict()
     for partition_type in partition_types:
         types_to_match = _get_matching_types(partition_type)
-        partitions = get_source_partitions(gm.graph, types_to_match, filter_fn)
+        partitions = get_source_partitions(gm.graph, types_to_match)
         typed_partitions[partition_type] = list(itertools.chain(*partitions.values()))
 
     typed_partitions_list = list(typed_partitions.values())

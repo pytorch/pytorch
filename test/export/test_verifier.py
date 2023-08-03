@@ -21,7 +21,10 @@ from torch._export.verifier import (
 
 @torch.no_grad()
 def capture(f, args):
+    torchdynamo.config.capture_scalar_outputs = True
+    torchdynamo.config.guard_nn_modules = True
     torchdynamo.config.allow_rnn = True
+    torchdynamo.config.verbose = True
     torchdynamo.reset()
     graphmodule, _ = torchdynamo.export(
         f,
