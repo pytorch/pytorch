@@ -229,7 +229,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-py3-clang7-mobile-build
-      docker-image-name: pytorch-linux-focal-py3-clang7-asan
+      docker-image-name: pytorch-linux-jammy-py3-clang12-asan
       build-generates-artifacts: false
       test-matrix: |
         { include: [
