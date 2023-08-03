@@ -39,6 +39,7 @@ from .common import (
     CSE,
     DataTypePropagation,
     DeferredLine,
+    DTYPE_TO_COMPUTATION_DTYPE,
     ExprPrinter,
     IndentedBuffer,
     Kernel,
@@ -48,24 +49,6 @@ from .common import (
 )
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
-
-DTYPE_TO_COMPUTATION_DTYPE = {
-    torch.bfloat16: torch.float,
-    torch.float16: torch.float,
-    **{
-        dtype: dtype
-        for dtype in [
-            torch.bool,
-            torch.float32,
-            torch.float64,
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.uint8,
-        ]
-    },
-}
 
 DTYPE_TO_CPP = {
     torch.float32: "float",
@@ -636,13 +619,11 @@ class CppVecOverrides(OpOverrides):
     def constant(val, dtype):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         assert opt_ctx
-        assert opt_ctx.dtype in [
-            torch.int32,
-            torch.float32,
-            torch.bfloat16,
-            torch.float16,
-        ]
         proposed_dtype = opt_ctx.dtype
+        assert proposed_dtype in [
+            torch.float,
+            torch.int32,
+        ]
         if val == float("inf"):
             quote = f"std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::infinity()"
         elif val == float("-inf"):
@@ -1046,7 +1027,6 @@ class CppOverrides(OpOverrides):
             # Since load promotes all half-precision inputs to float, constants
             # must be promoted as well
             dtype = torch.float32
-
         if val == float("inf"):
             return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
         elif val == float("-inf"):
@@ -2110,7 +2090,9 @@ class CppVecKernelChecker(CppVecKernel):
                 with RecordOptimizationContext(__name__) as node_ctx:
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
-                    opt_ctx.dtype = dtype
+                    # VecKernel override dtype for constant
+                    # Vectorization only support int32/fp32 now
+                    # So if dtype = int64/fp64, we will cast it to int32/fp32 if possible
                     i32_iinfo = numpy.iinfo(numpy.int32)
                     if (
                         dtype == torch.int64
@@ -2231,7 +2213,9 @@ class CppVecKernelChecker(CppVecKernel):
                     cur_node = node_ctx.get_fx_node()
                     input_value: torch.fx.Node = cur_node.all_input_nodes[1]
                     if dtype == torch.float:
-                        if input_value.target in ["load", "constant"]:
+                        if input_value.target in [
+                            "load",
+                        ]:
                             # Support masked_load for BF16/FP16. Because the legalization will
                             # insert to_dtype to convert the BF16/FP16 input to FP32.
                             dtype = (
@@ -2344,7 +2328,6 @@ class CppKernelProxy(CppKernel):
                 # Fast path if all operations can support bf16/fp16 without converting to fp32
                 if _node.target not in [
                     "load",
-                    "constant",
                     "store",
                     "abs",
                     "neg",
@@ -2371,16 +2354,11 @@ class CppKernelProxy(CppKernel):
 
     def legalize_lowp_fp_dtype(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
-            def is_lowp_fp_load_or_constant(node: torch.fx.Node):
-                if node.target not in ["load", "constant"]:
+            def is_lowp_fp_load(node: torch.fx.Node):
+                if node.target not in ["load"]:
                     return False
                 assert len(node.args) == 3
-                # If the node is constant, the last arg is dtype
-                load_dtype = (
-                    V.graph.get_dtype(node.args[1])
-                    if node.target == "load"
-                    else node.args[-1]
-                )
+                load_dtype = V.graph.get_dtype(node.args[1])
                 return load_dtype in DTYPE_LOWP_FP
 
             def is_lowp_fp_store(node: torch.fx.Node):
@@ -2393,7 +2371,7 @@ class CppKernelProxy(CppKernel):
             sub_graph_nodes = list(sub_graph.nodes)
             to_lowp_fp_legalized_nodes = []
             for _node in sub_graph_nodes:
-                if is_lowp_fp_load_or_constant(_node):
+                if is_lowp_fp_load(_node):
                     ops = _node.args[0]
                     with sub_graph.inserting_after(_node):
                         to_type_node = sub_graph.call_method(
@@ -2520,7 +2498,7 @@ class CppKernelProxy(CppKernel):
                 )
                 for sub_block in sub_blocks:
                     for fx_node in sub_block.graph.nodes:
-                        if fx_node.target in ["load", "constant", "store"]:
+                        if fx_node.target in ["load", "store"]:
                             assert fx_node.meta
                             assert OptimizationContext.key in fx_node.meta
                             opt_ctx: OptimizationContext = fx_node.meta[

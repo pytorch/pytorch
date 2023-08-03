@@ -766,7 +766,7 @@ class _OnnxSchemaChecker:
             elif (
                 param.is_attribute
                 and self.attributes[param.name].default_value.type
-                != onnx.AttributeProto.UNDEFINED
+                != onnx.AttributeProto.UNDEFINED  # type: ignore[attr-defined]
             ):
                 # User did not provide the attribute
                 if fill_defaults:
