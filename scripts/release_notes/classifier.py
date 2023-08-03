@@ -395,7 +395,7 @@ def main():
     parser.add_argument(
         "--regen_data",
         action="store_true",
-        help="Regenerate the training data, helps if labeld more examples and want to re-train.",
+        help="Regenerate the training data, helps if labeled more examples and want to re-train.",
     )
     parser.add_argument(
         "--resample",
