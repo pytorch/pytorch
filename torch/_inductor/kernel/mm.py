@@ -17,7 +17,6 @@ from .mm_common import (
     mm_grid,
     mm_options,
 )
-from .unpack_mixed_mm import int4x2_mixed_mm_template
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten

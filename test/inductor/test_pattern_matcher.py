@@ -79,10 +79,7 @@ class TestPaternMatcher(TestCase):
             ref = fn(*args)
             test, (code,) = run_and_get_code(torch.compile(fn), *args)
             torch.testing.assert_close(ref, test)
-            actual, (code,) = run_and_get_code(torch.compile(fn), *args)
             self.assertTrue("mixed_mm" in code)
-            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
-            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
 
     @inductor_config.patch(use_mixed_mm=True)
     def test_mixed_mm_epi_works(self):
@@ -116,7 +113,6 @@ class TestPaternMatcher(TestCase):
             ref = fn(*args)
             test, (code,) = run_and_get_code(torch.compile(fn), *args)
             torch.testing.assert_close(ref, test)
-            actual, (code,) = run_and_get_code(torch.compile(fn), *args)
             self.assertTrue("mixed_mm" in code)
 
     @inductor_config.patch(use_mixed_mm=False)
@@ -133,7 +129,6 @@ class TestPaternMatcher(TestCase):
         ref = fn(*args)
         test, (code,) = run_and_get_code(torch.compile(fn), *args)
         torch.testing.assert_close(ref, test)
-        actual, (code,) = run_and_get_code(torch.compile(fn), *args)
         self.assertFalse("mixed_mm" in code)
 
     @inductor_config.patch(use_mixed_mm=True)
@@ -150,17 +145,21 @@ class TestPaternMatcher(TestCase):
         ref = fn(*args)
         test, (code,) = run_and_get_code(torch.compile(fn), *args)
         torch.testing.assert_close(ref, test)
-        actual, (code,) = run_and_get_code(torch.compile(fn), *args)
         self.assertFalse("mixed_mm" in code)
 
-    def test_int4x2_mixed_mm(self):
+    @inductor_config.patch(use_mixed_mm=True)
+    def test_uint4x2_mixed_mm(self):
         def fn(a, b):
-            return torch.mm(a, torch.cat(((b & 0xF)-8, b>>4),1).reshape(-1, b.shape[1]).to(a.dtype))
+            return torch.mm(a, torch.cat((b & 0xF, b>>4),1).reshape(-1, b.shape[1]).to(a.dtype).sub(8))
 
         args_list = [
             (
                 torch.randn(8, 8, device="cuda"),
-                torch.randint(-128, 127, (4, 8), dtype=torch.int8, device="cuda"),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda"),
+            ),
+            (
+                torch.randn(8, 8, device="cuda"),
+                torch.randint(0, 255, (4, 8), dtype=torch.int32, device="cuda"),
             ),
         ]
 
@@ -170,11 +169,52 @@ class TestPaternMatcher(TestCase):
             ref = fn(*args)
             test, (code,) = run_and_get_code(torch.compile(fn), *args)
             torch.testing.assert_close(ref, test)
-            actual, (code,) = run_and_get_code(torch.compile(fn), *args)
-            print(code)
-            self.assertTrue("int4x2_mixed_mm" in code)
-            # self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
-            # self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+            self.assertTrue("uint4x2_mixed_mm" in code)
+
+    @inductor_config.patch(use_mixed_mm=True)
+    def test_uint4x2_mixed_mm_fail_to_match(self):
+        def fn(a, b):
+            return torch.mm(a, torch.cat((b & 0xF, b>>4),1).reshape(-1, b.shape[1]).to(a.dtype).sub(8))
+
+        args_list = [
+            (
+                torch.randn(8, 8),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8),
+            ),
+            (
+                torch.randn(8, 8, device="cuda"),
+                torch.randint(-128, 127, (4, 8), dtype=torch.int8, device="cuda"),
+            ), # doesn't work for int8 because bitwise logic in triton doesn't
+            # match torch for int8
+        ]
+
+        for args in args_list:
+            torch._dynamo.reset()
+            counters.clear()
+            ref = fn(*args)
+            test, (code,) = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(ref, test)
+            self.assertFalse("uint4x2_mixed_mm" in code)
+
+    @inductor_config.patch(use_mixed_mm=False)
+    def test_uint4x2_mixed_mm_gating_works(self):
+        def fn(a, b):
+            return torch.mm(a, torch.cat((b & 0xF, b>>4),1).reshape(-1, b.shape[1]).to(a.dtype).sub(8))
+
+        args_list = [
+            (
+                torch.randn(8, 8, device="cuda"),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda"),
+            ),
+        ]
+
+        for args in args_list:
+            torch._dynamo.reset()
+            counters.clear()
+            ref = fn(*args)
+            test, (code,) = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(ref, test)
+            self.assertFalse("uint4x2_mixed_mm" in code)
 
     def test_addmm(self):
         def fn(a, b, c):

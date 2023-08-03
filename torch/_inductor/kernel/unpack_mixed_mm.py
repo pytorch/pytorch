@@ -9,12 +9,13 @@ from .mm_common import (
     mm_configs,
     mm_grid,
     mm_options,
+    mm_args
 )
 
 log = logging.getLogger(__name__)
 
-int4x2_mixed_mm_template = TritonTemplate(
-    name="int4x2_mixed_mm",
+uint4x2_mixed_mm_template = TritonTemplate(
+    name="uint4x2_mixed_mm",
     grid=mm_grid,
     source=r"""
 {{def_kernel("A", "B")}}
@@ -56,9 +57,8 @@ int4x2_mixed_mm_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k, other=0.)
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
-        b = ((b >> b_shifts[:, None]) & 0xF) - b_subs[:, None]
-        if B_PROLOGUE_CAST_TYPE is not None:
-            b = b.to(B_PROLOGUE_CAST_TYPE)
+        b = ((b >> b_shifts[:, None]) & 0xF) - 8
+        b = b.to(B_PROLOGUE_CAST_TYPE)
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
         A += BLOCK_K * stride_ak
         B += BLOCK_K//2 * stride_bk
@@ -75,16 +75,15 @@ int4x2_mixed_mm_template = TritonTemplate(
 """,
 )
 
-def tuned_int4x2_mixed_mm(mat1, mat2, mat2_mm_shape, mat2_dtype):
-    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None, use_int4x2_dim=True)
-    assert mat2_mm_shape[0]==k and mat2_mm_shape[1]==n, "huh"
+def tuned_uint4x2_mixed_mm(mat1, mat2, mat2_mm_shape, mat2_dtype):
+    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None, use_4x2_dim=True)
     choices = []
     b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
     for config in mm_configs(m, n, k):
-            int4x2_mixed_mm_template.maybe_append_choice(
+            uint4x2_mixed_mm_template.maybe_append_choice(
                 choices,
                 (mat1, mat2),
                 layout,
                 **mm_options(config, k, layout, b_prologue_cast_type),
             )
-    return autotune_select_algorithm("int4x2_mixed_mm", choices, [mat1, mat2], layout)
+    return autotune_select_algorithm("uint4x2_mixed_mm", choices, [mat1, mat2], layout)
