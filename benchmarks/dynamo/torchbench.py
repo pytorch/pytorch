@@ -101,6 +101,7 @@ SKIP_TRAIN = {
     "pyhpc_turbulent_kinetic_energy",
     "maml",
     "llama",
+    "llama_v2_7b_16h",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
