@@ -358,21 +358,6 @@ class ExportedProgram:
         )
         return string
 
-    def __deepcopy__(
-        self, memo: Optional[Dict[int, Any]] = None
-    ) -> "ExportedProgram":
-        gm = copy.deepcopy(self.graph_module, memo)
-        new_ep = ExportedProgram(
-            gm,
-            gm.graph,
-            copy.deepcopy(self.graph_signature, memo),
-            copy.deepcopy(self.call_spec, memo),
-            copy.deepcopy(self.state_dict, memo),
-            copy.deepcopy(self.range_constraints, memo),
-            copy.deepcopy(self.equality_constraints, memo),
-        )
-        return new_ep
-
     def module(self) -> torch.nn.Module:
         """
         Returns a self contained GraphModule with all the states
