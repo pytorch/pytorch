@@ -1857,7 +1857,7 @@ def print_repro_on_failure(repro_str):
         # NB: Hacking the exception args is the cleanest way I've found to append
         # failure reproduction info without poisoning the stack trace.
         if len(e.args) >= 1:
-            e.args = (e.args[0] + f"\n{repro_str}",) + e.args[1:]
+            e.args = (str(e.args[0]) + f"\n{repro_str}",) + e.args[1:]
         raise
 
 #  "min_satisfying_examples" setting has been deprecated in hypothesis
