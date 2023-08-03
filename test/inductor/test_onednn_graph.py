@@ -345,8 +345,8 @@ class TestOnednnGraphRewrite(torch._dynamo.test_case.TestCase):
         if pre_rewrite_checks is None:
             pre_rewrite_checks = []
         check_helper(pre_rewrite_checks)
-        if rewrite_checks is None:
-            rewrite_checks = []
+        if rewrite_calls is None:
+            rewrite_calls = []
         for rewrite in rewrite_calls:
             rewrite(gm)
         if post_rewrite_checks is None:
