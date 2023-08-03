@@ -31,7 +31,12 @@ from torch._dynamo.testing import (
     same,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
-from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
+from torch._inductor.utils import (
+    add_scheduler_init_hook,
+    run_and_get_code,
+    run_and_get_triton_code,
+)
+from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
@@ -6814,6 +6819,43 @@ class CommonTemplate:
         self.assertEqual(U, U_e)
         self.assertEqual(rot.grad, rot_e.grad)
         self.assertEqual(trans.grad, trans_e.grad)
+
+    def test_inner_fn_str_and_stride(self):
+        def f(x):
+            x = x + 1
+            x = test_operators.realize(x)
+            x = x * 2
+            x = test_operators.realize(x)
+            return x
+
+        x = torch.rand(3, 2, device=self.device).t()
+        ref = f(x)
+        called = False
+
+        def hook_fn(scheduler, nodes):
+            nonlocal called
+            called = True
+
+            if self.device != "cpu":
+                self.assertEqual(len(nodes), 3)
+                _, mul_buf, _ = nodes
+                self.assertTrue(
+                    all(
+                        V.graph.sizevars.size_hints(buf.get_stride()) == (1, 2)
+                        for buf in nodes
+                    )
+                )
+                # before the fix, the wrong index expression
+                # 'i1 + 3 * i0' is cached.
+                self.assertTrue(
+                    "i0 + 2 * i1" in mul_buf.data.inner_fn_str()
+                    or "i0 + i1 * s0" in mul_buf.data.inner_fn_str()
+                )
+
+        with add_scheduler_init_hook(hook_fn):
+            actual = torch.compile(f, fullgraph=True)(x)
+        self.assertEqual(ref, actual)
+        self.assertTrue(called)
 
 
 @dataclasses.dataclass
