@@ -306,6 +306,12 @@ inline static bool is_nn_module_instance(PyObject* obj) {
   return false;
 }
 
+
+inline static bool is_dunder_method(THP_EVAL_API_FRAME_OBJECT* frame) {
+  const char* frame_name = name(frame);
+  return sizeof(frame_name) >= 2 && frame_name[0] == '_' && frame_name[1] == '_';
+}
+
 inline static PyObject* get_nn_module_if_frame_is_method_of_nn_module(THP_EVAL_API_FRAME_OBJECT* frame) {
   // Essentially returns isinstance(f_locals["self"], nn.Module).
   // There are some caveats here
@@ -316,6 +322,13 @@ inline static PyObject* get_nn_module_if_frame_is_method_of_nn_module(THP_EVAL_A
   // For both of these cases, we will still be functionally correct. Our cache
   // will still work, just that it might have more collisions than necessary for
   // the above cases.
+
+  if (is_dunder_method(frame)) {
+    // Skip for dunder methods like __init__ and __getattribute__. The self
+    // object might not be in the full initialized state to do isinstance(self,
+    // nn.Module).
+    return NULL;
+  }
 
   Py_ssize_t nlocals = frame->f_code->co_nlocals;
   PyObject* co_varnames = PyCode_GetVarnames(frame->f_code);
