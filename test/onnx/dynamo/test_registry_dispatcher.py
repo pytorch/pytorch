@@ -399,24 +399,6 @@ class TestOpSchemaWrapper(common_utils.TestCase):
                 (
                     [torch.randn(3, 4), torch.tensor(3)],
                     {"dtype": 2},  # at this point, dtype should be converted to int
-                    ops.core.aten_new_full,
-                    1,
-                ),
-                name="match_2_inputs_and_mismatch_1_kwarg",
-            ),
-            common_utils.subtest(
-                (
-                    [torch.randn(3, 4), torch.tensor(3)],
-                    {},
-                    ops.core.aten_new_full_dtype,
-                    1,
-                ),
-                name="match_2_input_and_mismatch_1_kwargs_optional",
-            ),
-            common_utils.subtest(
-                (
-                    [torch.randn(3, 4), torch.tensor(3)],
-                    {"dtype": 2},  # at this point, dtype should be converted to int
                     ops.core.aten_new_full_dtype,
                     2,
                 ),

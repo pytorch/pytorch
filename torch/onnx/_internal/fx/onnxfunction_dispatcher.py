@@ -29,7 +29,6 @@ from torch.onnx._internal.fx import (
 if TYPE_CHECKING:
     import onnxscript  # type: ignore[import]
 
-from onnxscript import values  # type: ignore[import]
 
 # For beartype
 from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
@@ -67,7 +66,7 @@ def _find_operator_overloads_in_onnx_registry_disagnostic_message_formatter(
 
 
 class OnnxFunctionDispatcher:
-    """A dispatcher that finds the best ONNX Function for ATen operators.
+    """A dispatcher that finds the best ONNX Function for ATen/Custom operators.
 
     It uses the `torch.ops` name to find the function. If not found, it falls back to default.
     Otherwise, the best match is found among all function overloads. An exact match has
@@ -84,6 +83,9 @@ class OnnxFunctionDispatcher:
         b. Otherwise, find the nearest one with the highest matching score. Because of
             the potential wrongly annotated dtypes and attributes matching, we use
             nearest match to find the best function once the aten name is targeted.
+
+    3. Tie-breaker: If there are multiple nearest matches, we will select the one with
+        the highest matching score.
 
     NOTE: The nearest match `doesn't guarantee` a correct match, and a warning message is logged.
     """
@@ -219,7 +221,6 @@ class OnnxFunctionDispatcher:
             Raises:
                 RuntimeError: If there are no overloaded functions available for the given FX node.
         """
-        # TODO(justinchuby): Cache the OnnxSchemaChecker  so we don't need to run the init logic everytime
         overload_match_ranking: Dict[registration.SymbolicFunction, Optional[int]] = {}
         diagnostic = diagnostic_context.inflight_diagnostic()
 
@@ -228,14 +229,15 @@ class OnnxFunctionDispatcher:
         for symbolic_function in reversed(default_and_custom_functions):
             function_opschema = _OnnxSchemaChecker(symbolic_function.onnx_function)
 
+            # NOTE: 1. If the perfect match is found, return the function
             if function_opschema.perfect_match_inputs(
                 diagnostic, onnx_args, onnx_kwargs
             ):
-                # If the perfect match is found, return the function
                 return symbolic_function.onnx_function
             # Record the match score for the nearest match if it's not the perfect match
             overload_match_ranking[symbolic_function] = function_opschema.match_score
-        # NOTE: If there is no perfect match, find the nearest match among the nearest matche candidates
+
+        # NOTE: 2. If there is no perfect match, find the nearest match among the nearest matche candidates
         # If there is no nearest match, raise an error
         overload_match_ranking = {
             k: v for k, v in overload_match_ranking.items() if v is not None
@@ -262,7 +264,7 @@ class OnnxFunctionDispatcher:
             "a nearest match is found. Please check the ONNX output carefully. \n",
         )
         diagnostic.level = diagnostics.levels.WARNING
-        # NOTE: Tie breaker: if there are multiple nearest matches, we will choose the one
+        # NOTE: 3. Tie breaker: if there are multiple nearest matches, we will choose the one
         # that is custom first
         symbolic_function_list: List[registration.SymbolicFunction] = sorted(
             overload_match_ranking,
@@ -372,7 +374,7 @@ class OnnxFunctionDispatcher:
             node=node, diagnostic_context=diagnostic_context
         )
 
-        # NOTE: If the ATen/Custom operators are not registered, the group will be None.
+        # If the ATen/Custom operators are not registered, the group will be None.
         # And non-registerd ATen/Custom operators will trigger error in the next step.
         function_group: Optional[List[registration.SymbolicFunction]] = None
 
@@ -391,10 +393,6 @@ class OnnxFunctionDispatcher:
                 overload=None,
             )
             if function_group is not None:
-                # NOTE: Currently, most of torchlib functions are not registered with overload
-                # in ONNX registry. So we will only log a warning in SARIF if we can't find the overload
-                # to avoid spammy warnings in printout.
-                # TODO: https://github.com/microsoft/onnxscript/issues/828
                 op_full_name = internal_opname.qualified_name()
                 diagnostic = diagnostic_context.inflight_diagnostic()
                 diagnostic.with_additional_message(
@@ -404,15 +402,13 @@ class OnnxFunctionDispatcher:
                 )
                 diagnostic.level = diagnostics.levels.WARNING
 
-        # NOTE: If the ATen/Custom operators are not registered, the group will be None.
         if function_group is not None:
-            # If the input has complex dtype, we will only dispatch to the complex functions.
+            # NOTE: If the input has complex dtype, we will only dispatch to the complex functions.
             function_group = self._filter_or_keep_complex(
                 node, function_group, diagnostic_context
             )
             return function_group  # type: ignore[return-value]
 
-        # If we can't find the function group, raise error.
         op_full_name = internal_opname.qualified_name()
         diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
             diagnostics.rules.no_symbolic_function_for_call_function,
@@ -450,7 +446,7 @@ class _OnnxSchemaChecker:
     provides a matching score to indicate how well the OpSchema matches the input and
     kwargs types.
 
-    There are three types of ONNX overloads in torchlib:
+    There are two types of ONNX overloads in torchlib:
 
     1. Different types: Caused by the difference between the ONNX spec and PyTorch.The
         matching system finds the correct one.
@@ -465,7 +461,7 @@ class _OnnxSchemaChecker:
             ...
     ```
 
-    2. Optional dtype: dtype could be "unprovided". The difference from 2 is that dtype
+    2. Optional attribute: attribute could be "unprovided". The difference from 2 is that dtype
         would not be None.
 
         ```python
@@ -519,7 +515,7 @@ class _OnnxSchemaChecker:
     def match_score(self) -> Optional[int]:
         """The matching score of the OnnxSchemaChecker .
 
-        NOTE: If this remains None, it means the matching score has not been calculated,
+        If this remains None, it means the matching score has not been calculated,
         and it's not a nearest match candidate.
 
         Returns:
@@ -541,6 +537,13 @@ class _OnnxSchemaChecker:
         The definition of perfect match is that the input types are all in the type
         constraints and the number of inputs matches the number of inputs in the
         OpSchema.
+
+        Checking steps:
+        1. The function signature matches the inputs number, and attribute names.
+        2. The input/attribute types are all in the type constraints.
+
+        A function should at least pass the first step to be eligible for the
+        nearest matching.
 
         Args:
             diagnostic: The diagnostic to use for logging detailed info.
@@ -566,7 +569,7 @@ class _OnnxSchemaChecker:
         diagnostic.with_additional_message(
             f"{diagnostics.format_argument(self.onnxfunction)}"
         )
-        # NOTE: The first stage, check if the input number and attribute names match the
+        # NOTE: 1. Check if the input number and attribute names match the
         # OpSchema. If it's not, we know the function is not eligible to be a perfect
         # match, and even a nearest match.
         if len(function_inputs) != len(self.op_schema.inputs):
@@ -589,7 +592,7 @@ class _OnnxSchemaChecker:
                 "The function is not a nearest match candidate.\n"
             )
             return False
-        # NOTE: The second stage, The dtypes of inputs and attributes should be in the
+        # NOTE: 2. The dtypes of inputs and attributes should be in the
         # type constraints of the OpSchema. If they are not, we know the function is not
         # eligible to be a perfect match, but can be a nearest match candidate.
         for schema_input, torch_input in zip(self.op_schema.inputs, function_inputs):
@@ -607,7 +610,7 @@ class _OnnxSchemaChecker:
                     f"Actual {torch_input_compatible_types} vs\n"
                     f"expected {allowed_types}\n"
                 )
-                # NOTE: If it's only type mismatch, this is still a candidate for nearest match.
+                # NOTE: This is still a candidate for nearest match, as it only mismatches on dtypes.
                 self._record_matching_score(function_inputs, function_attributes)
                 diagnostic.with_additional_message(f"match score: {self.match_score}\n")
                 return False
@@ -620,10 +623,7 @@ class _OnnxSchemaChecker:
                     f"Actual {type(attribute)} vs\n"
                     f"expected {self.attributes[attribute_name].type}\n"
                 )
-                # TODO: Currently the functions in torchlib are manully annotated,
-                # so there are quite a few functions that wrongly annotated or strctly annotated.
-                # The matching system relax the match while we fix them in the future.
-                # NOTE: If it's only type mismatch, this is still a candidate for nearest match.
+                # NOTE: This is still a candidate for nearest match, as it only mismatches on dtypes.
                 self._record_matching_score(function_inputs, function_attributes)
                 diagnostic.with_additional_message(f"match score: {self.match_score}\n")
                 return False
@@ -663,15 +663,18 @@ class _OnnxSchemaChecker:
         ],
         attributes: Dict[str, fx_type_utils.Argument],
     ):
-        """Calculate the inputs matching score of the OpSchema requirements to find the nearest match.
+        r"""Calculate the inputs matching score of the OpSchema requirements to find the nearest match.
+
+        Only the functions which have the same number of inputs and attributes as the
+        OpSchema are eligible to be a nearest match candidate. Thus, we don't need to
+        check the length of inputs and attributes here, and only check the types of
+        inputs and attributes.
 
         How the matchsing score is calculated:
-        1. score += 1 if one input type is in the type constraints.
-        2. score -= 1 if one kwarg is not symmetrically the same.
+            score += 1 if one input/attribute type is in the type constraints.
 
         Limitations:
-        1. An Overload is punished if it doesn't have `default` attributes.
-        2. None/NoeType/[] could result in zero matches, and the same score of overloads,
+            None/NoeType/[] could result in zero matches, and the same score of overloads,
             which will be recorded in SARIF.
 
         Args:
@@ -694,11 +697,6 @@ class _OnnxSchemaChecker:
                 self._matching_score += 1
         # NOTE: The penalty is applied to those functions which have different attributes.
         for attribute_name, attribute_proto in self.attributes.items():
-            if attribute_name not in attributes:
-                # If the attribute of the OpSchema and the attribute don't match,
-                # we know the function and the input are not compatible
-                self._matching_score -= 1
-                continue
             attribute = attributes[attribute_name]
             attribute_onnx_type = fx_type_utils.from_python_type_to_onnx_attribute_type(
                 type(attribute)
@@ -707,10 +705,6 @@ class _OnnxSchemaChecker:
                 # If the attribute type of the OpSchema and the attribute type don't match,
                 # we know the function and the input are not compatible
                 self._matching_score -= 1
-        # If there is any unexpected attribute in attributes, we know the function
-        # and the input are not compatible
-        extra_attrbute_counts = set(attributes).difference(set(self.attributes))
-        self._matching_score -= len(extra_attrbute_counts)
 
     # NOTE: Referenced from onnxscript internal function.
     # Importing this function makes the code less robust, as it is not a public API.
@@ -744,6 +738,9 @@ class _OnnxSchemaChecker:
         # args, kwargs and param_schemas should be all in order
         # user may not specify all inputs or attributes
 
+        # TODO: avoid circular dependency
+        import onnx
+
         onnx_inputs: List[Any] = []
         onnx_attributes: Dict[str, Any] = dict()
         # NOTE: We need to copy kwargs because we will mutate it
@@ -766,7 +763,11 @@ class _OnnxSchemaChecker:
                     copy_kwargs.pop(param.name)
                 else:
                     onnx_attributes[param.name] = copy_kwargs[param.name]
-            elif param.is_attribute and param.default is not values._EmptyDefault:
+            elif (
+                param.is_attribute
+                and self.attributes[param.name].default_value.type
+                != onnx.AttributeProto.UNDEFINED
+            ):
                 # User did not provide the attribute
                 if fill_defaults:
                     onnx_attributes[param.name] = param.default
@@ -776,7 +777,7 @@ class _OnnxSchemaChecker:
                 if fill_defaults:
                     onnx_inputs.append(None)
 
-        # pick up extra kwargs if it's not None. None is not expected
+        # NOTE: Pick up extra kwargs if it's not None. None is not expected
         # as an attribute value in torchlib.
         for k, v in copy_kwargs.items():
             if k not in onnx_attributes and v is not None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Sequence, Tuple, Union
 
 import onnxscript  # type: ignore[import]
-from onnxscript import evaluator, values  # type: ignore[import]
+from onnxscript import evaluator  # type: ignore[import]
 
 import torch
 import torch.fx
@@ -58,7 +58,6 @@ def validate_op_between_ort_torch(
     There are three signs can be found:
     1. Blue: Pass
     2. Yellow: Bypass
-    3. Red: Fail
 
     Args:
         node (torch.fx.Node): The validated fx.node
@@ -116,7 +115,6 @@ def validate_op_between_ort_torch(
                 symbolic_fn.param_schemas(),
                 torch_args,
                 torch_kwargs,
-                fill_defaults=False,
                 allow_extra_kwargs=True,
             )
             # NOTE: Apply kwargs preprocessing AFTER they are split
@@ -310,16 +308,16 @@ def _convert_torch_args_to_onnxfunction_args(
     param_schemas: Sequence[onnxscript.values.ParamSchema],
     args: List[fx_type_utils.Argument],
     kwargs: Dict[str, fx_type_utils.Argument],
-    fill_defaults: bool = False,
     allow_extra_kwargs: bool = False,
 ) -> Tuple[List[Any], Dict[str, Any],]:
     """Convert Python args and kwargs to OnnxFunction acceptable with matching ONNX ParamSchema.
+
+    This is different from the para
 
     Args:
         param_schemas: The parameter schemas of an Op or a OnnxFunction.
         args: The Python positional arguments supplied by the caller.
         kwargs: The Python keyword arguments supplied by the caller.
-        fill_defaults: Whether to fill the default values for attributes.
         allow_extra_kwargs: Whether to allow extra keyword arguments.
             When set to True, extra/unknown arguments will be ignored.
 
@@ -359,10 +357,6 @@ def _convert_torch_args_to_onnxfunction_args(
                 tagged_kwargs[param.name] = _convert_tensor_to_numpy(kwargs[param.name])
             else:
                 tagged_kwargs[param.name] = kwargs[param.name]
-        elif param.default is not values._EmptyDefault:
-            # User did not provide the input/attribute
-            if fill_defaults:
-                tagged_kwargs[param.name] = param.default
         elif param.required:
             raise TypeError(f"Required input/attribute '{param}' was not provided")
 
