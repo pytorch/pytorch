@@ -18,6 +18,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
+from torch._dynamo.exc import UserError
 from torch._export import dynamic_dim
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -3011,6 +3012,72 @@ def forward(self, x):
                     msg="test_capture_symbolic_tracing_simple_within_fake_mode_aten_graph_"
                     + str(aten_graph),
                 )
+
+    def test_invalid_input_global(self) -> None:
+        global bulbous_bouffant
+        bulbous_bouffant = torch.randn(3)
+
+        def f(y):
+            return bulbous_bouffant + y
+
+        self.assertExpectedInlineMunged(
+            UserError,
+            lambda: torch._dynamo.export(f)(torch.randn(3)),
+            """\
+G['bulbous_bouffant'], accessed at:
+  File "test_export.py", line N, in f
+    return bulbous_bouffant + y
+""",
+        )
+
+    def test_invalid_input_global_multiple_access(self) -> None:
+        global macademia
+        macademia = torch.randn(3)
+
+        def g(y):
+            global macademia
+            y = macademia + y
+            return y
+
+        def f(y):
+            global macademia
+            y = g(y)
+            return macademia + y
+
+        # NB: This doesn't actually work (it only reports the first usage),
+        # but I'm leaving the test here in case we fix it later
+        self.assertExpectedInlineMunged(
+            UserError,
+            lambda: torch._dynamo.export(f)(torch.randn(3)),
+            """\
+G['macademia'], accessed at:
+  File "test_export.py", line N, in f
+    y = g(y)
+  File "test_export.py", line N, in g
+    y = macademia + y
+""",
+        )
+
+    def test_invalid_input_nonlocal(self) -> None:
+        arglebargle = torch.randn(3)
+
+        def f(y):
+            return arglebargle + y
+
+        self.assertExpectedInlineMunged(
+            UserError,
+            lambda: torch._dynamo.export(f)(torch.randn(3)),
+            """L['arglebargle'], a closed over free variable""",
+        )
+
+    def test_invalid_input_unused_nonlocal_ok(self) -> None:
+        arglebargle = torch.randn(3)
+
+        def f(y):
+            x = arglebargle
+            return y
+
+        torch._dynamo.export(f)(torch.randn(3))
 
     def test_capture_symbolic_tracing_within_fake_mode(self):
         from torch._dynamo.output_graph import config
