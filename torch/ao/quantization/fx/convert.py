@@ -183,7 +183,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                     # For scale and zero_point values we register them as buffers in the root module.
                     # However, note that when the values are not tensors, as in the case of
                     # per_tensor quantization, they will be treated as literals.
-                    # However, registring them as a node seems to cause issue with dynamo
+                    # However, registering them as a node seems to cause issue with dynamo
                     # tracing where it may consider tensor overload as opposed to default.
                     # With extra check of scale and zero_point being scalar, it makes
                     # sure that the default overload can be used.
