@@ -343,7 +343,7 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
         r._is_flat_param = True  # type: ignore[attr-defined]
         return r
 
-    # NB: This is not a regular method, because FlatParameter are not actually
+    # NB: This is not a regular method, because FlatParameters are not actually
     # instances of this class (see __new__ above).  So you must indirectly
     # call this directly through the classmethod.
     @classmethod

@@ -1540,15 +1540,6 @@ class TestSDPA(NNTestCase):
         causal,
         train,
     ):
-        print(device,
-        fused_kernel,
-        dtype,
-        batch_size,
-        seq_len,
-        n_head,
-        head_dim,
-        causal,
-        train)
         atol = 1e-5
         rtol = 5e-6
         if dtype is torch.bfloat16:
