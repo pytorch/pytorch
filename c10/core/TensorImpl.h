@@ -260,10 +260,11 @@ struct C10_API ExtraMeta {
       std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta,
       std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta,
       intrusive_ptr<c10::BackendMeta> backend_meta,
-      c10::optional<std::string> custom_data_ptr_error_msg_ = c10::nullopt)
+      c10::optional<std::string> custom_data_ptr_error_msg = c10::nullopt)
       : symbolic_shape_meta_(std::move(symbolic_shape_meta)),
         named_tensor_meta_(std::move(named_tensor_meta)),
-        backend_meta_(std::move(backend_meta)) {}
+        backend_meta_(std::move(backend_meta)),
+        custom_data_ptr_error_msg_(std::move(custom_data_ptr_error_msg)) {}
 
   std::unique_ptr<ExtraMeta> clone() const {
     return std::make_unique<ExtraMeta>(*this);
@@ -1118,6 +1119,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return device_custom().is_xla();
     }
     return device_opt_.has_value() && device_opt_->type() == kXLA;
+  }
+
+  bool is_mtia() const {
+    if (C10_UNLIKELY(device_policy_)) {
+      return device_custom().is_mtia();
+    }
+    return device_opt_.has_value() && device_opt_->type() == kMTIA;
   }
 
   bool is_hpu() const {
