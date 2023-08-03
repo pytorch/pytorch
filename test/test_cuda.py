@@ -898,7 +898,7 @@ except RuntimeError as e:
             self.assertEqual(torch.cuda.current_stream(), bwd_ambient_stream)
 
     # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
+    @skipIfRocm(msg="flakey on ROCm https://github.com/pytorch/pytorch/issues/53190")
     def test_streaming_backwards_multiple_streams(self):
         MultiplyInStream = self._make_multiply_in_stream()
 

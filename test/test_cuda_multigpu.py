@@ -741,7 +741,7 @@ class TestCudaMultiGPU(TestCase):
             c2p.put(sync_func(self, TestCudaMultiGPU.FIFTY_MIL_CYCLES))
 
     # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm(msg="flakey on ROCm https://github.com/pytorch/pytorch/issues/53190")
+    @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_stream_event_nogil(self):
         for sync_func in [TestCudaMultiGPU._stream_synchronize,
