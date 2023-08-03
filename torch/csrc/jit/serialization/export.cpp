@@ -85,7 +85,7 @@ constexpr static std::array<int64_t, kMainOpsetVersion + 1>
         8, // opset 16
         8, // opset 17
         8, // opset 18
-        8, // opset 19
+        9, // opset 19
 };
 
 std::string getNodeStackTraceString(const Node* n) {
