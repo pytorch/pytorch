@@ -121,6 +121,7 @@ class TestCase(TorchTestCase):
 
     def setUp(self):
         torch._dynamo.reset()
+        torch._inductor.metrics.reset()
         super().setUp()
         self._start = time.perf_counter()
 
@@ -6696,10 +6697,7 @@ class CommonTemplate:
 
     @patch.object(config.triton, "autotune_pointwise", True)
     def test_inductor_bucketize_add_autotune(self):
-        """
-        Causes a @pointwise(size_hints) where size_hints is 2D
-        """
-        torch._inductor.metrics.generated_kernel_count = 0
+        # Causes a @pointwise(size_hints) where size_hints is 2D
 
         def fn(input, offsets, add_value):
             return torch.ops.prims._inductor_bucketize(input, offsets) + add_value
