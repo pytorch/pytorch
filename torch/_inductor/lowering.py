@@ -1711,7 +1711,6 @@ make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
-make_fallback(aten.cumsum, require_dense, warn=False)
 make_fallback(aten.cumprod, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
@@ -3985,6 +3984,31 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
     return inner
 
 
+def _make_scan_inner(x, *, axis, dtype):
+    if dtype is not None:
+        x = to_dtype(x, dtype)
+    size = x.get_size()
+    axis = _validate_reduction_axis(x, axis)[0]
+
+    pointwise_ranges = [*size[:axis], *size[axis + 1:]]
+    scan_ranges = [size[axis]]
+
+    def reindex(index, scan_index):
+        assert len(scan_ranges) == len(scan_ranges)
+        assert len(index) == len(pointwise_ranges)
+        new_index = [*index[:axis], *scan_index, *index[axis:]]
+        return new_index
+
+    return dict(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=x.make_loader(),
+        ranges=pointwise_ranges,
+        scan_ranges=scan_ranges,
+        reindex=reindex,
+    )
+
+
 @register_lowering(aten.mean)
 def mean(x, axis=None, keepdim=False, *, dtype=None):
     if dtype is not None:
@@ -4303,6 +4327,27 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 
     fn = make_reduction("sum", override_return_dtype=dtype)
     return fn(x, axis, keepdims, dtype=dtype)
+
+fallback_cumsum = fallback_handler(aten.cumsum)
+
+@register_lowering(aten.cumsum)
+def cumsum(x, axis=None, dtype=None):
+    if x.get_device().type != "cuda":
+        return fallback_cumsum(x, dim=axis, dtype=dtype)
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
+        dtype = torch.int64
+
+    kwargs = _make_scan_inner(
+        x,
+        axis=axis,
+        dtype=dtype,
+    )
+    return ir.Scan.create(
+        **kwargs,
+        scan_op="sum",
+    )
 
 
 @register_lowering(aten.prod)

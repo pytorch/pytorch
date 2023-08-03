@@ -357,6 +357,9 @@ class Loops(IRNode):
     def get_size(self):
         return self.ranges
 
+    def get_pointwise_size(self):
+        return self.ranges
+
     def is_extern(self):
         return False
 
@@ -1079,6 +1082,82 @@ class Reduction(Loops):
         )
 
 
+@dataclasses.dataclass
+class Scan(Loops):
+    scan_ranges: List[Expr]
+    scan_op: str  # TODO make this a callable
+    reindex: Callable[[List[Expr], List[Expr]], List[Expr]]
+    reduction_hint: ReductionHint = ReductionHint.DEFAULT # TODO
+
+    # HACK we mimick reduction
+
+    def store_reduction(self, output_name, indexer, vars, scan_vars):
+        idx = self.reindex(vars, scan_vars)
+        value = self.inner_fn(idx)
+        result = ops.scan(self.dtype, self.scan_op, value)
+        return ops.store(output_name, indexer(idx), result)
+
+    def get_reduction_type(self):
+        return self.scan_op
+
+    def get_reduction_size(self):
+        return self.scan_ranges
+
+    def get_size(self):
+        return (*self.ranges, *self.scan_ranges)
+
+    def get_pointwise_size(self):
+        return self.ranges
+
+    def index_length(self):
+        return len(self.ranges) + len(self.reduction_ranges)
+
+    def inner_fn_str(self):
+        index = self._index(self.ranges)
+        rindex = self._index(self.scan_ranges, "r")
+        return V.KernelFormatterHandler.ir_to_string(
+            self.inner_fn,
+            index,
+            rindex,
+        )
+
+    @classmethod
+    def create(
+        cls,
+        device: torch.device,
+        dtype: torch.dtype,
+        inner_fn: Callable[[List[Expr]], Any],
+        ranges: List[Expr],
+        scan_ranges: List[Expr],
+        scan_op: str,
+        reindex: Callable[[List[Expr], List[Expr]], List[Expr]],
+    ):
+        assert scan_op in {"sum", "prod", "min", "max"}
+        sizevars = V.graph.sizevars
+        scan_numel = sizevars.simplify(sympy_product(scan_ranges))
+        if sizevars.is_expr_static_and_true(sympy.Le(scan_numel, 1)):
+            return Pointwise.create(
+                device=device,
+                dtype=dtype,
+                inner_fn=inner_fn,
+                ranges=(*ranges, scan_ranges),
+            )
+
+        result = TensorBox.create(
+            Scan(
+                device=device,
+                dtype=dtype,
+                inner_fn=inner_fn,
+                ranges=ranges,
+                scan_ranges=scan_ranges,
+                scan_op=scan_op,
+                reindex=reindex,
+            )
+        )
+        result.realize()
+        return result
+
+
 def is_storage_and_layout(x):
     try:
         as_storage_and_layout(x, freeze=False)
@@ -1174,6 +1253,9 @@ class BaseView(IRNode):
 
     def get_name(self):
         return self.data.get_name()
+
+    def get_pointwise_size(self):
+        return self.get_size()
 
     def mark_reuse(self, users):
         return self.data.mark_reuse(users)
@@ -2187,7 +2269,7 @@ class ComputedBuffer(Buffer):
             if self.data.get_reduction_type():
                 return extract_read_writes(
                     self.get_store_function(),
-                    self.data.get_size(),
+                    self.data.get_pointwise_size(),
                     self.data.get_reduction_size(),
                 )
             else:
@@ -2224,7 +2306,7 @@ class ComputedBuffer(Buffer):
         """
         if isinstance(self.layout, FlexibleLayout):
             (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
-                self.data.get_size(), self.data.get_reduction_size()
+                self.data.get_pointwise_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
             reads_bufs = [
@@ -2248,8 +2330,12 @@ class ComputedBuffer(Buffer):
             ]
 
             if reads:
+                if isinstance(self.data, Scan):
+                    indices = self.data.reindex(index_vars, reduction_vars)
+                else:
+                    indices = index_vars
                 stride_lengths = [
-                    V.graph.sizevars.stride_hints(expr, index_vars) for expr in reads
+                    V.graph.sizevars.stride_hints(expr, indices) for expr in reads
                 ]
                 from .scheduler import pick_loop_order
 
@@ -2276,7 +2362,7 @@ class ComputedBuffer(Buffer):
             3) Reorder dimensions based on stride orders
         """
         args, var_ranges = dependencies.index_vars_squeeze(
-            self.data.get_size(), self.data.get_reduction_size(), prefix="q"
+            self.data.get_pointwise_size(), self.data.get_reduction_size(), prefix="q"
         )
         with patch.object(ConstantBuffer, "override_device", self.get_device()):
             body = LoopBody(
@@ -4477,7 +4563,7 @@ class StorageBox(MutableBox):
             ),
         ):
             return self.data.get_name()
-        assert isinstance(self.data, (Pointwise, Reduction)), type(self.data)
+        assert isinstance(self.data, (Pointwise, Reduction, Scan)), type(self.data)
         origin_node = self.data.get_origin_node()
         traceback = self.data.get_traceback()
         self.data = ComputedBuffer(

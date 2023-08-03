@@ -984,6 +984,12 @@ class CommonTemplate:
 
         self.common(fn, (torch.ones(32, 32) * 70,))
 
+    def test_cumsum(self):
+        def fn(x):
+            return x.cumsum(0), x.cumsum(1), x.view((-1,)).cumsum(0)
+
+        self.common(fn, (torch.rand(32, 32),))
+
     def test_clamp(self):
         def fn(a, b):
             return (a.clamp(-0.1, 0.1), b.clamp(0), torch.clamp(a + b, max=0))
