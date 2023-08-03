@@ -89,9 +89,26 @@ log = logging.getLogger(__name__)
 @functools.lru_cache(None)
 def cache_dir():
     cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+    
+    # Default to a local temporary directory
     if cache_dir is None:
         cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
-    os.makedirs(cache_dir, exist_ok=True)
+
+    if '://' in cache_dir:
+        try:
+            import fsspec
+        except ImportError:
+            raise ImportError("fsspec is required to handle remote file systems but it's not installed. "
+                              "Please install fsspec by running 'pip install fsspec'")
+        # Use fsspec to handle the directory
+        fs = fsspec.filesystem(cache_dir.split(':')[0])
+        # Create the directory if it does not exist
+        if not fs.exists(cache_dir):
+            fs.mkdir(cache_dir)
+    else:
+        # Use standard os library for local files
+        os.makedirs(cache_dir, exist_ok=True)
+
     return cache_dir
 
 
