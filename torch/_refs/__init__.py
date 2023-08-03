@@ -337,6 +337,12 @@ DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 aten = torch._ops.ops.aten
 
 
+def is_noncontiguous_supported(device):
+    if device is not None and device.type == "hpu":
+        return False
+    return True
+
+
 def _broadcast_shapes(*_shapes):
     shapes = tuple(
         (x,) if isinstance(x, IntLike) else x
@@ -433,7 +439,16 @@ def _make_elementwise_unary_reference(
             if extra_meta is not None:
                 extra_meta(a)
 
-            return prim(a)
+            out = prim(a)
+
+            device = None
+            if hasattr(a, 'fake_device'):
+                device = a.fake_device
+
+            if is_noncontiguous_supported(device) is False:
+                out = out.new_empty(out.shape)
+
+            return out
 
         if aten_op is infer_aten_op:
             aten_op = utils.get_aten_op(prim, prim.__name__)
@@ -956,7 +971,18 @@ def _make_elementwise_binary_reference(
                 lambda: f"{name}: Receive two Number inputs to an elementwise binary operation!",
             )
             a, b = _maybe_broadcast(a, b)
-            return prim(a, b)
+
+            device = None
+            if hasattr(a, 'fake_device'):
+                device = a.fake_device
+            elif hasattr(b, 'fake_device'):
+                device = b.fake_device
+
+            out = prim(a,b)
+            if is_noncontiguous_supported(device) is False:
+                out = out.new_empty(out.shape)
+
+            return out
 
         if has_out:
             _ref = out_wrapper()(_ref)
