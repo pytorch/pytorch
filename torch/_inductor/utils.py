@@ -7,7 +7,6 @@ import logging
 import math
 import operator
 import os
-import re
 import shutil
 import sys
 import tempfile
@@ -275,12 +274,6 @@ def cache_on_self(fn):
         return getattr(self, key)
 
     return wrapper
-
-
-def delete_cache_on_self(self):
-    for k in list(self.__dict__.keys()):
-        if re.match("__(.*)_cache", k):
-            delattr(self, k)
 
 
 def aggregate_origins(node_schedule):

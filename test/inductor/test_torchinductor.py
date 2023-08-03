@@ -6800,7 +6800,7 @@ class CommonTemplate:
                 self.assertTrue("i0 + 2 * i1" in mul_buf.data.inner_fn_str())
 
         with add_scheduler_init_hook(hook_fn):
-            actual = torch.compile(f)(x)
+            actual = torch.compile(f, fullgraph=True)(x)
         self.assertEqual(ref, actual)
         self.assertTrue(called)
 
