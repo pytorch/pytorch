@@ -3037,11 +3037,12 @@ def forward(self, x):
                 dynamic_dim(inputs[2], 0),
                 dynamic_dim(inputs[2], 0) == dynamic_dim(inputs[0], 0),
             ]
-            gm = torch._dynamo.export(
-                model,
-                constraints=constraints,
-                aten_graph=True,
-            )(*inputs).graph_module
+            for aten_graph in [True, False]:
+                gm = torch._dynamo.export(
+                    model,
+                    constraints=constraints,
+                    aten_graph=aten_graph,
+                )(*inputs).graph_module
 
         # Since there are no parameters we can do this
         inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
@@ -3052,16 +3053,29 @@ def forward(self, x):
 
         fake_mode = fake_tensor.FakeTensorMode()
 
+        # TODO: Seems to choke if you don't make a fresh model and
+        # just try to export Linear directly...
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                out = self.linear(x)
+                return out
+
         with fake_mode:
-            model = torch.nn.Linear(2, 2)
+            model = Model()
             inputs = (torch.randn(10, 2, 2),)
             constraints = [
                 dynamic_dim(inputs[0], 0),
             ]
-            gm = torch._dynamo.export(
-                model,
-                constraints=constraints,
-            )(*inputs).graph_module
+            for aten_graph in [True, False]:
+                gm = torch._dynamo.export(
+                    model,
+                    constraints=constraints,
+                    aten_graph=aten_graph,
+                )(*inputs).graph_module
 
     def test_capture_symbolic_tracing_within_fake_mode(self):
         from torch._dynamo.output_graph import config
