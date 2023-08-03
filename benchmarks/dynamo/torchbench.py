@@ -55,6 +55,7 @@ USE_SMALL_BATCH_SIZE = {
     "hf_Reformer": 4,
     "hf_T5_base": 4,
     "timm_efficientdet": 1,
+    "llama_v2_7b_16h": 1,
 }
 
 DETECTRON2_MODELS = {
