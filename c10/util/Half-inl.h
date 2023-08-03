@@ -20,10 +20,6 @@
 #include <sycl/sycl.hpp> // for SYCL 2020
 #endif
 
-#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
-#include <ATen/cpu/vec/vec_half.h>
-#endif
-
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
@@ -40,11 +36,7 @@ inline C10_HOST_DEVICE Half::Half(float value)
 #elif defined(__SYCL_DEVICE_ONLY__)
       x(c10::bit_cast<uint16_t>(sycl::half(value)))
 #else
-#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
-      x(at::vec::float2half_scalar(value))
-#else
       x(detail::fp16_ieee_from_fp32_value(value))
-#endif
 #endif
 {
 }
@@ -57,11 +49,7 @@ inline C10_HOST_DEVICE Half::operator float() const {
 #elif defined(__SYCL_DEVICE_ONLY__)
   return float(c10::bit_cast<sycl::half>(x));
 #else
-#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
-  return at::vec::half2float_scalar(x);
-#else
   return detail::fp16_ieee_to_fp32_value(x);
-#endif
 #endif
 }
 
