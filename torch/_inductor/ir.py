@@ -374,6 +374,10 @@ class Loops(IRNode):
             for n, s in enumerate(ranges)
         ]
 
+    @cache_on_self
+    def inner_fn_str_len(self):
+        return len(self.inner_fn_str())
+
     def inner_fn_str(self):
         index = self._index(self.ranges)
         return V.KernelFormatterHandler.ir_to_string(self.inner_fn, index)
@@ -2172,6 +2176,10 @@ class ShapeAsConstantBuffer(IRNode):
 class ComputedBuffer(Buffer):
     data: Loops
 
+    @cache_on_self
+    def num_reads(self):
+        return len(self.get_read_writes().reads)
+
     def get_read_writes(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.data.get_reduction_type():
@@ -2191,7 +2199,7 @@ class ComputedBuffer(Buffer):
         can_inline = (
             hasattr(self.data, "make_loader")
             and self.name not in V.graph.mutated_buffers
-            and len(self.get_read_writes().reads) == 0
+            and self.num_reads() == 0
         )
         if can_inline:
             return self.data.make_loader()
@@ -4363,7 +4371,7 @@ class StorageBox(MutableBox):
     def has_exceeded_max_reads(self):
         return isinstance(self.data, Pointwise) and (
             self.num_reads() > config.realize_acc_reads_threshold
-            or len(self.inner_fn_str()) > config.realize_bytes_threshold
+            or self.inner_fn_str_len() > config.realize_bytes_threshold
         )
 
     def mark_reuse(self, users):
