@@ -69,14 +69,19 @@ def _test_aot_autograd_forwards_backwards_helper(
         diff_args = [arg for arg in flat_args if isinstance(arg, torch.Tensor) and
                      arg.requires_grad]
         out = wrapper_set_seed(f, args)
-        # NB: we're assuming that the output only has Tensors
         flat_out, _ = pytree.tree_flatten(out)
+        if not diff_args:
+            return []
+
         sm = 0
         for i in flat_out:
-            # We need to call .abs() because it is possible that the output of the
-            # operator is a complex Tensor and autograd will yell at autograd.grad
-            # on a complex Tensor unless we manually provide the grad_output flag.
-            sm += i.sum().abs()
+            if isinstance(i, torch.Tensor) and i.requires_grad:
+                # We need to call .abs() because it is possible that the output of the
+                # operator is a complex Tensor and autograd will yell at autograd.grad
+                # on a complex Tensor unless we manually provide the grad_output flag.
+                sm += i.sum().abs()
+        if isinstance(sm, int) or not sm.requires_grad:
+            return []
         return torch.autograd.grad(sm, diff_args, allow_unused=True)
 
     def check(args, ignore_failure=False):
@@ -88,7 +93,7 @@ def _test_aot_autograd_forwards_backwards_helper(
             raise
 
         # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
-        if all(x is None for x in orig_grad):
+        if orig_grad and all(x is None for x in orig_grad):
             with assert_raises_regex_fn(RuntimeError, 'does not require grad and does not have a grad_fn'):
                 call_forwards_backwards(compiled_f, args)
             return
