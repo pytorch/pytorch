@@ -2325,6 +2325,38 @@ class BenchmarkRunner:
             results.append(experiment(model, example_inputs, **experiment_kwargs))
             return " ".join(map(str, results))
 
+    def minify_model(
+        self,
+        name,
+        model,
+        example_inputs,
+        optimize_ctx,
+        experiment,
+        tag,
+    ):
+        logging.info("Minifying %s...", name)
+        os.environ["TORCH_COMPILE_DEBUG"] = "1"
+        os.environ["TORCHDYNAMO_REPRO_AFTER"] = "dynamo"
+        os.environ["TORCHDYNAMO_REPRO_LEVEL"] = "4"
+
+        self.check_accuracy(name, model, example_inputs, optimize_ctx, experiment, tag)
+
+        if self.args.output_directory:
+            repro_dir = self.args.output_directory
+        else:
+            repro_dir = torch._dynamo.config.base_dir
+
+        try:
+            shutil.move("repro.py", f"{repro_dir}/{name}_repro.py")
+        except OSError as e:
+            logging.error("Could not find repro script for model %s", name)
+        else:
+            logging.info(
+                "Repro script for model %s with minified graph saved to %s",
+                name,
+                repro_dir,
+            )
+
     def run_one_model(
         self,
         name,
@@ -2348,6 +2380,10 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment, tag
             )
             print(status)
+            if status == "fail_accuracy" and self.args.minify:
+                self.minify_model(
+                    name, model, example_inputs, optimize_ctx, experiment, tag
+                )
         elif self.args.tolerance:
             status = self.check_tolerance(name, model, example_inputs, optimize_ctx)
             print(status)
@@ -2759,6 +2795,12 @@ def parse_args(args=None):
         "--no-translation-validation",
         action="store_true",
         help="Disable translation validation for accuracy builds.",
+    )
+
+    parser.add_argument(
+        "--minify",
+        action="store_true",
+        help="Enable minification when failure is below tolerance. Save repro script for each model.",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
