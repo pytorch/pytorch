@@ -992,7 +992,6 @@ class MultiheadAttention(Module):
             self.in_proj_bias = Parameter(torch.empty(3 * embed_dim, **factory_kwargs))
         else:
             self.register_parameter('in_proj_bias', None)
-        self.out_proj = NonDynamicallyQuantizableLinear(embed_dim, embed_dim, bias=bias, **factory_kwargs)
 
         if add_bias_kv:
             self.bias_k = Parameter(torch.empty((1, 1, embed_dim), **factory_kwargs))
@@ -1002,6 +1001,11 @@ class MultiheadAttention(Module):
 
         self.add_zero_attn = add_zero_attn
 
+        self.reset_parameters()
+
+        self.out_proj = NonDynamicallyQuantizableLinear(embed_dim, embed_dim, bias=bias, **factory_kwargs)
+
+    def reset_parameters(self):
         self._reset_parameters()
 
     def _reset_parameters(self):
@@ -1014,7 +1018,7 @@ class MultiheadAttention(Module):
 
         if self.in_proj_bias is not None:
             constant_(self.in_proj_bias, 0.)
-            constant_(self.out_proj.bias, 0.)
+            # constant_(self.out_proj.bias, 0.)
         if self.bias_k is not None:
             xavier_normal_(self.bias_k)
         if self.bias_v is not None:
