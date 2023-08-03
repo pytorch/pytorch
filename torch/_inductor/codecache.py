@@ -97,9 +97,9 @@ def cache_dir():
     if '://' in cache_dir:
         try:
             import fsspec
-        except ImportError:
-            raise ImportError("fsspec is required to handle remote file systems but it's not installed. "
-                              "Please install fsspec by running 'pip install fsspec'")
+        except ImportError as e:
+            raise ImportError("fsspec is required to handle remote file systems but it's not installed.") from e
+
         # Use fsspec to handle the directory
         fs = fsspec.filesystem(cache_dir.split(':')[0])
         # Create the directory if it does not exist
