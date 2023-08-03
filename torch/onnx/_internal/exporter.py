@@ -220,6 +220,11 @@ class ResolvedExportOptions(ExportOptions):
                 if not key.startswith("_"):  # skip private attributes
                     assert hasattr(self, key), f"Unresolved option '{key}'"
 
+        if self.dynamic_shapes and self.fake_context:
+            raise RuntimeError(
+                "Cannot enable both dynamic shapes and fake mode at the same time."
+            )
+
 
 @contextlib.contextmanager
 def enable_fake_mode():

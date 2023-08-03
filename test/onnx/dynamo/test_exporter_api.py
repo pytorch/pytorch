@@ -46,6 +46,29 @@ class TestExportOptionsAPI(common_utils.TestCase):
         with self.assertRaises(expected_exception_type):
             ResolvedExportOptions(options=12)  # type: ignore[arg-type]
 
+    def test_raise_on_invalid_argument_combination(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                out = self.linear(x)
+                return out
+
+        with torch.onnx.enable_fake_mode() as fake_context:
+            fake_model = Model()
+            fake_x = torch.rand(5, 2, 2)
+
+        # TODO: Dynamo does not support dynamic shapes and fake mode enabled at the same time
+        with self.assertRaises(RuntimeError):
+            export_options = ExportOptions(
+                dynamic_shapes=True, fake_context=fake_context
+            )
+            _ = torch.onnx.dynamo_export(
+                fake_model, fake_x, export_options=export_options
+            )
+
     def test_dynamic_shapes_default(self):
         options = ResolvedExportOptions(None)
         self.assertFalse(options.dynamic_shapes)
