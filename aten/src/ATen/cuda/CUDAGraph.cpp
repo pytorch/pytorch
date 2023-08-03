@@ -23,6 +23,18 @@ MempoolId_t graph_pool_handle() {
 #endif
 }
 
+
+// Get the expected id of a capture sequence so that we can call beginAllocateStreamToPool
+// before starting a graph capture
+CaptureId_t capture_sequence_id() {
+  // id starts at 1:
+  // Ensures uuid count starts at 1. 0 is reserved to mean "not set by cudaStreamGetCaptureInfo".
+  // (But how do we know GetCaptureInfo never sets id_ to 0? Because that's the current behavior,
+  // and I asked cuda devs to keep it that way, and they agreed.)
+  static std::atomic<CaptureId_t> uuid{1};
+  return uuid++;
+}
+
 /**
  * Note [CUDA Graph Wrapper Class]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -84,20 +96,8 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
   capture_gen_ = gen;
   capture_dev_ = c10::cuda::current_device();
 
-  // cudaStreamCaptureModeGlobal is the most conservative option to
-  // prevent potentially unsafe CUDA API calls during capture.  See
-  // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
-  AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, cudaStreamCaptureModeGlobal));
+  auto id = capture_sequence_id();
 
-  // Stashes the current capture's uuid.
-  cudaStreamCaptureStatus status;
-  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &id_));
-  TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
-
-  // Ensures uuid count starts at 1. 0 is reserved to mean "not set by cudaStreamGetCaptureInfo".
-  // (But how do we know GetCaptureInfo never sets id_ to 0? Because that's the current behavior,
-  // and I asked cuda devs to keep it that way, and they agreed.)
-  TORCH_INTERNAL_ASSERT(id_ > 0);
   if (pool.first != 0 || pool.second != 0) {
     // Either value being nonzero means the user supplied a pool to share.
     // But only one should be nonzero.
@@ -108,7 +108,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
   } else {
     // User did not ask us to share a mempool. Use our own id_ as our mempool_id_.
     // Sets just the first value, to distinguish it from MempoolId_ts created by graph_pool_handle().
-    mempool_id_ = {id_, 0};
+    mempool_id_ = {id, 0};
   }
 
   // When CUDACachingAllocator allocates while a capture is underway, it calls cudaStreamGetCaptureInfo
@@ -122,8 +122,24 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
   // The user has no business launching kernels on capture_stream_ from another thread
   // while calling capture_begin. They'll have no idea if their side thread's
   // kernel will end up as part of the capture or not.
+  // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture which should
+  // prevent the above from occurring. This is mainly to address e.g., an autograd thread's free() call
+  // triggering an invalid cudaEventRecord in the caching allocator due to the capture status being
+  // updated _after_ a capture had already started.
   c10::cuda::CUDACachingAllocator::beginAllocateStreamToPool(capture_dev_, capture_stream_, mempool_id_);
 
+  // cudaStreamCaptureModeGlobal is the most conservative option to
+  // prevent potentially unsafe CUDA API calls during capture.  See
+  // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
+  AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, cudaStreamCaptureModeGlobal));
+
+  // Stashes the current capture's uuid.
+  cudaStreamCaptureStatus status;
+  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status));
+  TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
+
+  id_ = id;
+  TORCH_INTERNAL_ASSERT(id_ > 0);
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 or ROCM >= 5.3")
 #endif
@@ -136,9 +152,10 @@ void CUDAGraph::capture_end() {
   TORCH_CHECK(stream == capture_stream_,
               "Capture must end on the same stream it began on.");
 
+  AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
+
   c10::cuda::CUDACachingAllocator::endAllocateStreamToPool(capture_dev_, capture_stream_);
 
-  AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
   TORCH_CHECK(graph_ != NULL, "Invalid capture.");
   has_graph_ = true;
 
