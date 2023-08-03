@@ -3545,6 +3545,30 @@ class TestMPS(TestCaseMPS):
         x_mps[2:4] = update_mps  # implicit type casting and copy
         self.assertEqual(x_cpu, x_mps)
 
+    def test_copy_broadcasting(self):
+        def helper(src_shape, dst_shape, src_dtype, dst_dtype):
+            cpu_src = torch.randint(0, 127, src_shape).to(src_dtype)
+            cpu_dst = torch.randint(0, 127, dst_shape).to(dst_dtype)
+            cpu_result = cpu_dst.copy_(cpu_src)
+            mps_src = cpu_src.to("mps")
+            mps_dst = cpu_dst.to("mps")
+            mps_result = mps_dst.copy_(mps_src)
+            self.assertEqual(cpu_result, mps_result)
+
+        test_dtypes = [torch.float32, torch.int32, torch.int16, torch.int8]
+
+        for (src_dtype, dst_dtype) in itertools.product(test_dtypes, test_dtypes):
+            helper((2, 1), (2, 3), src_dtype, dst_dtype)
+            helper((2, 1), (2, 2), src_dtype, dst_dtype)
+            helper((3, 1, 4, 1), (3, 4, 4, 5), src_dtype, dst_dtype)
+            helper((3,), (2, 3), src_dtype, dst_dtype)
+            helper((2,), (2, 2), src_dtype, dst_dtype)
+            helper((4, 1, 5), (3, 4, 4, 5), src_dtype, dst_dtype)
+            helper((4, 1, 5), (4, 0, 5), src_dtype, dst_dtype)
+            helper((1, 5), (4, 0, 5), src_dtype, dst_dtype)
+            helper((3, 1, 0), (3, 5, 0), src_dtype, dst_dtype)
+            helper((0, 1, 0), (0, 5, 0), src_dtype, dst_dtype)
+
     # See https://github.com/pytorch/pytorch/pull/84742
     # and https://github.com/pytorch/pytorch/pull/78319
     def test_binops_dtype_precedence(self):
@@ -5947,20 +5971,6 @@ class TestNLLLoss(TestCaseMPS):
             outputMPS.backward(gradient=torch.full_like(outputMPS, 0.6))
             self.assertEqual(inputCPU.grad, inputMPS.grad)
 
-        def helper_functional(shape, padding, mode, value=None):
-            inputCPU = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
-            inputCPU.retain_grad()
-            inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
-
-            outputCPU = nn.functional.pad(inputCPU, padding, mode=mode, value=value)
-            outputMPS = nn.functional.pad(inputMPS, padding, mode=mode, value=value)
-            self.assertEqual(outputCPU, outputMPS)
-
-            # backward pass (chose 0.6 just to have the grad_output != 1)
-            outputCPU.backward(gradient=torch.full_like(outputCPU, 0.6))
-            outputMPS.backward(gradient=torch.full_like(outputMPS, 0.6))
-            self.assertEqual(inputCPU.grad, inputMPS.grad)
-
         # 1D Padding
         helper((2, 4, 3), 2, nn.ReflectionPad1d)
         # verify if a change in shape of input would cause problems with graph caching
@@ -5969,8 +5979,8 @@ class TestNLLLoss(TestCaseMPS):
         helper((2, 1, 6), 3, nn.ReplicationPad1d)
         # Constant Pad 1D
         helper((2, 3, 4), 2, nn.ConstantPad1d)
-        # Constant Pad with single dimension input
-        helper_functional((16), (1, 2), 'constant')
+        # Constant Pad 1D with single dimension input
+        helper((16), (1, 2), nn.ConstantPad1d)
 
         # 2D Padding
         helper((1, 2, 3, 4), (1, 1, 2, 0), nn.ReflectionPad2d)
@@ -5987,7 +5997,7 @@ class TestNLLLoss(TestCaseMPS):
         # pad dims < input dims
         helper((50, 9, 300), (0, 0, 0, 31), nn.ConstantPad2d)
         # pad dims == input dims
-        helper_functional((1, 3), (0, 2, 0, 1), 'constant')
+        helper((1, 3), (0, 2, 0, 1), nn.ConstantPad2d)
         # input.numel() == 0 but output.numel() > 0
         helper((0, 3, 3), (1, 1, 1, 1, 1, 1), nn.ConstantPad2d)
         # pad dims < input dims - 2
@@ -6002,7 +6012,7 @@ class TestNLLLoss(TestCaseMPS):
         # Constant Pad 3D
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
         # input size < pad size
-        helper_functional((2, 4, 6), (1, 3, 3, 5, 3, 4), 'constant')
+        helper((2, 4, 6), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
         # check the workaround for the right padding bug in Monterey
         helper((1, 2, 2, 2, 2), (0, 1), nn.ConstantPad3d)
 
