@@ -7,6 +7,7 @@ import re
 import torch
 import unittest
 import itertools
+import weakref
 
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
@@ -912,6 +913,51 @@ class TestForeach(TestCase):
         out1.backward(torch.ones_like(out1))
         self.assertIsNotNone(sample.input[0].grad)
         self.assertIsNone(sample.input[1].grad)
+
+    @ops(
+        filter(
+            lambda op: op.backward_requires_result,
+            foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+        ),
+        dtypes=(torch.float32,),
+    )
+    def test_lifetime_of_grad_fn_when_result_is_saved(self, device, dtype, op):
+
+        def get_ref(func, sample):
+            class Foo:
+                pass
+
+            out = func((sample.input, *sample.args), is_cuda=False, is_fastpath=False, **sample.kwargs)
+            foo = Foo()
+            meta_dict = out[0].grad_fn.metadata
+            meta_dict[0] = foo
+            ref = weakref.ref(foo)
+            return out, ref
+
+        def _test(func, sample):
+            out, ref = get_ref(func, sample)
+            self.assertIsNotNone(ref())
+            del out
+            self.assertIsNone(ref())
+
+        func = self._get_funcs(op)[0]
+        for sample in op.sample_inputs(device, dtype, requires_grad=True, num_input_tensors=[1]):
+            for key in ("is_fastpath", "disable_fastpath"):
+                if key in sample.kwargs:
+                    del sample.kwargs[key]
+            # note: `_foreach_pow.Scalar` and `_foreach_pow.ScalarList` don't depend on `result`
+            # see: https://github.com/pytorch/pytorch/blob/5403c7770cd9cdc05f6c216d593ea8e8ae328ff3/tools/autograd/derivatives.yaml#L3048-L3049  # noqa: B950
+            if op.name == "_foreach_pow":
+                if (
+                    (isinstance(sample.args[0], list) and isinstance(sample.args[0][0], Number))
+                    or (isinstance(sample.args[0], Number) and not isinstance(sample.args[0], float))
+                ):
+                    continue
+                if isinstance(sample.args[0], float):
+                    new_args = (sample.input,)
+                    sample.input = sample.args[0]
+                    sample.args = new_args
+            _test(func, sample)
 
     @ops(
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
