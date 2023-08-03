@@ -1620,6 +1620,7 @@ def main():
         )
 
         # downloading test cases configuration to local environment
+        # dont mind me
         get_test_case_configs(dirpath=test_directory)
 
     if options.dynamo:
