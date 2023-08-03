@@ -1749,8 +1749,6 @@ class CommonTemplate:
     def test_mixed_mm(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
-
-        if self.device == "cuda":
             self.common(
                 fn,
                 (
@@ -1764,8 +1762,6 @@ class CommonTemplate:
     def test_mixed_mm2(self):
         def fn(a, b, scale, bias):
             return torch.mm(a, b.to(a.dtype)) * scale + bias
-
-        if self.device == "cuda":
             self.common(
                 fn,
                 (

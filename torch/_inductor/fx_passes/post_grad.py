@@ -151,7 +151,9 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
 def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
-
+"""
+    torch.mm(mat1, mat2.to(mat2_dtype))
+"""
 @register_lowering_pattern(
     CallFunction(
         aten.mm,
@@ -162,7 +164,10 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
             KeywordArg("mat2_dtype"),
         ),
     ),
-    extra_check=lambda x: config.use_mixed_mm,
+    extra_check=(
+        lambda match: config.use_mixed_mm and
+        match.kwargs["mat1"].meta["val"].is_cuda
+    ) # needs cuda
 )
 def mixed_mm(match: Match, mat1, mat2, mat2_dtype):
     return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)
