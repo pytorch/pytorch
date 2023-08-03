@@ -421,7 +421,40 @@ static PyTypeObject CacheEntryWrapperType = {
   .tp_new = PyType_GenericNew,
 };
 
-inline static CacheEntry* get_cache_entry(THP_EVAL_API_FRAME_OBJECT* frame, PyObject* nn_module) {
+
+// The cache lives on the extra segment of code object. It can have one of the 4 possible values
+// 1) NULL - First time accessed the extra segment.
+// 2) SKIP_CODE - We will skip the original frame.
+// 3) CacheEntryWrapper - This contains the cache_entry for the frame.
+// 4) A dict from nn module to the CacheEntryWrapper.
+//
+// Extracting a cache entry is split into two functions -
+// get_cache_entry_without_unwrapping and unwrap_cache_entry. The reason for
+// this split is to enable early return for SKIP_CODE.
+
+// For (1) and (2), we need to short circuit and return quickly for skipped
+// frames. Therefore, we cover this separately in get_cache_entry_without_unwrapping.
+
+// For (3) - If the frame is not a method of a nn.Module instance,
+// we just store the CacheEntry object directly on the extra segment.
+// For (4) - If the frame is a method of a nn.Module instance, we
+// store the CacheEntry for each nn module instance. This ensures that if a
+// SubModule is instantiated multiple times in a nn.Module and there is a
+// graph break in the SubModule, we save the CacheEntry per submodule isntance
+// and not per code object. If it is per code object (which is static and
+// shared across all nn module instances), this leads to collisions.
+
+inline static PyObject* get_cache_entry_without_unwrapping(PyCodeObject* code) {
+  // This just returns the extra value at cache entry index. It does not do any
+  // unwrapping mentioned in (3) and (4). This is useful to check if the frame
+  // has to be skipped and we can return quickly in _custom_eval_frame. This is
+  // useful in cases where we do lots of skips (like pytorch tests).
+   PyObject* extra = NULL;
+  _PyCode_GetExtra((PyObject*)code, cache_entry_extra_index, (void*)&extra);
+  return extra;
+}
+
+inline static CacheEntry* get_cache_entry(PyCodeObject* code, PyObject* nn_module) {
   // The cache lives on the extra segment of code object. It can have one of the 4 possible values
   // 1) NULL - First time accessed the extra segment.
   // 2) SKIP_CODE - We will skip the original frame.
@@ -441,9 +474,9 @@ inline static CacheEntry* get_cache_entry(THP_EVAL_API_FRAME_OBJECT* frame, PyOb
   // Note on (2) - We could move SKIP_CODE directly into the
   // CacheEntryWrapper->cache_entry, but we keep it separate to have a quick
   // lookup time for frames that are skipped.
-  PyObject* extra = NULL;
-  _PyCode_GetExtra((PyObject*)frame->f_code, cache_entry_extra_index, (void*)&extra);
+  PyObject* extra = get_cache_entry_without_unwrapping(code);
   // Case 1 and 2 - Short circuit for SKIP_CODE.
+  // TODO - Does skipping makes it faster?
   if (extra == NULL || extra == SKIP_CODE) {
     return (CacheEntry*)extra;
   }
@@ -454,35 +487,27 @@ inline static CacheEntry* get_cache_entry(THP_EVAL_API_FRAME_OBJECT* frame, PyOb
   }
 
   // Case 4.
-  if (PyDict_Check(extra)) {
-    if (nn_module == NULL) {
-      fprintf(stderr, "Unable to get nn.Module for frame. Failing.\n");
-      return NULL;
-    }
+  DEBUG_CHECK(PyDict_Check(extra));
+  DEBUG_NULL_CHECK(nn_module);
 
-    // TODO - the callback is set to NULL. Currently, there is a callback in
-    // CheckFnManager invalidate, which should track the garbage collection of nn
-    // modules. However, we can't fully rely on that one to call reset_code
-    // because when the callback is called, the referent is dead, so the weakrefs
-    // in the C cache will no longer hold equality with the weakref from python.
-    // Revisit this callback later, when we want to automatically free the cached
-    // guards/graphs on module garbage collection. This involves understanding how
-    // to write a Python callback function purely in C.
-    PyObject* nn_module_weakref = PyWeakref_NewRef(nn_module, NULL);
+  // TODO - the callback is set to NULL. Currently, there is a callback in
+  // CheckFnManager invalidate, which should track the garbage collection of nn
+  // modules. However, we can't fully rely on that one to call reset_code
+  // because when the callback is called, the referent is dead, so the weakrefs
+  // in the C cache will no longer hold equality with the weakref from python.
+  // Revisit this callback later, when we want to automatically free the cached
+  // guards/graphs on module garbage collection. This involves understanding how
+  // to write a Python callback function purely in C.
+  PyObject* nn_module_weakref = PyWeakref_NewRef(nn_module, NULL);
 
-    // TODO - Do I need to DECREF nn_module here? Is it a stolen reference?
-
-    // If the cache is empty, return a null object.
-    PyObject* nn_module_to_cache_entry_map = extra;
-    if (PyDict_GetItem(nn_module_to_cache_entry_map, nn_module_weakref) == NULL) {
-      return NULL;
-    }
-
-    // Find the cache entry.
-    CacheEntryWrapper* cache_entry_wrapper = (CacheEntryWrapper*)PyDict_GetItem(nn_module_to_cache_entry_map, nn_module_weakref);
-    return cache_entry_wrapper->cache_entry;
+  // If the cache is empty, return a null object.
+  PyObject* nn_module_to_cache_entry_map = extra;
+  if (PyDict_GetItem(nn_module_to_cache_entry_map, nn_module_weakref) == NULL) {
+    return NULL;
   }
-  CacheEntryWrapper* cache_entry_wrapper = (CacheEntryWrapper*)extra;
+
+  // Find the cache entry.
+  CacheEntryWrapper* cache_entry_wrapper = (CacheEntryWrapper*)PyDict_GetItem(nn_module_to_cache_entry_map, nn_module_weakref);
   return cache_entry_wrapper->cache_entry;
 }
 
@@ -490,7 +515,7 @@ inline static void set_cache_entry_on_code(PyCodeObject* code, CacheEntry* extra
   _PyCode_SetExtra((PyObject*)code, cache_entry_extra_index, extra);
 }
 
-inline static void set_cache_entry(THP_EVAL_API_FRAME_OBJECT* frame, CacheEntry* cache_entry, PyObject* nn_module) {
+inline static void set_cache_entry(PyCodeObject* code, CacheEntry* cache_entry, PyObject* nn_module) {
   // The cache lives on the extra segment of code object. It can have one of the 4 possible values
   // 1) NULL - First time accessed the extra segment.
   // 2) SKIP_CODE - We will skip the original frame.
@@ -502,20 +527,20 @@ inline static void set_cache_entry(THP_EVAL_API_FRAME_OBJECT* frame, CacheEntry*
 
   // Case 1 and 2 - Short circuit for SKIP_CODE.
   if (cache_entry == NULL || cache_entry == SKIP_CODE) {
-    set_cache_entry_on_code(frame->f_code, cache_entry);
+    set_cache_entry_on_code(code, cache_entry);
     return;
   }
   // Case 3
   if (nn_module == NULL) {
     CacheEntryWrapper *cache_entry_wrapper = (CacheEntryWrapper*) PyObject_CallObject((PyObject *) &CacheEntryWrapperType, NULL);
     cache_entry_wrapper->cache_entry = cache_entry;
-    _PyCode_SetExtra((PyObject*)frame->f_code, cache_entry_extra_index, (PyObject*) cache_entry_wrapper);
+    _PyCode_SetExtra((PyObject*)code, cache_entry_extra_index, (PyObject*) cache_entry_wrapper);
     return;
   }
 
   // Case 4
   PyObject* nn_module_to_cache_entry_map = NULL;
-  _PyCode_GetExtra((PyObject*)frame->f_code, cache_entry_extra_index, (void*)&nn_module_to_cache_entry_map);
+  _PyCode_GetExtra((PyObject*)code, cache_entry_extra_index, (void*)&nn_module_to_cache_entry_map);
 
   if (nn_module_to_cache_entry_map == NULL) {
     nn_module_to_cache_entry_map = PyDict_New();
@@ -526,7 +551,7 @@ inline static void set_cache_entry(THP_EVAL_API_FRAME_OBJECT* frame, CacheEntry*
   CacheEntryWrapper *cache_entry_wrapper = (CacheEntryWrapper*) PyObject_CallObject((PyObject *) &CacheEntryWrapperType, NULL);
   cache_entry_wrapper->cache_entry = cache_entry;
   PyDict_SetItem(nn_module_to_cache_entry_map, nn_module_weakref, (PyObject*) cache_entry_wrapper);
-  _PyCode_SetExtra((PyObject*)frame->f_code, cache_entry_extra_index, nn_module_to_cache_entry_map);
+  _PyCode_SetExtra((PyObject*)code, cache_entry_extra_index, nn_module_to_cache_entry_map);
 
 }
 
@@ -604,10 +629,10 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     // If the hit cache entry is not the head of the linked list,
     // move it to the head
     if (prev != NULL) {
-        CacheEntry* extra = get_cache_entry(frame, maybe_nn_module);
+        CacheEntry* extra = get_cache_entry(frame->f_code, maybe_nn_module);
         prev->next = e->next;
         e->next = extra;
-        set_cache_entry(frame, e, maybe_nn_module);
+        set_cache_entry(frame->f_code, e, maybe_nn_module);
     }
     return (PyObject*)e->code;
   }
@@ -829,6 +854,12 @@ static PyObject* _custom_eval_frame(
     return eval_frame_default(tstate, frame, throw_flag);
   }
 
+  PyObject* wrapped_extra = get_cache_entry_without_unwrapping(frame->f_code);
+  if (wrapped_extra == SKIP_CODE || (callback == Py_False && wrapped_extra == NULL)) {
+    DEBUG_TRACE("skip %s", name(frame));
+    return eval_frame_default(tstate, frame, throw_flag);
+  }
+
   // TODO(jansel): investigate directly using the "fast" representation
   // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
   // even though we should pass a PyFrameObject.
@@ -837,12 +868,12 @@ static PyObject* _custom_eval_frame(
     return NULL;
   }
 
-  eval_frame_callback_set(Py_None);
-  DEBUG_CHECK(PyDict_CheckExact(frame->f_locals));
   // Get the nn_module object if the frame is a method of a nn.Module instance.
   // This will be used by get/set_cache_entry and get/set_frame_state.
+  eval_frame_callback_set(Py_None);
+  DEBUG_CHECK(PyDict_CheckExact(frame->f_locals));
   PyObject* maybe_nn_module = get_nn_module_if_frame_is_method_of_nn_module(frame);
-  CacheEntry* extra = get_cache_entry(frame, maybe_nn_module);
+  CacheEntry* extra = get_cache_entry(frame->f_code, maybe_nn_module);
   eval_frame_callback_set(callback);
   if (extra == SKIP_CODE || (callback == Py_False && extra == NULL)) {
     DEBUG_TRACE("skip %s", name(frame));
@@ -919,7 +950,7 @@ static PyObject* _custom_eval_frame(
     DEBUG_TRACE("create cache %s", name(frame));
     extra = create_cache_entry(extra, result);
     Py_DECREF(result);
-    set_cache_entry(frame, extra, maybe_nn_module);
+    set_cache_entry(frame->f_code, extra, maybe_nn_module);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     return eval_custom_code(tstate, frame, extra->code, throw_flag);
@@ -927,7 +958,7 @@ static PyObject* _custom_eval_frame(
     DEBUG_TRACE("create skip %s", name(frame));
     Py_DECREF(result);
     destroy_cache_entry(extra);
-    set_cache_entry(frame, SKIP_CODE, maybe_nn_module);
+    set_cache_entry(frame->f_code, SKIP_CODE, maybe_nn_module);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     return eval_frame_default(tstate, frame, throw_flag);
