@@ -171,7 +171,6 @@ def addmm_patterns_init():
 def same_dtype(match):
     return match.output_node().args[0].meta["val"].dtype == match.kwargs["dtype"]
 
-
 @register_graph_pattern(
     CallFunction(
         torch.ops.prims.convert_element_type.default,
@@ -183,15 +182,9 @@ def same_dtype(match):
     pass_dict=pass_patterns[0],
     extra_check=same_dtype,
 )
-def unnecessary_conv_dtype_convert(match: Match, arg, dtype1, dtype2):
+def unnecessary_conv_dtype_convert(match: Match, **kwargs):
     """Remove unnecessary dtype conversion op, probably left as a result of Conv-Bn folding"""
     graph = match.graph
     node = match.output_node()
-    allowed = {torch.float16, torch.bfloat16, torch.float32, torch.float64}
-    if dtype1 in allowed and dtype2 in allowed:
-        repl = graph.call_function(
-            torch.ops.prims.convert_element_type.default, (arg, dtype2)
-        )
-        repl.meta.update(node.meta)
-        node.replace_all_uses_with(repl)
-        match.erase_nodes(graph)
+    node.replace_all_uses_with(node.args[0])
+    graph.erase_node(node)
