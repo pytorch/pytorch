@@ -21,62 +21,9 @@ aten = torch.ops.aten
 
 log = logging.getLogger(__name__)
 
-maximum_group_size = 150
-
-
-def _has_path(src_node, dest_node, cache):
-    """
-    If the graph has a path from `src_node` to `dest_node`, return True
-    """
-    cached = cache[id(src_node)][id(dest_node)]
-    if cached is not None:
-        return cached
-    src_input_nodes = src_node.all_input_nodes
-    if dest_node in src_input_nodes:
-        cache[id(src_node)][id(dest_node)] = True
-        return True
-
-    for x in src_input_nodes:
-        if _has_path(x, dest_node, cache):
-            cache[id(src_node)][id(dest_node)] = True
-            return True
-
-    cache[id(src_node)][id(dest_node)] = False
-    return False
-
-
-def _get_independent_node_subsets(node_list):
-    """
-    Return an iterator of node subset, each subset only contains nodes
-    those are independent with each other.
-    """
-    cache = collections.defaultdict(lambda: collections.defaultdict(lambda: None))
-
-    while len(node_list) > 0:
-        next_round = []
-
-        independent_set = []
-
-        def is_dependent(node_set, other):
-            for node in node_set:
-                if _has_path(node, other, cache) or _has_path(other, node, cache):
-                    return True
-
-            return False
-
-        for node in node_list:
-            if len(independent_set) < maximum_group_size and not is_dependent(
-                independent_set, node
-            ):
-                independent_set.append(node)
-            else:
-                next_round.append(node)
-
-        yield independent_set
-
-        cache.clear()
-
-        node_list = next_round
+MIN_FUSE_SET_SIZE = 5
+MAX_FUSE_SET_SIZE = 100
+MAX_FUSE_SEARCH_DEPTH = 5
 
 
 class GroupBatchFusionBase:
@@ -115,8 +62,21 @@ class GroupLinearFusion(GroupFusion):
             and all(x % 2 == 0 for x in input_shape + weight_shape)
         )
 
+    def _mm_node_can_be_fused(self, node):
+        input_shape = node.args[0].meta["tensor_meta"].shape
+        weight_shape = node.args[1].meta["tensor_meta"].shape
+        return (
+            len(input_shape) == 2
+            and len(weight_shape) == 2
+            and all(x % 2 == 0 for x in input_shape + weight_shape)
+        )
+
     def match(self, node):
-        if CallFunctionVarArgs(aten.addmm.default).match(
+        if CallFunctionVarArgs(aten.mm.default).match(
+            node
+        ) and self._mm_node_can_be_fused(node):
+            group_key = ("group_linear", True)
+        elif CallFunctionVarArgs(aten.addmm.default).match(
             node
         ) and self._addmm_node_can_be_fused(node):
             bias = node.args[0]
@@ -133,6 +93,10 @@ class GroupLinearFusion(GroupFusion):
         for node in subset:
             if CallFunctionVarArgs(aten.addmm.default).match(node):
                 bias, input, weight = node.args
+            else:
+                assert CallFunctionVarArgs(aten.mm.default).match(node)
+                input, weight = node.args
+                bias = None
 
             group_nodes.append(node)
             group_inputs.append(input)
@@ -270,32 +234,107 @@ class BatchLayernormFusion(BatchFusion):
             graph.erase_node(node)
 
 
+def find_independent_subset_greedy(node_list):
+    """
+    Return a list of subset from node_list, all nodes in each subset are independent with each other and can be fused together.
+    The type of subset is list, so we can preserve node's order and benefit from split-cat elimination in later pass.
+    """
+    visited_node_set = set()
+    dep_set = set()
+
+    def find_dependent_nodes(src_node, cur_node):
+        for input_node in cur_node.all_input_nodes:
+            if input_node in node_list:
+                dep_set.add(input_node)
+
+            if input_node not in visited_node_set:
+                visited_node_set.add(input_node)
+                find_dependent_nodes(src_node, input_node)
+
+    while len(node_list) > 0:
+        subset = []
+        subset_deps = set()
+
+        for node in node_list:
+            if len(subset) >= MAX_FUSE_SET_SIZE:
+                break
+
+            visited_node_set.clear()
+            dep_set.clear()
+
+            find_dependent_nodes(node, node)
+            if not dep_set.intersection(subset) and node not in subset_deps:
+                subset.append(node)
+                subset_deps.update(dep_set)
+
+        if len(subset) >= MIN_FUSE_SET_SIZE:
+            yield subset
+
+        next_round_node_list = [node for node in node_list if node not in subset]
+        node_list = next_round_node_list
+
+
+def get_fusion_candidates(rule, root_node, fused_set):
+    """
+    Search fusion candidates for a specific rule using BFS starting from the root node.
+    We only search the subgraph within MAX_FUSE_SEARCH_DEPTH.
+    """
+    q = collections.deque()
+
+    candidate_dict = collections.defaultdict(list)
+    visited_set = set()
+
+    for next_node in root_node.all_input_nodes:
+        q.append((1, next_node))
+        visited_set.add(next_node)
+
+    while len(q) > 0:
+        depth, node = q.popleft()
+
+        if node in fused_set:
+            continue
+
+        key = rule.match(node)
+        if key is not None:
+            candidate_nodes = candidate_dict[key]
+            if node not in candidate_nodes:
+                candidate_nodes.append(node)
+        else:
+            if depth < MAX_FUSE_SEARCH_DEPTH:
+                for next_node in node.all_input_nodes:
+                    if next_node not in visited_set:
+                        visited_set.add(next_node)
+                        q.append((depth + 1, next_node))
+
+    return candidate_dict
+
+
 def apply_group_batch_fusion(graph, rule):
-    fusible_groups = collections.defaultdict(list)
+    fused_set = set()
 
-    for node in graph.nodes:
-        group_key = rule.match(node)
-        if group_key:
-            fusible_groups[group_key].append(node)
+    for node in reversed(graph.nodes):
+        candidates = get_fusion_candidates(rule, node, fused_set)
 
-    log.debug("Generated fusible groups: %s", fusible_groups)
-
-    for fusible_nodes in fusible_groups.values():
-        subset_list = list(_get_independent_node_subsets(fusible_nodes))
-        for subset in subset_list:
-            if len(subset) <= 1:
+        for key, candidate_nodes in candidates.items():
+            if len(candidate_nodes) < MIN_FUSE_SET_SIZE:
                 continue
 
-            rule.fuse(graph, subset)
+            for subset in find_independent_subset_greedy(candidate_nodes):
+                rule.fuse(graph, subset)
+                fused_set.update(subset)
+                if isinstance(rule, GroupFusion):
+                    counters["inductor"]["group_fusion"] += 1
+                else:
+                    counters["inductor"]["batch_fusion"] += 1
 
-            if isinstance(rule, GroupFusion):
-                counters["inductor"]["group_fusion"] += 1
-            else:
-                counters["inductor"]["batch_fusion"] += 1
+                log.info(
+                    f"{rule.__class__.__name__}: key = {key}; subset size = {len(subset)}"  # noqa: G004
+                )
 
 
 def group_batch_fusion_post_grad_passes(graph: torch.fx.Graph):
     fusions = []
+
     if config.group_fusion and has_fbgemm:
         fusions += [GroupLinearFusion()]
 
@@ -306,7 +345,7 @@ def group_batch_fusion_post_grad_passes(graph: torch.fx.Graph):
 def group_batch_fusion_pre_grad_passes(graph: torch.fx.Graph):
     fusions = []
 
-    if config.batch_fusion and has_fbgemm:
+    if config.batch_fusion:
         fusions += [BatchLayernormFusion()]
 
     for rule in fusions:
