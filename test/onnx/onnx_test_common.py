@@ -210,7 +210,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         model: _ModelType,
         input_args: Sequence[_InputArgsType],
         *,
-        dynamic_shapes: Optional[bool],
         input_kwargs: Optional[Mapping[str, _InputArgsType]] = None,
         rtol: Optional[float] = 1e-3,
         atol: Optional[float] = 1e-7,
@@ -225,13 +224,13 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 ]
             ]
         ] = None,
+        skip_dynamic_shapes_check: Optional[bool] = False,
     ):
         """Compare the results of PyTorch model with exported ONNX model
 
         Args:
             model (_ModelType): PyTorch model
             input_args (Sequence[_InputArgsType]): torch input arguments
-            dynamic_shapes (bool): Whether the model has dynamic shapes.
             input_kwargs (Mapping[str, _InputArgsType]): torch input kwargs
             rtol (float, optional): relative tolerance. Defaults to 1e-3.
             atol (float, optional): absolute tolerance. Defaults to 1e-7.
@@ -248,6 +247,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 even if the following element is not provided.
                 For example,
                 additional_test_inputs = [((args1, args2), {"kwargs":1}), ((args1,),), ((), {"kwargs":1})]
+            skip_dynamic_shapes_check: Whether to skip dynamic shape check. Defaults to False.
 
         """
 
@@ -279,7 +279,8 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             ),
         )
 
-        assert_dynamic_shapes(export_output, dynamic_shapes)
+        if not skip_dynamic_shapes_check:
+            assert_dynamic_shapes(export_output, self.dynamic_shapes)
 
         if verbose:
             export_output.diagnostic_context.dump(
