@@ -186,12 +186,6 @@ struct BlockPool {
   PrivatePool* owner_PrivatePool;
 };
 
-struct HistoryChain {
-  History h;
-  std::unique_ptr<HistoryChain> next; // when blocks are merged we keep records
-                                      // of what used to be in the block
-};
-
 struct ExpandableSegment;
 
 struct Block {
@@ -213,8 +207,13 @@ struct Block {
   int event_count{0}; // number of outstanding CUDA events
   int gc_count{0}; // counter for prioritizing older / less useful blocks for
                    // garbage collection
-  std::unique_ptr<HistoryChain> history;
-  HistoryChain* history_last{nullptr};
+  std::shared_ptr<GatheredContext> context_when_allocated;
+  // only set for the first block in the segment (when prev == null)
+  // this records the frame information when cudaMalloc was called
+  // whereas context_when_allocated records the last time we handed this
+  // memory out from our cache.
+  std::shared_ptr<GatheredContext> context_when_segment_allocated;
+
   ExpandableSegment* expandable_segment_{nullptr};
 
   Block(
@@ -644,18 +643,6 @@ struct AllocParams {
   StatTypes stat_types = {false};
   cudaError_t err;
 };
-
-int trimHistoryBefore(Block* block, void* point) {
-  int n = 0;
-  while (block->history && block->history->h.addr < point) {
-    block->history = std::move(block->history->next);
-    ++n;
-  }
-  if (!block->history) {
-    block->history_last = nullptr;
-  }
-  return n;
-}
 
 // Note: cudaEventCreate when concurrently invoked from multiple threads can be
 // very expensive (at least on certain device/driver combinations). Thus, we a)
@@ -1501,9 +1488,6 @@ class DeviceCachingAllocator {
       remaining->size -= size;
       bool inserted = pool->blocks.insert(remaining).second;
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
-      if (record_history) {
-        trimHistoryBefore(remaining, (char*)block->ptr + size);
-      }
 
       if (already_split && !block->expandable_segment_) {
         // An already-split inactive block is being shrunk by size bytes.
@@ -1535,19 +1519,13 @@ class DeviceCachingAllocator {
     block->allocated = true;
     block->requested_size = orig_size;
     if (record_history) {
-      trimHistoryBefore(block, (char*)block->ptr + size);
-      block->history = std::make_unique<HistoryChain>(HistoryChain{
-          History{block->ptr, orig_size, std::move(context)},
-          std::move(block->history)});
-      if (!block->history_last) {
-        block->history_last = block->history.get();
-      }
+      block->context_when_allocated = std::move(context);
       record_trace(
           TraceEntry::ALLOC,
           int64_t(block->ptr),
           orig_size,
           block->stream,
-          block->history->h.context);
+          block->context_when_allocated);
     }
 
     bool inserted = active_blocks.insert(block).second;
@@ -1596,13 +1574,13 @@ class DeviceCachingAllocator {
           stats.allocated_bytes[stat_type],
           -static_cast<std::int64_t>(block->size));
     });
-    if (block->history) {
+    if (record_history) {
       record_trace(
           TraceEntry::FREE_REQUESTED,
           int64_t(block->ptr),
-          block->history->h.real_size,
+          block->requested_size,
           block->stream,
-          block->history->h.context);
+          block->context_when_allocated);
     }
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_allocations, -1);
@@ -1997,6 +1975,8 @@ class DeviceCachingAllocator {
       segment_info.stream = head_block->stream;
       segment_info.is_large = (!head_block->pool->is_small);
       segment_info.is_expandable = head_block->expandable_segment_;
+      segment_info.context_when_allocated =
+          head_block->context_when_segment_allocated;
       auto mempool_id = pool_to_id.find(head_block->pool->owner_PrivatePool);
       if (mempool_id != pool_to_id.end()) {
         segment_info.owner_private_pool_id = mempool_id->second;
@@ -2021,11 +2001,7 @@ class DeviceCachingAllocator {
           segment_info.active_size += block_info.size;
           segment_info.requested_size += block_info.requested_size;
         }
-        HistoryChain* h = block->history.get();
-        while (h) {
-          block_info.history.push_back(h->h);
-          h = h->next.get();
-        }
+        block_info.context_when_allocated = block->context_when_allocated;
         block = block->next;
       }
       total_active += segment_info.active_size;
@@ -2276,7 +2252,8 @@ class DeviceCachingAllocator {
       const std::shared_ptr<GatheredContext>& ctx) {
     TORCH_INTERNAL_ASSERT(!to_map->mapped && size <= to_map->size);
     TORCH_INTERNAL_ASSERT(
-        !to_map->history); // unmapped blocks should not keep history
+        !to_map->context_when_allocated); // unmapped blocks should not keep
+                                          // history
     auto mapped_range =
         to_map->expandable_segment_->map(SegmentRange{to_map->ptr, size});
     // failed to map the memory
@@ -2323,6 +2300,9 @@ class DeviceCachingAllocator {
           mapped_range.size,
           to_map->stream,
           ctx);
+      if (!to_map->prev && !to_map->context_when_segment_allocated) {
+        to_map->context_when_segment_allocated = ctx;
+      }
     }
 
     return true;
@@ -2366,13 +2346,14 @@ class DeviceCachingAllocator {
     TORCH_INTERNAL_ASSERT(
         !block->allocated && block->event_count == 0 &&
         block->stream_uses.empty());
-    if (block->history) {
+    if (record_history) {
       record_trace(
           TraceEntry::FREE_COMPLETED,
           int64_t(block->ptr),
-          block->history->h.real_size,
+          block->requested_size,
           block->stream,
-          block->history->h.context);
+          block->context_when_allocated);
+      block->context_when_allocated = nullptr;
     }
     size_t original_block_size = block->size;
     size_t requested_size = block->requested_size;
@@ -2444,27 +2425,13 @@ class DeviceCachingAllocator {
       if (dst->prev) {
         dst->prev->next = dst;
       }
-      if (!dst->history) {
-        dst->history = std::move(src->history);
-        dst->history_last = src->history_last;
-      } else if (src->history) {
-        src->history_last->next = std::move(dst->history);
-        dst->history = std::move(src->history);
-      }
-      src->history_last = nullptr;
+      dst->context_when_segment_allocated =
+          std::move(src->context_when_segment_allocated);
     } else { // [dest src]
       dst->next = src->next;
       if (dst->next) {
         dst->next->prev = dst;
       }
-      if (!dst->history) {
-        dst->history = std::move(src->history);
-        dst->history_last = src->history_last;
-      } else if (src->history) {
-        dst->history_last->next = std::move(src->history);
-        dst->history_last = src->history_last;
-      }
-      src->history_last = nullptr;
     }
     const size_t subsumed_size = src->size;
     dst->size += subsumed_size;
@@ -2734,6 +2701,7 @@ class DeviceCachingAllocator {
           p.block->size,
           p.stream(),
           ctx);
+      p.block->context_when_segment_allocated = ctx;
     }
     return true;
   }
@@ -2858,7 +2826,7 @@ class DeviceCachingAllocator {
           int64_t(block->ptr),
           block->size,
           block->stream,
-          block->history ? block->history->h.context : nullptr);
+          nullptr);
     }
     pool->blocks.erase(block);
     delete block;
@@ -2900,8 +2868,6 @@ class DeviceCachingAllocator {
     block->ptr = unmapped.ptr;
     block->size = unmapped.size;
     block->mapped = false;
-    block->history.reset();
-    block->history_last = nullptr;
 
     try_merge_blocks(block, block->prev, *block->pool);
     try_merge_blocks(block, block->next, *block->pool);
@@ -2919,7 +2885,7 @@ class DeviceCachingAllocator {
           int64_t(unmapped.ptr),
           unmapped.size,
           block->stream,
-          block->history ? block->history->h.context : nullptr);
+          nullptr);
     }
   }
   void release_blocks(BlockPool& pool) {
@@ -3197,13 +3163,13 @@ class NativeCachingAllocator : public CUDAAllocator {
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
       bool alloc_trace_record_context) override {
-    int device = 0;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    device_allocator[device]->recordHistory(
-        enabled,
-        context_recorder,
-        alloc_trace_max_entries,
-        alloc_trace_record_context);
+    for (auto& allocator : device_allocator) {
+      allocator->recordHistory(
+          enabled,
+          context_recorder,
+          alloc_trace_max_entries,
+          alloc_trace_record_context);
+    }
   }
 
   bool isHistoryEnabled() override {
