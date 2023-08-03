@@ -5083,20 +5083,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(x.grad, x_grad_ref)
 
     def test_batchnorm_nhwc_cpu(self):
-        def helper(self, size, dtype, mixed_dtype=False):
+        def helper(self, mod, size, dtype, mixed_dtype=False, format=torch.channels_last):
             channels = size[1]
             input = torch.randn(size, dtype=dtype, device='cpu', requires_grad=True)
-            input = input.contiguous(memory_format=torch.channels_last).to(dtype)
+            input = input.contiguous(memory_format=format).to(dtype)
             input.retain_grad()
             grad = torch.randn(size, dtype=dtype, device='cpu')
-            grad = grad.contiguous(memory_format=torch.channels_last)
-            bn = nn.BatchNorm2d(channels).cpu().to(dtype)
+            grad = grad.contiguous(memory_format=format)
+            bn = mod(channels).cpu().to(dtype)
             bn.weight.data.uniform_()
             bn.bias.data.uniform_()
 
             ref_input = input.detach().clone().contiguous().requires_grad_(True)
             ref_grad = grad.detach().clone().contiguous()
-            ref_bn = nn.BatchNorm2d(channels).cpu().to(dtype)
+            ref_bn = mod(channels).cpu().to(dtype)
             ref_bn.load_state_dict(bn.state_dict())
 
             if mixed_dtype:
@@ -5108,7 +5108,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             ref_out = ref_bn(ref_input)
             ref_out.backward(ref_grad)
 
-            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(out.is_contiguous(memory_format=format))
             self.assertTrue(ref_out.is_contiguous())
             self.assertEqual(out, ref_out)
             self.assertEqual(bn.weight.grad, ref_bn.weight.grad)
@@ -5117,9 +5117,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         # test NC11 and N1HW; test mixed dtype
         for shape in [(4, 8, 10, 10), (4, 1, 9, 9), (4, 9, 1, 1)]:
-            helper(self, shape, torch.float, False)
-            helper(self, shape, torch.bfloat16, False)
-            helper(self, shape, torch.bfloat16, True)
+            helper(self, nn.BatchNorm2d, shape, torch.float, False, torch.channels_last)
+            helper(self, nn.BatchNorm2d, shape, torch.bfloat16, False, torch.channels_last)
+            helper(self, nn.BatchNorm2d, shape, torch.bfloat16, True, torch.channels_last)
+
+        for shape in [(4, 8, 2, 10, 10), (4, 1, 2, 9, 9), (4, 9, 1, 1, 1)]:
+            helper(self, nn.BatchNorm3d, shape, torch.float, False, torch.channels_last_3d)
+            helper(self, nn.BatchNorm3d, shape, torch.bfloat16, False, torch.channels_last_3d)
+            helper(self, nn.BatchNorm3d, shape, torch.bfloat16, True, torch.channels_last_3d)
 
     @parametrize_test(
         'bn_module',
