@@ -1076,6 +1076,13 @@ def export(
         )
 
         if aten_graph:
+            if _guards.detect_fake_mode():
+                raise NotImplementedError(
+                    "aten_graph=True with FakeTensorMode is not currently implemented.  "
+                    "If this is affecting you, please comment on "
+                    "https://github.com/pytorch/pytorch/issues/106517"
+                )
+
             # Running graph with interpreter is needed for propagating the stack_trace
             def graph_with_interpreter(*args):
                 with torch.fx.traceback.preserve_node_meta():

@@ -3012,6 +3012,57 @@ def forward(self, x):
                     + str(aten_graph),
                 )
 
+    def test_symbolic_tracing_within_fake_mode_with_constraints(self):
+        from torch._subclasses import fake_tensor
+
+        fake_mode = fake_tensor.FakeTensorMode()
+
+        class DynamicShapeSimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b, c) -> torch.Tensor:
+                d = (torch.matmul(a, b) + c) / 2
+                d_s0 = d.shape[0]
+                d_s1 = d.shape[1]
+                d_s3 = d_s0 * d_s1
+                e = d.view(d_s3)
+                return torch.cat([e, e])
+
+        with fake_mode:
+            model = DynamicShapeSimpleModel()
+            inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
+            constraints = [
+                dynamic_dim(inputs[0], 0),
+                dynamic_dim(inputs[2], 0),
+                dynamic_dim(inputs[2], 0) == dynamic_dim(inputs[0], 0),
+            ]
+            gm = torch._dynamo.export(
+                model,
+                constraints=constraints,
+                aten_graph=True,
+            )(*inputs).graph_module
+
+        # Since there are no parameters we can do this
+        inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
+        self.assertEqual(model(*inputs), gm(*inputs))
+
+    def test_symbolic_tracing_within_fake_mode_with_constraints_with_parameters(self):
+        from torch._subclasses import fake_tensor
+
+        fake_mode = fake_tensor.FakeTensorMode()
+
+        with fake_mode:
+            model = torch.nn.Linear(2, 2)
+            inputs = (torch.randn(10, 2, 2),)
+            constraints = [
+                dynamic_dim(inputs[0], 0),
+            ]
+            gm = torch._dynamo.export(
+                model,
+                constraints=constraints,
+            )(*inputs).graph_module
+
     def test_capture_symbolic_tracing_within_fake_mode(self):
         from torch._dynamo.output_graph import config
         from torch._subclasses import fake_tensor
