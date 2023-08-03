@@ -1506,7 +1506,8 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
     #     For a more compact implementation see the relevant function in `_refs/__init__.py`
 
     # We don't do this for MPS or sparse tensors
-    if input.layout == torch.strided and input.device.type in ("cpu", "cuda", "meta"):
+    if input.layout == torch.strided and input.device.type in \
+            ("cpu", "cuda", "meta", torch.utils.backend_registration._privateuse1_backend_name):
         if dim is not None:
             if isinstance(dim, int):
                 _dim = [dim]
