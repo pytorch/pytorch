@@ -1857,7 +1857,7 @@ def print_repro_on_failure(repro_str):
         # NB: Hacking the exception args is the cleanest way I've found to append
         # failure reproduction info without poisoning the stack trace.
         if len(e.args) >= 1:
-            e.args = (e.args[0] + f"\n{repro_str}",) + e.args[1:]
+            e.args = (str(e.args[0]) + f"\n{repro_str}",) + e.args[1:]
         raise
 
 #  "min_satisfying_examples" setting has been deprecated in hypothesis
@@ -3267,8 +3267,10 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         )
 
         if error_metas:
+            # See [ErrorMeta Cycles]
+            error_metas = [error_metas]
             # TODO: compose all metas into one AssertionError
-            raise error_metas[0].to_error(
+            raise error_metas.pop()[0].to_error(
                 # This emulates unittest.TestCase's behavior if a custom message passed and
                 # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
                 # is True (default)

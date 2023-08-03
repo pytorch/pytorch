@@ -3079,48 +3079,6 @@ G['macademia'], accessed at:
 
         torch._dynamo.export(f)(torch.randn(3))
 
-    def test_capture_symbolic_tracing(self) -> None:
-        from torch._dynamo.output_graph import config
-        from torch._subclasses import fake_tensor
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(2, 2)
-                self.linear2 = torch.nn.Linear(2, 2)
-
-            def forward(self, x):
-                out = self.linear(x)
-                out = self.linear2(out)
-                return out
-
-        # User-instantiated FakeTensorMode
-        fake_mode = fake_tensor.FakeTensorMode(
-            allow_non_fake_inputs=False,
-            allow_fallback_kernels=True,
-            shape_env=ShapeEnv(
-                allow_scalar_outputs=config.capture_scalar_outputs,
-                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                frame_id=0,
-            ),
-        )
-        # Fakefy input+model before exporting it
-        with fake_mode:
-            x = torch.rand(5, 2, 2)
-            model = Model()
-
-        # Export the model with fake inputs and parameters
-        for aten_graph in [True, False]:
-            graph_module, _ = torch._dynamo.export(
-                model, x, aten_graph=aten_graph, fake_mode=fake_mode
-            )
-
-            self.assertTrue(
-                isinstance(graph_module, torch.fx.GraphModule),
-                msg="test_capture_symbolic_tracing_aten_graph_" + str(aten_graph),
-            )
-
     def test_capture_symbolic_tracing_within_fake_mode(self):
         from torch._dynamo.output_graph import config
         from torch._subclasses import fake_tensor
@@ -3513,6 +3471,25 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
         gm, _ = torch._dynamo.export(foo, inp_container, aten_graph=True)
 
         self.assertTrue(torch.allclose(foo(inp_container), gm(inp_container)))
+
+    @config.patch(suppress_errors=True)
+    @config.patch(verbose=True)
+    def test_export_with_map_zero_sized_tensor_suppress_errors(self):
+        from functorch.experimental.control_flow import map
+
+        class Module(torch.nn.Module):
+            def forward(self, xs):
+                def body(x):
+                    return x + 1
+
+                return map(body, xs)
+
+        mod = Module()
+        xs = torch.randn(0, 2)
+        with self.assertRaises(
+            torch._dynamo.exc.Unsupported,
+        ):
+            out_graph, _ = torch._dynamo.export(mod, xs)
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
