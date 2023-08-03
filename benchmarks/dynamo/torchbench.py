@@ -78,6 +78,8 @@ SKIP = {
     # TIMEOUT, https://github.com/pytorch/pytorch/issues/98467
     "tacotron2",
     "hf_Bert",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
+    "hf_Bert_large",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
+
 }
 
 SKIP_FOR_CPU = {
