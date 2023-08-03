@@ -29,9 +29,12 @@
 #     if used in conjunction with DEBUG or REL_WITH_DEB_INFO, will also
 #     build CUDA kernels with -lineinfo --source-in-ptx.  Note that
 #     on CUDA 12 this may cause nvcc to OOM, so this is disabled by default.
-#
+
 #   USE_CUDNN=0
 #     disables the cuDNN build
+#
+#   USE_CUSPARSELT=0
+#     disables the cuSPARSELt build
 #
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
