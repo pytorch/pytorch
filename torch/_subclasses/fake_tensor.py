@@ -561,6 +561,8 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
     with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
 
+    if out is new_kwargs["input"]:
+        return out  # copy_
     return FakeTensor(fake_mode, out, out_device)
 
 
@@ -596,6 +598,7 @@ def embedding_bag(fake_mode, func, *args, **kwargs):
 @register_op_impl(aten.index_put.default)
 @register_op_impl(aten._unsafe_index_put.default)
 @register_op_impl(aten.copy.default)
+@register_op_impl(aten.copy_.default)
 @register_op_impl(aten.slice_scatter.default)
 def multi_device_op_default(fake_mode, func, *args, **kwargs):
     return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
@@ -1420,13 +1423,19 @@ class FakeTensorMode(TorchDispatchMode):
                 if op_impl_out != NotImplemented:
                     return op_impl_out
 
-        def can_fallback(func: OpOverload):
+        def can_run_unsafe_fallback(func: OpOverload):
             if not self.allow_fallback_kernels:
                 return False
             # It's OK to try the fallback for built-in ops (e.g. aten, prims)
             # because we control and test these but the fallback leads to unexpected behavior
             # in user-defined custom ops
-            return func.namespace in {
+            #
+            # WARNING: DO NOT add any additional namespaces/operators here if they refer to operators
+            # outside of the pytorch/pytorch library! Any pre-existing things here
+            # are either in the pytorch/pytorch library or have been grandfathered in.
+            # The fallback does not always work and MAY CRASH and emit unreadable error messages
+            # so it should not be allowed by default.
+            allowed_namespaces = {
                 "debugprims",
                 "prims",
                 "aten",
@@ -1434,19 +1443,38 @@ class FakeTensorMode(TorchDispatchMode):
                 "vision",
                 "torchtext",
                 "torchaudio",
-                "fbgemm",
             }
+            grandfathered_ops_FIXME = {
+                "fbgemm::gmm",
+            }
+            return (
+                func.namespace in allowed_namespaces
+                or func.name() in grandfathered_ops_FIXME
+            )
+
+        def maybe_run_unsafe_fallback(error=None):
+            # no meta kernel registered, fallback to kernel for the device
+            if has_symbolic_sizes or not can_run_unsafe_fallback(func):
+                raise UnsupportedOperatorException(func)
+            if error is None:
+                error = UnsupportedOperatorException(func)
+            return run_fallback_kernel(self, func, args, kwargs, error)
+
+        # Optimization: If there is no Meta kernel, it takes a surprisingly long
+        # amount of time to catch the NotImplementedError, so we check it here.
+        if not torch._C._dispatch_has_computed_kernel_for_dispatch_key(
+            func.name(), "Meta"
+        ):
+            return maybe_run_unsafe_fallback()
 
         # run kernel registered to meta for func, which include
         # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
+        # It's possible that the kernel will return NotImplementedError
         try:
             with in_kernel_invocation_manager(self):
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
-            # no meta kernel registered, fallback to kernel for the device
-            if has_symbolic_sizes or not can_fallback(func):
-                raise UnsupportedOperatorException(func)
-            return run_fallback_kernel(self, func, args, kwargs, not_implemented_error)
+            return maybe_run_unsafe_fallback(not_implemented_error)
 
         return self.wrap_meta_outputs_with_default_device_logic(r, func, args, kwargs)
 
@@ -1466,6 +1494,7 @@ class FakeTensorMode(TorchDispatchMode):
                 not isinstance(x, FakeTensor)
                 and type(x) is not torch.Tensor
                 and type(x) is not torch.nn.Parameter
+                and type(x) is not torch.nn.Buffer
             )
 
         return [
