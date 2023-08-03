@@ -60,6 +60,8 @@ def validate_args_and_maybe_create_graph_inputs(
     from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
     from .builder import wrap_fx_proxy
 
+    assert tracer.parent is not None
+
     args = []
     for a in sub_args:
         assert isinstance(a, VariableTracker)
