@@ -527,7 +527,7 @@ class TestTensorCreation(TestCase):
         # Note that the tensor in w_slices[] here may not be a contiguous
         # tensor and we need to make sure this is not broken by fast concat
         b = torch.cat([w_slices[0], w_slices[1]], dim=1)
-        expected_b = torch.index_select(w, 1, torch.tensor([0, 1, 2, 3]))
+        expected_b = torch.index_select(w, 1, torch.tensor([0, 1, 2, 3], device=device))
         self.assertEqual(b, expected_b)
         # If inputs are contiguous tensors, then fast concat paths will be invoked
         b_fastcat = torch.cat([w_slices[0].contiguous(), w_slices[1].contiguous()], dim=1)

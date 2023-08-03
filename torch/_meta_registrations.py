@@ -4465,19 +4465,15 @@ def meta__scaled_dot_product_flash(
     head_dim = query.size(3)
 
     max_seqlen_batch_k = key.size(2)
-
-    query = query.transpose(1, 2)
-    key = key.transpose(1, 2)
-    value = value.transpose(1, 2)
-
     Nnz_q = batch_size * max_seqlen_batch_q
 
-    output = torch.empty(
-        (Nnz_q, num_heads, head_dim), dtype=query.dtype, device=query.device
-    )
-    output = output.view(batch_size, max_seqlen_batch_q, num_heads, head_dim).transpose(
-        1, 2
-    )
+    query_t = query.transpose(1, 2)
+    query_reshaped = query_t.reshape(Nnz_q, num_heads, head_dim)
+    attention = torch.empty_like(query_reshaped, device=query.device)
+    attention = attention.view(
+        batch_size, max_seqlen_batch_q, num_heads, head_dim
+    ).transpose(1, 2)
+
     max_seqlen_q = math.ceil(max_seqlen_batch_q / 16) * 16
     logsumexp = torch.empty(
         (batch_size, num_heads, max_seqlen_q),
@@ -4512,7 +4508,7 @@ def meta__scaled_dot_product_flash(
     # it's possible we'll need to have some special handling in inductor for sdpa
 
     return (
-        output,
+        attention,
         logsumexp,
         cumulative_sequence_length_q,
         cumulative_sequence_length_k,
