@@ -11,6 +11,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime
 from distutils.version import LooseVersion
 from typing import Any, cast, Dict, List, Optional, Union
@@ -40,11 +41,11 @@ try:
     # using tools/ to optimize test run.
     sys.path.insert(0, str(REPO_ROOT))
     from tools.stats.export_test_times import TEST_TIMES_FILE
+    from tools.stats.upload_stats_lib import emit_metric
     from tools.testing.test_selections import (
         calculate_shards,
         get_reordered_tests,
         get_test_case_configs,
-        log_time_savings,
         NUM_PROCS,
         ShardedTest,
         THRESHOLD,
@@ -1278,7 +1279,9 @@ def exclude_tests(
     return selected_tests
 
 
-def must_serial(file: str) -> bool:
+def must_serial(file: Union[str, ShardedTest]) -> bool:
+    if isinstance(file, ShardedTest):
+        file = file.name
     return (
         os.getenv("PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL", "0") == "1"
         or DISTRIBUTED_TEST_PREFIX in os.getenv("TEST_CONFIG", "")
@@ -1408,20 +1411,10 @@ def get_selected_tests(options) -> List[ShardedTest]:
         )
 
     selected_tests = [parse_test_module(x) for x in selected_tests]
+    return selected_tests
 
-    # sharding
-    which_shard, num_shards = 1, 1
-    if options.shard:
-        assert len(options.shard) == 2, "Unexpected shard format"
-        assert min(options.shard) > 0, "Shards must be positive numbers"
-        which_shard, num_shards = options.shard
-        assert (
-            which_shard <= num_shards
-        ), "Selected shard must be less than or equal to total number of shards"
-        assert num_shards <= len(
-            selected_tests
-        ), f"Number of shards must be less than {len(selected_tests)}"
 
+def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
     # Download previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), TEST_TIMES_FILE)
     if os.path.exists(path):
@@ -1434,14 +1427,35 @@ def get_selected_tests(options) -> List[ShardedTest]:
         print(
             "::warning:: Gathered no stats from artifacts. Proceeding with default sharding plan."
         )
+        return {}
     else:
         print("Found test time stats from artifacts")
+        return test_file_times[test_config]
+
+
+def do_sharding(
+    options,
+    selected_tests: List[str],
+    test_file_times: Dict[str, float],
+    sort: bool = True,
+) -> List[ShardedTest]:
+    which_shard, num_shards = 1, 1
+    if options.shard:
+        assert len(options.shard) == 2, "Unexpected shard format"
+        assert min(options.shard) > 0, "Shards must be positive numbers"
+        which_shard, num_shards = options.shard
+        assert (
+            which_shard <= num_shards
+        ), "Selected shard must be less than or equal to total number of shards"
 
     if HAVE_TEST_SELECTION_TOOLS:
         # Do sharding
-        test_file_times_config = test_file_times.get(test_config, {})
         shards = calculate_shards(
-            num_shards, selected_tests, test_file_times_config, must_serial=must_serial
+            num_shards,
+            selected_tests,
+            test_file_times,
+            must_serial=must_serial,
+            sort=sort,
         )
         _, tests_from_shard = shards[which_shard - 1]
         selected_tests = tests_from_shard
@@ -1486,25 +1500,10 @@ def run_tests(
 
     # parallel = in parallel with other files
     # serial = this file on it's own.  The file might still be run in parallel with itself (ex test_ops)
-    selected_tests_parallel = [
-        x
-        for x in selected_tests
-        if not must_serial(x.name if isinstance(x, ShardedTest) else x)
-    ]
+    selected_tests_parallel = [x for x in selected_tests if not must_serial(x)]
     selected_tests_serial = [
         x for x in selected_tests if x not in selected_tests_parallel
     ]
-    print(f"TEST GROUP: {group_name}")
-    print_to_stderr(
-        "parallel (file granularity) tests :\n {}".format(
-            "\n".join(str(x) for x in selected_tests_parallel)
-        )
-    )
-    print_to_stderr(
-        "serial (file granularity) tests:\n {}".format(
-            "\n ".join(str(x) for x in selected_tests_serial)
-        )
-    )
 
     # See Note [ROCm parallel CI testing]
     pool = get_context("spawn").Pool(
@@ -1611,30 +1610,41 @@ def main():
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
 
-    if options.verbose:
-        print_to_stderr(
-            "Selected tests:\n {}".format("\n ".join(str(x) for x in selected_tests))
-        )
-
-    if options.dry_run:
-        return
-
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
     prioritized_tests = []
-    remaining_tests = selected_tests
+    general_tests = selected_tests
     if IS_CI and HAVE_TEST_SELECTION_TOOLS:
-        (prioritized_tests, remaining_tests) = get_reordered_tests(selected_tests)
-        log_time_savings(
-            selected_tests,
-            prioritized_tests,
-            is_serial_test_fn=must_serial,
-            num_procs=NUM_PROCS,
-        )
-
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
+        (prioritized_tests, general_tests) = get_reordered_tests(general_tests)
+
+    test_times_dict = download_test_times(TEST_TIMES_FILE)
+    prioritized_tests = do_sharding(
+        options, prioritized_tests, test_times_dict, sort=False
+    )
+    general_tests = do_sharding(options, general_tests, test_times_dict)
+
+    if options.verbose:
+
+        def print_tests(category, tests):
+            tests_str = "\n ".join(str(x) for x in tests)
+            print_to_stderr(f"{category} tests:\n {tests_str}")
+
+        print_tests(
+            "Prioritized parallel", [x for x in prioritized_tests if not must_serial(x)]
+        )
+        print_tests(
+            "Prioritized serial", [x for x in prioritized_tests if must_serial(x)]
+        )
+        print_tests(
+            "General parallel", [x for x in general_tests if not must_serial(x)]
+        )
+        print_tests("General serial", [x for x in general_tests if must_serial(x)])
+
+    if options.dry_run:
+        return
 
     if options.dynamo:
         os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
@@ -1647,17 +1657,27 @@ def main():
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
     failure_messages = []
+    experiment_dict = {
+        "prioritized_tests_len": len(prioritized_tests),
+        "general_tests_len": len(general_tests),
+        "cpp": options.cpp,
+    }
+    start_time = time.time()
 
     # First run the prioritized tests, then the remaining tests.
     try:
         failure_messages = run_tests(
             prioritized_tests, test_directory, options, "Prioritized tests"
         )
-
-        failure_messages += run_tests(
-            remaining_tests, test_directory, options, "General tests"
+        experiment_dict["prioritized_failure_messages_len"] = len(failure_messages)
+        experiment_dict["general_start_time"] = time.time() - start_time
+        general_failure_messages = run_tests(
+            general_tests, test_directory, options, "General tests"
         )
+        experiment_dict["end_time"] = time.time() - start_time
+        experiment_dict["general_failure_messages_len"] = len(general_failure_messages)
 
+        failure_messages += general_failure_messages
     finally:
         if options.coverage:
             from coverage import Coverage
@@ -1670,6 +1690,9 @@ def main():
                 cov.save()
                 if not PYTORCH_COLLECT_COVERAGE:
                     cov.html_report()
+
+        if IS_CI and HAVE_TEST_SELECTION_TOOLS:
+            emit_metric("cats_td_experiment_1", experiment_dict)
 
     if len(failure_messages) != 0:
         for err in failure_messages:
