@@ -1776,7 +1776,13 @@ class CommonTemplate:
     @config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm(self):
         def fn(a, b):
-            return torch.mm(a, torch.cat((b & 0xF, b>>4),1).reshape(-1, b.shape[1]).to(a.dtype).sub(8))
+            return torch.mm(
+                a,
+                torch.cat((b & 0xF, b >> 4), 1)
+                .reshape(-1, b.shape[1])
+                .to(a.dtype)
+                .sub(8),
+            )
 
             self.common(
                 fn,

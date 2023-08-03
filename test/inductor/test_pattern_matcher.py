@@ -150,7 +150,13 @@ class TestPaternMatcher(TestCase):
     @inductor_config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm(self):
         def fn(a, b):
-            return torch.mm(a, torch.cat((b & 0xF, b>>4),1).reshape(-1, b.shape[1]).to(a.dtype).sub(8))
+            return torch.mm(
+                a,
+                torch.cat((b & 0xF, b >> 4), 1)
+                .reshape(-1, b.shape[1])
+                .to(a.dtype)
+                .sub(8),
+            )
 
         args_list = [
             (
@@ -174,7 +180,13 @@ class TestPaternMatcher(TestCase):
     @inductor_config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm_fail_to_match(self):
         def fn(a, b):
-            return torch.mm(a, torch.cat((b & 0xF, b>>4),1).reshape(-1, b.shape[1]).to(a.dtype).sub(8))
+            return torch.mm(
+                a,
+                torch.cat((b & 0xF, b >> 4), 1)
+                .reshape(-1, b.shape[1])
+                .to(a.dtype)
+                .sub(8),
+            )
 
         args_list = [
             (
@@ -184,7 +196,7 @@ class TestPaternMatcher(TestCase):
             (
                 torch.randn(8, 8, device="cuda"),
                 torch.randint(-128, 127, (4, 8), dtype=torch.int8, device="cuda"),
-            ), # doesn't work for int8 because bitwise logic in triton doesn't
+            ),  # doesn't work for int8 because bitwise logic in triton doesn't
             # match torch for int8
         ]
 
@@ -199,7 +211,13 @@ class TestPaternMatcher(TestCase):
     @inductor_config.patch(use_mixed_mm=False)
     def test_uint4x2_mixed_mm_gating_works(self):
         def fn(a, b):
-            return torch.mm(a, torch.cat((b & 0xF, b>>4),1).reshape(-1, b.shape[1]).to(a.dtype).sub(8))
+            return torch.mm(
+                a,
+                torch.cat((b & 0xF, b >> 4), 1)
+                .reshape(-1, b.shape[1])
+                .to(a.dtype)
+                .sub(8),
+            )
 
         args_list = [
             (

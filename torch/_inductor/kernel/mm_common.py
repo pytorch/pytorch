@@ -128,7 +128,7 @@ def mm_args(mat1, mat2, *others, layout=None, out_dtype=None, use_4x2_dim=False)
     *b2, k2, n = mat2.get_size()
     b = [V.graph.sizevars.guard_equals(a, b) for a, b in zip(b1, b2)]
     if use_4x2_dim:
-        k2 = k2*2
+        k2 = k2 * 2
     k = V.graph.sizevars.guard_equals(k1, k2)
     if layout is None:
         from torch._inductor.ir import FixedLayout
