@@ -280,6 +280,8 @@ class _CachingPropagator(ShardingPropagator):
         if op_schema_key in self.cached_prop_results:
             return self.cached_prop_results[op_schema_key]
         else:
+            # call DTensor's propagate_op_sharding to get the prop result
             output_sharding = super().propagate(op_overload, op_schema)
+            # update cached table
             self.cached_prop_results[op_schema_key] = output_sharding
             return output_sharding
