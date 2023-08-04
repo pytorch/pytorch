@@ -10,7 +10,6 @@ from torch.nn.utils.fusion import fuse_conv_bn_weights
 import copy
 import operator
 from typing import Any, Callable, Dict, Optional, Tuple
-from torch.fx.node import map_arg
 from torch.utils._pytree import LeafSpec
 
 __all__ = [
