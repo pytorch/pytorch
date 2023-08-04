@@ -62,12 +62,13 @@ def _reference_quantized_conv2d(x_i8, x_scale, x_zero_point, x_quant_min, x_quan
     weight_i16 = weight_i8.to(torch.int16)
     # always set bias to None so that the same representation can work for the case no matter if bias_scale == x_scale * weight_scale or not
     acc_i32 = out_dtype(torch.ops.aten.convolution.default, torch.int32, x_i16 - x_zero_point, weight_i16 - weight_zero_point, None, stride, padding, dilation, transposed, output_padding, groups)
-    # TODO: change to mul.Scalar when we make x_scale/weight_scale etc. Scalar values
-    acc_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, acc_i32, x_scale * weight_scale / out_scale)
     # TODO: change to mul.Scalar
     # Note: we are quantizing bias with these scales without signal from user, but it might be OK
     bias_scale = x_scale * weight_scale
     bias_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, bias_fp32, bias_scale / out_scale)
+    acc_i32 = acc_i32 + bias_i32
+    # TODO: change to mul.Scalar when we make x_scale/weight_scale etc. Scalar values
+    acc_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, acc_i32, x_scale * weight_scale / out_scale) + out_zero_point
     out_i8 = torch.ops.aten.clamp(acc_i32, out_quant_min, out_quant_max).to(torch.int8)
     return out_i8
 
@@ -311,7 +312,7 @@ def _reference_dequantize_per_channel_int8(x_i8, scales, zero_points, ch_axis, q
     x_i8 = torch.ops.aten.clamp(x_i8, quant_min, quant_max)
     x_i8 = torch.transpose(x_i8, ch_axis, -1)
     x_i32 = x_i8.to(torch.int32)
-    out_fp32 = (x_i32 - zero_points) * scales
+    out_fp32 = (x_i32 - zero_points).to(torch.float) * scales
     out_fp32 = torch.transpose(out_fp32, ch_axis, -1)
     return out_fp32
 
@@ -324,7 +325,7 @@ def _replace_ph_qdq_per_channel_replacement(gm: torch.fx.GraphModule):
 
 # (example inputs, pattern, replacement, post_transformation_pattern, post_transformation_replacement)
 _EXAMPLE_INPUTS_PATTERN_AND_REPLACEMENTS = [
-    (_QUANTIZED_CONV2d_EXAMPLE_INPUTS, _qdq_quantized_conv2d, _reference_quantized_conv2d, replace_literals_with_new_placeholders, replace_literals_with_new_placeholders),
+    (_QUANTIZED_CONV2d_EXAMPLE_INPUTS, _qdq_quantized_conv2d, _reference_quantized_conv2d, _replace_literals_with_new_placeholders, _replace_literals_with_new_placeholders),
     (_QUANTIZED_ADD_OR_ADD_RELU_EXAMPLE_INPUTS, _qdq_quantized_add_relu, _reference_quantized_add_relu, None, None),
     (_QUANTIZED_ADD_OR_ADD_RELU_EXAMPLE_INPUTS, _qdq_quantized_add, _reference_quantized_add, None, None),
     (_QUANTIZED_MAX_POOL2D_EXAMPLE_INPUTS, _qdq_quantized_max_pool2d, _reference_quantized_max_pool2d, _replace_literals_with_new_placeholders, _replace_literals_with_new_placeholders),

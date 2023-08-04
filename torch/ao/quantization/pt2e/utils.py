@@ -306,6 +306,23 @@ def _replace_literals_with_new_placeholders(gm, merge_dup=False, exclude_literal
 
 
 def _replace_literals_with_existing_placeholders(gm, exclude_literals, literal_to_ph_idx):
+    """Replace the literals in the graph with **existing** placeholder nodes, so that the literal arguments
+    in the graph can be matched and replaced
+
+    To use this, all literal args in the graph should be unique and each of them should correspond
+    to exactly one placeholder node
+
+    For example:
+    def forward(self, x, constant):
+        # constant = 3, it is burnt in due to dynamo tracing
+        return x + 3
+
+    call: _replace_literals_with_existing_placeholders(pattern, exclude_literals=[], literal_to_ph_idx={3: 1}
+    after this pass, we'll have:
+    def forward(self, x, scalar):
+        return x + scalar
+
+    """
     if exclude_literals is None:
         exclude_literals = []
 
