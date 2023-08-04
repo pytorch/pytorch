@@ -340,7 +340,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             benchmark = benchmark_cls(
                 test="train",
                 device=device,
-                jit=False,
                 batch_size=batch_size,
                 extra_args=extra_args,
                 model_kwargs=model_kwargs,
@@ -349,7 +348,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             benchmark = benchmark_cls(
                 test="train",
                 device=device,
-                jit=False,
                 batch_size=batch_size,
                 extra_args=extra_args,
             )
@@ -357,7 +355,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             benchmark = benchmark_cls(
                 test="eval",
                 device=device,
-                jit=False,
                 batch_size=batch_size,
                 extra_args=extra_args,
             )
