@@ -213,22 +213,6 @@ def exception_handler(e, code, frame=None, export=False):
         e.record_filename = record_filename
 
     augment_exc_message(e, export=export)
-    # Only log the exception if we are going to suppress it
-    # if aren't suppressing it, a higher level except block will handle it
-    if config.suppress_errors:
-        if config.is_fbcode():
-            from torch._dynamo.fb.logging import (  # type: ignore[import]
-                log_dynamo_suppress_errors,
-            )
-
-            error_msg = format_error_msg_verbose(e, code, record_filename, frame)
-            log_dynamo_suppress_errors(
-                code.co_name, code.co_filename, code.co_firstlineno, error_msg
-            )
-        else:
-            error_msg = format_error_msg(e, code, record_filename, frame)
-
-        log.warning(error_msg)
 
 
 FRAME_COUNTER = 0
@@ -559,12 +543,45 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
             result = inner_convert(frame, cache_size, hooks, frame_state)
             counters["frames"]["ok"] += 1
             return result
-        except (NotImplementedError, Unsupported):
-            log.info("converting frame raised unsupported, leaving it unconverted")
-        except Exception:
-            if not config.suppress_errors:
+        except Exception as e:
+            # These two exception types are "soft" failure, in the sense that
+            # we know this is due to something we didn't implement all the
+            # way, scare the user less about it.  That being said, if you
+            # are trying to understand why a graph break happened, it's still
+            # important to have this information, so offer it.
+            #
+            # NB: NotImplementedError used to be on this list, but actually
+            # it is impossible for it to reach here, as it is converted into
+            # InternalTorchDynamoError.  This behavior seemed reasonable
+            # to me (ezyang, Aug 2023) so I kept it, but maybe at some point
+            # someone wanted these to also get suppressed.  If so, you'll
+            # need to make these exceptions not get wrapped
+            soft_fail = isinstance(e, Unsupported)
+            if not config.suppress_errors and not soft_fail:
                 raise
-            log.warning("converting frame raised error, suppressing error")
+
+            # Suppress the error.  NB: It's very important to do the
+            # suppression logging HERE, where the actual suppression
+            # happens. Previously it was somewhere else and so it was
+            # possible to accidentally not log at all.
+            record_filename = getattr(e, "record_filename", None)
+            code = frame.f_code
+            if config.is_fbcode():
+                from torch._dynamo.fb.logging import (  # type: ignore[import]
+                    log_dynamo_suppress_errors,
+                )
+
+                error_msg = format_error_msg_verbose(e, code, record_filename, frame)
+                log_dynamo_suppress_errors(
+                    code.co_name, code.co_filename, code.co_firstlineno, error_msg
+                )
+            else:
+                error_msg = format_error_msg(e, code, record_filename, frame)
+
+            if soft_fail:
+                log.info(error_msg, exc_info=True)
+            else:
+                log.warning(error_msg, exc_info=True)
         return None
 
     _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
