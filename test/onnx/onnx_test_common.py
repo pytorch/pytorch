@@ -82,17 +82,14 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
     return verification.verify(*args, options=options, **kwargs)
 
 
-def assert_dynamic_shapes(
-    export_output: torch.onnx.ExportOutput, dynamic_shapes: Optional[bool]
-):
+def assert_dynamic_shapes(export_output: torch.onnx.ExportOutput, dynamic_shapes: bool):
     """Assert whether the exported model has dynamic shapes or not.
 
     Args:
         export_output (torch.onnx.ExportOutput): The output of torch.onnx.dynamo_export.
-        dynamic_shapes (Optional[bool], optional): Whether the exported model has dynamic shapes or not.
+        dynamic_shapes (bool): Whether the exported model has dynamic shapes or not.
             When True, raises if graph inputs don't have at least one dynamic dimension
             When False, raises if graph inputs have at least one dynamic dimension.
-            When None, no check is performed. Defaults to None.
 
     Raises:
         AssertionError: If the exported model has dynamic shapes and dynamic_shapes is False and vice-versa.
@@ -224,7 +221,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 ]
             ]
         ] = None,
-        skip_dynamic_shapes_check: Optional[bool] = False,
+        skip_dynamic_shapes_check: bool = False,
     ):
         """Compare the results of PyTorch model with exported ONNX model
 
@@ -248,6 +245,8 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 For example,
                 additional_test_inputs = [((args1, args2), {"kwargs":1}), ((args1,),), ((), {"kwargs":1})]
             skip_dynamic_shapes_check: Whether to skip dynamic shape check. Defaults to False.
+                Must be used when tests do not produce dynamic shapes even when dynamic shape feature is enabled.
+                This is needed because Torch Dynamo uses the dynamic_shapes flag as a hint, only.
 
         """
 
