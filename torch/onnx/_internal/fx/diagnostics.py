@@ -26,10 +26,25 @@ _CONTAINER_ITEM_LIMIT: int = 10
 # NOTE(bowbao): This is a shim over `torch.onnx._internal.diagnostics`, which is
 # used in `torch.onnx`, and loaded with `torch`. Hence anything related to `onnxscript`
 # cannot be put there.
+
+# [NOTE: `dynamo_export` diagnostics logging]
+# The 'dynamo_export' diagnostics leverages the PT2 artifact logger to handle the verbosity
+# level of logs that are recorded in each SARIF log diagnostic. In addition to SARIF log,
+# terminal logging is by default disabled. Terminal logging can be activated by setting
+# the environment variable `TORCH_LOGS="onnx_diagnostics"`. When the environment variable
+# is set, it also fixes logging level to `logging.DEBUG`, overriding the verbosity level
+# specified in the diagnostic options.
+# See `torch/_logging/__init__.py` for more on PT2 logging.
 _ONNX_DIAGNOSTICS_ARTIFACT_LOGGER_NAME = "onnx_diagnostics"
 diagnostic_logger = torch._logging.getArtifactLogger(
     "torch.onnx", _ONNX_DIAGNOSTICS_ARTIFACT_LOGGER_NAME
 )
+
+
+def is_onnx_diagnostics_log_artifact_enabled() -> bool:
+    return torch._logging._internal.log_state.is_artifact_enabled(
+        _ONNX_DIAGNOSTICS_ARTIFACT_LOGGER_NAME
+    )
 
 
 @functools.singledispatch
@@ -190,9 +205,9 @@ class Diagnostic(infra.Diagnostic):
     logger: logging.Logger = dataclasses.field(init=False, default=diagnostic_logger)
 
     def log(self, level: int, message: str, *args, **kwargs) -> None:
-        if torch._logging._internal.log_state.is_artifact_enabled(
-            _ONNX_DIAGNOSTICS_ARTIFACT_LOGGER_NAME
-        ):
+        if is_onnx_diagnostics_log_artifact_enabled():
+            # Only log to terminal if artifact is not enabled.
+            # See [NOTE: `dynamo_export` diagnostics logging] for details.
             self.logger.log(level, message, *args, **kwargs)
         if self.logger.isEnabledFor(level):
             self.additional_messages.append(message % args)
@@ -202,6 +217,18 @@ class Diagnostic(infra.Diagnostic):
 @dataclasses.dataclass
 class DiagnosticContext(infra.DiagnosticContext):
     logger: logging.Logger = dataclasses.field(init=False, default=diagnostic_logger)
+
+    def __enter__(self):
+        self._previous_log_level = self.logger.level
+        # Adjust the logger level based on `options.verbosity_level` and the environment
+        # variable `TORCH_LOGS`. See [NOTE: `dynamo_export` diagnostics logging] for details.
+        if not is_onnx_diagnostics_log_artifact_enabled():
+            return super().__enter__()
+        else:
+            return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.logger.level = self._previous_log_level
 
 
 diagnose_call = functools.partial(

@@ -255,9 +255,7 @@ class Transform(abc.ABC):
                     diagnostic.log(
                         graph_diff_log_level,
                         "```\n%s\n```",
-                        diagnostics.LazyString(
-                            _unified_diff, old_tabular, new_tabular
-                        ),
+                        diagnostics.LazyString(_unified_diff, old_tabular, new_tabular),
                     )
 
         return module

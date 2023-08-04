@@ -261,7 +261,7 @@ class DiagnosticContext:
         """Returns the SARIF Run object."""
         unique_rules = {diagnostic.rule for diagnostic in self.diagnostics}
         return sarif.Run(
-            tool=sarif.Tool(
+            sarif.Tool(
                 driver=sarif.ToolComponent(
                     name=self.name,
                     version=self.version,
