@@ -3,9 +3,9 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/ForeachUtils.h>
+#include <ATen/native/TensorCompare.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/ForeachMinMaxFunctors.cuh>
-#include <limits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -247,16 +247,18 @@ FOREACH_BINARY_OP_SCALAR(all_types_half_bfloat16, clamp_min, maximum, false);
 
 namespace {
 template <typename T>
-__forceinline__ C10_DEVICE T clamp(const T v, const T lower, const T upper) {
+__forceinline__ C10_DEVICE T clamp(
+    const T v,
+    const T lower,
+    const T upper,
+    const at::native::detail::ClampLimits& clamp_kind) {
   // Propagate nan, which doesn't propagate automatically for ROCm
   if (at::_isnan(v)) {
     return v;
-  }
-  if (at::_isnan(lower)) {
-    return lower;
-  }
-  if (at::_isnan(upper)) {
-    return upper;
+  } else if (clamp_kind == at::native::detail::ClampLimits::Min) {
+    return ::max(v, lower);
+  } else if (clamp_kind == at::native::detail::ClampLimits::Max) {
+    return ::min(v, upper);
   } else {
     return ::min(::max(v, lower), upper);
   }
@@ -270,7 +272,8 @@ struct ClampFunctor {
       const int chunk_size,
       TensorListMetadata<depth>& tl,
       opmath_t lower,
-      opmath_t upper) {
+      opmath_t upper,
+      const at::native::detail::ClampLimits& clamp_kind) {
     static_assert(depth == 1 || depth == 2, "");
     static_assert(depth >= r_args_depth, "");
     static_assert(res_arg_index == depth - 1 || res_arg_index == 0, "");
@@ -293,8 +296,8 @@ struct ClampFunctor {
         load_store(r_args[0], args[0], 0, i_start);
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
-          r_args[0][ii] =
-              clamp(static_cast<opmath_t>(r_args[0][ii]), lower, upper);
+          r_args[0][ii] = clamp(
+              static_cast<opmath_t>(r_args[0][ii]), lower, upper, clamp_kind);
         }
         // store
         load_store(args[res_arg_index], r_args[0], i_start, 0);
@@ -305,8 +308,8 @@ struct ClampFunctor {
         load_args<r_args_depth>(r_args, args, i_start, chunk_size, n);
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
-          r_args[0][ii] =
-              clamp(static_cast<opmath_t>(r_args[0][ii]), lower, upper);
+          r_args[0][ii] = clamp(
+              static_cast<opmath_t>(r_args[0][ii]), lower, upper, clamp_kind);
         }
         store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n);
       }
@@ -314,12 +317,25 @@ struct ClampFunctor {
   }
 };
 
+at::native::detail::ClampLimits get_clamp_kind(
+    const optional<Scalar>& min,
+    const optional<Scalar>& max) {
+  if (min.has_value() && max.has_value()) {
+    return at::native::detail::ClampLimits::MinMax;
+  } else if (min.has_value()) {
+    return at::native::detail::ClampLimits::Min;
+  } else {
+    return at::native::detail::ClampLimits::Max;
+  }
+}
+
 std::vector<at::Tensor> foreach_tensor_clamp_scalar_kernel_cuda(
     TensorList self,
     const optional<Scalar>& min,
     const optional<Scalar>& max) {
   check_foreach_api_restrictions(self);
-  if (!can_use_fast_route(ArrayRef<TensorList>{self}, ArrayRef<Scalar>{}, true)) {
+  if (!can_use_fast_route(
+          ArrayRef<TensorList>{self}, ArrayRef<Scalar>{}, true)) {
     return foreach_tensor_clamp_scalar_kernel_slow(self, min, max);
   }
   TORCH_CHECK(
@@ -346,9 +362,10 @@ std::vector<at::Tensor> foreach_tensor_clamp_scalar_kernel_cuda(
                 /* r_args_depth */ 1,
                 /* res_arg_index */ 1>(),
             min.has_value() ? min.value().to<opmath_t>()
-                            : std::numeric_limits<opmath_t>::min(),
+                            : max.value().to<opmath_t>(),
             max.has_value() ? max.value().to<opmath_t>()
-                            : std::numeric_limits<opmath_t>::max());
+                            : min.value().to<opmath_t>(),
+            get_clamp_kind(min, max));
       });
   return tensor_lists[1];
 }
@@ -358,7 +375,8 @@ void foreach_tensor_clamp_scalar_kernel_cuda_(
     const optional<Scalar>& min,
     const optional<Scalar>& max) {
   check_foreach_api_restrictions(self);
-  if (!can_use_fast_route(ArrayRef<TensorList>{self}, ArrayRef<Scalar>{}, true)) {
+  if (!can_use_fast_route(
+          ArrayRef<TensorList>{self}, ArrayRef<Scalar>{}, true)) {
     return foreach_tensor_clamp_scalar_kernel_slow_(self, min, max);
   }
   TORCH_CHECK(
@@ -380,9 +398,10 @@ void foreach_tensor_clamp_scalar_kernel_cuda_(
                 /* r_args_depth */ 1,
                 /* res_arg_index */ 0>(),
             min.has_value() ? min.value().to<opmath_t>()
-                            : std::numeric_limits<opmath_t>::min(),
+                            : max.value().to<opmath_t>(),
             max.has_value() ? max.value().to<opmath_t>()
-                            : std::numeric_limits<opmath_t>::max());
+                            : min.value().to<opmath_t>(),
+            get_clamp_kind(min, max));
       });
 }
 } // namespace at::native

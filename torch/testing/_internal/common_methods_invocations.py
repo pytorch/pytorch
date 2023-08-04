@@ -8519,7 +8519,7 @@ class foreach_clamp_sample_func(foreach_inputs_sample_func):
             }
             yield SampleInput(input, *args, **kwargs)
 
-        for num_tensors, (min_value, max_value) in product(
+        for num_tensors, args in product(
             num_input_tensors,
             (
                 (-1, 1),
@@ -8531,7 +8531,6 @@ class foreach_clamp_sample_func(foreach_inputs_sample_func):
             _foreach_inputs_kwargs["zero_size"] = False
             input = sample_inputs_foreach(
                 None, device, dtype, num_tensors, **_foreach_inputs_kwargs)
-            args = np.random.uniform(size=(2,)).tolist()
             kwargs = {
                 "zero_size": False,
                 "disable_fastpath": dtype in integral_types_and(torch.bool),
