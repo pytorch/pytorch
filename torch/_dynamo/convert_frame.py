@@ -33,6 +33,7 @@ from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
     format_error_msg,
+    format_error_msg_verbose,
     InternalTorchDynamoError,
     TorchRuntimeError,
     unimplemented,
@@ -51,6 +52,7 @@ from .utils import (
     gen_record_file_name,
     guard_failures,
     increment_frame,
+    is_guard_failure_reporting_enabled,
     is_namedtuple,
     istype,
     LazyString,
@@ -93,6 +95,7 @@ output_codes = Tracker()
 
 initial_grad_state = None
 initial_deterministic_algorithms_state = None
+initial_torch_function_state = None
 
 
 @functools.wraps(original_forward_from_src)
@@ -202,18 +205,14 @@ def has_tensor_in_frame(frame):
     return False
 
 
-def exception_handler(e, code, frame=None):
+def exception_handler(e, code, frame=None, export=False):
     record_filename = None
     if hasattr(e, "exec_record"):
         record_filename = gen_record_file_name(e, code)
         write_record_to_file(record_filename, e.exec_record)
         e.record_filename = record_filename
 
-    augment_exc_message(e)
-    # Only log the exception if we are going to suppress it
-    # if aren't suppressing it, a higher level except block will handle it
-    if config.suppress_errors:
-        log.error(format_error_msg(e, code, record_filename, frame))
+    augment_exc_message(e, export=export)
 
 
 FRAME_COUNTER = 0
@@ -242,19 +241,19 @@ def convert_frame_assert(
         if code in input_codes and (
             recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
         ):
-            if config.report_guard_failures:
+            if is_guard_failure_reporting_enabled():
                 message = (
-                    f"Recompiling function {code.co_name} in {code.co_filename}",
+                    f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}",
                     f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
                 )
             else:
                 message = (
-                    f"Recompiling function {code.co_name} in {code.co_filename}",
+                    f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}",
                     "set env var TORCHDYNAMO_REPORT_GUARD_FAILURES=1 to debug further",
                 )
 
             if recompiles_log.isEnabledFor(logging.DEBUG):
-                recompiles_log.debug(message)
+                recompiles_log.debug(message, stack_info=True)
 
             if config.error_on_recompile:
                 raise exc.RecompileError(message)
@@ -345,6 +344,9 @@ def convert_frame_assert(
         initial_deterministic_algorithms_state = (
             torch.are_deterministic_algorithms_enabled()
         )
+
+        global initial_torch_function_state
+        initial_torch_function_state = torch._C._is_torch_function_enabled()
 
         signpost_event(
             "dynamo",
@@ -473,6 +475,16 @@ def _compile(
         )
 
         assert output is not None
+
+        # Skipping Dynamo on a frame without any extracted graph.
+        # This does not affect eager functionality. But this is necessary
+        # for export for cases where Dynamo-reconstructed bytecode can create
+        # new function frames, confusing export in thinking that there
+        # are extra graphs now.
+
+        if output.export and output.is_empty_graph():
+            return None
+
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
         check_fn = CheckFunctionManager(
@@ -512,10 +524,10 @@ def _compile(
         ConstraintViolationError,
         GuardOnDataDependentSymNode,
     ) as e:
-        exception_handler(e, code, frame)
+        exception_handler(e, code, frame, export=export)
         raise
     except Exception as e:
-        exception_handler(e, code, frame)
+        exception_handler(e, code, frame, export=export)
         raise InternalTorchDynamoError(str(e)).with_traceback(e.__traceback__) from None
 
 
@@ -531,12 +543,45 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
             result = inner_convert(frame, cache_size, hooks, frame_state)
             counters["frames"]["ok"] += 1
             return result
-        except (NotImplementedError, Unsupported):
-            log.info("converting frame raised unsupported, leaving it unconverted")
-        except Exception:
-            if not config.suppress_errors:
+        except Exception as e:
+            # These two exception types are "soft" failure, in the sense that
+            # we know this is due to something we didn't implement all the
+            # way, scare the user less about it.  That being said, if you
+            # are trying to understand why a graph break happened, it's still
+            # important to have this information, so offer it.
+            #
+            # NB: NotImplementedError used to be on this list, but actually
+            # it is impossible for it to reach here, as it is converted into
+            # InternalTorchDynamoError.  This behavior seemed reasonable
+            # to me (ezyang, Aug 2023) so I kept it, but maybe at some point
+            # someone wanted these to also get suppressed.  If so, you'll
+            # need to make these exceptions not get wrapped
+            soft_fail = isinstance(e, Unsupported)
+            if not config.suppress_errors and not soft_fail:
                 raise
-            log.info("converting frame raised error, suppressing error")
+
+            # Suppress the error.  NB: It's very important to do the
+            # suppression logging HERE, where the actual suppression
+            # happens. Previously it was somewhere else and so it was
+            # possible to accidentally not log at all.
+            record_filename = getattr(e, "record_filename", None)
+            code = frame.f_code
+            if config.is_fbcode():
+                from torch._dynamo.fb.logging import (  # type: ignore[import]
+                    log_dynamo_suppress_errors,
+                )
+
+                error_msg = format_error_msg_verbose(e, code, record_filename, frame)
+                log_dynamo_suppress_errors(
+                    code.co_name, code.co_filename, code.co_firstlineno, error_msg
+                )
+            else:
+                error_msg = format_error_msg(e, code, record_filename, frame)
+
+            if soft_fail:
+                log.info(error_msg, exc_info=True)
+            else:
+                log.warning(error_msg, exc_info=True)
         return None
 
     _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
