@@ -1122,9 +1122,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # The model makes a deepcopy of nn module, so each one is cache
         # separately.
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """11""")
+            self.assertExpectedInline(cnt.frame_count, """2""")
         else:
-            self.assertExpectedInline(cnt.frame_count, """12""")
+            self.assertExpectedInline(cnt.frame_count, """3""")
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))

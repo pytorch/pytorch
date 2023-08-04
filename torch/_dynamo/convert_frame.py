@@ -499,7 +499,9 @@ def _compile(
             hooks.guard_fail_fn if hooks else None,
         )
 
-        guarded_code = GuardedCode(out_code, check_fn.check_fn)
+        guarded_code = GuardedCode(
+            out_code, check_fn.check_fn, output.guarded_nn_module_var_name
+        )
 
         if guards_log.isEnabledFor(logging.DEBUG):
             guard_str = "GUARDS:\n"
@@ -522,6 +524,7 @@ def _compile(
             hooks.guard_export_fn(output.guards)
 
         output.local_scope.clear()
+        # print("--->", guarded_code, flush=True)
         return guarded_code
     except (
         Unsupported,

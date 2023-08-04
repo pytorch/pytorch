@@ -46,6 +46,7 @@ class GuardFn(Protocol):
 class GuardedCode:
     code: types.CodeType
     check_fn: GuardFn
+    guarded_nn_module_var_name: str
 
 
 class DynamoCallbackFn(Protocol):
