@@ -39,6 +39,7 @@ from .exported_program import (
     ExportedProgram,
     ExportGraphSignature,
 )
+
 from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 from .passes.add_runtime_assertions_for_constraints_pass import _AddRuntimeAssertionsForInlineConstraintsPass
 
@@ -282,7 +283,7 @@ def export(
             # so we serialize them here instead of inside dynamo
             gm.meta["inline_constraints"] = {
                 k: v
-                for k, v in fake_mode.shape_env.var_to_range.items()
+                for k, v in fake_mode.shape_env.runtime_var_to_range.items()
                 if re.match(r"^[if]\d+$", str(k))
             }
 
@@ -326,6 +327,8 @@ def export(
 
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))
+        except torch._dynamo.exc.TorchRuntimeError as e:
+            raise UserError(UserErrorType.INVALID_INPUT, str(e))
         except GuardOnDataDependentSymNode as e:
             raise UserError(
                 UserErrorType.ANTI_PATTERN,

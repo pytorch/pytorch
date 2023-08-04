@@ -20,12 +20,12 @@
 namespace at {
 namespace native {
 
-void sym_constrain_range_cpu(
+void sym_constrain_range(
     const Scalar& size,
     c10::optional<int64_t> min,
     c10::optional<int64_t> max) {}
 
-Tensor _functional_sym_constrain_range_cpu(
+Tensor _functional_sym_constrain_range(
     const Scalar& size,
     c10::optional<int64_t> min,
     c10::optional<int64_t> max,

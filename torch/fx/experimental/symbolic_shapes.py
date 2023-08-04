@@ -32,7 +32,7 @@ from torch import (  # noqa: F401
     SymFloat,
     SymInt,
 )
-from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
+from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._sympy.functions import FloorDiv, LShift, Mod, RShift
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
@@ -312,6 +312,27 @@ def _constrain_symbol_range(shape_env, s: sympy.Symbol, min: int, max: int):
     else:
         shape_env.var_to_range[s] = ValueRanges(min, max)
 
+    shape_env.runtime_var_to_range[s] = shape_env.var_to_range[s]
+
+def _constrain_symbol_range_for_size(shape_env, s: sympy.Symbol, max: int):
+    if r := shape_env.var_to_range.get(s, None):
+        shape_env.var_to_range[s] = ValueRanges(
+            builtins.max(r.lower, 2), builtins.min(r.upper, max)
+        )
+    else:
+        shape_env.var_to_range[s] = ValueRanges(2, max)
+
+    # The only reason r.lower > 0 is that this symbol is constrained before via constrain_as_value,
+    # so we should respect that
+    if r := shape_env.runtime_var_to_range.get(s, None):
+        shape_env.var_to_range[s] = ValueRanges(
+            builtins.max(r.lower, 0), builtins.min(r.upper, max)
+        )
+
+    else:
+        shape_env.runtime_var_to_range[s] = ValueRanges(0, max)
+
+
 # inclusive both ways
 def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     """
@@ -346,13 +367,9 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
         values at runtime (we assume that a graph that is valid for N=2 will
         also be valid for N=1).
     """
+    assert max is not None
     if min is None:
-        min = -sympy.oo
-    if max is None:
-        max = sympy.oo
-    if not isinstance(a, SymInt):
-        constrain_range_int(a, min=min, max=max)
-        return
+        return _constrain_symbol_range_for_size(a.node.shape_env, a.node.expr, max)
 
     if isinstance(a.node.expr, sympy.Integer):
         if not (min <= int(a.node.expr) <= max):
@@ -365,30 +382,6 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     # something useful?  Might be better to restrict only for unbacked
     # SymInt).
     _constrain_symbol_range(a.node.shape_env, a.node.expr, min, max)
-
-def constrain_range_int(a, *, min, max):
-    """
-    Constrain range on concrete int value.
-    This can happens for the following scenarios:
-    - Eager mode execution and real int value is provided.
-    - During tracing the traced symbol is resolved as a static integer (see
-      PR #101655 for more details).
-    """
-
-    assert not isinstance(a, SymInt)
-    if not (min <= a <= max):
-        raise ValueRangeError(f"Invalid value {a} for range [{min}:{max}]")
-
-    if (
-        (fake_mode := detect_fake_mode()) is not None and
-        getattr(fake_mode, "shape_env", None) is not None
-    ):
-        # If we are tracing with a fake mode then add this integer to the
-        # shape_env's var_to_range
-        sym_integer = sympy.Integer(a)
-        shape_env = fake_mode.shape_env
-        _constrain_symbol_range(shape_env, sym_integer, min, max)
-        shape_env.var_to_stack[sym_integer] = TracingContext(fake_mode).extract_stack()
 
 def constrain_unify(a, b):
     """
@@ -1934,6 +1927,10 @@ class ShapeEnv:
         # range may contain ints which may not actually appear in
         # practice
         self.var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
+        # Maps symbolic ints to their min/max range for runtime checks.
+        # This is because we assume a graph generated with N=2 is general enough
+        # for N < 2. Therefore, it will be too strict to assert N=2 at runtime.
+        self.runtime_var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
         self.var_to_sources: Dict[sympy.Symbol, List[Source]] = {}
         self.var_to_stack: Dict[sympy.Symbol, traceback.StackSummary] = {}
         # Maps symbolic ints to the guards that refine their lower/upper
