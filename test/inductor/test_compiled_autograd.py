@@ -295,51 +295,49 @@ class TestCompiledAutograd(TestCase):
                 output = bias_sigmoid_mul_jit(x1, x2, self.linear_2_bias)
                 return output
 
-            class Model(nn.Module):
-                def __init__(self):
-                    super().__init__()
-                    self.module_with_jit_1 = ModuleWithJit()
-                    self.module_with_jit_2 = ModuleWithJit()
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.module_with_jit_1 = ModuleWithJit()
+                self.module_with_jit_2 = ModuleWithJit()
 
-                def forward(self, x, gradient_checkpointing: bool):
-                    if gradient_checkpointing:
-                        y = torch.utils.checkpoint.checkpoint(
-                            self._forward, x, use_reentrant=True
-                        )
-                    else:
-                        y = self._forward(x)
-                    return y
-
-                def _forward(self, x):
-                    x = x + self.module_with_jit_1(x)
-                    x = x + self.module_with_jit_2(x.transpose(-2, -3)).transpose(
-                        -2, -3
+            def forward(self, x, gradient_checkpointing: bool):
+                if gradient_checkpointing:
+                    y = torch.utils.checkpoint.checkpoint(
+                        self._forward, x, use_reentrant=True
                     )
-                    return x
+                else:
+                    y = self._forward(x)
+                return y
 
-            torch.cuda.set_device(device=DEVICE)
-            torch.manual_seed(1234567890)
-            model = Model()
-            model.train()
-            model.to(device=DEVICE)
-            model_parameters = list(model.parameters())
+            def _forward(self, x):
+                x = x + self.module_with_jit_1(x)
+                x = x + self.module_with_jit_2(x.transpose(-2, -3)).transpose(-2, -3)
+                return x
 
-            torch.manual_seed(1234567890)
-            input_tensor = torch.randn(1, 128, 256, NUM_FEATURES).to(device=DEVICE)
-            input_tensor.requires_grad = True
-            target_tensor = torch.randn(1, 128, 256, NUM_FEATURES).to(
-                dtype=input_tensor.dtype, device=DEVICE
+        torch.cuda.set_device(device=DEVICE)
+        torch.manual_seed(1234567890)
+        model = Model()
+        model.train()
+        model.to(device=DEVICE)
+        model_parameters = list(model.parameters())
+
+        torch.manual_seed(1234567890)
+        input_tensor = torch.randn(1, 128, 256, NUM_FEATURES).to(device=DEVICE)
+        input_tensor.requires_grad = True
+        target_tensor = torch.randn(1, 128, 256, NUM_FEATURES).to(
+            dtype=input_tensor.dtype, device=DEVICE
+        )
+
+        for iteration in range(10):
+            for param in model_parameters:
+                param.grad = None
+            output_tensor = model(
+                x=input_tensor.clone(),
+                gradient_checkpointing=True,
             )
-
-            for iteration in range(10):
-                for param in model_parameters:
-                    param.grad = None
-                output_tensor = model(
-                    x=input_tensor.clone(),
-                    gradient_checkpointing=True,
-                )
-                loss = torch.mean(torch.abs(target_tensor - output_tensor))
-                loss.backward()
+            loss = torch.mean(torch.abs(target_tensor - output_tensor))
+            loss.backward()
 
 
 def load_test_module(name):
