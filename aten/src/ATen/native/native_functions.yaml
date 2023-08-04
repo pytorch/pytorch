@@ -9701,6 +9701,7 @@
   structured: True
   dispatch:
     CPU, CUDA: renorm_out
+    MPS: renorm_out_mps
 
 - func: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
   device_check: NoCheck   # TensorIterator

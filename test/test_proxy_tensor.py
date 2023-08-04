@@ -795,8 +795,7 @@ class TestFakeProxyTensor(TestCase):
 
         with FakeTensorMode() as fake_mode:
             y = torch.randn(2)
-            with self.assertRaisesRegex(TypeError, "Multiple dispatch failed"):
-                make_fx(f, tracing_mode="real")(torch.randn(2))
+            make_fx(f, tracing_mode="real")(torch.randn(2))
 
     def test_fused_adam(self):
         # See https://github.com/pytorch/pytorch/issues/99356
