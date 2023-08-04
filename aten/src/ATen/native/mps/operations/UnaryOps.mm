@@ -385,12 +385,12 @@ TORCH_IMPL_FUNC(logit_backward_out_mps)
   }
 }
 
-void cumulative_op_impl(const Tensor& self,
-                        int64_t dim,
-                        c10::optional<ScalarType> dtype,
-                        const Tensor& result,
-                        MPSCumulativeOpType cumulativeOpType,
-                        const std::string& op_name) {
+static void cumulative_op_impl(const Tensor& self,
+                               int64_t dim,
+                               c10::optional<ScalarType> dtype,
+                               const Tensor& result,
+                               MPSCumulativeOpType cumulativeOpType,
+                               const std::string& op_name) {
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   auto nDims = self.dim();
   auto wrapped_dim = maybe_wrap_dim(dim, nDims);
