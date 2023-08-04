@@ -13,6 +13,7 @@ thread_local TorchDispatchModeTLS torchDispatchModeState;
 void TorchDispatchModeTLS::push_onto_stack(std::shared_ptr<SafePyObject> mode) {
   if (torchDispatchModeState.stack_.empty() &&
       torchDispatchModeState.proxy_mode_ == c10::nullopt &&
+      torchDispatchModeState.functional_mode_ == c10::nullopt &&
       torchDispatchModeState.fake_mode_ == c10::nullopt) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, true);
     c10::impl::tls_set_dispatch_key_included(
@@ -30,6 +31,7 @@ const std::shared_ptr<SafePyObject> TorchDispatchModeTLS::pop_stack() {
 
   if (torchDispatchModeState.stack_.empty() &&
       torchDispatchModeState.proxy_mode_ == c10::nullopt &&
+      torchDispatchModeState.functional_mode_ == c10::nullopt &&
       torchDispatchModeState.fake_mode_ == c10::nullopt) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
     c10::impl::tls_set_dispatch_key_included(
@@ -58,12 +60,17 @@ const c10::optional<std::shared_ptr<SafePyObject>> TorchDispatchModeTLS::
     get_proxy_mode() {
   return torchDispatchModeState.proxy_mode_;
 }
+const c10::optional<std::shared_ptr<SafePyObject>> TorchDispatchModeTLS::
+    get_functional_mode() {
+  return torchDispatchModeState.functional_mode_;
+}
 void TorchDispatchModeTLS::set_fake_mode(std::shared_ptr<SafePyObject> mode) {
   TORCH_CHECK(
       torchDispatchModeState.fake_mode_ == c10::nullopt,
       "trying to set the current fake mode, but one already exists");
   if (torchDispatchModeState.stack_.empty() &&
       torchDispatchModeState.proxy_mode_ == c10::nullopt &&
+      torchDispatchModeState.functional_mode_ == c10::nullopt &&
       torchDispatchModeState.fake_mode_ == c10::nullopt) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, true);
     c10::impl::tls_set_dispatch_key_included(
@@ -74,12 +81,25 @@ void TorchDispatchModeTLS::set_fake_mode(std::shared_ptr<SafePyObject> mode) {
 void TorchDispatchModeTLS::set_proxy_mode(std::shared_ptr<SafePyObject> mode) {
   if (torchDispatchModeState.stack_.empty() &&
       torchDispatchModeState.proxy_mode_ == c10::nullopt &&
+      torchDispatchModeState.functional_mode_ == c10::nullopt &&
       torchDispatchModeState.fake_mode_ == c10::nullopt) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, true);
     c10::impl::tls_set_dispatch_key_included(
         DispatchKey::PythonTLSSnapshot, true);
   }
   torchDispatchModeState.proxy_mode_ = std::move(mode);
+}
+void TorchDispatchModeTLS::set_functional_mode(
+    std::shared_ptr<SafePyObject> mode) {
+  if (torchDispatchModeState.stack_.empty() &&
+      torchDispatchModeState.proxy_mode_ == c10::nullopt &&
+      torchDispatchModeState.functional_mode_ == c10::nullopt &&
+      torchDispatchModeState.fake_mode_ == c10::nullopt) {
+    c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, true);
+    c10::impl::tls_set_dispatch_key_included(
+        DispatchKey::PythonTLSSnapshot, true);
+  }
+  torchDispatchModeState.functional_mode_ = std::move(mode);
 }
 
 const std::shared_ptr<SafePyObject> TorchDispatchModeTLS::unset_fake_mode() {
@@ -90,6 +110,7 @@ const std::shared_ptr<SafePyObject> TorchDispatchModeTLS::unset_fake_mode() {
   torchDispatchModeState.fake_mode_ = c10::nullopt;
   if (torchDispatchModeState.stack_.empty() &&
       torchDispatchModeState.proxy_mode_ == c10::nullopt &&
+      torchDispatchModeState.functional_mode_ == c10::nullopt &&
       torchDispatchModeState.fake_mode_ == c10::nullopt) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
     c10::impl::tls_set_dispatch_key_included(
@@ -105,6 +126,24 @@ const std::shared_ptr<SafePyObject> TorchDispatchModeTLS::unset_proxy_mode() {
   torchDispatchModeState.proxy_mode_ = c10::nullopt;
   if (torchDispatchModeState.stack_.empty() &&
       torchDispatchModeState.proxy_mode_ == c10::nullopt &&
+      torchDispatchModeState.functional_mode_ == c10::nullopt &&
+      torchDispatchModeState.fake_mode_ == c10::nullopt) {
+    c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
+    c10::impl::tls_set_dispatch_key_included(
+        DispatchKey::PythonTLSSnapshot, false);
+  }
+  return out;
+}
+const std::shared_ptr<SafePyObject> TorchDispatchModeTLS::
+    unset_functional_mode() {
+  TORCH_CHECK(
+      torchDispatchModeState.functional_mode_ != c10::nullopt,
+      "trying to call _unset_functional_mode, but there currently is not one.");
+  auto out = *torchDispatchModeState.functional_mode_;
+  torchDispatchModeState.functional_mode_ = c10::nullopt;
+  if (torchDispatchModeState.stack_.empty() &&
+      torchDispatchModeState.proxy_mode_ == c10::nullopt &&
+      torchDispatchModeState.functional_mode_ == c10::nullopt &&
       torchDispatchModeState.fake_mode_ == c10::nullopt) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
     c10::impl::tls_set_dispatch_key_included(
@@ -119,6 +158,10 @@ const c10::optional<std::shared_ptr<SafePyObject>> TorchDispatchModeTLS::
   const auto mode_stack_len = TorchDispatchModeTLS::stack_len();
   if (mode_stack_len > 0) {
     return get_stack_at(mode_stack_len - 1);
+  }
+  // Then check for a functional mode if there is one
+  if (torchDispatchModeState.functional_mode_ != c10::nullopt) {
+    return torchDispatchModeState.functional_mode_;
   }
   // Then check for a proxy mode if there is one
   if (torchDispatchModeState.proxy_mode_ != c10::nullopt) {
@@ -136,6 +179,7 @@ void TorchDispatchModeTLS::set_state(TorchDispatchModeTLS state) {
   torchDispatchModeState = std::move(state);
   if (torchDispatchModeState.stack_.empty() &&
       torchDispatchModeState.proxy_mode_ == c10::nullopt &&
+      torchDispatchModeState.functional_mode_ == c10::nullopt &&
       torchDispatchModeState.fake_mode_ == c10::nullopt) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
     c10::impl::tls_set_dispatch_key_included(
@@ -149,14 +193,15 @@ void TorchDispatchModeTLS::set_state(TorchDispatchModeTLS state) {
 
 // UTIL
 
-bool dispatch_mode_enabled(bool skip_proxy_and_fake) {
-  if (skip_proxy_and_fake) {
+bool dispatch_mode_enabled(bool skip_proxy_and_fake_and_functional) {
+  if (skip_proxy_and_fake_and_functional) {
     return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python) &&
         TorchDispatchModeTLS::stack_len() > 0;
   }
   return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python) &&
       (TorchDispatchModeTLS::stack_len() > 0 ||
        TorchDispatchModeTLS::get_proxy_mode() != c10::nullopt ||
+       TorchDispatchModeTLS::get_functional_mode() != c10::nullopt ||
        TorchDispatchModeTLS::get_fake_mode() != c10::nullopt);
 }
 
