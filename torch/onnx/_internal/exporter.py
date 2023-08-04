@@ -89,17 +89,16 @@ class OnnxRegistry:
     fixed opset version. It supports registering custom onnx-script functions and for
     dispatcher to dispatch calls to the appropriate function.
 
-    Attributes:
-        _registry: The registry maps OpNameto a list of SymbolicFunctions. It is important
-            not to directly modify this variable. Instead, access to it should be done through
-            the public methods: register_custom_op, get_functions, and is_registered_op.
-
     """
 
     def __init__(self) -> None:
         """Initializes the registry"""
+
+        # NOTE: _registry is the registry maps OpNameto a list of ONNXFunctions. It is important
+        # not to directly modify this variable. Instead, access to it should be done through
+        # the public methods: register_custom_op, get_ops, and is_registered_op.
         self._registry: Dict[
-            registration.OpName, List[registration.SymbolicFunction]
+            registration.OpName, List[registration.ONNXFunction]
         ] = defaultdict(list)
         # FIXME: Avoid importing onnxscript into torch
         from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
@@ -108,6 +107,7 @@ class OnnxRegistry:
         )
 
         # opset_version is unused for now, since torchlib only supports opset18.
+        # TODO: get opset version from torchlib
         self._opset_version = _DEFAULT_OPSET_VERSION
         warnings.warn(
             f"Torchlib only supports opset version {self._opset_version} for now. If you need to use a \
@@ -137,7 +137,7 @@ class OnnxRegistry:
         for aten_name, aten_overloads_func in torchlib_registry.items():
             internal_name_instance = registration.OpName.from_qualified_name(aten_name)
             for overload_func in aten_overloads_func.overloads:
-                symbolic_function = registration.SymbolicFunction(
+                symbolic_function = registration.ONNXFunction(
                     onnx_function=overload_func,
                     op_full_name=internal_name_instance.qualified_name(),
                     is_custom=False,
@@ -146,7 +146,7 @@ class OnnxRegistry:
                 self._register(internal_name_instance, symbolic_function)
 
             for complex_func in aten_overloads_func.complex:
-                symbolic_function = registration.SymbolicFunction(
+                symbolic_function = registration.ONNXFunction(
                     onnx_function=complex_func,
                     op_full_name=internal_name_instance.qualified_name(),
                     is_custom=False,
@@ -158,18 +158,18 @@ class OnnxRegistry:
     def _register(
         self,
         internal_qualified_name: registration.OpName,
-        symbolic_function: registration.SymbolicFunction,
+        symbolic_function: registration.ONNXFunction,
     ) -> None:
-        """Registers a SymbolicFunction to an operator.
+        """Registers a ONNXFunction to an operator.
 
         Args:
             internal_qualified_name: The qualified name of the operator to register: OpName.
-            symbolic_function: The SymbolicFunction to register.
+            symbolic_function: The ONNXFunction to register.
         """
         self._registry[internal_qualified_name].append(symbolic_function)
 
     @_beartype.beartype
-    def register_custom_op(
+    def register_op(
         self,
         function: Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"],
         namespace: str,
@@ -193,7 +193,7 @@ class OnnxRegistry:
         internal_name_instance = registration.OpName.from_name_parts(
             namespace=namespace, op_name=op_name, overload=overload
         )
-        symbolic_function = registration.SymbolicFunction(
+        symbolic_function = registration.ONNXFunction(
             onnx_function=function,
             op_full_name=internal_name_instance.qualified_name(),
             is_custom=True,
@@ -202,10 +202,10 @@ class OnnxRegistry:
         self._register(internal_name_instance, symbolic_function)
 
     @_beartype.beartype
-    def get_functions(
+    def get_op_functions(
         self, namespace: str, op_name: str, overload: Optional[str] = None
-    ) -> Optional[List[registration.SymbolicFunction]]:
-        """Returns a list of SymbolicFunctions for the given op: torch.ops.<namespace>.<op_name>.<overload>.
+    ) -> Optional[List[registration.ONNXFunction]]:
+        """Returns a list of ONNXFunctions for the given op: torch.ops.<namespace>.<op_name>.<overload>.
 
         The list is ordered by the time of registration. The custom operators should be
         in the second half of the list.
@@ -216,7 +216,7 @@ class OnnxRegistry:
             overload: The overload of the operator to get. If it's default overload,
                 leave it to None.
         Returns:
-            A list of SymbolicFunctions corresponding to the given name, or None if
+            A list of ONNXFunctions corresponding to the given name, or None if
             the name is not in the registry.
         """
         internal_name_instance = registration.OpName.from_name_parts(
@@ -239,7 +239,7 @@ class OnnxRegistry:
         Returns:
             True if the given op is registered, otherwise False.
         """
-        functions = self.get_functions(
+        functions = self.get_op_functions(
             namespace=namespace, op_name=op_name, overload=overload
         )
         return functions is not None

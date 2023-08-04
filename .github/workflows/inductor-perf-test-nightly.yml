@@ -78,6 +78,8 @@ jobs:
           { config: "inductor_torchbench_perf", shard: 3, num_shards: 4, runner: "linux.gcp.a100.large" },
           { config: "inductor_torchbench_perf", shard: 4, num_shards: 4, runner: "linux.gcp.a100.large" },
         ]}
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
   linux-bionic-cuda11_8-py3_10-gcc7-inductor-test-nightly:
     name: cuda11.8-py3.10-gcc7-sm80
@@ -91,6 +93,8 @@ jobs:
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
   linux-bionic-cuda11_8-py3_10-gcc7-inductor-test:
     name: cuda11.8-py3.10-gcc7-sm80
@@ -104,3 +108,5 @@ jobs:
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}

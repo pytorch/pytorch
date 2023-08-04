@@ -39,11 +39,11 @@ class TestRegistration(common_utils.TestCase):
         def custom_add(x, y):
             return op.Add(x, y)
 
-        self.registry.register_custom_op(custom_add, "test", "test_op", "default")
+        self.registry.register_op(custom_add, "test", "test_op", "default")
         self.assertTrue(self.registry.is_registered_op("test", "test_op", "default"))
 
-        # Test on get_functions
-        function_group = self.registry.get_functions("test", "test_op", "default")
+        # Test on get_ops
+        function_group = self.registry.get_op_functions("test", "test_op", "default")
         self.assertIsNotNone(function_group)
         self.assertEqual({func.onnx_function for func in function_group}, {custom_add})  # type: ignore[arg-type]
 
@@ -58,7 +58,7 @@ class TestRegistration(common_utils.TestCase):
         internal_name_instance = registration.OpName.from_name_parts(
             namespace="test", op_name="test_op", overload="default"
         )
-        symbolic_fn = registration.SymbolicFunction(
+        symbolic_fn = registration.ONNXFunction(
             test_original, op_full_name=internal_name_instance.qualified_name()
         )
         self.registry._register(internal_name_instance, symbolic_fn)
@@ -68,9 +68,9 @@ class TestRegistration(common_utils.TestCase):
         def test_custom(x, y):
             return op.Add(x, y)
 
-        self.registry.register_custom_op(test_custom, "test", "test_op")
+        self.registry.register_op(test_custom, "test", "test_op")
 
-        function_group = self.registry.get_functions("test", "test_op")
+        function_group = self.registry.get_op_functions("test", "test_op")
         assert function_group is not None
         # The order does matter (list)
         self.assertEqual(
@@ -280,12 +280,12 @@ class TestDispatcher(common_utils.TestCase):
         op_full_name = "test::test_op"
 
         custom_overloads = [
-            registration.SymbolicFunction(
+            registration.ONNXFunction(
                 test_custom_op, op_full_name=op_full_name, is_custom=True
             )
         ]
         function_overloads = [
-            registration.SymbolicFunction(test_default_op, op_full_name=op_full_name)
+            registration.ONNXFunction(test_default_op, op_full_name=op_full_name)
         ] + custom_overloads
 
         symbolic_fn = self.dispatcher._find_the_perfect_or_nearest_match_onnxfunction(
@@ -344,13 +344,13 @@ class TestDispatcher(common_utils.TestCase):
         op_full_name = "aten::add"
 
         function_overloads = [
-            registration.SymbolicFunction(
+            registration.ONNXFunction(
                 test_first_custom_op, op_full_name=op_full_name, is_custom=True
             ),
-            registration.SymbolicFunction(
+            registration.ONNXFunction(
                 test_second_custom_op, op_full_name=op_full_name, is_custom=True
             ),
-            registration.SymbolicFunction(
+            registration.ONNXFunction(
                 test_third_custom_op, op_full_name=op_full_name, is_custom=True
             ),
         ]

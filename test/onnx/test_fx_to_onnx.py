@@ -214,7 +214,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             def forward(self, input):
                 return torch.ops.aten.add.Tensor(input, input)
 
-        # _DEFAULT_OPSET_VERSION = 18
         onnx_registry = torch.onnx.OnnxRegistry()
         self.assertTrue(
             onnx_registry.is_registered_op(

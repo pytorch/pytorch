@@ -7590,6 +7590,10 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     for input, target, kwargs in gen_shape_kwargs():
         yield SampleInput(input, args=(target,), kwargs=kwargs)
 
+    target = torch.tensor([-1, 2], device=device, dtype=torch.long)
+    yield SampleInput(make_input(shape), args=(target,), kwargs={'ignore_index': -1})
+
+
 def sample_inputs_binary_cross_entropy_with_logits(
     op_info, device, dtype, requires_grad, **kwargs
 ):
@@ -8776,6 +8780,15 @@ foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         'zero',
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
+    ),
+
+    ForeachFuncInfo(
+        'sign',
+        dtypes=floating_types_and(torch.bool, torch.bfloat16, torch.half),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
