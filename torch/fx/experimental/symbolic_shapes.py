@@ -314,23 +314,23 @@ def _constrain_symbol_range(shape_env, s: sympy.Symbol, min: int, max: int):
 
     shape_env.runtime_var_to_range[s] = shape_env.var_to_range[s]
 
-def _constrain_symbol_range_for_size(shape_env, s: sympy.Symbol, max: int):
+def _constrain_symbol_range_for_size(shape_env, s: sympy.Symbol):
     if r := shape_env.var_to_range.get(s, None):
         shape_env.var_to_range[s] = ValueRanges(
-            builtins.max(r.lower, 2), builtins.min(r.upper, max)
+            builtins.max(r.lower, 2), builtins.min(r.upper, sys.maxsize)
         )
     else:
-        shape_env.var_to_range[s] = ValueRanges(2, max)
+        shape_env.var_to_range[s] = ValueRanges(2, sys.maxsize)
 
     # The only reason r.lower > 0 is that this symbol is constrained before via constrain_as_value,
     # so we should respect that
     if r := shape_env.runtime_var_to_range.get(s, None):
         shape_env.var_to_range[s] = ValueRanges(
-            builtins.max(r.lower, 0), builtins.min(r.upper, max)
+            builtins.max(r.lower, 0), builtins.min(r.upper, sys.maxsize)
         )
 
     else:
-        shape_env.runtime_var_to_range[s] = ValueRanges(0, max)
+        shape_env.runtime_var_to_range[s] = ValueRanges(0, sys.maxsize)
 
 
 # inclusive both ways
@@ -367,9 +367,17 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
         values at runtime (we assume that a graph that is valid for N=2 will
         also be valid for N=1).
     """
-    assert max is not None
-    if min is None:
-        return _constrain_symbol_range_for_size(a.node.shape_env, a.node.expr, max)
+
+    if (min is None) and (max is None):
+        return _constrain_symbol_range_for_size(a.node.shape_env, a.node.expr)
+
+    # They either need to be None or have concrete value
+    assert (min is not None) and (max is not None)
+
+    if isinstance(a, int):
+        if not (min <= a <= max):
+            raise ValueError(f"Invalid value {a} for range [{min}:{max}]")
+        return
 
     if isinstance(a.node.expr, sympy.Integer):
         if not (min <= int(a.node.expr) <= max):

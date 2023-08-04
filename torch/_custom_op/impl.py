@@ -766,7 +766,7 @@ class AbstractImplCtx:
             )
 
         result = self._shape_env.create_unbacked_symint()
-        torch.fx.experimental.symbolic_shapes.constrain_range(result, min=2, max=max)
+        torch.fx.experimental.symbolic_shapes.constrain_range(result, min=2, max=max if max else sys.maxsize)
         return result
 
 

@@ -23,13 +23,34 @@ namespace native {
 void sym_constrain_range(
     const Scalar& size,
     c10::optional<int64_t> min,
-    c10::optional<int64_t> max) {}
+    c10::optional<int64_t> max) {
+      if (min.has_value()) {
+        TORCH_CHECK(
+          size.toInt() >= min.value(),
+          "Constraining value ",
+          size.toInt(),
+          " is smaller than the minimum value ",
+          min.value()
+        );
+      }
+
+      if (max.has_value()) {
+        TORCH_CHECK(
+          size.toInt() <= max.value(),
+          "Constraining value ",
+          size.toInt(),
+          " is larger than the maximum value ",
+          max.value()
+        );
+      }
+    }
 
 Tensor _functional_sym_constrain_range(
     const Scalar& size,
     c10::optional<int64_t> min,
     c10::optional<int64_t> max,
     const Tensor& dep_token) {
+  sym_constrain_range(size, min, max);
   return dep_token.clone();
 }
 

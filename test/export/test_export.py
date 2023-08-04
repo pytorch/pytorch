@@ -21,7 +21,7 @@ class TestDynamismExpression(TestCase):
 
         def f(x):
             b = x.item()
-            constrain_as_size(b, max=5)
+            constrain_as_size(b)
             return torch.full((b, 1), 1)
 
         inp = (torch.tensor([3]),)
@@ -55,7 +55,7 @@ class TestDynamismExpression(TestCase):
 
         def conflicting_constraints(x):
             b = x.item()
-            constrain_as_size(b, max=3)
+            constrain_as_size(b)
             constrain_as_value(b, min=4, max=5)
             return torch.full((b, 1), 1)
 
@@ -155,25 +155,6 @@ class TestExport(TestCase):
         x = torch.randn(3, 5)
         with self.assertRaisesRegex(RuntimeError, "\\[1\\] is specialized at 4"):
             em(x)
-
-    def test_export_constrain_static(self):
-        def f(x, y):
-            b = x.item()
-            constrain_as_size(b, max=5)
-            c = y.dim()
-            constrain_as_value(c, min=1, max=3)
-            z = y[0:c]
-            return torch.empty((b, y.shape[0])), z
-
-        x = torch.tensor([3])
-        y = torch.randn([8, 8, 6])
-        example_inputs = (x, y)
-        constraints = [dynamic_dim(y, 0) >= 6, dynamic_dim(y, 0) <= 10]
-        with self.assertRaisesRegex(
-            torchdynamo.exc.UserError, "It appears that you're trying to set a constraint " +
-            "on a value which we evaluated to have a static value of 3. "
-        ):
-            export(f, example_inputs, {}, constraints)
 
     def test_not_correct_dim(self):
         def f(x):
@@ -535,7 +516,7 @@ class TestExport(TestCase):
     def test_constrain_size_in_eager(self):
         def fn(x, y):
             n = x.max().item()
-            constrain_as_size(n, 10)
+            constrain_as_size(n)
             return y + n
 
         ep = export(fn, (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3))))
@@ -546,12 +527,12 @@ class TestExport(TestCase):
         def fn(x, y):
             n = x.max().item()
             constrain_as_value(n, 2, 10)
-            constrain_as_size(n, 8)
+            constrain_as_size(n)
             return y + n
 
         # Since we are using constrain_as_value, we expect to raise error when user
         # passes in invalid tracing input
-        with self.assertRaisesRegex(ValueError, r"Invalid value 1 for range \[2:10\]"):
+        with self.assertRaisesRegex(RuntimeError, "Constraining value 1 is smaller than the minimum value 2"):
             _ = export(fn, (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3))))
 
 

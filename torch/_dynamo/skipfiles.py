@@ -145,6 +145,10 @@ FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "ao/quantization/pt2e/utils.py",
 }
 
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "_export/constraints.py",
+}
+
 # TODO (zhxchen17) Make exportdb importable here.
 FILENAME_ALLOWLIST |= set(
     glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
