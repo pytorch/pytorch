@@ -1334,7 +1334,7 @@ class TestIndexing(TestCase):
             idx1 = torch.tensor([0])
             idx2 = torch.tensor([2, 6])
             idx3 = torch.tensor([1, 5, 7])
-            
+
             tensor_a = torch.rand(13, 11, 12, 13, 12).cpu()
             tensor_b = tensor_a.to(device=device)
             tensor_a[idx1] = 1.0
@@ -1357,10 +1357,16 @@ class TestIndexing(TestCase):
             tensor_b[:, idx1] = 4.0
             self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
 
-            tensor_a = torch.rand(10).cpu()
+            tensor_a = torch.rand(10, 10).cpu()
             tensor_b = tensor_a.to(device=device)
             tensor_a[[8]] = 1.0
             tensor_b[[8]] = 1.0
+            self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
+            tensor_a = torch.rand(10).cpu()
+            tensor_b = tensor_a.to(device=device)
+            tensor_a[6] = 1.0
+            tensor_b[6] = 1.0
             self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
 
 
