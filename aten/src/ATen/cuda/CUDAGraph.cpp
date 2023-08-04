@@ -135,7 +135,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
 
   // Stashes the current capture's uuid.
   cudaStreamCaptureStatus status;
-  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status));
+  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, nullptr));
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
 
   id_ = id;
