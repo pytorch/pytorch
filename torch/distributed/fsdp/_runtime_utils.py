@@ -170,6 +170,7 @@ def _find_max_unsharded_numel(
 
 
 @no_type_check
+@torch.no_grad()
 def _create_ping_pong_buffers(
     root_state: _FSDPState,
 ):
