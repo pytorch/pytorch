@@ -36,8 +36,6 @@ except RuntimeError:
     HAS_TORCHVISION = False
 skip_if_no_torchvision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
-ONNX_OPSET_VERSION_TO_TEST = 18
-
 
 def _parameterized_class_attrs_and_values():
     input_values = []
@@ -75,7 +73,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def setUp(self):
         super().setUp()
-        self.opset_version = ONNX_OPSET_VERSION_TO_TEST
         self.ort_version = onnxruntime.__version__
 
     def test_simple_function(self):
@@ -149,7 +146,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             tensor_x,
             8.0,
             export_options=torch.onnx.ExportOptions(
-                opset_version=self.opset_version,
                 op_level_debug=self.op_level_debug,
                 dynamic_shapes=self.dynamic_shapes,
             ),
@@ -642,7 +638,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 # all files that contains real initializers.
 
                 options = torch.onnx.ExportOptions(
-                    opset_version=self.opset_version,
                     dynamic_shapes=self.dynamic_shapes,
                     op_level_debug=self.op_level_debug,
                 )
@@ -804,7 +799,6 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def setUp(self):
         super().setUp()
-        self.opset_version = ONNX_OPSET_VERSION_TO_TEST
         self.ort_version = onnxruntime.__version__
 
     @_beartype.beartype
@@ -860,7 +854,6 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
                 # Export the model with fake inputs and parameters
                 export_options = torch.onnx.ExportOptions(
-                    opset_version=self.opset_version,
                     dynamic_shapes=self.dynamic_shapes,
                     op_level_debug=self.op_level_debug,
                     fake_context=fake_context,
