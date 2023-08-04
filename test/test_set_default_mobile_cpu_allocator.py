@@ -9,10 +9,10 @@ class TestSetDefaultMobileCPUAllocator(TestCase):
         torch._C._unset_default_mobile_cpu_allocator()
 
     def test_exception(self):
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             torch._C._unset_default_mobile_cpu_allocator()
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             torch._C._set_default_mobile_cpu_allocator()
             torch._C._set_default_mobile_cpu_allocator()
 
@@ -20,7 +20,7 @@ class TestSetDefaultMobileCPUAllocator(TestCase):
         # For next test.
         torch._C._unset_default_mobile_cpu_allocator()
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             torch._C._set_default_mobile_cpu_allocator()
             torch._C._unset_default_mobile_cpu_allocator()
             torch._C._unset_default_mobile_cpu_allocator()

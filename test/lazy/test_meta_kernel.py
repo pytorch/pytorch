@@ -17,7 +17,7 @@ class TestMetaKernel(TestCase):
 
         fc_nobias = torch.nn.Linear(2, 2, bias=False, dtype=float32).to("lazy")
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             out_nobias = fc_nobias(input)
 
     def test_addmm(self):

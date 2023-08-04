@@ -2392,7 +2392,7 @@ class TestTEFuser(JitTestCase):
             with torch.jit.strict_fusion():
                 return x + x + torch.rand([4]) + 3
 
-        with self.assertRaises(Exception) as error_out:
+        with self.assertRaises(NameError) as error_out:
             foo_s = torch.jit.script(foo)
             foo_s(torch.rand([4]))
             foo_s(torch.rand([4]))
@@ -2412,7 +2412,7 @@ class TestTEFuser(JitTestCase):
 
         foo_s = torch.jit.script(test_autodiff)
         inp = torch.rand([4], requires_grad=True)
-        with self.assertRaises(Exception) as error_out:
+        with self.assertRaises(NameError) as error_out:
             for _ in range(3):
                 foo_s(inp)
         f = FileCheck().check("unfused operators").check("aten::rand")
@@ -2423,7 +2423,7 @@ class TestTEFuser(JitTestCase):
                 return x + x + x, y + y + y
 
         inp = torch.rand([4], requires_grad=True)
-        with self.assertRaises(Exception) as error_out:
+        with self.assertRaises(NameError) as error_out:
             for _ in range(3):
                 foo_s = torch.jit.script(test_separate_fusions)
                 foo_s(inp, inp)

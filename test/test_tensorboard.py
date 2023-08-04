@@ -356,11 +356,11 @@ class TestTensorBoardSummary(BaseTestCase):
         self.assertEqual(scale_factor, 255, msg='Values are in [0, 1], scale factor should be 255')
 
     def test_list_input(self):
-        with self.assertRaises(Exception) as e_info:
+        with self.assertRaises(NameError) as e_info:
             summary.histogram('dummy', [1, 3, 4, 5, 6], 'tensorflow')
 
     def test_empty_input(self):
-        with self.assertRaises(Exception) as e_info:
+        with self.assertRaises(NameError) as e_info:
             summary.histogram('dummy', np.ndarray(0), 'tensorflow')
 
     def test_image_with_boxes(self):

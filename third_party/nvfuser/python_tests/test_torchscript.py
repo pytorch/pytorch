@@ -3918,7 +3918,7 @@ class TestCudaFuser(JitTestCase):
             with torch.jit.strict_fusion():
                 return x + torch.mm(x, x) + x
 
-        with self.assertRaises(Exception) as error_out:
+        with self.assertRaises(NameError) as error_out:
             foo_s = torch.jit.script(failure)
             foo_s(torch.rand([4, 4]))
             foo_s(torch.rand([4, 4]))

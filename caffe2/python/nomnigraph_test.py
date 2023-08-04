@@ -81,7 +81,7 @@ class TestBindings(test_util.TestCase):
     def test_invalid_node(self):
         nn = ng.NNModule()
         dfg = nn.dataFlow
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             dfg.createNode(7)
 
     def test_edges_simple(self):
@@ -91,7 +91,7 @@ class TestBindings(test_util.TestCase):
         w = dfg.createNode(ng.NeuralNetData("W"))
         op = dfg.createNode(ng.NeuralNetOperator("Op"))
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             dfg.createEdge(x, w)
         dfg.createEdge(op, w)
         dfg.createEdge(x, op)
@@ -181,7 +181,7 @@ class TestBindings(test_util.TestCase):
             assert len(match) == 1
             count += 1
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             assert count == 1
 
     def test_match_graph(self):
@@ -439,5 +439,5 @@ class TestBindings(test_util.TestCase):
         d = caffe2_pb2.DeviceOption()
         nn = ng.NNModule(net, {"X": d, "W": d})
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             nn = ng.NNModule(net, {"X": d, "Fake": d})

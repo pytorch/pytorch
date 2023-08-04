@@ -26,7 +26,7 @@ target-version = "py38"
 # NOTE: Synchoronize the ignores with .flake8
 ignore = [
     # these ignores are from flake8-bugbear; please fix!
-    "B007", "B008", "B017",
+    "B007", "B008",
     "B018", # Useless expression
     "B019", "B020",
     "B023", "B024", "B026",

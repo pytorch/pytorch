@@ -73,7 +73,7 @@ class TestFakeQuantize(unittest.TestCase):
         apot_fake.disable_observer()
         apot_fake.enable_fake_quant()
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             apot_fake.forward(torch.clone(X), False)
 
     r""" Tests fake quantize helper backward() method

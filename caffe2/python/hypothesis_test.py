@@ -267,7 +267,7 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertReferenceChecks(gc, op, [X], softsign)
         if inplace:
-            with self.assertRaises(Exception):
+            with self.assertRaises(NameError):
                 self.assertGradientChecks(gc, op, [X], 0, [0])
         else:
             self.assertGradientChecks(gc, op, [X], 0, [0])
@@ -2791,7 +2791,7 @@ class TestOperators(hu.HypothesisTestCase):
         t = threading.Thread(target=_net_instance_cancel, args=[net_instance])
         t.start()
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             net_instance.run()
             t.join()
 

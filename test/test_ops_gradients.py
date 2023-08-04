@@ -46,7 +46,7 @@ class TestBwdGradients(TestGradients):
             for sample in op.sample_inputs(device, dtype, requires_grad=True):
                 if sample.broadcasts_input:
                     continue
-                with self.assertRaises(Exception):
+                with self.assertRaises(NameError):
                     result = inplace(sample)
                     result.sum().backward()
         else:

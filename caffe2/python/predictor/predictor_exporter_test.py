@@ -94,7 +94,7 @@ class PredictorExporterTest(unittest.TestCase):
         Test that passes intersecting parameters and input/output blobs
         '''
         m = self._create_model()
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             pe.PredictorExportMeta(
                 predict_net=m.net,
                 parameters=m.params,
@@ -102,7 +102,7 @@ class PredictorExporterTest(unittest.TestCase):
                 outputs=["y"],
                 shapes={"y": (1, 10), "data": (1, 5)},
             )
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             pe.PredictorExportMeta(
                 predict_net=m.net,
                 parameters=m.params,
@@ -230,7 +230,7 @@ class PredictorExporterTest(unittest.TestCase):
             self.assertEqual(caffe2_pb2.CPU, op.device_option.device_type)
 
     def test_db_fails_without_params(self):
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             for db_type in ["minidb"]:
                 db_file = tempfile.NamedTemporaryFile(
                     delete=False, suffix=".{}".format(db_type))

@@ -493,9 +493,9 @@ class TestOperatorTraceback(test_util.TestCase):
         a, b = net.AddExternalInput("a", "b")
         net.Mul([a, b], "c"); cf = currentframe(); line = cf.f_lineno
         func = cf.f_code.co_name
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             workspace.RunNetOnce(net)
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             workspace.CreateNet(net)
         self.op_name_check(net, cf, line, func)
 
@@ -505,10 +505,10 @@ class TestOperatorTraceback(test_util.TestCase):
         workspace.blobs[a] = np.array([1, 2, 3], dtype=np.float32)
         net.Split(a, ["b", "c"], axis=0); cf = currentframe(); line = cf.f_lineno
         func = cf.f_code.co_name
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             workspace.RunNetOnce(net)
         workspace.CreateNet(net)
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             workspace.RunNet(net)
         self.op_name_check(net, cf, line, func)
 
@@ -518,9 +518,9 @@ class TestOperatorTraceback(test_util.TestCase):
         net.Mul([a, b], "c"); cf = currentframe(); line = cf.f_lineno
         func = cf.f_code.co_name
         ws = workspace.C.Workspace()
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             ws.run(net)
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             ws.create_net(net)
         self.op_name_check(net, cf, line, func)
 
@@ -532,7 +532,7 @@ class TestOperatorTraceback(test_util.TestCase):
         ws = workspace.C.Workspace()
         ws.create_blob(str(a)).feed(np.array([1, 2, 3], dtype=np.float32))
         ws.create_net(net)
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             ws.run(net)
         self.op_name_check(net, cf, line, func)
 
@@ -543,7 +543,7 @@ class TestOperatorTraceback(test_util.TestCase):
         net.Split(a, ["b", "c"], axis=0); cf = currentframe(); line = cf.f_lineno
         func = cf.f_code.co_name
         workspace.FeedBlob(a, np.array([1, 2, 3], dtype=np.float32))
-        with self.assertRaises(Exception) as enforceNotMet:
+        with self.assertRaises(NameError) as enforceNotMet:
             workspace.RunNetOnce(net)
         self.assertIn('enforce fail', str(enforceNotMet.exception))
         self.op_name_check(net, cf, line, func)

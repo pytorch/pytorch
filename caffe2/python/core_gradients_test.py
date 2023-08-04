@@ -613,7 +613,7 @@ class TestGradientCalculation(test_util.TestCase):
         hidden, cell = net.LSTMUnit(
             [hidden_prev, cell, gates, seq_lengths, timestep],
             ["hidden_t", "cell_t"])
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             net.AddGradientOperators([hidden])
         net.ZeroGradient(cell, [])
         net.AddGradientOperators([hidden])

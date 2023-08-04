@@ -108,7 +108,7 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
 
     @with_comms
     def test_exception_logger(self) -> None:
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             self._failed_broadcast_raise_exception()
 
         with self.assertLogs(_c10d_logger, level="DEBUG") as captured:

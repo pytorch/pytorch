@@ -7702,7 +7702,7 @@ dedent """
             assert isinstance(x, Dict[str, torch.Tensor])
 
         foo({"1": torch.tensor(3)})
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             foo(2)
 
     def test_isinstance(self):

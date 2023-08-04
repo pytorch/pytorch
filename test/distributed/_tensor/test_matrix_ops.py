@@ -229,7 +229,7 @@ class DistMatrixOpsTest(DTensorTestBase):
                 spec for spec in shard_specs_comb if spec not in passlist
             ]
             for spec in shard_specs_comb:
-                with self.assertRaises(Exception):
+                with self.assertRaises(NameError):
                     test_placement_comb(
                         [spec[0]],
                         [spec[1]],

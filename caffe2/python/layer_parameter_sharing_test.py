@@ -175,7 +175,7 @@ class ParameterSharingTest(LayersTestCase):
                         weight_optim=self.model.NoOptim,
                     )
 
-                with scope.NameScope('scope_1'), self.assertRaises(Exception):
+                with scope.NameScope('scope_1'), self.assertRaises(NameError):
                     fc2_output = self.model.FC(
                         self.model.input_feature_schema.float_features,
                         output_dims
@@ -191,7 +191,7 @@ class ParameterSharingTest(LayersTestCase):
                         weight_optim=None,
                     )
 
-                with scope.NameScope('scope_1'), self.assertRaises(Exception):
+                with scope.NameScope('scope_1'), self.assertRaises(NameError):
                     fc2_output = self.model.FC(
                         self.model.input_feature_schema.float_features,
                         output_dims,
@@ -217,14 +217,14 @@ class ParameterSharingTest(LayersTestCase):
                         weight_optim=None,   # it will use adagrad_optim_2
                     )
 
-                with scope.NameScope('scope_1'), self.assertRaises(Exception):
+                with scope.NameScope('scope_1'), self.assertRaises(NameError):
                     fc2_output = self.model.FC(
                         self.model.input_feature_schema.float_features,
                         output_dims,
                         weight_optim=adagrad_optim,
                     )
 
-                with scope.NameScope('scope_2'), self.assertRaises(Exception):
+                with scope.NameScope('scope_2'), self.assertRaises(NameError):
                     fc2_output = self.model.FC(
                         self.model.input_feature_schema.float_features,
                         output_dims,

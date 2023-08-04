@@ -60,7 +60,7 @@ class TestPrims(TestCase):
             self.assertEqual(a, result)
 
             # Error input: reordering dims
-            with self.assertRaises(Exception):
+            with self.assertRaises(NameError):
                 result = fn(a, b, (1, 0))
 
             # Adding outermost dimensions

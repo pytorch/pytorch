@@ -8696,11 +8696,11 @@ class TestViewOpsMPS(TestCaseMPS):
     def test_narrow_tensor(self, device="mps"):
         x = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
         self.assertEqual(x.narrow(0, torch.tensor(0), 1), torch.tensor([[0, 1, 2]]))
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             x.narrow(0, torch.tensor(0.), 1)
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             x.narrow(0, torch.tensor([0]), 1)
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             x.narrow(0, torch.tensor([0, 1]), 1)
 
     def test_t(self, device="mps"):

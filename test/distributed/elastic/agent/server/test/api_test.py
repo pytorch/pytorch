@@ -462,7 +462,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
         agent = TestAgent(spec)
         worker_group = agent._worker_group
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             agent.run()
 
         self.assertEqual(WorkerState.UNKNOWN, worker_group.state)

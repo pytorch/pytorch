@@ -2843,12 +2843,12 @@ class TestSharding(TestCase):
 
         dp, _ = construct_sharded_pipe()
         dp.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DEFAULT)
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             dp.apply_sharding(5, 3, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
 
         dp, _ = construct_sharded_pipe()
         dp.apply_sharding(5, 3, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             dp.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DEFAULT)
 
     # Test tud.datapipes.iter.grouping.SHARDING_PRIORITIES for backward compatbility
@@ -2883,12 +2883,12 @@ class TestSharding(TestCase):
 
         dp, _ = construct_sharded_pipe()
         dp.apply_sharding(2, 1, sharding_group=LEGACY_SHARDING_PRIORITIES.DEFAULT)
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             dp.apply_sharding(5, 3, sharding_group=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING)
 
         dp, _ = construct_sharded_pipe()
         dp.apply_sharding(5, 3, sharding_group=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING)
-        with self.assertRaises(Exception):
+        with self.assertRaises(NameError):
             dp.apply_sharding(2, 1, sharding_group=LEGACY_SHARDING_PRIORITIES.DEFAULT)
 
     def test_legacy_custom_sharding(self):

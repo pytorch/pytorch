@@ -703,7 +703,7 @@ class TestCommon(TestCase):
 
             # Validates the op doesn't support out if it claims not to
             if not op.supports_out:
-                with self.assertRaises(Exception):
+                with self.assertRaises(NameError):
                     assert op_out(out=expected) != NotImplemented
                 return
 
@@ -823,7 +823,7 @@ class TestCommon(TestCase):
 
             # Validates the op doesn't support out if it claims not to
             if not op.supports_out:
-                with self.assertRaises(Exception):
+                with self.assertRaises(NameError):
                     assert op_out(out=expected) != NotImplemented
                 return
 

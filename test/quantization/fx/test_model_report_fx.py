@@ -1080,7 +1080,7 @@ class TestFxModelReportClass(QuantizationTestCase):
             self.assertNotEqual(graph_observer_cnt, 0)
 
             # make sure error when try to rerun report generation for full report but not single report
-            with self.assertRaises(Exception):
+            with self.assertRaises(NameError):
                 model_full_report = model_report_full.generate_model_report(
                     prepared_for_callibrate_model_full, False
                 )
@@ -1119,7 +1119,7 @@ class TestFxModelReportClass(QuantizationTestCase):
             prepared_for_callibrate_model(example_input)
 
             # try to visualize without generating report, should throw error
-            with self.assertRaises(Exception):
+            with self.assertRaises(NameError):
                 mod_rep_visualizaiton = mod_report.generate_visualizer()
 
             # now get the report by running it through ModelReport instance
