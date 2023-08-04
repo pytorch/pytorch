@@ -4655,9 +4655,6 @@ def fn():
             else:
                 return builtin_isinstance(obj, classinfo)
 
-        def patch_builtins():
-            builtins.__dict__["isinstance"] = patched_isinstance
-
         def fn(x, y):
             if isinstance(y, MyClass):
                 return x + 1
@@ -4667,13 +4664,16 @@ def fn():
         x = torch.ones(2, 3)
         y = MyClass()
 
-        ref = fn(x, y)
-        # Monkey patch builtin function
-        patch_builtins()
-        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
-        res = opt_fn(x, y)
-        self.assertTrue(same(ref, x + 1))
-        self.assertTrue(same(res, x - 1))
+        try:
+            ref = fn(x, y)
+            # Monkey patch builtin function
+            builtins.isinstance = patched_isinstance
+            opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+            res = opt_fn(x, y)
+            self.assertTrue(same(ref, x + 1))
+            self.assertTrue(same(res, x - 1))
+        finally:
+            builtins.isinstance = builtin_isinstance
 
     # specifically test for tensor.attribute -> torch.something()
     def test_real_imag_tensor_attribute(self):
