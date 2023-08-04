@@ -2613,10 +2613,7 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # not supported on MPS backend
                    DecorateInfo(skipMPS),
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   # FractionalMaxPool2d has a buffer _random_samples registered that is never updated
-                   # hence it does not warrant a reset_parameters and this is marked expected failure.
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_reset_parameters',))
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.FractionalMaxPool3d,
                module_inputs_func=module_inputs_torch_nn_FractionalMaxPool3d,
@@ -2624,10 +2621,7 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # not supported on MPS backend
                    DecorateInfo(skipMPS),
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   # FractionalMaxPool2d has a buffer _random_samples registered that is never updated
-                   # hence it does not warrant a reset_parameters and this is marked expected failure.
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_reset_parameters',))
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.L1Loss,
                module_inputs_func=module_inputs_torch_nn_L1Loss,
@@ -2952,13 +2946,7 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # No channels_last support for MultiheadAttention currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
-                   # MultiheadAttention has a private `_reset_parameters`.
-                   # However, promoting this to public API is insufficient!
-                   # Due to the ordering of the layer `out_proj`, which is initialized before everything
-                   # initialized by `_reset_params`, reseting `torch.manual_seed` and calling
-                   # _reset_parameters yields
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_reset_parameters'))
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.Embedding,
                module_inputs_func=module_inputs_torch_nn_Embedding,
@@ -2988,9 +2976,7 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # test fails on MPS backend and is being investigated.
                    # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),
-                   # Need simple fix to add `reset_parameters`
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_reset_parameters'),)
+                   DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.RNNCell,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True),
