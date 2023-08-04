@@ -4638,6 +4638,43 @@ def fn():
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
 
+    def test_patched_builtin_functions(self):
+        import builtins
+
+        # Cache the original builtin function ids
+        torch._dynamo.allowed_functions._builtin_function_ids()
+
+        class MyClass:
+            pass
+
+        builtin_isinstance = builtins.isinstance
+
+        def patched_isinstance(obj, classinfo) -> bool:
+            if builtin_isinstance(obj, MyClass):
+                return False
+            else:
+                return builtin_isinstance(obj, classinfo)
+
+        def fn(x, y):
+            if isinstance(y, MyClass):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.ones(2, 3)
+        y = MyClass()
+
+        try:
+            ref = fn(x, y)
+            # Monkey patch builtin function
+            builtins.isinstance = patched_isinstance
+            opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+            res = opt_fn(x, y)
+            self.assertTrue(same(ref, x + 1))
+            self.assertTrue(same(res, x - 1))
+        finally:
+            builtins.isinstance = builtin_isinstance
+
     # specifically test for tensor.attribute -> torch.something()
     def test_real_imag_tensor_attribute(self):
         def fn(x, y):
