@@ -154,6 +154,7 @@ test_failures = {
     "test_conv_backward_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_conv_functional_bn_fuse_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_convolution2_dynamic_shapes": TestFailure(("cpu",)),
+    "test_cumsum_dynamic_shapes": TestFailure(("cpu",)),
     "test_div8_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_embedding_bag_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_empty1_dynamic_shapes": TestFailure(("cpu", "cuda")),

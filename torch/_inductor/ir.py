@@ -1087,7 +1087,7 @@ class Scan(Loops):
     scan_ranges: List[Expr]
     scan_op: str  # TODO make this a callable
     reindex: Callable[[List[Expr], List[Expr]], List[Expr]]
-    reduction_hint: ReductionHint = ReductionHint.DEFAULT # TODO
+    reduction_hint: ReductionHint = ReductionHint.DEFAULT  # TODO
 
     # HACK we mimick reduction
 

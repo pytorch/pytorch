@@ -312,16 +312,21 @@ def check_model(
 
     correct_flat, correct_spec = tree_flatten(correct)
     actual_flat, _ = tree_flatten(actual)
-    if reference_in_float:
-        correct_flat = tuple(
+
+    def reference_to_expect(actual_flat, correct_flat):
+        return tuple(
             y.to(x.dtype)
             if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
             else y
             for x, y in zip(actual_flat, correct_flat)
         )
+
+    if reference_in_float:
+        correct_flat = reference_to_expect(actual_flat, correct_flat)
         correct = tree_unflatten(correct_flat, correct_spec)
 
     if assert_equal:
+        print(actual, correct)
         self.assertEqual(
             actual,
             correct,
@@ -379,9 +384,16 @@ def check_model(
             self.assertEqual(len(results_that_require_grad), 0)
         else:
             actual_grad = compute_grads(example_inputs, kwargs, actual, grads)
+            flat_actual, _ = tree_flatten(actual_grad)
+
+            if reference_in_float:
+                flat_expect = reference_to_expect(flat_actual, flat_grads)
+            else:
+                flat_expect = flat_grads
+
             self.assertEqual(
-                actual_grad,
-                correct_grad,
+                flat_actual,
+                flat_expect,
                 atol=atol,
                 rtol=rtol,
                 equal_nan=True,

@@ -1571,30 +1571,41 @@ class TritonKernel(Kernel):
             masks.append(self._load_mask)
         reduction_range_prefix = self.range_trees[-1].prefix
 
-        value = self.cse.generate(self.compute, f"tl.broadcast_to({value}, {self.dense_size_str()})")
+        value = self.cse.generate(
+            self.compute, f"tl.broadcast_to({value}, {self.dense_size_str()})"
+        )
 
         dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
         acc_type = triton_acc_type(dtype)
         cond = " & ".join(masks)
 
         if self.persistent_reduction:
-            masked_value = self.cse.generate(self.compute, f"tl.where({cond}, {value}, {default})")
-            result_var = self.cse.generate(self.compute, f"tl.cum{scan_op}({masked_value}, {dim})")
+            masked_value = self.cse.generate(
+                self.compute, f"tl.where({cond}, {value}, {default})"
+            )
+            result_var = self.cse.generate(
+                self.compute, f"tl.cum{scan_op}({masked_value}, {dim})"
+            )
         else:
             accumulator = self.cse.newvar()
             self.body.writeline(
                 f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
             )
 
-            masked_value = self.cse.generate(self.compute, f"tl.where({cond}, {value}, {default})")
+            masked_value = self.cse.generate(
+                self.compute, f"tl.where({cond}, {value}, {default})"
+            )
             combine_fn = ir.get_reduction_combine_fn(scan_op, dtype)
             partial_reduce = self.cse.generate(
-                self.compute,
-                self.reduction_resize(f"tl.{scan_op}({value}, {dim})")
+                self.compute, self.reduction_resize(f"tl.{scan_op}({value}, {dim})")
             )
             acc_next = combine_fn(accumulator, partial_reduce)
-            partial_scan = self.cse.generate(self.compute, f"tl.cum{scan_op}({masked_value}, {dim})")
-            result_var = self.cse.generate(self.compute, combine_fn(accumulator, partial_scan))
+            partial_scan = self.cse.generate(
+                self.compute, f"tl.cum{scan_op}({masked_value}, {dim})"
+            )
+            result_var = self.cse.generate(
+                self.compute, combine_fn(accumulator, partial_scan)
+            )
             self.compute.writeline(f"{accumulator} = {acc_next}")
 
         result_var.mask_vars = masks

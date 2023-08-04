@@ -3990,7 +3990,7 @@ def _make_scan_inner(x, *, axis, dtype):
     size = x.get_size()
     axis = _validate_reduction_axis(x, axis)[0]
 
-    pointwise_ranges = [*size[:axis], *size[axis + 1:]]
+    pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
     scan_ranges = [size[axis]]
 
     def reindex(index, scan_index):
@@ -4328,7 +4328,9 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
     fn = make_reduction("sum", override_return_dtype=dtype)
     return fn(x, axis, keepdims, dtype=dtype)
 
+
 fallback_cumsum = fallback_handler(aten.cumsum)
+
 
 @register_lowering(aten.cumsum)
 def cumsum(x, axis=None, dtype=None):
