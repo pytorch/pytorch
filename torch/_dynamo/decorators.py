@@ -1,6 +1,9 @@
+import dataclasses
+import logging
 from typing import TYPE_CHECKING
 
 import torch
+import torch._logging
 from . import allowed_functions
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
@@ -28,6 +31,31 @@ def run(fn=None):
         assert callable(fn)
         return RunOnlyContext()(fn)
     return RunOnlyContext()
+
+
+@dataclasses.dataclass
+class DebugFlags:
+    dynamo = logging.DEBUG
+    aot = logging.DEBUG
+    inductor = logging.DEBUG
+    pdb = True
+
+
+# Note - On Extending Debug
+# This kept coming back as a util that I would often hack out during various implementations
+# (FSDP, DTensor, Autograd, etc) as I got tired of sifting tall stacks and massive log dumps
+# to find the needle. This allows us to drop a breakpoint on the invocation of a specific
+# function, as well as to tune logging just for that function’s call.
+# Instead of boiling the ocean here and extending it to methods, modules, global vars,
+# local intermediates, etc - this starts with a common enough entry point, functions.
+# The mechanism here hooks into all call_function calls associated with the VT created
+# under the hood for this fn.Nothing in the implementation of the decorator or the internal
+# logic is overly opinionated on it being a function. It should be very easy to extend this
+# to globals, modules, methods, etc as needed (some of these might already just work?).
+def debug(fn, flags=DebugFlags()):
+    assert callable(fn)
+    fn._dynamo_debug_flagged = flags
+    return fn
 
 
 def disable(fn=None, recursive=True):

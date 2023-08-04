@@ -290,6 +290,32 @@ class DuplicateWarningChecker:
 graph_break_dup_warning_checker = DuplicateWarningChecker()
 
 
+@contextlib.contextmanager
+def preserve_log_state():
+    prev_state = torch._logging._internal._get_log_state()
+    torch._logging._internal._set_log_state(torch._logging._internal.LogState())
+    try:
+        yield
+    finally:
+        torch._logging._internal._set_log_state(prev_state)
+        torch._logging._internal._init_logs()
+
+
+@contextlib.contextmanager
+def debug_flags(flags):
+    with preserve_log_state():
+        # TODO(voz): No need to marshall, make a struct for set_logs
+        torch._logging.set_logs(
+            dynamo=flags.dynamo,
+            aot=flags.aot,
+            inductor=flags.inductor,
+            output_code=True,  # this is off by default
+        )
+        handler = add_file_handler()
+        yield
+        handler.close()
+
+
 def setup_compile_debug():
     compile_debug = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 

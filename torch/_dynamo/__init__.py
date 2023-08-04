@@ -5,6 +5,7 @@ from .convert_frame import replay
 from .decorators import (
     allow_in_graph,
     assume_constant_result,
+    debug,
     disable,
     disallow_in_graph,
     forbid_in_graph,
@@ -53,6 +54,7 @@ __all__ = [
     "is_compiling",
     "register_backend",
     "list_backends",
+    "debug",
 ]
 
 

@@ -210,6 +210,10 @@ class VariableBuilder:
             vt = self.tx.output.side_effects.track_object_existing(
                 self.source, value, vt
             )
+        if hasattr(value, "_dynamo_debug_flagged"):
+            # Note(voz): This should cover *most* things, certainly all inputs, user defined
+            # functions. See note - On Extending Debug
+            vt.set_debug_flags(value._dynamo_debug_flagged)
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt):

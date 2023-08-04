@@ -7,15 +7,7 @@ import torch._logging._internal
 from torch._dynamo.utils import LazyString
 import logging
 
-@contextlib.contextmanager
-def preserve_log_state():
-    prev_state = torch._logging._internal._get_log_state()
-    torch._logging._internal._set_log_state(torch._logging._internal.LogState())
-    try:
-        yield
-    finally:
-        torch._logging._internal._set_log_state(prev_state)
-        torch._logging._internal._init_logs()
+preserve_log_state = torch._dynamo.utils.preserve_log_state
 
 def log_settings(settings):
     exit_stack = contextlib.ExitStack()

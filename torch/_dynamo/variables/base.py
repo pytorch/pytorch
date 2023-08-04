@@ -6,7 +6,7 @@ from .. import variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
 from ..source import AttrSource, Source
-from ..utils import dict_values, identity, istype, odict_values
+from ..utils import debug_flags, dict_values, identity, istype, odict_values
 
 
 class MutableLocalSource(Enum):
@@ -328,12 +328,22 @@ class VariableTracker(metaclass=HasPostInit):
             )
         raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
+    def call_function_debug(self, fn):
+        def debug_wrapper(*args, **kwargs):
+            with debug_flags(self.debug_flags):
+                if self.debug_flags.pdb:
+                    breakpoint()
+                return fn(*args, **kwargs)
+
+        return debug_wrapper
+
     def __init__(
         self,
         guards: Optional[Set] = None,
         source: Source = None,
         mutable_local: MutableLocal = None,
         recursively_contains: Optional[Set] = None,
+        debug_flags=None,
     ):
         super().__init__()
         self.guards = guards or set()
@@ -342,6 +352,12 @@ class VariableTracker(metaclass=HasPostInit):
         self.recursively_contains = (
             recursively_contains  # provides hint to replace_all when replacing vars
         )
+        self.set_debug_flags(debug_flags)
+
+    def set_debug_flags(self, debug_flags):
+        self.debug_flags = debug_flags
+        if self.debug_flags:
+            self.call_function = self.call_function_debug(self.call_function)
 
     def __post_init__(self, *args, **kwargs):
         if self.recursively_contains is None:
