@@ -11,10 +11,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
-if [[ "$BUILD_ENVIRONMENT" == *-clang7-asan* ]]; then
-  exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
@@ -40,6 +36,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   if [[ "$BUILD_ENVIRONMENT" != *cuda11.3* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
     # TODO: there is a linking issue when building with UCC using clang,
     # disable it for now and to be fix later.
+    # TODO: disable UCC temporarily to enable CUDA 12.1 in CI
     export USE_UCC=1
     export USE_SYSTEM_UCC=1
   fi
@@ -167,6 +164,15 @@ if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CXX=clang++
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
+  export LDSHARED="clang --shared"
+  export USE_CUDA=0
+  export USE_ASAN=1
+  export USE_MKLDNN=0
+  export UBSAN_FLAGS="-fno-sanitize-recover=all;-fno-sanitize=float-divide-by-zero;-fno-sanitize=float-cast-overflow"
+  unset USE_LLVM
+fi
+
 if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
   export USE_PER_OPERATOR_HEADERS=0
 fi
@@ -196,7 +202,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
 
   if [[ "$CUDA_VERSION" == "cpu" ]]; then
     # Build torch, the Python module, and tests for CPU-only
-    tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" --config=cpu-only :torch :_C.so :all_tests
+    tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" --config=cpu-only :torch :torch/_C.so :all_tests
   else
     tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
   fi

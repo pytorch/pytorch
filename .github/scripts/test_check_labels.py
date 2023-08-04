@@ -15,7 +15,7 @@ from trymerge import GitHubPR
 
 
 def mock_parse_args() -> object:
-    class Object(object):
+    class Object:
         def __init__(self) -> None:
             self.pr_num = 76123
 
@@ -40,15 +40,17 @@ def mock_get_comments() -> List[GitHubComment]:
             author_association="",
             editor_login=None,
             database_id=1,
+            url="",
         ),
         # Case 2 - a label err comment
         GitHubComment(
-            body_text=" #" + LABEL_ERR_MSG_TITLE,
+            body_text=" #" + LABEL_ERR_MSG_TITLE.replace("`", ""),
             created_at="",
             author_login=BOT_AUTHORS[1],
             author_association="",
             editor_login=None,
             database_id=2,
+            url="",
         ),
     ]
 

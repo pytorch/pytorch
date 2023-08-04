@@ -45,7 +45,7 @@ def transform_file_name(
                 return file_path[file_path.find(folder) :]
     # remove pytorch base folder path
     if platform == TestPlatform.OSS:
-        from package.oss.utils import get_pytorch_folder
+        from package.oss.utils import get_pytorch_folder  # type: ignore[import]
 
         pytorch_foler = get_pytorch_folder()
         assert file_path.startswith(pytorch_foler)
@@ -57,7 +57,7 @@ def is_intrested_file(
     file_path: str, interested_folders: List[str], platform: TestPlatform
 ) -> bool:
     ignored_patterns = ["cuda", "aten/gen_aten", "aten/aten_", "build/"]
-    if any([pattern in file_path for pattern in ignored_patterns]):
+    if any(pattern in file_path for pattern in ignored_patterns):
         return False
 
     # ignore files that are not belong to pytorch

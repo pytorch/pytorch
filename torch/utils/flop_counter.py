@@ -1,8 +1,10 @@
 import torch
+import torch.nn as nn
 from torch.utils._pytree import tree_map
-from typing import List, Any, Dict, Optional, Union
+from typing import List, Any, Dict, Optional, Union, NamedTuple
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils.hooks import RemovableHandle
 from math import prod
 
 __all__ = ["FlopCounterMode"]
@@ -14,7 +16,7 @@ def get_shape(i):
         return i.shape
     return i
 
-def mm_flop(a_shape, b_shape, out=None) -> int:
+def mm_flop(a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
     """
     Count flops for matmul.
     """
@@ -26,13 +28,13 @@ def mm_flop(a_shape, b_shape, out=None) -> int:
     # NB(chilli): Should be 2 * k - 1 technically for FLOPs.
     return m * n * 2 * k
 
-def addmm_flop(self_shape, a_shape, b_shape, out=None, **kwargs) -> int:
+def addmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
     """
     Count flops for addmm
     """
     return mm_flop(a_shape, b_shape)
 
-def bmm_flop(a_shape, b_shape, out=None) -> int:
+def bmm_flop(a_shape, b_shape, out_shape=None, **kwargs) -> int:
     """
     Count flops for the bmm operation.
     """
@@ -46,7 +48,7 @@ def bmm_flop(a_shape, b_shape, out=None) -> int:
     flop = b * m * n * 2 * k
     return flop
 
-def baddbmm_flop(self_shape, a_shape, b_shape, out=None) -> int:
+def baddbmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
     """
     Count flops for the baddbmm operation.
     """
@@ -83,11 +85,11 @@ def conv_flop_count(
     flop = batch_size * prod(conv_shape) * c_out * prod(dims) * 2 * c_in
     return flop
 
-def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed, *args, out=None, **kwargs) -> int:
+def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed, *args, out_shape=None, **kwargs) -> int:
     """
     Count flops for convolution.
     """
-    return conv_flop_count(x_shape, w_shape, out, transposed=transposed)
+    return conv_flop_count(x_shape, w_shape, out_shape, transposed=transposed)
 
 def transpose_shape(shape):
     return [shape[1], shape[0]] + list(shape[2:])
@@ -104,14 +106,14 @@ def conv_backward_flop(
         _output_padding,
         _groups,
         output_mask,
-        out) -> int:
+        out_shape) -> int:
     flop_count = 0
 
     if output_mask[0]:
-        grad_input_shape = get_shape(out[0])
+        grad_input_shape = get_shape(out_shape[0])
         flop_count += conv_flop_count(grad_out_shape, w_shape, grad_input_shape, not transposed)
     if output_mask[1]:
-        grad_weight_shape = get_shape(out[1])
+        grad_weight_shape = get_shape(out_shape[1])
         flop_count += conv_flop_count(transpose_shape(x_shape), grad_out_shape, grad_weight_shape, transposed)
 
     return flop_count
@@ -134,7 +136,7 @@ def sdpa_flop_count(query_shape, key_shape, value_shape):
 
 
 
-def sdpa_flop(query_shape, key_shape, value_shape, *args, out=None, **kwargs) -> int:
+def sdpa_flop(query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """
     Count flops for self-attention.
     """
@@ -169,7 +171,7 @@ def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape
     return total_flops
 
 
-def sdpa_backward_flop(grad_out_shape, query_shape, key_shape, value_shape, *args, out=None, **kwargs) -> int:
+def sdpa_backward_flop(grad_out_shape, query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """
     Count flops for self-attention backward.
     """
@@ -208,7 +210,7 @@ def get_suffix_str(number):
 def convert_num_with_suffix(number, suffix):
     index = suffixes.index(suffix)
     # Divide the number by 1000^index and format it to two decimal places
-    value = "{:.3f}".format(number / (1000 ** index))
+    value = f"{number / 1000 ** index:.3f}"
     # Return the value and the suffix as a string
     return value + suffixes[index]
 
@@ -234,7 +236,7 @@ class FlopCounterMode(TorchDispatchMode):
             mods: Optional[Union[torch.nn.Module, List[torch.nn.Module]]] = None,
             depth: int = 2,
             display: bool = True,
-            custom_mapping: Dict[Any, Any] = None):
+            custom_mapping: Optional[Dict[Any, Any]] = None):
         self.flop_counts: Dict[str, Dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.parents = ["Global"]
@@ -244,17 +246,31 @@ class FlopCounterMode(TorchDispatchMode):
         if isinstance(mods, torch.nn.Module):
             mods = [mods]
         self.mods = mods
-        if mods is not None:
-            for mod in mods:
-                prefix = type(mod).__name__
-                for name, module in dict(mod.named_modules()).items():
-                    if name == "":
-                        name = prefix
-                    else:
-                        name = ".".join([prefix, name])
-                    module.register_forward_pre_hook(self._enter_module(name))
-                    module.register_forward_hook(self._exit_module(name))
+        # Keys will include the modules in `mods` and their submodules
+        self._module_to_forward_hook_handles: Dict[nn.Module, _ForwardHookHandles] = {}
         self.flop_mapping = {**flop_mapping, **custom_mapping}
+
+    def _register_forward_hooks(self):
+        if self.mods is None:
+            return
+        for mod in self.mods:
+            prefix = type(mod).__name__
+            for name, module in dict(mod.named_modules()).items():
+                if name == "":
+                    name = prefix
+                else:
+                    name = ".".join([prefix, name])
+                forward_pre_hook_handle = module.register_forward_pre_hook(self._enter_module(name))
+                forward_hook_handle = module.register_forward_hook(self._exit_module(name))
+                self._module_to_forward_hook_handles[module] = _ForwardHookHandles(
+                    forward_pre_hook_handle, forward_hook_handle
+                )
+
+    def _deregister_forward_hooks(self):
+        for forward_hook_handles in self._module_to_forward_hook_handles.values():
+            forward_hook_handles[0].remove()
+            forward_hook_handles[1].remove()
+        self._module_to_forward_hook_handles.clear()
 
     def _enter_module(self, name):
         def f(module, inputs):
@@ -306,6 +322,9 @@ class FlopCounterMode(TorchDispatchMode):
 
         return PopState.apply
 
+    def get_total_flops(self) -> int:
+        return sum(self.flop_counts['Global'].values())
+
     def get_flop_counts(self) -> Dict[str, Dict[Any, int]]:
         """Returns the flop counts as a dictionary of dictionaries. The outer
         dictionary is keyed by module name, and the inner dictionary is keyed by
@@ -326,7 +345,7 @@ class FlopCounterMode(TorchDispatchMode):
         tabulate.PRESERVE_WHITESPACE = True
         header = ["Module", "FLOP", "% Total"]
         values = []
-        global_flops = sum(self.flop_counts['Global'].values())
+        global_flops = self.get_total_flops()
         global_suffix = get_suffix_str(global_flops)
         is_global_subsumed = False
 
@@ -342,13 +361,13 @@ class FlopCounterMode(TorchDispatchMode):
             values.append([
                 padding + mod_name,
                 convert_num_with_suffix(total_flops, global_suffix),
-                "{:.2f}%".format(total_flops / global_flops * 100)
+                f"{total_flops / global_flops * 100:.2f}%"
             ])
             for k, v in self.flop_counts[mod_name].items():
                 values.append([
                     padding + " - " + str(k),
                     convert_num_with_suffix(v, global_suffix),
-                    "{:.2f}%".format(v / global_flops * 100)
+                    f"{v / global_flops * 100:.2f}%"
                 ])
             return values
 
@@ -379,12 +398,14 @@ class FlopCounterMode(TorchDispatchMode):
 
     def __enter__(self):
         self.flop_counts.clear()
+        self._register_forward_hooks()
         super().__enter__()
         return self
 
     def __exit__(self, *args):
         if self.display:
             print(self.get_table(self.depth))
+        self._deregister_forward_hooks()
         super().__exit__(*args)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -394,8 +415,12 @@ class FlopCounterMode(TorchDispatchMode):
         if func_packet in self.flop_mapping:
             flop_count_func = self.flop_mapping[func_packet]
             args, kwargs, out_shape = tree_map(get_shape, (args, kwargs, out))
-            flop_count = flop_count_func(*args, **kwargs, out=out_shape)  # type: ignore[operator]
+            flop_count = flop_count_func(*args, **kwargs, out_shape=out_shape)  # type: ignore[operator]
             for par in self.parents:
                 self.flop_counts[par][func_packet] += flop_count
 
         return out
+
+class _ForwardHookHandles(NamedTuple):
+    forward_pre_hook_handle: RemovableHandle
+    forward_hook_handle: RemovableHandle

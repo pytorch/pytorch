@@ -177,7 +177,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }
 
-Tensor mkldnn_linear_pointwise(
+static Tensor mkldnn_linear_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
     const c10::optional<Tensor>& bias_opt,
@@ -194,7 +194,9 @@ Tensor mkldnn_linear_pointwise(
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
   output_size.push_back(weight_t.size(0));
   auto output = at::empty(output_size, input.options());
-
+  if (output.sym_numel() == 0) {
+    return output;
+  }
   if (dim != 2) {
     std::vector<int64_t> output_size_reshaped = {input_reshaped.size(0),
                                                  weight_t.size(0)};
@@ -225,23 +227,17 @@ Tensor mkldnn_linear_pointwise(
   }
 
   if (mkldnn_bias.has_value()) {
-    ideep::inner_product_forward::compute(
+    ideep::inner_product_forward::compute</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input,
         w,
         mkldnn_bias.value(),
         mkldnn_output,
-        ideep::scale_t(),
-        ideep::scale_t(),
-        ideep::scale_t(),
         op_attr);
   } else {
-    ideep::inner_product_forward::compute(
+    ideep::inner_product_forward::compute</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input,
         w,
         mkldnn_output,
-        ideep::scale_t(),
-        ideep::scale_t(),
-        ideep::scale_t(),
         op_attr);
   }
 
@@ -252,7 +248,7 @@ Tensor mkldnn_linear_pointwise(
   return output;
 }
 
-Tensor mkldnn_linear_pointwise_binary(
+static Tensor mkldnn_linear_pointwise_binary(
     const Tensor& input_t,
     const Tensor& other_t,
     const Tensor& weight_t,
@@ -280,6 +276,9 @@ Tensor mkldnn_linear_pointwise_binary(
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
   output_size.push_back(weight_t.size(0));
   auto output = at::empty(output_size, input.options());
+  if (output.sym_numel() == 0) {
+    return output;
+  }
   auto other_reshaped = other_t.contiguous();
 
   if (dim != 2) {
@@ -308,7 +307,7 @@ Tensor mkldnn_linear_pointwise_binary(
   auto op_attr = ideep::attr_t::fuse_binary(it_binary->second, other_desc);
 
   if (mkldnn_bias.has_value()) {
-    ideep::inner_product_forward::compute_binary(
+    ideep::inner_product_forward::compute_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input,
         mkldnn_other,
         w,
@@ -316,7 +315,7 @@ Tensor mkldnn_linear_pointwise_binary(
         mkldnn_output,
         op_attr);
   } else {
-    ideep::inner_product_forward::compute_binary(
+    ideep::inner_product_forward::compute_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input, mkldnn_other, w, mkldnn_output, op_attr);
   }
 
@@ -330,7 +329,7 @@ Tensor mkldnn_linear_pointwise_binary(
 #if AT_MKL_ENABLED()
 #include <mkl.h>
 
-Tensor mkl_linear(
+static Tensor mkl_linear(
     const Tensor& self,
     const Tensor& mkl_weight_t,
     const Tensor& origin_weight_t,
@@ -363,6 +362,13 @@ Tensor mkl_linear(
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
   output_size.push_back(origin_weight_t.size(0));
   auto output = at::empty(output_size, self.options());
+  if (self.sym_numel() == 0) {
+    // avoid to call self.numel() / 0 when self.size(self.dim() - 1)==0.
+    return output.fill_(0);
+  }
+  if (output.sym_numel() == 0) {
+    return output;
+  }
   int64_t M = self.numel() / self.size(self.dim() - 1);
   if (M == prepack_batch_size && mkl_weight_t.is_mkldnn()) {
     auto self_ = self.is_contiguous() ? self : self.contiguous();
@@ -411,7 +417,7 @@ TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
 
 #else // AT_MKL_ENABLED
 
-Tensor mkl_linear(
+static Tensor mkl_linear(
     const Tensor& self,
     const Tensor& mkl_weight_t,
     const Tensor& origin_weight_t,

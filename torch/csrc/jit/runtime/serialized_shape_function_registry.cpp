@@ -940,7 +940,7 @@ def mv(self: List[int],
     ceil_mode: bool) -> List[int]:
   _0 = "AssertionError: max_pool2d: kernel_size must either be a single int, or a tuple of two ints"
   _1 = "AssertionError: max_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
-  _2 = "AssertionError: max_pool2d: padding must be either be a single int, or a tuple of two ints"
+  _2 = "AssertionError: max_pool2d: padding must either be a single int, or a tuple of two ints"
   _3 = "AssertionError: max_pool2d: dilation must be either a single int, or a tuple of two ints"
   _4 = "AssertionError: stride should not be zeero"
   _5 = "AssertionError: stride should not be zeero"
@@ -1153,7 +1153,7 @@ def mv(self: List[int],
     ceil_mode: bool) -> Tuple[List[int], List[int]]:
   _0 = "AssertionError: max_pool2d: kernel_size must either be a single int, or a tuple of two ints"
   _1 = "AssertionError: max_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
-  _2 = "AssertionError: max_pool2d: padding must be either be a single int, or a tuple of two ints"
+  _2 = "AssertionError: max_pool2d: padding must either be a single int, or a tuple of two ints"
   _3 = "AssertionError: max_pool2d: dilation must be either a single int, or a tuple of two ints"
   _4 = "AssertionError: stride should not be zeero"
   if torch.eq(torch.len(kernel_size), 1):
@@ -1772,7 +1772,8 @@ def transpose(self: List[int],
     _3 = torch.append(out0, elem0)
   return (out, out0, [grad_output[1]])
 
-def conv_forwards(input: List[int],
+)=====")
++ std::string(R"=====(def conv_forwards(input: List[int],
     weight: List[int],
     bias: Optional[List[int]],
     stride: List[int],
@@ -1782,6 +1783,7 @@ def conv_forwards(input: List[int],
     output_padding: List[int],
     groups: int) -> List[int]:
   has_dilation = torch.gt(torch.len(dilation), 0)
+  has_output_padding = torch.gt(torch.len(output_padding), 0)
   dim = torch.len(input)
   output_size = annotate(List[int], [])
   if transposed:
@@ -1789,27 +1791,91 @@ def conv_forwards(input: List[int],
   else:
     weight_output_channels_dim = 0
   _0 = torch.append(output_size, input[0])
-  _1 = torch.append(output_size, weight[weight_output_channels_dim])
-  for _2 in range(torch.__range_length(2, dim, 1)):
-    d = torch.__derive_index(_2, 2, 1)
+  if transposed:
+    _1 = torch.mul(weight[weight_output_channels_dim], groups)
+    _2 = torch.append(output_size, _1)
+  else:
+    _3 = torch.append(output_size, weight[weight_output_channels_dim])
+  for _4 in range(torch.__range_length(2, dim, 1)):
+    d = torch.__derive_index(_4, 2, 1)
     if has_dilation:
       dilation_ = dilation[torch.sub(d, 2)]
     else:
       dilation_ = 1
+    if has_output_padding:
+      output_padding_ = output_padding[torch.sub(d, 2)]
+    else:
+      output_padding_ = 0
     if transposed:
       kernel = torch.mul(dilation_, torch.sub(weight[d], 1))
-      _3 = torch.mul(torch.sub(input[d], 1), stride[torch.sub(d, 2)])
-      _4 = torch.mul(padding[torch.sub(d, 2)], 2)
-      _5 = torch.add(torch.sub(_3, _4), kernel)
-      _6 = torch.append(output_size, torch.add(_5, 1))
+      _5 = torch.mul(torch.sub(input[d], 1), stride[torch.sub(d, 2)])
+      _6 = torch.mul(padding[torch.sub(d, 2)], 2)
+      _7 = torch.add(torch.sub(_5, _6), kernel)
+      _8 = torch.add(torch.add(_7, output_padding_), 1)
+      _9 = torch.append(output_size, _8)
     else:
-      _7 = torch.mul(dilation_, torch.sub(weight[d], 1))
-      kernel0 = torch.add(_7, 1)
-      _8 = input[d]
-      _9 = torch.mul(padding[torch.sub(d, 2)], 2)
-      _10 = torch.sub(torch.add(_8, _9), kernel0)
-      _11 = torch.floordiv(_10, stride[torch.sub(d, 2)])
-      _12 = torch.append(output_size, torch.add(_11, 1))
+      _10 = torch.mul(dilation_, torch.sub(weight[d], 1))
+      kernel0 = torch.add(_10, 1)
+      _11 = input[d]
+      _12 = torch.mul(padding[torch.sub(d, 2)], 2)
+      _13 = torch.sub(torch.add(_11, _12), kernel0)
+      _14 = torch.floordiv(_13, stride[torch.sub(d, 2)])
+      _15 = torch.append(output_size, torch.add(_14, 1))
+  return output_size
+
+)=====")
++ std::string(R"=====(def _conv_forwards(input: List[int],
+    weight: List[int],
+    bias: Optional[List[int]],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    transposed: bool,
+    output_padding: List[int],
+    groups: int,
+    benchmark: bool,
+    deterministic: bool,
+    cudnn_enabled: bool,
+    allow_tf32: bool) -> List[int]:
+  has_dilation = torch.gt(torch.len(dilation), 0)
+  has_output_padding = torch.gt(torch.len(output_padding), 0)
+  dim = torch.len(input)
+  output_size = annotate(List[int], [])
+  if transposed:
+    weight_output_channels_dim = 1
+  else:
+    weight_output_channels_dim = 0
+  _0 = torch.append(output_size, input[0])
+  if transposed:
+    _1 = torch.mul(weight[weight_output_channels_dim], groups)
+    _2 = torch.append(output_size, _1)
+  else:
+    _3 = torch.append(output_size, weight[weight_output_channels_dim])
+  for _4 in range(torch.__range_length(2, dim, 1)):
+    d = torch.__derive_index(_4, 2, 1)
+    if has_dilation:
+      dilation_ = dilation[torch.sub(d, 2)]
+    else:
+      dilation_ = 1
+    if has_output_padding:
+      output_padding_ = output_padding[torch.sub(d, 2)]
+    else:
+      output_padding_ = 0
+    if transposed:
+      kernel = torch.mul(dilation_, torch.sub(weight[d], 1))
+      _5 = torch.mul(torch.sub(input[d], 1), stride[torch.sub(d, 2)])
+      _6 = torch.mul(padding[torch.sub(d, 2)], 2)
+      _7 = torch.add(torch.sub(_5, _6), kernel)
+      _8 = torch.add(torch.add(_7, output_padding_), 1)
+      _9 = torch.append(output_size, _8)
+    else:
+      _10 = torch.mul(dilation_, torch.sub(weight[d], 1))
+      kernel0 = torch.add(_10, 1)
+      _11 = input[d]
+      _12 = torch.mul(padding[torch.sub(d, 2)], 2)
+      _13 = torch.sub(torch.add(_11, _12), kernel0)
+      _14 = torch.floordiv(_13, stride[torch.sub(d, 2)])
+      _15 = torch.append(output_size, torch.add(_14, 1))
   return output_size
 
 )=====")
@@ -1829,6 +1895,11 @@ def conv_forwards(input: List[int],
     padding0 = [0, 0]
   else:
     padding0 = unchecked_cast(List[int], padding)
+  if torch.__is__(output_padding, None):
+    output_padding0 = [0, 0]
+  else:
+    output_padding1 = unchecked_cast(List[int], output_padding)
+    output_padding0 = output_padding1
   if torch.__is__(dilation, None):
     dilation0 = [1, 1]
   else:
@@ -1837,7 +1908,7 @@ def conv_forwards(input: List[int],
   dim = torch.len(input)
   output_size = annotate(List[int], [])
   _0 = torch.append(output_size, input[0])
-  _1 = torch.append(output_size, weight[1])
+  _1 = torch.append(output_size, torch.mul(weight[1], groups))
   for _2 in range(torch.__range_length(2, dim, 1)):
     d = torch.__derive_index(_2, 2, 1)
     if has_dilation:
@@ -1848,7 +1919,8 @@ def conv_forwards(input: List[int],
     _3 = torch.mul(torch.sub(input[d], 1), stride0[torch.sub(d, 2)])
     _4 = torch.mul(padding0[torch.sub(d, 2)], 2)
     _5 = torch.add(torch.sub(_3, _4), kernel)
-    _6 = torch.append(output_size, torch.add(_5, 1))
+    _6 = torch.add(_5, output_padding0[torch.sub(d, 2)])
+    _7 = torch.append(output_size, torch.add(_6, 1))
   return output_size
 
 )=====")
@@ -2944,6 +3016,64 @@ def native_batch_norm(input: List[int],
   return (out, _size, _size)
 
 )=====")
++ std::string(R"=====(def cross_entropy_loss(self: List[int],
+    target: List[int],
+    weight: Optional[List[int]]=None,
+    reduction: int=1,
+    ignore_index: int=-100,
+    label_smoothing: float=0.) -> List[int]:
+  self_dim = torch.len(self)
+  target_dim = torch.len(target)
+  if torch.lt(0, self_dim):
+    _0 = torch.le(self_dim, 2)
+  else:
+    _0 = False
+  if _0:
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.le(target_dim, 1):
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.eq(self_dim, 1):
+    no_batch_dim = torch.eq(target_dim, 0)
+  else:
+    no_batch_dim = False
+  if no_batch_dim:
+    _1 = True
+  else:
+    _1 = torch.eq(self[0], target[0])
+  if _1:
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  n_classes = self[-1]
+  if torch.__is__(weight, None):
+    _2 = True
+  else:
+    weight0 = unchecked_cast(List[int], weight)
+    if torch.eq(torch.len(weight0), 1):
+      _3 = torch.eq(weight0[0], n_classes)
+    else:
+      _3 = False
+    _2 = _3
+  if _2:
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.eq(reduction, 0):
+    _4 = torch.eq(self_dim, 2)
+  else:
+    _4 = False
+  if _4:
+    reduction_shape = [self[0]]
+  else:
+    reduction_shape = annotate(List[int], [])
+  _5 = (reduction_shape, annotate(List[int], []))
+  return (_5)[0]
+
+)=====")
 + std::string(R"=====(def broadcast_three(a: List[int],
     b: List[int],
     c: List[int]) -> List[int]:
@@ -3153,6 +3283,7 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
     {"aten::convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)", "conv_backwards"},
     {"aten::convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor", "conv_forwards"},
+    {"aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) -> Tensor", "_conv_forwards"},
     {"aten::conv_transpose2d.input(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int groups=1, int[2] dilation=1) -> Tensor", "conv_transpose2d_input"},
     {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
     {"aten::cat(Tensor[] tensors, int dim=0) -> Tensor", "cat"},
@@ -3182,6 +3313,7 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", "native_batch_norm"},
     {"aten::_native_batch_norm_legit(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", "native_batch_norm"},
     {"aten::_native_batch_norm_legit.no_stats(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", "native_batch_norm"},
+    {"aten::cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, SymInt ignore_index=-100, float label_smoothing=0.0) -> Tensor", "cross_entropy_loss"},
     {"aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor", "broadcast_three"},
     {"aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor", "broadcast_one_three"},
     {"aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", "broadcast_inplace"},

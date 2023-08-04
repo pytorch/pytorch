@@ -8,6 +8,7 @@ import copyreg
 import dataclasses
 import enum
 import functools
+import glob
 import importlib
 import inspect
 import linecache
@@ -31,23 +32,8 @@ import weakref
 
 import torch
 import torch._inductor.test_operators
-
-
-try:
-    import torch._prims
-
-    # isort: split
-    # TODO: Hack to unblock simultaneous landing changes. Fix after https://github.com/pytorch/pytorch/pull/81088 lands
-    import torch._prims.utils
-    import torch._prims.wrappers
-    import torch._refs
-    import torch._refs.nn
-    import torch._refs.nn.functional
-    import torch._refs.special
-
-    HAS_PRIMS_REFS = True
-except ImportError:
-    HAS_PRIMS_REFS = False
+import torch.distributed
+import torch.utils._content_store
 
 from . import comptime, config, external_utils
 
@@ -124,10 +110,19 @@ FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
     torch.set_rng_state.__code__.co_filename,
     torch._inductor.test_operators.__file__,
+    torch.utils._content_store.__file__,
     # These are dynamo files!
     external_utils.__file__,
     comptime.__file__,  # Want to inline these helpers
 }
+
+if torch.distributed.is_available():
+    # Inline the checkpoint code from distributed
+    import torch.distributed.algorithms._checkpoint.checkpoint_wrapper
+
+    FILENAME_ALLOWLIST |= {
+        torch.distributed.algorithms._checkpoint.checkpoint_wrapper.__file__
+    }
 
 # Include optimizer code for tracing
 FILENAME_ALLOWLIST |= {
@@ -136,17 +131,36 @@ FILENAME_ALLOWLIST |= {
     if inspect.isclass(obj)
 }
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
+FILENAME_ALLOWLIST |= {torch.utils._foreach_utils.__file__}
 
-if HAS_PRIMS_REFS:
-    FILENAME_ALLOWLIST |= {
-        torch._prims.__file__,
-        torch._prims.utils.__file__,
-        torch._prims.wrappers.__file__,
-        torch._refs.__file__,
-        torch._refs.special.__file__,
-        torch._refs.nn.functional.__file__,
-    }
+# Do trace through match and replace patterns used in PT2E QAT
+# Note: These patterns are comprised of torch ops and for internal use only.
+# They are exported to aten graphs before being passed to the FX subgraph rewriter.
+# TODO: find a better way to express this path without having to import
+# `torch.ao.quantization._pt2e`, which interferes with memory profiling
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "ao/quantization/pt2e/qat_utils.py",
+    _module_dir(torch) + "ao/quantization/quantizer/xnnpack_quantizer.py",
+    _module_dir(torch) + "ao/quantization/pt2e/representation/rewrite.py",
+    _module_dir(torch) + "ao/quantization/pt2e/utils.py",
+}
 
+# TODO (zhxchen17) Make exportdb importable here.
+FILENAME_ALLOWLIST |= set(
+    glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
+)
+
+# torch.func.grad: need to allow this file to be able to look at `grad_impl`
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "_functorch/apis.py",
+}
+
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "distributed/tensor/parallel/_utils.py",
+    _module_dir(torch) + "distributed/tensor/parallel/style.py",
+    _module_dir(torch) + "distributed/_tensor/api.py",
+    _module_dir(torch) + "distributed/_tensor/device_mesh.py",
+}
 
 SKIP_DIRS_RE = None
 
@@ -170,10 +184,7 @@ def add(import_name: str):
     if isinstance(import_name, types.ModuleType):
         return add(import_name.__name__)
     assert isinstance(import_name, str)
-    try:
-        module_spec = importlib.util.find_spec(import_name)
-    except Exception:
-        return
+    module_spec = importlib.util.find_spec(import_name)
     if not module_spec:
         return
     origin = module_spec.origin
@@ -200,6 +211,7 @@ def check(filename, allow_torch=False):
 # skip common third party libs
 for _name in (
     "functorch",
+    "fx2trt_oss",
     "intel_extension_for_pytorch",
     "networkx",
     "numpy",
@@ -213,11 +225,9 @@ for _name in (
     "tensorflow",
     "tensorrt",
     "torch2trt",
-    "torchrec.distributed",
     "tqdm",
     "tree",
     "tvm",
-    "fx2trt_oss",
     "xarray",
 ):
     add(_name)

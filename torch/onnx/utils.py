@@ -57,6 +57,7 @@ __all__ = [
     "setup_onnx_logging",
     "exporter_context",
     "export",
+    "model_signature",
     "warn_on_static_input_change",
     "unpack_quantized_tensor",
     "export_to_pretty_string",
@@ -204,6 +205,7 @@ def export(
     keep_initializers_as_inputs: Optional[bool] = None,
     custom_opsets: Optional[Mapping[str, int]] = None,
     export_modules_as_functions: Union[bool, Collection[Type[torch.nn.Module]]] = False,
+    autograd_inlining: Optional[bool] = True,
 ) -> None:
     r"""Exports a model into ONNX format.
 
@@ -452,6 +454,11 @@ def export(
             This may allow for better optimizations (e.g. constant folding) by
             backends/runtimes.
 
+            If True, `deduplicate_initializers` pass will not be executed. This means
+            initializers with duplicated values will not be deduplicated and
+            will be treated as distinct inputs to the graph. This allows different
+            input initializers to be supplied at the runtime following export.
+
             If ``opset_version < 9``, initializers MUST be part of graph
             inputs and this argument will be ignored and the behavior will be
             equivalent to setting this argument to True.
@@ -495,6 +502,9 @@ def export(
             * Set of type of nn.Module: export ``nn.Module`` forward calls as local function nodes,
                 only if the type of the ``nn.Module`` is found in the set.
 
+        autograd_inlining (bool, default True): Flag used to control whether to inline autograd functions.
+            Refer to https://github.com/pytorch/pytorch/pull/74765 for more details.
+
     Raises:
         :class:`torch.onnx.errors.CheckerError`: If the ONNX checker detects an invalid ONNX graph.
         :class:`torch.onnx.errors.UnsupportedOperatorError`: If the ONNX graph cannot be exported because it
@@ -519,6 +529,7 @@ def export(
         keep_initializers_as_inputs=keep_initializers_as_inputs,
         custom_opsets=custom_opsets,
         export_modules_as_functions=export_modules_as_functions,
+        autograd_inlining=autograd_inlining,
     )
 
 
@@ -580,7 +591,8 @@ def _optimize_graph(
     # Remove fork/wait nodes
     _C._jit_pass_inline_fork_wait(graph)
     _C._jit_pass_lint(graph)
-    _C._jit_pass_onnx_autograd_function_process(graph)
+    if GLOBALS.autograd_inlining:
+        _C._jit_pass_onnx_autograd_function_process(graph)
     _C._jit_pass_lower_all_tuples(graph)
 
     # we now record some ops like ones/zeros
@@ -1224,6 +1236,7 @@ def _model_to_graph(
 
 
 @_beartype.beartype
+@torch._disable_dynamo
 def export_to_pretty_string(
     model,
     args,
@@ -1482,6 +1495,7 @@ def _export(
     add_node_names=True,
     onnx_shape_inference=True,
     export_modules_as_functions=False,
+    autograd_inlining=True,
 ):
     assert GLOBALS.in_onnx_export is False
 
@@ -1533,6 +1547,8 @@ def _export(
 
     try:
         GLOBALS.in_onnx_export = True
+        _autograd_inlining_previous = GLOBALS.autograd_inlining
+        GLOBALS.autograd_inlining = autograd_inlining
 
         module_typenames_to_export_as_functions: Set[str] = set()
         if isinstance(model, (torch.nn.Module, torch.jit.ScriptModule)):
@@ -1592,9 +1608,11 @@ def _export(
                     module_typenames_to_export_as_functions,
                     list(params_dict.keys()),
                 )
-            params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
-                graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
-            )
+
+            if keep_initializers_as_inputs is not True:
+                params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
+                    graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
+                )
             _C._jit_pass_onnx_assign_scoped_names_for_node_and_value(graph)
             if export_params:
                 (
@@ -1657,6 +1675,7 @@ def _export(
     finally:
         assert GLOBALS.in_onnx_export
         GLOBALS.in_onnx_export = False
+        GLOBALS.autograd_inlining = _autograd_inlining_previous
         _reset_trace_module_map()
 
     return torch_out
@@ -2064,3 +2083,9 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
                 else:
                     value_dict[x] = str(key) + "_dynamic_axes_" + str(i + 1)
             dynamic_axes[key] = value_dict
+
+
+def model_signature(model: Union[torch.nn.Module, Callable]) -> inspect.Signature:
+    return inspect.signature(
+        model.forward if isinstance(model, torch.nn.Module) else model
+    )

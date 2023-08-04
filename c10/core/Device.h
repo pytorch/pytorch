@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/core/DeviceType.h>
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
 
 #include <cstddef>
@@ -81,6 +81,11 @@ struct C10_API Device final {
     return type_ == DeviceType::CUDA;
   }
 
+  /// Return true if the device is of PrivateUse1 type.
+  bool is_privateuseone() const noexcept {
+    return type_ == DeviceType::PrivateUse1;
+  }
+
   /// Return true if the device is of MPS type.
   bool is_mps() const noexcept {
     return type_ == DeviceType::MPS;
@@ -109,6 +114,11 @@ struct C10_API Device final {
   /// Return true if the device is of XLA type.
   bool is_xla() const noexcept {
     return type_ == DeviceType::XLA;
+  }
+
+  /// Return true if the device is of MTIA type.
+  bool is_mtia() const noexcept {
+    return type_ == DeviceType::MTIA;
   }
 
   /// Return true if the device is of HPU type.
@@ -144,6 +154,11 @@ struct C10_API Device final {
   /// Return true if the device is of CPU type.
   bool is_cpu() const noexcept {
     return type_ == DeviceType::CPU;
+  }
+
+  /// Return true if the device is of PrivateUse1 type.
+  bool is_privateuse1() const noexcept {
+    return type_ == DeviceType::PrivateUse1;
   }
 
   /// Return true if the device supports arbitrary strides.

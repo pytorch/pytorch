@@ -345,9 +345,9 @@ void cpu_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop, int
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
   // dynamic casting not currently supported on CPU, but some kernels (like Fill)
   // explicitly dynamic_cast, so we give the opt-out of checking.
-  c10::guts::if_constexpr<check_dynamic_cast>([&] {
+  if constexpr (check_dynamic_cast) {
     TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
-  });
+  }
 
   iter.for_each(make_vectorized_loop2d(op, vop), grain_size);
   iter.cast_outputs();

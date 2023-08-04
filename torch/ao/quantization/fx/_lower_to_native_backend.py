@@ -170,6 +170,8 @@ def is_general_tensor_shape_node(node, modules):
     ]
     module_type_list = [
         torch.nn.Identity,
+        torch.nn.PixelShuffle,
+        torch.nn.PixelUnshuffle,
     ]
     return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 
@@ -512,7 +514,7 @@ def _match_static_pattern(
     matched_dequantize = False
     for i in dequantize_node_arg_indices:
         assert i < len(ref_node.args),\
-            "Dequantize index %s exceeded reference node's arg length %s" % (i, len(ref_node.args))
+            f"Dequantize index {i} exceeded reference node's arg length {len(ref_node.args)}"
         arg = ref_node.args[i]
         if is_dequantize_node(arg):
             matched_dequantize = True
@@ -755,7 +757,7 @@ def _lower_weight_only_weighted_ref_module(model: GraphModule):
         # TODO: maybe define a WeightedWeightOnlyQuantizedModule
         q_module = q_class.from_reference(ref_module)  # type: ignore[union-attr]
 
-        # replace reference moduel with dynamically quantized module
+        # replace reference module with dynamically quantized module
         parent_name, module_name = _parent_name(ref_node.target)
         setattr(named_modules[parent_name], module_name, q_module)
 
@@ -817,7 +819,7 @@ def _lower_static_weighted_ref_functional(
             if (len(prepack_args) > 6):
                 prepack_args[5], prepack_args[6] = prepack_args[6], prepack_args[5]
         else:
-            raise ValueError("Lowering is not supported for op '%s'" % func_node.target)
+            raise ValueError(f"Lowering is not supported for op '{func_node.target}'")
         with model.graph.inserting_before(output_scale_node):
             # kwargs of the func node are needed for prepack op (i.e., quantized::linear_prepack)
             # They are not needed for compute op (i.e., quantized::linear)
@@ -933,7 +935,7 @@ def _lower_dynamic_weighted_ref_functional(
                     if len(prepack_args) > i and isinstance(prepack_args[i], int):
                         prepack_args[i] = (prepack_args[i],)
         else:
-            raise ValueError("Lowering is not supported for op '%s'" % func_node.target)
+            raise ValueError(f"Lowering is not supported for op '{func_node.target}'")
         with model.graph.inserting_before(func_node):
             packed_weight = model.graph.create_node("call_function", prepack_op, tuple(prepack_args), {})
 
@@ -981,7 +983,7 @@ def _lower_quantized_binary_op(
         assert bop_node.target in QBIN_OP_MAPPING
         binop_to_qbinop = QBIN_OP_MAPPING if relu_node is None else QBIN_RELU_OP_MAPPING
         qbin_op = binop_to_qbinop[bop_node.target]
-        # prepare the args for quantized bianry op
+        # prepare the args for quantized binary op
         # (x, y)
         qop_node_args = list(bop_node.args)
         # (x, y, scale, zero_point)

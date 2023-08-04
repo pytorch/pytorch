@@ -1,23 +1,36 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
+import operator
 from typing import Callable, cast, Dict, List, Sequence, Tuple, Union
 
 import torch
 
 import torch.distributed as dist
 import torch.distributed._tensor.api as dtensor
-from torch.distributed._tensor.op_schema import ArgsType, KwargsType, OutputSpecType
+import torch.distributed._tensor.random as random
+from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor.op_schema import (
+    ArgsType,
+    KwargsType,
+    OpSchema,
+    OutputSharding,
+    OutputSpecType,
+)
 from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed._tensor.random import is_rng_supported_mesh
 from torch.distributed._tensor.redistribute import redistribute_dtensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
-"""
-If _ENABLE_FALLBACK set to False, dispatch will fail when an op doesn't
-have a sharding rule registered.
-"""
-_ENABLE_FALLBACK = False
+def _is_random_op(op):
+    aten = torch.ops.aten
+    random_ops = [
+        aten.native_dropout.default,
+        aten.normal_.default,
+        aten.uniform_.default,
+    ]
+    return op in random_ops
 
 
 def wrap(res: object, spec: OutputSpecType) -> object:
@@ -99,6 +112,16 @@ def operator_dispatch(
     kwargs: Dict[str, object],
     sharding_propagator: ShardingPropagator,
 ) -> object:
+    out, _, _ = _operator_dispatch(op_call, args, kwargs, sharding_propagator)
+    return out
+
+
+def _operator_dispatch(
+    op_call: torch._ops.OpOverload,
+    args: Tuple[object, ...],
+    kwargs: Dict[str, object],
+    sharding_propagator: ShardingPropagator,
+) -> Tuple[object, OpSchema, OutputSharding]:
     # check that we are not getting mixed vanilla and Distributed tensors
     arg_list, _ = tree_flatten(args)
     mesh = None
@@ -118,31 +141,39 @@ def operator_dispatch(
             else:
                 mesh = arg.device_mesh
 
-    # first we need to lift some private aten aliases to public calls
-    if op_call in _CURRENT_DECOMPOSITION_TABLE:
-        return _CURRENT_DECOMPOSITION_TABLE[op_call](*args, **kwargs)
-
     # unwrap the args/kwargs schema
     op_schema = sharding_propagator.prepare_op_schema(op_call, args, kwargs)
 
-    output_sharding = sharding_propagator.propagate_op_sharding(op_call, op_schema)
+    output_sharding = sharding_propagator.propagate(op_call, op_schema)
+
+    # first we need to lift some private aten aliases to public calls
+    if op_call in _CURRENT_DECOMPOSITION_TABLE:
+        return (
+            _CURRENT_DECOMPOSITION_TABLE[op_call](*args, **kwargs),
+            op_schema,
+            output_sharding,
+        )
 
     # if the schema suggestion from sharding prop is not the same instance as the
     # input op_schema, it indicates a reshard, we need to redistribute the input
     # tensors before calling the local op
     assert output_sharding.schema_suggestions is not None
     suggested_input_schema = output_sharding.schema_suggestions[0]
-    needs_redistribute = suggested_input_schema is not op_schema
+    needs_redistribute = (
+        suggested_input_schema
+        != sharding_propagator.prepare_op_schema(op_call, args, kwargs)
+    )
 
     if mesh is not None and mesh.get_coordinate() is None:
         # For a non-participating device, we do:
-        # 1. if the return type is scalar, all gather the local result
-        # from participating devices, and reduce on the list of results
-        # with appropriate operators.
-        #   for bool type, we by default use AND to reduce;
-        #   we can extend for more ops if necessary.
-        # 2. if the return type is Tensor or List[Tensor], return empty
-        # tensor(s) with correct dtype.
+        #   1. if the return type is scalar, set the local result to None.
+        #   The local results from all devices will then be all-gathered
+        #   and a reduce op will be performed on the list of results
+        #   with appropriate operators:
+        #       for bool type, we by default use AND to reduce;
+        #       we can extend for more ops if necessary.
+        #   2. if the return type is Tensor or List[Tensor], return empty
+        #   tensor(s) with correct dtype.
         spec = output_sharding.output_spec
         ret_list = op_schema.func_schema.returns
         if len(ret_list) != 1:
@@ -153,21 +184,9 @@ def operator_dispatch(
             )
 
         if spec is None:
-            # return a scalar value
-            # collect local results from participating ranks
-            obj_list = [None for _ in range(dist.get_world_size())]
-            dist.all_gather_object(obj_list, None)
-            obj_list = list(filter(lambda x: x is not None, obj_list))
-            # perform reduce on the collection with AND op
-            ret_type = str(ret_list[0].type)
-            if ret_type == "bool":
-                import operator
-
-                local_results: object = functools.reduce(operator.and_, obj_list, True)
-            else:
-                raise NotImplementedError(
-                    f"return type {ret_type} in DTensor op is not supported"
-                )
+            # For a scalar return type, the non-participating device has None
+            # as its local result
+            local_results: object = None
         else:
 
             def default_tensor(spec: DTensorSpec) -> torch.Tensor:
@@ -209,26 +228,38 @@ def operator_dispatch(
             suggested_input_schema.kwargs_schema,
             redistribute_with_schema=needs_redistribute,
         )
-
         # run local op computation with potentially modified args/kwargs
         local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
         local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
-        local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
-        if (
-            (mesh is not None)
-            and (mesh.mesh.numel() < dist.get_world_size())
-            and (output_sharding.output_spec is None)
-        ):
-            # communicate the result to non-participating ranks if
-            # op runs on a submesh and return type is scalar value
+        assert isinstance(mesh, DeviceMesh)
+        if _is_random_op(op_call) and is_rng_supported_mesh(mesh):
+            if not random._rng_tracker:
+                raise RuntimeError(
+                    "A CudaRNGStateTracker instance must be instantiated "
+                    "before executing a random op over a DTensor. "
+                    "Try calling random.manual_seed() or distribute_tensor() "
+                    "before executing a DTensor random op."
+                )
+            # For DTensor random operator, run it within a distribute region
+            with random._rng_tracker._distribute_region(arg_list[0]._spec):
+                local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
+        else:
+            local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
+
+    # communicate the result to all ranks for some operators that return scalar value
+    if output_sharding.output_spec is None:
+        if op_call == torch.ops.aten.equal.default:
             obj_list = [None for _ in range(dist.get_world_size())]
             dist.all_gather_object(obj_list, local_results)
+            obj_list = list(filter(lambda x: x is not None, obj_list))
+            # perform reduce on the collection with AND op
+            local_results = functools.reduce(operator.and_, obj_list, True)
 
     if suggested_input_schema.is_inplace:
         # inplace op should return self instead of re-wrapping
         self = cast(dtensor.DTensor, args[0])
         self._spec = cast(DTensorSpec, output_sharding.output_spec)
-        return self
+        return self, op_schema, output_sharding
     elif suggested_input_schema.is_out_variant:
         # out variant could possibly have multiple out args (i.e. lu_unpack.out)
         output_specs = (
@@ -246,6 +277,14 @@ def operator_dispatch(
                 spec_idx += 1
 
         assert len(out_dts) >= 1, "out variant should have at least one out arg"
-        return tuple(out_dts) if len(out_dts) > 1 else out_dts[0]
+        return (
+            tuple(out_dts) if len(out_dts) > 1 else out_dts[0],
+            op_schema,
+            output_sharding,
+        )
     else:
-        return wrap(local_results, output_sharding.output_spec)
+        return (
+            wrap(local_results, output_sharding.output_spec),
+            op_schema,
+            output_sharding,
+        )

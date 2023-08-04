@@ -2,8 +2,9 @@ from ._ops import OpOverload
 from typing import Set
 import traceback
 import torch
+import weakref
 
-__all__ = ['Library', 'impl', 'define']
+__all__ = ['Library', 'impl', 'define', 'fallthrough_kernel']
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
@@ -14,6 +15,11 @@ _impls: Set[str] = set()
 # prim is reserved by TorchScript interpreter
 _reserved_namespaces = ['prim']
 
+def fallthrough_kernel():
+    """
+    A dummy function to pass to ``Library.impl`` in order to register a fallthrough.
+    """
+    raise NotImplementedError("fallthrough_kernel() should never be called.")
 
 class Library:
     """
@@ -24,28 +30,37 @@ class Library:
 
     To create a library to override operators in an existing library (with name ns), set the kind to "IMPL".
     To create a new library (with name ns) to register new operators, set the kind to "DEF".
+    To create a fragment of a possibly existing library to register operators (and bypass
+    the limitation that there is only one library for a given namespace), set the kind to
+    "FRAGMENT".
+
     Args:
         ns: library name
-        kind: "DEF", "IMPL" (default: "IMPL")
+        kind: "DEF", "IMPL" (default: "IMPL"), "FRAGMENT"
         dispatch_key: PyTorch dispatch key (default: "")
     """
     def __init__(self, ns, kind, dispatch_key=""):
-        if kind != "IMPL" and kind != "DEF":
+        if kind not in ('IMPL', 'DEF', 'FRAGMENT'):
             raise ValueError("Unsupported kind: ", kind)
 
-        if ns in _reserved_namespaces and kind == "DEF":
+        if ns in _reserved_namespaces and (kind == "DEF" or kind == 'FRAGMENT'):
             raise ValueError(ns, " is a reserved namespace. Please try creating a library with another name.")
 
         frame = traceback.extract_stack(limit=3)[0]
         filename, lineno = frame.filename, frame.lineno
         self.m = torch._C._dispatch_library(kind, ns, dispatch_key, filename, lineno)
         self.ns = ns
-        self._op_impls = set()
+        self._op_impls: Set[str] = set()
         self.kind = kind
         self.dispatch_key = dispatch_key
+        # Use a finalizer to setup the "destructor" instead of __del__.
+        # Python __del__ can lead to weird things (globals and locals may already
+        # be gone when __del__ actually gets called!). finalizers help the
+        # situation because it lets us capture references and keeps them alive
+        weakref.finalize(self, _del_library, _impls, self._op_impls)
 
     def __repr__(self):
-        return "Library(kind={}, ns={}, dispatch_key={})>".format(self.kind, self.ns, self.dispatch_key)
+        return f"Library(kind={self.kind}, ns={self.ns}, dispatch_key={self.dispatch_key})>"
 
     def define(self, schema, alias_analysis=""):
         r'''Defines a new operator and its semantics in the ns namespace.
@@ -65,7 +80,7 @@ class Library:
         # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
         # AliasAnalysis type in C++
         if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
-            raise RuntimeError("Invalid alias_analysis type {}".format(alias_analysis))
+            raise RuntimeError(f"Invalid alias_analysis type {alias_analysis}")
         return self.m.define(schema, alias_analysis)
 
     def impl(self, op_name, fn, dispatch_key=''):
@@ -73,19 +88,19 @@ class Library:
 
         Args:
             op_name: operator name (along with the overload) or OpOverload object.
-            fn: function that's the operator implementation for the input dispatch key.
+            fn: function that's the operator implementation for the input dispatch key or :func:`~fallthrough_kernel`
+                to register a fallthrough.
             dispatch_key: dispatch key that the input function should be registered for. By default, it uses
                           the dispatch key that the library was created with.
 
         Example::
-            >>> # xdoctest: +SKIP
             >>> my_lib = Library("aten", "IMPL")
             >>> def div_cpu(self, other):
             >>>     return self * (1 / other)
-            >>> my_lib.impl("div.Tensor", "CPU")
+            >>> my_lib.impl("div.Tensor", div_cpu, "CPU")
         '''
         if not callable(fn):
-            raise TypeError("Input function is required to be a callable but found type {}".format(type(fn)))
+            raise TypeError(f"Input function is required to be a callable but found type {type(fn)}")
         if dispatch_key == '':
             dispatch_key = self.dispatch_key
 
@@ -128,13 +143,9 @@ class Library:
         _impls.add(key)
         self._op_impls.add(key)
 
-    def __del__(self):
-        # _op_impls might not have been initialized if an error was thrown in __init__
-        _op_impls_ = getattr(self, '_op_impls', None)
-        if _op_impls_:
-            for key in self._op_impls:
-                _impls.remove(key)
-            del self.m
+
+def _del_library(captured_impls, op_impls):
+    captured_impls -= op_impls
 
 
 # decorator to register python functions for library ops

@@ -44,9 +44,17 @@ constexpr const char* NCCL_DESYNC_DEBUG = "NCCL_DESYNC_DEBUG";
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
-// TearDown mode: tear down process upon error, see `WorkNCCL::handleException`
-// Soft mode: just clean up collectives and abort communicators without tearing down process
-enum ErrorHandlingMode { NoHandling = 0, TearDown = 1, CleanUpOnly = 2 };
+// NoHandling: do not handle asynchronous NCCL errors
+// TearDown: tear down process upon error, see `WorkNCCL::handleException`
+// CleanUpOnly: just clean up collectives and abort communicators without tearing down process
+// SkipCleanUp: (this is a temporary option and can be removed in future) tear
+// down process without cleaning up NCCL communicators. This should be used as a
+// last resort in case `ncclCommAbort` itself is hanging
+enum ErrorHandlingMode { NoHandling = 0, TearDown = 1, CleanUpOnly = 2, SkipCleanUp = 3 };
+
+#define SHOULD_CLEAN_UP(a) (a != NoHandling && a != SkipCleanUp)
+
+#define SHOULD_TEAR_DOWN(a) (a != NoHandling && a != CleanUpOnly)
 
 // If set, ProcessGroupNCCL doesn't use recordStream calls to ensure
 // caching allocator safety for tensors used on both user-facing and
@@ -151,7 +159,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Helper function that returns True if the WorkNCCL object has timed out
     // and False otherwise.
     // In case of timeout, set exception on the WorkNCCL object.
-    bool checkTimeout();
+    bool checkTimeout(c10::optional<std::chrono::milliseconds> timeout = c10::nullopt);
 
     std::vector<at::Tensor> result() override;
 
@@ -192,6 +200,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Indicates if the nccl start event has been updated to the store trace.
     // This will be used by desync debug.
     bool startTraceUpdated_{false};
+
+    // Record collective sizes for debug. We only record the size on the first
+    // device as multi-device per process is deprecated
+    size_t numelIn_ = -1;
+    size_t numelOut_ = -1;
 
     // Wrapper method for the static checkForNCCLErrors which can be overridden
     // for tests.
@@ -279,6 +292,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Schedule NCCL operations on high priority CUDA streams
     bool is_high_priority_stream;
+
+#ifdef NCCL_HAS_COMM_NONBLOCKING
+    // Configure ranks
+    ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+#endif
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -324,8 +342,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void startCoalescing() override;
 
-  void endCoalescing(
-      std::vector<c10::intrusive_ptr<Work>>& reqs) override;
+  c10::intrusive_ptr<Work> endCoalescing() override;
 
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& tensors,
@@ -335,6 +352,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const BroadcastOptions& opts = BroadcastOptions());
+
+  c10::intrusive_ptr<Work> allreduce_sparse(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions()) override;
 
   c10::intrusive_ptr<Work> allreduce(
       std::vector<at::Tensor>& tensors,
@@ -369,6 +390,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
+  c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
   c10::intrusive_ptr<Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
@@ -377,6 +403,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<Work> _reduce_scatter_base(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
+  c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
   c10::intrusive_ptr<Work> barrier(
@@ -404,9 +435,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       int srcRank,
       int tag) override;
 
-  static void groupStart();
+  void groupStart();
 
-  static void groupEnd();
+  void groupEnd();
+
+  void groupEndNonblocking(std::vector<std::shared_ptr<NCCLComm>> comms);
 
   // Unsupported Ops
   c10::intrusive_ptr<Work> gather(
@@ -611,6 +644,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
       devNCCLCommMap_;
 
+  // The NCCL communicators currently in process of being initialized.
+  std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
+      inInitializationCommMap_;
+
   // Map from ncclUniqueId to appropriate communicator.
   std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
       ncclIdToCommMap_;
@@ -647,10 +684,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::set<int> usedDeviceIdxs_;
 
   // Flag to denote if a coalescing groupStart/groupEnd block is active
-  bool coalescing_active_ = false;
+  int coalescing_state_ = 0;
 
   // Stores device indexes for all collectives run inside a coalescing block
   std::vector<std::vector<at::Device>> coalescedDevices_;
+
+  // Stores communicators for all collectives run inside a coalescing block
+  std::vector<std::vector<std::shared_ptr<NCCLComm>>> coalescedComms_;
 
   // map from the key: "group name + pg counter (ID)" to the
   // unique NCCL ID count. This needs to be group and pg specific

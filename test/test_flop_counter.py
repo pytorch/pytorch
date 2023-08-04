@@ -148,7 +148,7 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(str(layer1_conv_back_flops), """1849688064""")
 
     def test_custom(self):
-        mode = FlopCounterMode(custom_mapping={torch.ops.aten.add: lambda *args, out: 5})
+        mode = FlopCounterMode(custom_mapping={torch.ops.aten.add: lambda *args, out_shape: 5})
         with mode:
             a = T(4, 5)
             a + a
@@ -223,7 +223,18 @@ class TestFlopCounter(TestCase):
         self.assertEqual(flops_fw_bw_flash, flops_fw_bw_efficient)
         self.assertExpectedInline(str(flops_fw_bw_flash), """939524096""")
 
+    def test_hook_registration(self):
+        model = torch.nn.Linear(100, 100)
+        x = torch.randn(3, 100)
 
+        flop_counter = FlopCounterMode(model)
+        with flop_counter:
+            self.assertEqual(len(model._forward_pre_hooks), 1)
+            self.assertEqual(len(model._forward_hooks), 1)
+            model(x).sum().backward()
+
+        self.assertEqual(len(model._forward_pre_hooks), 0)
+        self.assertEqual(len(model._forward_hooks), 0)
 
 
 if __name__ == '__main__':

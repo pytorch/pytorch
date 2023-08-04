@@ -195,7 +195,7 @@ auto handle_torch_function_setter(
 }
 
 // Combines self and args into one tuple.
-auto combine_self_args(PyObject* self, PyObject* args) -> py::tuple {
+static auto combine_self_args(PyObject* self, PyObject* args) -> py::tuple {
   if (args == nullptr) {
     return py::make_tuple(py::handle(self));
   } else if (self == nullptr) {
@@ -288,7 +288,7 @@ auto handle_torch_function_no_python_arg_parser(
   }
   py::tuple py_types = py::cast(overloaded_types);
   py::object ret;
-  PyObject* mode_obj = nullptr;
+  py::object mode_obj;
 
   const bool is_torch_function =
       torch_function_name == TorchFunctionName::TorchFunction;
@@ -302,15 +302,19 @@ auto handle_torch_function_no_python_arg_parser(
     // experience if you try to, e.g., print your tensors.
     at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
     at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
+    // NB: We only really need keep the mode_obj live if the function call
+    // fails for error reporting, but whatever, Python refcounts are cheap
     if (is_torch_function) {
       tf_g.emplace();
-      mode_obj = tf_g->get_cur_mode()->ptr(getPyInterpreter());
+      mode_obj = py::reinterpret_borrow<py::object>(
+          tf_g->get_cur_mode()->ptr(getPyInterpreter()));
     } else {
       td_g.emplace();
-      mode_obj = td_g->get_cur_mode()->ptr(getPyInterpreter());
+      mode_obj = py::reinterpret_borrow<py::object>(
+          td_g->get_cur_mode()->ptr(getPyInterpreter()));
     }
     py::object torch_function =
-        PyObject_FastGetAttrString(mode_obj, torch_function_name_str);
+        PyObject_FastGetAttrString(mode_obj.ptr(), torch_function_name_str);
     if (!torch_function) {
       TORCH_INTERNAL_ASSERT(0);
     }
@@ -319,7 +323,7 @@ auto handle_torch_function_no_python_arg_parser(
 
     TORCH_CHECK(
         PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
-            .is(py::reinterpret_borrow<py::object>(mode_obj)),
+            .is(mode_obj),
         "Defining your mode's `",
         torch_function_name_str,
         "` as a classmethod is not supported, please make it a plain method");
@@ -328,7 +332,7 @@ auto handle_torch_function_no_python_arg_parser(
     // because the nullptr terminates the argument list ick ick ick.
     if (kwargs == nullptr) {
       ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
-          mode_obj,
+          mode_obj.ptr(),
           torch_function_name_str,
           "OOO",
           torch_api_function,
@@ -336,7 +340,7 @@ auto handle_torch_function_no_python_arg_parser(
           args));
     } else {
       ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
-          mode_obj,
+          mode_obj.ptr(),
           torch_function_name_str,
           "OOOO",
           torch_api_function,
@@ -390,7 +394,7 @@ auto handle_torch_function_no_python_arg_parser(
     // all __torch_function__ implementations in overloaded_args
     // returned NotImplemented, so we raise a TypeError.
     std::stringstream ss;
-    ss << "no implementation found for '";
+    ss << "Multiple dispatch failed for '";
     if (module_name && func_name) {
       ss << module_name << "." << func_name;
     } else {
@@ -398,14 +402,16 @@ auto handle_torch_function_no_python_arg_parser(
       ss << py::str(fn.attr("__module__")) << "."
          << py::str(fn.attr("__name__"));
     }
-    ss << "' on types that implement " << torch_function_name_str << ": [";
-    for (auto& arg : overloaded_args) {
-      ss << py::repr(get_type_of_overloaded_arg(arg.ptr()));
-      if (!arg.is(overloaded_args.back())) {
-        ss << ", ";
-      }
+    ss << "'; all " << torch_function_name_str
+       << " handlers returned NotImplemented:\n\n";
+    if (mode_obj) {
+      ss << "  - mode object " << py::repr(mode_obj) << "\n";
     }
-    ss << "]";
+    for (auto& arg : overloaded_args) {
+      ss << "  - tensor subclass "
+         << py::repr(get_type_of_overloaded_arg(arg.ptr())) << "\n";
+    }
+    ss << "\nFor more information, try re-running with TORCH_LOGS=not_implemented";
     const std::string& tmp = ss.str();
     PyErr_SetString(PyExc_TypeError, tmp.c_str());
     throw python_error();
@@ -601,7 +607,7 @@ bool is_tensor_and_append_overloaded(
   return false;
 }
 
-bool is_scalar_list(PyObject* obj) {
+static bool is_scalar_list(PyObject* obj) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
@@ -646,7 +652,7 @@ bool is_tensor_list_and_append_overloaded(
   return true;
 }
 
-bool is_float_or_complex_list(PyObject* obj) {
+static bool is_float_or_complex_list(PyObject* obj) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
@@ -698,6 +704,20 @@ static bool is_int_list(
       return true;
     }
 
+    // in dynamo, FakeTensor is qualified for INT_LIST
+    if (is_dynamo_compiling && THPVariable_Check(item.ptr())) {
+      auto& var = THPVariable_Unpack(item.ptr());
+      if (var.numel() != 1 || !var.sizes().empty() ||
+          !at::isIntegralType(
+              var.dtype().toScalarType(), /*include_bool*/ true)) {
+        if (failed_idx != nullptr) {
+          *failed_idx = 0;
+        }
+        return false;
+      }
+      return true;
+    }
+
     // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
     // in an intlist argument. Even float or complex scalar tensors.
     bool r =
@@ -718,7 +738,23 @@ static bool is_int_or_symint(PyObject* obj) {
   // which may have side effects if obj is a symint node
   // so we do `is_symint` check first
   // TODO: maybe we should be using checkLong here?
-  return torch::is_symint(py::handle(obj)) || THPUtils_checkIndex(obj);
+  if (torch::is_symint(py::handle(obj))) {
+    return true;
+  }
+
+  if (THPUtils_checkIndex(obj)) {
+    return true;
+  }
+
+  // FakeTensor(..., size=()) is qualified for SymInt param
+  if (is_dynamo_compiling && THPVariable_Check(obj)) {
+    auto& var = THPVariable_Unpack(obj);
+    if (var.numel() == 1 && var.sizes().empty() &&
+        at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 static bool is_int_or_symint_list(
@@ -734,6 +770,7 @@ static bool is_int_or_symint_list(
     if (is_int_or_symint(item.ptr())) {
       return true;
     }
+
     // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
     // in an intlist argument. Even float or complex scalar tensors.
     bool r =
@@ -744,9 +781,10 @@ static bool is_int_or_symint_list(
     }
     return r;
   }
+
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single
   // int
-  return broadcast_size > 0 && THPUtils_checkLong(obj);
+  return broadcast_size > 0 && is_int_or_symint(obj);
 }
 
 // argnum is needed for raising the TypeError, it's used in the error message.
@@ -769,12 +807,12 @@ auto FunctionParameter::check(
       if (THPUtils_checkScalar(obj)) {
         return true;
       }
-      // fallthrough
+      [[fallthrough]];
     case ParameterType::COMPLEX:
       if (PyComplex_Check(obj)) {
         return true;
       }
-      // fallthrough
+      [[fallthrough]];
     case ParameterType::DOUBLE: {
       if (THPUtils_checkDouble(obj)) {
         return true;
@@ -1450,7 +1488,9 @@ bool FunctionSignature::parse(
   return true;
 }
 
-PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
+PythonArgParser::PythonArgParser(
+    const std::vector<std::string>& fmts,
+    bool traceable)
     : max_args(0), traceable(traceable) {
   int index = 0;
   for (auto& fmt : fmts) {
@@ -1585,6 +1625,9 @@ at::Tensor PythonArgs::tensor_slow(int i) {
   } else if (torch::is_symfloat(py::handle(obj))) {
     save_symint = true;
     scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
+  } else if (torch::is_symbool(py::handle(obj))) {
+    save_symint = true;
+    scalar = at::Scalar(true);
   } else {
     // NB: Are you here because you passed None to a Variable method,
     // and you expected an undefined tensor to be returned?   Don't add
@@ -1645,6 +1688,13 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
 
   if (torch::is_symfloat(arg)) {
     return at::Scalar(py::cast<c10::SymFloat>(arg));
+  }
+
+  if (torch::is_symbool(arg)) {
+    // Windows build fails with C2440: '<function-style-cast>'
+    // when at:Scalar(py::cast<c10::SymBool>(arg))
+    auto sym_bool = py::handle(arg).cast<c10::SymBool>();
+    return at::Scalar(sym_bool);
   }
 
   return at::Scalar(THPUtils_unpackDouble(arg));

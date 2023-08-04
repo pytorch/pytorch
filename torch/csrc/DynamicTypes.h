@@ -33,6 +33,6 @@ at::Storage createStorageGetType(
     bool& is_typed_storage);
 bool isStorage(PyObject* obj);
 
-THPDtype* getTHPDtype(at::ScalarType scalarType);
+TORCH_PYTHON_API THPDtype* getTHPDtype(at::ScalarType scalarType);
 THPLayout* getTHPLayout(at::Layout layout);
 } // namespace torch

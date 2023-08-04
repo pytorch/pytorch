@@ -41,6 +41,7 @@
 
 #include <ATen/native/transformers/cuda/flash_attn/fmha_utils.h>
 
+namespace pytorch_fmha {
 
 constexpr int TOTAL_DIM = 0;
 constexpr int H_DIM = 1;
@@ -125,6 +126,8 @@ struct FMHA_fprop_params : public Qkv_params {
 
     // Random state.
     at::PhiloxCudaState philox_args;
+    int64_t * extragraph_offset;
+    int64_t * seed;
 
     bool is_bf16;
     bool is_causal;
@@ -207,3 +210,5 @@ void run_fmha_bwd_hdim128(FMHA_dgrad_params &params, cudaStream_t stream, const 
 void run_fmha_block_fp16_sm80(Launch_params<FMHA_fprop_params> &launch_params, const bool configure);
 
 void run_fmha_block_dgrad_fp16_sm80(const FMHA_dgrad_params &params, cudaStream_t stream);
+
+}; // namespace pytorch_fmha

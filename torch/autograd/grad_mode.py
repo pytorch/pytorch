@@ -1,13 +1,20 @@
-import torch
 from typing import Any, Optional
+
+import torch
 
 from torch.utils._contextlib import _DecoratorContextManager
 
-__all__ = ['no_grad', 'enable_grad', 'set_grad_enabled',
-           'inference_mode', 'set_multithreading_enabled']
+__all__ = [
+    "no_grad",
+    "enable_grad",
+    "set_grad_enabled",
+    "inference_mode",
+    "set_multithreading_enabled",
+]
+
 
 class no_grad(_DecoratorContextManager):
-    r"""Context-manager that disabled gradient calculation.
+    r"""Context-manager that disables gradient calculation.
 
     Disabling gradient calculation is useful for inference, when you are sure
     that you will not call :meth:`Tensor.backward()`. It will reduce memory
@@ -53,6 +60,7 @@ class no_grad(_DecoratorContextManager):
         >>> a.requires_grad
         True
     """
+
     def __init__(self) -> None:
         if not torch._jit_internal.is_scripting():
             super().__init__()
@@ -105,6 +113,7 @@ class enable_grad(_DecoratorContextManager):
         True
 
     """
+
     def __enter__(self) -> None:
         self.prev = torch.is_grad_enabled()
         torch._C._set_grad_enabled(True)
@@ -213,19 +222,20 @@ class inference_mode(_DecoratorContextManager):
         False
 
     """
+
     def __init__(self, mode: bool = True) -> None:
         if not torch._jit_internal.is_scripting():
             super().__init__()
-        # Holds a python binding to a RAII guard that can enable or disable
-        # inference mode
-        self._inference_mode_raii_guard: Optional[torch._C._InferenceMode] = None
+        # Holds a context manager that can enable or disable inference mode
+        self._inference_mode_raii_context: Optional[torch._C._InferenceMode] = None
         self.mode = mode
 
     def __enter__(self) -> None:
-        self._inference_mode_raii_guard = torch._C._InferenceMode(self.mode)
+        self._inference_mode_context = torch._C._InferenceMode(self.mode)
+        self._inference_mode_context.__enter__()
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-        del self._inference_mode_raii_guard
+        self._inference_mode_context.__exit__(exc_type, exc_value, traceback)
 
     def clone(self) -> "inference_mode":
         return self.__class__(self.mode)
@@ -250,14 +260,15 @@ class set_multithreading_enabled(_DecoratorContextManager):
     """
 
     def __init__(self, mode: bool) -> None:
+        self.prev = torch._C._is_multithreading_enabled()
+        torch._C._set_multithreading_enabled(mode)
         self.mode = mode
-        self.multithreadeding_enabled_guard = torch._C._MultithreadingEnabled(mode)
 
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, *args) -> None:
-        del self.multithreadeding_enabled_guard
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        torch._C._set_multithreading_enabled(self.prev)
 
     def clone(self) -> "set_multithreading_enabled":
         return self.__class__(self.mode)
@@ -287,16 +298,19 @@ class _force_original_view_tracking(_DecoratorContextManager):
 
     def __init__(self, mode: bool) -> None:
         self.mode = mode
-        self._force_original_view_tracking_guard = torch._C._ViewReplayEnabled(mode)
 
     def __enter__(self) -> None:
-        pass
+        self._force_original_view_tracking_context = torch._C._ViewReplayEnabled(
+            self.mode
+        )
+        self._force_original_view_tracking_context.__enter__()
 
     def __exit__(self, *args) -> None:
-        del self._force_original_view_tracking_guard
+        self._force_original_view_tracking_context.__exit__(*args)
 
     def clone(self):
         return self.__class__(self.mode)
+
 
 class _unsafe_preserve_version_counter(_DecoratorContextManager):
     r"""DO NOT USE THIS UNLESS YOU KNOW EXACTLY WHAT YOU'RE DOING!

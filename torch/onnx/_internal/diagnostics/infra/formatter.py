@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import dataclasses
 import json
 import re
@@ -63,7 +65,7 @@ def _convert_key(
         else:
             new_v = v
         if new_v is None:
-            # Otherwise unnesseraily bloated sarif log with "null"s.
+            # Otherwise unnecessarily bloated sarif log with "null"s.
             continue
         if new_v == -1:
             # WAR: -1 as default value shouldn't be logged into sarif.
@@ -116,7 +118,7 @@ def pretty_print_item_title(
 
 @_beartype.beartype
 def format_argument(obj: Any) -> str:
-    return f"{str(obj)}: {type(obj)}"
+    return f"{type(obj)}"
 
 
 @_beartype.beartype

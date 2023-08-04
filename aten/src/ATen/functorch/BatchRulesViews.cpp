@@ -89,6 +89,8 @@ namespace at { namespace functorch {
 // Note [Writing batch rule for in-place operators]
 // TODO: This is kinda complicated. Saving this for a future date.
 
+namespace{
+
 std::tuple<Tensor,optional<int64_t>> unsqueeze_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
@@ -114,25 +116,6 @@ std::tuple<Tensor,optional<int64_t>> repeat_batch_rule(
   return std::make_tuple(self_.repeat_symint(sizes_with_bdim), 0);
 }
 
-
-std::tuple<Tensor,optional<int64_t>> diag_batch_rule(
-    const Tensor& input,
-    optional<int64_t> input_bdim,
-    int64_t diagonal) {
-  if (!input_bdim) {
-    return std::make_tuple(at::diag(input, diagonal), nullopt);
-  }
-  auto input_ = moveBatchDimToFront(input, input_bdim);
-  auto rank = rankWithoutBatchDim(input, input_bdim);
-
-  if (rank == 1) {
-    return std::make_tuple(at::diag_embed(input_, diagonal), 0);
-  } else if (rank == 2) {
-    return std::make_tuple(at::diagonal(input_.movedim(0, -1), diagonal).clone(), rank - 2);
-  } else {
-    throw std::runtime_error("Passed in an invalid shape to at::diag");
-  }
-}
 
 std::tuple<Tensor,optional<int64_t>> _unsafe_view_batch_rule(
     const Tensor& self,
@@ -277,12 +260,6 @@ std::tuple<Tensor, optional<int64_t>> squeeze_dim_batch_rule(
   return squeeze_dims_batch_rule(self, bdim, {dim});
 }
 
-std::tuple<std::vector<Tensor>, optional<int64_t>> chunk_batching_rule(const Tensor& self, optional<int64_t> self_bdim, int64_t chunks, int64_t dim) {
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  int64_t new_dim = getPhysicalDim(self, self_bdim.has_value(), dim);
-  return std::make_tuple(at::chunk(self_, chunks, new_dim), 0);
-}
-
 std::tuple<Tensor, optional<int64_t>> select_batching_rule(const Tensor& self, optional<int64_t> bdim, int64_t dim, c10::SymInt index) {
   if (!bdim) {
     return std::make_tuple(self.select_symint(dim, std::move(index)), nullopt);
@@ -305,7 +282,7 @@ std::tuple<Tensor, optional<int64_t>> _reshape_alias_batch_rule(const Tensor& se
   return std::make_tuple(at::reshape_symint(self_, new_shape), 0);
 }
 
-std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, optional<int64_t> bdim, IntArrayRef shifts, IntArrayRef dims) {
+std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, optional<int64_t> bdim, SymIntArrayRef shifts, IntArrayRef dims) {
   TORCH_INTERNAL_ASSERT(bdim.has_value());
 
   auto self_ = moveBatchDimToFront(self, bdim);
@@ -314,7 +291,7 @@ std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, option
     for (auto i: dims) {
       new_dims.push_back(getPhysicalDim(self, true, i));
     }
-    return std::make_tuple(at::roll(self_, shifts, new_dims), 0);
+    return std::make_tuple(at::roll_symint(self_, shifts, new_dims), 0);
   }
   // We will do something like: t.reshape(a, -1).roll(1, dims=[1, ]).reshape(old_shape)
   auto old_shape = self_.sizes();
@@ -324,7 +301,7 @@ std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, option
     self_ = self_.unsqueeze(0);
   }
 
-  auto output = at::roll(self_.flatten(1), shifts, new_dims);
+  auto output = at::roll_symint(self_.flatten(1), shifts, new_dims);
   // NOTE: For scalar tensor, we don't need to unsqueeze as reshape
   // with `old_shape` takes care of it.
   output = output.reshape(old_shape);
@@ -581,6 +558,8 @@ std::tuple<Tensor,optional<int64_t>> triu_batch_rule(
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto result = at::triu(self_, diagonal);
   return std::make_tuple(std::move(result), 0);
+}
+
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {

@@ -2,12 +2,28 @@ import contextlib
 
 import dataclasses
 import enum
+import functools
 import logging
+import threading
 import traceback
+import unittest.mock
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import Callable, Generic, List, NamedTuple, Optional, Set, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+)
+
+import torch
 
 log = logging.getLogger(__name__)
 
@@ -96,6 +112,7 @@ class GuardBuilderBase:
 
 class ShapeGuard(NamedTuple):
     expr: sympy.Expr
+    # TODO: store this in slightly less formatted form
     stack: str
 
 
@@ -135,11 +152,17 @@ class Guard:
             self.source.value if self.source else -1,
             len(self.name),
             self.name,
-            self.create_fn.__code__.co_firstlineno,
+            self.inner_create_fn().__code__.co_firstlineno,
         )
 
     def __lt__(self, other):
         return self.sort_key() < other.sort_key()
+
+    def inner_create_fn(self):
+        if isinstance(self.create_fn, functools.partial):
+            return self.create_fn.func
+        else:
+            return self.create_fn
 
     @staticmethod
     def weakref_to_str(obj_weakref):
@@ -166,17 +189,28 @@ class Guard:
         else:
             return str(obj_weakref)
 
-    def __str__(self):
+    def __repr__(self):
         s = f"""
-            {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.create_fn.__name__}
-            {{
-                'guard_types': {self.guard_types},
-                'code': {self.code_list},
-                'obj_weakref': {self.weakref_to_str(self.obj_weakref)}
-                'guarded_class': {self.guarded_class_weakref}
-            }}
-            """
+        {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.inner_create_fn().__name__}
+        {{
+            'guard_types': {self.guard_types},
+            'code': {self.code_list},
+            'obj_weakref': {self.weakref_to_str(self.obj_weakref)}
+            'guarded_class': {self.guarded_class_weakref}
+        }}
+        """
         return s
+
+    def __str__(self):
+        output = f"Name: {repr(self.name)}\n"
+        source = self.source.name.lower() if self.source else ""
+        output += f"    Source: {source}\n"
+        output += f"    Create Function: {self.inner_create_fn().__name__}\n"
+        output += f"    Guard Types: {self.guard_types}\n"
+        output += f"    Code List: {self.code_list}\n"
+        output += f"    Object Weakref: {self.weakref_to_str(self.obj_weakref)}\n"
+        output += f"    Guarded Class Weakref: {self.guarded_class_weakref}\n"
+        return output
 
     def create(self, local_builder: GuardBuilderBase, global_builder: GuardBuilderBase):
         return self.create_fn(self.source.select(local_builder, global_builder), self)
@@ -295,6 +329,97 @@ class GuardsCheckpointState:
         return self.diff(other) is None
 
 
+class ModuleContextCheckpointState:
+    nn_modules: Dict[str, torch.nn.Module] = {}
+
+    def __init__(self, nn_modules):
+        self.nn_modules = nn_modules
+
+    """
+    Produces a delta against another ModuleContextCheckpointState.
+
+    Returns None if no delta is found, otherwise, return a set() of mismatched
+    module key names.
+    """
+
+    def diff(self, other):
+        r = set(self.nn_modules.keys()).difference(set(other.nn_modules.keys()))
+        if len(r) == 0:
+            return None
+        return r
+
+    def __eq__(self, other):
+        return self.diff(other) is None
+
+
+class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
+    def __init__(self):
+        self.nn_modules: Dict[str, torch.nn.Module] = {}
+
+    def copy_graphstate(self):
+        return ModuleContextCheckpointState(dict(self.nn_modules))
+
+    def restore_graphstate(self, state):
+        assert isinstance(state, ModuleContextCheckpointState)
+        self.nn_modules = state.nn_modules
+
+
+class GlobalContextCheckpointState:
+    global_state: Dict[str, Tuple[Callable, ...]] = {}
+
+    def __init__(self, global_states):
+        self.global_state = global_states
+
+    """
+    Produces a delta against another GlobalContextCheckpointState.
+
+    Returns None if no delta is found, otherwise, return a set() of mismatched
+    global key names.
+    """
+
+    def diff(self, other):
+        r = set(self.global_state.keys()).difference(set(other.global_state.keys()))
+        if len(r) == 0:
+            return None
+        return r
+
+    def __eq__(self, other):
+        return self.diff(other) is None
+
+
+class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
+    """
+    This keeps track of the global torch state during tracing of a function.
+    For example, torch.is_grad_enabled.
+    """
+
+    _supported_global_states = {
+        "grad_enabled",
+        "torch_function_enabled",
+        "autocast_enabled",
+        "autocast_cpu_enabled",
+        "autocast_gpu_dtype",
+        "autocast_cpu_dtype",
+        "autocast_cache_enabled",
+    }
+
+    def __init__(self):
+        self.global_state: Dict[str, Tuple[Callable, ...]] = {}
+
+    def copy_graphstate(self):
+        return GlobalContextCheckpointState(dict(self.global_state))
+
+    def restore_graphstate(self, state):
+        assert isinstance(state, GlobalContextCheckpointState)
+        self.global_state = state.global_state
+        assert (
+            len(self.global_state) == len(self._supported_global_states)
+            and set(self.global_state.keys()) == self._supported_global_states
+        ), "Global state mismatch"
+        for func, args in self.global_state.values():
+            func(args)
+
+
 """
 A GuardsContext is a checkpointable representation of all the guards in the current tracing
 context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
@@ -316,7 +441,7 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.dynamo_guards = state.dynamo_guards
 
 
-_CURRENT_TRACING_CONTEXT = None
+_TLS = threading.local()
 
 """
 TracingContext is the source of truth for all currently accumulated information
@@ -333,7 +458,7 @@ having to plumb complex subsystems across multiple verticals.
 Ex: A common example is guard accumulation between dynamo, shape_env, aot_autograd, and inductor.
 Accessing the current tracing context via
 TracingContext.get() allows users to accumulate their own guards for processing, without needing to know how
-to plumb objects back up to where frame interpretation happend.
+to plumb objects back up to where frame interpretation happened.
 """
 
 
@@ -342,44 +467,131 @@ class TracingContext:
     Provides the currently installed TracingContext, or None.
 
     Note that it is a staticmethod, and invocations outside of `with tracing()` (see below), are valid but
-    will return NoNe.
+    will return None.
     """
 
     @staticmethod
     def get() -> Optional["TracingContext"]:
-        return _CURRENT_TRACING_CONTEXT
+        return getattr(_TLS, "tracing_context", None)
 
     def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
+        self.module_context = ModuleContext()
+        self.global_context = GlobalContext()
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
+        # This is morally part of frame_summary_stack, but it is kept separate
+        # for clarity.  As we process a frame, this variable gets updated
+        # to keep track of what line we are in the function.  We make a
+        # function call, this gets cleared and the frame location is pushed
+        # to frame_summary_stack (prepping this variable for the inner frame's
+        # progress)
         self.loc_in_frame = None
+        # this is only set after aot_autograd
+        self.fw_metadata = None
+        self.params_flat = None
+        # this is for extended return calling convention from backend
+        # compiler to aot_autograd
+        # Per output, what the compiler specified stride of the output is,
+        # or None if no stride is known.  This is always the HINT, it
+        # is never a SymInt (it would be better if it was a SymInt, but
+        # I can't conveniently get this from Inductor atm.  Also, be
+        # careful not to accidentally induce guards on the SymInt if
+        # you ever do change this in aot_autograd.py; you should check
+        # on permutations preferentially.)
+        self.output_strides: Optional[List[Optional[List[int]]]] = None
 
     @staticmethod
+    def extract_stack():
+        self = TracingContext.get()
+        if self is None:
+            return traceback.StackSummary()
+        stack = list(self.frame_summary_stack)
+        if self.loc_in_frame is not None:
+            stack.append(self.loc_in_frame)
+        return traceback.StackSummary.from_list(stack)
+
+    # Call this when you want to call into some code that isn't necessarily
+    # associated with the current frame state
+    @staticmethod
     @contextlib.contextmanager
-    def current_frame(frame_summary):
+    def clear_frame():
         tc = TracingContext.get()
         assert (
             tc is not None
         ), "Frame context manager must be called within an ongoing trace."
-        tc.frame_summary_stack.append(frame_summary)
-        try:
-            yield
-        finally:
-            tc.frame_summary_stack.pop()
+        with unittest.mock.patch.object(
+            tc, "frame_summary_stack", []
+        ), unittest.mock.patch.object(tc, "loc_in_frame", None):
+            try:
+                yield
+            except Exception as e:
+                # Prevent real_stack from getting attached
+                #
+                # The invariant is that if an Exception as real_stack, we've
+                # appropriately attached a user stack and we no longer need to
+                # attach anything. Because we cannot conveniently interpose
+                # when an exception is thrown, we instead interpose everywhere
+                # we set what the user stack is set (using the context
+                # manager). However, our compiler stack does "tail calls"
+                # (when it calls into user compiler), at which point the
+                # parent exception frames would incorrectly attach an
+                # incorrect frame.
+                #
+                # However, if, somehow, someone raised an exception with this
+                # scope that had a stack (for example, because they are
+                # restoring the user stack state appropriately as they process
+                # node by node), we should respect it. Thus, we cannot
+                # unconditionally set None.
+                if not hasattr(e, "real_stack"):
+                    e.real_stack = None  # type: ignore[attr-defined]
+                raise
 
     @staticmethod
     @contextlib.contextmanager
-    def current_loc(filename, lineno, frame_name):
+    def current_frame(frame_summary):
+        # frame_summary can be None to solely take advantage of real_stack
+        # attachment to thrown exceptions
+        tc = TracingContext.get()
+        assert (
+            tc is not None
+        ), "Frame context manager must be called within an ongoing trace."
+        if frame_summary is not None:
+            tc.frame_summary_stack.append(frame_summary)
+        old = tc.loc_in_frame
+        tc.loc_in_frame = None
+        try:
+            yield
+        except Exception as e:
+            if not hasattr(e, "real_stack"):
+                e.real_stack = tc.extract_stack()  # type: ignore[attr-defined]
+            raise
+        finally:
+            if frame_summary is not None:
+                tc.frame_summary_stack.pop()
+            tc.loc_in_frame = old
+
+    @staticmethod
+    @contextlib.contextmanager
+    def report_output_strides():
+        tc = TracingContext.get()
+        if tc is None:
+            yield None
+            return
+        old_output_strides = tc.output_strides
+        tc.output_strides = []
+        try:
+            yield tc.output_strides
+        finally:
+            tc.output_strides = old_output_strides
+
+    @staticmethod
+    def set_current_loc(filename, lineno, frame_name):
         tc = TracingContext.get()
         assert (
             tc is not None
         ), "Loc context manager must be called within an ongoing trace."
         tc.loc_in_frame = traceback.FrameSummary(filename, lineno, frame_name)
-        try:
-            yield
-        finally:
-            tc.loc_in_frame = None
 
 
 """
@@ -391,17 +603,21 @@ Calls to TracingContext.get() while not under a `with tracing()` context will re
 
 @contextmanager
 def tracing(context: TracingContext):
-    global _CURRENT_TRACING_CONTEXT
-    old_context = _CURRENT_TRACING_CONTEXT
-    _CURRENT_TRACING_CONTEXT = context
+    old_context = getattr(_TLS, "tracing_context", None)
+    _TLS.tracing_context = context
     try:
-        yield _CURRENT_TRACING_CONTEXT
+        yield context
+    except Exception as e:
+        if not hasattr(e, "real_stack"):
+            e.real_stack = context.extract_stack()  # type: ignore[attr-defined]
+        raise
     finally:
-        _CURRENT_TRACING_CONTEXT = old_context
+        _TLS.tracing_context = old_context
 
 
 # Subclasses can be found in torch/_dynamo/source.py
-@dataclasses.dataclass
+# TODO(voz): Consider a toplevel torch/_source.py
+@dataclasses.dataclass(frozen=True)
 class Source:
     def reconstruct(self, codegen):
         raise NotImplementedError()
@@ -419,3 +635,57 @@ class Source:
 
     def is_nn_module(self) -> bool:
         return self.guard_source().is_nn_module()
+
+
+# Subclasses can be found in torch/_dynamo/source.py
+# Note - there is an odd exception to this invariant of a single base,
+# see class SuperSource
+@dataclasses.dataclass(frozen=True)
+class ChainedSource(Source):
+    base: Source
+
+
+def detect_fake_mode(inputs: Any = None):
+    """
+    Attempts to "detect" what the current fake mode is.  If there is one ambiently
+    available from TracingContext, we preferentially use that.  Otherwise, we
+    heuristically detect the fake mode via the following sources, in order of
+    priority:
+
+        - Currently active fake mode on stack
+        - Fake mode associated with passed in tensors (inputs does not
+          have to be flattened)
+    """
+    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+    from torch.utils._pytree import tree_flatten
+
+    fake_modes = []
+
+    context = TracingContext.get()
+    if context is not None:
+        fake_mode = context.fake_mode
+        if fake_mode is not None:
+            fake_modes.append((fake_mode, "tracing context", 0))
+
+    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+
+    for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
+        if isinstance(m, FakeTensorMode):
+            fake_modes.append((m, "active fake mode", i))
+
+    flat_inputs, _ = tree_flatten(inputs)
+    for i, flat_input in enumerate(flat_inputs):
+        if isinstance(flat_input, FakeTensor):
+            fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
+
+    if fake_modes:
+        fake_mode, desc1, i1 = fake_modes[0]
+        for m, desc2, i2 in fake_modes[1:]:
+            assert fake_mode is m, (
+                f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
+                f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
+                f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
+            )
+        return fake_mode
+    else:
+        return None

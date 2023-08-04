@@ -4,6 +4,7 @@ import os
 import contextlib
 import torch._logging
 import torch._logging._internal
+from torch._dynamo.utils import LazyString
 import logging
 
 @contextlib.contextmanager
@@ -35,12 +36,22 @@ def kwargs_to_settings(**kwargs):
     INT_TO_VERBOSITY = {10: "+", 20: "", 40: "-"}
 
     settings = []
+
+    def append_setting(name, level):
+        if isinstance(name, str) and isinstance(level, int) and level in INT_TO_VERBOSITY:
+            settings.append(INT_TO_VERBOSITY[level] + name)
+            return
+        else:
+            raise ValueError("Invalid value for setting")
+
     for name, val in kwargs.items():
         if isinstance(val, bool):
             settings.append(name)
         elif isinstance(val, int):
-            if val in INT_TO_VERBOSITY:
-                settings.append(INT_TO_VERBOSITY[val] + name)
+            append_setting(name, val)
+        elif isinstance(val, dict) and name == "modules":
+            for module_qname, level in val.items():
+                append_setting(module_qname, level)
         else:
             raise ValueError("Invalid value for setting")
 
@@ -65,8 +76,12 @@ def make_logging_test(**kwargs):
             torch._dynamo.reset()
             records = []
             # run with env var
-            with log_settings(kwargs_to_settings(**kwargs)), self._handler_watcher(records):
-                fn(self, records)
+            if len(kwargs) == 0:
+                with self._handler_watcher(records):
+                    fn(self, records)
+            else:
+                with log_settings(kwargs_to_settings(**kwargs)), self._handler_watcher(records):
+                    fn(self, records)
 
             # run with API
             torch._dynamo.reset()
@@ -102,12 +117,32 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
         cls._exit_stack.enter_context(
             unittest.mock.patch("torch._dynamo.config.suppress_errors", True)
         )
+        cls._exit_stack.enter_context(
+            unittest.mock.patch("torch._dynamo.config.verbose", False)
+        )
 
     @classmethod
     def tearDownClass(cls):
         cls._exit_stack.close()
         torch._logging._internal.log_state.clear()
         torch._logging._init_logs()
+
+    def getRecord(self, records, m):
+        record = None
+        for r in records:
+            # NB: not r.msg because it looks like 3.11 changed how they
+            # structure log records
+            if m in r.getMessage():
+                self.assertIsNone(
+                    record,
+                    msg=LazyString(
+                        lambda: f"multiple matching records: {record} and {r} among {records}"
+                    ),
+                )
+                record = r
+        if record is None:
+            self.fail(f"did not find record with {m} among {records}")
+        return record
 
     # This patches the emit method of each handler to gather records
     # as they are emitted

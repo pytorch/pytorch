@@ -140,7 +140,12 @@ void calculate_mode(
   // location of the buffer at the innermost dimension that we are going
   // to calculate the mode for --> we do this by manually doing the stride
   // calculations to get an offset
-  scalar_t* data = self.data_ptr<scalar_t>();
+  //
+  // Yes, mutating self is a code smell, but we clone self before
+  // entering the bowels of this implementation.
+  //
+  // See [Note: CUDA torch.mode clones self]
+  scalar_t* data = self.mutable_data_ptr<scalar_t>();
   for (int64_t i = 0; i < static_cast<int64_t>(position.size()); i++) {
     data += position[i] * ensure_nonempty_stride(self, i);
   }
@@ -156,8 +161,8 @@ void calculate_mode(
   std::tie(mode, index) = ModeImpl<scalar_t>{}(iter_begin, iter_end);
 
   // Place mode, index in output
-  scalar_t* values_data = values.data_ptr<scalar_t>();
-  int64_t* indices_data = indices.data_ptr<int64_t>();
+  scalar_t* values_data = values.mutable_data_ptr<scalar_t>();
+  int64_t* indices_data = indices.mutable_data_ptr<int64_t>();
 
   for (int64_t i = 0; i < static_cast<int64_t>(position.size()); i++) {
     int64_t pos = position[i];
@@ -209,7 +214,7 @@ void handle_fused_mode(
       (sizeof(scalar_t) * size) + (2 * size * sizeof(unsigned int));
   compute_mode<scalar_t, size>
       <<<grid, num_threads, memsize, at::cuda::getCurrentCUDAStream()>>>(
-          self.data_ptr<scalar_t>(), ti_values, ti_indices, slice_size, slices);
+          self.const_data_ptr<scalar_t>(), ti_values, ti_indices, slice_size, slices);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 

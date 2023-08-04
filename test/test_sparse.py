@@ -10,7 +10,8 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
-    parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests
+    parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
+    skipIfCrossRef
 from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
 from typing import Dict, Any
@@ -21,18 +22,27 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes)
 from torch.testing._internal.common_methods_invocations import \
-    (reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops)
+    (op_db, reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
 from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
+from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
 
-reduction_ops_with_sparse_support = [op for op in reduction_ops if 'masked.' not in op.name and
-                                     (op.supports_sparse
-                                      or op.supports_sparse_csr
-                                      or op.supports_sparse_csc
-                                      or op.supports_sparse_bsr
-                                      or op.supports_sparse_bsc)]
+
+def _op_supports_any_sparse(op):
+    return (op.supports_sparse
+            or op.supports_sparse_csr
+            or op.supports_sparse_csc
+            or op.supports_sparse_bsr
+            or op.supports_sparse_bsc)
+
+
+reduction_ops_with_sparse_support = [op for op in reduction_ops if 'masked.' not in op.name and _op_supports_any_sparse(op)]
+
+binary_ufuncs_with_sparse_support = [op for op in binary_ufuncs if _op_supports_any_sparse(op)]
+
+like_fns_with_sparse_support = [op for op in op_db if _op_supports_any_sparse(op) and '_like' in op.name]
 
 if TEST_SCIPY:
     import scipy.sparse
@@ -93,6 +103,7 @@ class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
 
 class TestSparseLegacyAndDeprecation(TestCase):
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_legacy_warnings(self):
 
         def f1():
@@ -274,11 +285,11 @@ class TestSparse(TestSparseBase):
         for shape, sparse_dim, nnz in shape_sparse_dim_nnz:
             indices_shape = torch.Size((sparse_dim, nnz))
             values_shape = torch.Size((nnz,) + shape[sparse_dim:])
-            printed.append("# shape: {}".format(torch.Size(shape)))
-            printed.append("# nnz: {}".format(nnz))
-            printed.append("# sparse_dim: {}".format(sparse_dim))
-            printed.append("# indices shape: {}".format(indices_shape))
-            printed.append("# values shape: {}".format(values_shape))
+            printed.append(f"# shape: {torch.Size(shape)}")
+            printed.append(f"# nnz: {nnz}")
+            printed.append(f"# sparse_dim: {sparse_dim}")
+            printed.append(f"# indices shape: {indices_shape}")
+            printed.append(f"# values shape: {values_shape}")
 
             indices = torch.arange(indices_shape.numel(), dtype=self.index_tensor(0).dtype,
                                    device=device).view(indices_shape)
@@ -297,7 +308,7 @@ class TestSparse(TestSparseBase):
             else:
                 dtypes.append(torch.double)
             for dtype in dtypes:
-                printed.append("########## {} ##########".format(dtype))
+                printed.append(f"########## {dtype} ##########")
                 x = sp_tensor.detach().to(dtype)
                 printed.append("# sparse tensor")
                 printed.append(str(x))
@@ -1746,15 +1757,12 @@ class TestSparse(TestSparseBase):
         _test_spadd()
         _test_spadd_hybrid()
 
-    @onlyCUDA
     @coalescedonoff
-    @dtypes(torch.double, torch.cdouble)
+    @dtypes(torch.float)
     def test_sparse_add_out_bfloat16(self, device, dtype, coalesced):
         # fp32
         x, _, _ = self._gen_sparse(3, 5, 10, dtype, device, coalesced)
         y, _, _ = self._gen_sparse(3, 5, 10, dtype, device, coalesced)
-        x = x.float().cuda()
-        y = y.float().cuda()
         res_fp32 = torch.add(x, y)
 
         # bfloat16
@@ -2132,6 +2140,39 @@ class TestSparse(TestSparseBase):
         self._test_sparse_mask_shape(9, 0, [10, 10, 10], [2, 0], dtype, device, coalesced)
         self._test_sparse_mask_shape(0, 0, [10, 10, 10], [2, 0], dtype, device, coalesced)
         self._test_sparse_mask_shape(0, 0, [10, 10, 0], [2, 0], dtype, device, coalesced)
+
+    @dtypes(torch.double, torch.cdouble)
+    @skipIfCrossRef
+    def test_sparse_mask_backward(self, device, dtype):
+        from itertools import product, repeat
+
+        shape = (5, 5)
+        sparse_dims = len(shape)
+        nnzs = (0, 5, 15, 25)
+
+        lhs_data = torch.arange(1, 26, device=device).reshape(shape).to(dtype).to_sparse(sparse_dims)
+        rhs_data = lhs_data.clone()
+
+        for nnz in nnzs:
+            for lhs_is_coalesced, rhs_is_coalesced in product(*repeat((True, False), 2)):
+                lhs = torch.sparse_coo_tensor(
+                    lhs_data._indices()[:, :nnz],
+                    lhs_data._values()[:nnz],
+                    lhs_data.shape
+                ).clone()._coalesced_(lhs_is_coalesced).requires_grad_(True)
+
+                rhs = torch.sparse_coo_tensor(
+                    lhs_data._indices()[:, -nnz:],
+                    lhs_data._values()[-nnz:],
+                    lhs_data.shape
+                ).clone()._coalesced_(rhs_is_coalesced)
+
+                # To test masked semantics we need to make sure that
+                # sparsity_pattern(lhs) == sparsity_pattern(lhs.grad).
+                # lhs.sparse_mask(lhs_mask) accomplishes that.
+                lhs_mask = lhs.detach().clone()
+                gradcheck(lambda x: x.sparse_mask(lhs_mask).sparse_mask(rhs).to_dense(masked_grad=True), (lhs,), masked=True)
+                gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=False), (lhs,), masked=False)
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
@@ -3341,8 +3382,7 @@ class TestSparse(TestSparseBase):
                                                dtype=dtype, device=device)
             else:
                 raise ValueError(
-                    '`dim(=%s)` must be smaller than `sparse_dim(=%s) + dense_dim(=%s)`'
-                    % (dim, sparse.sparse_dim(), sparse.dense_dim()))
+                    f'`dim(={dim})` must be smaller than `sparse_dim(={sparse.sparse_dim()}) + dense_dim(={sparse.dense_dim()})`')
 
         def softmax_jacobian_analytic(x, dim):
             """Return Jacobian of softmax using analytic formula
@@ -3451,7 +3491,13 @@ class TestSparse(TestSparseBase):
                 return torch.sparse_coo_tensor(x._indices(), x._values().log(),
                                                x.size(), dtype=x.dtype, device=x.device)
 
-            for dim in range(x.sparse_dim() + x.dense_dim()):
+            # Check dim out of bounds
+            with self.assertRaisesRegex(IndexError, r"Dimension out of range"):
+                torch.sparse.softmax(x, x.dim())
+            with self.assertRaisesRegex(IndexError, r"Dimension out of range"):
+                torch.sparse.softmax(x, -x.dim() - 1)
+
+            for dim in range(x.dim()):
                 # Check sparse softmax definition
 
                 # check Python sparse softmax
@@ -3461,12 +3507,13 @@ class TestSparse(TestSparseBase):
                 self.assertEqual(r1, r2)
 
                 # check C++ sparse softmax
-                y1 = torch.sparse.softmax(x, dim)
-                self.assertEqual(y, y1)
+                for d in (dim, dim - x.dim()):
+                    y1 = torch.sparse.softmax(x, d)
+                    self.assertEqual(y, y1)
 
-                # check C++ sparse log_softmax
-                ly1 = torch.sparse.log_softmax(x, dim)
-                self.assertEqual(ly1, sparse_log(y1))
+                    # check C++ sparse log_softmax
+                    ly1 = torch.sparse.log_softmax(x, d)
+                    self.assertEqual(ly1, sparse_log(y1))
 
                 # Check autograd support on sparse softmax
 
@@ -3653,6 +3700,17 @@ class TestSparse(TestSparseBase):
 
             self.assertRaisesRegex(RuntimeError, 'mat1 dtype Double does not match mat2 dtype Float', different_dtypes)
 
+        def test_backward_noncontiguous():
+            # Sparse.mm backward used to wrong with non-contiguous grads,
+            # see https://github.com/pytorch/pytorch/issues/102493.
+            n_reps = 7
+            for _ in range(n_reps):
+                A = torch.eye(5).to_sparse().requires_grad_(True)
+                B = torch.eye(5).to_sparse()
+                out = torch.sparse.mm(A, B)
+                out.coalesce().values().sum().backward()
+                self.assertEqual(A.grad, A)
+
         for n in range(2, 5):
             for m in range(2, 8):
                 for p in range(2, 8):
@@ -3661,6 +3719,7 @@ class TestSparse(TestSparseBase):
         test_sparse_matmul(2, 0, [0, 0], [0, 0])
         test_sparse_matmul(2, 0, [0, 10], [10, 0])
         test_error_cases()
+        test_backward_noncontiguous()
 
     @coalescedonoff
     @dtypes(torch.double)
@@ -3731,8 +3790,8 @@ class TestSparse(TestSparseBase):
             self.skipTest(f"Test with dtype={dtype}, device={device} runs only with coalesced inputs")
 
     @coalescedonoff
-    # NOTE: addcmul_out is not implemented for bool and half.
-    @dtypes(*all_types_and_complex_and(torch.bfloat16))
+    # NOTE: addcmul_out is not implemented for bool.
+    @dtypes(*all_types_and_complex_and(torch.bfloat16, torch.float16))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_sparse_mul(self, device, dtype, coalesced):
         self._test_mul_skips(device, dtype, coalesced)
@@ -4505,20 +4564,24 @@ class TestSparseAny(TestCase):
             # not implemented conversions
             if from_layout in {
                     torch.sparse_csr, torch.sparse_csc} and to_layout in {torch.sparse_bsr, torch.sparse_bsc} and is_batch:
-                with self.assertRaisesRegex(RuntimeError,
-                                            r"conversion from (Csr|Csc) to (Bsr|Bsc) for batched inputs is not implemented"):
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        r"conversion from Sparse(Csr|Csc) to Sparse(Bsr|Bsc) for batched inputs is not supported"):
                     t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(RuntimeError,
-                                            r"conversion from (Csr|Csc) to (Bsr|Bsc) for batched inputs is not implemented"):
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        r"conversion from Sparse(Csr|Csc) to Sparse(Bsr|Bsc) for batched inputs is not supported"):
                     explicit_to_sparse(t)
                 continue
             elif from_layout is torch.sparse_coo and to_layout in {
                     torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc} and t.sparse_dim() != 2:
                 with self.assertRaisesRegex(
-                        RuntimeError, "Only tensors with two sparse dimensions can be converted to the Sparse(Csr|Csc) layout"):
+                        RuntimeError,
+                        r"conversion from Sparse to .* for input tensors with sparse_dim\(\)!=2 is not supported"):
                     t.to_sparse(layout=to_layout, blocksize=blocksize)
                 with self.assertRaisesRegex(
-                        RuntimeError, "Only tensors with two sparse dimensions can be converted to the Sparse(Csr|Csc) layout"):
+                        RuntimeError,
+                        r"conversion from Sparse to .* for input tensors with sparse_dim\(\)!=2 is not supported"):
                     explicit_to_sparse(t)
                 continue
             elif from_layout in {torch.sparse_csr, torch.sparse_csc,
@@ -4534,12 +4597,12 @@ class TestSparseAny(TestCase):
                                               (torch.sparse_bsr, torch.sparse_csr), (torch.sparse_bsr, torch.sparse_csc)}:
                 with self.assertRaisesRegex(
                         RuntimeError,
-                        r"sparse_compressed_to_sparse_(csr|csc|bsr|bsc) expected\s*(Sparse(Csc|Csr)[,]|)\s*Sparse(Csr|Bsr)"
+                        r"sparse_compressed_to_sparse_(csr|csc|bsr|bsc): expected\s*(Sparse(Csc|Csr)[,]|)\s*Sparse(Csr|Bsr)"
                         " or Sparse(Csc|Bsc) layout but got Sparse(Csr|Csc|Bsr|Bsc)"):
                     t.to_sparse(layout=to_layout, blocksize=blocksize)
                 with self.assertRaisesRegex(
                         RuntimeError,
-                        r"sparse_compressed_to_sparse_(csr|csc|bsr|bsc) expected\s*(Sparse(Csc|Csr)[,]|)\s*Sparse(Csr|Bsr)"
+                        r"sparse_compressed_to_sparse_(csr|csc|bsr|bsc): expected\s*(Sparse(Csc|Csr)[,]|)\s*Sparse(Csr|Bsr)"
                         " or Sparse(Csc|Bsc) layout but got Sparse(Csr|Csc|Bsr|Bsc)"):
                     explicit_to_sparse(t)
                 self.skipTest('NOT IMPL')
@@ -4760,6 +4823,116 @@ class TestSparseAny(TestCase):
         else:
             torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
 
+    @onlyNativeDeviceTypes
+    @suppress_warnings
+    @ops(binary_ufuncs_with_sparse_support)
+    @all_sparse_layouts('layout', include_strided=False)
+    def test_binary_operation(self, layout, device, dtype, op):
+        if not op.supports_sparse_layout(layout):
+            self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
+
+        for sample in op.sample_inputs_sparse(layout, device, dtype):
+            if validate_sample_input_sparse(op, sample, check_validate=False) is not sample:
+                # that is, the validation returns the sparse sample
+                # wrapped within ErrorInput instance
+                continue
+            t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+            batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
+            result = op.op(t_inp, *t_args, **t_kwargs)
+
+            # Check rop(inp, ...).shape == inp.shape
+            self.assertEqual(result.shape, t_inp.shape)
+
+            # Check rop(inp, ...).sparse_dim() == inp.sparse_dim()
+            self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
+
+            # Check rop(inp, ...).dense_dim() == inp.dense_dim()
+            self.assertEqual(result.dense_dim(), t_inp.dense_dim())
+
+            # Check invariant rop(inp, ...).to_dense() == rop(inp.to_dense(), ...)
+            try:
+                dense = op.op(t_inp.to_dense(), *(t_args[0].to_dense(), *t_args[1:]), **t_kwargs)
+            except Exception as msg:
+                # this is strided op issue, so skipping the sample silently here
+                if "\"cpublas_axpy_impl\" not implemented for 'ComplexHalf'" in str(msg):
+                    continue
+                raise
+            self.assertEqual(result, dense)
+
+    @onlyCPU
+    @all_sparse_layouts('layout', include_strided=True)
+    @dtypes(torch.double)
+    def test_to_sparse_identity(self, device, layout, dtype):
+        for dense_dim in range(4):
+            x_dense = torch.eye(dense_dim, dtype=dtype, device=device)
+            for sparse_dim_in in range(1, dense_dim):
+                x_sparse = x_dense.to_sparse(sparse_dim_in)
+                for sparse_dim_out in range(0, dense_dim):
+                    if sparse_dim_out == sparse_dim_in:
+                        self.assertTrue(x_sparse.to_sparse(sparse_dim_out).sparse_dim() == sparse_dim_out)
+                    else:
+                        with self.assertRaisesRegex(
+                                RuntimeError,
+                                r"to_sparse: conversion from Sparse to Sparse with sparse_dim argument !=self.sparse_dim\(\)"
+                                " is not supported"):
+                            x_sparse.to_sparse(sparse_dim_out)
+
+
+    @onlyNativeDeviceTypes
+    @suppress_warnings
+    @ops(like_fns_with_sparse_support)
+    @all_sparse_layouts('layout', include_strided=False)
+    def test_like_fns(self, layout, device, dtype, op):
+
+        for sample in op.sample_inputs_sparse(layout, device, dtype):
+            t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+            batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
+            if t_inp.layout in {torch.sparse_bsr, torch.sparse_bsc}:
+                expected_blocksize = t_inp.values().shape[batch_dim + 1:batch_dim + 3]
+            else:
+                expected_blocksize = None
+            expected_dtype = t_kwargs.get('dtype', dtype)
+            expected_device = torch.device(t_kwargs.get('device', device))
+            expected_layout = t_kwargs.get('layout', layout)
+
+            result = op.op(t_inp, *t_args, **t_kwargs)
+
+            self.assertEqual(result.dtype, expected_dtype)
+            self.assertEqual(result.device.type, expected_device.type)
+            self.assertEqual(result.layout, expected_layout)
+
+            if result.layout in {torch.sparse_bsr, torch.sparse_bsc}:
+                result_batch_dim = result.dim() - result.dense_dim() - result.sparse_dim()
+                blocksize = result.values().shape[result_batch_dim + 1:result_batch_dim + 3]
+                self.assertEqual(blocksize, expected_blocksize)
+
+            # Check op(inp).shape == inp.shape
+            self.assertEqual(result.shape, t_inp.shape)
+
+            if expected_layout is torch.strided:
+                self.assertEqual(result.sparse_dim(), 0)
+                # Check op(inp, layout=torch.strided).dense_dim() == inp.dim()
+                self.assertEqual(result.dense_dim(), t_inp.dim())
+            elif expected_layout is torch.sparse_coo:
+                # Check op(inp, layout=torch.sparse_coo).sparse_dim() == batch_dim + inp.sparse_dim()
+                self.assertEqual(result.sparse_dim(), batch_dim + t_inp.sparse_dim())
+                # Check op(inp, layout=torch.sparse_coo).dense_dim() == inp.dense_dim()
+                self.assertEqual(result.dense_dim(), t_inp.dense_dim())
+
+                torch._validate_sparse_coo_tensor_args(result._indices(), result._values(), result.shape)
+            else:
+                # Check op(inp).sparse_dim() == inp.sparse_dim()
+                self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
+                # Check op(inp).dense_dim() == inp.dense_dim()
+                self.assertEqual(result.dense_dim(), t_inp.dense_dim())
+
+                if result.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                    compressed_indices, plain_indices = result.crow_indices(), result.col_indices()
+                else:
+                    compressed_indices, plain_indices = result.ccol_indices(), result.row_indices()
+
+                torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, result.values(),
+                                                              result.shape, result.layout)
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')

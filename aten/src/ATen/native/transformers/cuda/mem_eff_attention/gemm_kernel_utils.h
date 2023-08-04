@@ -1,3 +1,10 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * All rights reserved.
+ *
+ * This source code is licensed under the BSD-style license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
 #pragma once
 
 #include <cutlass/arch/mma.h>
@@ -5,20 +12,20 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Some helper functions
 ////////////////////////////////////////////////////////////////////////////////
-#define DISPATCH_TYPES(tensor, func)                                        \
-  {                                                                         \
-    if (query.scalar_type() == at::ScalarType::Float) {                     \
-      using scalar_t = float;                                               \
-      func();                                                               \
-    } else if (query.scalar_type() == at::ScalarType::Half) {               \
-      using scalar_t = cutlass::half_t;                                     \
-      func();                                                               \
-    } else if (query.scalar_type() == at::ScalarType::BFloat16) {           \
-      using scalar_t = cutlass::bfloat16_t;                                 \
-      func();                                                               \
-    } else {                                                                \
+#define DISPATCH_TYPES(tensor, func)                                           \
+  {                                                                            \
+    if (query.scalar_type() == at::ScalarType::Float) {                        \
+      using scalar_t = float;                                                  \
+      func();                                                                  \
+    } else if (query.scalar_type() == at::ScalarType::Half) {                  \
+      using scalar_t = cutlass::half_t;                                        \
+      func();                                                                  \
+    } else if (query.scalar_type() == at::ScalarType::BFloat16) {              \
+      using scalar_t = cutlass::bfloat16_t;                                    \
+      func();                                                                  \
+    } else {                                                                   \
       TORCH_CHECK(false, "Only fp32, half & bf16 supported at the moment"); \
-    }                                                                       \
+    }                                                                          \
   }
 
 #define DISPATCH_BOOL(BOOL_V, BOOL_NAME, F) \
@@ -46,80 +53,44 @@
       using ArchTag = cutlass::arch::Sm50;                                \
       func();                                                             \
     } else {                                                              \
-      TORCH_CHECK(                                                        \
+      TORCH_CHECK(                                                     \
           false,                                                          \
           "Your device is too old. We require compute capability >= 50"); \
     }                                                                     \
   }
 
-#define CHECK_NOSPARSE_CONTIGUOUS_CUDA(TENSOR)                         \
+#define CHECK_NOSPARSE_CONTIGUOUS_CUDA(TENSOR)                            \
   TORCH_CHECK(TENSOR.is_cuda(), #TENSOR " must be a CUDA tensor");     \
   TORCH_CHECK(!TENSOR.is_sparse(), #TENSOR " must be a dense tensor"); \
   TORCH_CHECK(TENSOR.is_contiguous());
 
-#define CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(TENSOR)                     \
+#define CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(TENSOR)                        \
   TORCH_CHECK(TENSOR.is_cuda(), #TENSOR " must be a CUDA tensor");     \
   TORCH_CHECK(!TENSOR.is_sparse(), #TENSOR " must be a dense tensor"); \
   TORCH_CHECK(                                                         \
       TENSOR.stride(-1) == 1, #TENSOR ": last dimension must be contiguous");
 
 #define CHECK_ALIGNED_PTR(PTR, ALIGNMENT) \
-  TORCH_CHECK(uint64_t(PTR) % ALIGNMENT == 0, #PTR " is not correctly aligned")
+  TORCH_CHECK(                         \
+      uint64_t(PTR) % ALIGNMENT == 0, #PTR " is not correctly aligned")
+
+#define ASSIGN_CHECK_OVERFLOW(A, B)                                    \
+  {                                                                    \
+    A = B;                                                             \
+    TORCH_CHECK(                                                    \
+        B < std::numeric_limits<decltype(A)>::max(), #B " overflows"); \
+  }
+
 namespace gemm_kernel_utils {
-template <typename scalar_t>
-struct TypeTraits;
-
-template <>
-struct TypeTraits<cutlass::half_t> {
-  using scalar_t = cutlass::half_t;
-
-  static constexpr __host__ at::ScalarType atScalarType() {
-    return at::ScalarType::Half;
-  }
-  template <int nDim>
-  static __host__ at::PackedTensorAccessor32<scalar_t, nDim> packed_accessor(
-      at::Tensor const& tensor) {
-    return at::PackedTensorAccessor32<scalar_t, nDim>(
-        (scalar_t*)(tensor.data_ptr()),
-        tensor.sizes().data(),
-        tensor.strides().data());
-  }
-};
-
-template <>
-struct TypeTraits<cutlass::bfloat16_t> {
-  using scalar_t = cutlass::bfloat16_t;
-
-  static constexpr __host__ at::ScalarType atScalarType() {
-    return at::ScalarType::BFloat16;
-  }
-  template <int nDim>
-  static __host__ at::PackedTensorAccessor32<scalar_t, nDim> packed_accessor(
-      at::Tensor const& tensor) {
-    return at::PackedTensorAccessor32<scalar_t, nDim>(
-        (scalar_t*)(tensor.data_ptr()),
-        tensor.sizes().data(),
-        tensor.strides().data());
-  }
-};
-
-template <>
-struct TypeTraits<float> {
-  using scalar_t = float;
-
-  static constexpr __host__ at::ScalarType atScalarType() {
-    return at::ScalarType::Float;
-  }
-  template <int nDim>
-  static __host__ at::PackedTensorAccessor32<scalar_t, nDim> packed_accessor(
-      at::Tensor const& tensor) {
-    return tensor.packed_accessor32<scalar_t, nDim>();
-  }
-};
 
 template <typename integer>
-constexpr __host__ __device__ inline integer ceil_div(integer n, integer m) {
+constexpr CUTLASS_HOST_DEVICE integer ceil_div(integer n, integer m) {
   return (n + m - 1) / m;
+}
+
+template <typename integer>
+constexpr CUTLASS_HOST_DEVICE integer align_up(integer n, integer m) {
+  return ((n + m - 1) / m) * m;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -143,7 +114,8 @@ template <typename ArchTag>
 struct DefaultGemmType<
     ArchTag,
     float,
-    typename std::enable_if<ArchTag::kMinComputeCapability >= 80>::type> {
+    typename cutlass::platform::enable_if<
+        ArchTag::kMinComputeCapability >= 80>::type> {
   static constexpr int ThreadK = 32;
   static constexpr int WarpK = 32;
   static constexpr int kMinimumAlignment = 4;
@@ -157,12 +129,12 @@ template <typename ArchTag, typename scalar_t>
 struct DefaultGemmType<
     ArchTag,
     scalar_t,
-    typename std::enable_if<
+    typename cutlass::platform::enable_if<
         ArchTag::kMinComputeCapability >= 75 &&
         cutlass::sizeof_bits<scalar_t>::value == 16>::type> {
   static constexpr int ThreadK = 32;
   static constexpr int WarpK = 32;
-  static constexpr int kMinimumAlignment = 8;
+  static constexpr int kMinimumAlignment = 4;
   using OpClass = cutlass::arch::OpClassTensorOp;
   using InstructionShape = cutlass::gemm::GemmShape<16, 8, 8>;
   using Operator = cutlass::arch::OpMultiplyAdd;
@@ -187,17 +159,19 @@ struct call_conditional;
 
 template <typename TA, typename TB>
 struct call_conditional<true, TA, TB> {
-  template <typename... Args>
-  static CUTLASS_DEVICE auto apply(TA ta, TB tb, Args&&... args) {
-    return ta(std::forward<Args>(args)...);
+  template <typename Arg>
+  static CUTLASS_HOST_DEVICE auto apply(TA ta, TB tb, Arg arg)
+      -> decltype(ta(arg)) {
+    return ta(arg);
   }
 };
 
 template <typename TA, typename TB>
 struct call_conditional<false, TA, TB> {
-  template <typename... Args>
-  static CUTLASS_DEVICE auto apply(TA ta, TB tb, Args&&... args) {
-    return tb(std::forward<Args>(args)...);
+  template <typename Arg>
+  static CUTLASS_HOST_DEVICE auto apply(TA ta, TB tb, Arg arg)
+      -> decltype(tb(arg)) {
+    return tb(arg);
   }
 };
 
@@ -206,8 +180,17 @@ struct call_conditional<false, TA, TB> {
 // The cheapest way to do it is just to broadcast it from lane 0
 ////////////////////////////////////////////////////////////////////////////////
 
-CUTLASS_DEVICE int32_t warp_uniform(int32_t value) {
-  return (int32_t)__shfl_sync(0xfffff, (unsigned)value, 0);
+template <typename T>
+CUTLASS_DEVICE T warp_uniform(T value) {
+  struct {
+    union {
+      T value;
+      uint32_t asInt;
+    };
+  } p;
+  p.value = value;
+  p.asInt = __shfl_sync(0xffffffff, (unsigned)p.asInt, 0);
+  return p.value;
 }
 
 template <typename T>

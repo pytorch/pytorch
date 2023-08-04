@@ -19,6 +19,8 @@ namespace {
     template <typename T>
     class SignManipulation : public ::testing::Test {};
     template <typename T>
+    class SignManipulationHalfPrecision : public ::testing::Test {};
+    template <typename T>
     class Rounding : public ::testing::Test {};
     template <typename T>
     class SqrtAndReciprocal : public ::testing::Test {};
@@ -59,6 +61,8 @@ namespace {
     template <typename T>
     class QuantizationTests : public ::testing::Test {};
     template <typename T>
+    class Quantization8BitWithTailTests : public ::testing::Test {};
+    template <typename T>
     class FunctionalTests : public ::testing::Test {};
     template <typename T>
     class FunctionalTestsReducedFloat : public ::testing::Test {};
@@ -66,6 +70,10 @@ namespace {
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
     using QuantTestedTypes = ::testing::Types<vqint8, vquint8, vqint>;
+#if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
+    using Quantization8BitWithTailTestedTypes =
+        ::testing::Types<vqint8, vquint8>;
+#endif
     using RealFloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort>;
     using FloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
@@ -78,6 +86,7 @@ namespace {
     TYPED_TEST_SUITE(Nan, RealFloatTestedTypes);
     TYPED_TEST_SUITE(Interleave, RealFloatIntTestedTypes);
     TYPED_TEST_SUITE(SignManipulation, FloatIntTestedTypes);
+    TYPED_TEST_SUITE(SignManipulationHalfPrecision, ReducedFloatTestedTypes);
     TYPED_TEST_SUITE(Rounding, RealFloatTestedTypes);
     TYPED_TEST_SUITE(SqrtAndReciprocal, FloatTestedTypes);
     TYPED_TEST_SUITE(SqrtAndReciprocalReal, RealFloatTestedTypes);
@@ -97,6 +106,11 @@ namespace {
     TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatTestedTypes);
     TYPED_TEST_SUITE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_SUITE(QuantizationTests, QuantTestedTypes);
+#if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
+    TYPED_TEST_SUITE(
+        Quantization8BitWithTailTests,
+        Quantization8BitWithTailTestedTypes);
+#endif
     TYPED_TEST_SUITE(FunctionalTests, RealFloatIntTestedTypes);
     TYPED_TEST_SUITE(FunctionalTestsReducedFloat, ReducedFloatTestedTypes);
     TYPED_TEST(Memory, UnAlignedLoadStore) {
@@ -164,6 +178,60 @@ namespace {
             [](vec v) { return v.neg(); },
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_int_minimum));
+    }
+    TYPED_TEST(SignManipulationHalfPrecision, AbsNegate) {
+      typedef enum  {
+        ABS,
+        NEGATE
+      } SignOpType;
+      using vec = TypeParam;
+      using VT = UholdType<TypeParam>;
+      using RT = float; // reference
+      float atol = 0.01f;
+      float rtol = 0.01f;
+
+      auto cmp = [&](RT ref, VT val) {
+        return std::abs(ref - RT(val)) <= atol + rtol * std::abs(val);
+      };
+
+#define APPLY_FN_AND_STORE(VEC_TYPE)                            \
+      [&](SignOpType op_type, VEC_TYPE& x_fp_vec, void *x_fp) { \
+        if (op_type == SignOpType::NEGATE) {                    \
+          x_fp_vec.neg().store(x_fp);                           \
+        } else {                                                \
+          x_fp_vec.abs().store(x_fp);                           \
+        }                                                       \
+      }
+
+      auto apply_fn_and_store_ref = APPLY_FN_AND_STORE(vfloat);
+      auto apply_fn_and_store_half = APPLY_FN_AND_STORE(vec);
+
+      auto half_precision_ut = [&](SignOpType op_type) {
+        constexpr auto N = vec::size();
+        CACHE_ALIGN RT x_fp[N];
+        CACHE_ALIGN VT x_hp[N];
+        auto seed = TestSeed();
+        ValueGen<RT> generator(RT(-1), RT(1), seed);
+        for (const auto i : c10::irange(N)) {
+            x_fp[i] = generator.get();
+            x_hp[i] = VT(x_fp[i]);
+        }
+        auto x_fp_vec = vfloat::loadu(x_fp);
+        apply_fn_and_store_ref(op_type, x_fp_vec, x_fp);
+        x_fp_vec = vfloat::loadu(x_fp + vfloat::size());
+        apply_fn_and_store_ref(op_type, x_fp_vec, x_fp + vfloat::size());
+
+        auto x_hp_vec = vec::loadu(x_hp);
+        apply_fn_and_store_half(op_type, x_hp_vec, x_hp);
+
+        for (int64_t len = 0; len < N; len++) {
+            ASSERT_TRUE(cmp(x_fp[len], x_hp[len])) << "Failure Details:\nTest Seed to reproduce: " << seed
+                << "\nabs/negate, Length: " << len << "; fp32: " << x_fp[len] << "; bf16/fp16: " << RT(x_hp[len]);
+        }
+      };
+
+      half_precision_ut(SignOpType::ABS);
+      half_precision_ut(SignOpType::NEGATE);
     }
     TYPED_TEST(Rounding, Round) {
         using vec = TypeParam;
@@ -855,7 +923,7 @@ namespace {
         // generate expected_val
         for (int64_t i = 0; i < vec::size(); i++) {
             bit_rep hex_mask = 0;
-            hex_mask=bit_cast<bit_rep>(mask[i]);
+            hex_mask=c10::bit_cast<bit_rep>(mask[i]);
             expected_val[i] = (hex_mask & 0x01) ? b[i] : a[i];
         }
         // test with blendv
@@ -1031,6 +1099,11 @@ namespace {
         AssertVectorized<vcomplex>(NAME_INFO(complex imag), expected3, actual3).check();
         AssertVectorized<vcomplex>(NAME_INFO(complex conj), expected4, actual4).check();
     }
+    TEST(ComplexTests, TestComplexConstructor) {
+        auto actual1 = vcomplex(1.0);
+        auto expected1 = vcomplex(Complex<float>(1.0));
+        AssertVectorized<vcomplex>(NAME_INFO(complex constructor), expected1, actual1).check();
+    }
     TYPED_TEST(QuantizationTests, Quantize) {
         using vec = TypeParam;
         using underlying = ValueType<vec>;
@@ -1073,6 +1146,75 @@ namespace {
             if (AssertVectorized<vec>(NAME_INFO(Quantize), expected, actual).check()) return;
         } //trials;
     }
+#if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
+    // This test case aims to test at::vec::QuantizeAvx512 and
+    // at::vec::QuantizeAVX2 which do not support CPU_CAPABILITY_DEFAULT case
+    TYPED_TEST(Quantization8BitWithTailTests, QuantizeTile) {
+      using vec = TypeParam;
+      using underlying = ValueType<vec>;
+      constexpr int trials = 4000;
+      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+      constexpr int min_val = std::numeric_limits<underlying>::min();
+      constexpr int max_val = std::numeric_limits<underlying>::max();
+      constexpr int el_count = vfloat::size();
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+      CACHE_ALIGN float unit_float_vec[el_count];
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+      CACHE_ALIGN underlying expected_qint_vals[vec::size()];
+      CACHE_ALIGN underlying actual_qint_vals[vec::size()];
+      constexpr int tile_size = vec::size() - 1;
+      typename vec::float_vec_return_type float_ret;
+      auto seed = TestSeed();
+      // zero point
+      ValueGen<int> generator_zp(min_val, max_val, seed);
+      // scale
+      ValueGen<float> generator_sc(1.f, 15.f, seed.add(1));
+      // value
+      float minv = static_cast<float>(static_cast<double>(min_val) * 2.0);
+      float maxv = static_cast<float>(static_cast<double>(max_val) * 2.0);
+      ValueGen<float> gen(minv, maxv, seed.add(2));
+      for (const auto i : c10::irange(trials)) {
+        (void)i; // Suppress unused variable warning
+        float scale = generator_sc.get();
+        float inv_scale = 1.0f / static_cast<float>(scale);
+        auto zero_point_val = generator_zp.get();
+        int index = 0;
+        for (int j = 0; j < vec::float_num_vecs(); j++) {
+          // generate vals
+          for (auto& v : unit_float_vec) {
+            v = gen.get();
+            expected_qint_vals[index] =
+                quantize_val<underlying>(scale, zero_point_val, v);
+            index++;
+          }
+          float_ret[j] = vfloat::loadu(unit_float_vec);
+        }
+#if defined(CPU_CAPABILITY_AVX512)
+        at::vec::QuantizeAvx512(
+            (float*)float_ret.data(),
+            actual_qint_vals,
+            tile_size,
+            inv_scale,
+            zero_point_val);
+#endif
+#if defined(CPU_CAPABILITY_AVX2)
+        at::vec::QuantizeAvx2(
+            (float*)float_ret.data(),
+            actual_qint_vals,
+            tile_size,
+            inv_scale,
+            zero_point_val);
+#endif
+        expected_qint_vals[tile_size] = 0;
+        actual_qint_vals[tile_size] = 0;
+        auto expected = vec::loadu(expected_qint_vals);
+        auto actual = vec::loadu(actual_qint_vals);
+        if (AssertVectorized<vec>(NAME_INFO(QuantizeTile), expected, actual)
+                .check())
+          return;
+      } // trials;
+    }
+#endif
     TYPED_TEST(QuantizationTests, DeQuantize) {
         using vec = TypeParam;
         using underlying = ValueType<vec>;
@@ -1183,7 +1325,7 @@ namespace {
             for (int j = 0; j < vec::size(); j++) {
                 qint_vals[j] = generator.get();
                 qint_b[j] = generator.get();
-                if (std::is_same<underlying, int>::value) {
+                if constexpr (std::is_same_v<underlying, int>) {
                     //filter overflow cases
                     filter_sub_overflow(qint_vals[j], qint_b[j]);
                 }

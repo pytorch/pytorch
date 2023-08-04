@@ -1,4 +1,5 @@
 #include <c10/util/Optional.h>
+#include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
 
@@ -16,7 +17,9 @@
 #include <ATen/core/Vitals.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/ForeachUtils.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <libshm.h>
@@ -52,6 +55,7 @@
 #include <torch/csrc/autograd/python_sparse_functions.h>
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/jit/python/init.h>
@@ -78,6 +82,7 @@
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
+#include <torch/csrc/utils/verbose.h>
 
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
@@ -213,6 +218,22 @@ static PyObject* THPModule_crashIfATenASAN(PyObject* module, PyObject* arg) {
       "but got %s",
       THPUtils_typename(arg));
   return THPUtils_packInt32(at::_crash_if_asan(THPUtils_unpackInt(arg)));
+}
+
+static PyObject* THPModule_crashIfDebugAssertsFail(
+    PyObject* module,
+    PyObject* arg) {
+  THPUtils_assert(
+      THPUtils_checkLong(arg),
+      "crash_if_debug_asserts_fail expects an int, "
+      "but got %s",
+      THPUtils_typename(arg));
+  int32_t x = THPUtils_unpackInt(arg);
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      x != 424242, "Expect anything but 424242 as an input for debug builds");
+
+  return THPUtils_packInt32(0);
 }
 
 static PyObject* THPModule_getNumThreads(PyObject* module, PyObject* noargs) {
@@ -412,6 +433,14 @@ static PyObject* THPModule_cxxFlags(PyObject* module, PyObject* noargs) {
 static PyObject* THPModule_parallelInfo(PyObject* module, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(at::get_parallel_info());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_getCpuCapability(
+    PyObject* module,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packString(at::get_cpu_capability());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1015,9 +1044,14 @@ static PyMethodDef TorchMethods[] = {
     {"_crash_if_csrc_ubsan", THPModule_crashIfCsrcUBSAN, METH_O, nullptr},
     {"_crash_if_vptr_ubsan", THPModule_crashIfvptrUBSAN, METH_NOARGS, nullptr},
     {"_crash_if_aten_asan", THPModule_crashIfATenASAN, METH_O, nullptr},
+    {"_crash_if_debug_asserts_fail",
+     THPModule_crashIfDebugAssertsFail,
+     METH_O,
+     nullptr},
     {"_show_config", THPModule_showConfig, METH_NOARGS, nullptr},
     {"_cxx_flags", THPModule_cxxFlags, METH_NOARGS, nullptr},
     {"_parallel_info", THPModule_parallelInfo, METH_NOARGS, nullptr},
+    {"_get_cpu_capability", THPModule_getCpuCapability, METH_NOARGS, nullptr},
     {"_set_backcompat_broadcast_warn",
      THPModule_setBackcompatBroadcastWarn,
      METH_O,
@@ -1229,10 +1263,6 @@ void initIttBindings(PyObject* module);
 } // namespace torch
 #endif
 
-namespace torch {
-void initVerboseBindings(PyObject* module);
-} // namespace torch
-
 static std::vector<PyMethodDef> methods;
 
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
@@ -1243,6 +1273,12 @@ static void LogAPIUsageOnceFromPython(const std::string& event) {
     seen.insert(event);
     c10::LogAPIUsage(event);
   }
+}
+
+static void LogAPIUsageMetadataFromPython(
+    const std::string& event,
+    const std::map<std::string, std::string>& metadata_map) {
+  c10::LogAPIUsageMetadata(event, metadata_map);
 }
 
 // Weak reference to tensor, used to test a tensor isn't leaked
@@ -1338,6 +1374,7 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
+  torch::cpu::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
 
@@ -1365,7 +1402,7 @@ PyObject* initModule() {
 #else
   PyObject* has_cudnn = Py_False;
 #endif
-  ASSERT_TRUE(set_module_attr("has_cudnn", has_cudnn));
+  ASSERT_TRUE(set_module_attr("_has_cudnn", has_cudnn));
 
 #if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
   PyObject* has_spectral = Py_True;
@@ -1391,6 +1428,7 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
+  py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
 
   py_module.def("vitals_enabled", &at::vitals::torchVitalEnabled);
   py_module.def(
@@ -1607,10 +1645,10 @@ Call this whenever a new thread is created in order to propagate values from
   PyObject* has_mps = Py_False;
 #endif
 
-  ASSERT_TRUE(set_module_attr("has_cuda", has_cuda));
-  ASSERT_TRUE(set_module_attr("has_mps", has_mps));
+  ASSERT_TRUE(set_module_attr("_has_cuda", has_cuda));
+  ASSERT_TRUE(set_module_attr("_has_mps", has_mps));
   ASSERT_TRUE(
-      set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
+      set_module_attr("_has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 
 #ifdef _GLIBCXX_USE_CXX11_ABI
   ASSERT_TRUE(set_module_attr(
@@ -1687,6 +1725,52 @@ Call this whenever a new thread is created in order to propagate values from
         return torch::should_allow_numbers_as_tensors(name);
       });
 
+  // FIXME(crcrpar): Better to have `at::ScalarType` get mapped to `torch.dtype`
+  // Currently I see the second item of the key is displayed as
+  // e.g. `torch._C._te.ScalarType at 0x7fcf318adab0`
+  // I thought adding an appropriate type_caster of `at::ScalarType` to
+  // torch/csrc/pybind.h` would solve this but it caused segmentation fault in
+  // my environment.
+  using _DeviceDtypeKey = std::pair<at::Device, std::string>;
+  // Custom hasher is necessary to make unordered_map compilable for Windows
+  // debug targets. As `at::native::ParamsHash` only works on structs with
+  // standard layout, but std::string isn't one in Visual C++ debug builds,
+  // which one can easily verify by running something like:
+  //   #define _DEBUG
+  //   #include <type_traits>
+  //   #include <string>
+  //   static_assert(std::is_standard_layout_v<std::string>, "Oh noes");
+  // If above condition is not met, VC++ raises a very cryptic compilation
+  // error. See
+  // https://github.com/pytorch/pytorch/pull/100007#discussion_r1227116292 for
+  // more detail
+  struct _DeviceDtypeHasher {
+    std::size_t operator()(const _DeviceDtypeKey& k) const noexcept {
+      static at::native::ParamsHash<at::Device> device_hasher;
+      static std::hash<std::string> string_hasher;
+      return device_hasher(k.first) ^ string_hasher(k.second);
+    }
+  };
+  using _FlatMap = std::unordered_map<
+      _DeviceDtypeKey,
+      at::native::TensorsAndIndicesT,
+      _DeviceDtypeHasher>;
+  py_module.def(
+      "_group_tensors_by_device_and_dtype",
+      [](const std::vector<std::vector<c10::optional<at::Tensor>>>&
+             nested_tensorlist,
+         const bool with_indices) {
+        _FlatMap map;
+        for (const auto& iter :
+             at::native::_group_tensors_by_first_tensors_device_and_dtype(
+                 nested_tensorlist, with_indices)) {
+          const auto scalar_type_name =
+              torch::utils::getDtypeNames(iter.first.second).first;
+          map.insert({{iter.first.first, scalar_type_name}, iter.second});
+        }
+        return map;
+      });
+
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator =
       (THPGenerator*)THPGenerator_initDefaultGenerator(defaultGenerator);
@@ -1719,7 +1803,7 @@ Call this whenever a new thread is created in order to propagate values from
 inline void pytorch_duplicate_guard() {
   static int initialized = 0;
   if (initialized) {
-    fprintf(stderr, "pytorch: _C shared library re-initialized\n");
+    fmt::print(stderr, "pytorch: _C shared library re-initialized\n");
     abort();
   }
   initialized = 1;

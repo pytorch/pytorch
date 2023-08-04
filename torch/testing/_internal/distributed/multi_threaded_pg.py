@@ -1,7 +1,7 @@
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 from functools import partial, reduce
 
 import torch
@@ -11,12 +11,15 @@ from torch._C._distributed_c10d import (
     _create_work_from_future,
     AllgatherOptions,
     AllreduceOptions,
+    AllToAllOptions,
+    BarrierOptions,
     BroadcastOptions,
     ReduceScatterOptions,
     ScatterOptions,
     Store,
     ReduceOp,
 )
+from torch.distributed.distributed_c10d import _CollOp, P2POp
 from torch.futures import Future
 from torch.utils._pytree import tree_flatten
 
@@ -61,6 +64,16 @@ _reduce_ops = {
     ReduceOp.BXOR: partial(bitwise_reduce, op=torch.bitwise_xor),
 }
 
+class AllToAll:
+    @torch.no_grad()
+    def work(self, data):
+        world_size = len(data)
+        for dest_rank in range(world_size):
+            output_tensor_list, _ = data[dest_rank]
+            for src_rank in range(world_size):
+                _, input_tensor_list = data[src_rank]
+                output_tensor_list[src_rank].copy_(input_tensor_list[dest_rank])
+
 class AllReduce:
     def __init__(self, op):
         if op.op not in _reduce_ops:
@@ -69,17 +82,20 @@ class AllReduce:
             )
         self.op = op.op
 
+    @torch.no_grad()
     def work(self, data):
-        tensors = []
-        for src_rank in range(0, len(data)):
-            tensors.append(data[src_rank][0])
-        res = _reduce_ops[self.op](tensors)
-        with torch.no_grad():
-            for src_rank in range(len(data)):
-                data[src_rank][0].copy_(res)
+        for i in range(len(data[0])):
+            tensors = []
+            for src_rank in range(0, len(data)):
+                tensors.append(data[src_rank][i])
+            res = _reduce_ops[self.op](tensors)
+            with torch.no_grad():
+                for src_rank in range(len(data)):
+                    data[src_rank][i].copy_(res)
 
 
 class AllGather:
+    @torch.no_grad()
     def work(self, data):
         for src_rank in range(len(data)):
             in_tensor_list = data[src_rank][1]
@@ -89,13 +105,14 @@ class AllGather:
 
             for dest in data:
                 dest_tensor = dest[0][0][src_rank]
-                with torch.no_grad():
-                    dest_tensor.copy_(src_tensor)
+                dest_tensor.copy_(src_tensor)
+
 
 class Scatter:
     def __init__(self, src):
         self.src = src
 
+    @torch.no_grad()
     def work(self, data):
         src_in_tensor_list = data[self.src][1]
         # Can't handle scatter with multiple input tensor list
@@ -107,14 +124,14 @@ class Scatter:
             # Can't handle scatter with multiple output tensor
             assert len(out_tensor_list) == 1
             dest_tensor = out_tensor_list[0]
-            with torch.no_grad():
-                dest_tensor.copy_(src_in_tensors[rank])
+            dest_tensor.copy_(src_in_tensors[rank])
 
 
 class Gather:
     def __init__(self, dst):
         self.dst = dst
 
+    @torch.no_grad()
     def work(self, data):
         # Can't handle gather with multiple tensor lists
         assert len(data[self.dst][0]) == 1
@@ -124,8 +141,7 @@ class Gather:
             # Can't handle gather with multiple tensor lists
             assert len(src_in_tensor_list) == 1
             dest_tensor = out_tensor_list[rank]
-            with torch.no_grad():
-                dest_tensor.copy_(src_in_tensor_list[0])
+            dest_tensor.copy_(src_in_tensor_list[0])
 
 class ReduceScatter:
     def __init__(self, op):
@@ -133,6 +149,7 @@ class ReduceScatter:
             raise NotImplementedError("ReduceScatter only supports SUM on threaded pg for now.")
         self.op = op
 
+    @torch.no_grad()
     def work(self, data):
         start_reduction = [False for _ in range(len(data))]
         for each_rank_data in data:
@@ -144,24 +161,22 @@ class ReduceScatter:
                 # Can't handle reduce_scatter with multiple output tensor
                 assert len(dest_tensor_on_rank_i) == 1
                 if not start_reduction[i]:
-                    with torch.no_grad():
-                        dest_tensor_on_rank_i[0].copy_(to_scatter[i])
+                    dest_tensor_on_rank_i[0].copy_(to_scatter[i])
                     start_reduction[i] = True
                 else:
-                    with torch.no_grad():
-                        dest_tensor_on_rank_i[0].add_(to_scatter[i])
+                    dest_tensor_on_rank_i[0].add_(to_scatter[i])
 
 class Broadcast:
     def __init__(self, src):
         self.src = src
 
+    @torch.no_grad()
     def work(self, data):
         in_tensor_list = flatten_list(data[self.src])
         for i in range(len(data)):
             out_tensor_list = flatten_list(data[i])
             for j in range(len(in_tensor_list)):
-                with torch.no_grad():
-                    out_tensor_list[j].copy_(in_tensor_list[j])
+                out_tensor_list[j].copy_(in_tensor_list[j])
 
 
 class Collective:
@@ -267,11 +282,26 @@ class ProcessLocalGroup(dist.ProcessGroup):
             cls._cur_coll_on_pgs = {}
             cls._terminate.clear()
 
+    def alltoall(self, output_tensor_list, input_tensor_list, opts=AllToAllOptions()):
+        coll = ProcessLocalGroup._start_coll(AllToAll(), self)
+        res = coll.join(self._rank, (output_tensor_list, input_tensor_list))
+        ProcessLocalGroup._end_coll(coll, self)
+        return res
+
     def allreduce(self, tensor_list, opts=AllreduceOptions()):
         coll = ProcessLocalGroup._start_coll(AllReduce(opts.reduceOp), self)
         res = coll.join(self._rank, tensor_list)
         ProcessLocalGroup._end_coll(coll, self)
         return res
+
+    def allreduce_coalesced(self, tensor_list, opts=AllreduceOptions()):
+        coll = ProcessLocalGroup._start_coll(AllReduce(opts.reduceOp), self)
+        res = coll.join(self._rank, tensor_list)
+        ProcessLocalGroup._end_coll(coll, self)
+        return res
+
+    def barrier(self, opts=BarrierOptions()):
+        return self.allreduce(tensor_list=[torch.ones(1)])
 
     def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):
         coll = ProcessLocalGroup._start_coll(AllGather(), self)
@@ -307,6 +337,16 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
+    def _reduce_scatter_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+        tensor_list = list(torch.chunk(input_tensor, self._world_size))
+        return self.reduce_scatter([output_tensor], [tensor_list], opts)
+
+    def allgather_into_tensor_coalesced(self, output_tensor_list, input_tensor_list):
+        res = None
+        for o_t, i_t in zip(output_tensor_list, input_tensor_list):
+            res = self._allgather_base(o_t, i_t)
+        return res
+
     def __init__(self, rank, world_size):
         super().__init__(rank, world_size)
         self._rank = rank
@@ -315,6 +355,8 @@ class ProcessLocalGroup(dist.ProcessGroup):
         if isinstance(world, ThreadLocalWorld):
             world = world._get_world()
         self._world = weakref.ref(world)
+        self._ctx = torch.autograd.set_multithreading_enabled(False)
+
         ProcessLocalGroup._register(self)
 
     def size(self):
@@ -351,13 +393,16 @@ class WorldData:
     group_count: int
     tags_to_pg: Dict[str, List[dist.ProcessGroup]]
     pg_to_tag: Dict[dist.ProcessGroup, str]
+    pg_coalesce_state: Dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]
+    pg_default_device: Dict[dist.ProcessGroup, torch.device]
+
 
 class ThreadLocalWorld:
     _world = threading.local()
 
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
-            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, {}, 0, {}, {})
+            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, {}, 0, {}, {}, {}, {})
         return ThreadLocalWorld._world.world
 
     @property
@@ -400,14 +445,26 @@ class ThreadLocalWorld:
     def pg_to_tag(self):
         return self._get_world().pg_to_tag
 
+    @property
+    def pg_coalesce_state(self) -> Dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]:
+        return self._get_world().pg_coalesce_state
+
+    @property
+    def pg_default_device(self) -> Dict[dist.ProcessGroup, torch.device]:
+        return self._get_world().pg_default_device
+
 
 _old_pg_world = None
+_ctx_manager = None
 
 
 def _install_threaded_pg():
     global _old_pg_world
+    global _ctx_manager
     _old_pg_world = dist.distributed_c10d._world
     dist.distributed_c10d._world = ThreadLocalWorld()
+    _ctx_manager = torch.autograd.set_multithreading_enabled(False)
+
     return dist.distributed_c10d._world
 
 

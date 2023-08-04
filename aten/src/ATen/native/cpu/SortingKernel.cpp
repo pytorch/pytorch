@@ -1,15 +1,23 @@
 #define TORCH_ASSERT_NO_OPERATORS
+
+#include <limits>
+
 #include <ATen/native/Sorting.h>
 #include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorIterator.h>
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/StridedRandomAccessor.h>
 #include <ATen/native/CompositeRandomAccessor.h>
 #include <ATen/native/TopKImpl.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/util/irange.h>
+#ifdef USE_FBGEMM
+#include <fbgemm/Utils.h>
+#endif
 
 namespace at::native {
 
@@ -83,6 +91,56 @@ struct KeyValueCompDesc {
   }
 };
 
+#ifdef USE_FBGEMM
+static bool can_use_radix_sort(const TensorBase& values, const bool descending) {
+  // radix_sort can be used only for 1D data
+  if (values.dim() != 1) return false;
+  // radix_sort sorts in ascending order
+  if (descending) return false;
+  // radix_sort works for integer values
+  if (!at::isIntegralType(values.scalar_type(), /*includeBool=*/false)) return false;
+  // performance improvements are visible for bigger tensor sizes, when radix_sort
+  // is accelerated with OpenMP
+  if (values.numel() < at::internal::GRAIN_SIZE || !fbgemm::is_radix_sort_accelerated_with_openmp()) return false;
+  // TODO(DamianSzwichtenberg): radix_sort is a stable sorting algorithm,
+  // should we check here, whether stable is set to true?
+
+  return true;
+}
+
+static void parallel_sort1d_kernel(
+    const TensorBase& values,
+    const TensorBase& indices) {
+  AT_DISPATCH_INTEGRAL_TYPES(values.scalar_type(), "parallel_sort1d_kernel", [&] {
+    const auto elements = values.numel();
+    auto* const keys = values.data_ptr<scalar_t>();
+    auto* const vals = indices.data_ptr<int64_t>();
+    std::vector<scalar_t> tmp_keys(elements);
+    std::vector<int64_t> tmp_vals(elements);
+    const scalar_t* sorted_keys = nullptr;
+    const int64_t* sorted_vals = nullptr;
+    std::tie(sorted_keys, sorted_vals) = fbgemm::radix_sort_parallel(
+        keys,
+        vals,
+        tmp_keys.data(),
+        tmp_vals.data(),
+        elements,
+        std::numeric_limits<scalar_t>::max(),
+        values.scalar_type() != ScalarType::Byte);
+
+    const bool sorted_in_place = keys == sorted_keys;
+    if (!sorted_in_place) {
+      const auto num_threads = at::get_num_threads();
+      at::parallel_for(0, elements, elements / num_threads, [&](int64_t begin, int64_t end) {
+        const auto job_size = end - begin;
+        vec::map([](vec::Vectorized<scalar_t> x) -> vec::Vectorized<scalar_t> { return x; }, keys + begin, sorted_keys + begin, job_size);
+        vec::map([](vec::Vectorized<int64_t> x) -> vec::Vectorized<int64_t> { return x; }, vals + begin, sorted_vals + begin, job_size);
+      });
+    }
+  });
+}
+#endif
+
 static void sort_kernel(
     const TensorBase& self,
     const TensorBase& values,
@@ -97,6 +155,12 @@ static void sort_kernel(
     // https://github.com/pytorch/pytorch/issues/91420
     return;
   }
+#ifdef USE_FBGEMM
+  if (can_use_radix_sort(values, descending)) {
+    parallel_sort1d_kernel(values, indices);
+    return;
+  }
+#endif
   _dim_apply(
     values, indices, dim,
     "sort_cpu", [&](

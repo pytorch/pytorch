@@ -206,14 +206,14 @@ def _ort_session(
 def _onnx_reference_evaluator_session(model: Union[str, io.BytesIO]):
     try:
         import onnx
-        from onnx import reference as onnx_reference
+        from onnx import reference as onnx_reference  # type: ignore[attr-defined]
     except ImportError:
         raise ImportError("onnx >= 1.13 is required for reference evaluator.")
 
     proto = (
-        onnx.load(model)
+        onnx.load(model)  # type: ignore[attr-defined]
         if isinstance(model, str)
-        else onnx.load_model_from_string(model.getvalue())
+        else onnx.load_model_from_string(model.getvalue())  # type: ignore[attr-defined]
     )
     onnx_session = onnx_reference.ReferenceEvaluator(proto)
     return onnx_session
@@ -917,7 +917,7 @@ def verify_aten_graph(
     graph_inputs = list(graph.inputs())
     jit_inputs = tuple([arg for arg in input_args if arg is not None])
     weights = [params_dict[v.debugName()] for v in graph_inputs[len(jit_inputs) :]]
-    assert all([w is not None for w in weights])
+    assert all(w is not None for w in weights)
     # TODO: Only copy the argument if mutation is detected in Graph.
     jit_inputs = copy.deepcopy(jit_inputs)
     jit_input_and_parameters = jit_inputs + tuple(weights)

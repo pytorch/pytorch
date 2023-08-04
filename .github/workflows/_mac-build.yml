@@ -27,7 +27,7 @@ on:
         description: |
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
-      python_version:
+      python-version:
         required: false
         type: string
         default: "3.8"
@@ -52,19 +52,11 @@ on:
 
     outputs:
       test-matrix:
-        value: ${{ inputs.test-matrix }}
+        value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
       build-outcome:
         value: ${{ jobs.build.outputs.build-outcome }}
         description: The outcome of the build step. This is used to influence test filtering logic later on.
-
-    secrets:
-      MACOS_SCCACHE_S3_ACCESS_KEY_ID:
-        required: true
-        description: Access key for S3 bucket for macOS sccache.
-      MACOS_SCCACHE_S3_SECRET_ACCESS_KEY:
-        required: true
-        description: Secret for S3 bucket for macOS sccache.
 
 jobs:
   build:
@@ -72,20 +64,18 @@ jobs:
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ inputs.runner-type }}
     env:
-      # For sccache access (only on non-forked PRs)
-      AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
       BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
       SCCACHE_USE_GHA: ${{ inputs.sccache-use-gha }}  # this is placed here instead of the sccache step to appease actionlint
     outputs:
       build-outcome: ${{ steps.build.outcome }}
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
     steps:
       - name: Clean up disk space before running MacOS workflow
         uses: pytorch/test-infra/.github/actions/check-disk-space@main
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Set xcode version
         env:
@@ -99,8 +89,9 @@ jobs:
         if: inputs.environment-file == ''
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          python-version: ${{ inputs.python_version }}
+          python-version: ${{ inputs.python-version }}
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
       # This option is used when cross-compiling arm64 from x86-64. Specifically, we need arm64 conda
       # environment even though the arch is x86-64
@@ -108,19 +99,9 @@ jobs:
         if: inputs.environment-file != ''
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          python-version: ${{ inputs.python_version }}
+          python-version: ${{ inputs.python-version }}
           environment-file: ${{ inputs.environment-file }}
-
-      - name: Install macOS homebrew dependencies
-        uses: nick-fields/retry@v2.8.2
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 90
-          command: |
-            # Install dependencies
-            brew install libomp
-            brew link --force libomp
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
         uses: nick-fields/retry@v2.8.2
@@ -130,17 +111,40 @@ jobs:
           max_attempts: 3
           retry_wait_seconds: 90
           command: |
+            set -ex
+
+            DOWNLOAD_SCCACHE=0
+            SCCACHE_VERSION="0.4.1"
+            LOCAL_PATH="/usr/local/bin"
+
+            if [ ! -f "${LOCAL_PATH}/sccache" ]; then
+              DOWNLOAD_SCCACHE=1
+            else
+              LOCAL_VERSION=$("${LOCAL_PATH}/sccache" --version | cut -d" " -f2)
+
+              if [ "${LOCAL_VERSION}" != "${SCCACHE_VERSION}" ]; then
+                DOWNLOAD_SCCACHE=1
+              fi
+            fi
+
+            if [ "${DOWNLOAD_SCCACHE}" == "1" ]; then
+              sudo curl --retry 3 --retry-all-errors "https://s3.amazonaws.com/ossci-macos/sccache/sccache-v0.4.1-${RUNNER_ARCH}" --output "${LOCAL_PATH}/sccache"
+              sudo chmod +x "${LOCAL_PATH}/sccache"
+            fi
+
             if [[ "${SCCACHE_USE_GHA}" == "true" ]]; then
-              sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v0.4.0-pre.7 --output /usr/local/bin/sccache
               echo "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL}" >> "${GITHUB_ENV}"
               echo "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN}" >> "${GITHUB_ENV}"
               echo "SCCACHE_GHA_ENABLED=on" >> "${GITHUB_ENV}"
             else
-              sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
+              # The runner has access to the S3 bucket via IAM profile without the need
+              # for any credential
               echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
               echo "SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${GITHUB_ENV}"
             fi
-            sudo chmod +x /usr/local/bin/sccache
+
+            # This is needed so that later build script could find sccache (which sccache)
+            echo "${LOCAL_PATH}" >> $GITHUB_PATH
 
       - name: Get workflow job id
         id: get-job-id
@@ -164,6 +168,15 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
+
+          if [[ -n "$CONDA_ENV" ]]; then
+            # Use binaries under conda environment
+            export PATH="$CONDA_ENV/bin":$PATH
+          fi
+
+          # NB: Same trick as Linux, there is no need to initialize sccache with the risk of getting
+          # it hangs or timeout at initialization. The cache will be started automatically
+          export SKIP_SCCACHE_INITIALIZATION=1
           ${CONDA_RUN} .ci/pytorch/macos-build.sh
 
       - name: Archive artifacts into zip

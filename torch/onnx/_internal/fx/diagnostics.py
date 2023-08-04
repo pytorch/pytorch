@@ -1,15 +1,31 @@
+from __future__ import annotations
+
+import dataclasses
+
 import functools
-from typing import Any
+
+from typing import Any, Optional
 
 import onnxscript  # type: ignore[import]
-from onnxscript.function_libs.torch_aten import graph_building  # type: ignore[import]
+from onnxscript.function_libs.torch_lib import graph_building  # type: ignore[import]
 
 import torch
+import torch.fx
 from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import decorator, formatter, utils
 
-_LENGTH_LIMIT: int = 80
+from torch.onnx._internal.fx import registration, type_utils as fx_type_utils
+
+# NOTE: Symbolic shapes could be a calculation of values, such as
+# Tensor(i64[s0, 64, (s1//2) - 2, (s1//2) - 2]) where s0 and s1 are symbolic
+# so we need to relax the length limit.
+_LENGTH_LIMIT: int = 120
+# NOTE: The following limits are for the number of items to display in diagnostics for
+# a list, tuple or dict. The limit is picked such that common useful scenarios such as
+# operator arguments are covered, while preventing excessive processing loads on considerably
+# large containers such as the dictionary mapping from fx to onnx nodes.
+_CONTAINER_ITEM_LIMIT: int = 10
 
 # NOTE(bowbao): This is a shim over `torch.onnx._internal.diagnostics`, which is
 # used in `torch.onnx`, and loaded with `torch`. Hence anything related to `onnxscript`
@@ -25,38 +41,135 @@ def format_argument(obj: Any) -> str:
     formatter = _format_argument.dispatch(type(obj))
     result_str = formatter(obj)
 
-    if len(result_str) > _LENGTH_LIMIT:
-        # TODO(bowbao): group diagnostics.
-        #   Related fields of sarif.Result: occurance_count, fingerprints.
-        #   Do a final process to group results before outputing sarif log.
-        diag = infra.Diagnostic(
-            *diagnostics.rules.arg_format_too_verbose.format(
-                level=infra.levels.WARNING,
-                length=len(result_str),
-                length_limit=_LENGTH_LIMIT,
-                argument_type=type(obj),
-                formatter_type=type(format_argument),
+    result_str_lines = result_str.splitlines()
+    for line in result_str_lines:
+        if len(line) > _LENGTH_LIMIT:
+            # TODO(bowbao): group diagnostics.
+            #   Related fields of sarif.Result: occurance_count, fingerprints.
+            #   Do a final process to group results before outputing sarif log.
+            diag = infra.Diagnostic(
+                *diagnostics.rules.arg_format_too_verbose.format(
+                    level=infra.levels.WARNING,
+                    length=len(result_str),
+                    length_limit=_LENGTH_LIMIT,
+                    argument_type=type(obj),
+                    formatter_type=type(format_argument),
+                )
             )
-        )
-        diag.with_location(utils.function_location(formatter))
-        diagnostics.export_context().add_diagnostic(diag)
+            diag.with_location(utils.function_location(formatter))
+            diagnostics.export_context().log(diag)
 
     return result_str
 
 
+# NOTE: EDITING BELOW? READ THIS FIRST!
+#
+# The below functions register the `format_argument` function for different types via
+# `functools.singledispatch` registry. These are invoked by the diagnostics system
+# when recording function arguments and return values as part of a diagnostic.
+# Hence, code with heavy workload should be avoided. Things to avoid for example:
+# `torch.fx.GraphModule.print_readable()`.
+
+
 @_format_argument.register
 def _torch_nn_module(obj: torch.nn.Module) -> str:
-    return f"{obj.__class__.__name__}"
+    return f"torch.nn.Module({obj.__class__.__name__})"
 
 
 @_format_argument.register
 def _torch_fx_graph_module(obj: torch.fx.GraphModule) -> str:
-    return f"{obj.print_readable(print_output=False)}"
+    return f"torch.fx.GraphModule({obj.__class__.__name__})"
+
+
+@_format_argument.register
+def _torch_fx_node(obj: torch.fx.Node) -> str:
+    node_string = f"fx.Node({obj.target})[{obj.op}]:"
+    if "val" not in obj.meta:
+        return node_string + "None"
+    return node_string + format_argument(obj.meta["val"])
+
+
+@_format_argument.register
+def _torch_fx_symbolic_bool(obj: torch.SymBool) -> str:
+    return f"SymBool({obj})"
+
+
+@_format_argument.register
+def _torch_fx_symbolic_int(obj: torch.SymInt) -> str:
+    return f"SymInt({obj})"
+
+
+@_format_argument.register
+def _torch_fx_symbolic_float(obj: torch.SymFloat) -> str:
+    return f"SymFloat({obj})"
 
 
 @_format_argument.register
 def _torch_tensor(obj: torch.Tensor) -> str:
-    return f"Tensor(shape={obj.shape}, dtype={obj.dtype})"
+    return f"Tensor({fx_type_utils.from_torch_dtype_to_abbr(obj.dtype)}{_stringify_shape(obj.shape)})"
+
+
+@_format_argument.register
+def _int(obj: int) -> str:
+    return str(obj)
+
+
+@_format_argument.register
+def _float(obj: float) -> str:
+    return str(obj)
+
+
+@_format_argument.register
+def _bool(obj: bool) -> str:
+    return str(obj)
+
+
+@_format_argument.register
+def _registration_symbolic_function(obj: registration.SymbolicFunction) -> str:
+    # TODO: Compact display of `param_schema`.
+    return f"registration.SymbolicFunction({obj.op_full_name}, is_custom={obj.is_custom}, is_complex={obj.is_complex})"
+
+
+@_format_argument.register
+def _list(obj: list) -> str:
+    list_string = f"List[length={len(obj)}](\n"
+    if not obj:
+        return list_string + "None)"
+    for i, item in enumerate(obj):
+        if i >= _CONTAINER_ITEM_LIMIT:
+            # NOTE: Print only first _CONTAINER_ITEM_LIMIT items.
+            list_string += "...,\n"
+            break
+        list_string += f"{format_argument(item)},\n"
+    return list_string + ")"
+
+
+@_format_argument.register
+def _tuple(obj: tuple) -> str:
+    tuple_string = f"Tuple[length={len(obj)}](\n"
+    if not obj:
+        return tuple_string + "None)"
+    for i, item in enumerate(obj):
+        if i >= _CONTAINER_ITEM_LIMIT:
+            # NOTE: Print only first _CONTAINER_ITEM_LIMIT items.
+            tuple_string += "...,\n"
+            break
+        tuple_string += f"{format_argument(item)},\n"
+    return tuple_string + ")"
+
+
+@_format_argument.register
+def _dict(obj: dict) -> str:
+    dict_string = f"Dict[length={len(obj)}](\n"
+    if not obj:
+        return dict_string + "None)"
+    for i, (key, value) in enumerate(obj.items()):
+        if i >= _CONTAINER_ITEM_LIMIT:
+            # NOTE: Print only first _CONTAINER_ITEM_LIMIT items.
+            dict_string += "...\n"
+            break
+        dict_string += f"{key}: {format_argument(value)},\n"
+    return dict_string + ")"
 
 
 @_format_argument.register
@@ -66,28 +179,48 @@ def _torch_nn_parameter(obj: torch.nn.Parameter) -> str:
 
 @_format_argument.register
 def _onnxscript_torch_script_tensor(obj: graph_building.TorchScriptTensor) -> str:
-    # TODO(bowbao) obj.dtype throws error.
-    return f"`TorchScriptTensor({obj.name}, {obj.onnx_dtype}, {obj.shape}, {obj.symbolic_value()})`"
+    return f"`TorchScriptTensor({fx_type_utils.from_torch_dtype_to_abbr(obj.dtype)}{_stringify_shape(obj.shape)})`"
 
 
 @_format_argument.register
-def _onnxscript_onnx_function(obj: onnxscript.values.OnnxFunction) -> str:
+def _onnxscript_onnx_function(obj: onnxscript.OnnxFunction) -> str:
     return f"`OnnxFunction({obj.name})`"
+
+
+@_format_argument.register
+def _onnxscript_traced_onnx_function(obj: onnxscript.TracedOnnxFunction) -> str:
+    return f"`TracedOnnxFunction({obj.name})`"
+
+
+# from torch/fx/graph.py to follow torch format
+def _stringify_shape(shape: Optional[torch.Size]) -> str:
+    if shape is None:
+        return ""
+    return f"[{', '.join(str(x) for x in shape)}]"
 
 
 diagnose_call = functools.partial(
     decorator.diagnose_call,
-    diagnostics.export_context,
     diagnostic_type=diagnostics.ExportDiagnostic,
     format_argument=format_argument,
 )
 
-diagnose_step = functools.partial(
-    decorator.diagnose_step,
-    diagnostics.export_context,
-    format_argument=format_argument,
-)
-
 rules = diagnostics.rules
-export_context = diagnostics.export_context
 levels = diagnostics.levels
+DiagnosticContext = infra.DiagnosticContext
+Diagnostic = infra.Diagnostic
+RuntimeErrorWithDiagnostic = infra.RuntimeErrorWithDiagnostic
+
+
+@dataclasses.dataclass
+class UnsupportedFxNodeDiagnostic(Diagnostic):
+    unsupported_fx_node: Optional[torch.fx.Node] = None
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        # NOTE: This is a hack to make sure that the additional fields must be set and
+        # not None. Ideally they should not be set as optional. But this is a known
+        # limiation with `dataclasses`. Resolvable in Python 3.10 with `kw_only=True`.
+        # https://stackoverflow.com/questions/69711886/python-dataclasses-inheritance-and-default-values
+        if self.unsupported_fx_node is None:
+            raise ValueError("unsupported_fx_node must be specified.")

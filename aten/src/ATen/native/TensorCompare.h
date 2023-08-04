@@ -12,7 +12,7 @@ struct TensorIterator;
 struct TensorIteratorBase;
 }
 
-namespace at { namespace native {
+namespace at::native {
 
 using reduce_minmax_fn =
     void (*)(Tensor&, Tensor&, const Tensor&, int64_t, bool);
@@ -46,4 +46,4 @@ DECLARE_DISPATCH(void (*)(TensorIteratorBase &, c10::Scalar), clamp_max_scalar_s
 using isin_default_fn = void (*)(const Tensor&, const Tensor&, bool, const Tensor&);
 DECLARE_DISPATCH(isin_default_fn, isin_default_stub);
 
-}} // namespace at::native
+} // namespace at::native

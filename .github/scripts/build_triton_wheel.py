@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -10,8 +11,9 @@ SCRIPT_DIR = Path(__file__).parent
 REPO_DIR = SCRIPT_DIR.parent.parent
 
 
-def read_triton_pin() -> str:
-    with open(REPO_DIR / ".ci" / "docker" / "ci_commit_pins" / "triton.txt") as f:
+def read_triton_pin(rocm_hash: bool = False) -> str:
+    triton_file = "triton.txt" if not rocm_hash else "triton-rocm.txt"
+    with open(REPO_DIR / ".ci" / "docker" / "ci_commit_pins" / triton_file) as f:
         return f.read().strip()
 
 
@@ -56,12 +58,24 @@ def build_triton(
     version: str,
     commit_hash: str,
     build_conda: bool = False,
+    build_rocm: bool = False,
     py_version: Optional[str] = None,
 ) -> Path:
+    env = os.environ.copy()
+    if "MAX_JOBS" not in env:
+        max_jobs = os.cpu_count() or 1
+        env["MAX_JOBS"] = str(max_jobs)
+
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
         triton_pythondir = triton_basedir / "python"
-        check_call(["git", "clone", "https://github.com/openai/triton"], cwd=tmpdir)
+        if build_rocm:
+            triton_repo = "https://github.com/ROCmSoftwarePlatform/triton"
+            triton_pkg_name = "pytorch-triton-rocm"
+        else:
+            triton_repo = "https://github.com/openai/triton"
+            triton_pkg_name = "pytorch-triton"
+        check_call(["git", "clone", triton_repo], cwd=tmpdir)
         check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
         if build_conda:
             with open(triton_basedir / "meta.yaml", "w") as meta:
@@ -73,6 +87,7 @@ def build_triton(
                 print(
                     "build:\n  string: py{{py}}\n  number: 1\n  script: cd python; "
                     "python setup.py install --single-version-externally-managed --record=record.txt\n",
+                    " script_env:\n   - MAX_JOBS\n",
                     file=meta,
                 )
                 print(
@@ -105,6 +120,7 @@ def build_triton(
                     ".",
                 ],
                 cwd=triton_basedir,
+                env=env,
             )
             conda_path = list(Path(tmpdir).glob("linux-64/torchtriton*.bz2"))[0]
             shutil.copy(conda_path, Path.cwd())
@@ -112,16 +128,27 @@ def build_triton(
 
         patch_setup_py(
             triton_pythondir / "setup.py",
-            name="pytorch-triton",
+            name=triton_pkg_name,
             version=f"{version}+{commit_hash[:10]}",
         )
         patch_init_py(
             triton_pythondir / "triton" / "__init__.py",
             version=f"{version}+{commit_hash[:10]}",
         )
-        check_call([sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir)
+
+        if build_rocm:
+            check_call("scripts/amd/setup_rocm_libs.sh", cwd=triton_basedir, shell=True)
+
+        check_call(
+            [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir, env=env
+        )
+
         whl_path = list((triton_pythondir / "dist").glob("*.whl"))[0]
         shutil.copy(whl_path, Path.cwd())
+
+        if build_rocm:
+            check_call(".github/scripts/fix_so.sh", cwd=triton_basedir, shell=True)
+
         return Path.cwd() / whl_path.name
 
 
@@ -130,12 +157,16 @@ def main() -> None:
 
     parser = ArgumentParser("Build Triton binaries")
     parser.add_argument("--build-conda", action="store_true")
+    parser.add_argument("--build-rocm", action="store_true")
     parser.add_argument("--py-version", type=str)
-    parser.add_argument("--commit-hash", type=str, default=read_triton_pin())
+    parser.add_argument("--commit-hash", type=str)
     parser.add_argument("--triton-version", type=str, default=read_triton_version())
     args = parser.parse_args()
     build_triton(
-        commit_hash=args.commit_hash,
+        build_rocm=args.build_rocm,
+        commit_hash=args.commit_hash
+        if args.commit_hash
+        else read_triton_pin(args.build_rocm),
         version=args.triton_version,
         build_conda=args.build_conda,
         py_version=args.py_version,

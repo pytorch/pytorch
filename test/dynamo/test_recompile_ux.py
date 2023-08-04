@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import unittest
 import weakref
+from unittest.mock import patch
 
 import torch
 
@@ -11,7 +12,7 @@ import torch._dynamo.testing
 
 
 class RecompileUxTests(torch._dynamo.test_case.TestCase):
-    # TODO(whc) dynamo actualy recompiles one more time than the cache limit
+    # TODO(whc) dynamo actually recompiles one more time than the cache limit
     cache_limit = 1
 
     @classmethod
@@ -75,6 +76,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         # counters["frames"]["ok"] includes frames not containing torch ops?
         self.assertEqual(compile_counter.frame_count, self.cache_limit)
 
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     def test_dynamic_input(self):
         def model(input):
             return input + input
@@ -134,6 +136,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             msg=f'Expected to find "{contains_str}" in log "{logs.records[0].getMessage()}"',
         )
 
+    @patch.object(torch._dynamo.config, "report_guard_failures", True)
     def test_verbose_tensor_check(self):
         def func(a):
             # Warning: choose a function here whose meta implementation lives
@@ -163,7 +166,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         cache_fail_test(
             a,
             a.clone().as_strided((3, 4, 5), stride=(1, 3, 12)),
-            "tensor 'L['a']' strides mismatch at index 0. expected 20, actual 1",
+            "tensor 'L['a']' stride mismatch at index 0. expected 20, actual 1",
         )
         cache_fail_test(
             a, a[0, :, :], "tensor 'L['a']' rank mismatch. expected 3, actual 2"
@@ -182,6 +185,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             "tensor 'L['a']' requires_grad mismatch. expected requires_grad=0",
         )
 
+    @patch.object(torch._dynamo.config, "report_guard_failures", True)
     def test_mismatched_type(self):
         a = torch.rand(3, 4, 5)
         b = torch.rand(3, 4, 5)

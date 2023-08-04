@@ -1,16 +1,26 @@
 # Owner(s): ["module: dynamo"]
+import math
 import random
 import unittest
 
 import numpy as np
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch.nn.functional as F
+
+from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import same
 
 
-@torch._dynamo.config.patch(dynamic_shapes=True)
+# The intention of this test file is you should put test cases specifically
+# for assume_static_by_default=False, aka you want to YOLO make everything as
+# dynamic as possible.  If you want to test the more normal situation where
+# you assume static by default, put it in a regular test file and
+# test_dynamic_shapes will cover both the YOLO and non-YOLO cases.
+
+
+@torch._dynamo.config.patch(assume_static_by_default=False)
 class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_numpy_correctness(self):
         def fn(x, y, z):
@@ -97,7 +107,14 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
-    @torch._dynamo.config.patch("dynamic_shapes", True)
+    # Really annoying intersection of specialization and RandomValueSource
+    # If we get a RandomValueSource with a single element tensor, we should return a ConstantVariable like other
+    # unspects... but if we do, we break the bytecode assumptions and guards will not work as we will be reffering
+    # to a name from a source that is not there. If we call .item() and take the wrapped_value out, where we do
+    # wrapped_value = wrapped_value.item() where we send unspec down to wrap_fx_proxy, this test passes and then
+    # some models fail on missing codegen.tx.output.random_values_var. If we let the tensor value go into wrap as
+    # it is, this test fails.
+    # The real solution here is to rewrite RandomValueSource and all the codegen it does from the ground up.
     def test_multiple_consecutive_random_calls_before_graph(self):
         def fn(x):
             dim1 = random.randrange(start=0, stop=5)
@@ -115,6 +132,20 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
+    def test_compiled_random_calls_are_random(self):
+        # For compiled functions with random calls,
+        # it should return different values for every iteration.
+        # https://github.com/pytorch/pytorch/issues/95425
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return (x + 1) * random.uniform(0, 1)
+
+        res = []
+        for _ in range(5):
+            res.append(fn(torch.ones(2)))
+        for i in range(1, 5):
+            self.assertFalse(same(res[i - 1], res[i]))
+
     def test_random_call_with_while_loop(self):
         def fn(x):
             dim1 = random.randrange(start=0, stop=3)
@@ -131,8 +162,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
-    # TypeError: zeros(): argument 'size' (position 1) must be tuple of SymInts, not FakeTensor
-    @unittest.expectedFailure
     def test_builtin_getitem(self):
         # builtin getitem args[0] is python list and args[1] is unspec
         def fn(x, idx):
@@ -209,7 +238,79 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(20)
         opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn(x)
+
+    def test_isinstance_symint(self):
+        def fn(x):
+            assert isinstance(x.size(0), int)
+            return x * 2
+
+        x = torch.randn(20)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn(x)
+        y = torch.randn(30)
+        torch._dynamo.mark_dynamic(y, 0)
+        opt_fn(y)
+
+    def test_mark_01_dynamic(self):
+        def fn(x):
+            return x * 2
+
+        x = torch.randn(1)
         torch._dynamo.mark_dynamic(x, 0)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        # This will fail to compile a generic kernel, but we should not
+        # complain about it (mark dynamic will try its best but 0/1
+        # specialization is allowed)
+        opt_fn(x)
+
+    @unittest.expectedFailure
+    def test_conv1d_symint_padding(self):
+        kernel = torch.randn(1, 1, 4)
+
+        def func(x):
+            padding = math.ceil((kernel.shape[-1] + x.shape[-1] % 2) / 2) - 1
+            out = F.conv1d(x, kernel, padding=padding, stride=2)
+            return out
+
+        # TODO: NameError: name 's1' is not defined when dynamic=True
+        opt_func = torch.compile(func)
+
+        x = torch.randn(1, 1, 175)
+        opt_func(x)  # passes
+        x = torch.randn(1, 1, 249)
+        opt_func(x)  # crashes
+
+    @torch._dynamo.config.patch("assume_static_by_default", True)
+    def test_propagate_dynamic_dim(self):
+        x = torch.randn(20)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        @torch.compile()
+        def fn(x):
+            y = x * 2
+            comptime.graph_break()
+            z = y * 2
+            return z
+
+        z = fn(x)
+        self.assertEqual(z._dynamo_weak_dynamic_indices, {0})
+
+    def test_rshift_dynamic(self):
+        def shift_right(tensor: torch.Tensor) -> torch.Tensor:
+            return (tensor >> 2).to(torch.long)
+
+        opt_fn = torch.compile(shift_right, fullgraph=True, dynamic=True)
+        sample_input = torch.tensor([4, 4, 16, 32], dtype=torch.uint8)
+        opt_fn(sample_input)
+
+    def test_sym_int_conversion(self):
+        def f(x):
+            y = x.size(0)
+            return x * int(y == 0)
+
+        opt_fn = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.randn(2, 3)
         opt_fn(x)
 
 

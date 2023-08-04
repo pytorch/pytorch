@@ -146,23 +146,15 @@ static bool getDisableAddmmCudaLt() {
     return false;
 }
 
-uint8_t getAlignment(const Tensor &t) {
-  // alignment are in bytes
-  uint8_t alignment = 1;
-  uintptr_t address = reinterpret_cast<uintptr_t>(t.data_ptr());
-  for (; alignment < 4; alignment *= 2) {
-    if (address % (alignment * 2)) {
-      return alignment;
-    }
-  }
-  return alignment;
-}
-
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None) {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
   // expand().
   TORCH_CHECK(mat1.dim() == 2 && mat2.dim() == 2, "tensors must be 2-D");
+  TORCH_CHECK(
+    mat1.dtype() == mat2.dtype(),
+    "expected mat1 and mat2 to have the same dtype, but got: ", mat1.dtype(), " != ", mat2.dtype()
+  )
 
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU(__func__, args);
@@ -185,26 +177,13 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     // leading dim >> rows when they are sliced from a large tensor
     // see fbcode/caffe2/test/test_linalg.py:test_corner_cases_of_cublasltmatmul
     if (!disable_addmm_cuda_lt) {
-      auto self_alignment = getAlignment(self);
-      auto mat1_alignment = getAlignment(mat1);
-      auto mat2_alignment = getAlignment(mat2);
-      // due to a heuristic bug, cuBlasLt requires all alignments > 2 or the same ( == 2)
-      // should we err on the side of caution and remove the second dispatch path?
-      bool alignment_ok = (self_alignment > 2 &&
-                           mat1_alignment > 2 &&
-                           mat2_alignment > 2) ||
-                          (self_alignment == 2 &&
-                           mat1_alignment == 2 &&
-                           mat2_alignment == 2);
-
       useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
           result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
-          self.is_contiguous() &&
+          self.is_contiguous() && result.is_contiguous() &&
           (scalar_type == at::ScalarType::Double ||
            scalar_type == at::ScalarType::Float ||
            scalar_type == at::ScalarType::Half ||
            scalar_type == at::ScalarType::BFloat16) &&
-          alignment_ok &&
           mat2_sizes[0] > 1 && mat2_sizes[1] > 1 &&
           mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32 &&
           mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32 &&
@@ -305,16 +284,16 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               mat1_ld,
               mat2_->data_ptr<scalar_t>(),
               mat2_ld,
-              self.data_ptr<scalar_t>(),
+              self.const_data_ptr<scalar_t>(),
               result_->data_ptr<scalar_t>(),
               result_ld,
-#if 0
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11080
               activation_to_gemm_and_blas_arg(activation)
 #else
               // GELU is not supported (and does not compile!) prior
-              // to CUDA 11.4.  Have observed accuracy issues with
+              // to CUDA 11.4. Have observed accuracy issues with
               // GELU epilogue in 11.4; disabling the GELU epilogue
-              // path until we confirm which version it's working in.
+              // path for CUDA version < 11.8.
               activation != Activation::GELU
               ? activation_to_gemm_and_blas_arg(activation)
               : cuda::blas::GEMMAndBiasActivationEpilogue::None
@@ -333,9 +312,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           using opmath_t = at::opmath_type<scalar_t>;
           opmath_t alpha_val = alpha.to<opmath_t>();
           opmath_t beta_val = beta.to<opmath_t>();
-          scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
-          scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
-          scalar_t* result_ptr = result_->data_ptr<scalar_t>();
+          const scalar_t* mat1_ptr = mat1_->const_data_ptr<scalar_t>();
+          const scalar_t* mat2_ptr = mat2_->const_data_ptr<scalar_t>();
+          scalar_t* result_ptr = result_->mutable_data_ptr<scalar_t>();
           at::cuda::blas::gemm<scalar_t>(
               transpose_mat1 ? mat1_->is_conj() ? 'c' : 't' : 'n',
               transpose_mat2 ? mat2_->is_conj() ? 'c' : 't' : 'n',
@@ -356,7 +335,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         at::relu_(const_cast<Tensor&>(*result_));
         break;
       case Activation::GELU:
-        at::gelu_(const_cast<Tensor&>(*result_));
+        at::gelu_(const_cast<Tensor&>(*result_), "tanh");
         break;
       default: break;
     }
@@ -366,9 +345,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 // gating activation_to_gemm_and_blas_arg above; here we are manually
 // performing a post-GELU because we weren't able to use the GELU
 // epilogue above.
-#if !0
+#if !defined(CUDA_VERSION) || CUDA_VERSION < 11080
   if (useLtInterface && activation == Activation::GELU) {
-    at::gelu_(const_cast<Tensor&>(*result_));
+    at::gelu_(const_cast<Tensor&>(*result_), "tanh");
   }
 #endif
 
@@ -428,9 +407,9 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
     using opmath_t = at::opmath_type<scalar_t>;
     opmath_t alpha_val = alpha.to<opmath_t>();
     opmath_t beta_val = beta.to<opmath_t>();
-    scalar_t* batch1_ptr = batch1_->data_ptr<scalar_t>();
-    scalar_t* batch2_ptr = batch2_->data_ptr<scalar_t>();
-    scalar_t* result_ptr = result_->data_ptr<scalar_t>();
+    const scalar_t* batch1_ptr = batch1_->const_data_ptr<scalar_t>();
+    const scalar_t* batch2_ptr = batch2_->const_data_ptr<scalar_t>();
+    scalar_t* result_ptr = result_->mutable_data_ptr<scalar_t>();
     at::cuda::blas::bgemm<scalar_t>(
       transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n',
       transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n',
@@ -560,11 +539,11 @@ return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
         at::cuda::blas::dot<scalar_t>(
             handle,
             n,
-            self.data_ptr<scalar_t>(),
+            self.const_data_ptr<scalar_t>(),
             incx,
-            other.data_ptr<scalar_t>(),
+            other.const_data_ptr<scalar_t>(),
             incy,
-            result.data_ptr<scalar_t>());
+            result.mutable_data_ptr<scalar_t>());
 
         return result;
       });
@@ -609,11 +588,11 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
     at::cuda::blas::vdot<scalar_t>(
         handle,
         n,
-        self.data_ptr<scalar_t>(),
+        self.const_data_ptr<scalar_t>(),
         incx,
-        other.data_ptr<scalar_t>(),
+        other.const_data_ptr<scalar_t>(),
         incy,
-        result.data_ptr<scalar_t>());
+        result.mutable_data_ptr<scalar_t>());
 
     return result;
   });
@@ -653,19 +632,19 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
         auto alpha = alpha_.to<scalar_t>();
         if (mat.stride(0) == 1 && mat.stride(1) >= std::max<int64_t>(1, mat.size(0))) {
           at::cuda::blas::gemv<scalar_t>('n',
-            mat.size(0), mat.size(1), alpha, mat.data_ptr<scalar_t>(), mat.stride(1), vec_contiguous.data_ptr<scalar_t>(),
-            vec_stride, beta, result.data_ptr<scalar_t>(), r_stride);
+            mat.size(0), mat.size(1), alpha, mat.const_data_ptr<scalar_t>(), mat.stride(1), vec_contiguous.const_data_ptr<scalar_t>(),
+            vec_stride, beta, result.mutable_data_ptr<scalar_t>(), r_stride);
         }
         else if (mat.stride(1) == 1 && mat.stride(0) >= std::max<int64_t>(1, mat.size(1))) {
           at::cuda::blas::gemv<scalar_t>('t',
-            mat.size(1), mat.size(0), alpha, mat.data_ptr<scalar_t>(), mat.stride(0),
-            vec_contiguous.data_ptr<scalar_t>(), vec_stride, beta, result.data_ptr<scalar_t>(), r_stride);
+            mat.size(1), mat.size(0), alpha, mat.const_data_ptr<scalar_t>(), mat.stride(0),
+            vec_contiguous.const_data_ptr<scalar_t>(), vec_stride, beta, result.mutable_data_ptr<scalar_t>(), r_stride);
         }
         else {
           Tensor cmat = mat.contiguous();
           at::cuda::blas::gemv<scalar_t>('t',
-              mat.size(1), mat.size(0), alpha, cmat.data_ptr<scalar_t>(), cmat.stride(0),
-              vec_contiguous.data_ptr<scalar_t>(), vec_stride, beta, result.data_ptr<scalar_t>(), r_stride);
+              mat.size(1), mat.size(0), alpha, cmat.const_data_ptr<scalar_t>(), cmat.stride(0),
+              vec_contiguous.const_data_ptr<scalar_t>(), vec_stride, beta, result.mutable_data_ptr<scalar_t>(), r_stride);
         }
       });
     }

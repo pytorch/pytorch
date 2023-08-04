@@ -14,7 +14,11 @@ def dummy_fn(x):
     return torch.sigmoid(x + math.pi) / 10.0
 
 
-@unittest.skipIf(torch.backends.mps.is_available(), "default to aot_eager")
+class DummyModule(torch.nn.Module):
+    def forward(self, x):
+        return dummy_fn(x)
+
+
 class TestInductorConfig(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -115,6 +119,48 @@ class TestInductorConfig(TestCase):
                 opt_fn(x), y, msg=f"torch.compile(..., **{kwargs!r}) failed"
             )
 
+    def test_get_compiler_config(self):
+        from torch._inductor import config as inductor_default_config
+
+        default_cudagraphs = inductor_default_config._default["triton.cudagraphs"]
+
+        # nn.Module: should update default config with a new value
+        model = DummyModule()
+        optimized_module = torch.compile(
+            model, options={"triton.cudagraphs": not default_cudagraphs}
+        )
+        compiler_config = optimized_module.get_compiler_config()
+        self.assertEqual(compiler_config["triton.cudagraphs"], not default_cudagraphs)
+
+        # nn.Module: keep default config
+        model = DummyModule()
+        optimized_module = torch.compile(model)
+        compiler_config = optimized_module.get_compiler_config()
+        self.assertEqual(
+            compiler_config["triton.cudagraphs"],
+            default_cudagraphs,
+        )
+
+        # compile user func: should update default config with a new value
+        optimized_module = torch.compile(
+            dummy_fn, options={"triton.cudagraphs": not default_cudagraphs}
+        )
+        compiler_config = optimized_module.get_compiler_config()
+        self.assertEqual(compiler_config["triton.cudagraphs"], not default_cudagraphs)
+
+        # compile user func: keep default config
+        optimized_module = torch.compile(dummy_fn)
+        compiler_config = optimized_module.get_compiler_config()
+        self.assertEqual(
+            compiler_config["triton.cudagraphs"],
+            default_cudagraphs,
+        )
+
+        # backend=eager: expect None
+        optimized_module = torch.compile(dummy_fn, backend="eager")
+        compiler_config = optimized_module.get_compiler_config()
+        self.assertTrue(compiler_config is None)
+
     def test_compile_api_passes_config(self):
         # ensure configs are actually passed down to inductor
         self.assertRaises(
@@ -177,6 +223,12 @@ class TestInductorConfig(TestCase):
         self.assertEqual(max_autotune_opts["max_autotune"], True)
         self.assertEqual(max_autotune_opts["triton.cudagraphs"], True)
 
+        max_autotune_opts = torch._inductor.list_mode_options(
+            "max-autotune", dynamic=True
+        )
+        self.assertEqual(max_autotune_opts["max_autotune"], True)
+        self.assertEqual(max_autotune_opts["triton.cudagraphs"], True)
+
         max_autotune_no_cudagraphs_opts = torch._inductor.list_mode_options(
             "max-autotune-no-cudagraphs"
         )
@@ -189,6 +241,40 @@ class TestInductorConfig(TestCase):
         self.assertRaises(
             torch._dynamo.exc.InvalidBackend,
             lambda: torch.compile(dummy_fn, backend="does_not_exist")(torch.randn(10)),
+        )
+
+    def test_non_inductor_backend(self):
+        def assert_options(expected_mode=None, expected_options=None):
+            def backend(gm, _, *, mode=None, options=None):
+                nonlocal call_count
+                self.assertEqual(mode, expected_mode)
+                self.assertEqual(options, expected_options)
+                call_count += 1
+                return gm
+
+            return backend
+
+        inp = torch.randn(8)
+
+        def fn(x):
+            return x + 1
+
+        for mode, options in [
+            (None, None),
+            ("fast-mode", None),
+            (None, {"foo": "bar"}),
+        ]:
+            call_count = 0
+            torch.compile(
+                fn, backend=assert_options(mode, options), mode=mode, options=options
+            )(inp)
+            torch._dynamo.reset()
+            self.assertEqual(call_count, 1)
+
+        # TypeError: eager() got an unexpected keyword argument 'mode'
+        self.assertRaises(
+            torch._dynamo.exc.BackendCompilerFailed,
+            lambda: torch.compile(fn, backend="eager", mode="nope")(inp),
         )
 
 

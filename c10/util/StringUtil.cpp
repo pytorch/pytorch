@@ -8,8 +8,12 @@ namespace c10 {
 namespace detail {
 
 std::string StripBasename(const std::string& full_path) {
-  const char kSeparator = '/';
-  size_t pos = full_path.rfind(kSeparator);
+#ifdef _WIN32
+  const std::string separators("/\\");
+#else
+  const std::string separators("/");
+#endif
+  size_t pos = full_path.find_last_of(separators);
   if (pos != std::string::npos) {
     return full_path.substr(pos + 1, std::string::npos);
   } else {

@@ -55,6 +55,8 @@ namespace at {
 // if not use the same mechanism. In order to accomplish that we might have to
 // do some refactoring.
 
+namespace{
+
 // PyTorch allows operations to specify dim 0 and dim -1 on a scalar tensor.
 static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
   return dim == 0 || dim == -1;
@@ -1069,7 +1071,7 @@ Tensor comparison_pointwise_batching_rule(const Tensor& self, const Tensor& othe
   auto result = Func(physical_args[0].tensor(), physical_args[1].tensor());
   return physical_args[0].getPhysicalToLogicalMap().apply(result);
 }
-
+}
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }

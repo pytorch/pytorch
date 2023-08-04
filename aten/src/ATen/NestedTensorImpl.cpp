@@ -146,7 +146,7 @@ inline at::Tensor construct_offsets(const at::Tensor& sizes) {
   }
   int64_t ntensors = sizes.size(0), orig_dim = sizes.size(1);
   auto offsets = at::empty({ntensors}, sizes.options());
-  int64_t *offsets_ptr = offsets.data_ptr<int64_t>();
+  int64_t *offsets_ptr = offsets.mutable_data_ptr<int64_t>();
   // nesting scalars has easy offsets
   if (orig_dim == 0) {
     std::iota(offsets_ptr, offsets_ptr + ntensors, 0);
@@ -180,8 +180,8 @@ NestedTensorImpl::NestedTensorImpl(
       "in the near future.");
   auto storage_device = storage_.device();
   TORCH_INTERNAL_ASSERT(
-      storage_device.is_cpu() || storage_device.is_cuda(),
-      "NestedTensorImpl storage must be either CUDA or CPU but got ",
+      storage_device.is_cpu() || storage_device.is_cuda() || storage_device.is_privateuseone(),
+      "NestedTensorImpl storage must be either CUDA, CPU or ", get_privateuse1_backend(), " but got ",
       storage_device);
   validate_nested_tensor_metadata(nested_sizes_, nested_strides_, storage_offsets_);
   refresh_dim();
@@ -263,24 +263,7 @@ int64_t NestedTensorImpl::numel_custom() const {
   if (nested_sizes_.dim() == 0) {
     return 0;
   }
-  constexpr auto numel_max = std::min(
-      static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
-      static_cast<uint64_t>(std::numeric_limits<size_t>::max()));
-
-  const auto nt_dim = nested_sizes_.size(1);
-  const int64_t* sizes_ptr = nested_sizes_.data_ptr<int64_t>();
-  uint64_t num_elements{0};
-
-  for (const auto i : c10::irange(nested_sizes_.size(0))) {
-    uint64_t n = 1;
-    const auto start{sizes_ptr + i * nt_dim};
-    const auto end{start + nt_dim};
-    bool overflows = c10::safe_multiplies_u64(start, end, &n);
-    num_elements += n;
-    overflows |= (num_elements > numel_max);
-    TORCH_CHECK(!overflows, "numel: integer multiplication overflow");
-  }
-  return static_cast<int64_t>(num_elements);
+  return get_numel_from_nested_size_tensor(nested_sizes_);
 }
 
 
@@ -292,18 +275,18 @@ bool NestedTensorImpl::is_contiguous_custom(MemoryFormat) const {
   return nested_tensor_impl_is_contiguous(this);
 }
 IntArrayRef NestedTensorImpl::sizes_custom() const {
-  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
+  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue.");
 }
 c10::SymIntArrayRef NestedTensorImpl::sym_sizes_custom() const {
-  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
+  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue.");
 }
 
 c10::SymIntArrayRef NestedTensorImpl::sym_strides_custom() const {
-  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue on https://github.com/pytorch/nestedtensor");
+  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue.");
 }
 
 IntArrayRef NestedTensorImpl::strides_custom() const {
-  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue on https://github.com/pytorch/nestedtensor");
+  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue.");
 }
 
 const char* NestedTensorImpl::tensorimpl_type_name() const {
@@ -354,6 +337,27 @@ c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach(
     bool allow_tensor_metadata_change) const {
   return shallow_copy_and_detach_core(
       std::move(version_counter), allow_tensor_metadata_change);
+}
+
+int64_t get_numel_from_nested_size_tensor(const at::Tensor& tensor) {
+  constexpr auto numel_max = std::min(
+      static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+      static_cast<uint64_t>(std::numeric_limits<size_t>::max()));
+
+  const int64_t* sizes_ptr = tensor.data_ptr<int64_t>();
+  const auto nt_dim = tensor.size(1);
+  uint64_t num_elements{0};
+
+  for (const auto i : c10::irange(tensor.size(0))) {
+    uint64_t n = 1;
+    const auto start{sizes_ptr + i * nt_dim};
+    const auto end{start + nt_dim};
+    bool overflows = c10::safe_multiplies_u64(start, end, &n);
+    num_elements += n;
+    overflows |= (num_elements > numel_max);
+    TORCH_CHECK(!overflows, "numel: integer multiplication overflow");
+  }
+  return static_cast<int64_t>(num_elements);
 }
 
 } // namespace native

@@ -9,7 +9,7 @@ import copy
 import os
 import sys
 import unittest
-from contextlib import suppress
+from contextlib import nullcontext
 from typing import Any, cast, List
 
 import numpy as np
@@ -301,7 +301,7 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
             (list(m.parameters()), None),  # `params` as a list
         ]
         for ctor_input, error in ctor_inputs:
-            context = self.assertRaises(error) if error else suppress()
+            context = self.assertRaises(error) if error else nullcontext()
             with context:
                 ZeroRedundancyOptimizer(
                     ctor_input,
@@ -371,7 +371,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     @property
     def context(self):
         return (
-            suppress()
+            nullcontext()
             if not torch.cuda.is_available()
             else torch.cuda.device(self.rank)
         )
@@ -724,7 +724,8 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         if self.world_size < MIN_WORLD_SIZE:
             common_distributed.logger.info(
                 "Skipping `test_nondefault_process_group()` since world size "
-                f"of {self.world_size} is less than {MIN_WORLD_SIZE}"
+                "of %s is less than %s",
+                self.world_size, MIN_WORLD_SIZE
             )
             return
         BACKEND = dist.Backend.GLOO
@@ -854,8 +855,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 torch.nn.Linear(HIDDEN_DIM, HIDDEN_DIM),
                 torch.nn.Linear(HIDDEN_DIM, OUTPUT_DIM),
             ).to(self.device)
-            model.register_buffer(
-                "test_buffer",
+            model.test_buffer = torch.nn.Buffer(
                 torch.ones((1), device=self.device) * self.rank,
             )
             # Define models/optimizers for DDP with ZeRO and DDP with local

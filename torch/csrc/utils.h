@@ -170,7 +170,7 @@ TORCH_PYTHON_API void THPUtils_invalidArguments(
 bool THPUtils_checkIntTuple(PyObject* arg);
 std::vector<int> THPUtils_unpackIntTuple(PyObject* arg);
 
-void THPUtils_addPyMethodDefs(
+TORCH_PYTHON_API void THPUtils_addPyMethodDefs(
     std::vector<PyMethodDef>& vector,
     PyMethodDef* methods);
 
@@ -179,7 +179,7 @@ int THPUtils_getCallable(PyObject* arg, PyObject** result);
 typedef THPPointer<THPGenerator> THPGeneratorPtr;
 typedef class THPPointer<THPStorage> THPStoragePtr;
 
-std::vector<int64_t> THPUtils_unpackLongs(PyObject* arg);
+TORCH_PYTHON_API std::vector<int64_t> THPUtils_unpackLongs(PyObject* arg);
 PyObject* THPUtils_dispatchStateless(
     PyObject* tensor,
     const char* name,
@@ -220,8 +220,8 @@ std::vector<c10::optional<at::cuda::CUDAStream>>
 THPUtils_PySequence_to_CUDAStreamList(PyObject* obj);
 #endif
 
-void storage_fill(at::Storage self, uint8_t value);
-void storage_set(at::Storage self, ptrdiff_t idx, uint8_t value);
-uint8_t storage_get(at::Storage self, ptrdiff_t idx);
+void storage_fill(const at::Storage& self, uint8_t value);
+void storage_set(const at::Storage& self, ptrdiff_t idx, uint8_t value);
+uint8_t storage_get(const at::Storage& self, ptrdiff_t idx);
 
 #endif

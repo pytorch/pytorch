@@ -43,7 +43,7 @@ Calculates the cosine of the given input tensor, element-wise.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/cos_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/cos_op.cc
 
 
 <details>

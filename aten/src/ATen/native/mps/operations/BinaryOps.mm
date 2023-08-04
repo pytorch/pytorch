@@ -1,13 +1,38 @@
 //  Copyright © 2022 Apple Inc.
-
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-#include <ATen/mps/MPSStream.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ExpandUtils.h>
+#include <ATen/ScalarOps.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <c10/util/Optional.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/atan2_native.h>
+#include <ATen/ops/div_native.h>
+#include <ATen/ops/eq_native.h>
+#include <ATen/ops/fmod_native.h>
+#include <ATen/ops/ge_native.h>
+#include <ATen/ops/gt_native.h>
+#include <ATen/ops/hypot_native.h>
+#include <ATen/ops/le_native.h>
+#include <ATen/ops/lerp_native.h>
+#include <ATen/ops/logaddexp2_native.h>
+#include <ATen/ops/logaddexp_native.h>
+#include <ATen/ops/lt_native.h>
+#include <ATen/ops/maximum_native.h>
+#include <ATen/ops/minimum_native.h>
+#include <ATen/ops/mul_native.h>
+#include <ATen/ops/ne_native.h>
+#include <ATen/ops/pow.h>
+#include <ATen/ops/pow_native.h>
+#include <ATen/ops/remainder_native.h>
+#include <ATen/ops/result_type.h>
+#include <ATen/ops/sub_native.h>
+#include <ATen/ops/xlogy_native.h>
+#endif
 
 namespace at::native {
 namespace mps {
@@ -22,7 +47,7 @@ typedef MPSGraphTensor* (^BinaryOpBlock)(BinaryOpCachedGraph*, MPSGraphTensor*, 
 #define BinaryOpFn(graph, primary, secondary) \
   MPSGraphTensor*(mps::BinaryOpCachedGraph * graph, MPSGraphTensor * primary, MPSGraphTensor * secondary)
 
-// alpha is always 1.0 except when this function is called from add_sub_template()
+// alpha is always 1.0 except when this function is called from add_sub_lerp_template()
 void binaryOpTensor(const Tensor& self,
                     const Tensor& other,
                     const Scalar& alpha,
@@ -61,7 +86,7 @@ void binaryOpTensor(const Tensor& self,
     needsCopyToOutput = true;
     // else, determine if this is an in-place operation on a view output
   } else if (output_.is_view() && (self.is_alias_of(output_) || other.is_alias_of(output_))) {
-    output = at::native::empty_mps(output_.sizes(), output_.scalar_type(), c10::nullopt, kMPS);
+    output = at::empty(output_.sizes(), output_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
     needsCopyToOutput = true;
   }
 
@@ -82,55 +107,42 @@ void binaryOpTensor(const Tensor& self,
     }
   }
 
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({self, other, output_});
-    BinaryOpCachedGraph* cachedGraph = static_cast<BinaryOpCachedGraph*>(cache_->LookUp(key));
+    auto cachedGraph = LookUpOrCreateCachedGraph<BinaryOpCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      newCachedGraph->primaryTensor =
+          mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(inputDataType), getMPSShape(self));
+      newCachedGraph->secondaryTensor =
+          mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(otherDataType), getMPSShape(other));
 
-    if (!cachedGraph) {
-      MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
-        BinaryOpCachedGraph* newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new BinaryOpCachedGraph(mpsGraph);
-          newCachedGraph->primaryTensor =
-              mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(inputDataType), getMPSShape(self));
-          newCachedGraph->secondaryTensor =
-              mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(otherDataType), getMPSShape(other));
+      MPSGraphTensor* primaryCastTensor = newCachedGraph->primaryTensor;
+      MPSGraphTensor* secondaryCastTensor = newCachedGraph->secondaryTensor;
 
-          MPSGraphTensor* primaryCastTensor = newCachedGraph->primaryTensor;
-          MPSGraphTensor* secondaryCastTensor = newCachedGraph->secondaryTensor;
-
-          // this type inference is only required at the time of graph creation
-          ScalarType common_dtype = c10::promoteTypes(inputDataType, otherDataType);
-          if (isIntegralType(common_dtype, true)) {
-            // integer inputs must be cast to float, if output is float
-            if (isFloatingType(outputDataType)) {
-              common_dtype = outputDataType;
-              // in boolean comparison ops with signed vs. unsigned integers, we always cast to the unsigned type
-            } else if (outputDataType == ScalarType::Bool &&
-                       (inputDataType == ScalarType::Byte || otherDataType == ScalarType::Byte)) {
-              common_dtype = ScalarType::Byte;
-            }
-          }
-          if (inputDataType != common_dtype) {
-            primaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->primaryTensor, common_dtype);
-          }
-          if (otherDataType != common_dtype) {
-            secondaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->secondaryTensor, common_dtype);
-          }
-          newCachedGraph->outputTensor = binaryBlock(newCachedGraph, primaryCastTensor, secondaryCastTensor);
-          // Cast output tensor to an expected type if needed, which addresses discrepancy when int64 scalar is added to
-          // int32 tensor Output tensor should have been promoted but it remains an int32 tensor
-          if (outputDataType != common_dtype ||
-              [newCachedGraph->outputTensor dataType] != getMPSDataType(outputDataType)) {
-            newCachedGraph->outputTensor = castMPSTensor(mpsGraph, newCachedGraph->outputTensor, outputDataType);
-          }
+      // this type inference is only required at the time of graph creation
+      ScalarType common_dtype = c10::promoteTypes(inputDataType, otherDataType);
+      if (isIntegralType(common_dtype, true)) {
+        // integer inputs must be cast to float, if output is float
+        if (isFloatingType(outputDataType)) {
+          common_dtype = outputDataType;
+          // in boolean comparison ops with signed vs. unsigned integers, we always cast to the unsigned type
+        } else if (outputDataType == ScalarType::Bool &&
+                   (inputDataType == ScalarType::Byte || otherDataType == ScalarType::Byte)) {
+          common_dtype = ScalarType::Byte;
         }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<BinaryOpCachedGraph*>(tmpCachedGraph);
-    }
+      }
+      if (inputDataType != common_dtype) {
+        primaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->primaryTensor, common_dtype);
+      }
+      if (otherDataType != common_dtype) {
+        secondaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->secondaryTensor, common_dtype);
+      }
+      newCachedGraph->outputTensor = binaryBlock(newCachedGraph, primaryCastTensor, secondaryCastTensor);
+      // Cast output tensor to an expected type if needed, which addresses discrepancy when int64 scalar is added to
+      // int32 tensor Output tensor should have been promoted but it remains an int32 tensor
+      if (outputDataType != common_dtype || [newCachedGraph->outputTensor dataType] != getMPSDataType(outputDataType)) {
+        newCachedGraph->outputTensor = castMPSTensor(mpsGraph, newCachedGraph->outputTensor, outputDataType);
+      }
+    });
 
     NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
     Placeholder selfPlaceholder;
@@ -162,7 +174,7 @@ void binaryOpTensor(const Tensor& self,
       feeds[otherPlaceholder.getMPSGraphTensor()] = otherPlaceholder.getMPSGraphTensorData();
     }
 
-    // 'cachedGraph->alphaTensor' is not nil only if add_sub_template() was called with an alpha value != 1.0
+    // 'cachedGraph->alphaTensor' is not nil only if add_sub_lerp_template() was called with an alpha value != 1.0
     if (cachedGraph->alphaTensor) {
       alpha_scalar = getMPSScalar(alpha, other.scalar_type());
       feeds[cachedGraph->alphaTensor] = getMPSGraphTensorFromScalar(mpsStream, alpha_scalar);
@@ -244,14 +256,14 @@ void div_mode_template(const Tensor& self,
                  div_mode_op_block);
 }
 
-void add_sub_template(const Tensor& self,
-                      const Tensor& other,
-                      const Scalar& alpha,
-                      const Tensor& output,
-                      std::string op_name) {
+void add_sub_lerp_template(const Tensor& self,
+                           const Tensor& other,
+                           const Scalar& alpha,
+                           const Tensor& output,
+                           std::string op_name) {
   if (alpha.toDouble() == 0.0) {
     if (!self.is_alias_of(output)) { // if inplace, no-op
-      const_cast<Tensor&>(output) = self.clone();
+      output.copy_(self);
     }
     return;
   }
@@ -262,9 +274,22 @@ void add_sub_template(const Tensor& self,
     at::native::alpha_check(commonDtype, alpha);
   }
 
-  BinaryOpBlock add_sub_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
+  if (!alpha_has_value && op_name == "lerp") {
+    if (!self.is_alias_of(other)) { // if inplace, no-op
+      output.copy_(other);
+    }
+    return;
+  }
+
+  BinaryOpBlock add_sub_lerp_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
     MPSGraphTensor* secondaryTensor = secondaryCastTensor;
+
+    if (op_name == "lerp") {
+      secondaryCastTensor = [mpsGraph subtractionWithPrimaryTensor:secondaryCastTensor
+                                                   secondaryTensor:primaryCastTensor
+                                                              name:nil];
+    }
 
     // if alpha is 1.0, then we don't bother adding another multiply to graph
     if (alpha_has_value) {
@@ -273,7 +298,7 @@ void add_sub_template(const Tensor& self,
                                                   secondaryTensor:cachedGraph->alphaTensor
                                                              name:nil];
     }
-    if (op_name == "add")
+    if (op_name == "add" || op_name == "lerp")
       return [mpsGraph additionWithPrimaryTensor:primaryCastTensor secondaryTensor:secondaryTensor name:nil];
     else
       return [mpsGraph subtractionWithPrimaryTensor:primaryCastTensor secondaryTensor:secondaryTensor name:nil];
@@ -284,7 +309,7 @@ void add_sub_template(const Tensor& self,
                  alpha,
                  output,
                  op_name + "_out_mps:" + (alpha_has_value ? getMPSTypeString(alpha.type()) : ""),
-                 add_sub_op_block);
+                 add_sub_lerp_op_block);
 }
 
 } // namespace mps
@@ -378,32 +403,18 @@ TORCH_IMPL_FUNC(div_out_mps)(const Tensor& self, const Tensor& other, const Tens
 }
 
 TORCH_IMPL_FUNC(add_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
-  mps::add_sub_template(self, other, alpha, output, "add");
+  mps::add_sub_lerp_template(self, other, alpha, output, "add");
 }
 
 TORCH_IMPL_FUNC(sub_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
-  mps::add_sub_template(self, other, alpha, output, "sub");
+  mps::add_sub_lerp_template(self, other, alpha, output, "sub");
 }
 
 TORCH_IMPL_FUNC(pow_Scalar_out_mps)(const Scalar& base, const Tensor& exp, const Tensor& out) {
   if (base.equal(1.0)) {
     out.fill_(1);
   } else {
-    // Copied and modified from aten/stc/ATen/ScalarOps.h
-    // as MPS doesn't support float64 tensor.
-    Tensor base_tensor;
-    if (base.isFloatingPoint()) {
-      base_tensor = at::scalar_tensor(base, at::device(exp.device()).dtype(at::kFloat));
-    } else if (base.isBoolean()) {
-      base_tensor = at::scalar_tensor(base, at::device(exp.device()).dtype(at::kBool));
-    } else if (base.isComplex()) {
-      base_tensor = at::scalar_tensor(base, at::device(exp.device()).dtype(at::kComplexDouble));
-    } else {
-      AT_ASSERT(base.isIntegral(false));
-      base_tensor = at::scalar_tensor(base, at::device(exp.device()).dtype(at::kLong));
-    }
-    base_tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-    at::pow_out(const_cast<Tensor&>(out), base_tensor, exp); // redispatch!
+    at::pow_out(const_cast<Tensor&>(out), mps::wrapped_scalar_tensor_mps(base, exp.device()), exp); // redispatch!
   }
 }
 
@@ -495,4 +506,7 @@ TORCH_IMPL_FUNC(xlogy_out_mps)(const Tensor& self, const Tensor& other, const Te
   mps::binaryOpTensor(self, other, Scalar(1.0), output, "xlogy_out_mps", xlogy_op_block);
 }
 
+TORCH_IMPL_FUNC(lerp_Scalar_mps)(const Tensor& self, const Tensor& end, const Scalar& weight, const Tensor& out) {
+  mps::add_sub_lerp_template(self, end, weight, out, "lerp");
+}
 } // namespace at::native

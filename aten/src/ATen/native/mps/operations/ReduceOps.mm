@@ -1,16 +1,34 @@
 //  Copyright © 2022 Apple Inc.
-
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/Utils.h>
-#include <ATen/mps/MPSStream.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/util/irange.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/all_native.h>
+#include <ATen/ops/amax_native.h>
+#include <ATen/ops/amin_native.h>
+#include <ATen/ops/aminmax_native.h>
+#include <ATen/ops/any_native.h>
+#include <ATen/ops/argmax_native.h>
+#include <ATen/ops/argmin_native.h>
+#include <ATen/ops/linalg_vector_norm_native.h>
+#include <ATen/ops/max_native.h>
+#include <ATen/ops/mean_native.h>
+#include <ATen/ops/median.h>
+#include <ATen/ops/min_native.h>
+#include <ATen/ops/norm_native.h>
+#include <ATen/ops/prod_native.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/sum_native.h>
+#endif
 
 namespace at::native {
 namespace mps {
@@ -39,7 +57,7 @@ void set_apparent_shapes(NSMutableArray<NSNumber*>*& apparent_out_shape,
                          NSMutableArray<NSNumber*>*& apparent_in_shape,
                          int64_t num_reduce_dims,
                          int64_t num_output_dims,
-                         IntArrayRef& input_shape,
+                         const IntArrayRef& input_shape,
                          NSMutableArray<NSNumber*>*& axes) {
   if (num_reduce_dims == 0) {
     /* Output shape becomes a one
@@ -92,14 +110,12 @@ void set_axes(NSMutableArray<NSNumber*>*& axes,
 }
 
 // Helper function to prepare axes and tensor shapes
-void set_axes_and_shapes(const Tensor& input_t,
+void set_axes_and_shapes(const IntArrayRef& input_shape,
                          OptionalIntArrayRef opt_dims,
                          NSMutableArray<NSNumber*>*& axes,
                          NSMutableArray<NSNumber*>*& apparent_input_shape,
                          NSMutableArray<NSNumber*>*& apparent_output_shape,
                          NSMutableArray<NSNumber*>*& output_shape) {
-  IntArrayRef input_shape = input_t.sizes();
-
   int64_t num_input_dims = input_shape.size();
   int64_t num_reduce_dims = opt_dims.has_value() ? opt_dims.value().size() : 0;
   int64_t num_output_dims;
@@ -130,16 +146,35 @@ void reduction_out_mps(const Tensor& input_t,
                        const std::string& func_name) {
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, func_name);
-
-  auto input_shape = input_t.sizes();
+  bool canSqueezeLastDim = true;
+  IntArrayRef input_shape = input_t.sizes();
   if (opt_dim.has_value()) {
     IntArrayRef dim = opt_dim.value();
     for (const auto dim_val : dim) {
       auto wrap_dim = maybe_wrap_dim(dim_val, input_shape.size());
+      if (wrap_dim >= 4) {
+        canSqueezeLastDim = false;
+      }
       TORCH_CHECK(
           wrap_dim < static_cast<decltype(wrap_dim)>(input_shape.size() == 0 ? input_t.numel() : input_shape.size()),
           func_name + ": reduction dim must be in the range of input shape")
     }
+  }
+
+  if (input_shape.size() >= 5 && canSqueezeLastDim) {
+    for (const auto i : c10::irange(4, input_shape.size())) {
+      if (input_shape[i] != 1) {
+        canSqueezeLastDim = false;
+      }
+    }
+  } else {
+    canSqueezeLastDim = false;
+  }
+
+  MPSShape* mpsShape = getMPSShape(input_t);
+  if (canSqueezeLastDim) {
+    mpsShape = @[ @(input_shape[0]), @(input_shape[1]), @(input_shape[2]), @(input_shape[3]) ];
+    input_shape = makeArrayRef(input_shape.begin(), input_shape.end() - (input_t.dim() - 4));
   }
 
   NSMutableArray<NSNumber*>* axes = nil;
@@ -147,9 +182,8 @@ void reduction_out_mps(const Tensor& input_t,
   NSMutableArray<NSNumber*>* apparent_output_shape = nil;
   NSMutableArray<NSNumber*>* output_shape = nil;
 
-  set_axes_and_shapes(input_t, opt_dim, axes, apparent_input_shape, apparent_output_shape, output_shape);
-  NSArray<NSNumber*>* wrappedAxes = mps::getTensorAxes(input_t, opt_dim);
-  auto cache_ = MPSGraphCache::getInstance();
+  set_axes_and_shapes(input_shape, opt_dim, axes, apparent_input_shape, apparent_output_shape, output_shape);
+  NSArray<NSNumber*>* wrappedAxes = mps::getTensorAxes(input_shape, opt_dim);
 
   if (output_t.numel() == 0 || input_t.numel() == 0) {
     if (reduction_type == MPSReductionType::PROD) {
@@ -167,88 +201,76 @@ void reduction_out_mps(const Tensor& input_t,
         std::to_string(keepdim) + ":" + std::to_string(reduction_type) + ":" + getTensorsStringKey(output_t) + ":" +
         dtype_str;
     using CachedGraph = MPSUnaryCachedGraph;
-    auto cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      auto inputScalarType = input_t.scalar_type();
 
-    if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
+      MPSGraphTensor* inputTensor =
+          mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input_t.scalar_type()), mpsShape);
+      MPSGraphTensor* castInputTensor = inputTensor;
+      MPSDataType inputCastType = MPSDataTypeInvalid;
+      if (dtype.has_value() &&
+          (dtype.value() == kFloat || dtype.value() == kHalf || dtype.value() == kInt ||
+           (dtype.value() == kLong && macOS13_3_plus))) {
+        inputCastType = getMPSDataType(dtype.value());
+      } else if (inputScalarType != kInt && inputScalarType != kHalf && inputScalarType != kFloat &&
+                 (inputScalarType != kLong || !macOS13_3_plus)) {
+        inputCastType = getMPSDataType(kFloat);
+      } else if (!is_macos_13_or_newer() && inputScalarType == kHalf) {
+        inputCastType = getMPSDataType(kFloat);
+      }
 
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-          auto inputScalarType = input_t.scalar_type();
+      if (inputCastType != MPSDataTypeInvalid) {
+        castInputTensor = castMPSTensor(mpsGraph, inputTensor, inputCastType);
+      }
 
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-          MPSGraphTensor* castInputTensor = inputTensor;
-          MPSDataType inputCastType = MPSDataTypeInvalid;
-          if (dtype.has_value() &&
-              (dtype.value() == kFloat || dtype.value() == kHalf || dtype.value() == kInt ||
-               (dtype.value() == kLong && macOS13_3_plus))) {
-            inputCastType = getMPSDataType(dtype.value());
-          } else if (inputScalarType != kInt && inputScalarType != kHalf && inputScalarType != kFloat &&
-                     (inputScalarType != kLong || !macOS13_3_plus)) {
-            inputCastType = getMPSDataType(kFloat);
-          } else if (!is_macos_13_or_newer() && inputScalarType == kHalf) {
-            inputCastType = getMPSDataType(kFloat);
-          }
+      MPSGraphTensor* castOutputTensor = nil;
 
-          if (inputCastType != MPSDataTypeInvalid) {
-            castInputTensor = castMPSTensor(mpsGraph, inputTensor, inputCastType);
-          }
+      if (reduction_type == MPSReductionType::SUM) {
+        castOutputTensor = [mpsGraph reductionSumWithTensor:castInputTensor axes:wrappedAxes name:nil];
+      } else if (reduction_type == MPSReductionType::PROD) {
+        castOutputTensor = [mpsGraph reductionProductWithTensor:castInputTensor axes:wrappedAxes name:nil];
+      } else if (reduction_type == MPSReductionType::MEAN) {
+        castOutputTensor = [mpsGraph meanOfTensor:castInputTensor axes:wrappedAxes name:nil];
+      } else if (reduction_type == MPSReductionType::COUNT_NONZERO) {
+        MPSGraphTensor* zeros = [mpsGraph constantWithScalar:0 dataType:castInputTensor.dataType];
 
-          MPSGraphTensor* castOutputTensor = nil;
+        MPSGraphTensor* nonZeros = [mpsGraph notEqualWithPrimaryTensor:castInputTensor secondaryTensor:zeros name:nil];
 
-          if (reduction_type == MPSReductionType::SUM) {
-            castOutputTensor = [mpsGraph reductionSumWithTensor:castInputTensor axes:wrappedAxes name:nil];
-          } else if (reduction_type == MPSReductionType::PROD) {
-            castOutputTensor = [mpsGraph reductionProductWithTensor:castInputTensor axes:wrappedAxes name:nil];
-          } else if (reduction_type == MPSReductionType::MEAN) {
-            castOutputTensor = [mpsGraph meanOfTensor:castInputTensor axes:wrappedAxes name:nil];
-          } else if (reduction_type == MPSReductionType::COUNT_NONZERO) {
-            MPSGraphTensor* zeros = [mpsGraph constantWithScalar:0 dataType:castInputTensor.dataType];
+        castOutputTensor = [mpsGraph reductionSumWithTensor:nonZeros axes:wrappedAxes name:nil];
+      } else if (reduction_type == MPSReductionType::AMAX) {
+        castOutputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axes:wrappedAxes name:nil];
+      } else if (reduction_type == MPSReductionType::AMIN) {
+        castOutputTensor = [mpsGraph reductionMinimumWithTensor:castInputTensor axes:wrappedAxes name:nil];
+      } else if (reduction_type == MPSReductionType::TRACE) {
+        MPSGraphTensor* bandPartWithTensor = [mpsGraph bandPartWithTensor:castInputTensor
+                                                                 numLower:0
+                                                                 numUpper:0
+                                                                     name:nil];
+        castOutputTensor = [mpsGraph reductionSumWithTensor:bandPartWithTensor axes:@[ @0, @1 ] name:nil];
+      } else if (reduction_type == MPSReductionType::NANSUM) {
+        // Create a 0 tensor of the same shape as inputTensor
+        MPSGraphTensor* zeros = [mpsGraph constantWithScalar:0.0 dataType:castInputTensor.dataType];
+        // Find NaNs
+        MPSGraphTensor* nanMask = [mpsGraph isNaNWithTensor:castInputTensor name:nil];
+        // Replace NaNs with 0
+        MPSGraphTensor* nanReplaced = [mpsGraph selectWithPredicateTensor:nanMask
+                                                      truePredicateTensor:zeros
+                                                     falsePredicateTensor:castInputTensor
+                                                                     name:nil];
+        // Sum
+        castOutputTensor = [mpsGraph reductionSumWithTensor:nanReplaced axes:wrappedAxes name:nil];
+      }
 
-            MPSGraphTensor* nonZeros = [mpsGraph notEqualWithPrimaryTensor:castInputTensor
-                                                           secondaryTensor:zeros
-                                                                      name:nil];
+      MPSGraphTensor* outputTensor = castOutputTensor;
+      if (getMPSDataType(output_t) != [castOutputTensor dataType]) {
+        outputTensor = castMPSTensor(mpsGraph, castOutputTensor, output_t.scalar_type());
+      }
 
-            castOutputTensor = [mpsGraph reductionSumWithTensor:nonZeros axes:wrappedAxes name:nil];
-          } else if (reduction_type == MPSReductionType::AMAX) {
-            castOutputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axes:wrappedAxes name:nil];
-          } else if (reduction_type == MPSReductionType::AMIN) {
-            castOutputTensor = [mpsGraph reductionMinimumWithTensor:castInputTensor axes:wrappedAxes name:nil];
-          } else if (reduction_type == MPSReductionType::TRACE) {
-            MPSGraphTensor* bandPartWithTensor = [mpsGraph bandPartWithTensor:castInputTensor
-                                                                     numLower:0
-                                                                     numUpper:0
-                                                                         name:nil];
-            castOutputTensor = [mpsGraph reductionSumWithTensor:bandPartWithTensor axes:@[ @0, @1 ] name:nil];
-          } else if (reduction_type == MPSReductionType::NANSUM) {
-            // Create a 0 tensor of the same shape as inputTensor
-            MPSGraphTensor* zeros = [mpsGraph constantWithScalar:0.0 dataType:castInputTensor.dataType];
-            // Find NaNs
-            MPSGraphTensor* nanMask = [mpsGraph isNaNWithTensor:castInputTensor name:nil];
-            // Replace NaNs with 0
-            MPSGraphTensor* nanReplaced = [mpsGraph selectWithPredicateTensor:nanMask
-                                                          truePredicateTensor:zeros
-                                                         falsePredicateTensor:castInputTensor
-                                                                         name:nil];
-            // Sum
-            castOutputTensor = [mpsGraph reductionSumWithTensor:nanReplaced axes:wrappedAxes name:nil];
-          }
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
 
-          MPSGraphTensor* outputTensor = castOutputTensor;
-          if (getMPSDataType(output_t) != [castOutputTensor dataType]) {
-            outputTensor = castMPSTensor(mpsGraph, castOutputTensor, output_t.scalar_type());
-          }
-
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-    }
-
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t, mpsShape);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_output_shape);
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
       inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
@@ -270,7 +292,9 @@ void impl_func_norm_mps(const Tensor& input_tensor,
                         bool cdist = false,
                         c10::optional<IntArrayRef> input_broadcasted_shape = c10::nullopt,
                         NormOpBlock normOpBlock = nullptr) {
+  auto p = opt_p.has_value() ? opt_p.get().to<double>() : Scalar(2.0).to<double>();
   if (input_tensor.numel() == 0) {
+    output_t.fill_((p < 0) ? INFINITY : 0);
     return;
   }
 
@@ -286,9 +310,6 @@ void impl_func_norm_mps(const Tensor& input_tensor,
                 "norm_out_mps: reduction dim must be in the range of input shape")
   }
 
-  auto cache_ = MPSGraphCache::getInstance();
-
-  auto p = opt_p.has_value() ? opt_p.get().to<double>() : Scalar(2.0).to<double>();
   auto reciprocal_p = 1 / p;
   bool pIsZero = (p == 0.0);
   bool pIsPosInf = (p == numeric_limits<double>::infinity());
@@ -309,7 +330,7 @@ void impl_func_norm_mps(const Tensor& input_tensor,
 
   set_apparent_shapes(apparent_output_shape, apparent_input_shape, num_reduce_dims, num_output_dims, input_shape, axes);
 
-  NSArray<NSNumber*>* wrappedAxes = mps::getTensorAxes(input_t, dim);
+  NSArray<NSNumber*>* wrappedAxes = mps::getTensorAxes(input_shape, dim);
   if (cdist) {
     apparent_input_shape = [mps::getMPSShape(input_tensor.sizes()) mutableCopy];
     apparent_output_shape = [mps::getMPSShape(output_t.sizes()) mutableCopy];
@@ -319,81 +340,78 @@ void impl_func_norm_mps(const Tensor& input_tensor,
     return;
   }
 
+  // Cast FP16 to FP32 on macOS Monterey due to precision issues.
+  // This is fixed starting with macOS Ventura.
+  bool castInputData = false;
+  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_0_PLUS) && mps_input_dtype == MPSDataTypeFloat16) {
+    castInputData = true;
+    mps_input_dtype = MPSDataTypeFloat32;
+  }
+
   auto stream = at::mps::getCurrentMPSStream();
   @autoreleasepool {
-    NSString* ns_key = [[axes valueForKey:@"description"] componentsJoinedByString:@","];
+    NSString* ns_key = [[wrappedAxes valueForKey:@"description"] componentsJoinedByString:@","];
     string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
     string tensor_key = cdist ? getTensorsStringKey({input_tensor, other_tensor}) : getTensorsStringKey({input_t});
     string key =
         string("norm_out_mps:") + [ns_key UTF8String] + ":" + tensor_key + ":p" + to_string(p) + ":" + keepdim_info;
 
-    auto cachedGraph = cache_->LookUpAs<MPSBinaryCachedGraph>(key);
+    auto cachedGraph = LookUpOrCreateCachedGraph<MPSBinaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, input_tensor);
 
-    if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<MPSBinaryCachedGraph>(key, ^MPSCachedGraph*() {
-        MPSBinaryCachedGraph* newCachedGraph = nil;
+      if (cdist) {
+        newCachedGraph->otherTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, other_tensor);
+      }
 
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new MPSBinaryCachedGraph(mpsGraph);
-          newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, input_tensor);
+      MPSGraphTensor* inputTensor = cdist
+          ? normOpBlock(newCachedGraph, newCachedGraph->inputTensor_, newCachedGraph->otherTensor_)
+          : newCachedGraph->inputTensor_;
 
-          if (cdist) {
-            newCachedGraph->otherTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, other_tensor);
-          }
+      if (opt_dtype.has_value() || castInputData) {
+        inputTensor = castMPSTensor(mpsGraph, inputTensor, mps_input_dtype);
+      }
 
-          MPSGraphTensor* inputTensor = cdist
-              ? normOpBlock(newCachedGraph, newCachedGraph->inputTensor_, newCachedGraph->otherTensor_)
-              : newCachedGraph->inputTensor_;
-          if (opt_dtype.has_value()) {
-            inputTensor = [mpsGraph castTensor:inputTensor toType:mps_input_dtype name:@"castInputTensor"];
-          }
+      MPSGraphTensor* outputTensor;
 
-          MPSGraphTensor* outputTensor;
+      if (pIsZero) {
+        MPSGraphTensor* zeros = [mpsGraph constantWithScalar:0.0 dataType:mps_input_dtype];
+        MPSGraphTensor* ones = [mpsGraph constantWithScalar:1.0 dataType:mps_input_dtype];
+        MPSGraphTensor* nonZeros = [mpsGraph selectWithPredicateTensor:inputTensor
+                                                   truePredicateTensor:ones
+                                                  falsePredicateTensor:zeros
+                                                                  name:nil];
+        outputTensor = [mpsGraph reductionSumWithTensor:nonZeros axes:wrappedAxes name:nil];
+      } else if (pIsPosInf) {
+        MPSGraphTensor* absoluteTensor = [mpsGraph absoluteWithTensor:inputTensor name:nil];
+        outputTensor = [mpsGraph reductionMaximumWithTensor:absoluteTensor axes:wrappedAxes name:nil];
+      } else if (pIsNegInf) {
+        MPSGraphTensor* absoluteTensor = [mpsGraph absoluteWithTensor:inputTensor name:nil];
+        outputTensor = [mpsGraph reductionMinimumWithTensor:absoluteTensor axes:wrappedAxes name:nil];
+      } else {
+        MPSGraphTensor* absoluteTensor = [mpsGraph absoluteWithTensor:inputTensor name:nil];
 
-          if (pIsZero) {
-            MPSGraphTensor* absoluteTensor = [mpsGraph absoluteWithTensor:inputTensor name:nil];
-            MPSGraphTensor* powerValTensor = [mpsGraph constantWithScalar:p dataType:mps_input_dtype];
-            MPSGraphTensor* powerTensor = [mpsGraph powerWithPrimaryTensor:absoluteTensor
-                                                           secondaryTensor:powerValTensor
-                                                                      name:nil];
-            outputTensor = [mpsGraph reductionSumWithTensor:powerTensor axes:wrappedAxes name:nil];
-          } else if (pIsPosInf) {
-            MPSGraphTensor* absoluteTensor = [mpsGraph absoluteWithTensor:inputTensor name:nil];
-            outputTensor = [mpsGraph reductionMaximumWithTensor:absoluteTensor axes:wrappedAxes name:nil];
-          } else if (pIsNegInf) {
-            MPSGraphTensor* absoluteTensor = [mpsGraph absoluteWithTensor:inputTensor name:nil];
-            outputTensor = [mpsGraph reductionMinimumWithTensor:absoluteTensor axes:wrappedAxes name:nil];
-          } else {
-            MPSGraphTensor* absoluteTensor = [mpsGraph absoluteWithTensor:inputTensor name:nil];
+        MPSGraphTensor* powerValTensor = [mpsGraph constantWithScalar:p dataType:mps_input_dtype];
 
-            MPSGraphTensor* powerValTensor = [mpsGraph constantWithScalar:p dataType:mps_input_dtype];
+        MPSGraphTensor* reciprocalPowerValTensor = [mpsGraph constantWithScalar:reciprocal_p dataType:mps_input_dtype];
 
-            MPSGraphTensor* reciprocalPowerValTensor = [mpsGraph constantWithScalar:reciprocal_p
-                                                                           dataType:mps_input_dtype];
+        MPSGraphTensor* powerTensor = [mpsGraph powerWithPrimaryTensor:absoluteTensor
+                                                       secondaryTensor:powerValTensor
+                                                                  name:nil];
 
-            MPSGraphTensor* powerTensor = [mpsGraph powerWithPrimaryTensor:absoluteTensor
-                                                           secondaryTensor:powerValTensor
-                                                                      name:nil];
+        MPSGraphTensor* reductionSumTensor = [mpsGraph reductionSumWithTensor:powerTensor axes:wrappedAxes name:nil];
 
-            MPSGraphTensor* reductionSumTensor = [mpsGraph reductionSumWithTensor:powerTensor
-                                                                             axes:wrappedAxes
-                                                                             name:nil];
+        outputTensor = [mpsGraph powerWithPrimaryTensor:reductionSumTensor
+                                        secondaryTensor:reciprocalPowerValTensor
+                                                   name:nil];
+      }
 
-            outputTensor = [mpsGraph powerWithPrimaryTensor:reductionSumTensor
-                                            secondaryTensor:reciprocalPowerValTensor
-                                                       name:nil];
-          }
+      if (cdist) {
+        outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:mps::getMPSShape(output_t) name:nil];
+      }
 
-          if (cdist) {
-            outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:mps::getMPSShape(output_t) name:nil];
-          }
-
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-    }
+      newCachedGraph->outputTensor_ =
+          castInputData ? castMPSTensor(mpsGraph, outputTensor, output_t.scalar_type()) : outputTensor;
+    });
 
     auto otherPlaceholder = Placeholder();
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
@@ -440,8 +458,7 @@ Tensor std_var_common_impl_mps(const Tensor& input_t,
   const auto correction_value = correction.value_or(1.0).toDouble();
   int64_t correction_n = 1;
 
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-  NSArray<NSNumber*>* wrappedAxes = getTensorAxes(input_t, dim);
+  NSArray<NSNumber*>* wrappedAxes = getTensorAxes(input_t.sizes(), dim);
 
   int64_t num_output_dims = 0;
   NSMutableArray<NSNumber*>* axes = nil;
@@ -533,12 +550,12 @@ Tensor std_var_common_impl_mps(const Tensor& input_t,
     }
   }
 
-  Tensor output_t = at::native::empty_mps(IntArrayRef(output_shape.data(), num_output_dims),
-                                          input_t.scalar_type(),
-                                          c10::nullopt,
-                                          kMPS,
-                                          c10::nullopt,
-                                          c10::nullopt);
+  Tensor output_t = at::empty(IntArrayRef(output_shape.data(), num_output_dims),
+                              input_t.scalar_type(),
+                              c10::nullopt,
+                              kMPS,
+                              c10::nullopt,
+                              c10::nullopt);
 
   if (output_t.numel() == 0 || input_t.numel() == 0) {
     return output_t;
@@ -557,38 +574,25 @@ Tensor std_var_common_impl_mps(const Tensor& input_t,
     string key = op_key + ":" + getTensorsStringKey(input_t) + ":" + use_dim_info + ":" + keepdim_info + ":" +
         string([ns_key UTF8String]) + ":" + bessel_corrected + ":" + std::to_string(correction_value);
 
-    auto cachedGraph = cache_->LookUpAs<CachedGraph>(key);
-    // Initialize once if configuration not found in cache
-    if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
+      MPSGraphTensor* outputVarTensor = [mpsGraph varianceOfTensor:inputTensor axes:wrappedAxes name:nil];
+      MPSGraphTensor* outputTensor = nil;
 
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-          MPSGraphTensor* outputVarTensor = [mpsGraph varianceOfTensor:inputTensor axes:wrappedAxes name:nil];
-          MPSGraphTensor* outputTensor = nil;
-
-          if (use_correction && correction_value) {
-            MPSGraphTensor* besselTensor = [mpsGraph constantWithScalar:bessel_correction
-                                                               dataType:getMPSDataType(input_t)];
-            MPSGraphTensor* correctedTensor = [mpsGraph multiplicationWithPrimaryTensor:outputVarTensor
-                                                                        secondaryTensor:besselTensor
-                                                                                   name:nil];
-            outputTensor = (stdVarType == STANDARD_DEVIATION) ? [mpsGraph squareRootWithTensor:correctedTensor name:nil]
-                                                              : correctedTensor;
-          } else {
-            outputTensor = (stdVarType == STANDARD_DEVIATION) ? [mpsGraph squareRootWithTensor:outputVarTensor name:nil]
-                                                              : outputVarTensor;
-          }
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-    }
+      if (use_correction && correction_value) {
+        MPSGraphTensor* besselTensor = [mpsGraph constantWithScalar:bessel_correction dataType:getMPSDataType(input_t)];
+        MPSGraphTensor* correctedTensor = [mpsGraph multiplicationWithPrimaryTensor:outputVarTensor
+                                                                    secondaryTensor:besselTensor
+                                                                               name:nil];
+        outputTensor = (stdVarType == STANDARD_DEVIATION) ? [mpsGraph squareRootWithTensor:correctedTensor name:nil]
+                                                          : correctedTensor;
+      } else {
+        outputTensor = (stdVarType == STANDARD_DEVIATION) ? [mpsGraph squareRootWithTensor:outputVarTensor name:nil]
+                                                          : outputVarTensor;
+      }
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
 
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_output_shape);
@@ -611,11 +615,10 @@ Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction_type, 
 
   using CachedGraph = MPSUnaryCachedGraph;
 
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   IntArrayRef input_shape = input_t.sizes();
   int64_t num_in_elements = c10::multiply_integers(input_shape);
 
-  Tensor output_t = at::native::empty_mps({}, input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor output_t = at::empty({}, input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   if (output_t.numel() == 0 || num_in_elements == 0) {
     return output_t;
@@ -623,39 +626,28 @@ Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction_type, 
 
   @autoreleasepool {
     string key = func_name + mps::getTensorsStringKey(input_t);
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
-    // Initialize once if configuration not found in cache
-    if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
+    CachedGraph* cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
 
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
+      MPSGraphTensor* castOutputTensor = nil;
+      MPSGraphTensor* castInputTensor =
+          castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
 
-          MPSGraphTensor* castOutputTensor = nil;
-          MPSGraphTensor* castInputTensor =
-              castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
+      NSArray<NSNumber*>* axes = getTensorAxes(input_t);
+      if (reduction_type == MPSReductionType::MAX) {
+        castOutputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axes:axes name:nil];
+      } else if (reduction_type == MPSReductionType::MIN) {
+        castOutputTensor = [mpsGraph reductionMinimumWithTensor:castInputTensor axes:axes name:nil];
+      }
 
-          NSArray<NSNumber*>* axes = getTensorAxes(input_t);
-          if (reduction_type == MPSReductionType::MAX) {
-            castOutputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axes:axes name:nil];
-          } else if (reduction_type == MPSReductionType::MIN) {
-            castOutputTensor = [mpsGraph reductionMinimumWithTensor:castInputTensor axes:axes name:nil];
-          }
+      MPSGraphTensor* outputTensor = castOutputTensor;
+      if (getMPSDataType(output_t) != [castOutputTensor dataType]) {
+        outputTensor = castMPSTensor(mpsGraph, castOutputTensor, output_t.scalar_type());
+      }
 
-          MPSGraphTensor* outputTensor = castOutputTensor;
-          if (getMPSDataType(output_t) != [castOutputTensor dataType]) {
-            outputTensor = castMPSTensor(mpsGraph, castOutputTensor, output_t.scalar_type());
-          }
-
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-    }
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
 
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, @[ @1 ]);
@@ -700,8 +692,6 @@ void min_max_out_mps(const Tensor& input_t,
     MPSGraphTensor* indicesTensor_ = nil;
   };
 
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
   int64_t dim_ = maybe_wrap_dim(dim, input_t.dim());
 
   // Calculate the output shape according to keepdim=True
@@ -719,52 +709,40 @@ void min_max_out_mps(const Tensor& input_t,
 
   @autoreleasepool {
     string key = func_name + getTensorsStringKey({input_t, indices_t}) + ":" + to_string(dim_);
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
+      MPSGraphTensor* outputTensor = nil;
+      MPSGraphTensor* castInputTensor =
+          castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
 
-    if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
+      if (reduction_type == MPSReductionType::MAX) {
+        outputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
+      } else if (reduction_type == MPSReductionType::MIN) {
+        outputTensor = [mpsGraph reductionMinimumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
+      }
 
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-          MPSGraphTensor* outputTensor = nil;
-          MPSGraphTensor* castInputTensor =
-              castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
-          ;
+      MPSGraphTensor* argreduceOutTensor = nil;
+      if (reduction_type == MPSReductionType::MAX)
+        argreduceOutTensor = [mpsGraph reductionArgMaximumWithTensor:castInputTensor
+                                                                axis:(NSInteger)dim_
+                                                                name:@"argmax_out"];
+      else if (reduction_type == MPSReductionType::MIN)
+        argreduceOutTensor = [mpsGraph reductionArgMinimumWithTensor:castInputTensor
+                                                                axis:(NSInteger)dim_
+                                                                name:@"argmax_out"];
 
-          if (reduction_type == MPSReductionType::MAX) {
-            outputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
-          } else if (reduction_type == MPSReductionType::MIN) {
-            outputTensor = [mpsGraph reductionMinimumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
-          }
+      MPSGraphTensor* indicesTensor = nil;
+      if ([argreduceOutTensor dataType] != MPSDataTypeInt64) {
+        indicesTensor = [mpsGraph castTensor:argreduceOutTensor toType:MPSDataTypeInt64 name:@"cast_out"];
+      }
 
-          MPSGraphTensor* argreduceOutTensor = nil;
-          if (reduction_type == MPSReductionType::MAX)
-            argreduceOutTensor = [mpsGraph reductionArgMaximumWithTensor:castInputTensor
-                                                                    axis:(NSInteger)dim_
-                                                                    name:@"argmax_out"];
-          else if (reduction_type == MPSReductionType::MIN)
-            argreduceOutTensor = [mpsGraph reductionArgMinimumWithTensor:castInputTensor
-                                                                    axis:(NSInteger)dim_
-                                                                    name:@"argmax_out"];
-
-          MPSGraphTensor* indicesTensor = nil;
-          if ([argreduceOutTensor dataType] != MPSDataTypeInt64) {
-            indicesTensor = [mpsGraph castTensor:argreduceOutTensor toType:MPSDataTypeInt64 name:@"cast_out"];
-          }
-
-          if ([outputTensor dataType] != getMPSDataType(output_t)) {
-            outputTensor = castMPSTensor(mpsGraph, outputTensor, output_t.scalar_type());
-          }
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-          newCachedGraph->indicesTensor_ = indicesTensor;
-        }
-        return newCachedGraph;
-      });
-    }
+      if ([outputTensor dataType] != getMPSDataType(output_t)) {
+        outputTensor = castMPSTensor(mpsGraph, outputTensor, output_t.scalar_type());
+      }
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+      newCachedGraph->indicesTensor_ = indicesTensor;
+    });
 
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_out_shape);
@@ -821,14 +799,13 @@ std::tuple<Tensor, Tensor> min_max_mps_impl(const Tensor& input_t,
   Tensor output_t;
   Tensor indices_t;
   if (!keepdim) {
-    output_t = at::native::empty_mps(
-        IntArrayRef(vec_out_shape), input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-    indices_t = at::native::empty_mps(
-        IntArrayRef(vec_out_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+    output_t =
+        at::empty(IntArrayRef(vec_out_shape), input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+    indices_t = at::empty(IntArrayRef(vec_out_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   } else {
-    output_t = at::native::empty_mps(
+    output_t = at::empty(
         IntArrayRef(vec_apparent_out_shape), input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-    indices_t = at::native::empty_mps(
+    indices_t = at::empty(
         IntArrayRef(vec_apparent_out_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   }
 
@@ -848,7 +825,6 @@ void argmax_argmin_out_mps(const Tensor& input_t,
                            MPSReductionType reduction_type,
                            const std::string& func_name) {
   using CachedGraph = MPSUnaryCachedGraph;
-  auto cache_ = MPSGraphCache::getInstance();
 
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "argmax_argmin_out");
@@ -900,48 +876,37 @@ void argmax_argmin_out_mps(const Tensor& input_t,
     NSString* ns_key = [[apparent_in_shape valueForKey:@"description"] componentsJoinedByString:@","];
     string key =
         func_name + ":" + to_string(dim_) + ":" + getTensorsStringKey(input_t) + ":" + string([ns_key UTF8String]);
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      auto inputScalarType = input_t.scalar_type();
+      MPSGraphTensor* inputTensor =
+          mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(inputScalarType), apparent_in_shape);
+      MPSGraphTensor* argreduceOutTensor = nil;
 
-    if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
+      MPSGraphTensor* castInputTensor = inputTensor;
+      if (inputScalarType != kInt && inputScalarType != kHalf && inputScalarType != kFloat &&
+          (inputScalarType != kLong || !macOS13_3_plus)) {
+        castInputTensor = castMPSTensor(mpsGraph, inputTensor, kFloat);
+      }
+      if (reduction_type == MPSReductionType::MAX) {
+        argreduceOutTensor = [mpsGraph reductionArgMaximumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
+      } else {
+        argreduceOutTensor = [mpsGraph reductionArgMinimumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
+      }
 
-          auto inputScalarType = input_t.scalar_type();
-          MPSGraphTensor* inputTensor =
-              mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(inputScalarType), apparent_in_shape);
-          MPSGraphTensor* argreduceOutTensor = nil;
+      MPSGraphTensor* outputTensor = argreduceOutTensor;
+      if (getMPSDataType(output_t) != [argreduceOutTensor dataType]) {
+        outputTensor = castMPSTensor(mpsGraph, argreduceOutTensor, output_t.scalar_type());
+      }
 
-          MPSGraphTensor* castInputTensor = inputTensor;
-          if (inputScalarType != kInt && inputScalarType != kHalf && inputScalarType != kFloat &&
-              (inputScalarType != kLong || !macOS13_3_plus)) {
-            castInputTensor = castMPSTensor(mpsGraph, inputTensor, kFloat);
-          }
-          if (reduction_type == MPSReductionType::MAX) {
-            argreduceOutTensor = [mpsGraph reductionArgMaximumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
-          } else {
-            argreduceOutTensor = [mpsGraph reductionArgMinimumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
-          }
+      MPSGraphTensor* outputClampedTensor =
+          [mpsGraph clampWithTensor:outputTensor
+                     minValueTensor:[mpsGraph constantWithScalar:0 dataType:MPSDataTypeInt64]
+                     maxValueTensor:[mpsGraph constantWithScalar:0x7FEFFFFFFFFFFFFF dataType:MPSDataTypeInt64]
+                               name:nil];
 
-          MPSGraphTensor* outputTensor = argreduceOutTensor;
-          if (getMPSDataType(output_t) != [argreduceOutTensor dataType]) {
-            outputTensor = castMPSTensor(mpsGraph, argreduceOutTensor, output_t.scalar_type());
-          }
-
-          MPSGraphTensor* outputClampedTensor =
-              [mpsGraph clampWithTensor:outputTensor
-                         minValueTensor:[mpsGraph constantWithScalar:0 dataType:MPSDataTypeInt64]
-                         maxValueTensor:[mpsGraph constantWithScalar:LLONG_MAX dataType:MPSDataTypeInt64]
-                                   name:nil];
-
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputClampedTensor;
-        }
-        return newCachedGraph;
-      });
-    }
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputClampedTensor;
+    });
 
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t, apparent_in_shape);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_out_shape);
@@ -990,9 +955,11 @@ Tensor nansum_mps(const Tensor& self, OptionalIntArrayRef dim, bool keepdim, c10
   return nansum_out_mps(self, dim, keepdim, dtype, result);
 }
 
-Tensor trace_mps_out(const Tensor& self) {
-  Tensor output_t = at::native::empty_mps(
-      {}, get_dtype_from_self(self, c10::nullopt, true), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+Tensor trace_mps(const Tensor& self) {
+  TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim ", self.dim());
+
+  Tensor output_t =
+      at::empty({}, get_dtype_from_self(self, c10::nullopt, true), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   std::vector<int64_t> dims(self.dim());
   std::iota(dims.begin(), dims.end(), 0);
@@ -1003,7 +970,7 @@ Tensor trace_mps_out(const Tensor& self) {
                          c10::nullopt,
                          const_cast<Tensor&>(output_t),
                          mps::MPSReductionType::TRACE,
-                         "trace_mps_out");
+                         "trace_mps");
 
   return output_t;
 }
@@ -1023,12 +990,30 @@ TORCH_IMPL_FUNC(amin_out_mps)(const Tensor& input_t, IntArrayRef dim, bool keepd
   mps::reduction_out_mps(input_t, dim, keepdim, c10::nullopt, output_t, mps::MPSReductionType::AMIN, "amin_out_mps");
 }
 
+TORCH_IMPL_FUNC(aminmax_out_mps)
+(const Tensor& input_t, c10::optional<int64_t> dim_opt, bool keepdim, const Tensor& min_t, const Tensor& max_t) {
+  mps::reduction_out_mps(input_t,
+                         dim_opt.has_value() ? OptionalIntArrayRef({*dim_opt}) : c10::nullopt,
+                         keepdim,
+                         c10::nullopt,
+                         min_t,
+                         mps::MPSReductionType::AMIN,
+                         "aminmax_out_mps_min");
+  mps::reduction_out_mps(input_t,
+                         dim_opt.has_value() ? OptionalIntArrayRef({*dim_opt}) : c10::nullopt,
+                         keepdim,
+                         c10::nullopt,
+                         max_t,
+                         mps::MPSReductionType::AMAX,
+                         "aminmax_out_mps_max");
+}
+
 Tensor prod_mps(const Tensor& self, c10::optional<ScalarType> opt_dtype) {
   std::vector<int64_t> dims(self.dim());
   std::iota(dims.begin(), dims.end(), 0);
 
-  Tensor output_t = at::native::empty_mps(
-      {}, get_dtype_from_self(self, opt_dtype, true), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor output_t =
+      at::empty({}, get_dtype_from_self(self, opt_dtype, true), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   mps::reduction_out_mps(self,
                          IntArrayRef(dims),
@@ -1057,8 +1042,8 @@ Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims) {
     }
   }
 
-  Tensor output_t = at::native::empty_mps(
-      IntArrayRef(output_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor output_t =
+      at::empty(IntArrayRef(output_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   mps::reduction_out_mps(self,
                          dims,
                          false,
@@ -1092,6 +1077,17 @@ TORCH_IMPL_FUNC(norm_dtype_out_mps)
  ScalarType dtype,
  const Tensor& result) {
   mps::impl_func_norm_mps(self, self, opt_p, dim, keepdim, dtype, result, /*cdist=*/false);
+}
+
+TORCH_IMPL_FUNC(linalg_vector_norm_out_mps)
+(const Tensor& self,
+ const Scalar& scalar_ord,
+ OptionalIntArrayRef opt_dim,
+ bool keepdim,
+ c10::optional<ScalarType> opt_dtype,
+ const Tensor& result) {
+  mps::impl_func_norm_mps(
+      self, self, scalar_ord, opt_dim.value_or(IntArrayRef{}), keepdim, opt_dtype, result, /*cdist=*/false);
 }
 
 Tensor _cdist_forward_mps(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
@@ -1225,7 +1221,6 @@ TORCH_IMPL_FUNC(any_out_mps)
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "any_out");
 
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   int64_t dim_ = maybe_wrap_dim(dim, input_t.dim());
   native::zero_numel_check_dims(input_t, dim_, "any()");
 
@@ -1245,31 +1240,20 @@ TORCH_IMPL_FUNC(any_out_mps)
     MPSShape* input_t_shape = getMPSShape(input_t);
     string key = string("any_out_mps:") + getMPSShapeString(input_t_shape) + ":" + to_string(dim_) + ":" +
         getMPSTypeString(input_t);
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSDataType input_type = getMPSDataType(input_t);
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_type, input_t_shape);
 
-    if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          MPSDataType input_type = getMPSDataType(input_t);
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_type, input_t_shape);
-
-          MPSGraphTensor* castInputTensor =
-              castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
-          MPSGraphTensor* castOutputTensor = [mpsGraph reductionOrWithTensor:castInputTensor axis:dim_ name:nil];
-          MPSGraphTensor* outputTensor = castOutputTensor;
-          if (MPSDataTypeBool != [castOutputTensor dataType]) {
-            outputTensor = [mpsGraph castTensor:castOutputTensor toType:MPSDataTypeBool name:@"outputTensor"];
-          }
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-    }
+      MPSGraphTensor* castInputTensor =
+          castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
+      MPSGraphTensor* castOutputTensor = [mpsGraph reductionOrWithTensor:castInputTensor axis:dim_ name:nil];
+      MPSGraphTensor* outputTensor = castOutputTensor;
+      if (MPSDataTypeBool != [castOutputTensor dataType]) {
+        outputTensor = [mpsGraph castTensor:castOutputTensor toType:MPSDataTypeBool name:@"outputTensor"];
+      }
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
 
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_out_shape);
@@ -1301,38 +1285,25 @@ TORCH_IMPL_FUNC(any_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "any_all_out");
 
-  auto cache_ = MPSGraphCache::getInstance();
   auto stream = at::mps::getCurrentMPSStream();
 
   @autoreleasepool {
     MPSShape* input_t_shape = getMPSShape(input_t);
     string key = string("any_all_out_mps:") + getMPSShapeString(input_t_shape) + ":" + getMPSTypeString(input_t);
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSDataType input_type = getMPSDataType(input_t);
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_type, input_t_shape);
+      MPSGraphTensor* castInputTensor =
+          castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
+      MPSGraphTensor* castOutputTensor = [mpsGraph reductionOrWithTensor:castInputTensor axes:nil name:nil];
 
-    if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
-
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          MPSDataType input_type = getMPSDataType(input_t);
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_type, input_t_shape);
-          MPSGraphTensor* castInputTensor =
-              castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
-          MPSGraphTensor* castOutputTensor = [mpsGraph reductionOrWithTensor:castInputTensor axes:nil name:nil];
-
-          MPSGraphTensor* outputTensor = castOutputTensor;
-          if (getMPSDataType(output_t) != [castOutputTensor dataType]) {
-            outputTensor = castMPSTensor(mpsGraph, castOutputTensor, output_t.scalar_type());
-          }
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-    }
+      MPSGraphTensor* outputTensor = castOutputTensor;
+      if (getMPSDataType(output_t) != [castOutputTensor dataType]) {
+        outputTensor = castMPSTensor(mpsGraph, castOutputTensor, output_t.scalar_type());
+      }
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
 
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t);
@@ -1360,7 +1331,6 @@ TORCH_IMPL_FUNC(all_out_mps)
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "all_out");
 
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   int64_t dim_ = maybe_wrap_dim(dim, input_t.dim());
   native::zero_numel_check_dims(input_t, dim_, "all()");
 
@@ -1380,30 +1350,19 @@ TORCH_IMPL_FUNC(all_out_mps)
     MPSShape* input_t_shape = getMPSShape(input_t);
     string key = string("all_out_mps:") + getMPSShapeString(input_t_shape) + ":" + to_string(dim_) + ":" +
         getMPSTypeString(input_t);
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
-
-    if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          MPSDataType input_type = getMPSDataType(input_t);
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_type, input_t_shape);
-          MPSGraphTensor* castInputTensor =
-              castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
-          MPSGraphTensor* castOutputTensor = [mpsGraph reductionAndWithTensor:castInputTensor axis:dim_ name:nil];
-          MPSGraphTensor* outputTensor = castOutputTensor;
-          if (MPSDataTypeBool != [castOutputTensor dataType]) {
-            outputTensor = castMPSTensor(mpsGraph, castOutputTensor, MPSDataTypeBool);
-          }
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-    }
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSDataType input_type = getMPSDataType(input_t);
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_type, input_t_shape);
+      MPSGraphTensor* castInputTensor =
+          castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
+      MPSGraphTensor* castOutputTensor = [mpsGraph reductionAndWithTensor:castInputTensor axis:dim_ name:nil];
+      MPSGraphTensor* outputTensor = castOutputTensor;
+      if (MPSDataTypeBool != [castOutputTensor dataType]) {
+        outputTensor = castMPSTensor(mpsGraph, castOutputTensor, MPSDataTypeBool);
+      }
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
 
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_out_shape);
@@ -1423,44 +1382,34 @@ TORCH_IMPL_FUNC(all_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
   using namespace mps;
   using CachedGraph = MPSUnaryCachedGraph;
   if (output_t.numel() == 0 || input_t.numel() == 0) {
+    // in line with cpu behaviour and numpy, an empty tensor should return true.
+    // specifying ones forces the output to be true for this case.
+    output_t.fill_(1);
     return;
   }
 
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "all_all_out");
 
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
   auto stream = at::mps::getCurrentMPSStream();
 
   @autoreleasepool {
     MPSShape* input_t_shape = getMPSShape(input_t);
     string key = string("all_all_out_mps:") + getMPSShapeString(input_t_shape) + ":" + getMPSTypeString(input_t);
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSDataType input_type = getMPSDataType(input_t);
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_type, input_t_shape);
+      MPSGraphTensor* castInputTensor =
+          castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
+      MPSGraphTensor* castOutputTensor = [mpsGraph reductionAndWithTensor:castInputTensor axes:nil name:nil];
+      MPSGraphTensor* outputTensor = castOutputTensor;
+      if (MPSDataTypeBool != [castOutputTensor dataType]) {
+        outputTensor = castMPSTensor(mpsGraph, castOutputTensor, MPSDataTypeBool);
+      }
 
-    if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          MPSDataType input_type = getMPSDataType(input_t);
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_type, input_t_shape);
-          MPSGraphTensor* castInputTensor =
-              castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
-          MPSGraphTensor* castOutputTensor = [mpsGraph reductionAndWithTensor:castInputTensor axes:nil name:nil];
-          MPSGraphTensor* outputTensor = castOutputTensor;
-          if (MPSDataTypeBool != [castOutputTensor dataType]) {
-            outputTensor = castMPSTensor(mpsGraph, castOutputTensor, MPSDataTypeBool);
-          }
-
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-    }
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
 
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t);
@@ -1542,8 +1491,6 @@ Tensor median_mps(const Tensor& input_t) {
 
   using CachedGraph = MPSUnaryCachedGraph;
 
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
   IntArrayRef input_shape = input_t.sizes();
 
   // calculate total no. of elements in the input tensor to reduce it to one dimension
@@ -1552,7 +1499,7 @@ Tensor median_mps(const Tensor& input_t) {
 
   apparent_input_shape[0] = [NSNumber numberWithInt:num_in_elements];
 
-  Tensor output_t = at::native::empty_mps({}, input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor output_t = at::empty({}, input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   if (output_t.numel() == 0 || num_in_elements == 0) {
     return output_t;
@@ -1560,32 +1507,22 @@ Tensor median_mps(const Tensor& input_t) {
 
   @autoreleasepool {
     string key = "median_mps:" + mps::getMPSTypeString(input_t) + mps::getTensorsStringKey(input_t);
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
-    // Initialize once if configuration not found in cache
-    if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-          auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-          MPSGraphTensor* castInputTensor =
-              castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
+      MPSGraphTensor* castInputTensor =
+          castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
 
-          auto reshapedTensor = [mpsGraph reshapeTensor:castInputTensor withShape:@[ @-1 ] name:nil];
-          auto sortedTensor = [mpsGraph sortWithTensor:reshapedTensor axis:((NSUInteger)(int)0)name:nil];
-          auto outputTensor = [mpsGraph sliceTensor:sortedTensor
-                                          dimension:0
-                                              start:((NSUInteger)(int)((num_in_elements + 1) / 2) - 1)
-                                             length:1
-                                               name:nil];
+      auto reshapedTensor = [mpsGraph reshapeTensor:castInputTensor withShape:@[ @-1 ] name:nil];
+      auto sortedTensor = [mpsGraph sortWithTensor:reshapedTensor axis:((NSUInteger)(int)0)name:nil];
+      auto outputTensor = [mpsGraph sliceTensor:sortedTensor
+                                      dimension:0
+                                          start:((NSUInteger)(int)((num_in_elements + 1) / 2) - 1)
+                                         length:1
+                                           name:nil];
 
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-    }
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
 
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, @[ @1 ]);
@@ -1629,7 +1566,6 @@ void median_out_mps(const Tensor& input_t,
     MPSGraphTensor* indicesTensor_ = nil;
   };
 
-  auto cache_ = MPSGraphCache::getInstance();
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "median_out");
 
@@ -1652,42 +1588,30 @@ void median_out_mps(const Tensor& input_t,
   @autoreleasepool {
     string key =
         func_name + ":" + to_string(dim_) + ":" + getTensorsStringKey(input_t) + ":" + getTensorsStringKey(indices_t);
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
+      MPSGraphTensor* castInputTensor =
+          castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
 
-    if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
+      MPSGraphTensor* sortedTensor = [mpsGraph sortWithTensor:castInputTensor axis:((NSUInteger)(int)dim_)name:nil];
 
-        @autoreleasepool {
-          auto mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
+      MPSGraphTensor* outputTensor = [mpsGraph sliceTensor:sortedTensor
+                                                 dimension:dim_
+                                                     start:((NSUInteger)(int)((dim_total_elements + 1) / 2) - 1)
+                                                    length:1
+                                                      name:nil];
+      MPSGraphTensor* argreduceOutTensor = nil;
+      argreduceOutTensor = [mpsGraph argSortWithTensor:castInputTensor axis:(NSInteger)dim_ name:@"argmax_out"];
+      MPSGraphTensor* argOutputTensor = [mpsGraph sliceTensor:argreduceOutTensor
+                                                    dimension:dim_
+                                                        start:((NSUInteger)(int)((dim_total_elements + 1) / 2) - 1)
+                                                       length:1
+                                                         name:nil];
 
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-          MPSGraphTensor* castInputTensor =
-              castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
-
-          MPSGraphTensor* sortedTensor = [mpsGraph sortWithTensor:castInputTensor axis:((NSUInteger)(int)dim_)name:nil];
-
-          MPSGraphTensor* outputTensor = [mpsGraph sliceTensor:sortedTensor
-                                                     dimension:dim_
-                                                         start:((NSUInteger)(int)((dim_total_elements + 1) / 2) - 1)
-                                                        length:1
-                                                          name:nil];
-          MPSGraphTensor* argreduceOutTensor = nil;
-          argreduceOutTensor = [mpsGraph argSortWithTensor:castInputTensor axis:(NSInteger)dim_ name:@"argmax_out"];
-          MPSGraphTensor* argOutputTensor = [mpsGraph sliceTensor:argreduceOutTensor
-                                                        dimension:dim_
-                                                            start:((NSUInteger)(int)((dim_total_elements + 1) / 2) - 1)
-                                                           length:1
-                                                             name:nil];
-
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-          newCachedGraph->indicesTensor_ = argOutputTensor;
-        }
-        return newCachedGraph;
-      });
-    }
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+      newCachedGraph->indicesTensor_ = argOutputTensor;
+    });
 
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_out_shape);
@@ -1768,14 +1692,13 @@ TORCH_API ::std::tuple<at::Tensor&, at::Tensor&> median_out_mps(const at::Tensor
   }
 
   if (!keepdim) {
-    values = at::native::empty_mps(
-        IntArrayRef(vec_out_shape), input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-    indices = at::native::empty_mps(
-        IntArrayRef(vec_out_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+    values =
+        at::empty(IntArrayRef(vec_out_shape), input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+    indices = at::empty(IntArrayRef(vec_out_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   } else {
-    values = at::native::empty_mps(
+    values = at::empty(
         IntArrayRef(vec_apparent_out_shape), input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-    indices = at::native::empty_mps(
+    indices = at::empty(
         IntArrayRef(vec_apparent_out_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   }
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["module: scatter & gather ops"]
 
 import random
@@ -150,7 +149,13 @@ class TestScatterGather(TestCase):
             else:
                 expected.div_(counts, rounding_mode="floor")
 
-        self.assertEqual(actual, expected, atol=0, rtol=0)
+        if dtype == torch.float16 or dtype == torch.bfloat16:
+            # Some CUDA kernels (e.g. indexing_backward_kernel_stride_1) that are called during
+            # the test use fp32 for internal accumulation for improved accuracy. When using 16 bit
+            # precision types can be small differences
+            self.assertEqual(actual, expected, atol=0.04, rtol=0.05)
+        else:
+            self.assertEqual(actual, expected, atol=0, rtol=0)
 
         # Tests empty index
         dst = make_tensor((2, 2), device=device, dtype=dtype)
@@ -271,7 +276,7 @@ class TestScatterGather(TestCase):
                 self.assertEqual(input, expected_result)
 
     @onlyCPU
-    @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
     def test_scatter_expanded_index(self, device, dtype):
         def helper(input_size, idx_size):
             input = torch.randn(input_size, device=device).to(dtype=dtype)
@@ -297,7 +302,6 @@ class TestScatterGather(TestCase):
 
             out = input.scatter_add(0, idx, src)
             out2 = input2.scatter_add(0, idx2, src)
-
             self.assertEqual(out, out2)
 
             for reduce in ["sum", "prod", "mean", "amax", "amin"]:
@@ -314,6 +318,17 @@ class TestScatterGather(TestCase):
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
     def test_gather_expanded_index(self, device, dtype):
+        # Test when index is [N, 1], which would have stride [1, 0]
+        # should be excluded from the fast path when index ix expanded
+        input = torch.arange(25).view(5, 5)
+        input2 = input.to(dtype=dtype)
+
+        idx = torch.arange(5).view(5, 1)
+        out = torch.gather(input, 0, idx)
+        out2 = torch.gather(input2, 0, idx)
+
+        self.assertEqual(out.to(dtype=dtype), out2)
+
         def helper(input_size, idx_size):
             input = torch.randn(input_size, device=device).to(dtype=dtype)
             input2 = input.clone()

@@ -264,9 +264,15 @@ void Pickler::pushBinGet(uint32_t memo_id) {
 
 // unmemoized encoding of a string
 void Pickler::pushStringImpl(const std::string& string) {
-  push<PickleOpCode>(PickleOpCode::BINUNICODE);
-  push<uint32_t>(to_le32(string.size()));
-  pushBytes(string);
+  if (string.size() <= UINT_MAX) {
+    push<PickleOpCode>(PickleOpCode::BINUNICODE);
+    push<uint32_t>(to_le32(string.size()));
+    pushBytes(string);
+  } else {
+    push<PickleOpCode>(PickleOpCode::BINUNICODE8);
+    push<int64_t>(to_le64(string.size()));
+    pushBytes(string);
+  }
 }
 
 void Pickler::pushString(const std::string& string) {
@@ -546,9 +552,11 @@ void Pickler::pushDouble(double value) {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
   // Python pickle format is big endian, swap.
   push<double>(swapDouble(value));
-#else /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
   push<double>(value);
-#endif /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
 }
 void Pickler::pushComplexDouble(const IValue& value) {
   c10::complex<double> d = value.toComplexDouble();

@@ -89,22 +89,24 @@ void pack_rgb(
     const at::Tensor& unpacked_tensor, // IN
     const at::Tensor& packed_tensor // OUT
 ) {
-  // Convert from unpacked channels last 4-channels tensor into original data layout.
+  // Convert from unpacked channels last 3-channels or 4-channels tensor into original data layout.
 
-  constexpr int rgba_size = 4;
   uint8_t* unpacked = (uint8_t*)unpacked_tensor.data_ptr<uint8_t>();
   uint8_t* packed = (uint8_t*)packed_tensor.data_ptr<uint8_t>();
   auto num_pixels = packed_tensor.size(1) * packed_tensor.size(2);
   auto num_channels = packed_tensor.size(0);
 
+  auto unpacked_increment = unpacked_tensor.size(0);
   auto packed_increment = packed_tensor.stride(2);
   auto packed_stride = packed_tensor.stride(0);
+
+  TORCH_INTERNAL_ASSERT(unpacked_increment == 3 || unpacked_increment == 4);
 
   for (const auto i C10_UNUSED : c10::irange(num_pixels)) {
     for (const auto j : c10::irange(num_channels)) {
       packed[j * packed_stride] = unpacked[j];
     }
-    unpacked += rgba_size;
+    unpacked += unpacked_increment;
     packed += packed_increment;
   }
 }
@@ -264,6 +266,7 @@ void ImagingResampleVertical(
   auto xout = unpacked_output.size(2);
   auto yout = unpacked_output.size(1);
   const auto num_channels = unpacked_input.size(0);
+  TORCH_INTERNAL_ASSERT(num_channels == unpacked_output.size(0));
 
   auto xout_stride = xout * num_channels;
   for (const auto yy : c10::irange(yout)) {
@@ -282,7 +285,7 @@ void ImagingResampleVertical(
   }
 }
 
-// This is the only public entry point in this file.  It supports bilinear
+// This is the only public entry point in this file.  It supports bilinear or bicubic
 // mode for uint8 dtype when C <= 4, with or without antialias. The
 // implem is based on PIL-SIMD.
 // Its equivalent implementation (fallback) for when AVX isn't supported or when
@@ -298,22 +301,33 @@ void ImagingResampleVertical(
 // here: all these kernels are general enough to handle an arbitrary number of
 // weights, but when aa=False they could be optimized further.
 template <typename scale_type, class F>
-void upsample_avx_bilinear_uint8(
-    const at::Tensor& input,
+void upsample_avx_bilinear_bicubic_uint8(
+    const at::Tensor& input_,
     const at::Tensor& output,
     bool align_corners,
     const scale_type& scales,
     bool antialias) {
-  auto batch_size = input.size(0);
-  auto num_channels = input.size(1);
-  auto xin = input.size(3);
-  auto yin = input.size(2);
+  auto batch_size = input_.size(0);
+  auto num_channels = input_.size(1);
+  auto xin = input_.size(3);
+  auto yin = input_.size(2);
   auto xout = output.size(3);
   auto yout = output.size(2);
 
   if (xin == xout && yin == yout) {
-    output.copy_(input);
+    output.copy_(input_);
     return;
+  }
+
+  at::Tensor input = input_;
+  if (!(input.is_contiguous() || input.is_contiguous(at::MemoryFormat::ChannelsLast))) {
+    // If input is not contiguous with memory format channels first or channels last,
+    // we explicitly convert the input to contiguous channels last memory format.
+    // This simplifies the rest of the code and let us assume that the format is only contiguous channels first or channels last,
+    // Most tensors going through this `if` block won't need to go through unpacking, but those having C < 3 may
+    // have to (this means 2 copies are made). We could avoid the extra copy by handling non-contiguous input
+    // directly within unpack_rgb() and pack_rgb(), but initial attempts showed that this is fairly complex.
+    input = input.contiguous(at::MemoryFormat::ChannelsLast);
   }
 
   auto need_horizontal = xout != xin;
@@ -323,11 +337,12 @@ void upsample_avx_bilinear_uint8(
   std::vector<at::Tensor> horiz_indices_weights, vert_indices_weights;
   unsigned int horiz_weights_precision, vert_weights_precision;
 
-  bool needs_unpacking = (num_channels == 3 || num_channels == 4) && input.is_contiguous(at::MemoryFormat::ChannelsLast);
+  bool skip_unpacking = (num_channels == 3 || num_channels == 4) && input.is_contiguous(at::MemoryFormat::ChannelsLast);
+  bool skip_packing = (num_channels == 3 || num_channels == 4) && output.is_contiguous(at::MemoryFormat::ChannelsLast);
 
   if (need_horizontal) {
     int interp_dim = 3;
-    auto stride = (needs_unpacking) ? num_channels : 4;
+    auto stride = (skip_unpacking) ? num_channels : 4;
     std::tie(horiz_indices_weights, ksize_horiz, horiz_weights_precision) =
         F::compute_indices_int16_weights_aa(
             /*input_size=*/xin,
@@ -343,7 +358,7 @@ void upsample_avx_bilinear_uint8(
 
   if (need_vertical) {
     int interp_dim = 2;
-    auto stride = (needs_unpacking) ? num_channels * xout : 4 * xout;
+    auto stride = (skip_unpacking) ? num_channels * xout : 4 * xout;
     std::tie(vert_indices_weights, ksize_vert, vert_weights_precision) =
         F::compute_indices_int16_weights_aa(
             /*input_size=*/yin,
@@ -360,25 +375,25 @@ void upsample_avx_bilinear_uint8(
   at::Tensor buffer_horiz, buffer_vert;
   // Minor optimization: we can avoid allocating an extra buffer if we're performing
   // horizontal-only or vertical-only interpolation, and if the tensor doesn't
-  // need unpacking
-  if (need_horizontal && !(needs_unpacking && !need_vertical)) {
-    auto c = (needs_unpacking) ? num_channels : 4;
+  // need repacking
+  if (need_horizontal && (need_vertical || !skip_packing)) {
+    auto c = (skip_unpacking) ? num_channels : 4;
     buffer_horiz = at::empty({c, yin, xout}, input.options());
   }
-  if (need_vertical && !needs_unpacking) {
-    auto c = (needs_unpacking) ? num_channels : 4;
+  if (need_vertical && !skip_packing) {
+    auto c = (skip_unpacking) ? num_channels : 4;
     buffer_vert = at::empty({c, yout, xout}, input.options());
   }
 
   for (const auto i : c10::irange(batch_size)) {
 
-    at::Tensor unpacked_input = (needs_unpacking) ? input[i] : unpack_rgb(input[i]);
+    at::Tensor unpacked_input = (skip_unpacking) ? input[i] : unpack_rgb(input[i]);
     at::Tensor unpacked_output;
 
     if (need_horizontal) {
-      at::Tensor unpacked_output_temp = (needs_unpacking && !need_vertical) ? output[i] : buffer_horiz;
+      at::Tensor unpacked_output_temp = (need_vertical || !skip_packing) ? buffer_horiz : output[i];
 
-      if (needs_unpacking && num_channels == 3) {
+      if (skip_unpacking && num_channels == 3) {
         ImagingResampleHorizontal<3>(
           unpacked_output_temp,
           unpacked_input,
@@ -396,7 +411,7 @@ void upsample_avx_bilinear_uint8(
       unpacked_output = unpacked_input = unpacked_output_temp;
     }
     if (need_vertical) {
-      unpacked_output = (needs_unpacking) ? output[i] : buffer_vert;
+      unpacked_output = (skip_packing) ? output[i] : buffer_vert;
 
       ImagingResampleVertical(
           unpacked_output,
@@ -409,7 +424,7 @@ void upsample_avx_bilinear_uint8(
 
     TORCH_INTERNAL_ASSERT(unpacked_output.defined());
 
-    if (!needs_unpacking) {
+    if (!skip_packing) {
       pack_rgb(unpacked_output, output[i]);
     }
   }

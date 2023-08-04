@@ -2,15 +2,23 @@ import argparse
 import datetime
 import json
 import os
+
+import time
 import urllib.parse
 from typing import Any, Callable, cast, Dict, List, Optional, Set
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-# import time
 from tools.stats.upload_stats_lib import upload_to_s3
 
-FILTER_OUT_USERS = {"pytorchmergebot", "facebook-github-bot", "pytorch-bot[bot]"}
+FILTER_OUT_USERS = {
+    "pytorchmergebot",
+    "facebook-github-bot",
+    "pytorch-bot[bot]",
+    "pytorchbot",
+    "pytorchupdatebot",
+    "dependabot[bot]",
+}
 
 
 def _fetch_url(
@@ -93,6 +101,7 @@ def get_external_pr_data(
                 "date": str(period_begin_date),
                 "pr_count": pr_count,
                 "user_count": len(users),
+                "users": list(users),
             }
         )
         period_begin_date = period_end_date + datetime.timedelta(days=1)
@@ -125,18 +134,22 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     for i in range(args.length):
+        tries = 0
         startdate = args.startDate + datetime.timedelta(days=i)
         data = get_external_pr_data(
             startdate,
             startdate + datetime.timedelta(days=args.period_length),
             period_length=args.period_length,
         )
+        for pr_info in data:
+            # sometimes users does not get added, so we check it got uploaded
+            assert "users" in pr_info
+            assert isinstance(pr_info["users"], list)
+        print(f"uploading the following data: \n {data}")
         upload_to_s3(
             bucket_name="torchci-contribution-data",
             key=f"external_contribution_counts/{str(startdate)}",
             docs=data,
         )
-        # uncomment when running large queries locally to avoid github's rate limiting
-        #
-        # import time
-        # time.sleep(20)
+        # get around rate limiting
+        time.sleep(10)

@@ -17,11 +17,10 @@ class CUDAStream final : public CustomClassHolder {
   CUDAStream(
       c10::optional<c10::Device> device = c10::nullopt,
       int64_t priority = 0) {
-    constexpr int64_t PRIORITY_INDEX = 0;
     c10::DeviceIndex device_index =
         device.has_value() ? device->index() : c10::cuda::current_device();
     stream_ = std::make_unique<c10::cuda::CUDAStream>(
-        c10::cuda::getStreamFromPool(priority < PRIORITY_INDEX, device_index));
+        c10::cuda::getStreamFromPool(static_cast<int>(priority), device_index));
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)

@@ -1,5 +1,4 @@
 import collections
-import dataclasses
 import inspect
 from typing import Any, Dict, List, Optional
 
@@ -12,55 +11,50 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
+from .exc import unimplemented
 from .source import LocalSource, Source
-from .utils import object_new
-from .variables.base import VariableTracker
+from .utils import nn_module_new, object_new
+from .variables.base import (
+    is_side_effect_safe,
+    MutableLocalBase,
+    MutableLocalSource,
+    VariableTracker,
+)
 
 
-@dataclasses.dataclass
-class MutableSideEffects:
+class MutableSideEffects(MutableLocalBase):
     """
     VariableTracker.mutable_local marker to indicate a list passed as
     an input that if we mutate we need to re-apply those mutations after
     the graph runs.
     """
 
-    source: Source
-    is_modified: bool = False
-
-    def __hash__(self):
-        return id(self)
-
-    def __eq__(self, other):
-        return self is other
+    def __init__(self, source: Source, is_modified: bool = False):
+        super().__init__(MutableLocalSource.Existing)
+        self.source = source
+        self.is_modified = is_modified
 
 
-@dataclasses.dataclass
-class AttributeMutation:
+class AttributeMutation(MutableLocalBase):
     """
     VariableTracker.mutable_local marker to track changes to attributes
     """
 
-    source: Source
+    def __init__(self, typ: MutableLocalSource, source: Source):
+        super().__init__(typ)
+        self.source = source
 
 
 class AttributeMutationExisting(AttributeMutation):
-    def __hash__(self):
-        return id(self)
-
-    def __eq__(self, other):
-        return self is other
+    def __init__(self, source: Source):
+        super().__init__(MutableLocalSource.Existing, source)
+        self.source = source
 
 
-@dataclasses.dataclass
 class AttributeMutationNew(AttributeMutation):
-    cls_source: Source
-
-    def __hash__(self):
-        return id(self)
-
-    def __eq__(self, other):
-        return self is other
+    def __init__(self, source: Source, cls_source: Source):
+        super().__init__(MutableLocalSource.Local, source)
+        self.cls_source = cls_source
 
 
 class SideEffects:
@@ -73,11 +67,18 @@ class SideEffects:
     store_attr_mutations: Dict[AttributeMutation, Dict[str, VariableTracker]]
     keepalive: List[Any]
 
-    def __init__(self, id_to_variable=None, store_attr_mutations=None, keepalive=None):
+    def __init__(
+        self,
+        id_to_variable=None,
+        store_attr_mutations=None,
+        keepalive=None,
+        save_for_backward=None,
+    ):
         super().__init__()
         self.id_to_variable = id_to_variable or collections.OrderedDict()
         self.store_attr_mutations = store_attr_mutations or collections.OrderedDict()
         self.keepalive = keepalive or []
+        self.save_for_backward = save_for_backward or []
 
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
@@ -85,6 +86,7 @@ class SideEffects:
         return (
             self.id_to_variable == other.id_to_variable
             and self.store_attr_mutations == other.store_attr_mutations
+            and self.save_for_backward == other.save_for_backward
         )
 
     def diff(self, other: "SideEffects") -> Optional[str]:
@@ -102,6 +104,8 @@ class SideEffects:
             if sk_sam != ok_sam:
                 return f"store_attr_mutations keys: {sk_sam} != {ok_sam}"
             return "store_attr_mutations: unknown diff"
+        elif self.save_for_backward != other.save_for_backward:
+            return "save_for_backward"
         else:
             return None
 
@@ -114,6 +118,7 @@ class SideEffects:
                 for k, v in self.store_attr_mutations.items()
             ),
             keepalive=list(self.keepalive),
+            save_for_backward=self.save_for_backward,
         )
 
     def apply(self, fn, cache=None, skip_fn=lambda _: False):
@@ -128,6 +133,9 @@ class SideEffects:
             (k, VariableTracker.apply(fn, v, cache, skip_fn))
             for k, v in self.store_attr_mutations.items()
         )
+        self.save_for_backward = VariableTracker.apply(
+            fn, self.save_for_backward, cache, skip_fn
+        )
 
     def __contains__(self, item):
         return id(item) in self.id_to_variable
@@ -135,15 +143,31 @@ class SideEffects:
     def __getitem__(self, item):
         return self.id_to_variable[id(item)]
 
+    def check_allowed_side_effect(self, item):
+        from torch._dynamo.variables.misc import AutogradFunctionContextVariable
+
+        # People do things like self.dim = dim inside autograd.Function.
+        # These are benign.
+        if isinstance(item, AutogradFunctionContextVariable):
+            return True
+        if not is_side_effect_safe(item.mutable_local):
+            unimplemented(
+                "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
+            )
+
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
         assert self.is_attribute_mutation(item)
+        self.check_allowed_side_effect(item)
         if item.mutable_local not in self.store_attr_mutations:
             self.store_attr_mutations[item.mutable_local] = collections.OrderedDict()
         self.store_attr_mutations[item.mutable_local][name] = value
 
-    def load_attr(self, item, name):
+    def load_attr(self, item, name, deleted_ok=False):
         assert self.is_attribute_mutation(item)
-        return self.store_attr_mutations[item.mutable_local][name]
+        result = self.store_attr_mutations[item.mutable_local][name]
+        if not deleted_ok and isinstance(result, variables.DeletedVariable):
+            unimplemented("read deleted attribute")
+        return result
 
     def store_cell(self, cellvar, value):
         assert isinstance(cellvar, variables.NewCellVariable)
@@ -172,6 +196,11 @@ class SideEffects:
 
     def is_attribute_mutation(self, item):
         return isinstance(item.mutable_local, AttributeMutation)
+
+    def has_pending_mutation(self, item):
+        return self.is_attribute_mutation(item) and bool(
+            self.store_attr_mutations.get(item.mutable_local)
+        )
 
     def is_modified(self, item):
         if isinstance(item.mutable_local, AttributeMutationNew):
@@ -213,7 +242,12 @@ class SideEffects:
         variable_cls: Any,
         options,
     ):
-        obj = object_new(user_cls)
+        if user_cls is torch.autograd.function.FunctionCtx:
+            obj = torch.autograd.Function()
+        elif issubclass(user_cls, torch.nn.Module):
+            obj = nn_module_new(user_cls)
+        else:
+            obj = object_new(user_cls)
         variable = variable_cls(
             obj,
             mutable_local=AttributeMutationNew(None, cls_source),
@@ -250,6 +284,10 @@ class SideEffects:
         self.keepalive.append(item)
         return variable
 
+    def track_save_for_backward(self, ctx, args):
+        assert isinstance(ctx, variables.AutogradFunctionContextVariable)
+        self.save_for_backward.append((ctx, args))
+
     def prune_dead_object_new(self, tx):
         live_new_objects = set()
         skip_obj = None
@@ -285,6 +323,7 @@ class SideEffects:
         )
 
     def mutation(self, oldvar, newvar):
+        self.check_allowed_side_effect(oldvar)
         return newvar.clone(
             mutable_local=MutableSideEffects(oldvar.mutable_local.source, True)
         )
@@ -303,6 +342,8 @@ class SideEffects:
                 if isinstance(var.mutable_local, AttributeMutationNew):
                     var.mutable_local.source = LocalSource(cg.tempvars[var])
             elif isinstance(var.mutable_local, AttributeMutationNew):
+                if isinstance(var, variables.AutogradFunctionContextVariable):
+                    unimplemented("AutogradFunctionContextVariable escaped")
                 if "__call_nn_module_init" in self.store_attr_mutations.get(
                     var.mutable_local, {}
                 ):
@@ -319,6 +360,20 @@ class SideEffects:
                 # subsequent usage should point to the original variable
                 cg(var.mutable_local.source)
                 cg.add_cache(var)
+
+        for ctx, args in self.save_for_backward:
+            cg(ctx.source)
+            cg.extend_output(
+                [create_instruction("LOAD_METHOD", argval="save_for_backward")]
+            )
+            for arg in args:
+                cg(arg)
+            cg.extend_output(
+                [
+                    *create_call_method(len(args)),
+                    create_instruction("POP_TOP"),
+                ]
+            )
 
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []
@@ -366,6 +421,15 @@ class SideEffects:
                         )
                     elif name == "__call_nn_module_init":
                         pass  # handled in codegen_save_tempvars
+                    elif isinstance(value, variables.DeletedVariable):
+                        if isinstance(
+                            var.mutable_local, AttributeMutationExisting
+                        ) and hasattr(getattr(var, "value", None), name):
+                            cg.tx.output.update_co_names(name)
+                            cg(var.mutable_local.source)
+                            suffixes.append(
+                                [create_instruction("DELETE_ATTR", argval=name)]
+                            )
                     else:
                         cg.tx.output.update_co_names(name)
                         cg(value)
@@ -379,4 +443,11 @@ class SideEffects:
             cg.extend_output(suffix)
 
     def is_empty(self):
-        return not any(map(self.is_modified, self.id_to_variable.values()))
+        return not (
+            any(map(self.is_modified, self.id_to_variable.values()))
+            or self.save_for_backward
+        )
+
+    def clear(self):
+        self.keepalive.clear()
+        self.id_to_variable.clear()

@@ -118,7 +118,7 @@ def _with_callable_args(cls_or_self, **kwargs):
     return r.with_callable_args(**kwargs)
 
 
-ABC: Any = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
+ABC: Any = ABCMeta("ABC", (object,), {})  # compatible with Python 2 *and* 3:
 
 
 class ObserverBase(ABC, nn.Module):
@@ -509,7 +509,7 @@ class MinMaxObserver(UniformQuantizationObserverBase):
 
     @torch.jit.export
     def extra_repr(self):
-        return "min_val={}, max_val={}".format(self.min_val, self.max_val)
+        return f"min_val={self.min_val}, max_val={self.max_val}"
 
     @torch.jit.export
     def reset_min_max_vals(self):
@@ -712,7 +712,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
         return self._calculate_qparams(self.min_val, self.max_val)
 
     def extra_repr(self):
-        return "min_val={}, max_val={}".format(self.min_val, self.max_val)
+        return f"min_val={self.min_val}, max_val={self.max_val}"
 
     def _load_from_state_dict(
         self,
@@ -746,7 +746,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
                 elif name == expected_max_name:
                     self.max_val.resize_(val.shape)
                 else:
-                    warnings.warn("Observer load_from_state_dict got unexpected name {}".format(name))
+                    warnings.warn(f"Observer load_from_state_dict got unexpected name {name}")
                 # For torchscript module we need to update the attributes here since we do not
                 # call the `_load_from_state_dict` function defined module.py
                 if torch.jit.is_scripting():
@@ -755,7 +755,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
                     elif name == expected_max_name:
                         self.max_val.copy_(val)
                     else:
-                        warnings.warn("Observer load_from_state_dict got unexpected name {}".format(name))
+                        warnings.warn(f"Observer load_from_state_dict got unexpected name {name}")
             elif strict:
                 missing_keys.append(key)
 
@@ -992,8 +992,6 @@ class HistogramObserver(UniformQuantizationObserverBase):
         dst_bin_of_end = torch.clamp(
             torch.div(src_bin_end, dst_bin_width, rounding_mode='floor'), 0, self.dst_nbins - 1
         )
-        dst_bin_of_end_center = (dst_bin_of_end + 0.5) * dst_bin_width
-
         density = self.histogram / bin_width
 
         norm = torch.zeros(self.bins, device=self.histogram.device)
@@ -1115,7 +1113,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         Nbins: int,
     ) -> torch.Tensor:
         # First up-sample the histogram with new data by a factor of L
-        # This creates an approximate probability density thats piecwise constant
+        # This creates an approximate probability density thats piecewise constant
         upsampled_histogram = new_hist.repeat_interleave(upsample_rate)
         # Now insert the upsampled histogram into the output
         # histogram, which is initialized with zeros.
@@ -1267,7 +1265,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         )
 
     def extra_repr(self):
-        return "min_val={}, max_val={}".format(self.min_val, self.max_val)
+        return f"min_val={self.min_val}, max_val={self.max_val}"
 
 
 class FixedQParamsObserver(ObserverBase):
@@ -1362,6 +1360,10 @@ class PlaceholderObserver(ObserverBase):
 
     def forward(self, x):
         return x
+
+    @torch.jit.export
+    def extra_repr(self):
+        return f"dtype={self.dtype}, is_dynamic={self.is_dynamic}"
 
     @torch.jit.export
     def calculate_qparams(self):
@@ -1516,10 +1518,10 @@ def load_observer_state_dict(mod, obs_dict):
                 )
     for k in missing_keys:
         if "observer" in k or "activation_post_process" in k:
-            raise Exception("Missing keys for observer {} in state_dict".format(k))
+            raise Exception(f"Missing keys for observer {k} in state_dict")
     for k in unexpected_keys:
         if "observer" in k or "activation_post_process" in k:
-            raise Exception("Unexpected keys for observer {} in state_dict".format(k))
+            raise Exception(f"Unexpected keys for observer {k} in state_dict")
 
 
 # Restrict activations to be in the range (0,127)

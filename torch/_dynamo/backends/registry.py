@@ -64,7 +64,7 @@ def lookup_backend(compiler_fn):
     return compiler_fn
 
 
-def list_backends(exclude_tags=("debug", "experimental")):
+def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
     """
     Return valid strings that can be passed to:
 
@@ -88,7 +88,7 @@ def _lazy_import():
 
     import_submodule(backends)
 
-    from ..debug_utils import dynamo_minifier_backend
+    from ..repro.after_dynamo import dynamo_minifier_backend
 
     assert dynamo_minifier_backend is not None
 

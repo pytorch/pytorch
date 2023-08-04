@@ -158,7 +158,7 @@ class TestJit(JitCommonTestCase):
 
                     # right now, tuple of outputs and tensor output supported
                     # TODO: list of tensor outputs
-                    tuple_of_tensors = isinstance(out, tuple) and all([isinstance(elem, torch.Tensor) for elem in out])
+                    tuple_of_tensors = isinstance(out, tuple) and all(isinstance(elem, torch.Tensor) for elem in out)
 
                     if isinstance(out, torch.Tensor) or tuple_of_tensors:
                         if tuple_of_tensors:
@@ -190,7 +190,7 @@ class TestJit(JitCommonTestCase):
     _alias_ops = partial(ops, dtypes=OpDTypes.supported,
                          allowed_dtypes=(torch.float,))
 
-    @_alias_ops((op for op in op_db if op.aliases))
+    @_alias_ops(op for op in op_db if op.aliases)
     def test_jit_alias_remapping(self, device, dtype, op):
         # NOTE: only tests on first sample
         samples = op.sample_inputs(device, dtype, requires_grad=True)

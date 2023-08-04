@@ -7,6 +7,7 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <array>
 #include <iostream>
@@ -350,7 +351,12 @@ SymFloatTypePtr SymFloatType::get() {
   return value;
 }
 
-c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool default_to_union=false, TypePtr type_hint=nullptr) {
+SymBoolTypePtr SymBoolType::get() {
+  static SymBoolTypePtr value(new SymBoolType());
+  return value;
+}
+
+static c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool default_to_union=false, TypePtr type_hint=nullptr) {
   // check direct subtyping relation
   if (t1->isSubtypeOf(*t2)) {
     return t2;

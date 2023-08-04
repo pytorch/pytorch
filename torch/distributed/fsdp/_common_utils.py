@@ -4,9 +4,13 @@ This file includes private common utilities for FSDP.
 
 import traceback
 import warnings
+import weakref
 from enum import auto, Enum
+from functools import partial
 from typing import (
+    Any,
     Callable,
+    cast,
     Dict,
     Generator,
     Iterable,
@@ -14,6 +18,8 @@ from typing import (
     no_type_check,
     Optional,
     Set,
+    Tuple,
+    Type,
 )
 
 import torch
@@ -21,9 +27,12 @@ import torch.distributed as dist
 import torch.distributed.fsdp.flat_param as flat_param_file
 import torch.nn as nn
 from torch.distributed._composable_state import _get_module_state, _State
+from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
+from torch.distributed.utils import _apply_to_tensors
+from torch.utils._mode_utils import no_dispatch
 
 from .api import (
     FullOptimStateDictConfig,
@@ -38,6 +47,63 @@ FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FSDP_FLATTENED = "_fsdp_flattened"
 
+# Save a global mapping from module to its input tensor dtype to be populated
+# during the forward pre-hook and consumed in the forward post-hook when
+# overriding a module's mixed precision
+# NOTE: We currently take the last input tensor's dtype in the case of multiple
+# floating-point input tensors, which may be incorrect. However, since there is
+# not a 1:1 correspondence between input and output tensors, we must use *some*
+# heuristic like this to predict the desired output dtype.
+_MODULE_TO_INP_DTYPE: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+class _FSDPDeviceHandle:
+    """
+    This is a simple abstraction for FSDP computing devices,
+    which enables custom backends that implement CUDA-like
+    semantics to be integrated with FSDP.
+    """
+
+    def __init__(self, device: torch.device, backend: Any = None):
+        if backend is None:
+            try:
+                self.__backend = getattr(torch, device.type)
+                self.__device = device
+            except AttributeError:
+                raise AttributeError(
+                    f"Device '{device}' does not have a corresponding backend registered as 'torch.{device.type}'."
+                )
+        else:
+            self.__backend = backend
+
+    @classmethod
+    def from_device(cls, device: torch.device) -> "_FSDPDeviceHandle":
+        """
+        Return an device handle corresponding to the device, and through this handle,
+        operations with the same semantics as CUDA can be performed on the device.
+        Just return torch.cuda if the device is cuda to make attribute-access faster.
+        Custom backend must first register a module with the same name with {device.type} on torch.
+        """
+        if device.type == "cuda":
+            return cast(_FSDPDeviceHandle, torch.cuda)
+        return cls(device)
+
+    def __getattr__(self, __name: str) -> Any:
+        try:
+            return getattr(self.__backend, __name)
+        except AttributeError:
+            raise AttributeError(
+                f"Custom backend '{self.__device.type}' not implement 'torch.{self.__device.type}.{__name}'"
+            )
+
+
+class _UninitializedDeviceHandle(_FSDPDeviceHandle):
+    def __init__(self):
+        pass
+
+    def __getattribute__(self, __name: str) -> Any:
+        raise RuntimeError("Trying to use an uninitialized device handle.")
+
 
 class _FSDPState(_State):
     def __init__(self) -> None:
@@ -48,6 +114,7 @@ class _FSDPState(_State):
         self.process_group: Optional[dist.ProcessGroup] = None
         self.rank: int = -1
         self.world_size: int = -1
+        self._device_mesh: Optional[DeviceMesh] = None
         self.sharding_strategy = ShardingStrategy.FULL_SHARD
         self._use_orig_params: bool = False
         self.training_state = TrainingState.IDLE
@@ -56,11 +123,18 @@ class _FSDPState(_State):
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
         self._optim_state_dict_config: OptimStateDictConfig = FullOptimStateDictConfig()
         self._is_root: Optional[bool] = None
-        self._handles: List[flat_param_file.FlatParamHandle] = []
-        self._fully_sharded_module_to_handles: Dict[
-            nn.Module, flat_param_file.FlatParamHandle
+        self._handle: Optional[flat_param_file.FlatParamHandle] = None
+        self._fully_sharded_module_to_handle: Dict[
+            nn.Module, Optional[flat_param_file.FlatParamHandle]
         ] = {}
-        self.compute_device = torch.device("cuda", torch.cuda.current_device())
+        self.compute_device: Optional[torch.device] = None
+        self._gradient_predivide_factor: int = 0
+        self._gradient_postdivide_factor: int = 0
+        self._comm_hook: Optional[Callable] = None
+        self._comm_hook_state: Optional[Any] = None
+        # Abstract device handle for fsdp compute device. For now,
+        # the compute device must implement cuda semantics used by fsdp
+        self._device_handle: _FSDPDeviceHandle = _UninitializedDeviceHandle()
         # All following attributes should only be used for root states:
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
@@ -82,7 +156,7 @@ def _get_module_fsdp_state_if_fully_sharded_module(
         return None
     if state == module:  # FullyShardedDataParallel module case.
         return state
-    if module in state._fully_sharded_module_to_handles:  # fully_shard case.
+    if module in state._fully_sharded_module_to_handle:  # fully_shard case.
         return state
     return None
 
@@ -115,47 +189,36 @@ def _is_composable(state: _FSDPState):
 
 
 @no_type_check
-def _module_handles(state: _FSDPState, module: nn.Module) -> List:
+def _module_handle(state: _FSDPState, module: nn.Module) -> Optional["FlatParamHandle"]:
     """
-    Returns the ``FlatParamHandle`` s corresponding to ``module``. These are
-    the handles that contain some parameter in ``module``.
+    Returns the ``FlatParamHandle`` s corresponding to ``module``. This is
+    the handle that contains some parameter in ``module``.
     """
     if _is_composable(state):
+        # A valid FSDP state may have no managed parameters and hence no
+        # handles, meaning no entry in `_fully_sharded_module_to_handles`
+        if state._handle is None:
+            return None
         assert (
-            module in state._fully_sharded_module_to_handles
+            module in state._fully_sharded_module_to_handle
         ), f"Expects a fully sharded module but got {module} on rank {state.rank}"
-        return state._fully_sharded_module_to_handles[module][:]
+        return state._fully_sharded_module_to_handle[module]
     else:
         # NOTE: This assumes `module` is a `FullyShardedDataParallel` instance.
-        return module._handles[:]
+        return module._handle
 
 
 @no_type_check
 def _has_fsdp_params(state: _FSDPState, module: nn.Module) -> bool:
     """Returns if ``module`` has parameters managed by FSDP."""
-    return len(_module_handles(state, module)) > 0
+    return _module_handle(state, module) is not None
 
 
-def _get_sharding_strategy(handles: Iterable):
+def _get_sharding_strategy(handle):
     """
-    Returns the sharding strategy of the group of handles given by ``handles``
-    or ``None`` if ``handles`` is empty. The input should be the handles
-    corresponding to one module, so we enforce that they all share the same
-    sharding strategy.
+    Returns the sharding strategy of the handle.
     """
-    sharding_strategy = None
-    for handle in handles:
-        if sharding_strategy is None:
-            sharding_strategy = handle._sharding_strategy
-        elif (
-            sharding_strategy is not None
-            and sharding_strategy != handle._sharding_strategy
-        ):
-            raise AssertionError(
-                "Expects each group of handles to have the same sharding "
-                f"strategy but got {sharding_strategy} and {handle._sharding_strategy}"
-            )
-    return sharding_strategy
+    return handle._sharding_strategy if handle else None
 
 
 def clean_tensor_name(tensor_name: str) -> str:
@@ -184,16 +247,48 @@ def _is_fsdp_flattened(tensor: torch.Tensor) -> bool:
     return getattr(tensor, FSDP_FLATTENED, False)
 
 
+def _named_parameters_with_duplicates(
+    module: nn.Module, **kwargs: Any
+) -> List[Tuple[str, nn.Parameter]]:
+    """
+    This API is required as some modules overwrite `named_parameters()` but do not support
+    `remove_duplicate`.
+    """
+    assert (
+        "remove_duplicate" not in kwargs
+    ), "_named_parameters_with_duplicates cannot be used with `remove_duplicate` argument."
+    kwargs["remove_duplicate"] = False
+    try:
+        ret = list(module.named_parameters(**kwargs))
+    except AssertionError as e:
+        kwargs.pop("remove_duplicate")
+        ret = list(module.named_parameters(**kwargs))
+    return ret
+
+
 def _get_param_to_fqns(
     model: torch.nn.Module,
     dedup_shared_params: bool = True,
 ) -> Dict[nn.Parameter, List[str]]:
     """
-    Constructs a mapping from parameter to a list of its FQNs. Each normal
-    parameter maps to a singleton list containing its FQN, while each
+    Constructs a mapping from parameter to a list of its \"canonical\" FQNs. Here,
+    we use canonical to mean the fully-qualified name assigned to the parameter
+    based on its position in the original nn.Module hierarchy before any wrapper
+    or parallelism has been applied to it. This is in contrast to FQNs that may be
+    generated after parallelisms or wrappers have been applied to the model.
+
+    Each normal parameter maps to a singleton list containing its FQN, while each
     ``FlatParameter`` maps to a list of its original parameter FQNs, which may
-    have length greater than one. All FQNs are prefixed starting from
-    ``model``.
+    have length greater than one.  All FQNs are prefixed starting from ``model``.
+
+    In the case where FSDP was applied with ``use_orig_params=True``, there should be no
+    ``FlatParameter`` s registered to the model's modules and this mapping will only
+    contain mappings from ``nn.Parameter`` s to singleton FQN lists.
+
+    It is only in the case where FSDP was applied with ``use_orig_params=False`` where
+    a ``FlatParameter`` will be registered in place of the original parameters and there
+    will be mappings from each ``FlatParameter`` to lists of FQNs corresponding to the
+    original parameters.
 
     Args:
         model (torch.nn.Module): Root module (which may or may not be a
@@ -204,11 +299,13 @@ def _get_param_to_fqns(
             includes the FQNs across all encounters. (Default: ``True``)
     """
 
-    def module_fn(module, prefix, param_to_fqns):
-        for param_name, param in module.named_parameters(recurse=False):
+    def module_fn(module, prefix, tree_level, param_to_fqns):
+        for param_name, param in _named_parameters_with_duplicates(
+            module, recurse=False
+        ):
             local_fqns = (
                 param._fqns
-                if type(param) is flat_param_file.FlatParameter
+                if isinstance(param, flat_param_file.FlatParameter)
                 else [param_name]
             )  # prefixed from `module`
             global_fqns = [
@@ -218,7 +315,7 @@ def _get_param_to_fqns(
             if not is_shared_param:
                 param_to_fqns[param] = global_fqns
             else:
-                if type(param) is flat_param_file.FlatParameter:
+                if isinstance(param, flat_param_file.FlatParameter):
                     # DMP overwrites `named_parameters` and skip (advance to
                     # the next child module) the wrapped_module (e.g.,
                     # _dmp_wrapped_module and _fsdp_wrapped_module). When a user
@@ -247,7 +344,7 @@ def _get_param_to_fqns(
         model,
         module_fn,
         return_fn,
-        [key for key, _ in model.named_parameters()],
+        [key for key, _ in _named_parameters_with_duplicates(model)],
         param_to_unflat_param_names,
     )
 
@@ -272,13 +369,14 @@ def _apply_to_modules(
     to remove the prefix.
     """
 
-    def f(module: torch.nn.Module, prefix: str, *args, **kwargs):
+    def f(module: torch.nn.Module, prefix: str, tree_level: int, *args, **kwargs):
         # Call the module function before recursing over children (pre-order)
-        module_fn(module, prefix, *args, **kwargs)
+        module_fn(module, prefix, tree_level, *args, **kwargs)
         for submodule_name, submodule in module.named_children():
             if submodule is None:
                 continue
             new_prefix = prefix + submodule_name + "."
+            new_tree_level = tree_level + 1
             if filter_fqns is not None:
                 for fqn in filter_fqns:
                     if fqn.startswith(new_prefix):
@@ -308,9 +406,9 @@ def _apply_to_modules(
                             f"submodule_name = {submodule_name}"
                         )
                         new_prefix = prefix
-            f(submodule, new_prefix, *args, **kwargs)
+            f(submodule, new_prefix, new_tree_level, *args, **kwargs)
 
-    f(root_module, "", *args, **kwargs)
+    f(root_module, "", 0, *args, **kwargs)
     return return_fn(*args, **kwargs)
 
 
@@ -358,3 +456,62 @@ def _get_root_modules(modules: Set[nn.Module]) -> Set[nn.Module]:
         if is_root_module:
             root_modules.add(candidate_module)
     return root_modules
+
+
+def _override_module_mixed_precision(
+    root: torch.nn.Module,
+    module_classes_to_override: Iterable[Type[nn.Module]],
+    wrap_override_dict: Dict[str, Any] = {"mixed_precision": None},  # noqa: B006
+) -> Set[Type[nn.Module]]:
+    module_classes_to_override = tuple(set(module_classes_to_override))
+    # Return a set of the actually overridden module classes
+    overridden_module_classes: Set[Type[nn.Module]] = set()
+    for mod in root.modules():
+        if isinstance(mod, module_classes_to_override):
+            overridden_module_classes.add(type(mod))
+            mod._wrap_overrides = wrap_override_dict  # type: ignore[assignment]
+            # TODO: We need to run this mixed precision ignored module in fp32,
+            # but ensure subsequent modules, that may possibly be running with
+            # mixed precision, still receive the appropriate precision inputs
+            # without user having to adjust mixed precision config too much.
+            # As a result, we attach pre and post forward hooks to up / down
+            # cast. We should revisit this design.
+
+            def cast_fn(
+                dtype: torch.dtype, module: nn.Module, x: torch.Tensor
+            ) -> torch.Tensor:
+                if not torch.is_floating_point(x) or x.dtype == dtype:
+                    return x
+                _MODULE_TO_INP_DTYPE[module] = x.dtype
+                return x.to(dtype)
+
+            def forward_pre_hook(module, args):
+                return _apply_to_tensors(partial(cast_fn, torch.float32, module), args)
+
+            def forward_post_hook(module, args, output):
+                # NOTE: If the forward did not have any floating-point tensors,
+                # then the dtype will not be set for this module, and we do not
+                # upcast the dtype.
+                if module in _MODULE_TO_INP_DTYPE:
+                    old_dtype = _MODULE_TO_INP_DTYPE[module]
+                    return _apply_to_tensors(
+                        partial(cast_fn, old_dtype, module), output
+                    )
+
+            # We intentionally append both of these hooks so that they run after
+            # all other hooks.
+            mod.register_forward_pre_hook(forward_pre_hook, prepend=False)
+            mod.register_forward_hook(forward_post_hook, prepend=False)
+    return overridden_module_classes
+
+
+def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.Stream) -> None:
+    # FIXME record_stream doesn't work with non-cuda tensors
+    if tensor.device.type not in ["cuda", torch._C._get_privateuse1_backend_name()]:
+        return
+    with no_dispatch():
+        tensor.record_stream(stream)
+
+
+def _same_storage_as_data_ptr(x: torch.Tensor, data_ptr: int) -> bool:
+    return x._typed_storage()._data_ptr() == data_ptr

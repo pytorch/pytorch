@@ -556,6 +556,29 @@ class TestFXExperimental(JitTestCase):
         )
         self.assertEqual(fused(inp), model(inp))
 
+    def test_conv_bn_fusion_mixed_dtype(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False, dtype=torch.bfloat16)
+                self.bn = torch.nn.BatchNorm2d(16, eps=0.001, momentum=0.1, affine=True, track_running_stats=True)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        model = M().eval()
+
+        traced = symbolic_trace(model)
+        fused = optimization.fuse(traced)
+        inp = torch.randn(1, 3, 64, 64, dtype=torch.bfloat16)
+
+        self.assertTrue(
+            all(not isinstance(m, torch.nn.BatchNorm2d) for m in fused.modules())
+        )
+        self.assertEqual(fused(inp), model(inp))
+
     def test_call_to_assert_no_msg(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -761,6 +784,38 @@ terrible spacing
         submodules_out = module_with_submodules(x, y)
 
         self.assertEqual(orig_out, submodules_out)
+
+    def test_split_module_dead_code(self):
+        class ModWithDeadCode(torch.nn.Module):
+            def forward(self, x):
+                output = x * 2  # we want this
+                dead_line = x + 2  # this is dead
+                return output
+
+        mod = ModWithDeadCode()
+        traced = torch.fx.symbolic_trace(mod)
+
+        # split into before (0), target (1), and after(2)
+        saw_mul = False
+
+        def split_callback(n):
+            nonlocal saw_mul
+            if n.target == operator.mul:
+                saw_mul = True
+                return 1
+
+            if not saw_mul:
+                return 0
+            if saw_mul:
+                return 2
+
+        split = split_module(traced, mod, split_callback)
+
+        x = torch.randn((5,))
+        torch.testing.assert_close(
+            split(x), traced(x)
+        )
+
 
     def test_split_module_kwargs_expansion(self):
         class ModuleWithKwargsExpansion(torch.nn.Module):
@@ -1192,8 +1247,8 @@ class {test_classname}(torch.nn.Module):
                 self.seq = torch.nn.Sequential(torch.nn.BatchNorm1d(2, 2))
                 self.linear = torch.nn.Linear(2, 2)
                 self.attr = torch.randn(2)
-                self.register_buffer("attr2", torch.randn(2))
-                self.register_buffer("attr3", torch.ones(2, dtype=torch.int32))
+                self.attr2 = torch.nn.Buffer(torch.randn(2))
+                self.attr3 = torch.nn.Buffer(torch.ones(2, dtype=torch.int32))
 
             def forward(self, x):
                 return self.linear(self.seq(self.W + self.attr + self.attr2 + self.attr3 + x))

@@ -1,4 +1,5 @@
 import functools
+import logging
 from typing import List
 
 import torch
@@ -16,9 +17,18 @@ from ..select_algorithm import (
     ExternKernelChoice,
     TritonTemplate,
 )
-from ..utils import ceildiv, is_ones, is_zeros, sympy_product, use_triton_template
+from ..utils import (
+    ceildiv,
+    is_ones,
+    is_zeros,
+    pad_listlike,
+    sympy_product,
+    use_triton_template,
+)
 from ..virtualized import V
 from .mm_common import filtered_configs
+
+log = logging.getLogger(__name__)
 
 
 aten = torch.ops.aten
@@ -171,7 +181,9 @@ conv2d_template = TritonTemplate(
 )
 
 aten_convolution = ExternKernelChoice(
-    torch.convolution, "at::convolution", has_out_variant=False
+    torch.convolution,
+    "at::convolution",
+    has_out_variant=False,
 )
 
 
@@ -203,10 +215,10 @@ def conv_layout(
             ir.ir_node_to_tensor(weight, guard_shape=True),
             ir.ir_node_to_tensor(bias, guard_shape=True),
             stride,
-            padding,
+            tuple(V.graph.sizevars.size_hint(p) for p in padding),
             dilation,
             transposed,
-            output_padding,
+            tuple(V.graph.sizevars.size_hint(p) for p in output_padding),
             groups,
         )
         sizes = ir.convert_shape_to_inductor(output.size())
@@ -287,11 +299,14 @@ def convolution(
             dim=0,
         )
 
-    out_chan, in_chan, *kernel_shape = V.graph.sizevars.guard_static_shapes(
+    out_chan, in_chan, *kernel_shape = V.graph.sizevars.evaluate_static_shapes(
         weight.get_size()
     )
     ndim = len(kernel_shape)
-    assert ndim == len(stride) == len(padding) == len(dilation) == len(output_padding)
+    stride = pad_listlike(stride, ndim)
+    padding = pad_listlike(padding, ndim)
+    dilation = pad_listlike(dilation, ndim)
+    output_padding = pad_listlike(output_padding, ndim)
 
     if (
         config.conv_1x1_as_mm
@@ -314,21 +329,46 @@ def convolution(
 
     x.realize()
     weight.realize()
-    layout = conv_layout(x, weight, None, **kwargs)
-    req_stride_order = ir.get_stride_order(V.graph.sizevars.size_hints(layout.stride))
-    x = ir.ExternKernel.require_stride_order(x, req_stride_order)
-    weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
 
+    # ndim can be 1 for convolution in models such as demucs
+    # TODO: check if it's beneficial to convert Conv1d to Conv2d and then
+    # apply channels last.
+    if V.graph.layout_opt and ndim == 2:
+        V.graph.num_channels_last_conv += 1
+        x = ir.ExternKernel.require_channels_last(x)
+        # TODO maybe we can convert weights to channels last just once before
+        # running the model.
+        weight = ir.ExternKernel.require_channels_last(weight)
+        layout = conv_layout(x, weight, None, **kwargs)
+    else:
+        layout = conv_layout(x, weight, None, **kwargs)
+        req_stride_order = ir.get_stride_order(
+            V.graph.sizevars.size_hints(layout.stride)
+        )
+        x = ir.ExternKernel.require_stride_order(x, req_stride_order)
+        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
+
+    ordered_kwargs_for_cpp_kernel = [
+        "stride",
+        "padding",
+        "dilation",
+        "transposed",
+        "output_padding",
+        "groups",
+    ]
     if bias is None:
         args = (x, weight)
         kwargs["bias"] = None
+        ordered_kwargs_for_cpp_kernel.insert(0, "bias")
     else:
         args = (x, weight, bias)
         bias.realize()
         bias.freeze_layout()
-        V.graph.sizevars.guard_static_shapes(bias.get_size())
+        V.graph.sizevars.evaluate_static_shapes(bias.get_size())
 
-    choices = [aten_convolution.bind(args, layout, **kwargs)]
+    choices = [
+        aten_convolution.bind(args, layout, ordered_kwargs_for_cpp_kernel, **kwargs)
+    ]
     if (
         use_triton_template(layout)
         # templates only support these:
@@ -337,7 +377,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
-        and V.graph.sizevars.maybe_guard_equals(in_chan, x.get_size()[1])
+        and V.graph.sizevars.statically_known_equals(in_chan, x.get_size()[1])
     ):
         if (
             is_ones(kernel_shape)
@@ -352,28 +392,27 @@ def convolution(
             out_chan,
             in_chan,
         ):
-            choices.append(
-                conv2d_template.generate(
-                    (x, weight),
-                    layout,
-                    KERNEL_H=kernel_shape[0],
-                    KERNEL_W=kernel_shape[1],
-                    STRIDE_H=stride[0],
-                    STRIDE_W=stride[1],
-                    PADDING_H=padding[0],
-                    PADDING_W=padding[1],
-                    GROUPS=groups,
-                    # TODO(jansel): try unroll for bigger kernels once fixed:
-                    #               https://github.com/openai/triton/issues/1254
-                    UNROLL=is_ones(kernel_shape),
-                    ALLOW_TF32=torch.backends.cudnn.allow_tf32,
-                    num_stages=cfg.num_stages,
-                    num_warps=cfg.num_warps,
-                    **cfg.kwargs,
-                )
+            conv2d_template.maybe_append_choice(
+                choices,
+                (x, weight),
+                layout,
+                KERNEL_H=kernel_shape[0],
+                KERNEL_W=kernel_shape[1],
+                STRIDE_H=stride[0],
+                STRIDE_W=stride[1],
+                PADDING_H=padding[0],
+                PADDING_W=padding[1],
+                GROUPS=groups,
+                # TODO(jansel): try unroll for bigger kernels once fixed:
+                #               https://github.com/openai/triton/issues/1254
+                UNROLL=is_ones(kernel_shape),
+                ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                num_stages=cfg.num_stages,
+                num_warps=cfg.num_warps,
+                **cfg.kwargs,
             )
 
-    return autotune_select_algorithm(choices, args, layout)
+    return autotune_select_algorithm("convolution", choices, args, layout)
 
 
 @register_lowering(aten._convolution)
@@ -397,4 +436,12 @@ def _convolution(
     )
 
 
-add_layout_constraint(aten.convolution, constrain_to_fx_strides)
+def constrain_conv_to_fx_strides(fx_node, *args, **kwargs):
+    assert fx_node.target == torch.ops.aten.convolution.default
+    if V.graph.layout_opt:
+        return args, kwargs
+    else:
+        return constrain_to_fx_strides(fx_node, *args, **kwargs)
+
+
+add_layout_constraint(aten.convolution, constrain_conv_to_fx_strides)

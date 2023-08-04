@@ -85,7 +85,10 @@ class Tensor(torch._C._TensorBase):
         if not self.is_leaf:
             raise RuntimeError(
                 "Only Tensors created explicitly by the user "
-                "(graph leaves) support the deepcopy protocol at the moment"
+                "(graph leaves) support the deepcopy protocol at the moment.  "
+                "If you were attempting to deepcopy a module, this may be because "
+                "of a torch.nn.utils.weight_norm usage, "
+                "see https://github.com/pytorch/pytorch/pull/103001"
             )
         if id(self) in memo:
             return memo[id(self)]
@@ -187,7 +190,7 @@ class Tensor(torch._C._TensorBase):
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
 
-            if not type(self) is Tensor:
+            if type(self) is not Tensor:
                 if type(new_tensor) is not type(self):
                     raise RuntimeError(
                         "Type of deepcopy result does not match the type of the source tensor. "
@@ -329,11 +332,11 @@ class Tensor(torch._C._TensorBase):
             if self.layout == torch.sparse_coo:
                 args_sparse = (
                     self.layout,
-                    (self._indices(), self._values(), self.size()),
+                    (self._indices(), self._values(), self.size(), self.is_coalesced()),
                 )
             else:
                 raise NotImplementedError(
-                    "sparse tensor __reduce_ex__ for layout `%s`" % (self.layout)
+                    f"sparse tensor __reduce_ex__ for layout `{self.layout}`"
                 )
             return (torch._utils._rebuild_sparse_tensor, args_sparse)
         elif self.layout in {
@@ -429,7 +432,7 @@ class Tensor(torch._C._TensorBase):
     def backward(
         self, gradient=None, retain_graph=None, create_graph=False, inputs=None
     ):
-        r"""Computes the gradient of current tensor w.r.t. graph leaves.
+        r"""Computes the gradient of current tensor wrt graph leaves.
 
         The graph is differentiated using the chain rule. If the tensor is
         non-scalar (i.e. its data has more than one element) and requires
@@ -875,8 +878,7 @@ class Tensor(torch._C._TensorBase):
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rpow__(self, other):
-        dtype = torch.result_type(other, self)
-        return torch.tensor(other, dtype=dtype, device=self.device) ** self
+        return torch.pow(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __floordiv__(self, other):
@@ -993,13 +995,14 @@ class Tensor(torch._C._TensorBase):
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__contains__, (self,), self, element)
-        if isinstance(element, (torch.Tensor, Number)):
+        if isinstance(
+            element, (torch.Tensor, Number, torch.SymInt, torch.SymFloat, torch.SymBool)
+        ):
             # type hint doesn't understand the __contains__ result array
             return (element == self).any().item()  # type: ignore[union-attr]
 
         raise RuntimeError(
-            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a %s."
-            % type(element)
+            f"Tensor.__contains__ only supports Tensor or scalar, but you passed in a {type(element)}."
         )
 
     @property
@@ -1316,6 +1319,8 @@ class Tensor(torch._C._TensorBase):
             this stream before the capsule is created, and since the capsule
             shares its storage with the tensor this make it safe to access from
             both streams.  If None or -1 is passed then no synchronization is performed.
+            If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
+            synchronization.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack__, (self,), self, stream)
@@ -1340,7 +1345,15 @@ class Tensor(torch._C._TensorBase):
             raise TypeError("stream must be ``int`` or ``none``")
         elif stream is not None and stream != -1:
             if self.device.type == "cuda":
-                stream = torch.cuda.ExternalStream(stream)
+                # NB: This logic handles the special case values for default
+                # streams and must be kept in sync with from_dlpack in
+                # torch/utils/dlpack.py
+                if stream == 1 and torch.version.hip is None:
+                    stream = torch.cuda.default_stream()
+                elif stream == 0 and torch.version.hip is not None:
+                    stream = torch.cuda.default_stream()
+                else:
+                    stream = torch.cuda.ExternalStream(stream)
                 # Only synchronize on different streams
                 sync_stream = torch.cuda.current_stream()
                 if stream != sync_stream:
@@ -1366,9 +1379,7 @@ class Tensor(torch._C._TensorBase):
         elif self.device.type == "xpu":
             device_type = DLDeviceType.kDLOneAPI
         else:
-            raise ValueError(
-                "Unknown device type {} for Dlpack".format(torch_device_type)
-            )
+            raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
         return (device_type, idx)
 
     __module__ = "torch"

@@ -98,9 +98,10 @@ class TORCH_API Reducer {
   // Cannot combine with the call of `register_comm_hook`.
   void register_builtin_comm_hook(c10d::BuiltinCommHookType comm_hook_type);
 
-  // If set_to_none=True, reducer will set gradients to None in
-  // finalize_backward callback.
-  void set_grads_to_none(bool set_to_none);
+  // Informs reducer that optimizer is running in backward, so gradients
+  // don't need to be copied from buckets as the optimizer would've already
+  // been applied.
+  void set_optimizer_in_backward() { optim_in_backward_ = true; };
 
   // Runs allreduce or installed communication hook given GradBucket instance.
   c10::intrusive_ptr<c10::ivalue::Future> run_comm_hook(
@@ -128,6 +129,8 @@ class TORCH_API Reducer {
   // the performance cost is negligible. Returns true if the buckets were
   // rebuilt.
   bool rebuild_buckets();
+
+  void setSparseMetadata(std::map<std::string, at::Tensor>& metadata);
 
   // Install futures that should be awaited at end of backwards. Currently these
   // are only used by user-defined custom buffer reduction hooks, but can be generalized
@@ -177,7 +180,11 @@ class TORCH_API Reducer {
   // current iteration, which means unused params set has not changed.
   bool ddp_graph_static();
 
+  // Removes autograd hooks registered by the Reducer on the model parameters.
   void remove_autograd_hooks();
+
+  // Checks whether or not the reducer has finalized the current backward iteration.
+  void check_finalized();
 
  protected:
   // Forward declaration.
@@ -370,6 +377,9 @@ class TORCH_API Reducer {
     // If `true`, then this implies that `bucket.variables.size() == 1`.
     bool expect_sparse_gradient = false;
 
+    // Sparse indices tensor
+    c10::optional<at::Tensor> sparse_tensor_indices = c10::nullopt;
+
     // TODO(@pietern)
     // Memory copies from gradient tensors into the bucket are potentially
     // done on different CUDA streams. We record an event for every copy
@@ -399,6 +409,11 @@ class TORCH_API Reducer {
 
   // track the number of iterations to synchronize grads in training so far.
   long num_iterations_;
+  // track distinct iteration of backward call. This is distinct from num_iterations_,
+  // for example in the case of multiple forward before backward.
+  long num_bwd_calls_;
+  // whether the first autograd hook for a distinct backward pass has been called.
+  bool first_autograd_hook_called_;
   // track the number of buckets that have been ready for
   // communication calls like allReduce or communication hooks.
   int num_buckets_ready_;
@@ -495,6 +510,12 @@ class TORCH_API Reducer {
 
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
+
+  // Sparse metadata contains the indices that will be used
+  // when calling into sparse allreduce.
+  // This is only used in the sparse allreduce collective calls
+  std::unique_ptr<std::map<std::string, at::Tensor>> sparse_metadata_;
+
   // Debug level setting. It is parsed once when Reducer is constructed, and
   // remains the same across a single invocation of DDP training.
   DebugLevel ddp_debug_level_;
@@ -524,7 +545,7 @@ class TORCH_API Reducer {
   // are rebuilt after which this mapping is static.
   mutable std::unordered_map<size_t, std::vector<at::Tensor>> cached_variables_for_bucket_;
 
-  bool set_grads_to_none_{false};
+  bool optim_in_backward_{false};
   friend class Logger;
 };
 
