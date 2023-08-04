@@ -70,21 +70,15 @@ def _functionalize_sync(t):
     from torch._subclasses.functional_tensor import FunctionalTensor
 
     if isinstance(t, FunctionalTensor):
-        modes = torch.utils._python_dispatch._get_current_dispatch_mode_stack()
-        functional_modes = [
-            x
-            for x in modes
-            if isinstance(x, torch._subclasses.functional_tensor.FunctionalTensorMode)
-        ]
+        maybe_functional_mode = torch._C._get_functional_tensor_mode()
         # If a FunctionalTensorMode is active while syncing, we don't want it to intercept any ops that get called
         # when we sync our inner tensor.
-        assert len(functional_modes) < 2
-        if len(functional_modes) == 1:
+        if maybe_functional_mode is not None:
             try:
-                functional_modes[0].is_active = False
+                maybe_functional_mode.is_active = False
                 torch._functionalize_sync(t.elem)
             finally:
-                functional_modes[0].is_active = True
+                maybe_functional_mode.is_active = True
         else:
             torch._functionalize_sync(t.elem)
     else:

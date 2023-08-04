@@ -1,6 +1,8 @@
+import contextlib
+
 import torch
 import torch.utils._pytree as pytree
-from torch.utils._python_dispatch import TorchDispatchMode, return_and_correct_aliasing
+from torch.utils._python_dispatch import return_and_correct_aliasing, TorchDispatchMode
 
 
 class _ToFunctionalTensor(torch.autograd.Function):
@@ -74,8 +76,10 @@ class FunctionalTensor(torch.Tensor):
             torch.ops.aten.sym_numel.default,
             torch.ops.aten.dim.default,
         ]:
+
             def unwrap(x):
                 return x.elem
+
             args_unwrapped = pytree.tree_map_only(FunctionalTensor, unwrap, args)
             # All metadata accesses should be plumbed to the inner tensor, that way we don't have to worry
             # about the problem of keeping metadata in sync between the wrapper and inner tensor.
@@ -92,7 +96,7 @@ class FunctionalTensor(torch.Tensor):
         )
 
     def __repr__(self):
-        return f'FunctionalTensor({str(self.elem)})'
+        return f"FunctionalTensor({str(self.elem)})"
 
     @staticmethod
     def to_functional(x):
@@ -102,7 +106,8 @@ class FunctionalTensor(torch.Tensor):
         # - requires_grad (so autograd runs)
         # - is_leaf (so that mutations on graph inputs that are not leaves are allowed by the autograd engine)
         #   this is handled by FunctionalTensor.to_functional
-        x_functional = torch._to_functional_tensor(x, mirror_autograd_meta=True)
+        x_functional = torch._to_functional_tensor(x)
+        torch._mirror_autograd_meta(x, x_functional)
 
         torch._functionalize_enable_reapply_views(True)
         if x.requires_grad and not x.is_leaf:
@@ -113,9 +118,28 @@ class FunctionalTensor(torch.Tensor):
             out.requires_grad = x_functional.requires_grad
             return out
 
+    def from_functional(self):
+        torch._sync(self)
+        return torch._from_functional_tensor(self.elem)
+
+
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self):
         self.is_active = True
+        self.is_on_stack = False
+
+    # No-op if FunctionalTensorMode is already in use
+    def __enter__(self):
+        if torch._C._get_functional_tensor_mode() is None:
+            torch._C._set_functional_tensor_mode(self)
+            self.is_on_stack = True
+        return self
+
+    def __exit__(self, a, b, c):
+        if self.is_on_stack:
+            out = torch._C._unset_functional_tensor_mode()
+            # Sanity check
+            assert out is self
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
@@ -155,9 +179,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         # This requires swizzling our TLS dispatch keys so that the Functionalize key is active.
         with torch._C._SetExcludeDispatchKeyGuard(
             torch._C.DispatchKey.Functionalize, False
-        ), torch._C._IncludeDispatchKeyGuard(
-            torch._C.DispatchKey.Functionalize
-        ):
+        ), torch._C._IncludeDispatchKeyGuard(torch._C.DispatchKey.Functionalize):
             try:
                 # By default for python functionalization (for AOTAutograd), we reapply views.
                 torch._functionalize_enable_reapply_views(True)
@@ -180,4 +202,16 @@ class FunctionalTensorMode(TorchDispatchMode):
         # inplace ops like `aten.add_()` are expected to return inputs **directly**, instead of creating fresh tensor objects.
         # Use this util to figure out the right thing to return.
         # If none of our inputs were wrapped, then we have no FunctionalTensor outputs that we need to fix up storages for.
-        return return_and_correct_aliasing(func, args, outs_wrapped)
+        return return_and_correct_aliasing(func, args, kwargs, outs_wrapped)
+
+
+@contextlib.contextmanager
+def maybe_disable_functional_mode():
+    func_mode = None
+    if torch._C._get_functional_tensor_mode() is not None:
+        func_mode = torch._C._unset_functional_tensor_mode()
+    try:
+        yield
+    finally:
+        if func_mode is not None:
+            torch._C._set_functional_tensor_mode(func_mode)

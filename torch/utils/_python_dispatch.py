@@ -176,15 +176,15 @@ def _correct_storage_aliasing(func, args, outs):
        # want our subclass to intercept the set_() call.
        # instead, our subclass should directly have its storage swapped out.
        with torch.utils._mode_utils.no_dispatch():
-           if isinstance(ret, torch._subclasses.functional_tensor.FunctionalTensor):
-               # directly calling this overload, and passing ret.shape, because we **explicitly**
-               # don't want to reset the sizes on ret, if the storage implies a size change.
-               # Why?
-               # - FunctionalTensor has a CustomSizes, so that it can plumb all calls to metadata to the inner tensor.
-               # - TensorImpl.set_sizes_strides() therefore yells if you try to directly change sizes.
-               torch.ops.aten.set_.source_Storage_storage_offset(ret, arg.untyped_storage(), 0, ret.shape)
-           else:
-               ret.set_(arg.untyped_storage())
+           # directly calling this overload, and passing ret.shape, because we **explicitly**
+           # don't want to reset the sizes on ret, if the storage implies a size change.
+           # Why?
+           # The purpose of this API is *not* to change the size/strides of our output- we assume it's already correct.
+           # We just want to "fix up" the storage aliasing, without modifying or output's metadata.
+           # Example: out = inp.expand(inp.shape[0], inp.shape[0])
+           #     This requires swapping the storage of out to be the same as inp,
+           #     but we do *not* want it to change the sizes/strides that were compute for out.
+           torch.ops.aten.set_.source_Storage_storage_offset(ret, arg.untyped_storage(), 0, ret.shape)
 
     def is_match(arg, ret):
         arg_aliases = set() if not arg.alias_info else arg.alias_info.before_set
@@ -215,20 +215,42 @@ def _correct_storage_aliasing(func, args, outs):
             # For lists of outputs, need to alias every individual tensor to the input
             alias_storage(args[0], o)
 
-def return_and_correct_aliasing(func, args, out):
+def return_and_correct_aliasing(func, args, kwargs, out):
     def get_write_alias(x):
         if not x.alias_info or not x.alias_info.before_set:
             return None
         before_set = list(x.alias_info.before_set)
         # torchscript allows for complicated alias sets, but our dispatcher ops only really involve simple aliasing
         assert len(before_set) == 1
-        if '!' in list(before_set)[0]:
+        if x.alias_info.is_write:
             return before_set[0]
         return None
+
+    def get_arg_idx_from_alias(output_alias):
+        arg_indices = [i for i, a in enumerate(func._schema.arguments) if a.alias_info is not None and output_alias in a.alias_info.before_set]
+        # For any dispatcher op with an output alias, we expect it to map to exactly one alias in the schema's input arguments.
+        assert len(arg_indices) == 1
+        return arg_indices[0]
 
     # Fix up the storages of any outs so that they point to the same storage as the input,
     # if func is a view op.
     _correct_storage_aliasing(func, args, [out] if not isinstance(out, (list, tuple)) else out)
+
+    # For inplace_view ops in particular, we'll try hard to make sure that the wrapper subclass's
+    # metadata is set correctly.
+    if torch.Tag.inplace_view in func.tags:
+        # no_dispatch() to make sure that we secretly change the metadata on the wrapper,
+        # but don't end up dispatching the op anywhere else.
+        mutated_args = [x for i, x in enumerate(args) if get_write_alias(func._schema.arguments[i]) is not None]
+        # Assumption: we have a very small number of inplace_view ops that follow a strict schema:
+        # there is only a single argument that gets its metadata mutated.
+        assert len(mutated_args) == 1
+        # This check exists because we generally *do* want to update the metadata of any wrapper subclasses,
+        # but FunctionalTensor is special: it overrides all size/stride calls to plumb to the inner tensor.
+        # so we don't actually need to update the metadata (and attempting to do so causes errors)
+        if not isinstance(mutated_args[0], torch._subclasses.functional_tensor.FunctionalTensor):
+            with torch.utils._mode_utils.no_dispatch():
+                func(*args, **kwargs)
 
     # Next: we need to make sure to return inputs directly, if the output is a mutable alias (e.g. add_()).
 
@@ -241,9 +263,11 @@ def return_and_correct_aliasing(func, args, out):
         raise RuntimeError("Unsupported schema: " + str(func._schema))
 
     if len(func._schema.returns) == 1:
-        arg_idx = get_arg_idx_from_alias(get_write_alias(0))
+        arg_idx = get_arg_idx_from_alias(get_write_alias(func._schema.returns[0]))
         return args[arg_idx]
 
-    return [
-        args[get_arg_idx_from_alias(get_write_alias(0))] for i in range(len(func._schema.returns))
-    ]
+    # In the multi-return case, all aten ops return a tuple / list, so cast accordingly.
+    outs_to_return = type(out)([
+        args[get_arg_idx_from_alias(get_write_alias(func._schema.returns[i]))] if get_write_alias(r) is not None else o for (r, o) in zip(func._schema.returns, out)
+    ])
+    return outs_to_return

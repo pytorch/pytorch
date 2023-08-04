@@ -23,22 +23,29 @@ struct StashTorchDispatchModeGuard {
   std::shared_ptr<at::SafePyObject> saved_mode_;
 };
 
-struct ProxyOrFakeModeGuard {
+struct ProxyOrFakeOrFunctionalModeGuard {
  public:
-  ProxyOrFakeModeGuard(bool is_proxy) {
-    if (is_proxy) {
+  enum class GuardType { Proxy, Fake, Functional };
+
+  ProxyOrFakeOrFunctionalModeGuard(GuardType guard_type) {
+    if (guard_type == GuardType::Proxy) {
       saved_mode_ = c10::impl::TorchDispatchModeTLS::unset_proxy_mode();
-    } else {
+    } else if (guard_type == GuardType::Fake) {
       saved_mode_ = c10::impl::TorchDispatchModeTLS::unset_fake_mode();
+    } else {
+      saved_mode_ = c10::impl::TorchDispatchModeTLS::unset_functional_mode();
     }
-    is_proxy_ = is_proxy;
+    guard_type_ = guard_type;
   }
 
-  ~ProxyOrFakeModeGuard() {
-    if (is_proxy_) {
+  ~ProxyOrFakeOrFunctionalModeGuard() {
+    if (guard_type_ == GuardType::Proxy) {
       c10::impl::TorchDispatchModeTLS::set_proxy_mode(std::move(saved_mode_));
-    } else {
+    } else if (guard_type_ == GuardType::Fake) {
       c10::impl::TorchDispatchModeTLS::set_fake_mode(std::move(saved_mode_));
+    } else {
+      c10::impl::TorchDispatchModeTLS::set_functional_mode(
+          std::move(saved_mode_));
     }
   }
 
@@ -48,7 +55,7 @@ struct ProxyOrFakeModeGuard {
 
  private:
   std::shared_ptr<at::SafePyObject> saved_mode_;
-  bool is_proxy_;
+  GuardType guard_type_;
 };
 
 struct StashTorchDispatchStackGuard {
