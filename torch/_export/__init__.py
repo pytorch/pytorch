@@ -10,6 +10,7 @@ import sympy
 import torch
 import torch._dynamo
 import torch.fx
+import torch.fx._pytree as fx_pytree
 
 import torch.utils._pytree as pytree
 from torch._decomp import core_aten_decompositions, get_decompositions
@@ -344,3 +345,55 @@ def _reorder_kwargs_by_names(arg_names: List[str], args: Tuple[Any], kwargs: Dic
         f"but got {len(args)} positional args, {len(kwargs)} kwargs."
     )
     return OrderedDict({kw_name: kwargs[kw_name] for kw_name in arg_names[len(args):]})
+
+
+def aot_compile(
+    f: Callable,
+    args: Tuple[Any],
+    kwargs: Optional[Dict[str, Any]] = None,
+    constraints: Optional[List[Constraint]] = None,
+    options: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, ExportedProgram]:
+    """
+    Note: this function is not stable yet
+
+    Traces either an nn.Module's forward function or just a callable with PyTorch
+    operations inside, generates executable cpp code from the program, and returns
+    the path to the generated shared library
+
+    Args:
+        f: the `nn.Module` or callable to trace.
+
+        args: example positional inputs.
+
+        kwargs: optional example keyword inputs.
+
+        constraints: A optional list of constraints on the dynamic arguments specifying
+            their possible range of their shapes
+
+        options: A dictionary of options to control inductor
+
+    Returns:
+        Path to the generated shared library, and the exported program
+    """
+    from torch._inductor.compile_fx import compile_fx_aot
+    from torch._inductor.decomposition import select_decomp_table
+
+    global DECOMP_TABLE
+    DECOMP_TABLE = select_decomp_table()
+    ep = export(f, args, kwargs, constraints)
+    # Reset the global value
+    DECOMP_TABLE = core_aten_decompositions()
+
+    param_buffer_values = list(ep.state_dict.values())
+    flat_example_inputs = fx_pytree.tree_flatten_spec(
+        combine_args_kwargs(args, kwargs), ep.call_spec.in_spec  # type: ignore[arg-type]
+    )
+    all_args = (*param_buffer_values, *flat_example_inputs)
+
+    so_path = compile_fx_aot(
+        ep.graph_module,
+        all_args,  # type: ignore[arg-type]
+        config_patches=options,
+    )
+    return so_path, ep
