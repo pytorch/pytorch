@@ -555,19 +555,59 @@ inline static void set_cache_entry(PyCodeObject* code, CacheEntry* cache_entry, 
 
 }
 
-// TODO - What is this frame state? Does my change for the nn module cache
-// location requires changing the location of frame states as well.
-inline static PyObject* get_frame_state(PyCodeObject* code) {
+inline static PyObject* get_frame_state(PyCodeObject* code, PyObject* nn_module) {
+  // Read get_cache_entry to understand the cache structure. For frame_state, we
+  // have to replicate similar hierarchy. There are 3 possible values.
+  // 1) NULL - First time accessed the extra segment.
+  // 2) Not a NN module method frame - just return PyObject
+  // 3) NN module method frame - access the dict of nn module to frame state.
+
   PyObject* extra = NULL;
   _PyCode_GetExtra((PyObject*)code, dynamic_frame_state_extra_index, (void*)&extra);
-  return extra;
+
+  // Case 1 and 2
+  if (nn_module == NULL || extra == NULL) {
+    return extra;
+  }
+
+  // case 3.
+  PyObject* nn_module_weakref = PyWeakref_NewRef(nn_module, NULL);
+
+  // If the cache is empty, return a null object.
+  PyObject* nn_module_to_cache_entry_map = extra;
+  if (PyDict_GetItem(nn_module_to_cache_entry_map, nn_module_weakref) == NULL) {
+    return NULL;
+  }
+  // Find the frame state.
+  return PyDict_GetItem(nn_module_to_cache_entry_map, nn_module_weakref);
 }
 
-inline static void set_frame_state(PyCodeObject* code, PyObject* extra) {
-  // TODO(jansel): would it be faster to bypass this?
-  _PyCode_SetExtra((PyObject*)code, dynamic_frame_state_extra_index, extra);
-}
+inline static void set_frame_state(PyCodeObject* code, PyObject* extra, PyObject* nn_module) {
+  // Read get_cache_entry to understand the cache structure. For frame_state, we
+  // have to replicate similar hierarchy. There are 3 possible values.
+  // 1) NULL - First time accessed the extra segment.
+  // 2) Not a NN module method frame - just return PyObject
+  // 3) NN module method frame - access the dict of nn module to frame state.
 
+  // Case 1 and 2
+  if (nn_module == NULL) {
+    _PyCode_SetExtra((PyObject*)code, dynamic_frame_state_extra_index, extra);
+    return;
+  }
+
+
+  // Case 3
+  PyObject* nn_module_to_cache_entry_map = NULL;
+  _PyCode_GetExtra((PyObject*)code, cache_entry_extra_index, (void*)&nn_module_to_cache_entry_map);
+
+  if (nn_module_to_cache_entry_map == NULL) {
+    nn_module_to_cache_entry_map = PyDict_New();
+  }
+
+  PyObject* nn_module_weakref = PyWeakref_NewRef(nn_module, NULL);
+  PyDict_SetItem(nn_module_to_cache_entry_map, nn_module_weakref, extra);
+  _PyCode_SetExtra((PyObject*)code, cache_entry_extra_index, nn_module_to_cache_entry_map);
+}
 
 static PyObject* call_guard_fail_hook(
     PyObject* hook,
@@ -927,11 +967,11 @@ static PyObject* _custom_eval_frame(
   }
   // cache miss
 
-  PyObject *frame_state = get_frame_state(frame->f_code);
+  PyObject *frame_state = get_frame_state(frame->f_code, maybe_nn_module);
   if (frame_state == NULL) {
     // TODO(voz): Replace this dict with a real FrameState object.
     frame_state = PyDict_New();
-    set_frame_state(frame->f_code, frame_state);
+    set_frame_state(frame->f_code, frame_state, maybe_nn_module);
   }
   // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
   // that gets re-interpreted as a PyObject (which it is NOT!)
@@ -1026,7 +1066,6 @@ static PyObject* set_eval_frame_py(PyObject* dummy, PyObject* callback) {
   return set_eval_frame(callback, PyThreadState_GET());
 }
 
-
 static void destroy_cache_entry_wrapper(PyObject* code) {
   PyObject* extra = NULL;
   _PyCode_GetExtra((PyObject*)code, cache_entry_extra_index, (void*)&extra);
@@ -1048,11 +1087,11 @@ static void destroy_cache_entry_wrapper(PyObject* code) {
   set_cache_entry_on_code((PyCodeObject*)code, NULL);
 }
 
-
 static void destroy_frame_state(PyObject* code) {
-  PyObject* frame_state = get_frame_state((PyCodeObject*)code);
+  PyObject* frame_state = NULL;
+  _PyCode_GetExtra((PyObject*)code, dynamic_frame_state_extra_index, (void*)&frame_state);
   Py_XDECREF(frame_state);
-  set_frame_state((PyCodeObject*)code, NULL);
+  _PyCode_SetExtra((PyObject*)code, dynamic_frame_state_extra_index, NULL);
 }
 
 static PyObject* reset_code(PyObject* dummy, PyObject* code) {
