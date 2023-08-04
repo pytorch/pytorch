@@ -566,8 +566,8 @@ inline static PyObject* get_frame_state(PyCodeObject* code, PyObject* nn_module)
   _PyCode_GetExtra((PyObject*)code, dynamic_frame_state_extra_index, (void*)&extra);
 
   // Case 1 and 2
-  if (extra == NULL || nn_module == NULL) {
-    return NULL;
+  if (nn_module == NULL) {
+    return extra;
   }
 
   // case 3.
@@ -590,7 +590,7 @@ inline static void set_frame_state(PyCodeObject* code, PyObject* extra, PyObject
   // 3) NN module method frame - access the dict of nn module to frame state.
 
   // Case 1 and 2
-  if (extra == NULL || nn_module == NULL) {
+  if (nn_module == NULL) {
     _PyCode_SetExtra((PyObject*)code, dynamic_frame_state_extra_index, extra);
     return;
   }
