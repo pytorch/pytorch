@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_weights
 import copy
 import operator
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, List, Union
 from torch.utils._pytree import LeafSpec
 
 __all__ = [
@@ -301,7 +301,7 @@ def _replace_literals_with_new_placeholders(
     """
     last_ph = None
     cnt = 0
-    literal_to_ph: Dict[Any, Node] = {}
+    literal_to_ph: Dict[Union[float, bool, int, torch.dtype], Node] = {}
     if exclude_literals is None:
         exclude_literals = []
 
@@ -333,8 +333,8 @@ def _replace_literals_with_new_placeholders(
 
 def _replace_literals_with_existing_placeholders(
     gm: torch.fx.GraphModule,
-    exclude_literals: Optioinal[List[Any]] = None,
-    literal_to_ph_idx: Optional[List[Any, int]] = None
+    exclude_literals: Optional[List[Any]] = None,
+    literal_to_ph_idx: Optional[Dict[Union[float, int, bool, torch.dtype], int]] = None
 ):
     """Replace the literals in the graph with **existing** placeholder nodes, so that the literal arguments
     in the graph can be matched and replaced
@@ -390,6 +390,9 @@ def _replace_literals_with_existing_placeholders(
     """
     if exclude_literals is None:
         exclude_literals = []
+
+    if literal_to_ph_idx is None:
+        literal_to_ph_idx = {}
 
     phs = [node for node in gm.graph.nodes if node.op == "placeholder"]
 
