@@ -343,7 +343,7 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
         r._is_flat_param = True  # type: ignore[attr-defined]
         return r
 
-    # NB: This is not a regular method, because FlatParameter are not actually
+    # NB: This is not a regular method, because FlatParameters are not actually
     # instances of this class (see __new__ above).  So you must indirectly
     # call this directly through the classmethod.
     @classmethod
@@ -511,6 +511,19 @@ class FlatParamHandle:
         # it points to parameterizes behavior. We use the following attribute
         # to track which tensor data the parameters are unsharded views into.
         self._unsharded_flat_param_for_skipped_views: Optional[Tensor] = None
+        # The index in the state's `all_handles`, which must be the
+        # same across ranks for the execution order validation to work
+        self._handle_index: Optional[int] = None
+        # Index in handles_to_pre_forward_order
+        self._pre_forward_order_index: Optional[int] = None
+        # Index in `handles_post_forward_order`
+        self._post_forward_index: Optional[int] = None
+        # Used for guarding against mistargeted forward prefetches
+        self._needs_pre_forward_unshard = False
+        # Used for guarding against mistargeted backward prefetches
+        self._needs_pre_backward_unshard = False
+        # Was the handle prefetched? Set on successful _prefetch_handle and unshard
+        self._prefetched = False
         # Optimistically assume a valid input `params` and set dtype attributes
         # before `_init_flat_param()`, which performs the actual validation
         self._orig_param_dtype = params[0].dtype
