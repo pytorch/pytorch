@@ -16,7 +16,7 @@ from torch._inductor.scheduler import (
     Scheduler,
     SchedulerNode,
 )
-from torch._inductor.utils import add_scheduler_init_hook
+from torch._inductor.utils import add_scheduler_init_hook, run_and_get_code
 from torch._inductor.virtualized import ops, V
 from torch.fx import symbolic_trace
 from torch.testing._internal.common_utils import (
@@ -303,6 +303,121 @@ class LoopOrderingTest(TestCase):
 
         with add_scheduler_init_hook(None, hook_fn):
             torch.compile(f, fullgraph=True)(a, b, c)
+
+        self.assertTrue(called)
+
+    @staticmethod
+    def lite_init_scheduler(scheduler, nodes):
+        scheduler.backends = {}
+        scheduler.available_buffer_names = {
+            *V.graph.graph_inputs.keys(),
+            *V.graph.constants.keys(),
+        }
+
+        scheduler.nodes = [scheduler.create_scheduler_node(n) for n in nodes]
+        scheduler.compute_predecessors()
+
+    def test_outer_reduction_fusion(self):
+        def f(x):
+            x = x.sin()
+            x = test_operators.realize(x)
+            return x.sum(dim=0)
+
+        x = torch.randn(128, 256).cuda()
+        called = False
+
+        def hook_fn(scheduler, nodes):
+            nonlocal called
+            called = True
+
+            self.lite_init_scheduler(scheduler, nodes)
+            snodes = scheduler.nodes
+            self.assertTrue(scheduler.can_fuse(snodes[0], snodes[1]))
+
+        with add_scheduler_init_hook(hook_fn):
+            torch.compile(f, fullgraph=True)(x)
+
+        self.assertTrue(called)
+
+    def test_reshape_fusion(self):
+        def f(x, y):
+            x = x + y
+            x = test_operators.realize(x)
+            s0, s1, s2, s3, s4 = x.size()
+            x = x.permute(1, 0, 4, 3, 2).reshape(s0 * s1, s2 * s3 * s4)
+            return x
+
+        x = torch.randn(9, 8, 7, 6, 5, device=self.device)
+        y = torch.randn(9, 8, 7, 6, 5, device=self.device)
+
+        called = False
+
+        def hook_fn(scheduler, nodes):
+            nonlocal called
+            called = True
+
+            self.lite_init_scheduler(scheduler, nodes)
+            snodes = scheduler.nodes
+
+            sin_snode, reshape_snode = snodes
+            self.assertTrue(str(reshape_snode.node).count("ModularIndexing") == 5)
+
+            self.assertTrue(len(reshape_snode.node.get_size()) == 2)
+            self.assertTrue(len(reshape_snode._sizes[0]) == 5)
+
+            # we can fuse sin_snode and reshape_snode since we split the var
+            # ranges for the reshape_snode.
+            self.assertTrue(scheduler.can_fuse(sin_snode, reshape_snode))
+
+        with add_scheduler_init_hook(hook_fn):
+            actual = torch.compile(f, fullgraph=True)(x, y)
+            ref = f(x, y)
+            self.assertTrue(torch.allclose(actual, ref))
+
+        self.assertTrue(called)
+
+    @parametrize(
+        "loop_range",
+        [
+            32,
+            64,
+            128,
+            129,
+            256,
+        ],
+    )
+    def test_chain_fusion(self, loop_range):
+        def f(x):
+            for i in range(loop_range):
+                x = x + 1
+                if i != loop_range - 1:
+                    x = test_operators.realize(x)
+            return x
+
+        x = torch.rand(10, 10).cuda()
+
+        called = False
+
+        def hook_fn(scheduler, nodes):
+            nonlocal called
+            called = True
+            self.assertTrue(len(nodes) == loop_range)
+            # loop_range nodes are fused into a single node
+            expected_num_fused = (
+                loop_range + config.max_fusion_size - 1
+            ) // config.max_fusion_size
+            self.assertTrue(
+                len(scheduler.nodes) == expected_num_fused,
+                f"Number of fused scheduler node: {len(scheduler.nodes)}, expected {expected_num_fused}",
+            )
+            self.assertTrue(
+                sum(len(n.get_nodes()) for n in scheduler.nodes) == loop_range
+            )
+
+        with add_scheduler_init_hook(None, hook_fn):
+            actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+            ref = f(x)
+            self.assertTrue(torch.allclose(actual, ref))
 
         self.assertTrue(called)
 
