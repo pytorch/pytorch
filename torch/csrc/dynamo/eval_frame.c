@@ -1091,7 +1091,7 @@ static void destroy_frame_state(PyObject* code) {
   PyObject* frame_state = NULL;
   _PyCode_GetExtra((PyObject*)code, dynamic_frame_state_extra_index, (void*)&frame_state);
   Py_XDECREF(frame_state);
-  _PyCode_SetExtra((PyObject*)code, cache_entry_extra_index, NULL);
+  _PyCode_SetExtra((PyObject*)code, dynamic_frame_state_extra_index, NULL);
 }
 
 static PyObject* reset_code(PyObject* dummy, PyObject* code) {
