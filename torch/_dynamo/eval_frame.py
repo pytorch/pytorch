@@ -987,7 +987,10 @@ def export(
 
         flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
+        # TODO: remove_from_cache doesn't completely work
+        # https://github.com/pytorch/pytorch/issues/106547
         remove_from_cache(f)
+        torch._dynamo.reset()
         constraint_violation_error = None
         if tracing_mode != "symbolic":
             assume_static_by_default = True
@@ -1013,6 +1016,7 @@ def export(
             except ConstraintViolationError as e:
                 constraint_violation_error = e
         remove_from_cache(f)
+        torch._dynamo.reset()
 
         if (
             (shape_env := getattr(fake_mode, "shape_env", None)) is not None

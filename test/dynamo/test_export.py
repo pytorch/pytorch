@@ -72,6 +72,11 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = out_graph()
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    def test_issue106547_export_nn_twice(self):
+        m = torch.nn.Linear(2, 2)
+        torch._dynamo.export(m)(torch.randn(2, 2))
+        torch._dynamo.export(m)(torch.randn(2, 2))
+
     def test_export_mismatched_out(self):
         def func(x):
             y = x + 1
