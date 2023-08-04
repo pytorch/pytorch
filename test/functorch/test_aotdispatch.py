@@ -2960,7 +2960,7 @@ aot_autograd_module_failures = set({
                                # of a tracing tensor with aten._local_scalar_dense.default -
                                # erroring out! It's likely that this is caused by data-dependent
                                # control flow or similar.
-    torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input
+    torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.eq compares a mask input
                                   # to a causal mask tensor, to see if Boolean is_causal should be set
                                   # for TrnasformerEncoder layers, MHA and sdp custom kernels
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input
