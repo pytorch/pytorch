@@ -153,6 +153,11 @@ def supports(o, factory_methods):
             print("Skipping {} Because of Arg: {} ({}) ".format(
                   o['name'], arg['type'], arg['dynamic_type']))
             return False
+
+    # skip _foreach_clamp(Tensor[], Scalar?, Scalar?)
+    if o['name'] in {"_foreach_clamp"}:
+        print(f"Skipping {o['name']} because it has multiple scalar arguments with default values.")
+        return False
     return True
 
 
