@@ -513,7 +513,7 @@ static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (at::autocast::is_enabled() || at::autocast::is_cpu_enabled() ||
       at::autocast::is_xpu_enabled() || at::autocast::is_ipu_enabled() ||
-      at::autocast::is_xla_enabled()) {
+      at::autocast::is_xla_enabled() || at::autocast::is_hpu_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
