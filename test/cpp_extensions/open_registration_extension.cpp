@@ -348,8 +348,9 @@ void custom_cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack
   at::native::cpu_fallback(op, stack);
 }
 
-TORCH_LIBRARY_IMPL(_, PrivateUse1, m) {
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
+TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
+  m.impl("sub.Tensor", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
+  m.impl("_foreach_add.List", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
 }
 
 // This basic implementation doesn't bother dealing with different device indices

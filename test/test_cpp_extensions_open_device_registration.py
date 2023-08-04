@@ -462,7 +462,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             # create tensors located in custom device
             v_foo = torch.Tensor([1, 2, 3]).to('foo')
             # create result tensor located in cpu
-            v_cpu = torch.Tensor([2, 4, 6])
+            z_cpu = torch.Tensor([2, 4, 6])
             # create tensorlist for foreach_add op
             x = (v_foo, v_foo)
             y = (v_foo, v_foo)
@@ -473,8 +473,8 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             # call _foreach_add op, which will fallback to cpu
             z = torch._foreach_add(x, y)
 
-            self.assertEqual(v_cpu, z[0])
-            self.assertEqual(v_cpu, z[1])
+            self.assertEqual(z_cpu, z[0])
+            self.assertEqual(z_cpu, z[1])
 
         test_base_device_registration()
         test_before_common_registration()
