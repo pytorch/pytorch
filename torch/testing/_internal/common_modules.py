@@ -2988,7 +2988,9 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # test fails on MPS backend and is being investigated.
                    # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),)
+                   DecorateInfo(skipMPS),
+                   # Need simple fix to add `reset_parameters`
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_reset_parameters'),)
                ),
     ModuleInfo(torch.nn.RNNCell,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True),
