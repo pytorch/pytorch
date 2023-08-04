@@ -1075,7 +1075,9 @@ class FakeTensor(torch.Tensor):
         fake_modes_on_stack = [m for m in cur_stack if isinstance(m, FakeTensorMode)]
         if fake_modes_on_stack:
             not_implemented_log.debug(
-                "FakeTensor mode already active: %s in %s", fake_modes_on_stack, cur_stack
+                "FakeTensor mode already active: %s in %s",
+                fake_modes_on_stack,
+                cur_stack,
             )
             return NotImplemented
 
