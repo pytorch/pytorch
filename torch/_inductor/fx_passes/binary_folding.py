@@ -20,6 +20,9 @@ def mark_mixed_dtype_conv(conv):
         return
 
     conv_user = next(iter(conv.users.keys()))
+    if not isinstance(conv_user.meta["val"], torch.Tensor):
+        return
+
     if not conv_user.meta["val"].dtype == torch.float32:
         return
 
@@ -80,7 +83,7 @@ _binary_ops = [aten.add.Tensor, aten.sub.Tensor, aten.mul.Tensor, aten.div.Tenso
 def binary_folding_init():
     _conv_args = [Arg() for _ in range(9)]
     _computation_ops = [aten.convolution.default]
-    _computation_calls = [CallFunction(aten.convolution.default, *_conv_args)]
+    _computation_calls = [CallFunction(aten.convolution.default, *_conv_args, _users=1)]
 
     """
     In order to fuse add/sub/mul/div with conv, the dimensions of its
