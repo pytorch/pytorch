@@ -292,16 +292,19 @@ auto handle_torch_function_no_python_arg_parser(
 
   // Of our overloaded types, filter out the FakeTensor arguments.
   // FakeTensor is special, and gets lower precdence in the dispatcher ordering.
-  std::vector<py::handle> overloaded_non_fake_args;
+  std::vector<py::handle> overloaded_user_subclasses;
   std::vector<py::handle> overloaded_fake_args;
+  std::vector<py::handle> overloaded_functional_args;
   for (auto& arg : overloaded_args) {
     auto curr_type = get_type_of_overloaded_arg(arg.ptr());
     auto curr_type_name = PyObject_GetAttrString(curr_type, "__name__");
     auto curr_type_str = std::string(PyUnicode_AsUTF8(curr_type_name));
-    if (curr_type_str != "FakeTensor") {
-      overloaded_non_fake_args.push_back(arg);
-    } else {
+    if (curr_type_str == "FakeTensor") {
       overloaded_fake_args.push_back(arg);
+    } else if (curr_type_str == "FunctionalTensor") {
+      overloaded_functional_args.push_back(arg);
+    } else {
+      overloaded_user_subclasses.push_back(arg);
     }
   }
 
@@ -311,8 +314,9 @@ auto handle_torch_function_no_python_arg_parser(
     return is_torch_function
         ? at::impl::torch_function_mode_enabled()
         // Check if any *user* torch_dispatch modes are active (not including
-        // fake and proxy modes, which are special)
-        : c10::impl::dispatch_mode_enabled(/*skip_proxy_and_fake=*/true);
+        // fake, proxy and functional modes, which are special)
+        : c10::impl::dispatch_mode_enabled(
+              /*skip_proxy_and_fake_and_functional=*/true);
   };
 
   // Step 1: Try to dispatch based on the mode stack.
@@ -373,7 +377,7 @@ auto handle_torch_function_no_python_arg_parser(
   }
   // Step 2: Try to dispatch based on any user subclasses
   if (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) {
-    for (auto& arg : overloaded_non_fake_args) {
+    for (auto& arg : overloaded_user_subclasses) {
       py::object torch_function =
           PyObject_FastGetAttrString(arg.ptr(), torch_function_name_str);
       if (!torch_function) {
@@ -406,50 +410,83 @@ auto handle_torch_function_no_python_arg_parser(
       }
     }
   }
-  // Step 3: Try to dispatch based ProxyTorchDispatchMode, FakeTensorMode, or
-  // any FakeTensor args (Only do this for __torch_dispatch__)
+  // Step 3: Try to dispatch based on the following fixed order:
+  // - FunctionalTensorMode
+  // - FunctionalTensor subclass arguments
+  // - ProxyTorchDispatchMode
+  // - FakeTensorMode
+  // - FakeTensor subclass arguments
   if (!is_torch_function &&
       (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented)) {
-    auto found_proxy_or_fake = false;
+    auto found_proxy_or_fake_or_functional = false;
+    auto is_functional_mode = false;
     auto is_proxy_mode = false;
     auto is_fake_mode = false;
     c10::optional<py::object> torch_dispatch;
 
+    // Try functional mode
+    auto maybe_functional_mode =
+        c10::impl::TorchDispatchModeTLS::get_functional_mode();
+    if (maybe_functional_mode != c10::nullopt) {
+      mode_obj = py::reinterpret_borrow<py::object>(
+          (*maybe_functional_mode)->ptr(getPyInterpreter()));
+      is_functional_mode = true;
+      found_proxy_or_fake_or_functional = true;
+    }
+
+    // Looks for functional tensor args
+    if (!found_proxy_or_fake_or_functional) {
+      for (auto& arg : overloaded_functional_args) {
+        torch_dispatch =
+            PyObject_FastGetAttrString(arg.ptr(), torch_function_name_str);
+        found_proxy_or_fake_or_functional = true;
+      }
+    }
+
     // Try proxy mode
     auto maybe_proxy_mode = c10::impl::TorchDispatchModeTLS::get_proxy_mode();
-    if (maybe_proxy_mode != c10::nullopt) {
-      mode_obj = py::reinterpret_borrow<py::object>(
-          (*maybe_proxy_mode)->ptr(getPyInterpreter()));
-      is_proxy_mode = true;
-      found_proxy_or_fake = true;
+    if (!found_proxy_or_fake_or_functional) {
+      if (maybe_proxy_mode != c10::nullopt) {
+        mode_obj = py::reinterpret_borrow<py::object>(
+            (*maybe_proxy_mode)->ptr(getPyInterpreter()));
+        is_proxy_mode = true;
+        found_proxy_or_fake_or_functional = true;
+      }
     }
 
     // Try fake mode
-    if (!found_proxy_or_fake) {
+    if (!found_proxy_or_fake_or_functional) {
       auto maybe_fake_mode = c10::impl::TorchDispatchModeTLS::get_fake_mode();
       if (maybe_fake_mode != c10::nullopt) {
         mode_obj = py::reinterpret_borrow<py::object>(
             (*maybe_fake_mode)->ptr(getPyInterpreter()));
         is_fake_mode = true;
-        found_proxy_or_fake = true;
+        found_proxy_or_fake_or_functional = true;
       }
     }
 
     // Looks for fake tensor args
-    if (!found_proxy_or_fake) {
+    if (!found_proxy_or_fake_or_functional) {
       for (auto& arg : overloaded_fake_args) {
         torch_dispatch =
             PyObject_FastGetAttrString(arg.ptr(), torch_function_name_str);
-        found_proxy_or_fake = true;
+        found_proxy_or_fake_or_functional = true;
       }
     }
-    if (found_proxy_or_fake) {
+    if (found_proxy_or_fake_or_functional) {
       // We successfully found a proxy / fake mode or argument to dispatch on
       // Sigh, there are a few differences on how we need do call back into
       // python depending on whether our object is a mode or a subclass.
-      if (is_proxy_mode || is_fake_mode) {
-        torch_dispatch_mode::ProxyOrFakeModeGuard guard(
-            /*is_proxy=*/is_proxy_mode);
+      if (is_proxy_mode || is_fake_mode || is_functional_mode) {
+        torch_dispatch_mode::ProxyOrFakeOrFunctionalModeGuard guard(
+            /*guard_type=*/is_proxy_mode
+                ? torch_dispatch_mode::ProxyOrFakeOrFunctionalModeGuard::
+                      GuardType::Proxy
+                : is_fake_mode
+                ? torch_dispatch_mode::ProxyOrFakeOrFunctionalModeGuard::
+                      GuardType::Fake
+                : torch_dispatch_mode::ProxyOrFakeOrFunctionalModeGuard::
+                      GuardType::Functional);
         auto mode_obj = py::reinterpret_borrow<py::object>(
             guard.get_cur_mode()->ptr(getPyInterpreter()));
         if (kwargs == nullptr) {
