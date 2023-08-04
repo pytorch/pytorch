@@ -566,7 +566,7 @@ inline static PyObject* get_frame_state(PyCodeObject* code, PyObject* nn_module)
   _PyCode_GetExtra((PyObject*)code, dynamic_frame_state_extra_index, (void*)&extra);
 
   // Case 1 and 2
-  if (nn_module == NULL) {
+  if (nn_module == NULL || extra == NULL) {
     return extra;
   }
 
