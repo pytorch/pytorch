@@ -1,5 +1,6 @@
 import itertools
 import logging
+import threading
 from functools import lru_cache
 from typing import Callable, Dict, List, Sequence
 
@@ -116,6 +117,8 @@ class OnednnGraphPartitionModule(torch.nn.Module):
         self.kernel = None
         self.output_descs = None
 
+        self.lock = threading.Lock()
+
     def name(self):
         return self.__name__
 
@@ -142,17 +145,18 @@ class OnednnGraphPartitionModule(torch.nn.Module):
             ]
             return output_tensors[0] if len(output_tensors) == 1 else output_tensors
 
-        if not self.kernel:
-            cache_parameter = self.onednn_graph.is_inference
-            self.input_descs = self.onednn_graph.update_input_descs(
-                self.input_descs, input_tensors, cache_parameter
-            )
-            self.kernel = self.onednn_graph.compile_partition(
-                self.partition, self.input_descs
-            )
-            self.output_descs = self.onednn_graph.get_compiled_output_descs(
-                self.kernel, self.partition.get_out_ports()
-            )
+        with self.lock:
+            if not self.kernel:
+                cache_parameter = self.onednn_graph.is_inference
+                self.input_descs = self.onednn_graph.update_input_descs(
+                    self.input_descs, input_tensors, cache_parameter
+                )
+                self.kernel = self.onednn_graph.compile_partition(
+                    self.partition, self.input_descs
+                )
+                self.output_descs = self.onednn_graph.get_compiled_output_descs(
+                    self.kernel, self.partition.get_out_ports()
+                )
 
         input_onednn_tensors = [
             llga.tensor(input_desc, self.onednn_graph.engine, input_tensor.data_ptr())
