@@ -1055,17 +1055,7 @@ def compile_fx(
 
     fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
 
-    if _in_aot_compilation and config.freezing and not torch.is_grad_enabled():
-        inference_compiler = functools.partial(
-            fw_compiler_freezing,
-            dynamo_model=model_,
-            num_example_inputs=num_example_inputs,
-            inner_compile=inner_compile,
-            cudagraphs=cudagraphs,
-            graph_id=graph_id,
-            forward_device=forward_device,
-        )
-    elif config.freezing and not torch.is_grad_enabled():
+    if config.freezing and not torch.is_grad_enabled():
         inference_compiler = functools.partial(
             fw_compiler_freezing,
             dynamo_model=model_,

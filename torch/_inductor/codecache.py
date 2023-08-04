@@ -887,7 +887,9 @@ class AotCodeCache:
             specified_dir=config.aot_inductor_output_path,
         )
 
-        # Write list of constants to file
+        # Write list of constants to file.
+        # We have to do this hack with torch.nn.Module because torch::load()
+        # cannot directly load List[Tensor].
         path = f"{os.path.splitext(input_path)[0]}_constants.pt"
         m = torch.nn.Module()
         m.tensor_list = list(graph.constants.values())

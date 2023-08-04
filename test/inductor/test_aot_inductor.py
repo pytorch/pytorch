@@ -44,7 +44,6 @@ class AOTInductorModelRunner:
         source = (
             """
         #include <torch/csrc/inductor/aot_inductor_model.h>
-        #include <torch/torch.h>
         #include <torch/script.h>
 
         torch::aot_inductor::AOTInductorModel model;
