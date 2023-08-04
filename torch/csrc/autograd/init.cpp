@@ -2,6 +2,7 @@
 
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/SavedTensorHooks.h>
+#include <ATen/SequenceNumber.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/record_function.h>
@@ -264,6 +265,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);
+  m.def("_get_sequence_nr", &at::sequence_number::peek);
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
       .def("trace_start_us", &ProfilerResult::trace_start_us)
@@ -511,7 +513,7 @@ static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (at::autocast::is_enabled() || at::autocast::is_cpu_enabled() ||
       at::autocast::is_xpu_enabled() || at::autocast::is_ipu_enabled() ||
-      at::autocast::is_xla_enabled()) {
+      at::autocast::is_xla_enabled() || at::autocast::is_hpu_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;

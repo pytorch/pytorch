@@ -128,10 +128,18 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
 template <>
 void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
 
+#if defined(USE_ROCM) && ROCM_VERSION <= 55000
+// ROCm 5.6 hipblas matches the const Dtype *A API, but prior hipblas does not.
+#define CUDABLAS_TRSM_ARGTYPES(Dtype)                                  \
+  hipblasHandle_t handle, hipblasSideMode_t side, hipblasFillMode_t uplo, \
+      hipblasOperation_t trans, hipblasDiagType_t diag, int m, int n,    \
+      const Dtype *alpha,       Dtype *A, int lda, Dtype *B, int ldb
+#else
 #define CUDABLAS_TRSM_ARGTYPES(Dtype)                                  \
   cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, \
       cublasOperation_t trans, cublasDiagType_t diag, int m, int n,    \
       const Dtype *alpha, const Dtype *A, int lda, Dtype *B, int ldb
+#endif
 
 template <typename Dtype>
 inline void trsm(CUDABLAS_TRSM_ARGTYPES(Dtype)) {
