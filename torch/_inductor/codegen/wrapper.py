@@ -1089,7 +1089,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         # Output tensors are allocated by the AOT runtime.
         if V.graph.aot_mode:
             for idx, output in enumerate(V.graph.graph_outputs):
-                if isinstance(output, ir.ReinterpretView) or (
+                if (
                     hasattr(output, "get_name")
                     and output.get_name() in self.outputs_need_copy
                 ):

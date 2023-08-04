@@ -164,17 +164,31 @@ void clamp_tensor_out_mps(const Tensor& input_t,
 
       clamp_mps_graph(newCachedGraph, input_t, min_opt_tensor, max_opt_tensor);
     });
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor, input_t);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor, output_t);
+
+    bool gatherTensorData = true;
+    if (!output_t.is_contiguous() || output_t.is_view()) {
+      gatherTensorData = false;
+    }
+
+    auto inputPlaceholder =
+        Placeholder(cachedGraph->inputTensor, input_t, /*mpsShape=*/nil, /*gatherTensorData=*/gatherTensorData);
+    auto outputPlaceholder =
+        Placeholder(cachedGraph->outputTensor, output_t, /*mpsShape=*/nil, /*gatherTensorData=*/false);
 
     NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
     feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
     if (has_min) {
-      auto minPlaceholder = Placeholder(cachedGraph->minTensor, min_opt_tensor);
+      min_opt_tensor =
+          gatherTensorData && !min_opt_tensor.is_contiguous() ? min_opt_tensor.contiguous() : min_opt_tensor;
+      auto minPlaceholder =
+          Placeholder(cachedGraph->minTensor, min_opt_tensor, /*mpsShape=*/nil, /*gatherTensorData=*/gatherTensorData);
       feeds[minPlaceholder.getMPSGraphTensor()] = minPlaceholder.getMPSGraphTensorData();
     }
     if (has_max) {
-      auto maxPlaceholder = Placeholder(cachedGraph->maxTensor, max_opt_tensor);
+      max_opt_tensor =
+          gatherTensorData && !max_opt_tensor.is_contiguous() ? max_opt_tensor.contiguous() : max_opt_tensor;
+      auto maxPlaceholder =
+          Placeholder(cachedGraph->maxTensor, max_opt_tensor, /*mpsShape=*/nil, /*gatherTensorData=*/gatherTensorData);
       feeds[maxPlaceholder.getMPSGraphTensor()] = maxPlaceholder.getMPSGraphTensorData();
     }
 
@@ -224,8 +238,15 @@ void clamp_scalar_out_mps(const Tensor& input_t,
       clamp_mps_graph(newCachedGraph, input_t, input_t, input_t);
     });
 
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor, input_t);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor, output_t);
+    bool gatherTensorData = true;
+    if (!output_t.is_contiguous() || output_t.is_view()) {
+      gatherTensorData = false;
+    }
+
+    auto inputPlaceholder =
+        Placeholder(cachedGraph->inputTensor, input_t, /*mpsShape=*/nil, /*gatherTensorData=*/gatherTensorData);
+    auto outputPlaceholder =
+        Placeholder(cachedGraph->outputTensor, output_t, /*mpsShape=*/nil, /*gatherTensorData=*/false);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
       inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
