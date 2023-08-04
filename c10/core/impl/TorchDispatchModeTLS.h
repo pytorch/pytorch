@@ -23,6 +23,11 @@ struct C10_API TorchDispatchModeTLS {
   static const std::shared_ptr<SafePyObject> unset_proxy_mode();
   static void set_proxy_mode(std::shared_ptr<SafePyObject> mode);
 
+  static const c10::optional<std::shared_ptr<SafePyObject>>
+  get_functional_mode();
+  static const std::shared_ptr<SafePyObject> unset_functional_mode();
+  static void set_functional_mode(std::shared_ptr<SafePyObject> mode);
+
   static const TorchDispatchModeTLS& get_state();
   static void set_state(TorchDispatchModeTLS state);
 
@@ -34,9 +39,13 @@ struct C10_API TorchDispatchModeTLS {
   // However, we only allow asingle FakeTensorMode onto the stack at a time
   // (Pushing additional FakeTensorModes onto the stack is a no-op)
   c10::optional<std::shared_ptr<c10::SafePyObject>> fake_mode_;
+  // FunctionalTensorMode also does not carry state, so pushing multiple
+  // on the stack will be a noop
+  c10::optional<std::shared_ptr<c10::SafePyObject>> functional_mode_;
 };
 
-C10_API bool dispatch_mode_enabled(bool skip_proxy_and_fake = false);
+C10_API bool dispatch_mode_enabled(
+    bool skip_proxy_and_fake_and_functional = false);
 
 } // namespace impl
 } // namespace c10

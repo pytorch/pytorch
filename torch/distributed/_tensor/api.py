@@ -184,12 +184,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 "use local_tensor.detach() and make requires_grad consistent."
             )
 
-        # temp HACK to get DTensor working with AOTAutograd.
-        # This will also effectively turn off functionalization, requires some design to fix properly.
-        # (Planning on working to fix this when I'm back from PTO).
-        if torch._is_functional_tensor(local_tensor):
-            local_tensor = torch._from_functional_tensor(local_tensor)
-
         # new method instruct wrapper tensor from local_tensor and add
         # placement spec, it does not do actual distribution
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
@@ -412,7 +406,7 @@ def distribute_tensor(
     Args:
         tensor (torch.Tensor): torch.Tensor to be distributed. Note that if you
             want to shard a tensor on a dimension that is not evenly divisible by
-            the number of devices in that mesh dimension, we use `torch.tensor_split`
+            the number of devices in that mesh dimension, we use `torch.chunk`
             semantic to shard the tensor and scatter the shards.
         device_mesh (:class:`DeviceMesh`, optional): DeviceMesh to distribute the
             tensor, if not specified, must be called under a DeviceMesh context
