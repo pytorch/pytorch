@@ -2272,7 +2272,7 @@ def forward(self, x):
     def test_export_preserve_constraints_as_metadata_scalar(self):
         def f(x, y):
             b = x.item()
-            constrain_as_size(b, min=2, max=5)
+            constrain_as_size(b, max=5)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])
@@ -2321,7 +2321,7 @@ def forward(self, x):
 
         def f(x, y):
             b = x.item()
-            constrain_as_size(b, min=2, max=5)
+            constrain_as_size(b, max=5)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])
@@ -2343,11 +2343,11 @@ def forward(self, x):
     def test_export_with_inline_constraints(self):
         def f(x):
             a = x.item()
-            constrain_as_size(a, 4, 7)
+            constrain_as_value(a, 4, 7)
             return torch.empty((a, 4))
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError, r"Invalid value 20 for range \[4:7\]"
+            ValueError, r"Invalid value 20 for range \[4:7\]"
         ) as cm:
             torch._export.export(f, (torch.tensor([20]),))
 
@@ -2367,7 +2367,7 @@ def forward(self, x):
     def test_export_with_inline_constraints_complex(self):
         def f(x):
             a = x.item()
-            constrain_as_size(a, 4, 7)
+            constrain_as_value(a, 4, 7)
             empty = torch.empty((a, 4))
 
             return torch.cat((empty.transpose(0, 1), torch.zeros(6, a)), 0)
