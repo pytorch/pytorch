@@ -5,6 +5,7 @@ import operator
 import torch
 from ..lowering import lowerings as L
 from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, Match
+from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
 
@@ -365,6 +366,22 @@ def _register_quantized_maxpool2d_lowering(
         padding = kwargs["padding"] if ("padding" in kwargs) else 0
         dilation = kwargs["dilation"] if ("dilation" in kwargs) else 1
         ceil_mode = kwargs["ceil_mode"] if ("ceil_mode" in kwargs) else False
+
+        if padding == 0:
+            padding = [0, 0]
+        if dilation == 1:
+            dilation = [1, 1]
+        if not stride:
+            stride = kernel_size
+        kernel_size = pad_listlike(kernel_size, 2)
+        stride = pad_listlike(stride, 2)
+        padding = pad_listlike(padding, 2)
+        dilation = pad_listlike(dilation, 2)
+
+        assert len(kernel_size) == 2
+        assert len(stride) == 2
+        assert len(padding) == 2
+        assert len(dilation) == 2
 
         computation_args = (
             x,
