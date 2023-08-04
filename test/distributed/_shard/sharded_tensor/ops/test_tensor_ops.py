@@ -110,6 +110,27 @@ class TestTensorOps(ShardedTensorTestBase):
         for local_shard in local_shards:
             self.assertTrue(local_shard.tensor.requires_grad)
 
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_set_is_complex(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        st = sharded_tensor.rand(spec, (12, 5))
+        local_shards = st.local_shards()
+        # before set requires_grad, all local shards should not require grads
+        for local_shard in local_shards:
+            self.assertFalse(local_shard.tensor.is_complex())
+
+        self.assertFalse(st.is_complex())
+
 
 if __name__ == "__main__":
     run_tests()
