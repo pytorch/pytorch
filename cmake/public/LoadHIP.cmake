@@ -1,20 +1,144 @@
 set(PYTORCH_FOUND_HIP FALSE)
 
-if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "6.0.0")
-  set(HIP_PATH ${ROCM_PATH})
-  set(ROCRAND_PATH ${ROCM_PATH})
-  set(HIPRAND_PATH ${ROCM_PATH})
-  set(ROCBLAS_PATH ${ROCM_PATH})
-  set(MIOPEN_PATH ${ROCM_PATH})
-  set(ROCFFT_PATH ${ROCM_PATH})
-  set(HIPFFT_PATH ${ROCM_PATH})
-  set(HIPSPARSE_PATH ${ROCM_PATH})
-  set(RCCL_PATH ${ROCM_PATH})
-  set(ROCPRIM_PATH ${ROCM_PATH})
-  set(HIPCUB_PATH ${ROCM_PATH})
-  set(ROCTHRUST_PATH ${ROCM_PATH})
-  set(HIPSOLVER_PATH ${ROCM_PATH})
-  set(ROCTRACER_PATH ${ROCM_PATH})
+if(NOT DEFINED ENV{ROCM_PATH})
+  set(ROCM_PATH /opt/rocm)
+else()
+  set(ROCM_PATH $ENV{ROCM_PATH})
+endif()
+if(NOT DEFINED ENV{ROCM_INCLUDE_DIRS})
+  set(ROCM_INCLUDE_DIRS ${ROCM_PATH}/include)
+else()
+  set(ROCM_INCLUDE_DIRS $ENV{ROCM_INCLUDE_DIRS})
+endif()
+# HIP_PATH
+if(NOT DEFINED ENV{HIP_PATH})
+  set(HIP_PATH ${ROCM_PATH}/hip)
+else()
+  set(HIP_PATH $ENV{HIP_PATH})
+endif()
+
+#if(NOT EXISTS ${HIP_PATH})
+#  return()
+#endif()
+
+# HSA_PATH
+if(NOT DEFINED ENV{HSA_PATH})
+  set(HSA_PATH ${ROCM_PATH}/hsa)
+else()
+  set(HSA_PATH $ENV{HSA_PATH})
+endif()
+
+# ROCBLAS_PATH
+if(NOT DEFINED ENV{ROCBLAS_PATH})
+  set(ROCBLAS_PATH ${ROCM_PATH}/rocblas)
+else()
+  set(ROCBLAS_PATH $ENV{ROCBLAS_PATH})
+endif()
+
+# HIPBLAS_PATH
+if(NOT DEFINED ENV{HIPBLAS_PATH})
+  set(HIPBLAS_PATH ${ROCM_PATH}/hipblas)
+else()
+  set(HIPBLAS_PATH $ENV{HIPBLAS_PATH})
+endif()
+
+# ROCFFT_PATH
+if(NOT DEFINED ENV{ROCFFT_PATH})
+  set(ROCFFT_PATH ${ROCM_PATH}/rocfft)
+else()
+  set(ROCFFT_PATH $ENV{ROCFFT_PATH})
+endif()
+
+# HIPFFT_PATH
+if(NOT DEFINED ENV{HIPFFT_PATH})
+  set(HIPFFT_PATH ${ROCM_PATH}/hipfft)
+else()
+  set(HIPFFT_PATH $ENV{HIPFFT_PATH})
+endif()
+
+# HIPSPARSE_PATH
+if(NOT DEFINED ENV{HIPSPARSE_PATH})
+  set(HIPSPARSE_PATH ${ROCM_PATH}/hipsparse)
+else()
+  set(HIPSPARSE_PATH $ENV{HIPSPARSE_PATH})
+endif()
+
+# THRUST_PATH
+if(DEFINED ENV{THRUST_PATH})
+  set(THRUST_PATH $ENV{THRUST_PATH})
+else()
+  set(THRUST_PATH ${ROCM_PATH}/include)
+endif()
+
+# HIPRAND_PATH
+if(NOT DEFINED ENV{HIPRAND_PATH})
+  set(HIPRAND_PATH ${ROCM_PATH}/hiprand)
+else()
+  set(HIPRAND_PATH $ENV{HIPRAND_PATH})
+endif()
+
+# ROCRAND_PATH
+if(NOT DEFINED ENV{ROCRAND_PATH})
+  set(ROCRAND_PATH ${ROCM_PATH}/rocrand)
+else()
+  set(ROCRAND_PATH $ENV{ROCRAND_PATH})
+endif()
+
+# MIOPEN_PATH
+if(NOT DEFINED ENV{MIOPEN_PATH})
+  set(MIOPEN_PATH ${ROCM_PATH}/miopen)
+else()
+  set(MIOPEN_PATH $ENV{MIOPEN_PATH})
+endif()
+
+# RCCL_PATH
+if(NOT DEFINED ENV{RCCL_PATH})
+  set(RCCL_PATH ${ROCM_PATH}/rccl)
+else()
+  set(RCCL_PATH $ENV{RCCL_PATH})
+endif()
+
+# ROCPRIM_PATH
+if(NOT DEFINED ENV{ROCPRIM_PATH})
+  set(ROCPRIM_PATH ${ROCM_PATH}/rocprim)
+else()
+  set(ROCPRIM_PATH $ENV{ROCPRIM_PATH})
+endif()
+
+# HIPCUB_PATH
+if(NOT DEFINED ENV{HIPCUB_PATH})
+  set(HIPCUB_PATH ${ROCM_PATH}/hipcub)
+else()
+  set(HIPCUB_PATH $ENV{HIPCUB_PATH})
+endif()
+
+# ROCTHRUST_PATH
+if(NOT DEFINED ENV{ROCTHRUST_PATH})
+  set(ROCTHRUST_PATH ${ROCM_PATH}/rocthrust)
+else()
+  set(ROCTHRUST_PATH $ENV{ROCTHRUST_PATH})
+endif()
+
+# HIPSOLVER_PATH
+if(NOT DEFINED ENV{HIPSOLVER_PATH})
+  set(HIPSOLVER_PATH ${ROCM_PATH}/hipsolver)
+else()
+  set(HIPSOLVER_PATH $ENV{HIPSOLVER_PATH})
+endif()
+
+# ROCTRACER_PATH
+if(NOT DEFINED ENV{ROCTRACER_PATH})
+  set(ROCTRACER_PATH ${ROCM_PATH}/roctracer)
+else()
+  set(ROCTRACER_PATH $ENV{ROCTRACER_PATH})
+endif()
+
+# MAGMA_HOME
+if(NOT DEFINED ENV{MAGMA_HOME})
+  set(MAGMA_HOME ${ROCM_PATH}/magma)
+  set(ENV{MAGMA_HOME} ${ROCM_PATH}/magma)
+else()
+  set(MAGMA_HOME $ENV{MAGMA_HOME})
 endif()
 
 torch_hip_get_arch_list(PYTORCH_ROCM_ARCH)
@@ -37,6 +161,12 @@ find_package_and_print_version(HIP 1.0)
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
   set(FOUND_ROCM_VERSION_H FALSE)
+
+  if(EXISTS ${ROCM_PATH}/.info/version-dev)
+    # ROCM < 4.5, we don't have the header api file, use flat file
+    file(READ "${ROCM_PATH}/.info/version-dev" ROCM_VERSION_DEV_RAW)
+    message("\n***** ROCm version from ${ROCM_PATH}/.info/version-dev ****\n")
+  endif()
 
   set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}")
   set(file "${PROJECT_BINARY_DIR}/detect_rocm_version.cc")
@@ -121,6 +251,23 @@ if(HIP_FOUND)
   set(CMAKE_HIP_CLANG_FLAGS_DEBUG ${CMAKE_CXX_FLAGS_DEBUG})
   set(CMAKE_HIP_CLANG_FLAGS_RELEASE ${CMAKE_CXX_FLAGS_RELEASE})
   ### Remove setting of Flags when FindHIP.CMake PR #558 is accepted.###
+
+  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "6.0.0")
+    set(HIP_PATH ${ROCM_PATH})
+    set(ROCRAND_PATH ${ROCM_PATH})
+    set(HIPRAND_PATH ${ROCM_PATH})
+    set(ROCBLAS_PATH ${ROCM_PATH})
+    set(MIOPEN_PATH ${ROCM_PATH})
+    set(ROCFFT_PATH ${ROCM_PATH})
+    set(HIPFFT_PATH ${ROCM_PATH})
+    set(HIPSPARSE_PATH ${ROCM_PATH})
+    set(RCCL_PATH ${ROCM_PATH})
+    set(ROCPRIM_PATH ${ROCM_PATH})
+    set(HIPCUB_PATH ${ROCM_PATH})
+    set(ROCTHRUST_PATH ${ROCM_PATH})
+    set(HIPSOLVER_PATH ${ROCM_PATH})
+    set(ROCTRACER_PATH ${ROCM_PATH})
+  endif()
 
   # As of ROCm 5.1.x, all *.cmake files are under /opt/rocm/lib/cmake/<package>
   if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.1.0")
