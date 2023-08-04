@@ -20,6 +20,7 @@ from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer import X86InductorQuantizer
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
     skipIfNoONEDNN,
@@ -91,9 +92,9 @@ class TestCase(TorchTestCase):
 
 
 class ConvBN(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, **kwargs):
+    def __init__(self, in_channels, out_channels, bias=False, **kwargs):
         super().__init__()
-        self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
+        self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
         self.bn = torch.nn.BatchNorm2d(out_channels, eps=0.001, dtype=torch.float)
 
     def forward(self, x):
@@ -279,32 +280,74 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(out_compiled_no_inference, out_compiled)
 
     def test_folded_conv_bn(self):
-        mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
-        x = torch.rand(3, 3, 32, 32).to(self.device)
+        for use_bias, dtype in itertools.product(
+            [True, False], [torch.float16, torch.bfloat16, torch.float32]
+        ):
+            if self.device == "cpu" and dtype == torch.float16:
+                continue
 
-        @torch.compile()
+            if (
+                self.device == "cuda"
+                and not dtype == torch.bfloat16
+                and not SM80OrLater
+            ):
+                continue
+
+            mod = (
+                ConvBN(3, 32, bias=use_bias, kernel_size=3, stride=2)
+                .eval()
+                .to(self.device)
+                .to(dtype)
+            )
+
+            x = torch.rand(3, 3, 32, 32).to(self.device).to(dtype)
+
+            @torch.compile()
+            def foo(mod, x):
+                return mod(x)
+
+            # TODO - bias is separate kernel right now, we should only unfuse it
+            # from conv if it can be fused
+
+            with torch.no_grad():
+                out_eager = mod(x)
+                out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
+
+            self.assertNotIn(
+                "aten._native_batch_norm_legit_no_training(",
+                code[0],
+            )
+
+            # we unfuse the conv bias, but it should only have one constant in the kernel
+            if self.device == "cuda":
+                FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
+                    "constant"
+                ).check_not("constant").check_next("return").run(code[0])
+
+            self.assertEqual(
+                out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
+            )
+
+    def test_dont_change_dtype_folding(self):
+        dtype = torch.float16 if self.device == "cuda" else torch.bfloat16
+
+        mod = (
+            torch.nn.Conv2d(3, 32, bias=None, kernel_size=3, stride=2)
+            .eval()
+            .to(self.device)
+            .to(dtype)
+        )
+        x = torch.rand(3, 3, 32, 32).to(self.device).to(dtype)
+
         def foo(mod, x):
-            return mod(x)
+            return mod(x) * torch.full([1], 2.0, device=self.device)
 
-        # TODO - bias is separate kernel right now, we should only unfuse it
-        # from conv if it can be fused
+        foo_c = torch.compile(foo)
 
         with torch.no_grad():
-            out_eager = mod(x)
-            out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
-
-        self.assertNotIn(
-            "aten._native_batch_norm_legit_no_training(",
-            code[0],
-        )
-
-        # we unfuse the conv bias, but it should only have one constant in the kernel
-        if self.device == "cuda":
-            FileCheck().check(".run(").check_same("constant").check_not(
-                "constant"
-            ).check_next("return").run(code[0])
-
-        self.assertEqual(out_optimized_for_infernece, out_eager)
+            out_eager = foo(mod, x)
+            out_compiled = foo_c(mod, x)
+            self.assertEqual(out_eager, out_compiled)
 
     def test_param_deallocated(self):
         # TODO: cpu path keeps an extra copy of graph around somewhere,

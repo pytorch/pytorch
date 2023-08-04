@@ -43,6 +43,7 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     # unnecessary nodes, but may need a good method to chose the rounds number.
     # works like: conv+binary+binary.
     binary_folding = counters["inductor"]["binary_folding"]
+    fake_tensor_prop(gm, aot_example_inputs, True)
 
     torch._inductor.fx_passes.binary_folding.mark_mixed_dtype_allowed_convs(gm)
     for _ in range(4):
@@ -55,6 +56,8 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
         if counters["inductor"]["binary_folding"] == binary_folding:
             break
         binary_folding = counters["inductor"]["binary_folding"]
+
+    torch._inductor.fx_passes.binary_folding.recover_original_precision_folded_convs(gm)
 
     constant_fold(gm)
     fake_tensor_prop(gm, aot_example_inputs, True)
@@ -170,6 +173,7 @@ def addmm_patterns_init():
 
 def same_dtype(match):
     return match.output_node().args[0].meta["val"].dtype == match.kwargs["dtype"]
+
 
 @register_graph_pattern(
     CallFunction(

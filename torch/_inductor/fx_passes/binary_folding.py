@@ -11,36 +11,66 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 
-def allow_mixed_dtype_folding(conv):
-    # mixed dtype not needed
+def mark_mixed_dtype_conv(conv):
     conv_dtype = conv.meta["val"].dtype
     if conv_dtype not in (torch.float16, torch.bfloat16):
-        return False
+        return
 
     if not len(conv.users) == 1:
-        return False
+        return
 
     conv_user = next(iter(conv.users.keys()))
     if not conv_user.meta["val"].dtype == torch.float32:
-        return False
+        return
 
     while conv_user.target in _binary_ops:
         if not len(conv_user.users) == 1:
-            return False
+            return
 
         conv_user = next(iter(conv_user.users.keys()))
 
-    return (
+    if not (
         conv_user.target == prims.convert_element_type.default
         and conv_user.args[1] == conv_dtype
-    )
+    ):
+        return
+
+    conv.meta["_allow_conv_mixed_dtype_folding"] = conv_dtype
 
 
 def mark_mixed_dtype_allowed_convs(gm):
-    convs = [node for node in gm.graph.nodes if node.target is aten.convolution.default]
-    for conv in convs:
-        if allow_mixed_dtype_folding(conv):
-            conv.meta["_allow_conv_mixed_dtype_folding"] = True
+    """
+    Mark convolutions which we will binary fold even with mixed precision constants. We constant fold in the higher precision
+    for better accuracy and then recover the original precision after.
+    """
+    for node in gm.graph.nodes:
+        if node.target is aten.convolution.default:
+            mark_mixed_dtype_conv(node)
+
+
+def recover_original_precision_folded_convs(gm):
+    """
+    After binary folding conv weights and biases to a higher dtype, recover the original precision they were in.
+    """
+    graph = gm.graph
+    convs = [node for node in graph.nodes if node.target is aten.convolution.default]
+    for node in convs:
+        orig_dtype = node.meta.get("_allow_conv_mixed_dtype_folding", None)
+        if orig_dtype is None:
+            continue
+
+        with graph.inserting_before(node):
+            for idx in [1, 2]:
+                old_input = node.args[idx]
+                if old_input is None:
+                    continue
+
+                new_input = graph.create_node(
+                    "call_function",
+                    prims.convert_element_type.default,
+                    (old_input, orig_dtype),
+                )
+                node.replace_input_with(old_input, new_input)
 
 
 _binary_ops = [aten.add.Tensor, aten.sub.Tensor, aten.mul.Tensor, aten.div.Tensor]
@@ -187,12 +217,6 @@ def binary_folding_init():
                 binary_node.target,
                 (0 if bias is None else bias, other_reshape),
             )
-            if conv_node.meta["val"].dtype != other.meta["val"].dtype:
-                new_bias = graph.create_node(
-                    "call_function",
-                    prims.convert_element_type.default,
-                    (new_bias, conv_node.meta["val"].dtype),
-                )
             conv_args[2] = new_bias
         else:
             assert binary_node.target in [aten.mul.Tensor, aten.div.Tensor]
@@ -204,12 +228,6 @@ def binary_folding_init():
             new_weight = graph.create_node(
                 "call_function", binary_node.target, (conv_args[1], other_reshape1)
             )
-            if conv_node.meta["val"].dtype != other.meta["val"].dtype:
-                new_weight = graph.create_node(
-                    "call_function",
-                    prims.convert_element_type.default,
-                    (new_weight, conv_node.meta["val"].dtype),
-                )
             new_weight.meta.update(conv_args[1].meta)
             conv_args[1] = new_weight
             if bias is not None:
@@ -218,11 +236,6 @@ def binary_folding_init():
                 )
                 new_bias = graph.create_node(
                     "call_function", binary_node.target, (bias, other_reshape)
-                )
-                new_bias = graph.create_node(
-                    "call_function",
-                    prims.convert_element_type.default,
-                    (new_bias, conv_node.meta["val"].dtype),
                 )
                 new_bias.meta.update(bias.meta)
                 conv_args[2] = new_bias
