@@ -436,8 +436,13 @@ def _reshard(
     """
     Reshards the handle. ``free_unsharded_flat_param`` indicates whether to
     free the handle's padded unsharded flat parameter.
+    Note that we don't free all-gather buffer in the stream-wait strategy
     """
-    handle.reshard(free_unsharded_flat_param)
+    free_storage = (
+        free_unsharded_flat_param
+        and state._allgather_limit_strategy == AllGatherLimitStrategy.CPU_SYNC
+    )
+    handle.reshard(free_storage)
     if state.limit_all_gathers > 0 and free_unsharded_flat_param:
         free_event = state._device_handle.Event()
         free_event.record()
