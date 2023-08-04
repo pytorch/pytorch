@@ -151,15 +151,19 @@ def export(
 
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
         try:
-            gm_torch_level, _ = torch._dynamo.export(
-                f,
-                constraints=constraints,
-                assume_static_by_default=True,
-                tracing_mode="symbolic",
-            )(
-                *args,
-                **kwargs,
-            )
+            # TODO hack to skip dynamo
+            if isinstance(f, torch.fx.GraphModule) and "is_torch_exported" in f.meta:
+                gm_torch_level = f
+            else:
+                gm_torch_level, _ = torch._dynamo.export(
+                    f,
+                    constraints=constraints,
+                    assume_static_by_default=True,
+                    tracing_mode="symbolic",
+                )(
+                    *args,
+                    **kwargs,
+                )
 
             params_buffers: OrderedDict[str, Union[torch.Tensor, torch.nn.Parameter]] = OrderedDict()
             for name, param in gm_torch_level.named_parameters(recurse=True, remove_duplicate=False):
@@ -168,6 +172,32 @@ def export(
             for name, buffer in gm_torch_level.named_buffers(recurse=True, remove_duplicate=False):
                 params_buffers[name] = buffer
 
+            fake_inps = []
+            fake_mode = FakeTensorMode(
+                allow_fallback_kernels=False,
+                allow_non_fake_inputs=True,
+                shape_env=ShapeEnv(
+                    assume_static_by_default=True,
+                ),
+            )
+            for node in gm_torch_level.graph.nodes:
+                if node.op == "placeholder" and "val" in node.meta:
+                    fake_val = node.meta["val"]
+                    fake_inps.append(fake_val)
+
+            if detected_fake_mode := detect_fake_mode(fake_inps):
+                fake_mode = detected_fake_mode
+
+            # First, we want to pass through the graph to try populating
+            # val field for getattr if there is anything missing.
+            # THis can happen when quantization adds extra params and forgets
+            # to update "val"
+            for node in gm_torch_level.graph.nodes:
+                if node.op == "get_attr" and "val" not in node.meta:
+                    attr = getattr(gm_torch_level, node.target)
+                    # Checks if it is not a HigherOrderOp branch or a module
+                    if not isinstance(attr, torch.nn.Module):
+                        node.meta["val"] = fake_mode.from_tensor(attr, static_shapes=True)
 
             # When aot_export lifts the params, we lose the nn_module_stack
             # and source_fn from the param nodes as they are treated as fresh inputs
@@ -185,28 +215,19 @@ def export(
                         for name, _ in submodule.named_buffers(recurse=True, remove_duplicate=False):
                             params_buffers_to_node_meta[target + "." + name] = meta
 
+                if node.op == "get_attr":
+                    submodule = getattr(gm_torch_level, target)
+                    if not isinstance(submodule, torch.fx.GraphModule):
+                        params_buffers_to_node_meta[target] = meta
+
                 # If the call_function uses param as input, we also need to capture the meta for it
                 # This is basically the same flow as torch.fx.traceback.preserve_meta()
                 if node.op == "call_function" and not isinstance(node.target, torch._ops.HigherOrderOperator):
-                    for n in node._input_nodes:
-                        if n.op == "get_attr":
-                            params_buffers_to_node_meta[n.target] = meta
-
-            fake_inps = []
-            fake_mode = FakeTensorMode(
-                allow_fallback_kernels=False,
-                allow_non_fake_inputs=True,
-                shape_env=ShapeEnv(
-                    assume_static_by_default=True,
-                ),
-            )
-            for node in gm_torch_level.graph.nodes:
-                if node.op == "placeholder" and "val" in node.meta:
-                    fake_val = node.meta["val"]
-                    fake_inps.append(fake_val)
-
-            if detected_fake_mode := detect_fake_mode(fake_inps):
-                fake_mode = detected_fake_mode
+                    for arg in node._input_nodes:
+                        if arg.op == "get_attr":
+                            for entry in torch.fx.proxy._COPY_META_FIELDS:
+                                if entry in meta:
+                                    params_buffers_to_node_meta[arg.target][entry] = meta[entry]
 
             fake_args = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, args)
             fake_kwargs = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, kwargs)
@@ -228,27 +249,7 @@ def export(
                     out_spec,
                 )
             )
-
             gm_torch_level.recompile()
-
-            params_buffers_to_node_meta = OrderedDict()
-
-            for node in gm_torch_level.graph.nodes:
-                target = node.target
-                meta = node.meta
-                if node.op == "call_module":
-                    submodule = getattr(gm_torch_level, target)
-                    if isinstance(submodule, torch.nn.Module):
-                        for name, _ in submodule.named_parameters(recurse=True, remove_duplicate=False):
-                            params_buffers_to_node_meta[target + "." + name] = meta
-
-                        for name, _ in submodule.named_buffers(recurse=True, remove_duplicate=False):
-                            params_buffers_to_node_meta[target + "." + name] = meta
-
-                if node.op == "call_function" and not isinstance(node.target, torch._ops.HigherOrderOperator):
-                    for n in node._input_nodes:
-                        if n.op == "get_attr":
-                            params_buffers_to_node_meta[n.target] = meta
 
             # Note: aot_export_module doesn't accept kwargs, we'd like to reorder the kwargs as an OrderedDict
             # to follow the order in orig_args and correctly call gm_torch_level
@@ -289,6 +290,8 @@ def export(
                 for k, v in fake_mode.shape_env.var_to_range.items()
                 if re.match(r"^[if]\d+$", str(k))
             }
+
+            gm.meta["is_torch_exported"] = True
 
             # After aot_export, set the param/buffer metadata back into placeholders
             # Technically, users can still construct this data from param names

@@ -6,17 +6,16 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import sympy
 
 import torch
-
 import torch.fx
 import torch.fx._pytree as fx_pytree
-from torch.fx._compatibility import compatibility
-from torch.fx.experimental.symbolic_shapes import SymInt
-from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from torch.fx.passes.infra.pass_manager import PassManager
 
 import torch.utils._pytree as pytree
 from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx._compatibility import compatibility
+from torch.fx.experimental.symbolic_shapes import SymInt
+from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.fx.passes.infra.pass_manager import PassManager
 
 from . import error
 from .pass_base import PassType
