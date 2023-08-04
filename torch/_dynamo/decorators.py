@@ -52,6 +52,12 @@ class DebugFlags:
 # under the hood for this fn.Nothing in the implementation of the decorator or the internal
 # logic is overly opinionated on it being a function. It should be very easy to extend this
 # to globals, modules, methods, etc as needed (some of these might already just work?).
+#
+# Future ways to extend this:
+# - Cover entrance frame fn
+# - Extend to guards (debug guard fn, but also to debug the associated guard of a decorated fn)
+# - More objects
+# - More flags (stacktraces, etc)
 def debug(fn, flags=DebugFlags()):
     assert callable(fn)
     fn._dynamo_debug_flagged = flags
