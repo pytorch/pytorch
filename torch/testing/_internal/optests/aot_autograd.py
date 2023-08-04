@@ -32,9 +32,9 @@ def aot_autograd_check(
         args,
         kwargs,
         dynamic,
-        check_gradients=True,
         assert_raises_regex_fn=assert_raises_regex,
         assert_equals_fn=torch.testing._comparison.assert_close,
+        check_gradients=True,
         try_check_data_specialization=False):
     """Compares func(*args, **kwargs) in eager-mode to under AOTAutograd.
 

@@ -2738,7 +2738,7 @@ class TestAOTModuleSimplified(AOTTestCase):
                 return (x + fake_z, )
 
         with self.assertRaisesRegex(
-            TypeError, "FakeTensor"
+            AssertionError, "Unexpected fake"
         ):
             aot_module_simplified(MockModule(), (fake_x,), nop)
 
@@ -2887,8 +2887,9 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
         t_kwargs = sample_input.kwargs
         try:
             aot_autograd_check(
-                op.op, t_args, t_kwargs, dynamic, True,
+                op.op, t_args, t_kwargs, dynamic,
                 self.assertRaisesRegex, self.assertEqual,
+                check_gradients=True,
                 try_check_data_specialization=try_check_data_specialization)
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
@@ -2972,7 +2973,7 @@ aot_autograd_module_failures = set({
                                # of a tracing tensor with aten._local_scalar_dense.default -
                                # erroring out! It's likely that this is caused by data-dependent
                                # control flow or similar.
-    torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input
+    torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.eq compares a mask input
                                   # to a causal mask tensor, to see if Boolean is_causal should be set
                                   # for TrnasformerEncoder layers, MHA and sdp custom kernels
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input
