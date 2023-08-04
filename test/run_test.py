@@ -1571,13 +1571,14 @@ def run_tests(
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
-            test, err_message = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_error_messages((test, err_message))
+            failure = run_test_module(test, test_directory, options_clone)
+            test_failed = handle_error_messages(failure)
             if (
                 test_failed
                 and not options.continue_through_error
                 and not RERUN_DISABLED_TESTS
             ):
+                _, err_message = failure
                 raise RuntimeError(err_message)
 
     finally:
