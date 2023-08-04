@@ -214,7 +214,7 @@ void prepareTrace(
 #ifdef USE_KINETO
   if (!libkineto::api().isProfilerRegistered()) {
     libkineto_init(/*cpuOnly=*/cpuOnly, /*logOnError=*/true);
-    // XXX add back later libkineto::api().suppressLogMessages();
+    libkineto::api().suppressLogMessages();
   }
 
   if (!libkineto::api().isProfilerInitialized()) {
