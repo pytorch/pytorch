@@ -4769,7 +4769,6 @@ class TestCompileTransforms(TestCase):
         self.assertEqual(actual, expected)
 
     # torch.compile is not supported on Windows
-    # Triton only supports GPU with SM70 or later.
     @expectedFailureIf(IS_WINDOWS)
     @torch._dynamo.config.patch(suppress_errors=False)
     @skipIfTorchDynamo("Do not test torch.compile on top of torch.compile")
