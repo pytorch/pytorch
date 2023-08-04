@@ -200,9 +200,8 @@ def diagnose(
     context.
     """
     # NOTE: Cannot use `@_beartype.beartype`. It somehow erases the cpp stack frame info.
-    logger = torch._logging.getArtifactLogger("torch.onnx", "onnx_diagnostics")
     diagnostic = TorchScriptOnnxExportDiagnostic(
-        rule, level, message, logger=logger, frames_to_skip=frames_to_skip, **kwargs
+        rule, level, message, frames_to_skip=frames_to_skip, **kwargs
     )
     export_context().log(diagnostic)
     return diagnostic
