@@ -305,6 +305,7 @@ def _prod(x):
 
 def _tensor_nbytes(numel, dtype):
     sizes = {
+        torch.complex32: 4,
         torch.complex64: 8,
         torch.complex128: 16,
         torch.float16: 2,

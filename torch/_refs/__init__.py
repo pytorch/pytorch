@@ -5481,18 +5481,20 @@ def log_normal(self, mean=1, std=2, generator=None):
 @register_decomposition(aten.normal)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("self",),
+    type_promoting_args=("mean",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-def normal(self, mean=0, std=1, generator=None):
+def normal(mean=0, std=1, generator=None):
     assert generator is None
-    torch._check(std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}")
+    # TODO, std check for tensor
+    torch._check(isinstance(std, torch.Tensor) or std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}")
+    tensor = mean if isinstance(mean, torch.Tensor) else std
     normal_samples = prims.normal(
-        self.shape,
+        tensor.shape,
         mean=0.0,
         std=1.0,
-        dtype=self.dtype,
-        device=self.device,
+        dtype=tensor.dtype,
+        device=tensor.device,
         requires_grad=False,
     )
     return std * normal_samples + mean
