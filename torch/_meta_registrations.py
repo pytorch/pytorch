@@ -1696,6 +1696,14 @@ def dot_check(self, other):
         lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
     )
 
+    def numel_error():
+        return (
+            f"inconsistent tensor size, expected tensor [{self.numel()}] and src [{other.numel()}] to have the"
+            f"same number of elements, but got {self.numel()} and {other.numel()} elements respectively"
+        )
+
+    torch._check(self.numel() == other.numel(), numel_error)
+
 
 @register_meta(aten.dot.default)
 def meta_dot(self, tensor):
