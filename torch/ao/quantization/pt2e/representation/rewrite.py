@@ -146,6 +146,38 @@ def _reference_quantized_max_pool2d(
     out_i8 = out_fp32.to(torch.int8)
     return out_i8
 
+_QUANTIZED_ADAPTIVE_AVG_POOL2D_EXAMPLE_INPUTS = (
+    torch.randint(-128, 127, (1, 3, 3, 3), dtype=torch.int8),
+    torch.randn(1, dtype=torch.float),
+    torch.zeros(1, dtype=torch.int),
+    torch.tensor([-128], dtype=torch.int),
+    torch.tensor([127], dtype=torch.int),
+    torch.randn(1, dtype=torch.float),
+    torch.zeros(1, dtype=torch.int),
+    torch.tensor([-128], dtype=torch.int),
+    torch.tensor([127], dtype=torch.int),
+)
+
+def _qdq_quantized_adaptive_avg_pool2d(
+        x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, out_scale, out_zero_point, out_quant_min, out_quant_max):
+    output_size = (3, 3)
+    x_fp32 = torch.ops.quantized_decomposed.dequantize_per_tensor(x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, torch.int8)
+    out_fp32 = torch.ops.aten.adaptive_avg_pool2d(x_fp32, output_size)
+    out_i8 = torch.ops.quantized_decomposed.quantize_per_tensor(
+        out_fp32, out_scale, out_zero_point, out_quant_min, out_quant_max, torch.int8)
+    return out_i8
+
+def _reference_quantized_adaptive_avg_pool2d(
+        x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, out_scale, out_zero_point, out_quant_min, out_quant_max):
+    output_size = (3, 3)
+    x_i8 = torch.clamp(x_i8, x_quant_min, x_quant_max)
+    x_i32 = x_i8.to(torch.int32)
+    out_i32 = torch.ops.aten.adaptive_avg_pool2d(x_i32, output_size)
+    out_fp32 = out_i32 * (x_scale / out_scale) + out_zero_point
+    out_fp32 = torch.clamp(out_fp32, out_quant_min, out_quant_max)
+    out_i8 = out_fp32.to(torch.int8)
+    return out_i8
+
 _QUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS = (
     torch.randn(1, 3, 3, 3, dtype=torch.float),
     torch.randn(1, dtype=torch.float),
@@ -201,6 +233,10 @@ _EXAMPLE_INPUTS_PATTERN_AND_REPLACEMENTS = [
     (_QUANTIZED_ADD_OR_ADD_RELU_EXAMPLE_INPUTS, _qdq_quantized_add_relu, _reference_quantized_add_relu, _DONT_REPLACE_LITERAL),
     (_QUANTIZED_ADD_OR_ADD_RELU_EXAMPLE_INPUTS, _qdq_quantized_add, _reference_quantized_add, _DONT_REPLACE_LITERAL),
     (_QUANTIZED_MAX_POOL2D_EXAMPLE_INPUTS, _qdq_quantized_max_pool2d, _reference_quantized_max_pool2d, _REPLACE_LITERAL),
+    (_QUANTIZED_ADAPTIVE_AVG_POOL2D_EXAMPLE_INPUTS,
+     _qdq_quantized_adaptive_avg_pool2d,
+     _reference_quantized_adaptive_avg_pool2d,
+     _REPLACE_LITERAL),
     (_QUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS,
      _quantize_per_tensor_int8,
      _reference_quantize_per_tensor_int8,
