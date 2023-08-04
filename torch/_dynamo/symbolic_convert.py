@@ -972,10 +972,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         val = self.f_builtins[inst.argval]
 
         if callable(val):
-            if is_builtin_callable(val):
-                self.push(VariableBuilder(self, GlobalSource(inst.argval))(val))
-            else:
-                self.push(UserFunctionVariable(val, source=GlobalSource(inst.argval)))
+            self.push(VariableBuilder(self, GlobalSource(inst.argval))(val))
         else:
             assert is_builtin_constant(val)
             self.push(ConstantVariable(value=val))
