@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
+import logging
 from typing import FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
@@ -271,6 +272,9 @@ class DiagnosticOptions:
     """
     Options for diagnostic context.
     """
+
+    verbosity_level: int = dataclasses.field(default=logging.INFO)
+    """The verbosity level of the diagnostic context."""
 
     warnings_as_errors: bool = dataclasses.field(default=False)
     """If True, warnings are treated as errors."""

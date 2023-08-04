@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 
 import functools
+import logging
 
 from typing import Any, Optional
 
@@ -13,14 +14,9 @@ import torch
 import torch.fx
 from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
-from torch.onnx._internal.diagnostics.infra import decorator, formatter, utils
-
+from torch.onnx._internal.diagnostics.infra import decorator, formatter
 from torch.onnx._internal.fx import registration, type_utils as fx_type_utils
 
-# NOTE: Symbolic shapes could be a calculation of values, such as
-# Tensor(i64[s0, 64, (s1//2) - 2, (s1//2) - 2]) where s0 and s1 are symbolic
-# so we need to relax the length limit.
-_LENGTH_LIMIT: int = 120
 # NOTE: The following limits are for the number of items to display in diagnostics for
 # a list, tuple or dict. The limit is picked such that common useful scenarios such as
 # operator arguments are covered, while preventing excessive processing loads on considerably
@@ -30,6 +26,10 @@ _CONTAINER_ITEM_LIMIT: int = 10
 # NOTE(bowbao): This is a shim over `torch.onnx._internal.diagnostics`, which is
 # used in `torch.onnx`, and loaded with `torch`. Hence anything related to `onnxscript`
 # cannot be put there.
+_ONNX_DIAGNOSTICS_ARTIFACT_LOGGER_NAME = "onnx_diagnostics"
+diagnostic_logger = torch._logging.getArtifactLogger(
+    "torch.onnx", _ONNX_DIAGNOSTICS_ARTIFACT_LOGGER_NAME
+)
 
 
 @functools.singledispatch
@@ -39,27 +39,7 @@ def _format_argument(obj: Any) -> str:
 
 def format_argument(obj: Any) -> str:
     formatter = _format_argument.dispatch(type(obj))
-    result_str = formatter(obj)
-
-    result_str_lines = result_str.splitlines()
-    for line in result_str_lines:
-        if len(line) > _LENGTH_LIMIT:
-            # TODO(bowbao): group diagnostics.
-            #   Related fields of sarif.Result: occurance_count, fingerprints.
-            #   Do a final process to group results before outputing sarif log.
-            diag = infra.Diagnostic(
-                *diagnostics.rules.arg_format_too_verbose.format(
-                    level=infra.levels.WARNING,
-                    length=len(result_str),
-                    length_limit=_LENGTH_LIMIT,
-                    argument_type=type(obj),
-                    formatter_type=type(format_argument),
-                )
-            )
-            diag.with_location(utils.function_location(formatter))
-            diagnostics.export_context().log(diag)
-
-    return result_str
+    return formatter(obj)
 
 
 # NOTE: EDITING BELOW? READ THIS FIRST!
@@ -199,17 +179,36 @@ def _stringify_shape(shape: Optional[torch.Size]) -> str:
     return f"[{', '.join(str(x) for x in shape)}]"
 
 
-diagnose_call = functools.partial(
-    decorator.diagnose_call,
-    diagnostic_type=diagnostics.ExportDiagnostic,
-    format_argument=format_argument,
-)
-
 rules = diagnostics.rules
 levels = diagnostics.levels
-DiagnosticContext = infra.DiagnosticContext
-Diagnostic = infra.Diagnostic
 RuntimeErrorWithDiagnostic = infra.RuntimeErrorWithDiagnostic
+LazyString = formatter.LazyString
+
+
+@dataclasses.dataclass
+class Diagnostic(infra.Diagnostic):
+    logger: logging.Logger = dataclasses.field(init=False, default=diagnostic_logger)
+
+    def log(self, level: int, message: str, *args, **kwargs) -> None:
+        if torch._logging._internal.log_state.is_artifact_enabled(
+            _ONNX_DIAGNOSTICS_ARTIFACT_LOGGER_NAME
+        ):
+            self.logger.log(level, message, *args, **kwargs)
+        if self.logger.isEnabledFor(level):
+            self.additional_messages.append(message % args)
+            self.additional_messages.append("\n")
+
+
+@dataclasses.dataclass
+class DiagnosticContext(infra.DiagnosticContext):
+    logger: logging.Logger = dataclasses.field(init=False, default=diagnostic_logger)
+
+
+diagnose_call = functools.partial(
+    decorator.diagnose_call,
+    diagnostic_type=Diagnostic,
+    format_argument=format_argument,
+)
 
 
 @dataclasses.dataclass

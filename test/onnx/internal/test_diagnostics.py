@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import io
+import logging
 import typing
 import unittest
 from typing import AbstractSet, Protocol, Tuple
@@ -123,7 +124,7 @@ class TestOnnxDiagnostics(common_utils.TestCase):
 
     def _trigger_node_missing_onnx_shape_inference_warning_diagnostic_from_cpp(
         self,
-    ) -> diagnostics.ExportDiagnostic:
+    ) -> diagnostics.TorchScriptOnnxExportDiagnostic:
         class CustomAdd(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x, y):
@@ -147,7 +148,9 @@ class TestOnnxDiagnostics(common_utils.TestCase):
                 diagnostic.rule == rule
                 and diagnostic.level == diagnostics.levels.WARNING
             ):
-                return typing.cast(diagnostics.ExportDiagnostic, diagnostic)
+                return typing.cast(
+                    diagnostics.TorchScriptOnnxExportDiagnostic, diagnostic
+                )
         raise AssertionError("No diagnostic found.")
 
     def test_assert_diagnostic_raises_when_diagnostic_not_found(self):
@@ -203,7 +206,7 @@ class TestOnnxDiagnostics(common_utils.TestCase):
             diagnostics.export_context().log(diagnostic)
 
     def test_diagnostics_records_python_call_stack(self):
-        diagnostic = diagnostics.ExportDiagnostic(self._sample_rule, diagnostics.levels.NOTE)  # fmt: skip
+        diagnostic = diagnostics.TorchScriptOnnxExportDiagnostic(self._sample_rule, diagnostics.levels.NOTE)  # fmt: skip
         # Do not break the above line, otherwise it will not work with Python-3.8+
         stack = diagnostic.python_call_stack
         assert stack is not None  # for mypy
@@ -287,6 +290,61 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                 custom_rules.custom_rule_2, infra.Level.ERROR  # type: ignore[attr-defined]
             )
             self.context.log(diagnostic2)
+
+    def test_diagnostic_log_is_not_emitted_when_level_less_than_diagnostic_options_verbosity_level(
+        self,
+    ):
+        verbosity_level = logging.INFO
+        self.context.options.verbosity_level = verbosity_level
+        with self.context:
+            diagnostic = infra.Diagnostic(
+                self.rules.rule_without_message_args, infra.Level.NOTE
+            )
+
+            with self.assertLogs(
+                diagnostic.logger, level=verbosity_level
+            ) as assert_log_context:
+                diagnostic.log(logging.DEBUG, "debug message")
+                # NOTE: self.assertNoLogs only exist >= Python 3.10
+                # Add this dummy log such that we can pass self.assertLogs, and inspect
+                # assert_log_context.records to check if the log level is correct.
+                diagnostic.log(logging.INFO, "info message")
+
+        for record in assert_log_context.records:
+            self.assertGreaterEqual(record.levelno, logging.INFO)
+        self.assertFalse(
+            any(
+                message.find("debug message") >= 0
+                for message in diagnostic.additional_messages
+            )
+        )
+
+    def test_diagnostic_log_is_emitted_when_level_not_less_than_diagnostic_options_verbosity_level(
+        self,
+    ):
+        verbosity_level = logging.INFO
+        self.context.options.verbosity_level = verbosity_level
+        with self.context:
+            diagnostic = infra.Diagnostic(
+                self.rules.rule_without_message_args, infra.Level.NOTE
+            )
+
+            level_message_pairs = [
+                (logging.INFO, "info message"),
+                (logging.WARNING, "warning message"),
+                (logging.ERROR, "error message"),
+            ]
+
+            for level, message in level_message_pairs:
+                with self.assertLogs(diagnostic.logger, level=verbosity_level):
+                    diagnostic.log(level, message)
+
+            self.assertTrue(
+                any(
+                    message.find(message) >= 0
+                    for message in diagnostic.additional_messages
+                )
+            )
 
     def test_diagnostic_context_raises_if_diagnostic_is_error(self):
         with self.assertRaises(infra.RuntimeErrorWithDiagnostic):
