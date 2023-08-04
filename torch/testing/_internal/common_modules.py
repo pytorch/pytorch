@@ -771,6 +771,19 @@ def module_inputs_torch_nn_BatchNorm3d(module_info, device, dtype, requires_grad
                     forward_input=FunctionInput(make_input((0, 5, 2, 2, 2))),
                     desc='zero_batch')]
 
+def module_inputs_torch_nn_ChannelShuffle(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(2),
+                    forward_input=FunctionInput(make_input((1, 4, 5, 6))),
+                    desc='2d'),
+        ModuleInput(constructor_input=FunctionInput(2),
+                    forward_input=FunctionInput(make_input((2, 4, 5, 6, 7))),
+                    desc='3d'),
+        ModuleInput(constructor_input=FunctionInput(2),
+                    forward_input=FunctionInput(make_input((2, 4, 5, 6, 7, 2))),
+                    desc='4d')]
 
 def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, training, **kwargs):
     N = kwargs['N']
@@ -2736,6 +2749,16 @@ module_db: List[ModuleInfo] = [
                        active_if=lambda p: p['training']
                    ),)
                ),
+    ModuleInfo(torch.nn.ChannelShuffle,
+               module_inputs_func=module_inputs_torch_nn_ChannelShuffle,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
+                                device_type='mps', dtypes=[torch.float32]),
+               ),
+               decorators=(
+                   DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+               )),
     ModuleInfo(torch.nn.CELU,
                module_inputs_func=module_inputs_torch_nn_CELU,
                skips=(
