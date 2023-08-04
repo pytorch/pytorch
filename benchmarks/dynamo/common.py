@@ -526,7 +526,7 @@ def _normalize_bench_inputs(example_inputs) -> Tuple[Tuple[Any], Mapping[str, An
     if isinstance(example_inputs, dict):
         return (), example_inputs
     else:
-        return example_inputs, {}
+        return tuple(example_inputs), {}
 
 
 def _register_dataclass_output_as_pytree(example_outputs) -> None:
