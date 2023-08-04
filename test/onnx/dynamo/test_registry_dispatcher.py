@@ -86,7 +86,7 @@ class TestDispatcher(common_utils.TestCase):
         # TODO: remove this once we have a better way to do this
         logger = logging.getLogger("TestDispatcher")
         self.diagnostic_context = infra.DiagnosticContext(
-            "torch.onnx.dynamo_export", torch.__version__, logger=logger
+            "torch.onnx.dynamo_export", torch.__version__
         )
         self.dispatcher = onnxfunction_dispatcher.OnnxFunctionDispatcher(
             self.registry, self.diagnostic_context
