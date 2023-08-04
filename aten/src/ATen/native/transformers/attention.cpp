@@ -20,6 +20,7 @@
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -668,6 +669,7 @@ Tensor scaled_dot_product_attention(
     double dropout_p,
     bool is_causal,
     c10::optional<double> scale) {
+  std::cout << "[liaoxuan] enter scaled_dot_product_attention" << std::endl;
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (query_.device().type() == DeviceType::CUDA
@@ -716,6 +718,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal,
         const c10::optional<Tensor>& dropout_mask, c10::optional<double> scale) {
+  std::cout << "[liaoxuan] enter _scaled_dot_product_attention_math" << std::endl;
   C10_LOG_API_USAGE_ONCE("torch.sdpa.math_fallback");
   if (query_.is_nested() || key.is_nested() || value.is_nested()) {
     TORCH_CHECK(
@@ -785,6 +788,7 @@ _scaled_dot_product_flash_attention_cpu(
     bool is_causal,
     bool return_debug_mask,
     c10::optional<double> scale) {
+  std::cout << "[liaoxuan] enter _scaled_dot_product_flash_attention_cpu" << std::endl;
 
   int64_t batchSize = query.size(0);
   int64_t qSize = query.size(2);
