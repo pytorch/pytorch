@@ -1951,10 +1951,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.linear = torch.nn.Linear(5, 5)
 
             def forward(self, x):
-                return self.conv(x)
+                return self.linear(x)
 
         quantizer = XNNPACKQuantizer()
         # use per channel quantization for weight
@@ -1962,30 +1962,36 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         quantizer.set_global(operator_config)
         m_eager = M().eval()
 
-        example_inputs = (torch.randn(1, 3, 3, 3),)
-        ref_node_occurrence = {
-            ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_tensor
-            ): 0,
-            ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor
-            ): 0,
-        }
-        non_ref_node_occurrence = {
-            ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_tensor.default
-            ): 3,
-            ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default
-            ): 3,
-        }
-        self._test_representation(
-            M().eval(),
-            example_inputs,
-            quantizer,
-            ref_node_occurrence,
-            non_ref_node_occurrence
-        )
+        inputs = [
+            (torch.randn(1, 5),),
+            (torch.randn(1, 3, 5),),
+            (torch.randn(1, 3, 3, 5),),
+            (torch.randn(1, 3, 3, 3, 5),),
+        ]
+        for example_inputs in inputs:
+            ref_node_occurrence = {
+                ns.call_function(
+                    torch.ops.quantized_decomposed.quantize_per_channel.default
+                ): 0,
+                ns.call_function(
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default
+                ): 0,
+            }
+            non_ref_node_occurrence = {
+                ns.call_function(
+                    torch.ops.quantized_decomposed.quantize_per_channel.default
+                ): 1,
+                ns.call_function(
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default
+                ): 1,
+            }
+            self._test_representation(
+                M().eval(),
+                example_inputs,
+                quantizer,
+                ref_node_occurrence,
+                non_ref_node_occurrence
+            )
 
     def test_representation_quantize_dequantize(self):
         class M(torch.nn.Module):
