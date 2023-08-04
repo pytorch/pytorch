@@ -246,14 +246,15 @@ class DiagnosticContext:
         init=False, default_factory=list
     )
     _previous_log_level: int = dataclasses.field(init=False, default=logging.WARNING)
+    logger: logging.Logger = dataclasses.field(init=False, default=diagnostic_logger)
 
     def __enter__(self):
-        self._previous_log_level = diagnostic_logger.level
-        diagnostic_logger.level = self.options.verbosity_level
+        self._previous_log_level = self.logger.level
+        self.logger.level = self.options.verbosity_level
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        diagnostic_logger.level = self._previous_log_level
+        self.logger.level = self._previous_log_level
         return None
 
     def sarif(self) -> sarif.Run:

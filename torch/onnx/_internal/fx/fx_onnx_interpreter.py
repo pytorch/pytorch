@@ -398,7 +398,7 @@ class FxOnnxInterpreter:
                 rule=diagnostics.rules.fx_node_to_onnx
             )
             with diagnostic.log_section(logging.INFO, "PyTorch source information"):
-                diagnostic.info(node_stack_trace)
+                diagnostic.info("```\n%s\n```", node_stack_trace)
             location = _location_from_fx_stack_trace(node_stack_trace)
             if location is not None:
                 diagnostic.with_location(location)

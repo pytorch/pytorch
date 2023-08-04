@@ -61,7 +61,6 @@ ModifierCallableType = Callable[
 @_beartype.beartype
 def diagnose_call(
     rule: infra.Rule,
-    # logger: logging.Logger,
     *,
     level: infra.Level = infra.Level.NONE,
     diagnostic_type: Type[infra.Diagnostic] = infra.Diagnostic,
@@ -99,7 +98,6 @@ def diagnose_call(
                 rule,
                 level,
                 diagnostic_message_formatter(fn, *args, **kwargs),
-                # logger=logger,
             )
 
             # pop the decorator frame
@@ -147,7 +145,8 @@ def diagnose_call(
                         )
                     return return_values
                 except Exception as e:
-                    diag.log_source_exception(infra.levels.ERROR, e)
+                    diag.log_source_exception(logging.ERROR, e)
+                    diag.level = infra.Level.ERROR
                 finally:
                     ctx.log_and_raise_if_error(diag)
 
