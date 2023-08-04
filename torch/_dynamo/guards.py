@@ -832,7 +832,7 @@ class CheckFunctionManager:
     ):
         guards = output_graph.guards if output_graph else None
         self.valid = True
-        self._weakrefs: List["ReferenceType[object]"] = []
+        self._weakrefs: List[ReferenceType[object]] = []
         self._seen_ids: Set[int] = set()
         self.output_graph = output_graph
 

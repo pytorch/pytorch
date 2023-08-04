@@ -247,15 +247,9 @@ def object_annotation(obj):
         filename = obj.f_code.co_filename
         if len(filename) > FRAME_FILENAME_LIMIT:
             filename = "..." + filename[-(FRAME_FILENAME_LIMIT - 3):]
-        return "frame\n{}:{}".format(
-            filename,
-            obj.f_lineno,
-        )
+        return f"frame\n{filename}:{obj.f_lineno}"
     else:
-        return "object\n{}.{}".format(
-            type(obj).__module__,
-            type(obj).__name__,
-        )
+        return f"object\n{type(obj).__module__}.{type(obj).__name__}"
 
 
 

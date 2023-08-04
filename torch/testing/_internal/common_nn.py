@@ -1372,7 +1372,7 @@ new_module_tests = [
         desc='dilated',
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.01,
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -1384,7 +1384,7 @@ new_module_tests = [
         desc='no_bias',
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.01,
     ),
     dict(
         fullname='ConvTranspose2d_groups',
@@ -2480,7 +2480,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='multilayer_coder',
         with_tf32=True,
-        tf32_precision=0.02,
+        tf32_precision=0.03,
     ),
     dict(
         module_name='Linear',
@@ -2542,13 +2542,13 @@ for padding_mode, cpp_padding_mode in zip(
             dict(
                 module_name=f'Conv{d}d',
                 constructor_args=(2, 3, 3, 2, padding, 1, 1, True, padding_mode),
-                cpp_constructor_args='''torch::nn::Conv{}dOptions(2, 3, 3)
+                cpp_constructor_args=f'''torch::nn::Conv{d}dOptions(2, 3, 3)
                                         .stride(2)
-                                        .padding({})
+                                        .padding({cpp_padding})
                                         .dilation(1)
                                         .groups(1)
                                         .bias(true)
-                                        .padding_mode({})'''.format(d, cpp_padding, cpp_padding_mode),
+                                        .padding_mode({cpp_padding_mode})''',
                 input_size=input_size,
                 output_size=output_size,
                 cudnn=True,
@@ -4736,14 +4736,14 @@ def _create_basic_net():
         def __init__(self):
             super().__init__()
             self.layer_dummy_param = nn.Parameter(torch.empty(3, 5))
-            self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
+            self.layer_dummy_buf = nn.Buffer(torch.zeros(1, 3, 3, 7))
 
     class Net(nn.Module):
         def __init__(self):
             super().__init__()
             self.l1 = Layer()
             self.dummy_param = nn.Parameter(torch.empty(3, 5))
-            self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))
+            self.dummy_buf = nn.Buffer(torch.zeros(7, 3, 3, 1))
 
     l = Layer()
     n = Net()

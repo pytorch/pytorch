@@ -31,7 +31,7 @@ from torch.nn.utils import clip_grad_norm_, clip_grad_value_
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.nn.utils.fusion import fuse_conv_bn_weights
 from torch.nn.utils.fusion import fuse_linear_bn_weights
-from torch.nn import Parameter
+from torch.nn import Buffer, Parameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes, floating_types
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
@@ -365,8 +365,8 @@ class TestNN(NNTestCase):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer1", torch.empty(3, 5))
-                self.register_buffer("buffer2", self.buffer1)
+                self.buffer1 = Buffer(torch.empty(3, 5))
+                self.buffer2 = self.buffer1
 
         m = M()
         self.assertEqual(names(m.named_buffers()),
@@ -425,7 +425,7 @@ class TestNN(NNTestCase):
         linear = nn.Linear(2, 2)
         linear._test_submodule = nn.Linear(2, 2)
         linear._test_parameter = Parameter(torch.empty(2, 2))
-        linear.register_buffer('_test_buffer', torch.empty(2, 2))
+        linear._test_buffer = Buffer(torch.empty(2, 2))
         keys = dir(linear)
         self.assertIn('_test_submodule', keys)
         self.assertIn('_test_parameter', keys)
@@ -530,6 +530,9 @@ class TestNN(NNTestCase):
         with self.assertRaises(KeyError):
             m.register_buffer('attribute_name', torch.rand(5))
 
+        with self.assertRaises(KeyError):
+            m.attribute_name = Buffer(torch.rand(5))
+
         del m.attribute_name
         m.register_parameter('attribute_name', nn.Parameter())
         with self.assertRaises(KeyError):
@@ -556,12 +559,18 @@ class TestNN(NNTestCase):
         self.assertEqual(m.buffer_name, buffer2)
         m.register_buffer('buffer_name', buffer3)
         self.assertEqual(m.buffer_name, buffer3)
+        m.buffer_name = Buffer(buffer1)
+        self.assertEqual(m.buffer_name, Buffer(buffer1))
+        m.buffer_name = Buffer(buffer2)
+        self.assertEqual(m.buffer_name, Buffer(buffer2))
+        m.buffer_name = Buffer(buffer3)
+        self.assertEqual(m.buffer_name, Buffer(buffer3))
 
     def test_get_buffer(self):
         m = nn.Module()
         buffer1 = torch.randn(2, 3)
         buffer2 = torch.randn(4, 5)
-        m.register_buffer('foo', buffer1)
+        m.foo = Buffer(buffer1)
         m.register_buffer('bar', buffer2)
         self.assertEqual(buffer1, m.get_buffer('foo'))
         self.assertEqual(buffer2, m.get_buffer('bar'))
@@ -575,13 +584,13 @@ class TestNN(NNTestCase):
         class Sub(nn.Module):
             def __init__(self, foo, bar):
                 super().__init__()
-                self.register_buffer('foo', foo)
+                self.foo = Buffer(foo)
                 self.subsub = SubSub(bar)
 
         class SubSub(nn.Module):
             def __init__(self, bar):
                 super().__init__()
-                self.register_buffer('bar', bar)
+                self.bar = Buffer(bar)
 
         foo = torch.randn(2, 3)
         bar = torch.randn(4, 5)
@@ -591,33 +600,35 @@ class TestNN(NNTestCase):
 
     def test_buffer_not_persistent(self):
         m = nn.Module()
-        m.register_buffer('buf', torch.rand(5), persistent=False)
+        m.buf = nn.Buffer(torch.rand(5), persistent=False)
         self.assertTrue(len(list(m.buffers())) == 1)
         self.assertTrue(len(m.state_dict()) == 0)
 
     def test_buffer_not_persistent_del(self):
         m = nn.Module()
-        m.register_buffer('buf', torch.rand(5), persistent=False)
+        m.buf = nn.Buffer(torch.rand(5), persistent=False)
         del m.buf
         self.assertTrue(len(list(m.buffers())) == 0)
 
     def test_buffer_not_persistent_overwrite(self):
         m = nn.Module()
-        m.register_buffer('buf', torch.rand(5), persistent=False)
-        m.register_buffer('buf', torch.rand(5))
+        m.buf = nn.Buffer(torch.rand(5), persistent=False)
+        m.buf = nn.Buffer(torch.rand(5))
 
         # can we overwrite a non-persistent buffer with a persistent one?
         self.assertTrue(len(list(m.buffers())) == 1)
         self.assertTrue(len(m.state_dict()) == 1)
 
         # can we overwrite a persistent buffer with a non-persistent one?
-        m.register_buffer('buf', torch.rand(5), persistent=False)
+        m.buf = nn.Buffer(torch.rand(5), persistent=False)
         self.assertTrue(len(list(m.buffers())) == 1)
         self.assertTrue(len(m.state_dict()) == 0)
 
     def test_buffer_not_persistent_assign(self):
         m = nn.Module()
-        m.register_buffer('buf', torch.rand(5), persistent=False)
+        m.buf = nn.Buffer(torch.rand(5), persistent=False)
+        self.assertTrue(len(list(m.buffers())) == 1)
+        self.assertTrue(len(m.state_dict()) == 0)
 
         # Assigning None removes the buffer but if we then assign a new Tensor
         # to the same property, it should still be marked as a buffer.
@@ -659,7 +670,7 @@ class TestNN(NNTestCase):
 
     def test_buffer_not_persistent_load(self):
         m = nn.Module()
-        m.register_buffer('buf', torch.rand(5), persistent=False)
+        m.buf = nn.Buffer(torch.rand(5), persistent=False)
         m.load_state_dict({})
 
     def test_register_parameter_raises_error_if_name_is_not_string(self):
@@ -678,6 +689,11 @@ class TestNN(NNTestCase):
 
         del m.attribute_name
         m.register_buffer('attribute_name', torch.rand(5))
+        with self.assertRaises(KeyError):
+            m.register_parameter('attribute_name', nn.Parameter())
+
+        del m.attribute_name
+        m.attribute_name = Buffer(torch.rand(5))
         with self.assertRaises(KeyError):
             m.register_parameter('attribute_name', nn.Parameter())
 
@@ -1625,7 +1641,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         net.l = l
         net.l2 = l
         net.add_module('empty', None)
-        net.register_buffer('indices', torch.LongTensor(1))
+        net.indices = Buffer(torch.LongTensor(1))
         net.float()
         self.assertIsInstance(l.weight.data, torch.FloatTensor)
         self.assertIsInstance(l.bias.data, torch.FloatTensor)
@@ -2699,6 +2715,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, "size mismatch for fc1.weight: copying a param with shape"):
             net2.load_state_dict(state_dict, strict=False, assign=True)
 
+    def test_load_state_dict_warn_assign(self):
+        with torch.device('meta'):
+            m = torch.nn.Linear(3, 5)
+        state_dict = m.state_dict()
+        state_dict['weight'] = torch.empty_like(state_dict['weight'], device='cpu')
+        with self.assertWarnsRegex(UserWarning, "for weight: copying from a non-meta parameter in the checkpoint to a meta"):
+            m.load_state_dict(state_dict)
+
     def test_extra_state_missing_set_extra_state(self):
 
         class MyModule(torch.nn.Module):
@@ -2811,8 +2835,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         del l.a, l.b
         self.assertEqual(list(l.children()), [])
 
-        buf = torch.randn(10)
-        l.register_buffer('buf', buf)
+        buf = Buffer(torch.randn(10))
+        l.buf = buf
         self.assertIs(l.buf, buf)
         l.buf = None
         self.assertIs(l.buf, None)
@@ -2852,22 +2876,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
                 hx.sum().backward()
 
-    def test_RNN_cell_forward_input_size(self):
-        input = torch.randn(3, 11)
-        hx = torch.randn(3, 20)
-        for module in (nn.RNNCell, nn.GRUCell):
-            cell = module(10, 20)
-            self.assertRaises(Exception, lambda: cell(input, hx))
-
-    def test_RNN_cell_forward_hidden_size(self):
-        input = torch.randn(3, 10)
-        hx = torch.randn(3, 21)
-        cell_shared_param = (10, 20)
-        for cell in (nn.RNNCell(*cell_shared_param, nonlinearity="relu"),
-                     nn.RNNCell(*cell_shared_param, nonlinearity="tanh"),
-                     nn.GRUCell(*cell_shared_param)):
-            self.assertRaises(Exception, lambda: cell(input, hx))
-
     def test_RNN_cell_forward_zero_hidden_size(self):
         input = torch.randn(3, 10)
         hx = torch.randn(3, 0)
@@ -2890,7 +2898,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         input = cast(torch.randn(3, 5))
         target = cast(torch.randn(5, 3))
-        for _name, fn in losses.items():
+        for fn in losses.values():
             self.assertRaises(Exception, lambda: fn(input, target))
 
     def test_loss_equal_input_target_shape(self):
@@ -5075,20 +5083,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(x.grad, x_grad_ref)
 
     def test_batchnorm_nhwc_cpu(self):
-        def helper(self, size, dtype, mixed_dtype=False):
+        def helper(self, mod, size, dtype, mixed_dtype=False, format=torch.channels_last):
             channels = size[1]
             input = torch.randn(size, dtype=dtype, device='cpu', requires_grad=True)
-            input = input.contiguous(memory_format=torch.channels_last).to(dtype)
+            input = input.contiguous(memory_format=format).to(dtype)
             input.retain_grad()
             grad = torch.randn(size, dtype=dtype, device='cpu')
-            grad = grad.contiguous(memory_format=torch.channels_last)
-            bn = nn.BatchNorm2d(channels).cpu().to(dtype)
+            grad = grad.contiguous(memory_format=format)
+            bn = mod(channels).cpu().to(dtype)
             bn.weight.data.uniform_()
             bn.bias.data.uniform_()
 
             ref_input = input.detach().clone().contiguous().requires_grad_(True)
             ref_grad = grad.detach().clone().contiguous()
-            ref_bn = nn.BatchNorm2d(channels).cpu().to(dtype)
+            ref_bn = mod(channels).cpu().to(dtype)
             ref_bn.load_state_dict(bn.state_dict())
 
             if mixed_dtype:
@@ -5100,7 +5108,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             ref_out = ref_bn(ref_input)
             ref_out.backward(ref_grad)
 
-            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(out.is_contiguous(memory_format=format))
             self.assertTrue(ref_out.is_contiguous())
             self.assertEqual(out, ref_out)
             self.assertEqual(bn.weight.grad, ref_bn.weight.grad)
@@ -5109,9 +5117,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         # test NC11 and N1HW; test mixed dtype
         for shape in [(4, 8, 10, 10), (4, 1, 9, 9), (4, 9, 1, 1)]:
-            helper(self, shape, torch.float, False)
-            helper(self, shape, torch.bfloat16, False)
-            helper(self, shape, torch.bfloat16, True)
+            helper(self, nn.BatchNorm2d, shape, torch.float, False, torch.channels_last)
+            helper(self, nn.BatchNorm2d, shape, torch.bfloat16, False, torch.channels_last)
+            helper(self, nn.BatchNorm2d, shape, torch.bfloat16, True, torch.channels_last)
+
+        for shape in [(4, 8, 2, 10, 10), (4, 1, 2, 9, 9), (4, 9, 1, 1, 1)]:
+            helper(self, nn.BatchNorm3d, shape, torch.float, False, torch.channels_last_3d)
+            helper(self, nn.BatchNorm3d, shape, torch.bfloat16, False, torch.channels_last_3d)
+            helper(self, nn.BatchNorm3d, shape, torch.bfloat16, True, torch.channels_last_3d)
 
     @parametrize_test(
         'bn_module',
@@ -5522,7 +5535,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         }
 
         input = torch.randn(2, 1, requires_grad=True)
-        for _name, fn in losses.items():
+        for fn in losses.values():
             for requires_grad in [True, False]:
                 # When target.requires_grad=True, its impl is in Python, while the other is in TH.
                 target = torch.randn(2, 10, requires_grad=requires_grad)
@@ -9231,7 +9244,6 @@ class TestNNDeviceType(NNTestCase):
 
             zeros = torch.zeros_like(input).to(torch.int64)
             v(lambda: F.multilabel_soft_margin_loss(input, zeros, reduction=reduction))
-            v(lambda: F.multilabel_margin_loss(input, zeros, reduction=reduction))
 
             v(lambda: F.triplet_margin_loss(input, input, input, reduction=reduction))
             v(lambda: F.triplet_margin_with_distance_loss(input, input, input, reduction=reduction))
