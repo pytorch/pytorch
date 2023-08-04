@@ -504,8 +504,8 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         # make sure it runs
         pt2e_quant_output = model(*example_inputs)
 
-        # TODO: torchdynamo times out when we do this, we can enable numerical checking
-        # after that is fixed
+        # # TODO: torchdynamo times out when we do this, we can enable numerical checking
+        # # after that is fixed
         # model_copy = prepare_pt2e(model_copy, quantizer)
         # # Calibrate
         # model_copy(*example_inputs)
@@ -522,6 +522,8 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         #             output_scale = n.args[1]
         # assert output_scale is not None
 
+        # print("diff:", torch.abs(pt2e_quant_output_copy - pt2e_quant_output))
+        # print("scale:", output_scale)
         # # make sure the result is off by one at most in the quantized integer representation
         # self.assertTrue(
         #     torch.max(torch.abs(pt2e_quant_output_copy - pt2e_quant_output)) <= (2 * output_scale + 1e-5)
@@ -1899,6 +1901,22 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             example_inputs,
             quantizer,
             ref_node_occurrence=ref_node_occurrence,
+            non_ref_node_occurrence={}
+        )
+
+    def test_representation_maxpool2d(self):
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(operator_config)
+        m_eager = TestHelperModules.ConvMaxPool2d().eval()
+
+        example_inputs = (torch.randn(1, 2, 2, 2),)
+
+        self._test_representation(
+            m_eager,
+            example_inputs,
+            quantizer,
+            ref_node_occurrence={},
             non_ref_node_occurrence={}
         )
 
