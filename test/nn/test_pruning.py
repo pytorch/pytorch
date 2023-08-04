@@ -760,7 +760,7 @@ class TestPruningNN(NNTestCase):
                         "torch.nn.utils.prune.L1Unstructured.compute_mask"
                     ) as compute_mask:
                         compute_mask.side_effect = Exception('HA!')
-                        with self.assertRaises(NameError):
+                        with self.assertRaisesRegex(Exception, '^HA!$'):
                             prune.l1_unstructured(m, name=name, amount=0.9)
 
                         self.assertTrue(
