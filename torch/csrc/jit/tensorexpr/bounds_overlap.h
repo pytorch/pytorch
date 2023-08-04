@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 
 #include <deque>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -22,7 +23,7 @@ struct TORCH_API Bound {
   bool swapped{false};
 
   Bound() = default;
-  Bound(ExprPtr s, ExprPtr e) : start(s), end(e) {}
+  Bound(ExprPtr s, ExprPtr e) : start(std::move(s)), end(std::move(e)) {}
 
   void print() const;
   bool equals(const Bound& other) const;
@@ -77,7 +78,7 @@ enum class CmpEvalResult { True, False, NotDetermined };
 OverlapKind TORCH_API boundOverlap(Bound A, Bound B);
 
 // The comparison is conservative and the compare result is deterministic.
-// It means that every element of the Bound to be compared needs to satisfiy
+// It means that every element of the Bound to be compared needs to satisfy
 // the given comparison operator.
 CmpEvalResult TORCH_API compareBound(
     const Bound& a,

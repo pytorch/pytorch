@@ -18,6 +18,33 @@ import re
 from abc import ABC, abstractmethod
 from typing import Any, Tuple
 
+__all__ = [
+    "FakeQuantizeBase",
+    "FakeQuantize",
+    "FixedQParamsFakeQuantize",
+    "FusedMovingAvgObsFakeQuantize",
+    "disable_fake_quant",
+    "disable_observer",
+    "enable_fake_quant",
+    "enable_observer",
+    "default_fake_quant",
+    "default_weight_fake_quant",
+    "default_dynamic_fake_quant",
+    "default_fixed_qparams_range_neg1to1_fake_quant",
+    "default_fixed_qparams_range_0to1_fake_quant",
+    "default_symmetric_fixed_qparams_fake_quant",
+    "default_affine_fixed_qparams_fake_quant",
+    "default_per_channel_weight_fake_quant",
+    "default_embedding_fake_quant",
+    "default_embedding_fake_quant_4bit",
+    "default_histogram_fake_quant",
+    "default_fused_act_fake_quant",
+    "default_fused_wt_fake_quant",
+    "default_fused_per_channel_wt_fake_quant",
+    "fused_wt_fake_quant_range_neg_127_to_127",
+    "fused_per_channel_wt_fake_quant_range_neg_127_to_127",
+]
+
 def _is_per_channel(qscheme: 'torch.qscheme') -> bool:
     return qscheme in [torch.per_channel_symmetric, torch.per_channel_affine, torch.per_channel_affine_float_qparams]
 
@@ -76,7 +103,13 @@ class FakeQuantizeBase(ABC, Module):
     def disable_observer(self):
         self.enable_observer(False)
 
-    with_args = classmethod(_with_args)
+    @classmethod
+    def with_args(cls, **kwargs):
+        fake_quant_constructor = _with_args(cls, **kwargs)
+        # need to assign the correct module to fake_quantize
+        # constructors to satisfy public v private requirements
+        fake_quant_constructor.__module__ = "torch.ao.quantization.fake_quantize"
+        return fake_quant_constructor
 
 class FakeQuantize(FakeQuantizeBase):
     r""" Simulate the quantize and dequantize operations in training time.
@@ -189,7 +222,7 @@ class FakeQuantize(FakeQuantizeBase):
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         # We cannot currently register scalar values as buffers, so need to manually
         # specify serialization here.
-        super(FakeQuantize, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'scale'] = self.scale
         destination[prefix + 'zero_point'] = self.zero_point
 
@@ -221,8 +254,8 @@ class FakeQuantize(FakeQuantizeBase):
                         self.zero_point.copy_(val)
             elif strict:
                 missing_keys.append(key)
-        super(FakeQuantize, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
-                                                        missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+                                      missing_keys, unexpected_keys, error_msgs)
 
 
 class FixedQParamsFakeQuantize(FakeQuantize):
@@ -231,10 +264,11 @@ class FixedQParamsFakeQuantize(FakeQuantize):
     is supported.
     """
 
+    # TODO: rename observer to observer_ctr
     def __init__(self, observer):
         super().__init__(observer=observer)
         assert type(self.activation_post_process) == FixedQParamsObserver,\
-            "%s's observer must be a %s" % (self.__class__.__name__, FixedQParamsObserver.__name__)
+            f"{self.__class__.__name__}'s observer must be a {FixedQParamsObserver.__name__}"
         self._observer_ctr = observer
         self.scale = self.activation_post_process.scale
         self.zero_point = self.activation_post_process.zero_point
@@ -395,6 +429,7 @@ default_fused_act_fake_quant = FusedMovingAvgObsFakeQuantize.with_args(observer=
                                                                        quant_min=0,
                                                                        quant_max=255,
                                                                        dtype=torch.quint8,)
+
 """
 Fused version of `default_fake_quant`, with improved performance.
 """
@@ -428,12 +463,14 @@ fused_wt_fake_quant_range_neg_127_to_127 = FusedMovingAvgObsFakeQuantize.with_ar
 Fused version of `default_weight_fake_quant`, with the 8-bit values restricted to [-127, +127], excluding -128.
 """
 
-fused_per_channel_wt_fake_quant_range_neg_127_to_127 = FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
-                                                                                               quant_min=-127,
-                                                                                               quant_max=127,
-                                                                                               dtype=torch.qint8,
-                                                                                               qscheme=torch.per_channel_symmetric,
-                                                                                               eps=2 ** -12)
+fused_per_channel_wt_fake_quant_range_neg_127_to_127 = \
+    FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAveragePerChannelMinMaxObserver,
+                                            quant_min=-127,
+                                            quant_max=127,
+                                            dtype=torch.qint8,
+                                            qscheme=torch.per_channel_symmetric,
+                                            eps=2 ** -12)
+
 """
 Fused version of `default_per_channel_weight_fake_quant`, with the 8-bit values restricted to [-127, +127], excluding -128.
 """

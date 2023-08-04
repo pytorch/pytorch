@@ -1,0 +1,61 @@
+name: 🐛 torch.compile Bug Report
+description: Create a report to help us reproduce and fix the bug
+labels: ["oncall: pt2"]
+
+body:
+  - type: markdown
+    attributes:
+      value: >
+        #### Before submitting a bug, please make sure the issue hasn't been already addressed by searching through [the
+        existing and past issues](https://github.com/pytorch/pytorch/issues)
+        It's likely that your bug will be resolved by checking our FAQ or troubleshooting guide [documentation](https://pytorch.org/docs/master/dynamo/index.html)
+  - type: textarea
+    attributes:
+      label: 🐛 Describe the bug
+      description: |
+        Please provide a clear and concise description of what the bug is.
+      placeholder: |
+        A clear and concise description of what the bug is.
+    validations:
+      required: false
+
+  - type: textarea
+    attributes:
+      label: Error logs
+      description: |
+        Please provide the error you're seeing
+      placeholder: |
+        Error...
+    validations:
+      required: false
+  - type: textarea
+    attributes:
+      label: Minified repro
+      description: |
+        Please run the minifier on your example and paste the minified code below
+        Learn more here https://pytorch.org/docs/master/compile/troubleshooting.html
+      placeholder: |
+        env TORCHDYNAMO_REPRO_AFTER="aot" python your_model.py
+        or
+        env TORCHDYNAMO_REPRO_AFTER="dynamo" python your_model.py
+
+        import torch
+        ...
+
+        # torch version: 2.0.....
+
+        class Repro(torch.nn.Module)
+    validations:
+      required: false
+  - type: textarea
+    attributes:
+      label: Versions
+      description: |
+        Please run the following and paste the output below.
+        ```sh
+        curl -OL https://raw.githubusercontent.com/pytorch/pytorch/main/torch/utils/collect_env.py
+        # For security purposes, please check the contents of collect_env.py before running it.
+        python3 collect_env.py
+        ```
+    validations:
+      required: true

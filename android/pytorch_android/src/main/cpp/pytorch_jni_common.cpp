@@ -303,7 +303,7 @@ facebook::jni::local_ref<JIValue> JIValue::newJIValueFromStringDict(
       facebook::jni::alias_ref<JIValue::javaobject>>::create();
   for (auto& pair : dict) {
     jmap->put(
-        facebook::jni::make_jstring(pair.key().toString()->string()),
+        facebook::jni::make_jstring(pair.key().toStringRef()),
         JIValue::newJIValueFromAtIValue(pair.value()));
   }
   return jMethodDictStringKey(JIValue::javaClassStatic(), jmap);
@@ -348,7 +348,7 @@ facebook::jni::local_ref<JIValue> JIValue::newJIValueFromAtIValue(
     const auto& tensor = ivalue.toTensor();
     return jMethodTensor(
         JIValue::javaClassStatic(),
-        TensorHybrid::newJTensorFromAtTensor(tensor.cpu()));
+        TensorHybrid::newJTensorFromAtTensor(tensor));
   } else if (ivalue.isBool()) {
     static auto jMethodBool =
         JIValue::javaClassStatic()

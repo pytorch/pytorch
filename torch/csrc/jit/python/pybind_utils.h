@@ -57,14 +57,16 @@
 namespace torch {
 namespace jit {
 
+using ResolutionCallback = std::function<py::object(std::string)>;
+
 void clear_registered_instances(void* ptr);
 
-TORCH_API IValue toIValue(
+TORCH_PYTHON_API IValue toIValue(
     py::handle obj,
     const TypePtr& type,
     c10::optional<int32_t> N = c10::nullopt);
 
-py::object toPyObject(IValue ivalue);
+TORCH_PYTHON_API py::object toPyObject(IValue ivalue);
 
 // Hack to overload the behavior of toIValue to accept Python
 // numbers in places where a Tensor is expected
@@ -240,6 +242,79 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   }
 };
 
+// The PythonAwaitWrapper for ivalue::Await
+//
+// Expresses delayed function execution with Lazy semantic.
+// i.e. Await[W] in eager mode can be used as W.
+// When the attribute of W type is requested, Await[W] will return the
+// attribute of W, transparently calling wait() beforehand.
+// No Lazy semantic for script, explicit wait(Await[W]) -> W must be called to
+// convert to type W.
+//
+// The Await object takes shared ownership of specified function and the
+// arguments. After first call for wait() it owns the result. Deliberately no
+// type inference for eager mode.
+struct VISIBILITY_HIDDEN PythonAwaitWrapper
+    : std::enable_shared_from_this<PythonAwaitWrapper> {
+  explicit PythonAwaitWrapper(c10::intrusive_ptr<c10::ivalue::Await> aw)
+      : aw_(std::move(aw)) {}
+  explicit PythonAwaitWrapper(py::handle input) {
+    args_ = py::tuple(1u);
+    args_[0] = input;
+    auto type = PyObjectType::get();
+    aw_ = c10::make_intrusive<c10::ivalue::Await>(type);
+    aw_->markCompleted(toIValue(input, type));
+  }
+
+  explicit PythonAwaitWrapper(py::function pf, py::tuple args) {
+    pyfg_ = std::make_shared<torch::jit::PythonFunctionGuard>(std::move(pf));
+    args_ = std::move(args);
+    std::function<IValue()> f = [fg(pyfg_), &args(args_)]() {
+      pybind11::gil_scoped_acquire ag;
+      return toIValue(fg->func_(*args), PyObjectType::get());
+    };
+    aw_ = c10::make_intrusive<c10::ivalue::Await>(
+        PyObjectType::get(), std::move(f));
+  }
+
+  explicit PythonAwaitWrapper(const PythonAwaitWrapper&) = delete;
+  PythonAwaitWrapper& operator=(const PythonAwaitWrapper&) = delete;
+
+  py::object wait() {
+    py::gil_scoped_acquire acquire;
+    return toPyObject(aw_->wait());
+  }
+
+  // Nowait semantic means trivial case when Await is constructed from the
+  // result
+  bool is_nowait() {
+    return pyfg_ == nullptr;
+  }
+
+  const py::function fn() {
+    TORCH_CHECK(
+        pyfg_, "Await constructed as awaitable_nowait does not have fn");
+    return pyfg_->func_;
+  }
+
+  const py::tuple args() {
+    return args_;
+  }
+
+  TypePtr type() {
+    return aw_->type();
+  }
+
+  c10::intrusive_ptr<c10::ivalue::Await> aw_;
+  std::shared_ptr<torch::jit::PythonFunctionGuard> pyfg_;
+  py::tuple args_;
+
+ private:
+  std::shared_ptr<PythonAwaitWrapper> getPtr() {
+    return shared_from_this();
+  }
+};
+
 // error reporting: when reporting user-caused errors, these functions should
 // not use AT_ERROR macros, since these macros add stack trace information
 // that is confusing to display to the end user since it always reports
@@ -299,7 +374,7 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(TensorType::get());
   }
 
-  if (input.is(py::none())) {
+  if (input.is_none()) {
     return InferredType(NoneType::get());
   }
 
@@ -341,7 +416,7 @@ inline InferredType tryToInferType(py::handle input) {
     auto enum_type = py::cast<TypePtr>(
         py::module::import("torch.jit.annotations")
             .attr("try_ann_to_type")(enum_class, SourceRange()));
-    return InferredType(enum_type);
+    return InferredType(std::move(enum_type));
   }
 
   py::bool_ isClass =
@@ -387,7 +462,7 @@ inline InferredType tryToInferType(py::handle input) {
         auto class_type = py::cast<ClassTypePtr>(script_class);
 
         if (class_type && !class_type->is_module()) {
-          return InferredType(class_type);
+          return InferredType(std::move(class_type));
         }
       }
     }
@@ -401,6 +476,13 @@ inline InferredType tryToInferType(py::handle input) {
     auto rref_ivalue = input.cast<torch::distributed::rpc::PyRRef>().toIValue();
     return InferredType(rref_ivalue.type());
 #endif
+  }
+
+  auto await_type = py::module::import("torch._awaits").attr("_Await");
+  py::bool_ is_await = py::isinstance(input, await_type);
+  if (py::cast<bool>(is_await)) {
+    auto awptr = input.cast<std::shared_ptr<PythonAwaitWrapper>>();
+    return InferredType(AwaitType::create(awptr->aw_->elementType()));
   }
 
   if (as_module(py::cast<py::object>(input))) {
@@ -432,7 +514,7 @@ inline InferredType tryToInferContainerType(py::handle input) {
         return type_match.reason();
       }
     }
-    return InferredType(TupleType::create(element_types));
+    return InferredType(TupleType::create(std::move(element_types)));
   } else if (PyDict_Check(input.ptr())) {
     // Check to make sure we can generate useful input/output types
     auto dict = py::cast<py::dict>(input);
@@ -478,7 +560,8 @@ inline InferredType tryToInferContainerType(py::handle input) {
       key_type = *unified_key;
       value_type = *unified_value;
     }
-    return InferredType(DictType::create(key_type, value_type));
+    return InferredType(
+        DictType::create(std::move(key_type), std::move(value_type)));
   } else if (PyList_Check(input.ptr())) {
     auto list = py::cast<py::list>(input);
     size_t len = py::len(list);
@@ -548,6 +631,21 @@ inline bool isTraceableType(const TypePtr& type) {
 inline IValue toTypeInferredIValue(py::handle input) {
   auto match = tryToInferType(input);
   if (!match.success()) {
+    auto object = py::cast<py::object>(input);
+    if (auto mod = as_module(object)) {
+      // if obj is already a ScriptModule, just return its ivalue
+      auto ptr = mod.value()._ivalue();
+      // explict copy semantics for strong ownership of the resource.
+      return c10::intrusive_ptr<c10::ivalue::Object>::reclaim_copy(
+          ptr.release());
+    }
+
+    // Check if the obj is a ScriptObject.
+    if (auto script_obj = as_object(object)) {
+      auto ptr = script_obj.value()._ivalue();
+      return c10::intrusive_ptr<c10::ivalue::Object>::reclaim_copy(
+          ptr.release());
+    }
     AT_ERROR(
         "Tracer cannot infer type of ", py::str(input), "\n:", match.reason());
   }
@@ -565,12 +663,23 @@ inline Stack toTraceableStack(const py::tuple& inputs) {
   return info.toTupleRef().elements().vec();
 }
 
+// Serialize the python dictionary into a traceable stack.
+inline Stack toTraceableStack(const py::dict& inputs) {
+  Stack res;
+  for (auto it = inputs.begin(); it != inputs.end(); it++) {
+    if (THPVariable_Check(it->second.ptr())) {
+      res.push_back(toIValue(it->second, tryToInferType(it->second).type()));
+    }
+  }
+  return res;
+}
+
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   auto elems = c10::impl::GenericList(elem_type);
   for (auto elem : obj) {
     elems.push_back(toIValue(elem, elem_type));
   }
-  return IValue(std::move(elems));
+  return IValue(elems);
 }
 
 inline IValue createGenericDict(
@@ -583,7 +692,7 @@ inline IValue createGenericDict(
     elems.insert(
         toIValue(entry.first, key_type), toIValue(entry.second, value_type));
   }
-  return IValue(std::move(elems));
+  return IValue(elems);
 }
 
 template <class T>
@@ -593,10 +702,6 @@ inline void guardAgainstNamedTensor(const T& var) {
       "NYI: Named tensors are currently unsupported in TorchScript. As a  "
       "workaround please drop names via `tensor = tensor.rename(None)`.");
 }
-
-// Defined in pybind_utils.cpp to break a circular dependency with
-// python_ivalue.h
-IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N);
 
 // Extract custom class registered with torchbind
 template <typename T>
@@ -646,7 +751,7 @@ inline IValue argumentToIValue(
     py::handle object) {
   const auto& argument = schema.arguments().at(argumentPosition);
   try {
-    return toIValue(object, argument.type(), argument.N());
+    return toIValue(object, argument.real_type(), argument.N());
   } catch (const py::cast_error& error) {
     throw schema_match_error(c10::str(
         schema.formatTypeMismatchMsg(
@@ -697,167 +802,6 @@ inline py::object getScriptedClassOrError(const c10::NamedTypePtr& classType) {
     throw std::runtime_error(err.str());
   }
   return py_class;
-}
-
-inline py::object toPyObject(IValue ivalue) {
-  if (ivalue.isNone()) {
-    return py::none();
-  } else if (ivalue.isTensor()) {
-    auto tensor = std::move(ivalue).toTensor();
-    if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
-      TORCH_INTERNAL_ASSERT(tensor.device().is_cpu());
-      auto scalar_type = tensor.scalar_type();
-      switch (scalar_type) {
-        case at::ScalarType::Bool:
-          return py::cast(*tensor.data_ptr<bool>());
-        case at::ScalarType::Long:
-          return py::cast(*tensor.data_ptr<int64_t>());
-        case at::ScalarType::Double:
-          return py::cast(*tensor.data_ptr<double>());
-        case at::ScalarType::ComplexDouble:
-          // TODO: https://github.com/pytorch/pytorch/issues/77134
-          return py::cast(static_cast<std::complex<double>>(
-              *tensor.data_ptr<c10::complex<double>>()));
-        default:
-          TORCH_CHECK(
-              false,
-              "Missing cases in 'toPyObject' wrapped number handling! Can't convert ",
-              scalar_type,
-              " to a Python object");
-      }
-    } else {
-      guardAgainstNamedTensor<at::Tensor>(tensor);
-      return py::cast(autograd::Variable(std::move(tensor)));
-    }
-  } else if (ivalue.isStorage()) {
-    return py::cast(ivalue.toStorage());
-  } else if (ivalue.isDouble()) {
-    return py::cast(std::move(ivalue).toDouble());
-  } else if (ivalue.isComplexDouble()) {
-    return py::cast(
-        static_cast<std::complex<double>>(std::move(ivalue).toComplexDouble()));
-  } else if (ivalue.isInt()) {
-    return py::cast(std::move(ivalue).toInt());
-  } else if (ivalue.isBool()) {
-    return py::cast(std::move(ivalue).toBool());
-  } else if (ivalue.isString()) {
-    return py::cast(std::move(ivalue).toStringRef());
-  } else if (ivalue.isList()) {
-    auto list = std::move(ivalue).toList();
-    py::list t{list.size()};
-    for (const auto i : c10::irange(list.size())) {
-      t[i] = toPyObject(IValue{list.get(i)});
-    }
-    return std::move(t);
-  } else if (ivalue.isTuple()) {
-    auto tuple = std::move(ivalue).toTuple();
-    const auto& elements = tuple->elements();
-
-    py::tuple t{elements.size()};
-    for (const auto i : c10::irange(elements.size())) {
-      t[i] = toPyObject(IValue{elements.at(i)});
-    }
-
-    // If we have a NamedTuple
-    if (tuple->type() && tuple->type()->schema() &&
-        tuple->type()->schema()->name() != "") {
-      auto unqualName = tuple->type()->name()->name();
-
-      const std::vector<Argument>& tuple_args =
-          tuple->type()->schema()->arguments();
-
-      std::vector<pybind11::object> defaults;
-      auto it = std::find_if(
-          tuple_args.begin(), tuple_args.end(), [](const Argument& arg) {
-            return arg.default_value().has_value();
-          });
-      std::transform(
-          it,
-          tuple_args.end(),
-          std::back_inserter(defaults),
-          [](const Argument& arg) { return toPyObject(*arg.default_value()); });
-
-      std::vector<std::string> fieldNames =
-          fmap(tuple_args, [](const Argument& arg) { return arg.name(); });
-
-      return py::module::import("torch._jit_internal")
-          .attr("_create_named_tuple")(
-              t, unqualName, fieldNames, py::make_tuple(defaults));
-    } else {
-      return std::move(t);
-    }
-  } else if (ivalue.isDevice()) {
-    return py::cast<py::object>(THPDevice_New(std::move(ivalue).toDevice()));
-  } else if (ivalue.isGenericDict()) {
-    auto dict = std::move(ivalue).toGenericDict();
-    py::dict py_dict;
-    for (auto& pair : dict) {
-      py_dict[toPyObject(IValue{pair.key()})] =
-          toPyObject(IValue{pair.value()});
-    }
-    return std::move(py_dict);
-  } else if (ivalue.isRRef()) {
-#ifdef USE_RPC
-    auto RRefPtr =
-        c10::dynamic_intrusive_pointer_cast<torch::distributed::rpc::RRef>(
-            std::move(ivalue).toRRef());
-    return py::cast(torch::distributed::rpc::PyRRef(RRefPtr));
-#else
-    AT_ERROR("RRef is only supported with the distributed package");
-#endif
-  } else if (ivalue.isObject()) {
-    const auto obj = std::move(ivalue).toObject();
-    if (obj->type()->is_module()) {
-      return py::cast(Module(obj));
-    }
-
-    auto pyCu = get_python_cu();
-    if (obj->name().find("__torch__.torch.classes") == 0) {
-      return py::cast(Object(obj));
-    }
-    const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
-    AT_ASSERT(classType);
-    auto pyClass = getScriptedClassOrError(obj->type());
-    auto pyObj = pyClass.attr("__new__")(pyClass);
-
-    const auto numAttrs = classType->numAttributes();
-
-    for (const auto slot : c10::irange(numAttrs)) {
-      const auto& attrName = classType->getAttributeName(slot);
-      IValue v = obj->getSlot(slot);
-      py::setattr(pyObj, attrName.c_str(), toPyObject(std::move(v)));
-    }
-    return pyObj;
-  } else if (ivalue.isPyObject()) {
-    // return borrowed reference to ensure it correctly incref the underlying
-    // PyObject
-    return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
-  } else if (ivalue.isCapsule()) {
-    return py::cast(c10::Capsule(ivalue.toCapsule()));
-  } else if (ivalue.isFuture()) {
-    return py::cast(std::make_shared<PythonFutureWrapper>(ivalue.toFuture()));
-  } else if (ivalue.isEnum()) {
-    auto enum_holder = ivalue.toEnumHolder();
-    auto py_class = getScriptedClassOrError(enum_holder->type());
-    return py_class.attr(enum_holder->name().c_str());
-  } else if (ivalue.isRRef()) {
-#ifdef USE_RPC
-    return py::cast(torch::distributed::rpc::PyRRef(
-        c10::static_intrusive_pointer_cast<distributed::rpc::RRef>(
-            ivalue.toRRef())));
-#else
-    TORCH_CHECK(false, "RRef is only supported with the distributed package");
-#endif
-  } else if (ivalue.isSymInt()) {
-    auto si = ivalue.toSymInt();
-    return si.is_symbolic() ? py::cast(si.toSymbolicIntNode())
-                            : py::cast(si.expect_int());
-  } else {
-    AT_ERROR(
-        "Missing cases in 'toPyObject'! Can't convert ",
-        ivalue.tagKind(),
-        " to a Python object");
-  }
 }
 
 struct VISIBILITY_HIDDEN tuple_slice {
@@ -1056,7 +1000,7 @@ inline py::object runAndInsertCall(
   }
 
   TORCH_CHECK(
-      stack.size() > 0,
+      !stack.empty(),
       "Expected values in the stack after execution but found none");
   return toPyObject(std::move(stack.back()));
 }
@@ -1097,7 +1041,7 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
         total_arg_num,
         false /* throw_error */);
   }
-  if (overloaded_args.size() > 0) {
+  if (!overloaded_args.empty()) {
     return pybind11::reinterpret_steal<py::object>(
         handle_torch_function_no_python_arg_parser(
             /*overloaded_args=*/overloaded_args,
@@ -1149,117 +1093,24 @@ inline py::object invokeScriptMethodFromPython(
       });
 }
 
-inline std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
+TORCH_PYTHON_API std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
-    const py::kwargs& kwargs) {
-  Stack stack;
-  if (operations.size() == 1) {
-    std::shared_ptr<Operator> op = operations.at(0);
-    // Create a stack full of the arguments and keyword arguments.
-    stack = createStackForSchema(
-        op->schema(), std::move(args), kwargs, c10::nullopt);
+    const py::kwargs& kwargs);
 
-    return std::make_pair(op, stack);
-  } else {
-    std::vector<schema_match_error> errors;
-    std::shared_ptr<Operator> found_op = nullptr;
-    for (const auto& op : operations) {
-      try {
-        stack = createStackForSchema(op->schema(), args, kwargs, c10::nullopt);
-        found_op = op;
-        break;
-      } catch (schema_match_error& error) {
-        errors.push_back(std::move(error));
-      }
-    }
-    if (!found_op) {
-      std::stringstream ss;
-      ss << "Overloaded torch operator invoked from Python failed to many any schema:\n";
-      for (const auto& err : errors) {
-        ss << err.what() << "\n\n";
-      }
-      throw std::runtime_error(ss.str());
-    }
-
-    return std::make_pair(found_op, stack);
-  }
-}
-inline py::object invokeOperatorFromPython(
+TORCH_PYTHON_API py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
-    const py::kwargs& kwargs) {
-  auto opWithStack = getOpWithStack(operations, args, kwargs);
-  std::shared_ptr<Operator> found_op = std::get<0>(opWithStack);
-  Stack stack = std::get<1>(opWithStack);
-  {
-    pybind11::gil_scoped_release no_gil_guard;
-    found_op->getOperation()(stack);
-  }
+    const py::kwargs& kwargs,
+    c10::optional<c10::DispatchKey> dk = c10::nullopt);
 
-  return createPyObjectForStack(std::move(stack));
-}
-
-inline py::object _get_operation_for_overload_or_packet(
+TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     const std::vector<std::shared_ptr<Operator>>& operations,
     Symbol symbol,
     py::args args,
     const py::kwargs& kwargs,
-    bool is_overload) {
-  std::vector<py::handle> overloaded_args;
-  size_t total_arg_num = args.size() + kwargs.size();
-  for (const auto i : c10::irange(args.size())) {
-    is_tensor_and_append_overloaded(args[i].ptr(), &overloaded_args);
-    is_tensor_list_and_append_overloaded(
-        args[i].ptr(),
-        &overloaded_args,
-        static_cast<int>(total_arg_num),
-        false /* throw_error */);
-  }
-  // NB: for kwargs, we cannot guarantee the order of appending
-  // is the same as the argument order in operator's schema.
-  // This is suboptimal, but should be fine. Later when we have
-  // better schema matching and argument parsing, we could
-  // match the operator in `operations` first, then the order will
-  // be guaranteed.
-  for (auto item : kwargs) {
-    is_tensor_and_append_overloaded(item.second.ptr(), &overloaded_args);
-    is_tensor_list_and_append_overloaded(
-        item.second.ptr(),
-        &overloaded_args,
-        total_arg_num,
-        false /* throw_error */);
-  }
-  if (overloaded_args.size() > 0 ||
-      at::impl::PythonTorchFunctionTLS::get_mode()) {
-    py::object ret;
-    std::string ns = symbol.ns().toUnqualString();
-    std::string method_name = symbol.toUnqualString();
-    auto self_func = py::module::import("torch")
-                         .attr("ops")
-                         .attr(ns.c_str())
-                         .attr(method_name.c_str());
-    if (is_overload) {
-      auto overload_name = operations[0]->schema().overload_name();
-      if (overload_name == "") {
-        self_func = self_func.attr("default");
-      } else {
-        self_func = self_func.attr(overload_name.c_str());
-      }
-    }
-    std::string module_name("torch.ops");
-    module_name.append(ns);
-    return pybind11::reinterpret_steal<py::object>(
-        handle_torch_function_no_python_arg_parser(
-            overloaded_args,
-            args.ptr(),
-            kwargs.ptr(),
-            method_name.c_str(),
-            self_func.ptr(),
-            module_name.c_str()));
-  }
-  return invokeOperatorFromPython(operations, args, kwargs);
-}
+    bool is_overload,
+    c10::optional<c10::DispatchKey> dk = c10::nullopt);
 
 } // namespace jit
 } // namespace torch

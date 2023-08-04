@@ -6,9 +6,10 @@ toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 
+from torch.ao.quantization.backend_config import get_native_backend_config
+from torch.ao.quantization.fx.quantize_handler import _get_pattern_to_quantize_handlers
 from torch.ao.quantization.utils import getattr_from_fqn
 from .ns_types import NSNodeTargetType
-from torch.ao.quantization.fx.backend_config_utils import get_native_quant_patterns
 from torch.ao.quantization import (
     ObserverBase,
     FakeQuantizeBase,
@@ -25,7 +26,7 @@ def get_type_a_related_to_b(
     # TODO(future PR): add the rest of modules and ops here
     type_a_related_to_b: Set[Tuple[NSNodeTargetType, NSNodeTargetType]] = set()
 
-    for base_name, s in base_name_to_sets_of_related_ops.items():
+    for s in base_name_to_sets_of_related_ops.values():
         s_list = list(s)
         # add every bidirectional pair
         for idx_0 in range(0, len(s_list)):
@@ -66,12 +67,12 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
     # * multiple ops: (torch.nn.ReLU, torch.nn.Conv2d)
     # For fusions, we only care about patterns composed of multiple ops.
     # TODO(future PR): allow customizations from default patterns.
-    all_quant_patterns = get_native_quant_patterns()
+    all_quant_patterns = _get_pattern_to_quantize_handlers(get_native_backend_config())
 
     default_base_op_idx = 0
-    for quant_pattern, _quant_handler in all_quant_patterns.items():
+    for quant_pattern in all_quant_patterns.keys():
         # TODO: this is a temporary hack to flatten the patterns from quantization so
-        # that it works with the ns matcher function, maybe we should use `is_match`
+        # that it works with the ns matcher function, maybe we should use `_is_match`
         # in torch.ao.quantization.fx.match_utils to match the patterns
         if isinstance(quant_pattern, tuple) and len(quant_pattern) == 2 and \
            isinstance(quant_pattern[1], tuple) and len(quant_pattern[1]) == 2:
@@ -96,7 +97,7 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
             results.append((new_pattern, default_base_op_idx))  # type: ignore[arg-type]
 
 
-    # After this point, results countains values such as
+    # After this point, results contains values such as
     # [..., ((torch.nn.Relu, torch.nn.Conv2d), 0), ...]
 
     # Patterns for matching fp16 emulation are not specified in the quantization

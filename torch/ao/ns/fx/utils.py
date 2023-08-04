@@ -3,8 +3,8 @@ import operator
 
 import torch
 import torch.nn as nn
-import torch.nn.intrinsic.quantized as nniq
-import torch.nn.quantized as nnq
+import torch.ao.nn.intrinsic.quantized as nniq
+import torch.ao.nn.quantized as nnq
 
 toq = torch.ops.quantized
 from typing import Tuple, Callable, Dict, Set, List, Optional, Union
@@ -16,7 +16,7 @@ from torch.ao.quantization import (
     FakeQuantizeBase,
 )
 from torch.ao.quantization.utils import getattr_from_fqn
-from torch.ao.quantization.quantize import is_activation_post_process
+from torch.ao.quantization.observer import _is_activation_post_process
 
 from .ns_types import NSNodeTargetType, NSResultsType
 
@@ -256,14 +256,14 @@ def return_first_non_observer_node(
     """
     if node.op == "call_module":
         node_obj = getattr_from_fqn(gm, node.target)  # type: ignore[arg-type]
-        if is_activation_post_process(node_obj):
+        if _is_activation_post_process(node_obj):
             assert len(node.args) == 1
             assert isinstance(node.args[0], Node)
             node = node.args[0]
             # code duplication intended, not worth refactoring
             assert isinstance(node.target, str)
             node_obj = getattr_from_fqn(gm, node.target)
-            if is_activation_post_process(node_obj):
+            if _is_activation_post_process(node_obj):
                 assert len(node.args) == 1
                 assert isinstance(node.args[0], Node)
                 node = node.args[0]
@@ -363,7 +363,7 @@ def rekey_logger_info_on_node_name_of_model(
     new_results = {}
     for old_layer_name, result_type_to_results in results.items():
         new_layer_name = None
-        for _result_type, model_name_to_results in result_type_to_results.items():
+        for model_name_to_results in result_type_to_results.values():
             for cur_model_name, list_of_results in model_name_to_results.items():
                 if cur_model_name == model_name:
                     assert len(list_of_results)
@@ -389,8 +389,8 @@ def maybe_add_missing_fqns(results: NSResultsType) -> None:
 
     # Check in the first result to find any model with fqn entries defined.
     model_name_with_fqns = None
-    for layer_name, result_type_to_results in results.items():
-        for result_type, model_name_to_results in result_type_to_results.items():
+    for result_type_to_results in results.values():
+        for model_name_to_results in result_type_to_results.values():
             for model_name, model_results in model_name_to_results.items():
                 if len(model_results) > 0:
                     if model_results[0]["fqn"] is not None:
@@ -400,8 +400,8 @@ def maybe_add_missing_fqns(results: NSResultsType) -> None:
         break
 
     if model_name_with_fqns:
-        for layer_name, result_type_to_results in results.items():
-            for result_type, model_name_to_results in result_type_to_results.items():
+        for result_type_to_results in results.values():
+            for model_name_to_results in result_type_to_results.values():
                 ref_model_results = model_name_to_results[model_name_with_fqns]
                 for model_name, model_results in model_name_to_results.items():
                     if model_name == model_name_with_fqns:

@@ -41,10 +41,6 @@ sudo apt-get install \
 # the one provided by apt-get is quite old so we install it via pip
 sudo pip install hypothesis
 
-# Install the six module, which includes Python 2 and 3 compatibility utilities,
-# and is required for Caffe2
-sudo pip install six
-
 # Now, actually build the android target.
 echo "Building caffe2"
 cd $BUILD_ROOT

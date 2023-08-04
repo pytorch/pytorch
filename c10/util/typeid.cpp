@@ -1,17 +1,12 @@
 #include <c10/util/Exception.h>
 #include <c10/util/typeid.h>
 
+#include <algorithm>
 #include <atomic>
-
-#if !defined(_MSC_VER)
-#include <cxxabi.h>
-#endif
-
-using std::string;
 
 namespace caffe2 {
 namespace detail {
-C10_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
+C10_EXPORT void _ThrowRuntimeTypeLogicError(const std::string& msg) {
   // In earlier versions it used to be std::abort() but it's a bit hard-core
   // for a library
   TORCH_CHECK(false, msg);
@@ -26,8 +21,12 @@ C10_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
       " (please report this error)");
 }
 
-// see TypeMeta::addTypeMetaData
-std::atomic<uint16_t> TypeMeta::nextTypeIndex(NumScalarTypes);
+std::mutex& TypeMeta::getTypeMetaDatasLock() {
+  static std::mutex lock;
+  return lock;
+}
+
+uint16_t TypeMeta::nextTypeIndex(NumScalarTypes);
 
 // fixed length array of TypeMetaData instances
 detail::TypeMetaData* TypeMeta::typeMetaDatas() {
@@ -53,41 +52,41 @@ detail::TypeMetaData* TypeMeta::typeMetaDatas() {
   return instances;
 }
 
-CAFFE_KNOWN_TYPE(std::string)
-CAFFE_KNOWN_TYPE(uint16_t)
-CAFFE_KNOWN_TYPE(char)
-CAFFE_KNOWN_TYPE(std::unique_ptr<std::mutex>)
-CAFFE_KNOWN_TYPE(std::unique_ptr<std::atomic<bool>>)
-CAFFE_KNOWN_TYPE(std::vector<int32_t>)
-CAFFE_KNOWN_TYPE(std::vector<int64_t>)
-CAFFE_KNOWN_TYPE(std::vector<unsigned long>)
-CAFFE_KNOWN_TYPE(bool*)
-CAFFE_KNOWN_TYPE(char*)
-CAFFE_KNOWN_TYPE(int*)
+uint16_t TypeMeta::existingMetaDataIndexForType(TypeIdentifier identifier) {
+  auto* metaDatas = typeMetaDatas();
+  const auto end = metaDatas + nextTypeIndex;
+  // MaxTypeIndex is not very large; linear search should be fine.
+  auto it = std::find_if(metaDatas, end, [identifier](const auto& metaData) {
+    return metaData.id_ == identifier;
+  });
+  if (it == end) {
+    return MaxTypeIndex;
+  }
+  return static_cast<uint16_t>(it - metaDatas);
+}
 
-// For some of the compilers, long is defined separately from int32_t and
-// int64_t. As a result we will need to actually define them separately.
-// It is recommended that one does NOT use long - use int32_t and int64_t
-// explicitly. Explicit long type annotation may go away in the future.
-// details: This hack works by defining a _guard_long_unique type, which is
-// long iff the compiler has a separate long type and is a dummy type otherwise.
-// we then allocate a type id to that _guard_long_unique. If the compiler has a
-// separate long type, this allocates a type id for long. Otherwise, it
-// allocates a type id for the dummy type, which doesn't matter.
-namespace detail {
-template <class T>
-class _guard_long_unique_dummy final {};
-template <class T>
-using _guard_long_unique = std::conditional_t<
-    std::is_same<long, int32_t>::value || std::is_same<long, int64_t>::value,
-    _guard_long_unique_dummy<T>,
-    T>;
-} // namespace detail
+CAFFE_DEFINE_KNOWN_TYPE(std::string, std_string)
+CAFFE_DEFINE_KNOWN_TYPE(uint16_t, uint16_t)
+CAFFE_DEFINE_KNOWN_TYPE(char, char)
+CAFFE_DEFINE_KNOWN_TYPE(std::unique_ptr<std::mutex>, std_unique_ptr_std_mutex)
+CAFFE_DEFINE_KNOWN_TYPE(
+    std::unique_ptr<std::atomic<bool>>,
+    std_unique_ptr_std_atomic_bool)
+CAFFE_DEFINE_KNOWN_TYPE(std::vector<int32_t>, std_vector_int32_t)
+CAFFE_DEFINE_KNOWN_TYPE(std::vector<int64_t>, std_vector_int64_t)
+CAFFE_DEFINE_KNOWN_TYPE(std::vector<unsigned long>, std_vector_unsigned_long)
+CAFFE_DEFINE_KNOWN_TYPE(bool*, bool_ptr)
+CAFFE_DEFINE_KNOWN_TYPE(char*, char_ptr)
+CAFFE_DEFINE_KNOWN_TYPE(int*, int_ptr)
 
-CAFFE_KNOWN_TYPE(detail::_guard_long_unique<long>);
-CAFFE_KNOWN_TYPE(detail::_guard_long_unique<std::vector<long>>)
+CAFFE_DEFINE_KNOWN_TYPE(
+    detail::_guard_long_unique<long>,
+    detail_guard_long_unique_long);
+CAFFE_DEFINE_KNOWN_TYPE(
+    detail::_guard_long_unique<std::vector<long>>,
+    detail_guard_long_unique_std_vector_long)
 
-CAFFE_KNOWN_TYPE(float*)
-CAFFE_KNOWN_TYPE(at::Half*)
+CAFFE_DEFINE_KNOWN_TYPE(float*, float_ptr)
+CAFFE_DEFINE_KNOWN_TYPE(at::Half*, at_Half)
 
 } // namespace caffe2

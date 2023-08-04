@@ -24,7 +24,7 @@ from .ns_types import (
 from torch.ao.ns.fx.mappings import (
     get_node_type_to_io_type_map,
 )
-from torch.ao.quantization.quantize import is_activation_post_process
+from torch.ao.quantization.observer import _is_activation_post_process
 
 from typing import Dict, Tuple, Callable, List, Any, Union, Optional, Set
 
@@ -38,7 +38,7 @@ def _maybe_get_fqn(node: Node, gm: GraphModule) -> Optional[str]:
         if node.op == 'call_module':
             assert isinstance(node.target, str)
             module = getattr_from_fqn(gm, node.target)
-            if is_activation_post_process(module):
+            if _is_activation_post_process(module):
                 node_to_use_for_fqn = get_normalized_nth_input(node, gm, 0)
         fqn = gm._node_name_to_scope[node_to_use_for_fqn.name][0]  # type: ignore[index]
     return fqn  # type: ignore[return-value]
@@ -424,7 +424,7 @@ def _can_insert_copy_of_subgraph_a(
                     return False
             cur_idx += 1
 
-        for kwarg_name, kwarg_val in norm_kwargs.items():
+        for kwarg_val in norm_kwargs.values():
             # stitch the inputs from base graph
             if cur_idx == 0:
                 pass

@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <limits>
 #include <ATen/native/UnaryOps.h>
+#include <ATen/native/cuda/Copy.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/JitLoops.cuh>
 #include <ATen/Dispatch.h>
@@ -8,7 +9,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 // We manually overload angle because std::arg does not work with types other than c10::complex.
 template<typename scalar_t>
@@ -24,7 +25,10 @@ __host__ __device__ static inline c10::complex<T> angle_wrapper(c10::complex<T> 
   return c10::complex<T>{std::arg(v), 0};
 }
 
-const char angle_name[] = "angle_kernel";
+#if AT_USE_JITERATOR()
+CONSTEXPR_EXCEPT_WIN_CUDA char angle_name[] = "angle_kernel";
+#endif
+
 void angle_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
@@ -58,22 +62,10 @@ void angle_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-// We manually overload conj because std::conj does not work types other than c10::complex.
-template<typename scalar_t>
-__host__ __device__ static inline scalar_t conj_wrapper(scalar_t v) {
-  return v;
-}
-
-template<typename T>
-__host__ __device__ static inline c10::complex<T> conj_wrapper(c10::complex<T> v) {
-  return std::conj(v);
-}
-
 // NB: Ignores the negative bit on tensors
-const char conj_name[] = "conj_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char conj_name[] = "conj_kernel";
 void conj_kernel_cuda(TensorIteratorBase& iter) {
-  auto common_dtype = iter.common_dtype();
-  if (common_dtype == kComplexHalf) {
+  auto conj_chalf = [&] {
     using scalar_t = c10::complex<at::Half>;
     #if AT_USE_JITERATOR()
       static const auto conj_string = jiterator_stringify(
@@ -85,20 +77,26 @@ void conj_kernel_cuda(TensorIteratorBase& iter) {
       jitted_gpu_kernel<conj_name, scalar_t, scalar_t, 1>(iter, conj_string);
     #else
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
-          return conj_wrapper(a);
+          return std::conj(a);
       });
     #endif
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kBool, kBFloat16, kHalf, iter.common_dtype(), "conj_cuda", [&]() {
-        gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
-          return conj_wrapper(a);
-        });
-    });
-  }
+  };
+
+  AT_DISPATCH_SWITCH(iter.common_dtype(), "conj_cuda",
+    AT_DISPATCH_CASE_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, [&] {
+      // Conj is a no-op for non-complex types
+      direct_copy_kernel_cuda(iter);
+    })
+    AT_DISPATCH_CASE_COMPLEX_TYPES([&] {
+      gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return std::conj(a);
+      });
+    })
+    AT_DISPATCH_CASE(kComplexHalf, conj_chalf)
+  );
 }
 
 REGISTER_DISPATCH(angle_stub, &angle_kernel_cuda);
 REGISTER_DISPATCH(conj_physical_stub, &conj_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

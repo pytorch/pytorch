@@ -2,7 +2,7 @@ import torch
 from typing import Optional
 
 
-class SobolEngine(object):
+class SobolEngine:
     r"""
     The :class:`torch.quasirandom.SobolEngine` is an engine for generating
     (scrambled) Sobol sequences. Sobol sequences are an example of low
@@ -35,6 +35,7 @@ class SobolEngine(object):
 
     Examples::
 
+        >>> # xdoctest: +SKIP("unseeded random state")
         >>> soboleng = torch.quasirandom.SobolEngine(dimension=5)
         >>> soboleng.draw(3)
         tensor([[0.0000, 0.0000, 0.0000, 0.0000, 0.0000],

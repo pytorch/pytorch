@@ -66,13 +66,9 @@ class Errors:
         At the moment, only tests on "numpy.ndarray" are supported.
         """
         if isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
-            try:
-                np.testing.assert_allclose(
-                    x, y, rtol=self.rtol, atol=self.atol, equal_nan=True, verbose=True
-                )
-            except AssertionError as e:
-                raise
-                k(f"{colonize(msg)}{str(e).lstrip()}")
+            np.testing.assert_allclose(
+                x, y, rtol=self.rtol, atol=self.atol, equal_nan=True, verbose=True
+            )
         else:
             raise RuntimeError("Unsupported almost equal test")
 
@@ -105,11 +101,7 @@ class Errors:
             new_msg = f"{colonize(msg)}In embedded parameter '{x.name}'"
             self.equalAndThen(t1, t2, new_msg, k)
         elif isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
-            try:
-                np.testing.assert_equal(x, y)
-            except AssertionError as e:
-                raise
-                k("{}{}".format(colonize(msg, ": "), str(e).lstrip()))
+            np.testing.assert_equal(x, y)
         else:
             if x != y:
                 # TODO: Better algorithm for lists
@@ -513,7 +505,7 @@ def verify(
             backend_out = prepared.run(onnx_input)
             if isinstance(torch_out, torch.Tensor):
                 torch_out = (torch_out,)
-            torch_out, _ = torch._C._jit_flatten(torch_out)
+            torch_out, _ = torch.jit._flatten(torch_out)
             # NB: onnx backend NEVER returns bare numpy array
             msg = "ONNX backend returned different results from PyTorch"
             result_hint = (

@@ -21,7 +21,7 @@ class OptionalArrayRef final {
  public:
   // Constructors
 
-  constexpr OptionalArrayRef() noexcept {}
+  constexpr OptionalArrayRef() noexcept = default;
 
   constexpr OptionalArrayRef(nullopt_t) noexcept {}
 
@@ -73,6 +73,9 @@ class OptionalArrayRef final {
       std::initializer_list<U> il,
       Args&&... args)
       : wrapped_opt_array_ref(ip, il, args...) {}
+
+  constexpr OptionalArrayRef(const std::initializer_list<T>& Vec)
+      : wrapped_opt_array_ref(ArrayRef<T>(Vec)) {}
 
   // Destructor
 

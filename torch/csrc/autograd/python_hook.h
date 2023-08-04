@@ -7,12 +7,21 @@
 namespace torch {
 namespace autograd {
 
-struct PyFunctionPreHook : public FunctionPreHook {
-  PyFunctionPreHook(PyObject* dict, int value_idx);
-  ~PyFunctionPreHook() override;
+struct PyFunctionTensorPreHook : public FunctionPreHook {
+  PyFunctionTensorPreHook(PyObject* dict, int value_idx);
+  ~PyFunctionTensorPreHook() override;
   variable_list operator()(const variable_list& values) override;
+  void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) override;
   PyObject* dict;
   int value_idx;
+};
+
+struct PyFunctionPreHook : public FunctionPreHook {
+  PyFunctionPreHook(PyObject* dict);
+  ~PyFunctionPreHook() override;
+  variable_list operator()(const variable_list& values) override;
+  void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) override;
+  PyObject* dict;
 };
 
 struct PyFunctionPostHook : public FunctionPostHook {
@@ -21,6 +30,7 @@ struct PyFunctionPostHook : public FunctionPostHook {
   variable_list operator()(
       const variable_list& outputs,
       const variable_list& inputs) override;
+  void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) override;
   PyObject* dict;
 };
 

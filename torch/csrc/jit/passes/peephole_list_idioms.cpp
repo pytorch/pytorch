@@ -10,11 +10,12 @@
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <torch/csrc/utils/memory.h>
 #include <limits>
+#include <utility>
 
 namespace torch {
 namespace jit {
 
-c10::optional<size_t> normalizeIndex(int64_t index, size_t len) {
+static c10::optional<size_t> normalizeIndex(int64_t index, size_t len) {
   if (index < 0) {
     index = index + len;
   }
@@ -36,11 +37,11 @@ struct ListLenRefiner {
   bool run() {
     std::unordered_set<Value*> li_with_len_use;
     collectListsToRefine(graph_->block(), li_with_len_use);
-    if (lists_to_refine_.size() == 0) {
+    if (lists_to_refine_.empty()) {
       return false;
     }
     ListRefinement refinements;
-    RefineListLens(graph_->block(), refinements);
+    RefineListLens(graph_->block(), std::move(refinements));
     return changed_;
   }
 
@@ -238,7 +239,7 @@ struct PeepholeOptimizeListIdiomsImpl {
       }
 
       // only optimizing list ops
-      if (node->inputs().size() == 0 ||
+      if (node->inputs().empty() ||
           !node->input(0)->type()->castRaw<ListType>()) {
         continue;
       }

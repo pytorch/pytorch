@@ -1,5 +1,5 @@
 import re
-from typing import Match, Optional, Sequence, Mapping
+from typing import Mapping, Match, Optional, Sequence
 
 # match $identifier or ${identifier} and replace with value in env
 # If this identifier is at the beginning of whitespace on a line
@@ -20,7 +20,7 @@ class CodeTemplate:
 
     @staticmethod
     def from_file(filename: str) -> "CodeTemplate":
-        with open(filename, "r") as f:
+        with open(filename) as f:
             return CodeTemplate(f.read(), filename)
 
     def __init__(self, pattern: str, filename: str = "") -> None:

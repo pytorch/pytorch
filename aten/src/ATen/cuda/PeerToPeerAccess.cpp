@@ -1,10 +1,11 @@
 #include <ATen/cuda/PeerToPeerAccess.h>
+
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
 #include <vector>
-#include <algorithm>
 
 namespace at {
 namespace cuda {
@@ -44,22 +45,13 @@ bool get_p2p_access(int dev, int dev_to_access) {
     return cache;
   }
 
-  c10::cuda::CUDAGuard device_guard(dev);
-
-  int access = 0;
-  C10_CUDA_CHECK(cudaDeviceCanAccessPeer(&access, dev, dev_to_access));
-  if (access) {
-    cudaError_t err = cudaDeviceEnablePeerAccess(dev_to_access, 0);
-    if (err == cudaErrorPeerAccessAlreadyEnabled) {
-      // ignore and clear the error if access was already enabled
-      cudaGetLastError();
-    } else {
-      C10_CUDA_CHECK(err);
-    }
-    cache = 1;
-  } else {
-    cache = 0;
+  int result;
+  C10_CUDA_CHECK(cudaDeviceCanAccessPeer(&result, dev, dev_to_access));
+  cache = result ? 1 : 0;
+  if (cache) {
+    CUDACachingAllocator::enablePeerAccess(dev, dev_to_access);
   }
+
   return cache;
 }
 

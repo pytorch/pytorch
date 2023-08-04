@@ -12,18 +12,19 @@ using namespace api::utils;
 
 Tensor mean(
     const at::Tensor& input_arg,
-    const IntArrayRef dim,
+    const OptionalIntArrayRef opt_dim,
     const bool keepdim,
     const optional<ScalarType> dtype) {
-  TORCH_CHECK(
-      input_arg.dim() == 4,
-      "Vulkan mean expects 4-dimensional input!");
+  TORCH_CHECK(input_arg.dim() == 4, "Vulkan mean expects 4-dimensional input!");
 
   static const std::unordered_set<int64_t> expected_dims_set({2, 3});
   std::unordered_set<int64_t> dims_set;
 
-  for (const auto& d : dim) {
-    dims_set.insert(utils::normalize(d, 4));
+  if (opt_dim.has_value()) {
+    auto dim = opt_dim.value();
+    for (const auto& d : dim) {
+      dims_set.insert(utils::normalize(d, 4));
+    }
   }
 
   TORCH_CHECK(
@@ -38,8 +39,8 @@ Tensor mean(
   const IntArrayRef v_input_sizes = v_input.sizes();
 
   c10::SmallVector<int64_t, 4u> output_sizes{
-    v_input_sizes[Layout::Activation4D::batch],
-    v_input_sizes[Layout::Activation4D::channels],
+      v_input_sizes[Layout::Activation4D::batch],
+      v_input_sizes[Layout::Activation4D::channels],
   };
 
   if (keepdim) {
@@ -48,33 +49,32 @@ Tensor mean(
   }
 
   vTensor v_output{
-    context,
-    output_sizes,
-    v_input.options(),
+      context,
+      output_sizes,
+      input_arg.scalar_type(),
   };
 
+  int32_t channels = safe_downcast<int32_t>(get_dim<Dim4D::Channel>(v_input));
+  int32_t ch_aligned = api::utils::align_up(channels, 4);
+
   const struct Block final {
-    uvec3 extents;
-    int32_t range;
-    uvec3 iextents;
-  } block {
-    v_output.extents(),
-    safe_downcast<int32_t>(
-        v_input_sizes[Layout::Activation4D::width] *
-        v_input_sizes[Layout::Activation4D::height]),
-    v_input.extents()
+    ivec3 out_extents;
+    int32_t plane_size;
+    ivec3 in_extents;
+    int32_t ch_aligned;
+  } block{
+      api::utils::make_ivec3(v_output.extents()),
+      safe_downcast<int32_t>(
+          v_input_sizes[Layout::Activation4D::width] *
+          v_input_sizes[Layout::Activation4D::height]),
+      api::utils::make_ivec3(v_input.extents()),
+      ch_aligned,
   };
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       keepdim ? VK_KERNEL(mean) : VK_KERNEL(mean2d),
       // pipeline barrier
@@ -90,9 +90,7 @@ Tensor mean(
           pipeline_barrier,
           api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_input.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+      v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 

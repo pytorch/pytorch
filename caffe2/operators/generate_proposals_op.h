@@ -28,7 +28,7 @@ class ConstTensorView {
     return dims_;
   }
   int dim(int i) const {
-    DCHECK_LE(i, dims_.size());
+    TORCH_DCHECK_LE(i, dims_.size());
     return dims_[i];
   }
   const T* data() const {
@@ -103,7 +103,7 @@ class GenerateProposalsOp final : public Operator<Context> {
         legacy_plus_one_(
             this->template GetSingleArgument<bool>("legacy_plus_one", true)) {}
 
-  ~GenerateProposalsOp() {}
+  ~GenerateProposalsOp() override {}
 
   bool RunOnDevice() override;
 

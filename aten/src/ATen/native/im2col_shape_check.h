@@ -1,9 +1,9 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/div_rtn.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static inline void col2im_shape_check(
     const Tensor& input,
@@ -36,6 +36,13 @@ static inline void col2im_shape_check(
       dilation_height,
       " dilation_width: ",
       dilation_width);
+  TORCH_CHECK(
+      pad_width >= 0 && pad_height >= 0,
+      "padding should be non-negative, but got pad_height: ",
+      pad_height,
+      " pad_width: ",
+      pad_width);
+
 
   int64_t ndim = input.ndimension();
   // allow dim=0 only the batch dimension.
@@ -218,9 +225,8 @@ static inline void im2col_shape_check(
         output_height,
         ", ",
         output_width,
-        "), which is too small (non-positive).");
+        "), but its components must be at least one.");
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -2,26 +2,22 @@
 
 import unittest
 
+import pytorch_test_common
+
+import torch
 from model_defs.dcgan import _netD, _netG, bsz, imgsz, nz, weights_init
 from model_defs.emb_seq import EmbeddingNetwork1, EmbeddingNetwork2
 from model_defs.mnist import MNIST
-from model_defs.op_test import (
-    ConcatNet,
-    DummyNet,
-    FakeQuantNet,
-    PermuteNet,
-    PReluNet,
-)
+from model_defs.op_test import ConcatNet, DummyNet, FakeQuantNet, PermuteNet, PReluNet
 from model_defs.squeezenet import SqueezeNet
 from model_defs.srresnet import SRResNet
 from model_defs.super_resolution import SuperResolutionNet
-from test_pytorch_common import (
-    TestCase,
-    run_tests,
-    skipIfNoLapack,
-    skipIfUnsupportedMinOpsetVersion,
-    skipScriptTest,
-)
+from pytorch_test_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
+from torch.ao import quantization
+from torch.autograd import Variable
+from torch.onnx import OperatorExportTypes
+from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import skipIfNoLapack
 from torchvision.models import shufflenet_v2_x1_0
 from torchvision.models.alexnet import alexnet
 from torchvision.models.densenet import densenet121
@@ -34,14 +30,6 @@ from torchvision.models.segmentation import deeplabv3_resnet101, fcn_resnet101
 from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
 from torchvision.models.video import mc3_18, r2plus1d_18, r3d_18
 from verify import verify
-
-import caffe2.python.onnx.backend as backend
-import torch
-import torch.onnx
-import torch.onnx.utils
-from torch import quantization
-from torch.autograd import Variable
-from torch.onnx import OperatorExportTypes
 
 if torch.cuda.is_available():
 
@@ -57,11 +45,13 @@ else:
 BATCH_SIZE = 2
 
 
-class TestModels(TestCase):
+class TestModels(pytorch_test_common.ExportTestCase):
     opset_version = 9  # Caffe2 doesn't support the default.
     keep_initializers_as_inputs = False
 
-    def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7):
+    def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7, **kwargs):
+        import caffe2.python.onnx.backend as backend
+
         with torch.onnx.select_model_mode_for_export(
             model, torch.onnx.TrainingMode.EVAL
         ):
@@ -154,13 +144,10 @@ class TestModels(TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(resnet50()), toC(x), atol=1e-6)
 
-    @unittest.skip(
-        "This test has been flaky on trunk and PRs. See https://github.com/pytorch/pytorch/issues/79540"
-    )
-    @skipScriptTest(min_opset_version=15)  # None type in outputs
+    # This test is numerically unstable. Sporadic single element mismatch occurs occasionally.
     def test_inception(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 299, 299))
-        self.exportTest(toC(inception_v3()), toC(x))
+        self.exportTest(toC(inception_v3()), toC(x), acceptable_error_percentage=0.01)
 
     def test_squeezenet(self):
         # SqueezeNet: AlexNet-level accuracy with 50x fewer parameters and
@@ -244,7 +231,7 @@ class TestModels(TestCase):
 
         self.exportTest(toC(qat_resnet50), toC(x))
 
-    @skipScriptTest(min_opset_version=15)  # None type in outputs
+    @skipScriptTest(skip_before_opset_version=15, reason="None type in outputs")
     def test_googlenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(googlenet()), toC(x), rtol=1e-3, atol=1e-5)
@@ -296,4 +283,4 @@ class TestModels(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    common_utils.run_tests()

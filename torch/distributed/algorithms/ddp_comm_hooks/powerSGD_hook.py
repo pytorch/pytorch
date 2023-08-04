@@ -3,7 +3,6 @@ import logging
 import math
 from typing import Dict
 
-import numpy as np
 import torch
 import torch.distributed as dist
 
@@ -82,7 +81,7 @@ def _should_compress(
 
     The result of this function is a tuple of the form (compression_recommendation, uncompressed_el_count, compressed_el_count), where:
 
-    compresion_recommendation is true if the tensor is worth compressing, and false otherwise (see above);
+    compression_recommendation is true if the tensor is worth compressing, and false otherwise (see above);
 
     uncompressed_el_count is the uncompressed element count, i.e. ``num_rows`` * ``num_cols``; and,
 
@@ -107,13 +106,13 @@ def _report_compression_stats(bucket, state):
     ):
         stats = state.compression_stats()
         logger.info(
-            "Compression stats: iter {}, total before compression {}, total after compression {}, "
-            "rate {}".format(state.iter, stats[1], stats[2], stats[0])
+            "Compression stats: iter %s, total before compression %s, total after compression %s, "
+            "rate %s", state.iter, stats[1], stats[2], stats[0]
         )
         state.next_stats_report = state.iter + state.compression_stats_logging_frequency
 
 
-class PowerSGDState(object):
+class PowerSGDState:
     r"""
     Stores both the algorithm's hyperparameters and the internal state for all the gradients during the training.
     Particularly, ``matrix_approximation_rank`` and ``start_powerSGD_iter`` are the main hyperparameters that should be tuned by the user.
@@ -123,9 +122,9 @@ class PowerSGDState(object):
 
         1.1. If ``matrix_approximation_rank`` is too low, the full model quality will need more training steps to reach or will never reach and yield loss in accuracy.
 
-        1.2. The increase of ``matrix_approximation_rank`` can substantially increase the computation costs of the compression, and the accuracy may not be futher improved beyond a certain ``matrix_approximation_rank`` threshold.
+        1.2. The increase of ``matrix_approximation_rank`` can substantially increase the computation costs of the compression, and the accuracy may not be further improved beyond a certain ``matrix_approximation_rank`` threshold.
 
-    To tune ``matrix_approximation_rank``, we suggest to start from 1 and increase by factors of 2 (like an expoential grid search, 1, 2, 4, ...), until a satisfactory accuracy is reached. Typically only a small value 1-4 is used. For some NLP tasks (as shown in Appendix D of the original paper), this value has been increased to 32.
+    To tune ``matrix_approximation_rank``, we suggest to start from 1 and increase by factors of 2 (like an exponential grid search, 1, 2, 4, ...), until a satisfactory accuracy is reached. Typically only a small value 1-4 is used. For some NLP tasks (as shown in Appendix D of the original paper), this value has been increased to 32.
 
     2. ``start_powerSGD_iter`` defers PowerSGD compression until step ``start_powerSGD_iter``, and vanilla allreduce runs prior to step ``start_powerSGD_iter``. This hybrid scheme of **vanilla allreduce + PowerSGD** can effectively improve the accuracy, even a relatively small ``matrix_approximation_rank`` is used. This is because that, the beginning of training phase is usually very sensitive to inaccurate gradients, and compressing gradients too early may make the training quickly take a suboptimal trajectory, which can result in an irrecoverable impact on the accuracy.
 
@@ -184,19 +183,18 @@ class PowerSGDState(object):
         batch_tensors_with_same_shape: bool = False,
     ):
         logger.info(
-            "PowerSGD config: matrix_approximation_rank = {}; start_powerSGD_iter = {}; "
-            "min_compression_rate = {}; orthogonalization_epsilon = {}; use_error_feedback = {}; warm_start = {}; "
-            "random_seed = {}; compression_stats_logging_frequency = {}; batch_tensors_with_same_shape = {}".format(
-                matrix_approximation_rank,
-                start_powerSGD_iter,
-                min_compression_rate,
-                orthogonalization_epsilon,
-                use_error_feedback,
-                warm_start,
-                random_seed,
-                compression_stats_logging_frequency,
-                batch_tensors_with_same_shape,
-            )
+            "PowerSGD config: matrix_approximation_rank = %s; start_powerSGD_iter = %s; "
+            "min_compression_rate = %s; orthogonalization_epsilon = %s; use_error_feedback = %s; warm_start = %s; "
+            "random_seed = %s; compression_stats_logging_frequency = %s; batch_tensors_with_same_shape = %s",
+            matrix_approximation_rank,
+            start_powerSGD_iter,
+            min_compression_rate,
+            orthogonalization_epsilon,
+            use_error_feedback,
+            warm_start,
+            random_seed,
+            compression_stats_logging_frequency,
+            batch_tensors_with_same_shape,
         )
 
         self.process_group = process_group
@@ -241,6 +239,7 @@ class PowerSGDState(object):
         # Different random seeds across iterations indicate different 'projections' of the gradients at different SGD steps.
         # If the same random projection is used,
         # there will be differences between the gradients that are never synchronized.
+        import numpy as np
         self.rng = np.random.RandomState(random_seed)
         # Since there is only a single state instance for all the input buckets,
         # need to maintain a dictionary that maps each bucket index to the local error.
@@ -258,7 +257,7 @@ class PowerSGDState(object):
             1, compression_stats_logging_frequency
         )
         self.next_stats_report = 0
-        # Batching tensors with same shape can increase parallelism in compressiom / decompression computation.
+        # Batching tensors with same shape can increase parallelism in compression / decompression computation.
         # This requires a larger bucket size to make more same-shaped tensor to appear in one bucket, however
         # this may reduce the overlap between computation and communication, and increase the memory footprint
         # due to stacking tensors.
@@ -300,7 +299,7 @@ class PowerSGDState(object):
 
         if self.iter == self.start_powerSGD_iter:
             logger.info(
-                "Start to apply PowerSGD after {} iterations.".format(self.iter)
+                "Start to apply PowerSGD after %s iterations.", self.iter
             )
 
     def compression_stats(self):
@@ -379,6 +378,7 @@ def powerSGD_hook(
         Future handler of the communication, which updates the gradients in place.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1,
                                   start_powerSGD_iter=10, min_compression_rate=0.5)
         >>> ddp_model.register_comm_hook(state, powerSGD_hook)
@@ -408,9 +408,8 @@ def powerSGD_hook(
             input_tensor.add_(state.error_dict[bucket_index])
         else:
             logger.info(
-                "A zero tensor of length {} that represents local error is created.".format(
-                    total_length
-                )
+                "A zero tensor of length %s that represents local error is created.",
+                total_length
             )
             state.error_dict[bucket_index] = torch.zeros(
                 total_length, device=device, dtype=dtype
@@ -467,9 +466,8 @@ def powerSGD_hook(
         # Only log this if warm-start to avoid spamming.
         if state.warm_start:
             logger.info(
-                "Allocating contiguous memory of length {} for Ps, and of length {} for Qs, respectively.".format(
-                    total_Ps_size, total_Qs_size
-                )
+                "Allocating contiguous memory of length %s for Ps, and of length %s for Qs, respectively.",
+                total_Ps_size, total_Qs_size
             )
         state.p_memory_dict[bucket_index] = torch.empty(
             total_Ps_size, device=device, dtype=dtype
@@ -687,6 +685,7 @@ def batched_powerSGD_hook(
         Future handler of the communication, which updates the gradients in place.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1)
         >>> ddp_model.register_comm_hook(state, batched_powerSGD_hook)
     """  # noqa: B950
@@ -726,9 +725,8 @@ def batched_powerSGD_hook(
             input_tensor.add_(state.error_dict[bucket_index])
         else:
             logger.info(
-                "A zero tensor of length {} that represents local error is created.".format(
-                    padded_total_length
-                )
+                "A zero tensor of length %s that represents local error is created.",
+                padded_total_length
             )
             state.error_dict[bucket_index] = torch.zeros(
                 padded_total_length, device=device, dtype=input_tensor.dtype
@@ -747,9 +745,8 @@ def batched_powerSGD_hook(
         # Only log this if warm-start to avoid spamming.
         if state.warm_start:
             logger.info(
-                "Initializing low-rank tensors P and Q, each of which has a shape of {} x {}.".format(
-                    square_side_length, state.matrix_approximation_rank
-                )
+                "Initializing low-rank tensors P and Q, each of which has a shape of %s x %s.",
+                square_side_length, state.matrix_approximation_rank
             )
 
         def create_low_rank_tensor(fill_random_values, rng):
@@ -825,7 +822,7 @@ def batched_powerSGD_hook(
         if state.use_error_feedback:
             # Memorize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
-        # Removing this seemingly unnecessary sync somehow may cause faliures.
+        # Removing this seemingly unnecessary sync somehow may cause failures.
         # See: https://github.com/pytorch/pytorch/pull/54838
         if torch.cuda.is_available():
             torch.cuda.synchronize(device)

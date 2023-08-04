@@ -23,7 +23,7 @@ bool SoftplusGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
 
-  DCHECK_EQ(dY.numel(), Y.numel());
+  TORCH_DCHECK_EQ(dY.numel(), Y.numel());
   auto* dX = Output(0, Y.sizes(), at::dtype<float>());
 
   const float* Ydata = Y.data<float>();
@@ -50,8 +50,8 @@ Softplus takes one input data tensor $X$ and produces one output data tensor $Y,
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/softplus_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/softplus_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/softplus_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/softplus_op.cc
 
 
 <details>

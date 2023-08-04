@@ -1,5 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
-load("@//third_party:sleef.bzl", "sleef_cc_library")
+load("@pytorch//third_party:sleef.bzl", "sleef_cc_library")
 
 SLEEF_COPTS = [
     "-DHAVE_MALLOC_USABLE_SIZE=1",

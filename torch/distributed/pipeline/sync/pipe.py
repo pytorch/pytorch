@@ -21,7 +21,7 @@ from .skip.layout import inspect_skip_layout
 from .skip.skippable import verify_skippables
 from .stream import AbstractStream, new_stream
 
-__all__ = ["Pipe"]
+__all__ = ["Pipe", "BalanceError", "PipeSequential", "WithDevice"]
 
 
 Device = Union[torch.device, int, str]
@@ -149,17 +149,20 @@ class WithDevice(nn.Module):
         device(:class:`torch.device`): The device to run the module on.
 
     Example::
+        >>> # xdoctest: +SKIP("distributed")
         >>> fc1 = nn.Linear(16, 8).cuda(0)
         >>> fc2 = nn.Linear(8, 4).cuda(1)
         >>> dropout = nn.Dropout()
         >>>
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA1)
         >>> # Dropout does not have any parameters/buffers, but we want to
         >>> # run it on cuda:1 to avoid any GPU to CPU transfers.
         >>> model = nn.Sequential(fc1, fc2, WithDevice(dropout, 'cuda:1'))
+        >>> # xdoctest: +SKIP("Needs RPC framework init")
         >>> model = Pipe(model, chunks=8)
     """
     def __init__(self, module: nn.Module, device: torch.device):
-        super(WithDevice, self).__init__()
+        super().__init__()
         self._module = module
         self._device = torch.device(device)
 
@@ -183,6 +186,7 @@ def _assemble_partition(modules: List[nn.Module]):
         else:
             modules_list.append(module)
     return PipeSequential(*modules_list)
+
 
 def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[torch.device]]:
     partitions = []
@@ -214,7 +218,7 @@ def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[tor
     return partitions, devices
 
 
-MOVING_DENIED = TypeError("denied to move parameters and buffers, " "because Pipe should manage device placement")
+MOVING_DENIED = TypeError("denied to move parameters and buffers, because Pipe should manage device placement")
 
 
 class Pipe(Module):
@@ -270,6 +274,7 @@ class Pipe(Module):
         Pipeline of two FC layers across GPUs 0 and 1.
 
         >>> # Need to initialize RPC framework first.
+        >>> # xdoctest: +SKIP
         >>> os.environ['MASTER_ADDR'] = 'localhost'
         >>> os.environ['MASTER_PORT'] = '29500'
         >>> torch.distributed.rpc.init_rpc('worker', rank=0, world_size=1)
@@ -292,7 +297,7 @@ class Pipe(Module):
         will be expanded to support inter-node pipelining in the future.
         The forward function returns an :class:`~torch.distributed.rpc.RRef`
         to allow for inter-node pipelining in the future, where the output
-        might be on a remote host. For intra-node pipelinining you can use
+        might be on a remote host. For intra-node pipelining you can use
         :meth:`~torch.distributed.rpc.RRef.local_value` to retrieve the
         output locally.
 
@@ -413,7 +418,7 @@ class Pipe(Module):
 
         It's worth to cache CUDA streams although PyTorch already manages a
         pool of pre-allocated CUDA streams, because it may reduce GPU memory
-        fragementation when the number of micro-batches is small.
+        fragmentation when the number of micro-batches is small.
 
         """
         if not self._copy_streams:

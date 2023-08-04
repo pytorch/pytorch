@@ -17,6 +17,7 @@
 #include <c10/util/SmallVector.h>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 using namespace c10;
 
 // Check that no bytes are wasted and everything is well-aligned.
@@ -111,6 +112,7 @@ void* SmallVectorBase<Size_T>::mallocForGrow(
     size_t TSize,
     size_t& NewCapacity) {
   NewCapacity = getNewCapacity<Size_T>(MinSize, TSize, this->capacity());
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   auto Result = std::malloc(NewCapacity * TSize);
   if (Result == nullptr) {
     throw std::bad_alloc();
@@ -125,8 +127,9 @@ void SmallVectorBase<Size_T>::grow_pod(
     size_t MinSize,
     size_t TSize) {
   size_t NewCapacity = getNewCapacity<Size_T>(MinSize, TSize, this->capacity());
-  void* NewElts;
+  void* NewElts = nullptr;
   if (BeginX == FirstEl) {
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     NewElts = std::malloc(NewCapacity * TSize);
     if (NewElts == nullptr) {
       throw std::bad_alloc();
@@ -136,6 +139,7 @@ void SmallVectorBase<Size_T>::grow_pod(
     memcpy(NewElts, this->BeginX, size() * TSize);
   } else {
     // If this wasn't grown from the inline copy, grow the allocated space.
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     NewElts = std::realloc(this->BeginX, NewCapacity * TSize);
     if (NewElts == nullptr) {
       throw std::bad_alloc();

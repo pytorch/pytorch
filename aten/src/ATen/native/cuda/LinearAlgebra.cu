@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/LinearAlgebra.h>
@@ -8,7 +9,7 @@
 #include <ATen/native/ReduceOps.h>
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -100,14 +101,14 @@ static void _launch_kernel(int total_n_elems, func_t f) {
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-void unpack_pivots_cuda_kernel(TensorIterator& iter, const int64_t dim_size) {
+void unpack_pivots_cuda_kernel(TensorIterator& iter, const int64_t dim_size, const int64_t max_pivot) {
   if (iter.numel() == 0) {
     return;
   }
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      unpack_pivots_cuda_kernel(sub_iter, dim_size);
+      unpack_pivots_cuda_kernel(sub_iter, dim_size, max_pivot);
     }
     return;
   }
@@ -138,4 +139,4 @@ void unpack_pivots_cuda_kernel(TensorIterator& iter, const int64_t dim_size) {
 
 REGISTER_DISPATCH(unpack_pivots_stub, &unpack_pivots_cuda_kernel);
 REGISTER_DISPATCH(addr_stub, &addr_kernel_cuda);
-}}
+} // namespace at::native

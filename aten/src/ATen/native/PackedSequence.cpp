@@ -1,11 +1,26 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_pack_padded_sequence_backward_native.h>
+#include <ATen/ops/_pack_padded_sequence_native.h>
+#include <ATen/ops/_pad_packed_sequence_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/pad_sequence_native.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
 
 #include <c10/util/irange.h>
 
 namespace at { namespace native {
 
-void checkLongTensor(const Tensor& tensor) {
+static void checkLongTensor(const Tensor& tensor) {
   TORCH_CHECK(tensor.dim() == 1 && tensor.device().type() == at::kCPU && tensor.scalar_type() == at::kLong,
            "'lengths' argument should be a 1D CPU int64 tensor, but got ",
             tensor.dim(), "D ", tensor.device().str(), " ", tensor.scalar_type(), " tensor");
@@ -17,13 +32,14 @@ void checkLongTensor(const Tensor& tensor) {
 // must be a CPU int64 tensor.
 // See NOTE [ device and dtype of a PackedSequence ]
 std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Tensor& _lengths, bool batch_first) {
+  TORCH_CHECK(_input.numel() > 0, "Cannot pack empty tensors.");
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   auto lengths_t = _lengths.contiguous();
   checkLongTensor(lengths_t);
 
   int64_t batch_size = input.size(1);
   int64_t * lengths = lengths_t.data_ptr<int64_t>();
-  TORCH_CHECK(input.numel() > 0, "Cannot pack empty tensors.");
+
   TORCH_CHECK(lengths_t.size(0) == batch_size,
            "Expected `len(lengths)` to be equal to batch_size, but got ", lengths_t.size(0),
            " (batch_size=", batch_size, ")");
@@ -45,7 +61,7 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
   std::vector<at::Tensor> steps;
   steps.reserve(batch_size);
   at::Tensor batch_sizes_t = at::empty(lengths[0], _lengths.options());
-  int64_t * batch_sizes = batch_sizes_t.data_ptr<int64_t>();
+  int64_t * batch_sizes = batch_sizes_t.mutable_data_ptr<int64_t>();
 
   std::vector<int64_t> step_shape; // == [-1, *input.shape[2:]]
   {
@@ -96,18 +112,20 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
 // `grad` could be on arbitrary device and of arbitrary dtype, but `_batch_sizes`
 // is guaranteed to be a CPU int64 tensor.
 // See NOTE [ device and dtype of a PackedSequence ]
-Tensor _pack_padded_sequence_backward(const Tensor& grad, at::IntArrayRef input_size, const Tensor& _batch_sizes, bool batch_first) {
-  std::vector<int64_t> input_size_after_t = input_size.vec();
+Tensor _pack_padded_sequence_backward_symint(const Tensor& grad, c10::SymIntArrayRef input_size, const Tensor& _batch_sizes, bool batch_first) {
+  std::vector<c10::SymInt> input_size_after_t = input_size.vec();
   if (batch_first) {
     TORCH_CHECK(input_size.size() >= 2);
     std::swap(input_size_after_t[0], input_size_after_t[1]);
   }
-  auto grad_input = at::zeros(input_size_after_t, grad.options());
+  auto grad_input = at::zeros_symint(input_size_after_t, grad.options());
   auto batch_sizes_t = _batch_sizes.contiguous();
   checkLongTensor(batch_sizes_t);
 
   int64_t offset = 0;
-  int64_t max_seq_len = batch_sizes_t.size(0);
+  // NOTE: this op advertises as CompositeImplicitAutograd, but uses data_ptr().
+  // we should fix this.
+  auto max_seq_len = batch_sizes_t.size(0);
   int64_t * batch_sizes = batch_sizes_t.data_ptr<int64_t>();
   for (const auto i : c10::irange(max_seq_len)) {
     grad_input[i].slice(0, 0, batch_sizes[i]).copy_(grad.slice(0, offset, offset + batch_sizes[i]));
@@ -151,7 +169,7 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
   std::vector<int64_t> tmp_view_size = std::move(output_size); // == [-1, -1, *var_data.size()[1:]]
 
   at::Tensor lengths_t = at::empty(max_batch_size, batch_sizes_t.options());
-  int64_t * lengths = lengths_t.data_ptr<int64_t>() + max_batch_size - 1;
+  int64_t * lengths = lengths_t.mutable_data_ptr<int64_t>() + max_batch_size - 1;
   int64_t data_offset = 0;
   int64_t prev_batch_size = max_batch_size;
   int64_t prev_i = 0;
@@ -208,7 +226,7 @@ Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value
 
   Tensor out = at::full(out_dims, padding_value, sequences[0].options());
   for (const auto i : c10::irange(sequences_size)) {
-    const Tensor currseq = sequences[i];
+    const Tensor& currseq = sequences[i];
     const int64_t length_i = currseq.size(0);
     // use index notation to prevent duplicate references to the tensor
     if (batch_first) {

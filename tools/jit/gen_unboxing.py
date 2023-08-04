@@ -4,27 +4,25 @@ import os
 import pathlib
 import sys
 from dataclasses import dataclass
-from typing import Union, Sequence, List
+from typing import List, Literal, Sequence, Union
 
 import yaml
-from typing_extensions import Literal
 
-from torchgen.api import cpp
-from torchgen.api import unboxing
+from torchgen.api import cpp, unboxing
 from torchgen.api.translate import translate
 from torchgen.api.types import CppSignatureGroup
 from torchgen.api.unboxing import convert_arguments
 from torchgen.context import method_with_native_function
-from torchgen.gen import parse_native_yaml, cpp_string, get_custom_build_selector
-from torchgen.model import NativeFunction, NativeFunctionsGroup, Variant, Argument
+from torchgen.gen import cpp_string, get_custom_build_selector, parse_native_yaml
+from torchgen.model import Argument, NativeFunction, NativeFunctionsGroup, Variant
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import Target, FileManager, mapMaybe, make_file_manager
+from torchgen.utils import FileManager, make_file_manager, mapMaybe, Target
 
 
 # Generates UnboxingFunctions.h & UnboxingFunctions.cpp.
 @dataclass(frozen=True)
 class ComputeUnboxingFunctions:
-    target: Union[Literal[Target.DECLARATION], Literal[Target.DEFINITION]]
+    target: Literal[Target.DECLARATION, Target.DEFINITION]
     selector: SelectiveBuilder
 
     @method_with_native_function
@@ -117,7 +115,9 @@ class ComputeCodegenUnboxedKernels:
                 # from wrapping/unwrapping TensorOptios.
                 # However, we would look to include default args for schema parsing.
                 # Default args only show up in the nonfaithful C++ API,
-                arg_default = cpp.default_expr(arg.argument.default, arg.argument.type)
+                arg_default = cpp.default_expr(
+                    arg.argument.default, arg.argument.type, symint=False
+                )
                 if arg_default.startswith("{"):
                     arg_cpp = f"c10::IntArrayRef({arg_default})"
                 else:
@@ -159,6 +159,9 @@ def gen_unboxing(
     def key_func(fn: Union[NativeFunction, NativeFunctionsGroup]) -> str:
         return fn.root_name
 
+    selected_op_num: int = len(selector.operators)
+    # a best practice threshold of operators to enable sharding
+    sharding_threshold: int = 100
     cpu_fm.write_sharded(
         "UnboxingFunctions.cpp",
         native_functions,
@@ -166,7 +169,7 @@ def gen_unboxing(
         env_callable=lambda fn: {
             "definitions": [ComputeUnboxingFunctions(Target.DEFINITION, selector)(fn)]
         },
-        num_shards=5,
+        num_shards=1 if selected_op_num < sharding_threshold else 5,
         sharded_keys={"definitions"},
     )
     cpu_fm.write(
@@ -187,7 +190,7 @@ def gen_unboxing(
         env_callable=lambda fn: {
             "unboxed_ops": [ComputeCodegenUnboxedKernels(selector)(fn)]
         },
-        num_shards=10,
+        num_shards=1 if selected_op_num < sharding_threshold else 10,
         sharded_keys={"unboxed_ops"},
     )
 
@@ -201,7 +204,11 @@ def main(args: List[str]) -> None:
         default="aten/src/ATen",
     )
     parser.add_argument(
-        "-d", "--install_dir", help="output directory", default="build/aten/src/ATen"
+        "-d",
+        "--install-dir",
+        "--install_dir",
+        help="output directory",
+        default="build/aten/src/ATen",
     )
     parser.add_argument(
         "-o",
@@ -214,6 +221,7 @@ def main(args: List[str]) -> None:
         help="run without writing any files (still updates outputs)",
     )
     parser.add_argument(
+        "--op-selection-yaml-path",
         "--op_selection_yaml_path",
         help="Provide a path to the operator selection (for custom build) YAML "
         "that contains the information about the set of selected operators "
@@ -222,6 +230,7 @@ def main(args: List[str]) -> None:
         "The operator names also contain the namespace prefix (e.g. aten::)",
     )
     parser.add_argument(
+        "--op-registration-allowlist",
         "--op_registration_allowlist",
         nargs="*",
         help="filter op registrations by the allowlist (if set); "
@@ -229,6 +238,7 @@ def main(args: List[str]) -> None:
         "e.g.: aten::empty aten::conv2d ...",
     )
     parser.add_argument(
+        "--TEST-ONLY-op-registration-allowlist-yaml-path",
         "--TEST_ONLY_op_registration_allowlist_yaml_path",
         help="Provide a path to the operator selection (for custom build) YAML "
         "which contains a list of operators. It is to serve testing purpose and "
@@ -240,13 +250,13 @@ def main(args: List[str]) -> None:
     if options.op_registration_allowlist:
         op_registration_allowlist = options.op_registration_allowlist
     elif options.TEST_ONLY_op_registration_allowlist_yaml_path:
-        with open(options.TEST_ONLY_op_registration_allowlist_yaml_path, "r") as f:
+        with open(options.TEST_ONLY_op_registration_allowlist_yaml_path) as f:
             op_registration_allowlist = yaml.safe_load(f)
     else:
         op_registration_allowlist = None
 
     selector = get_custom_build_selector(
-        options.op_registration_allowlist,
+        op_registration_allowlist,
         options.op_selection_yaml_path,
     )
 

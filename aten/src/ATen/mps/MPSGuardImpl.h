@@ -4,6 +4,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <ATen/Context.h>
 #include <ATen/mps/MPSStream.h>
 
 #ifdef __OBJC__
@@ -28,29 +29,29 @@ namespace mps {
 // TODO: Move the MPSGuardImpl to inherit from NoOpDeviceGuardImpl
 // https://github.com/pytorch/pytorch/issues/77170
 struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface {
-  static constexpr DeviceType static_type = DeviceType::MPS;
+  static constexpr c10::DeviceType static_type = c10::DeviceType::MPS;
 
   // constructor
   MPSGuardImpl() {}
-  explicit MPSGuardImpl(DeviceType t) {
-    TORCH_INTERNAL_ASSERT(t == DeviceType::MPS);
+  explicit MPSGuardImpl(c10::DeviceType t) {
+    TORCH_INTERNAL_ASSERT(t == c10::DeviceType::MPS);
   }
 
   // returns the type
-  DeviceType type() const override {
-    return DeviceType::MPS;
+  c10::DeviceType type() const override {
+    return c10::DeviceType::MPS;
   }
 
   Device exchangeDevice(Device d) const override {
-    return Device(DeviceType::MPS, 0);
+    return Device(c10::DeviceType::MPS, 0);
   }
 
   Device getDevice() const override {
-    return Device(DeviceType::MPS, 0);
+    return Device(c10::DeviceType::MPS, 0);
   }
 
   c10::optional<Device> uncheckedGetDevice() const noexcept {
-    return Device(DeviceType::MPS, 0);
+    return Device(c10::DeviceType::MPS, 0);
   }
 
   void setDevice(Device d) const override {
@@ -62,16 +63,16 @@ struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface
   }
 
   Stream getStream(Device d) const noexcept override {
-    return Stream(Stream::DEFAULT, Device(DeviceType::MPS, 0));
+    return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
 
   Stream getDefaultStream(Device d) const override {
-    return Stream(Stream::DEFAULT, Device(DeviceType::MPS, 0));
+    return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
 
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const noexcept override {
-    return Stream(Stream::DEFAULT, Device(DeviceType::MPS, 0));
+    return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
   DeviceIndex deviceCount() const noexcept override {
     if (at::hasMPS()) {
@@ -109,12 +110,12 @@ struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface
 struct OptionalMPSGuard {
   explicit OptionalMPSGuard() : guard_() {}
 
-  explicit OptionalMPSGuard(optional<Device> device_opt)
+  explicit OptionalMPSGuard(c10::optional<Device> device_opt)
       : guard_(device_opt) {}
 
   /// Set the current MPS device to the passed device index, if it is not
   /// nullopt
-  explicit OptionalMPSGuard(optional<DeviceIndex> device_index_opt)
+  explicit OptionalMPSGuard(c10::optional<DeviceIndex> device_index_opt)
       : guard_(device_index_opt) {}
 
   // Copy is not allowed
@@ -144,14 +145,14 @@ struct OptionalMPSGuard {
 
   /// Returns the device that was set immediately prior to initialization of the
   /// guard, or nullopt if the guard is uninitialized.
-  optional<Device> original_device() const {
+  c10::optional<Device> original_device() const {
     return guard_.original_device();
   }
 
   /// Returns the most recent device that was set using this device guard,
   /// either from construction, or via set_device, if the guard is initialized,
   /// or nullopt if the guard is uninitialized.
-  optional<Device> current_device() const {
+  c10::optional<Device> current_device() const {
     return guard_.current_device();
   }
 

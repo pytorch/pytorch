@@ -3,12 +3,13 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/JitLoops.cuh>
+#include <ATen/native/cuda/Pow.cuh>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/Pow.h>
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 // Forward declare some unary kernels
 void rsqrt_kernel_cuda(TensorIteratorBase& iter);
@@ -16,54 +17,6 @@ void sqrt_kernel_cuda(TensorIteratorBase& iter);
 void reciprocal_kernel_cuda(TensorIteratorBase& iter);
 
 namespace {
-
-
-// SFINAE doesn't work well with NVCC under Windows for math functions like pow and sqrt.
-// So we need to define the functions with the explicit function signatures.
-// As for pow, the following signatures are defined as the device function:
-//   pow(float, int)
-//   pow(double, int)
-//   pow(float, float)
-//   pow(double, double)
-#ifdef _MSC_VER
-// Functions for pow
-// pow for at::Half
-static inline __host__ __device__ at::Half pow_(at::Half base, at::Half exp) {
-  return static_cast<at::Half>(std::pow(static_cast<float>(base), static_cast<float>(exp)));
-}
-// pow for at::BFloat16
-static inline __host__ __device__ at::BFloat16 pow_(at::BFloat16 base, at::BFloat16 exp) {
-  return static_cast<at::BFloat16>(std::pow(static_cast<float>(base), static_cast<float>(exp)));
-}
-// pow (floating, floating/int)
-template <typename Base_type, typename Exp_type>
-static inline __host__ __device__ typename std::enable_if<std::is_floating_point<Base_type>::value && (std::is_same<Base_type, Exp_type>::value || std::is_same<Exp_type, int>::value), Base_type>::type
-  pow_(Base_type base, Exp_type exp) {
-  return std::pow(base, exp);
-}
-// pow (Otherwise)
-template <typename Base_type, typename Exp_type>
-static inline __host__ __device__ typename std::enable_if<!std::is_same<Base_type, Exp_type>::value && !std::is_same<Exp_type, int>::value, Base_type>::type
-  pow_(Base_type base, Exp_type exp) {
-  return static_cast<Base_type>(std::pow(static_cast<double>(base), static_cast<double>(exp)));
-}
-#else
-template <typename Base_type, typename Exp_type>
-static inline __host__ __device__ Base_type pow_(Base_type base, Exp_type exp) {
-  return ::pow(base, exp);
-}
-#endif
-
-template <typename T>
-static inline __host__ __device__ std::enable_if_t<std::is_integral<T>::value, T> pow_(
-    T base, T exp) {
-  return at::native::powi(base, exp);
-}
-
-template <typename T>
-static inline __host__ __device__ c10::complex<T> pow_(c10::complex<T> base, c10::complex<T> exp) {
-  return c10_complex_math::pow(base, exp);
-}
 
 void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar);
 
@@ -85,7 +38,7 @@ void pow_scalar_tensor_impl(TensorIteratorBase& iter, c10::complex<value_t> base
 }
 
 /* complex<Half> support impl */
-const char pow_scalar_base_name[] = "pow_scalar_base_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char pow_scalar_base_name[] = "pow_scalar_base_kernel";
 template <>
 void pow_scalar_tensor_impl(TensorIteratorBase& iter, c10::complex<at::Half> base) {
   using scalar_t = c10::complex<at::Half>;
@@ -115,7 +68,7 @@ namespace {
 
 #if AT_USE_JITERATOR()
 /* complex<Half> support impl */
-const char pow_name[] = "pow_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char pow_name[] = "pow_kernel";
 static const auto pow_kernel_string =
     jiterator_stringify(template <typename T> T pow_kernel(T base, T exp) {
       return std::pow(base, exp);
@@ -253,4 +206,4 @@ void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar
 REGISTER_DISPATCH(pow_tensor_tensor_stub, &pow_tensor_tensor_kernel);
 REGISTER_DISPATCH(pow_tensor_scalar_stub, &pow_tensor_scalar_kernel);
 
-}} // namespace at::native
+} // namespace at::native

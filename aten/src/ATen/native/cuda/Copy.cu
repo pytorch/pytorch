@@ -6,7 +6,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/PeerToPeerAccess.h>
-#include <c10/cuda/CUDAStream.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -17,13 +16,14 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
-namespace at {
-namespace native {
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAStream.h>
+
+namespace at::native {
 
 void neg_kernel_cuda(TensorIteratorBase &iter);
 void conj_kernel_cuda(TensorIteratorBase &iter);
 
-namespace {
 void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
   ScalarType dtype = iter.dtype(0);
   if (isQIntType(dtype)) {
@@ -31,8 +31,8 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-        kHalf, kBool, kBFloat16, kComplexHalf, dtype, "copy_", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(
+        kHalf, kBool, kBFloat16, kComplexHalf, kFloat8_e4m3fn, kFloat8_e5m2, dtype, "copy_", [&] {
           gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
   }
@@ -43,12 +43,13 @@ void neg_conj_kernel_cuda(TensorIteratorBase &iter) {
     gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return -std::conj(x); });
   });
 }
-}  // namespace (anonymous)
 
 using namespace at::cuda;
 
 // device-to-device copy, does type conversion
-void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
+void copy_device_to_device(TensorIterator& iter,
+                           bool non_blocking,
+                           bool p2p_enabled) {
   int64_t numel = iter.numel();
 
   // We can memcpy the memory if both tensors have the same type AND both
@@ -89,11 +90,15 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
     void *src = iter.data_ptr(1);
     size_t size = numel * iter.element_size(0);
     if (src != dst || src_device != dst_device) {
-      // Perform the copy
-      AT_CUDA_CHECK(cudaMemcpyAsync(
-          dst, src, size,
-          cudaMemcpyDeviceToDevice,
-          copy_stream));
+      // Due to bizarre cuda driver intricacies, copies of
+      // cudaMallocAsynced memory between devices that aren't
+      // peer-to-peer-capable need "cudaMemcpyPeerAsync".
+      // So we let the allocator implement the correct call
+      // (either cudaMemcpyAsync or cudaMemcpyPeerAsync)
+      AT_CUDA_CHECK(CUDACachingAllocator::memcpyAsync(
+        dst, dst_device.index(),
+        src, src_device.index(),
+        size, copy_stream, p2p_enabled));
     }
   } else {
     if (same_neg) {
@@ -173,9 +178,10 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     Tensor dst_contig;
     Tensor src_contig;
 
-    // Type conversions are performed on the CPU for CPU-GPU copies and on
-    // the src device for GPU-GPU copies.
-    if (iter.device_type(0) == kCUDA) {
+    // If non_blocking is true - type conversions are performed on the GPU
+    // for CPU-GPU copies, otherwise type conversions are performed on the CPU.
+    // Type conversions are performed on the src device for GPU-GPU copies.
+    if (iter.device_type(0) == kCUDA || non_blocking) {
       dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous();
     } else {
@@ -206,7 +212,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
 
   // Copy on GPU (or between GPUs)
   if (dst_device.is_cuda() && src_device.is_cuda()) {
-    copy_device_to_device(iter, non_blocking);
+    copy_device_to_device(iter, non_blocking, p2p_enabled);
     return;
   }
 
@@ -263,5 +269,4 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
 
 REGISTER_DISPATCH(copy_stub, &copy_kernel_cuda);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

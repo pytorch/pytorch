@@ -23,8 +23,7 @@ using c10::make_right;
 using c10::OperatorName;
 using c10::OptionalType;
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 struct SchemaParser {
@@ -165,7 +164,11 @@ struct SchemaParser {
       N = c10::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
       auto container = type_parser.parseAliasAnnotation();
-      if (container && alias_info) {
+      if (alias_info) {
+        if (!container) {
+          container = c10::optional<at::AliasInfo>(at::AliasInfo());
+          container->setIsWrite(alias_info->isWrite());
+        }
         container->addContainedType(std::move(*alias_info));
       }
       alias_info = std::move(container);
@@ -386,5 +389,4 @@ OperatorName parseName(const std::string& name) {
   return std::move(parsed.left());
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

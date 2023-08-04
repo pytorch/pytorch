@@ -21,7 +21,7 @@ class TestFuture(TestCase):
         error_msg = "Intentional Value Error"
         value_error = ValueError(error_msg)
 
-        f = Future[T]()
+        f = Future[T]()  # type: ignore[valid-type]
         # Set exception
         f.set_exception(value_error)
         # Exception should throw on wait
@@ -29,7 +29,7 @@ class TestFuture(TestCase):
             f.wait()
 
         # Exception should also throw on value
-        f = Future()
+        f = Future[T]()  # type: ignore[valid-type]
         f.set_exception(value_error)
         with self.assertRaisesRegex(ValueError, "Intentional"):
             f.value()
@@ -37,7 +37,7 @@ class TestFuture(TestCase):
         def cb(fut):
             fut.value()
 
-        f = Future()
+        f = Future[T]()  # type: ignore[valid-type]
         f.set_exception(value_error)
 
         with self.assertRaisesRegex(RuntimeError, "Got the following error"):
@@ -54,7 +54,7 @@ class TestFuture(TestCase):
             with self.assertRaisesRegex(ValueError, "Intentional"):
                 f.wait()
 
-        f = Future[T]()
+        f = Future[T]()  # type: ignore[valid-type]
         t = threading.Thread(target=wait_future, args=(f, ))
         t.start()
         f.set_exception(value_error)
@@ -68,7 +68,7 @@ class TestFuture(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Got the following error"):
                 fut.wait()
 
-        f = Future[T]()
+        f = Future[T]()  # type: ignore[valid-type]
         t = threading.Thread(target=then_future, args=(f, ))
         t.start()
         f.set_exception(value_error)
@@ -326,6 +326,15 @@ class TestFuture(TestCase):
         fut3 = fut1.then(raise_in_fut)
         with self.assertRaisesRegex(RuntimeError, "Expected error"):
             torch.futures.wait_all([fut3, fut2])
+
+    def test_wait_none(self):
+        fut1 = Future[int]()
+        with self.assertRaisesRegex(RuntimeError, "Future can't be None"):
+            torch.jit.wait(None)
+        with self.assertRaisesRegex(RuntimeError, "Future can't be None"):
+            torch.futures.wait_all((None,))  # type: ignore[arg-type]
+        with self.assertRaisesRegex(RuntimeError, "Future can't be None"):
+            torch.futures.collect_all((fut1, None,))  # type: ignore[arg-type]
 
 if __name__ == '__main__':
     run_tests()

@@ -5,7 +5,7 @@
 #include <ATen/core/IListRef.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 [[noreturn]]
 static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, int64_t maskIdx) {
@@ -48,12 +48,18 @@ static C10_UNUSED std::vector<Tensor> expandTensors(const Tensor & self, IOptTen
   return result;
 }
 
-static C10_UNUSED void checkIndexTensorTypes(IOptTensorListRef indices) {
+static C10_UNUSED void checkIndexTensorTypes(IOptTensorListRef indices, bool allow_int=false) {
   for (const auto& tensor : indices) {
     if (tensor.has_value() && tensor->defined()) {
       auto scalarType = tensor->scalar_type();
-      if (scalarType != kLong && scalarType != kByte && scalarType != kBool) {
-          TORCH_CHECK_INDEX(false, "tensors used as indices must be long, byte or bool tensors");
+      if (allow_int) {
+        if (scalarType != kLong && scalarType != kByte && scalarType != kBool && scalarType != kInt) {
+            TORCH_CHECK_INDEX(false, "tensors used as indices must be long, int, byte or bool tensors");
+        }
+      } else {
+        if (scalarType != kLong && scalarType != kByte && scalarType != kBool) {
+            TORCH_CHECK_INDEX(false, "tensors used as indices must be long, byte or bool tensors");
+        }
       }
     }
   }
@@ -151,4 +157,4 @@ struct AdvancedIndex {
 };
 
 
-}}
+} //namespace at::native

@@ -1,10 +1,9 @@
 #pragma once
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/TensorIterator.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 static std::string shapes_as_str(TensorList tensors) {
   std::ostringstream os;
@@ -30,11 +29,11 @@ const Tensor& value){
   int64_t num_ind = 0;
   Tensor mask;
   auto self_device = self.device();
-  for (const c10::optional<Tensor> i: indices) {
+  for (const c10::optional<Tensor>& i: indices) {
     if (!i.has_value() || !(*i).defined()){
       num_ind++;
     } else {
-      Tensor index = std::move(*i);
+      const Tensor &index = *i;
       if ((index.scalar_type() != kByte && index.scalar_type() != kBool) ||
           index.device() != self_device || mask.defined()){
         return std::make_tuple(false, Tensor());
@@ -57,7 +56,7 @@ const Tensor& value){
 }
 
 static AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
-  checkIndexTensorTypes(orig);
+  checkIndexTensorTypes(orig, /*allow_int*/ true);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
   // next broadcast all index tensors together
@@ -82,8 +81,13 @@ static AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
       indice = indice.to(self.device());
     }
   }
+  for (auto & indice : indices) {
+    if (indice.defined() && indice.dtype() == at::kInt) {
+      indice = indice.to(at::kLong);
+    }
+  }
+
   return AdvancedIndex(self, indices);
 }
 
-} // at
-} // native
+} // namespace at::native

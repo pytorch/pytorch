@@ -3,92 +3,348 @@
 from .common import AOMigrationTestCase
 
 
-class TestAOMigrationQuantization(AOMigrationTestCase):
-    def test_package_import_quantize(self):
-        self._test_package_import('quantize')
-
-    def test_function_import_quantize(self):
+class TestAOMigrationNNQuantized(AOMigrationTestCase):
+    def test_functional_import(self):
+        r"""Tests the migration of the torch.nn.quantized.functional"""
         function_list = [
-            '_convert',
-            '_observer_forward_hook',
-            '_propagate_qconfig_helper',
-            '_remove_activation_post_process',
-            '_remove_qconfig',
-            'add_observer_',
-            'add_quant_dequant',
-            'convert',
-            'get_observer_dict',
-            'get_unique_devices_',
-            'is_activation_post_process',
-            'prepare',
-            'prepare_qat',
-            'propagate_qconfig_',
-            'quantize',
-            'quantize_dynamic',
-            'quantize_qat',
-            'register_activation_post_process_hook',
-            'swap_module',
+            'avg_pool2d',
+            'avg_pool3d',
+            'adaptive_avg_pool2d',
+            'adaptive_avg_pool3d',
+            'conv1d',
+            'conv2d',
+            'conv3d',
+            'interpolate',
+            'linear',
+            'max_pool1d',
+            'max_pool2d',
+            'celu',
+            'leaky_relu',
+            'hardtanh',
+            'hardswish',
+            'threshold',
+            'elu',
+            'hardsigmoid',
+            'clamp',
+            'upsample',
+            'upsample_bilinear',
+            'upsample_nearest',
         ]
-        self._test_function_import('quantize', function_list)
+        self._test_function_import('functional', function_list, base='nn.quantized')
 
-    def test_package_import_stubs(self):
-        self._test_package_import('stubs')
+    def test_modules_import(self):
+        module_list = [
+            # Modules
+            'BatchNorm2d',
+            'BatchNorm3d',
+            'Conv1d',
+            'Conv2d',
+            'Conv3d',
+            'ConvTranspose1d',
+            'ConvTranspose2d',
+            'ConvTranspose3d',
+            'DeQuantize',
+            'ELU',
+            'Embedding',
+            'EmbeddingBag',
+            'GroupNorm',
+            'Hardswish',
+            'InstanceNorm1d',
+            'InstanceNorm2d',
+            'InstanceNorm3d',
+            'LayerNorm',
+            'LeakyReLU',
+            'Linear',
+            'MaxPool2d',
+            'Quantize',
+            'ReLU6',
+            'Sigmoid',
+            'Softmax',
+            'Dropout',
+            # Wrapper modules
+            'FloatFunctional',
+            'FXFloatFunctional',
+            'QFunctional',
+        ]
+        self._test_function_import('modules', module_list, base='nn.quantized')
 
-    def test_function_import_stubs(self):
+    def test_modules_activation(self):
         function_list = [
-            'QuantStub',
-            'DeQuantStub',
-            'QuantWrapper',
+            'ReLU6',
+            'Hardswish',
+            'ELU',
+            'LeakyReLU',
+            'Sigmoid',
+            'Softmax',
         ]
-        self._test_function_import('stubs', function_list)
+        self._test_function_import('activation', function_list,
+                                   base='nn.quantized.modules')
 
-    def test_package_import_quantize_jit(self):
-        self._test_package_import('quantize_jit')
-
-    def test_function_import_quantize_jit(self):
+    def test_modules_batchnorm(self):
         function_list = [
-            '_check_is_script_module',
-            '_check_forward_method',
-            'script_qconfig',
-            'script_qconfig_dict',
-            'fuse_conv_bn_jit',
-            '_prepare_jit',
-            'prepare_jit',
-            'prepare_dynamic_jit',
-            '_convert_jit',
-            'convert_jit',
-            'convert_dynamic_jit',
-            '_quantize_jit',
-            'quantize_jit',
-            'quantize_dynamic_jit',
+            'BatchNorm2d',
+            'BatchNorm3d',
         ]
-        self._test_function_import('quantize_jit', function_list)
+        self._test_function_import('batchnorm', function_list,
+                                   base='nn.quantized.modules')
 
-    def test_package_import_fake_quantize(self):
-        self._test_package_import('fake_quantize')
-
-    def test_function_import_fake_quantize(self):
+    def test_modules_conv(self):
         function_list = [
-            '_is_per_channel',
-            '_is_per_tensor',
-            '_is_symmetric_quant',
-            'FakeQuantizeBase',
-            'FakeQuantize',
-            'FixedQParamsFakeQuantize',
-            'FusedMovingAvgObsFakeQuantize',
-            'default_fake_quant',
-            'default_weight_fake_quant',
-            'default_fixed_qparams_range_neg1to1_fake_quant',
-            'default_fixed_qparams_range_0to1_fake_quant',
-            'default_per_channel_weight_fake_quant',
-            'default_histogram_fake_quant',
-            'default_fused_act_fake_quant',
-            'default_fused_wt_fake_quant',
-            'default_fused_per_channel_wt_fake_quant',
-            '_is_fake_quant_script_module',
-            'disable_fake_quant',
-            'enable_fake_quant',
-            'disable_observer',
-            'enable_observer',
+            '_reverse_repeat_padding',
+            'Conv1d',
+            'Conv2d',
+            'Conv3d',
+            'ConvTranspose1d',
+            'ConvTranspose2d',
+            'ConvTranspose3d',
         ]
-        self._test_function_import('fake_quantize', function_list)
+
+        self._test_function_import('conv', function_list,
+                                   base='nn.quantized.modules')
+
+    def test_modules_dropout(self):
+        function_list = [
+            'Dropout',
+        ]
+        self._test_function_import('dropout', function_list,
+                                   base='nn.quantized.modules')
+
+    def test_modules_embedding_ops(self):
+        function_list = [
+            'EmbeddingPackedParams',
+            'Embedding',
+            'EmbeddingBag',
+        ]
+        self._test_function_import('embedding_ops', function_list,
+                                   base='nn.quantized.modules')
+
+    def test_modules_functional_modules(self):
+        function_list = [
+            'FloatFunctional',
+            'FXFloatFunctional',
+            'QFunctional',
+        ]
+        self._test_function_import('functional_modules', function_list,
+                                   base='nn.quantized.modules')
+
+    def test_modules_linear(self):
+        function_list = [
+            'Linear',
+            'LinearPackedParams',
+        ]
+        self._test_function_import('linear', function_list,
+                                   base='nn.quantized.modules')
+
+    def test_modules_normalization(self):
+        function_list = [
+            'LayerNorm',
+            'GroupNorm',
+            'InstanceNorm1d',
+            'InstanceNorm2d',
+            'InstanceNorm3d',
+        ]
+        self._test_function_import('normalization', function_list,
+                                   base='nn.quantized.modules')
+
+    def test_modules_utils(self):
+        function_list = [
+            '_ntuple_from_first',
+            '_pair_from_first',
+            '_quantize_weight',
+            '_hide_packed_params_repr',
+            'WeightedQuantizedModule',
+        ]
+        self._test_function_import('utils', function_list,
+                                   base='nn.quantized.modules')
+
+    def test_import_nn_quantized_dynamic_import(self):
+        module_list = [
+            # Modules
+            'Linear',
+            'LSTM',
+            'GRU',
+            'LSTMCell',
+            'RNNCell',
+            'GRUCell',
+            'Conv1d',
+            'Conv2d',
+            'Conv3d',
+            'ConvTranspose1d',
+            'ConvTranspose2d',
+            'ConvTranspose3d',
+        ]
+        self._test_function_import('dynamic', module_list, base='nn.quantized')
+
+    def test_import_nn_quantizable_activation(self):
+        module_list = [
+            # Modules
+            'MultiheadAttention',
+        ]
+        self._test_function_import('activation', module_list, base='nn.quantizable.modules')
+
+    def test_import_nn_quantizable_rnn(self):
+        module_list = [
+            # Modules
+            'LSTM',
+            'LSTMCell',
+        ]
+        self._test_function_import('rnn', module_list, base='nn.quantizable.modules')
+
+    def test_import_nn_qat_conv(self):
+        module_list = [
+            'Conv1d',
+            'Conv2d',
+            'Conv3d',
+        ]
+        self._test_function_import('conv', module_list, base='nn.qat.modules')
+
+    def test_import_nn_qat_embedding_ops(self):
+        module_list = [
+            'Embedding',
+            'EmbeddingBag',
+        ]
+        self._test_function_import('embedding_ops', module_list, base='nn.qat.modules')
+
+    def test_import_nn_qat_linear(self):
+        module_list = [
+            'Linear',
+        ]
+        self._test_function_import('linear', module_list, base='nn.qat.modules')
+
+    def test_import_nn_qat_dynamic_linear(self):
+        module_list = [
+            'Linear',
+        ]
+        self._test_function_import('linear', module_list, base='nn.qat.dynamic.modules')
+
+
+class TestAOMigrationNNIntrinsic(AOMigrationTestCase):
+    def test_modules_import_nn_intrinsic(self):
+        module_list = [
+            # Modules
+            '_FusedModule',
+            'ConvBn1d',
+            'ConvBn2d',
+            'ConvBn3d',
+            'ConvBnReLU1d',
+            'ConvBnReLU2d',
+            'ConvBnReLU3d',
+            'ConvReLU1d',
+            'ConvReLU2d',
+            'ConvReLU3d',
+            'LinearReLU',
+            'BNReLU2d',
+            'BNReLU3d',
+            'LinearBn1d',
+        ]
+        self._test_function_import('intrinsic', module_list, base='nn')
+
+    def test_modules_nn_intrinsic_fused(self):
+        function_list = [
+            '_FusedModule',
+            'ConvBn1d',
+            'ConvBn2d',
+            'ConvBn3d',
+            'ConvBnReLU1d',
+            'ConvBnReLU2d',
+            'ConvBnReLU3d',
+            'ConvReLU1d',
+            'ConvReLU2d',
+            'ConvReLU3d',
+            'LinearReLU',
+            'BNReLU2d',
+            'BNReLU3d',
+            'LinearBn1d',
+        ]
+        self._test_function_import('fused', function_list,
+                                   base='nn.intrinsic.modules')
+
+    def test_modules_import_nn_intrinsic_qat(self):
+        module_list = [
+            "LinearReLU",
+            "LinearBn1d",
+            "ConvReLU1d",
+            "ConvReLU2d",
+            "ConvReLU3d",
+            "ConvBn1d",
+            "ConvBn2d",
+            "ConvBn3d",
+            "ConvBnReLU1d",
+            "ConvBnReLU2d",
+            "ConvBnReLU3d",
+            "update_bn_stats",
+            "freeze_bn_stats",
+        ]
+        self._test_function_import('qat', module_list, base='nn.intrinsic')
+
+    def test_modules_intrinsic_qat_conv_fused(self):
+        function_list = [
+            'ConvBn1d',
+            'ConvBnReLU1d',
+            'ConvReLU1d',
+            'ConvBn2d',
+            'ConvBnReLU2d',
+            'ConvReLU2d',
+            'ConvBn3d',
+            'ConvBnReLU3d',
+            'ConvReLU3d',
+            'update_bn_stats',
+            'freeze_bn_stats'
+        ]
+        self._test_function_import('conv_fused', function_list,
+                                   base='nn.intrinsic.qat.modules')
+
+    def test_modules_intrinsic_qat_linear_fused(self):
+        function_list = [
+            'LinearBn1d',
+        ]
+        self._test_function_import('linear_fused', function_list,
+                                   base='nn.intrinsic.qat.modules')
+
+    def test_modules_intrinsic_qat_linear_relu(self):
+        function_list = [
+            'LinearReLU',
+        ]
+        self._test_function_import('linear_relu', function_list,
+                                   base='nn.intrinsic.qat.modules')
+
+    def test_modules_import_nn_intrinsic_quantized(self):
+        module_list = [
+            'BNReLU2d',
+            'BNReLU3d',
+            'ConvReLU1d',
+            'ConvReLU2d',
+            'ConvReLU3d',
+            'LinearReLU',
+        ]
+        self._test_function_import('quantized', module_list, base='nn.intrinsic')
+
+    def test_modules_intrinsic_quantized_bn_relu(self):
+        function_list = [
+            'BNReLU2d',
+            'BNReLU3d',
+        ]
+        self._test_function_import('bn_relu', function_list,
+                                   base='nn.intrinsic.quantized.modules')
+
+    def test_modules_intrinsic_quantized_conv_relu(self):
+        function_list = [
+            'ConvReLU1d',
+            'ConvReLU2d',
+            'ConvReLU3d',
+        ]
+        self._test_function_import('conv_relu', function_list,
+                                   base='nn.intrinsic.quantized.modules')
+
+    def test_modules_intrinsic_quantized_linear_relu(self):
+        function_list = [
+            'LinearReLU',
+        ]
+        self._test_function_import('linear_relu', function_list,
+                                   base='nn.intrinsic.quantized.modules')
+
+    def test_modules_no_import_nn_intrinsic_quantized_dynamic(self):
+        # TODO(future PR): generalize this
+        import torch
+        _ = torch.ao.nn.intrinsic.quantized.dynamic
+        _ = torch.nn.intrinsic.quantized.dynamic

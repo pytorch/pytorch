@@ -2,14 +2,15 @@ import argparse
 import os
 import pathlib
 import sys
+from typing import Any, cast, Optional
+
 import yaml
-from typing import Any, Optional, cast
 
 try:
     # use faster C loader if available
     from yaml import CSafeLoader as YamlLoader
 except ImportError:
-    from yaml import SafeLoader as YamlLoader  # type: ignore[misc]
+    from yaml import SafeLoader as YamlLoader  # type: ignore[assignment, misc]
 
 NATIVE_FUNCTIONS_PATH = "aten/src/ATen/native/native_functions.yaml"
 TAGS_PATH = "aten/src/ATen/native/tags.yaml"
@@ -25,9 +26,10 @@ def generate_code(
     force_schema_registration: bool = False,
     operator_selector: Any = None,
 ) -> None:
-    from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
-    from tools.autograd.gen_annotated_fn_args import gen_annotated
     from torchgen.selective_build.selector import SelectiveBuilder
+
+    from tools.autograd.gen_annotated_fn_args import gen_annotated
+    from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
 
     # Build ATen based Variable classes
     if install_dir is None:
@@ -52,7 +54,6 @@ def generate_code(
         operator_selector = SelectiveBuilder.get_nop_selector()
 
     if subset == "libtorch" or not subset:
-
         gen_autograd(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
             tags_path or TAGS_PATH,
@@ -74,7 +75,7 @@ def generate_code(
 def get_selector_from_legacy_operator_selection_list(
     selected_op_list_path: str,
 ) -> Any:
-    with open(selected_op_list_path, "r") as f:
+    with open(selected_op_list_path) as f:
         # strip out the overload part
         # It's only for legacy config - do NOT copy this code!
         selected_op_list = {
@@ -84,7 +85,7 @@ def get_selector_from_legacy_operator_selection_list(
     # Internal build doesn't use this flag any more. Only used by OSS
     # build now. Every operator should be considered a root operator
     # (hence generating unboxing code for it, which is consistent with
-    # the current behaviour), and also be considered as used for
+    # the current behavior), and also be considered as used for
     # training, since OSS doesn't support training on mobile for now.
     #
     is_root_operator = True
@@ -136,6 +137,7 @@ def main() -> None:
         help="Root directory where to install files. Defaults to the current working directory.",
     )
     parser.add_argument(
+        "--install-dir",
         "--install_dir",
         help=(
             "Deprecated. Use --gen-dir instead. The semantics are different, do not change "
@@ -157,21 +159,25 @@ def main() -> None:
         help="Path to the YAML file that contains the list of operators to include for custom build.",
     )
     parser.add_argument(
+        "--operators-yaml-path",
         "--operators_yaml_path",
         help="Path to the model YAML file that contains the list of operators to include for custom build.",
     )
     parser.add_argument(
+        "--force-schema-registration",
         "--force_schema_registration",
         action="store_true",
         help="force it to generate schema-only registrations for ops that are not"
         "listed on --selected-op-list",
     )
     parser.add_argument(
+        "--gen-lazy-ts-backend",
         "--gen_lazy_ts_backend",
         action="store_true",
         help="Enable generation of the torch::lazy TorchScript backend",
     )
     parser.add_argument(
+        "--per-operator-headers",
         "--per_operator_headers",
         action="store_true",
         help="Build lazy tensor ts backend with per-operator ATen headers, must match how ATen was built",
@@ -207,8 +213,8 @@ def main() -> None:
         assert os.path.isfile(
             ts_native_functions
         ), f"Unable to access {ts_native_functions}"
-        from torchgen.gen_lazy_tensor import run_gen_lazy_tensor
         from torchgen.dest.lazy_ir import GenTSLazyIR
+        from torchgen.gen_lazy_tensor import run_gen_lazy_tensor
 
         run_gen_lazy_tensor(
             aten_path=aten_path,

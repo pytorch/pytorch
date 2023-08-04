@@ -48,29 +48,9 @@ TORCH_API bool profileNode(const Node* node);
 
 TORCH_API bool skipNode(const std::string& symbol_str, bool flip = true);
 
-TORCH_API bool complyWith(
-    const at::Tensor& tensor,
-    const c10::TensorTypePtr& guard_tensor_type);
-
 TORCH_API bool isEnabled();
 TORCH_API bool setEnabled(bool is_enabled);
 TORCH_API bool canBeEnabled();
-
-struct TORCH_API NVFuserPassManager : public PassManager<NVFuserPassManager> {
-  static bool registerPass(bool enabled) {
-    bool old_value = PassManager::isRegistered();
-    if (enabled) {
-      PassManager::registerPass(fuseGraph);
-    } else {
-      PassManager::clearPass();
-    }
-    return old_value;
-  }
-
-  static bool isRegistered() {
-    return PassManager::isRegistered();
-  }
-};
 
 } // namespace cuda
 } // namespace fuser

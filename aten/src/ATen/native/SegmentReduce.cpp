@@ -1,9 +1,22 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/SegmentReduce.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/TensorOperators.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_segment_reduce_backward_native.h>
+#include <ATen/ops/all.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/segment_reduce_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at {
 namespace native {
@@ -15,25 +28,9 @@ DEFINE_DISPATCH(_segment_reduce_offsets_backward_stub);
 
 namespace {
 
-SegmentReductionType get_reduction_enum(const c10::string_view& reduce) {
-  if (reduce == "max") {
-    return SegmentReductionType::MAX;
-  } else if (reduce == "mean") {
-    return SegmentReductionType::MEAN;
-  } else if (reduce == "min") {
-    return SegmentReductionType::MIN;
-  } else if (reduce == "sum") {
-    return SegmentReductionType::SUM;
-  } else if (reduce == "prod") {
-    return SegmentReductionType::PROD;
-  } else {
-    TORCH_CHECK(false, "unsupported reduction given! ", reduce);
-  }
-}
-
 template <typename T, bool is_offsets_like=false>
 void _segment_reduce_lengths_cpu_kernel1(
-    SegmentReductionType reduction,
+    ReductionType reduction,
     const Tensor& data,
     const T* lengths_data,
     int64_t axis,
@@ -77,15 +74,15 @@ void _segment_reduce_lengths_cpu_kernel1(
               scalar_t initial_value;
               if (initial.has_value()) {
                 initial_value = initial.value().to<scalar_t>();
-              } else if (reduction == SegmentReductionType::MAX) {
+              } else if (reduction == ReductionType::MAX) {
                 initial_value = -std::numeric_limits<scalar_t>::infinity();
               } else if (
-                  reduction == SegmentReductionType::MEAN ||
-                  reduction == SegmentReductionType::SUM) {
+                  reduction == ReductionType::MEAN ||
+                  reduction == ReductionType::SUM) {
                 initial_value = 0;
-              } else if (reduction == SegmentReductionType::MIN) {
+              } else if (reduction == ReductionType::MIN) {
                 initial_value = std::numeric_limits<scalar_t>::infinity();
-              } else if (reduction == SegmentReductionType::PROD) {
+              } else if (reduction == ReductionType::PROD) {
                 initial_value = 1;
               }
 
@@ -94,19 +91,19 @@ void _segment_reduce_lengths_cpu_kernel1(
                 int64_t data_index = outer_idx * data_stride_axis * data_size_axis
                                      + j * data_stride_axis + inner_idx;
                 const auto val = values_data[data_index];
-                if (reduction == SegmentReductionType::MAX) {
+                if (reduction == ReductionType::MAX) {
                   initial_value = at::_isnan(val)
                       ? val
                       : std::max<scalar_t>(initial_value, val);
                 } else if (
-                    reduction == SegmentReductionType::MEAN ||
-                    reduction == SegmentReductionType::SUM) {
+                    reduction == ReductionType::MEAN ||
+                    reduction == ReductionType::SUM) {
                   initial_value = initial_value + val;
-                } else if (reduction == SegmentReductionType::MIN) {
+                } else if (reduction == ReductionType::MIN) {
                   initial_value = at::_isnan(val)
                       ? val
                       : std::min<scalar_t>(initial_value, val);
-                } else if (reduction == SegmentReductionType::PROD) {
+                } else if (reduction == ReductionType::PROD) {
                   initial_value = initial_value * val;
                 }
               }
@@ -115,10 +112,10 @@ void _segment_reduce_lengths_cpu_kernel1(
               TORCH_CHECK(segment_length >= 0);
 
               if (segment_length == 0 && !initial.has_value() &&
-                  reduction == SegmentReductionType::MEAN) {
+                  reduction == ReductionType::MEAN) {
                 initial_value = static_cast<scalar_t>(NAN);
               } else if (
-                  reduction == SegmentReductionType::MEAN &&
+                  reduction == ReductionType::MEAN &&
                   segment_length > 0 && !at::_isnan(initial_value)) {
                 initial_value = initial_value / segment_length;
               }
@@ -132,7 +129,7 @@ void _segment_reduce_lengths_cpu_kernel1(
 }
 
 Tensor _segment_reduce_lengths_cpu_kernel(
-    SegmentReductionType reduction,
+    ReductionType reduction,
     const Tensor& data,
     const Tensor& lengths,
     int64_t axis,
@@ -158,7 +155,7 @@ Tensor _segment_reduce_lengths_cpu_kernel(
 }
 
 Tensor _segment_reduce_offsets_cpu_kernel(
-    SegmentReductionType reduction,
+    ReductionType reduction,
     const Tensor& data,
     const Tensor& offsets,
     int64_t axis,
@@ -188,7 +185,7 @@ void _segment_reduce_cpu_lengths_backward_kernel1(
     const Tensor& grad_contig,
     const Tensor& output_contig,
     const Tensor& data_contig,
-    SegmentReductionType reduction,
+    ReductionType reduction,
     const T* lengths_data,
     int64_t axis,
     const c10::optional<Scalar>& initial,
@@ -217,11 +214,11 @@ void _segment_reduce_cpu_lengths_backward_kernel1(
       [&]() {
         auto* output_data = output_contig.data_ptr<scalar_t>();
         auto* grad_data = grad_contig.data_ptr<scalar_t>();
-        auto* grad_input_data = grad_input.data_ptr<scalar_t>();
+        auto* grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
         const auto* values_data = data_contig.data_ptr<scalar_t>();
         // Used to calculate exclusive prod
         scalar_t initial_prod_value;
-        if (reduction == SegmentReductionType::PROD) {
+        if (reduction == ReductionType::PROD) {
           if (initial.has_value()) {
             initial_prod_value = initial.value().to<scalar_t>();
           } else {
@@ -252,8 +249,8 @@ void _segment_reduce_cpu_lengths_backward_kernel1(
             for (const auto inner_idx : c10::irange(inner_offset)) {
               int64_t output_index = outer_idx * output_stride_axis * output_size_axis
                                      + dim_idx * output_stride_axis + inner_idx;
-              if (reduction == SegmentReductionType::MAX ||
-                  reduction == SegmentReductionType::MIN) {
+              if (reduction == ReductionType::MAX ||
+                  reduction == ReductionType::MIN) {
                 int64_t counter = 0;
                 for (const auto j : c10::irange(segment_start, segment_end)) {
                   int64_t data_index = outer_idx * data_stride_axis * data_size_axis
@@ -277,21 +274,21 @@ void _segment_reduce_cpu_lengths_backward_kernel1(
                         grad_input_data[data_index] / counter;
                   }
                 }
-              } else if (reduction == SegmentReductionType::MEAN) {
+              } else if (reduction == ReductionType::MEAN) {
                 auto grad_val = grad_data[output_index] / segment_length;
                 for (const auto j : c10::irange(segment_start, segment_end)) {
                   int64_t data_index = outer_idx * data_stride_axis * data_size_axis
                                        + j * data_stride_axis + inner_idx;
                   grad_input_data[data_index] = grad_val;
                 }
-              } else if (reduction == SegmentReductionType::SUM) {
+              } else if (reduction == ReductionType::SUM) {
                 const auto& grad_val = grad_data[output_index];
                 for (const auto j : c10::irange(segment_start, segment_end)) {
                   int64_t data_index = outer_idx * data_stride_axis * data_size_axis
                                        + j * data_stride_axis + inner_idx;
                   grad_input_data[data_index] = grad_val;
                 }
-              } else if (reduction == SegmentReductionType::PROD) {
+              } else if (reduction == ReductionType::PROD) {
                 const auto& grad_val = grad_data[output_index] * output_data[output_index];
                 for (const auto j : c10::irange(segment_start, segment_end)) {
                   int64_t data_index = outer_idx * data_stride_axis * data_size_axis
@@ -324,7 +321,7 @@ Tensor _segment_reduce_cpu_lengths_backward_kernel(
     const Tensor& grad_contig,
     const Tensor& output_contig,
     const Tensor& data_contig,
-    SegmentReductionType reduction,
+    ReductionType reduction,
     const Tensor& lengths_contig,
     int64_t axis,
     const c10::optional<Scalar>& initial) {
@@ -357,7 +354,7 @@ Tensor _segment_reduce_cpu_offsets_backward_kernel(
     const Tensor& grad_contig,
     const Tensor& output_contig,
     const Tensor& data_contig,
-    SegmentReductionType reduction,
+    ReductionType reduction,
     const Tensor& offsets_contig,
     int64_t axis,
     const c10::optional<Scalar>& initial) {
@@ -397,7 +394,7 @@ Tensor segment_reduce_kernel(
     bool unsafe,
     const c10::optional<Scalar>& initial) {
   axis = maybe_wrap_dim(axis, data.ndimension());
-  TORCH_CHECK(data.numel() > 0);
+  TORCH_CHECK(data.numel() >= 0);
 
   // check that one of lengths or offsets is defined
   auto lengths_has_value = lengths.has_value();

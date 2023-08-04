@@ -125,15 +125,11 @@ def _all_gather_base(output_tensor, input_tensor, group=group.WORLD):
         input_tensor (Tensor): Tensor to be broadcast from current process.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
-        async_op (bool, optional): Whether this op should be an async op
-
-    Returns:
-        Async work handle, if async_op is set to True.
-        None, if not async_op or if not part of the group
 
     Examples:
         >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
+        >>> # xdoctest: +SKIP("incorrect want text")
         >>> output_tensor = torch.zeros(2, dtype=torch.int64)
         >>> output_tensor
         [tensor([0, 0])] # Rank 0 and 1
@@ -161,7 +157,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=group.WORLD):
     return gathered list of tensors in output list.
 
     Arguments:
-        out_tensor_list (list[Tensor]): list of tensors to gather one per rank.
+        output_tensor_list (list[Tensor]): list of tensors to gather one per rank.
         input_tensor_list (list[Tensor]): List of tensors to scatter one per rank.
         group (ProcessGroup, optional): The process group to work on.
 
@@ -185,7 +181,7 @@ def all_to_all_single(
     the processes in the group and return single output tensor.
 
     Arguments:
-        output (Tensor): Gathered cancatenated output tensor.
+        output (Tensor): Gathered concatenated output tensor.
         input (Tensor): Input tensor to scatter.
         output_split_sizes: (list[Int], optional): Output split sizes for dim 0
             if specified None or empty, dim 0 of ``output`` tensor must divide
@@ -306,6 +302,8 @@ class _Reduce_Scatter(Function):
     @staticmethod
     def forward(ctx, op, group, tensor, *input_tensor_list):
         ctx.group = group
+        # Need contiguous tensors for collectives.
+        tensor = tensor.contiguous()
         input_tensor_list = tuple(t.contiguous() for t in input_tensor_list)
         dist.reduce_scatter(tensor, list(input_tensor_list), op=op, group=group)
         return tensor
@@ -353,7 +351,6 @@ class _AllGatherBase(Function):
     @staticmethod
     def backward(ctx, grad_output):
         if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
-            rank = dist.get_rank(group=ctx.group)
             world_size = dist.get_world_size(group=ctx.group)
             out_size = list(grad_output.size())
             if out_size[0] % world_size != 0:

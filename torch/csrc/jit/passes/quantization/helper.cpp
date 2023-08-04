@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -183,7 +185,7 @@ std::tuple<c10::QScheme, QParamVector> _per_tensor_asym_qparam =
              std::make_pair(".zero_point", IValue(_asym_zero_point)),
              std::make_pair(".scalar_type", IValue(c10::kQUInt8))}));
 
-// quantization parrameters for ops with range -1 to 1
+// quantization parameters for ops with range -1 to 1
 // for example: aten/src/ATen/native/quantized/cpu/qtanh.cpp
 std::tuple<c10::QScheme, QParamVector> _per_tensor_sym_qparam = std::make_tuple(
     c10::kPerTensorAffine,
@@ -251,7 +253,7 @@ bool matchCallFuncToUse(
 
 // Check any use of `v` matches the aten function call
 // or CallFunction patterns
-bool matchArgPattern(
+static bool matchArgPattern(
     Value* v,
     const AtenFuncArgs& aten_func_args,
     const CallFuncArgs& call_func_args) {
@@ -326,6 +328,21 @@ c10::optional<Use> getClampScalarInputUse(Value* v) {
   return c10::nullopt;
 }
 
+void cloneMethod(
+    Module& module,
+    const std::string& orig_method_name,
+    const std::string& new_method_name) {
+  const Function& method = module.get_method(orig_method_name).function();
+  auto graph = toGraphFunction(method).graph()->copy();
+  const auto& schema = method.getSchema();
+  const auto this_method_name =
+      c10::QualifiedName(*module.type()->name(), new_method_name);
+  auto copied = module._ivalue()->compilation_unit()->create_function(
+      this_method_name, std::move(graph));
+  module.type()->addMethod(copied);
+  copied->setSchema(schema);
+}
+
 std::vector<Value*> getPassThroughInputs(Value* v) {
   Node* n = v->node();
   if (isSingleInputGeneralCallFunction(n)) {
@@ -378,7 +395,8 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
   return {};
 }
 
-std::vector<NodeKind> toAtenSymbol(const std::vector<std::string>& func_names) {
+static std::vector<NodeKind> toAtenSymbol(
+    const std::vector<std::string>& func_names) {
   std::vector<NodeKind> symbols;
   std::transform(
       func_names.begin(),
@@ -388,18 +406,18 @@ std::vector<NodeKind> toAtenSymbol(const std::vector<std::string>& func_names) {
   return symbols;
 }
 
-bool isAtenFunc(Node* n, const std::vector<NodeKind>& aten_funcs) {
+static bool isAtenFunc(Node* n, const std::vector<NodeKind>& aten_funcs) {
   return std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
       aten_funcs.end();
 }
 
-bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs) {
+static bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs) {
   const auto& symbols = toAtenSymbol(aten_funcs);
   return isAtenFunc(n, symbols);
 }
 
 // TODO: factor out isCallFunc
-bool isFunctionNode(
+static bool isFunctionNode(
     Node* n,
     const std::vector<std::string>& call_funcs,
     const std::vector<std::string>& aten_funcs) {
@@ -652,7 +670,7 @@ bool is_int_constant(
   return v && v->isInt() && v->toInt() == value;
 }
 
-bool is_functional(
+static bool is_functional(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap,
     const std::string& vname,
@@ -676,7 +694,7 @@ c10::optional<std::string> getModuleName(Value* value) {
   return c10::nullopt;
 }
 
-bool is_module(
+static bool is_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap,
     const std::string& vname,

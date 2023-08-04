@@ -27,7 +27,11 @@ Node* CreateCastToBoolNode(Value* val, Graph* graph) {
   return cast_node;
 }
 
-Node* InsertCastForCond(Value* cond_val, Graph* graph, Node* consumer_node) {
+Node* InsertCastForCond(
+    Value* cond_val,
+    Graph* graph,
+    Node* consumer_node,
+    int opset_version) {
   // prev:  cond_val -> consumer_node
   // after: cond_val -> cast -> consumer_node
   // NOTE: The cast is required because operators like PyTorch Greater/Less
@@ -37,6 +41,8 @@ Node* InsertCastForCond(Value* cond_val, Graph* graph, Node* consumer_node) {
   cast_node->insertBefore(consumer_node);
 
   consumer_node->replaceInputWith(cond_val, cast_node->output());
+  const ParamMap empty_params_dict = {};
+  ONNXShapeTypeInference(cast_node, empty_params_dict, opset_version);
   return cast_node;
 }
 
@@ -74,7 +80,7 @@ bool IsErasableSequence(const Node* loop_node, size_t i) {
   const auto init_seq_node_kind = init_seq_node->kind();
   if ((init_seq_node_kind != ::c10::onnx::SequenceEmpty) &&
       (init_seq_node_kind != ::c10::prim::ListConstruct ||
-       init_seq_node->inputs().size() != 0)) {
+       !init_seq_node->inputs().empty())) {
     // Initial sequence must be empty.
     return false;
   }
@@ -195,10 +201,12 @@ Node* ONNXOptionalNode(OptionalTypePtr opt_type, Graph* g) {
 }
 
 // Replaces block output i with an onnx::Optional
-// with `type` taken from opt_type.
-// Needed when control flow has multiple branches, one of which
+// with `type` taken from opt_type. If and Loop Ops shares this function.
+// 1. If Op: Needed when control flow has multiple branches, one of which
 // is defined by `block` and returns a None and another branch
 // returns not-None. The passed-in opt_type should be from the other branch.
+// 2. Loop Op: insert Optional node before output, if input is Optional type
+// or output type is None.
 void ReplaceBlockOutputWithOptional(
     OptionalTypePtr opt_type,
     Block* block,
@@ -206,7 +214,9 @@ void ReplaceBlockOutputWithOptional(
   Node* opt_node = ONNXOptionalNode(opt_type, block->owningGraph());
   opt_node->insertBefore(block->return_node());
   Value* block_output = block->outputs().at(i);
-  block_output->replaceAllUsesWith(opt_node->output());
+  // replace only the last value as Optional type only affects
+  // the value right before output
+  block_output->replaceAllUsesAfterNodeWith(opt_node, opt_node->output());
   if (!block_output->type()->cast<NoneType>()) {
     opt_node->addInput(block_output);
     opt_node->copyMetadata(block_output->node());
@@ -265,7 +275,12 @@ void FixupONNXLoopBlockOutputs(Node* n) {
   for (Block* block : n->blocks()) {
     // output 0 is continue_condition, never None.
     for (const auto i : c10::irange(1, block->outputs().size())) {
-      if (block->outputs().at(i)->type()->cast<NoneType>()) {
+      // Two conditions that we need to replace block output with optional
+      // 1. output is NoneType
+      // 2. input is optional but output type is not
+      if ((block->outputs().at(i)->type()->cast<NoneType>()) ||
+          (block->inputs().at(i + 1)->type()->cast<OptionalType>() &&
+           !block->outputs().at(i)->type()->cast<OptionalType>())) {
         ReplaceBlockOutputWithOptional(
             // Output 0 is continue_condition.
             // Inputs (0, 1) are (loop_counter, cond). So input i + 1
@@ -279,7 +294,7 @@ void FixupONNXLoopBlockOutputs(Node* n) {
   FixupONNXSubblockOutputs(n);
 }
 
-void FixupONNXLoopNodeInputs(Node* node) {
+void FixupONNXLoopNodeInputs(Node* node, int opset_version) {
   if (node->kind() != ::c10::onnx::Loop) {
     return;
   }
@@ -289,7 +304,7 @@ void FixupONNXLoopNodeInputs(Node* node) {
   // add cast to condition input outside the loop.
   Value* cond_val = node->input(1);
   if (IsCondCastRequired(cond_val)) {
-    auto* cast_node = InsertCastForCond(cond_val, graph, node);
+    auto* cast_node = InsertCastForCond(cond_val, graph, node, opset_version);
     cast_node->copyMetadata(node);
   }
 
@@ -305,8 +320,8 @@ void FixupONNXLoopNodeInputs(Node* node) {
   // add cast to condition input inside the loop.
   Value* next_cond_val = sub_block->outputs().at(0);
   if (IsCondCastRequired(next_cond_val)) {
-    auto* cast_node =
-        InsertCastForCond(next_cond_val, graph, sub_block->return_node());
+    auto* cast_node = InsertCastForCond(
+        next_cond_val, graph, sub_block->return_node(), opset_version);
     cast_node->copyMetadata(node);
   }
 
@@ -346,7 +361,7 @@ std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
   GRAPH_DEBUG("before FixupONNXLoopBlockInputs: ", *node->owningGraph());
   FixupONNXLoopBlockInputs(node);
   GRAPH_DEBUG("after FixupONNXLoopBlockInputs: ", *node->owningGraph());
-  FixupONNXLoopNodeInputs(node);
+  FixupONNXLoopNodeInputs(node, opset_version);
   GRAPH_DEBUG("after FixupONNXLoopNodeInputs: ", *node->owningGraph());
   FixupONNXLoopBlockOutputs(node);
   GRAPH_DEBUG("after FixupONNXLoopBlockOutputs: ", *node->owningGraph());
@@ -462,10 +477,9 @@ void ONNXFixupUninitializedOutput(Node* node, int opset_version) {
   // Check if the input to ONNX If node is node Bool, and insert
   // cast to Bool if needed.
   if (!if_node->input()->type()->isSubtypeOf(*BoolType::get())) {
-    Node* cast_node = CreateCastToBoolNode(if_node->input(), graph);
-    cast_node->insertBefore(if_node);
+    Node* cast_node =
+        InsertCastForCond(if_node->input(), graph, if_node, opset_version);
     cast_node->copyMetadata(if_node);
-    if_node->replaceInputWith(if_node->input(), cast_node->output());
   }
 
   Block* then_block = if_node->blocks()[0];

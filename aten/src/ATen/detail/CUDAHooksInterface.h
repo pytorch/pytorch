@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
-#include <ATen/core/Generator.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/Registry.h>
@@ -10,14 +9,14 @@
 #include <functional>
 #include <memory>
 
-// Forward-declares at::cuda::NVRTC
-namespace at { namespace cuda {
-struct NVRTC;
-}} // at::cuda
-
+// Forward-declares at::Context, at::Generator and at::cuda::NVRTC
 namespace at {
 class Context;
-}
+struct Generator;
+namespace cuda {
+struct NVRTC;
+} // namespace cuda
+} // namespace at
 
 // NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {
@@ -67,7 +66,7 @@ constexpr const char* CUDA_HELP =
 struct TORCH_API CUDAHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
-  virtual ~CUDAHooksInterface() {}
+  virtual ~CUDAHooksInterface() = default;
 
   // Initialize THCState and, transitively, the CUDA state
   virtual void initCUDA() const {
@@ -83,7 +82,7 @@ struct TORCH_API CUDAHooksInterface {
     TORCH_CHECK(false, "Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual bool isPinnedPtr(void* /*data*/) const {
+  virtual bool isPinnedPtr(const void* /*data*/) const {
     return false;
   }
 
@@ -147,6 +146,10 @@ struct TORCH_API CUDAHooksInterface {
     return false;
   }
 
+  virtual bool supportsBFloat16ConvolutionWithCuDNNv8() const {
+    return false;
+  }
+
   virtual long versionCuDNN() const {
     TORCH_CHECK(false, "Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
   }
@@ -193,7 +196,7 @@ struct TORCH_API CUDAHooksInterface {
 // for the "..." in a variadic macro"
 struct TORCH_API CUDAHooksArgs {};
 
-C10_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs);
+TORCH_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs);
 #define REGISTER_CUDA_HOOKS(clsname) \
   C10_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
 

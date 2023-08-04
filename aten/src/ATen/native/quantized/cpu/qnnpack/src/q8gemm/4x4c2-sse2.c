@@ -327,14 +327,15 @@ void pytorch_q8gemm_ukernel_4x4c2__sse2(
         (uint32_t)_mm_cvtsi128_si32(_mm_unpackhi_epi32(vout, vout));
     *((uint32_t*)c3) = (uint32_t)_mm_cvtsi128_si32(_mm_srli_si128(vout, 12));
   } else {
+    typedef PYTORCH_QNNP_UNALIGNED uint16_t unaligned_uint16_t;
     if (nr >= 2) {
-      *((uint16_t*)c0) = (uint16_t)_mm_extract_epi16(vout, 0);
+      *((unaligned_uint16_t*)c0) = (uint16_t)_mm_extract_epi16(vout, 0);
       c0 += 2;
-      *((uint16_t*)c1) = (uint16_t)_mm_extract_epi16(vout, 2);
+      *((unaligned_uint16_t*)c1) = (uint16_t)_mm_extract_epi16(vout, 2);
       c1 += 2;
-      *((uint16_t*)c2) = (uint16_t)_mm_extract_epi16(vout, 4);
+      *((unaligned_uint16_t*)c2) = (uint16_t)_mm_extract_epi16(vout, 4);
       c2 += 2;
-      *((uint16_t*)c3) = (uint16_t)_mm_extract_epi16(vout, 6);
+      *((unaligned_uint16_t*)c3) = (uint16_t)_mm_extract_epi16(vout, 6);
       c3 += 2;
       vout = _mm_srli_epi32(vout, 16);
       nr -= 2;

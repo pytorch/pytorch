@@ -1,4 +1,5 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Parallel.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
@@ -9,6 +10,13 @@
 
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 #include <ATen/native/ao_sparse/quantized/cpu/qnnpack_utils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/quantize_per_tensor.h>
+#include <ATen/ops/empty.h>
+#endif
 
 namespace ao {
 namespace sparse {
@@ -37,7 +45,7 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
   const auto cols_input = static_cast<int64_t>(input.size(input.dim() - 1));
   TORCH_CHECK(
       cols_input == input_channels_,
-      "quantized_sparse_lienar: Input tensor's last and weight tensor's"
+      "quantized_sparse_linear: Input tensor's last and weight tensor's"
       " second dimension must match.");
 
   // On empty input, no output data will be generated,
@@ -75,11 +83,12 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
             output_channels_,
             q_input_contig.q_zero_point(),
             w_zero_points_.data(),
-            bcsr_matrix_->col_indices.data(),
-            bcsr_matrix_->row_values.data(),
+            bcsr_matrix_->col_indices_data_ptr(),
+            bcsr_matrix_->row_values_data_ptr(),
             bcsr_matrix_->values.data(),
             bcsr_matrix_->row_block_size, /* out_features_block_size */
             bcsr_matrix_->col_block_size, /* in_features_block_size */
+            bcsr_matrix_->indices_dtype,
             0, /* output zero point: not used */
             std::numeric_limits<uint8_t>::min(),
             std::numeric_limits<uint8_t>::max(),

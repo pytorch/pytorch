@@ -36,7 +36,7 @@ class Cleanup {
 
   Cleanup& operator=(const Cleanup&) = delete;
 
-  Cleanup& operator=(Cleanup&& ref) {
+  Cleanup& operator=(Cleanup&& ref) noexcept {
     if (this != &ref) {
       func_ = std::move(ref.func_);
       status_ = std::move(ref.status_);

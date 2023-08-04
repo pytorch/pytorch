@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # Owner(s): ["oncall: mobile"]
 
-import sys
 import os
 import io
 import functools
@@ -85,8 +84,7 @@ def webdriver_test(testfunc):
 
 class TestModelDump(TestCase):
     def needs_resources(self):
-        if sys.version_info < (3, 7):
-            self.skipTest("importlib.resources was new in 3.7")
+        pass
 
     def test_inline_skeleton(self):
         self.needs_resources()
@@ -131,6 +129,8 @@ class TestModelDump(TestCase):
 
         with tempfile.NamedTemporaryFile() as tf:
             torch.jit.save(torch.jit.script(SimpleModel()), tf)
+            # Actually write contents to disk so we can read it below
+            tf.flush()
 
             stdout = io.StringIO()
             torch.utils.model_dump.main(

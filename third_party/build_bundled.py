@@ -37,23 +37,35 @@ def collect_license(current):
     return collected
 
 
-def create_bundled(d, outstream):
+def create_bundled(d, outstream, include_files=False):
     """Write the information to an open outstream"""
     collected = collect_license(d)
     sorted_keys = sorted(collected.keys())
     outstream.write('The Pytorch repository and source distributions bundle '
                     'several libraries that are \n')
-    outstream.write('compatibly licensed.  We list these here.\n\n')
+    outstream.write('compatibly licensed.  We list these here.')
+    files_to_include = []
     for k in sorted_keys:
         c = collected[k]
         files = ',\n     '.join(c['Files'])
         license_file = ',\n     '.join(c['License_file'])
+        outstream.write('\n\n')
         outstream.write(f"Name: {c['Name']}\n")
         outstream.write(f"License: {c['License']}\n")
         outstream.write(f"Files: {files}\n")
-        outstream.write('  For details, see ')
+        outstream.write('  For details, see')
+        if include_files:
+            outstream.write(' the files concatenated below: ')
+            files_to_include += c['License_file']
+        else:
+            outstream.write(': ')
         outstream.write(license_file)
+    for fname in files_to_include:
         outstream.write('\n\n')
+        outstream.write(fname)
+        outstream.write('\n' + '-' * len(fname) + '\n')
+        with open(fname, 'r') as fid:
+            outstream.write(fid.read())
 
 
 def identify_license(f, exception=''):
@@ -156,7 +168,7 @@ bsd3_src_txt = bsd3_txt[:2] + bsd3_txt[4:]
 
 
 if __name__ == '__main__':
-    third_party = os.path.join(mydir)
+    third_party = os.path.relpath(mydir)
     parser = argparse.ArgumentParser(
         description="Generate bundled licenses file",
     )
@@ -169,9 +181,14 @@ if __name__ == '__main__':
         ),
         help="location to output new bundled licenses file",
     )
-
+    parser.add_argument(
+        "--include-files",
+        action="store_true",
+        default=False,
+        help="include actual license terms to the output",
+    )
     args = parser.parse_args()
     fname = args.out_file
     print(f"+ Writing bundled licenses to {args.out_file}")
     with open(fname, 'w') as fid:
-        create_bundled(third_party, fid)
+        create_bundled(third_party, fid, args.include_files)

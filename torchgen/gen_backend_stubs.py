@@ -1,15 +1,18 @@
-import pathlib
 import argparse
 import os
-import yaml
+import pathlib
 import re
-from collections import namedtuple, Counter, defaultdict
-from typing import List, Dict, Union, Sequence, Optional
-from torchgen.gen import (
-    get_grouped_native_functions,
-    parse_native_yaml,
-    NamespaceHelper,
-)
+from collections import Counter, defaultdict, namedtuple
+from typing import Dict, List, Optional, Sequence, Set, Union
+
+import yaml
+
+import torchgen.api.dispatcher as dispatcher
+import torchgen.dest as dest
+from torchgen.api.types import DispatcherSignature
+from torchgen.code_template import CodeTemplate
+from torchgen.context import native_function_manager
+from torchgen.gen import get_grouped_native_functions, parse_native_yaml
 from torchgen.model import (
     BackendIndex,
     BackendMetadata,
@@ -19,12 +22,8 @@ from torchgen.model import (
     OperatorName,
 )
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import Target, concatMap, context, YamlLoader, FileManager
-from torchgen.context import native_function_manager
-from torchgen.code_template import CodeTemplate
-import torchgen.dest as dest
-import torchgen.api.dispatcher as dispatcher
-from torchgen.api.types import DispatcherSignature
+from torchgen.utils import concatMap, context, FileManager, NamespaceHelper, Target
+from torchgen.yaml_utils import YamlLoader
 
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
@@ -40,7 +39,6 @@ def parse_backend_yaml(
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     backend_indices: Dict[DispatchKey, BackendIndex],
 ) -> ParsedExternalYaml:
-
     native_functions_map: Dict[OperatorName, NativeFunction] = {
         f.func.name: f
         for f in concatMap(
@@ -49,7 +47,7 @@ def parse_backend_yaml(
         )
     }
 
-    with open(backend_yaml_path, "r") as f:
+    with open(backend_yaml_path) as f:
         yaml_values = yaml.load(f, Loader=YamlLoader)
     assert isinstance(yaml_values, dict)
 
@@ -62,6 +60,8 @@ def parse_backend_yaml(
         "autograd",
         "full_codegen",
         "non_native",
+        "ir_gen",
+        "symint",
     ]
 
     backend = yaml_values.pop("backend", None)
@@ -90,6 +90,14 @@ def parse_backend_yaml(
         supported, list
     ), f'expected "supported" to be a list, but got: {supported} (of type {type(supported)})'
 
+    symint = yaml_values.pop("symint", [])
+    if symint is None:
+        symint = []  # Allow an empty list of symint ops
+    assert isinstance(
+        symint, list
+    ), f'expected "symint" to be a list, but got: {supported} (of type {type(supported)})'
+    symint_set = set(symint)
+
     supported_autograd = yaml_values.pop("autograd", [])
     assert isinstance(
         supported_autograd, list
@@ -102,6 +110,9 @@ def parse_backend_yaml(
     # non_native is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
     non_native = yaml_values.pop("non_native", {})
 
+    # ir_gen is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
+    _ = yaml_values.pop("ir_gen", {})
+
     assert (
         len(yaml_values.keys()) == 0
     ), f'{backend_yaml_path} contains unexpected keys: {", ".join(yaml_values.keys())}. \
@@ -109,6 +120,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
 
     def create_backend_index(
         backend_ops: List[str],
+        symint_ops: Set[str],
         dispatch_key: DispatchKey,
         *,
         use_out_as_primary: bool,
@@ -122,6 +134,8 @@ Only the following keys are supported: {", ".join(valid_keys)}'
             ), f"Found an invalid operator name: {op_name}"
             # See Note [External Backends Follow Dispatcher API]
             kernel_name = dispatcher.name(native_functions_map[op_name].func)
+            if op in symint_ops:
+                kernel_name += "_symint"
             # TODO: allow structured external backends later.
             m = BackendMetadata(
                 kernel=kernel_name, structured=False, cpp_namespace=cpp_namespace
@@ -144,6 +158,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
 
         backend_idx = create_backend_index(
             supported,
+            symint_set,
             backend_key,
             use_out_as_primary=use_out_as_primary,
             use_device_guard=use_device_guard,
@@ -161,6 +176,7 @@ the behavior of autograd for some operators on your backend. However "Autograd{b
 
         autograd_idx = create_backend_index(
             supported_autograd,
+            symint_set,
             autograd_key,
             use_out_as_primary=use_out_as_primary,
             use_device_guard=use_device_guard,
@@ -237,40 +253,59 @@ def error_on_missing_kernels(
     full_codegen: Optional[List[OperatorName]] = None,
 ) -> None:
     try:
-        with open(kernel_defn_file_path, "r") as f:
+        with open(kernel_defn_file_path) as f:
             backend_defns = f.read()
-    except IOError:
+    except OSError as e:
         raise AssertionError(
             f"Unable to read from the specified impl_path file: {kernel_defn_file_path}"
-        )
+        ) from e
 
     if full_codegen is None:
         full_codegen = []
 
-    expected_backend_op_names: List[OperatorName] = (
-        list(backend_indices[backend_key].index.keys()) + []
-        if autograd_key is None
-        else list(backend_indices[autograd_key].index.keys())
+    indices = [backend_indices[backend_key].index] + (
+        [] if autograd_key is None else [backend_indices[autograd_key].index]
+    )
+    # Quick mapping from each OperatorName used by the external backend
+    # to its backend kernel name
+    expected_backend_op_names: Dict[OperatorName, str] = dict(
+        list(
+            concatMap(
+                lambda index: [
+                    (op_name, metadata.kernel) for op_name, metadata in index.items()
+                ],
+                indices,
+            )
+        )
     )
     expected_backend_native_funcs: List[NativeFunction] = [
         f
         for f in native_functions
-        if f.func.name in expected_backend_op_names and f.func.name not in full_codegen
+        if f.func.name in expected_backend_op_names.keys()
+        and f.func.name not in full_codegen
     ]
     expected_backend_kernel_name_counts: Dict[str, List[NativeFunction]] = defaultdict(
         list
     )
     for native_f in expected_backend_native_funcs:
-        expected_backend_kernel_name_counts[dispatcher.name(native_f.func)].append(
-            native_f
-        )
+        expected_backend_kernel_name_counts[
+            expected_backend_op_names[native_f.func.name]
+        ].append(native_f)
 
     # This just looks for lines containing "foo(", and assumes that the kernel foo has been implemented.
     # It might cause false negatives (we won't catch all cases), but that's ok - if we catch a missing kernel
     # here, then we get a nicer error message. If we miss it, you get a linker error.
-    kernel_defn_regex = rf"{class_name}::\s*([\w\d]*)\("
+    kernel_defn_regex = rf"(.*){class_name}::\s*([\w\d]*)\("
     actual_backend_kernel_name_counts = Counter(
-        re.findall(kernel_defn_regex, backend_defns)
+        # A bit unwieldy (this could probably be moved into regex),
+        # but we don't want to include kernel names that come from function calls,
+        # like "return torch_xla::XLANativeFunctions::empty_strided_symint(...)".
+        # Easy check is to ignore any lines with colons before the class name.
+        [
+            y
+            for (x, y) in re.findall(kernel_defn_regex, backend_defns)
+            if not x.endswith(":")
+        ]
     )
 
     missing_kernels_err_msg = ""
@@ -297,12 +332,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate backend stub files")
     parser.add_argument(
         "-s",
+        "--source-yaml",
         "--source_yaml",
         help="path to source yaml file containing operator external definitions",
     )
-    parser.add_argument("-o", "--output_dir", help="output directory")
-    parser.add_argument("--dry_run", type=bool, default=False, help="output directory")
+    parser.add_argument("-o", "--output-dir", "--output_dir", help="output directory")
     parser.add_argument(
+        "--dry-run", "--dry_run", type=bool, default=False, help="output directory"
+    )
+    parser.add_argument(
+        "--impl-path",
         "--impl_path",
         type=str,
         default=None,
@@ -331,29 +370,25 @@ def gen_dispatchkey_nativefunc_headers(
     # Convert to a set first to remove duplicate kernel names.
     # Backends are allowed to repeat kernel names; only generate the declaration once!
     # Sort for deterministic output.
-    backend_declarations = list(
-        sorted(
-            set(
-                concatMap(
-                    lambda f: dest.compute_native_function_declaration(
-                        f, backend_indices[backend_dispatch_key]
-                    ),
-                    grouped_native_functions,
-                )
+    backend_declarations = sorted(
+        set(
+            concatMap(
+                lambda f: dest.compute_native_function_declaration(
+                    f, backend_indices[backend_dispatch_key]
+                ),
+                grouped_native_functions,
             )
         )
     )
-    autograd_declarations = list(
-        sorted(
-            set(
-                concatMap(
-                    lambda f: []
-                    if autograd_dispatch_key is None
-                    else dest.compute_native_function_declaration(
-                        f, backend_indices[autograd_dispatch_key]
-                    ),
-                    grouped_native_functions,
-                )
+    autograd_declarations = sorted(
+        set(
+            concatMap(
+                lambda f: []
+                if autograd_dispatch_key is None
+                else dest.compute_native_function_declaration(
+                    f, backend_indices[autograd_dispatch_key]
+                ),
+                grouped_native_functions,
             )
         )
     )
@@ -407,12 +442,15 @@ def gen_dispatcher_registrations(
                 Target.REGISTRATION,
                 selector,
                 rocm=False,
+                symint=True,
                 class_method_name=f"{class_name}",
                 skip_dispatcher_op_registration=False,
             ),
             grouped_native_functions,
         )
     )
+    newline = "\n"
+    ns_helper = NamespaceHelper(namespace_str="at")
     deferred_dispatch_registrations = ""
     static_init_dispatch_registrations = ""
     if eager_registration:
@@ -429,6 +467,7 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
     else:
         deferred_template = CodeTemplate(
             """\
+TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions();
 TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
     static auto m = MAKE_TORCH_LIBRARY_IMPL(aten, $dispatch_key);
     $dispatch_registrations_body
@@ -444,8 +483,6 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
         f"Register{dispatch_key}.cpp",
         "RegisterDispatchKey.cpp",
         lambda: {
-            "static_init_dispatch_registrations": static_init_dispatch_registrations,
-            "deferred_dispatch_registrations": deferred_dispatch_registrations,
             "extra_cuda_headers": "",
             "external_backend_headers": external_backend_headers_str,
             "ops_headers": "#include <ATen/Functions.h>"
@@ -456,21 +493,32 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
             "dispatch_headers": dest.gen_registration_headers(
                 backend_index, per_operator_headers=per_operator_headers, rocm=False
             ),
-            "dispatch_helpers": dest.gen_registration_helpers(backend_index),
-            "dispatch_namespaced_definitions": "",
-            "dispatch_anonymous_definitions": list(
-                concatMap(
-                    dest.RegisterDispatchKey(
-                        backend_index,
-                        Target.ANONYMOUS_DEFINITION,
-                        selector,
-                        rocm=False,
-                        class_method_name=f"{class_name}",
-                        skip_dispatcher_op_registration=False,
+            "dispatch_definitions": fm.substitute_with_template(
+                "RegisterDispatchDefinitions.ini",
+                lambda: {
+                    "ns_prologue": ns_helper.prologue,
+                    "ns_epilogue": ns_helper.epilogue,
+                    "static_init_dispatch_registrations": static_init_dispatch_registrations,
+                    "deferred_dispatch_registrations": deferred_dispatch_registrations,
+                    "dispatch_helpers": dest.gen_registration_helpers(backend_index),
+                    "dispatch_namespace": dispatch_key.lower(),
+                    "dispatch_namespaced_definitions": "",
+                    "dispatch_anonymous_definitions": list(
+                        concatMap(
+                            dest.RegisterDispatchKey(
+                                backend_index,
+                                Target.ANONYMOUS_DEFINITION,
+                                selector,
+                                rocm=False,
+                                symint=True,
+                                class_method_name=f"{class_name}",
+                                skip_dispatcher_op_registration=False,
+                            ),
+                            grouped_native_functions,
+                        )
                     ),
-                    grouped_native_functions,
-                )
-            ),
+                },
+            ).split(newline),
         },
     )
 
@@ -478,7 +526,6 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
 def run(
     source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str] = None
 ) -> None:
-
     # Assumes that this file lives at PYTORCH_ROOT/torchgen/gen_backend_stubs.py
     pytorch_root = pathlib.Path(__file__).parent.parent.absolute()
     template_dir = os.path.join(pytorch_root, "aten/src/ATen/templates")

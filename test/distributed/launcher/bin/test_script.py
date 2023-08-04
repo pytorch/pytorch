@@ -24,6 +24,7 @@ def parse_args():
 
     # file is used for assertions
     parser.add_argument(
+        "--touch-file-dir",
         "--touch_file_dir",
         type=str,
         help="dir to touch a file with global rank as the filename",

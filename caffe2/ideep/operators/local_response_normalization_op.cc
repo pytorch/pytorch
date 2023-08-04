@@ -15,10 +15,10 @@ class IDEEPLRNOp final : public IDEEPOperator {
         alpha_(OperatorBase::GetSingleArgument<float>("alpha", 0)),
         beta_(OperatorBase::GetSingleArgument<float>("beta", 0)),
         bias_(OperatorBase::GetSingleArgument<float>("bias", 1)) {
-    DCHECK_GT(size_, 0);
-    DCHECK_EQ(size_ % 2, 1);
-    DCHECK_GT(alpha_, 0);
-    DCHECK_GT(beta_, 0);
+    TORCH_DCHECK_GT(size_, 0);
+    TORCH_DCHECK_EQ(size_ % 2, 1);
+    TORCH_DCHECK_GT(alpha_, 0);
+    TORCH_DCHECK_GT(beta_, 0);
   }
   ~IDEEPLRNOp() override = default;
 
@@ -52,10 +52,10 @@ class IDEEPLRNGradientOp final : public IDEEPOperator {
         alpha_(OperatorBase::GetSingleArgument<float>("alpha", 0)),
         beta_(OperatorBase::GetSingleArgument<float>("beta", 0)),
         bias_(OperatorBase::GetSingleArgument<float>("bias", 1)) {
-    DCHECK_GT(size_, 0);
-    DCHECK_EQ(size_ % 2, 1);
-    DCHECK_GT(alpha_, 0);
-    DCHECK_GT(beta_, 0);
+    TORCH_DCHECK_GT(size_, 0);
+    TORCH_DCHECK_EQ(size_ % 2, 1);
+    TORCH_DCHECK_GT(alpha_, 0);
+    TORCH_DCHECK_GT(beta_, 0);
   }
   ~IDEEPLRNGradientOp() override = default;
 

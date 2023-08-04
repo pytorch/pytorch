@@ -16,16 +16,20 @@ from pathlib import Path
 import os
 import warnings
 
+__all__ = ["reduce_graph_module", "reduce_package_graph_module", "reduce_deploy_graph_module", "GraphModule"]
+
+_USER_PRESERVED_ATTRIBUTES_KEY = "_user_preserved_attributes"
+
 # Normal exec loses the source code, however we can work with
 # the linecache module to recover it.
 # Using _exec_with_source will add it to our local cache
 # and then tools like TorchScript will be able to get source info.
-class _EvalCacheLoader(object):
+class _EvalCacheLoader:
     def __init__(self):
         self.eval_cache = {}
         self.next_id = 0
 
-    def cache(self, src: str, globals: Dict[str, Any]):
+    def cache(self, src: str, globals: Dict[str, Any], co_fields=None):
         """Store the source in a private cache, and add a lazy entry in linecache
         that allows the source to be retrieved by 'filename'.
 
@@ -38,6 +42,8 @@ class _EvalCacheLoader(object):
         """
 
         key = self._get_key()
+        if co_fields:
+            key += f" from {co_fields['co_filename']}:{co_fields['co_firstlineno']} in {co_fields['co_name']}"
         self.eval_cache[key] = src
 
         # Don't mutate globals so that this loader is only used
@@ -66,15 +72,15 @@ class _EvalCacheLoader(object):
 _loader = _EvalCacheLoader()
 
 
-def _exec_with_source(src: str, globals: Dict[str, Any]):
-    key = _loader.cache(src, globals)
+def _exec_with_source(src: str, globals: Dict[str, Any], co_fields=None):
+    key = _loader.cache(src, globals, co_fields)
     exec(compile(src, key, 'exec'), globals)
 
 
-def _forward_from_src(src: str, globals: Dict[str, Any]):
+def _forward_from_src(src: str, globals: Dict[str, Any], co_fields=None):
     # avoid mutating the passed in dict
     globals_copy = globals.copy()
-    _exec_with_source(src, globals_copy)
+    _exec_with_source(src, globals_copy, co_fields)
     forward_fn = globals_copy['forward']
     del globals_copy['forward']
     return forward_fn
@@ -116,13 +122,20 @@ def reduce_package_graph_module(
 def reduce_deploy_graph_module(
     importer: PackageImporter, body: Dict[Any, Any], import_block: str
 ) -> torch.nn.Module:
-    ns = dict()
+    ns = {}
     ns["__builtins__"] = importer.patched_builtins
     fn_src = body.get('_code')
     assert fn_src is not None
     forward = _forward_from_src(import_block + fn_src, ns)
     return _deserialize_graph_module(forward, body)
 
+# We create a dummy class here because symbolic_trace pulls the forward()
+# function off of the class, rather than the instance. This class is used
+# in _deserialize_graph_module() below.
+class _CodeOnlyModule(torch.nn.Module):
+    def __init__(self, body):
+        super().__init__()
+        self.__dict__ = body
 
 def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
     """
@@ -131,15 +144,9 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
     saving the dictionary so that changes to the in-memory graph format do not
     get serialized.
     """
-    # We create a dummy class here because symbolic_trace pulls the forward()
-    # function off of the class, rather than the instance
-    class CodeOnlyModule(torch.nn.Module):
-        def __init__(self, body):
-            super().__init__()
-            self.__dict__ = body
 
     # Try to retrieve the forward source in a backward-compatible way
-    CodeOnlyModule.forward = forward
+    _CodeOnlyModule.forward = forward
 
     tracer_cls = body.get('_tracer_cls')
     if tracer_cls is None:
@@ -158,7 +165,7 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
         def is_leaf_module(self, _: torch.nn.Module, __: str) -> bool:
             return True
 
-    com = CodeOnlyModule(body)
+    com = _CodeOnlyModule(body)
 
     tracer_extras = body.get('_tracer_extras', {})
     graph = KeepModules().trace(com, **tracer_extras)
@@ -338,6 +345,18 @@ class GraphModule(torch.nn.Module):
         if isinstance(root, torch.nn.Module):
             if hasattr(root, 'training'):
                 self.training = root.training
+
+            # When we pickle/unpickle graph module, we don't want to drop any module or attributes.
+            if isinstance(root, _CodeOnlyModule):
+                for k, _ in root.named_children():
+                    _copy_attr(root, self, k)
+
+                for k, _ in root.named_buffers():
+                    _copy_attr(root, self, k)
+
+                for k, _ in root.named_parameters():
+                    _copy_attr(root, self, k)
+
             for node in graph.nodes:
                 if node.op in ['get_attr', 'call_module']:
                     assert isinstance(node.target, str)
@@ -377,6 +396,9 @@ class GraphModule(torch.nn.Module):
         self._tracer_extras = {}
         if self.graph._tracer_extras:
             self._tracer_extras = self.graph._tracer_extras
+
+        # Dictionary to store metadata
+        self.meta : Dict[str, Any] = {}
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -419,8 +441,11 @@ class GraphModule(torch.nn.Module):
         Path(folder).mkdir(exist_ok=True)
         torch.save(self.state_dict(), folder / 'state_dict.pt')
         tab = " " * 4
+        custom_builtins = '\n'.join([v.import_str for v in _custom_builtins.values()])
         model_str = f"""
 import torch
+{custom_builtins}
+
 from torch.nn import *
 class {module_name}(torch.nn.Module):
     def __init__(self):
@@ -574,7 +599,7 @@ class {module_name}(torch.nn.Module):
             if node.op == "call_module" or node.op == "get_attr":
 
                 # A list of strings representing the different parts
-                # of the path. For exmaple, `foo.bar.baz` gives us
+                # of the path. For example, `foo.bar.baz` gives us
                 # ["foo", "bar", "baz"]
                 fullpath = node.target.split(".")
 
@@ -635,7 +660,8 @@ class {module_name}(torch.nn.Module):
         self._code = python_code.src
 
         cls = type(self)
-        cls.forward = _forward_from_src(self._code, python_code.globals)
+        co_fields = self._graph._co_fields if hasattr(self._graph, '_co_fields') else {}
+        cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
 
         # Determine whether this class explicitly defines a __call__ implementation
         # to wrap. If it does, save it in order to have wrapped_call invoke it.
@@ -696,16 +722,61 @@ class {module_name}(torch.nn.Module):
     # we need to define deepcopy otherwise it will call __reduce__
     # and cause symbolic tracing to occur every time we try to copy the object
     def __deepcopy__(self, memo):
+        res = type(self).__new__(type(self))
+        memo[id(self)] = res
         fake_mod = torch.nn.Module()
-        fake_mod.__dict__ = copy.deepcopy(self.__dict__)
-        return GraphModule(fake_mod, fake_mod.__dict__['_graph'])
+        fake_mod.__dict__ = copy.deepcopy(self.__dict__, memo)
+        GraphModule.__init__(res, fake_mod, fake_mod.__dict__['_graph'])
+        # hooks are lost during `GraphModule.__init__`, so we need to copy over
+        # them explicitly, note right now we are only copying state_dict related
+        # hooks, to reduce bc-related issues, we can copy forward/backward related
+        # hooks in the future as well if needed
+        extra_preserved_attrs = [
+            "_state_dict_hooks",
+            "_load_state_dict_pre_hooks",
+            "_load_state_dict_post_hooks"
+        ]
+        for attr in extra_preserved_attrs:
+            if attr in self.__dict__:
+                setattr(res, attr, copy.deepcopy(self.__dict__[attr], memo))
+        res.meta = copy.deepcopy(getattr(self, 'meta', {}), memo)
+        if _USER_PRESERVED_ATTRIBUTES_KEY in res.meta:
+            for attr_name, attr in res.meta[_USER_PRESERVED_ATTRIBUTES_KEY].items():
+                setattr(res, attr_name, attr)
+        return res
 
     def __copy__(self):
-        return GraphModule(self, self.graph)
+        res = GraphModule(self, self.graph)
+        res.meta = getattr(self, 'meta', {})
+        return res
+
+    @compatibility(is_backward_compatible=False)
+    def print_readable(self, print_output=True):
+        """
+        Return the Python code generated for current GraphModule and its children GraphModules
+        """
+        verbose_python_code = self._graph.python_code(root_module='self', verbose=True)
+        module_code = verbose_python_code.src
+        module_code = module_code.lstrip('\n')
+        module_code = f"class {self._get_name()}(torch.nn.Module):\n" + module_code
+        module_code = _addindent(module_code, 4)
+
+        submodule_code_list = [""]
+        for submodule in self.children():
+            if isinstance(submodule, GraphModule):
+                submodule_code_list.append(submodule.print_readable(print_output=False))
+        submodule_code = "\n".join(submodule_code_list)
+        submodule_code = _addindent(submodule_code, 4)
+
+        output = module_code + submodule_code
+        if print_output:
+            print(module_code + submodule_code)
+        return output
 
     def __str__(self) -> str:
         orig_str = super().__str__()
-        return '\n'.join([orig_str, self._code])
+        print_readable_reminder = "# To see more debug info, please use `graph_module.print_readable()`"
+        return '\n'.join([orig_str, self._code, print_readable_reminder])
 
     def _replicate_for_data_parallel(self):
         new_gm = self.__copy__()

@@ -1,18 +1,31 @@
 # Owner(s): ["module: nn"]
 
 import tempfile
-import torch
 from copy import deepcopy
 from functools import partial
+from unittest import expectedFailure
+
+import torch
 from torch import nn
-from torch.nn.utils.parametrize import register_parametrization, remove_parametrizations
 from torch.nn.modules.lazy import LazyModuleMixin
+from torch.nn.utils.parametrize import (
+    register_parametrization,
+    remove_parametrizations,
+)
+from torch.testing._internal.common_subclass import (
+    DiagTensorBelow,
+    subclass_db,
+)
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests)
-from torch.testing._internal.common_subclass import subclass_db, DiagTensorBelow
+    TestCase,
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    skipIfTorchDynamo,
+    subtest,
+)
 from torch.testing._internal.logging_tensor import LoggingTensor
 from torch.utils._pytree import tree_map
-from unittest import expectedFailure
 
 # The current test methodology in this file is to test a variety of real use cases
 # with a set of fully-fledged tensor subclasses. In the future, this may change
@@ -43,6 +56,7 @@ class TestSubclass(TestCase):
         self.assertNotIsInstance(x, nn.Parameter)
         self.assertEqual(x.requires_grad, tensor_requires_grad)
 
+    @skipIfTorchDynamo()
     @parametrize_tensor_cls
     @parametrize("as_param", [False, True])
     def test_deepcopy(self, tensor_cls, as_param):
@@ -76,6 +90,7 @@ class TestSubclass(TestCase):
                 # Serialization should preserve both custom type and "parameter-ness".
                 self.assertIsInstance(x_loaded, nn.Parameter)
 
+    @skipIfTorchDynamo("Visible only with functorch as functorch monkeypatches tensor str")
     @parametrize_tensor_cls
     @parametrize("as_param", [False, True])
     def test_repr(self, tensor_cls, as_param):
@@ -127,7 +142,7 @@ class TestSubclass(TestCase):
                     nn.init.normal_(self.p1)
                     for p in self.p_list:
                         nn.init.uniform_(p)
-                    for _, p in self.p_dict.items():
+                    for p in self.p_dict.values():
                         nn.init.uniform_(p)
 
             def forward(self, x):
@@ -135,7 +150,7 @@ class TestSubclass(TestCase):
                 for p in self.p_list:
                     out = p + out
 
-                for _, v in self.p_dict.items():
+                for v in self.p_dict.values():
                     out = v + out
 
                 return out
@@ -213,7 +228,7 @@ class TestSubclass(TestCase):
             def __new__(
                 cls, t: torch.Tensor
             ):
-                r = super(NonRewrappingTensor, cls)._make_wrapper_subclass(
+                r = super()._make_wrapper_subclass(
                     cls, t.shape, dtype=t.dtype, requires_grad=t.requires_grad, device=t.device)
                 return r
 

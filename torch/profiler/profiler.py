@@ -9,17 +9,28 @@ from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
-from torch._C._autograd import (
+from torch._C import _get_privateuse1_backend_name
+from torch._C._profiler import (
+    _add_execution_trace_observer,
+    _disable_execution_trace_observer,
+    _enable_execution_trace_observer,
     _ExperimentalConfig,
-    _add_execution_graph_observer,
-    _remove_execution_graph_observer,
-    _enable_execution_graph_observer,
-    _disable_execution_graph_observer,
+    _remove_execution_trace_observer,
 )
-from torch.autograd import ProfilerActivity, kineto_available
+from torch.autograd import kineto_available, ProfilerActivity
+from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
 
-__all__ = ['supported_activities', 'ProfilerAction', 'schedule', 'tensorboard_trace_handler', 'profile',
-           'ExecutionGraphObserver']
+
+__all__ = [
+    "supported_activities",
+    "ProfilerAction",
+    "schedule",
+    "tensorboard_trace_handler",
+    "profile",
+    "ExecutionTraceObserver",
+]
+PROFILER_STEP_NAME = "ProfilerStep"
+
 
 def supported_activities():
     """
@@ -35,7 +46,7 @@ def supported_activities():
     return torch.autograd._supported_activities()
 
 
-class _KinetoProfile(object):
+class _KinetoProfile:
     """Low-level profiler wrap the autograd profile
 
     Args:
@@ -58,23 +69,25 @@ class _KinetoProfile(object):
             used by profiler libraries like Kineto. Note, backward compatibility is not guaranteed.
 
     .. note::
-        This API is an experimental and subject to change in future.
+        This API is experimental and subject to change in the future.
 
         Enabling shape and stack tracing results in additional overhead.
         When record_shapes=True is specified, profiler will temporarily hold references to the tensors;
         that may further prevent certain optimizations that depend on the reference count and introduce
         extra tensor copies.
     """
+
     def __init__(
-            self,
-            *,
-            activities: Optional[Iterable[ProfilerActivity]] = None,
-            record_shapes: bool = False,
-            profile_memory: bool = False,
-            with_stack: bool = False,
-            with_flops: bool = False,
-            with_modules: bool = False,
-            experimental_config: Optional[_ExperimentalConfig] = None):
+        self,
+        *,
+        activities: Optional[Iterable[ProfilerActivity]] = None,
+        record_shapes: bool = False,
+        profile_memory: bool = False,
+        with_stack: bool = False,
+        with_flops: bool = False,
+        with_modules: bool = False,
+        experimental_config: Optional[_ExperimentalConfig] = None,
+    ):
         self.activities = set(activities) if activities else supported_activities()
         self.record_shapes = record_shapes
         self.with_flops = with_flops
@@ -83,6 +96,11 @@ class _KinetoProfile(object):
         self.with_modules = with_modules
         self.experimental_config = experimental_config
         self.profiler: Optional[prof.profile] = None
+        self.mem_tl: Optional[MemoryProfileTimeline] = None
+        self.use_device = None
+        privateuse1_backend = _get_privateuse1_backend_name()
+        if privateuse1_backend != "privateuseone":
+            self.use_device = privateuse1_backend
 
     def start(self):
         self.prepare_trace()
@@ -95,6 +113,8 @@ class _KinetoProfile(object):
         self.profiler = prof.profile(
             use_cuda=(ProfilerActivity.CUDA in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
+            use_mtia=(ProfilerActivity.MTIA in self.activities),
+            use_device=None,
             record_shapes=self.record_shapes,
             with_flops=self.with_flops,
             profile_memory=self.profile_memory,
@@ -109,10 +129,32 @@ class _KinetoProfile(object):
         assert self.profiler is not None
         self.profiler._start_trace()
 
+        if self.profile_memory:
+            self.add_metadata_json("profile_memory", "1")
+        if self.with_stack:
+            self.add_metadata_json("with_stack", "1")
+        if self.record_shapes:
+            self.add_metadata_json("record_shapes", "1")
+        if self.with_modules:
+            self.add_metadata_json("with_modules", "1")
+        if self.with_flops:
+            self.add_metadata_json("with_flops", "1")
+
         if kineto_available():
             dist_info = self._get_distributed_info()
             if dist_info:
                 self.add_metadata_json("distributedInfo", json.dumps(dist_info))
+
+            # FIXME: CUPTI Lazy Re-init and CUDA Graph crashes with CUDA 11.
+            is_cuda11_or_lower = (torch.version.cuda is not None) and (
+                [int(x) for x in torch.version.cuda.split(".")] < [12, 0]
+            )
+            if is_cuda11_or_lower and hasattr(torch, "_inductor"):
+                import torch._inductor.config as inductor_config
+
+                if inductor_config.triton.cudagraphs:
+                    os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
+                    self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
 
     def stop_trace(self):
         assert self.profiler is not None
@@ -123,12 +165,12 @@ class _KinetoProfile(object):
         Exports the collected trace in Chrome JSON format.
         """
         assert self.profiler
-        if path.endswith('.gz'):
-            fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
+        if path.endswith(".gz"):
+            fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=False)
             fp.close()
             retvalue = self.profiler.export_chrome_trace(fp.name)
             with open(fp.name) as fin:
-                with gzip.open(path, 'wt') as fout:
+                with gzip.open(path, "wt") as fout:
                     fout.writelines(fin)
             os.remove(fp.name)
             return retvalue
@@ -152,7 +194,9 @@ class _KinetoProfile(object):
         assert self.profiler
         return self.profiler.export_stacks(path, metric)
 
-    def key_averages(self, group_by_input_shape: bool = False, group_by_stack_n: int = 0):
+    def key_averages(
+        self, group_by_input_shape: bool = False, group_by_stack_n: int = 0
+    ):
         """Averages events, grouping them by operator name and (optionally) input shapes and
         stack.
 
@@ -176,7 +220,7 @@ class _KinetoProfile(object):
         Adds a user defined metadata with a string key and a string value
         into the trace file
         """
-        wrapped_value = "\"" + value.replace('"', '\\"') + "\""
+        wrapped_value = '"' + value.replace('"', '\\"') + '"'
         torch.autograd._add_metadata_json(key, wrapped_value)
 
     def add_metadata_json(self, key: str, value: str):
@@ -188,27 +232,78 @@ class _KinetoProfile(object):
 
     def _get_distributed_info(self):
         import torch.distributed as dist
+
         if not dist.is_available() or not dist.is_initialized():
             return None
 
         return {
             "backend": dist.get_backend(),
             "rank": dist.get_rank(),
-            "world_size": dist.get_world_size()
+            "world_size": dist.get_world_size(),
         }
+
+    def _memory_profile(self) -> MemoryProfile:
+        required = ("record_shapes", "profile_memory", "with_stack")
+        missing = [f"{i}=True" for i in required if not getattr(self, i)]
+        if missing:
+            raise ValueError(f"{', '.join(missing)} required for memory profiling.")
+
+        assert self.profiler is not None and self.profiler.kineto_results is not None
+        return MemoryProfile(self.profiler.kineto_results)
+
+    def export_memory_timeline(self, path: str, device: Optional[str] = None) -> None:
+        """Extract the memory information from the memory profile collected
+        tree for a given device, and export a timeline plot consisting of
+        [times, [sizes by category]], where times are timestamps and sizes
+        are memory usage for each category. The memory timeline plot will
+        be saved a JSON (by default) or gzipped JSON.
+
+        Input: (path of file, device)
+        Output: File written as JSON or gzipped JSON
+        """
+        # Default to device 0, if unset. Fallback on cpu.
+        if device is None and self.use_device and self.use_device != "cuda":
+            device = self.use_device + ":0"
+
+        if device is None:
+            device = "cuda:0" if torch.cuda.is_available() else "cpu"
+
+        # Construct the memory timeline plot data
+        self.mem_tl = MemoryProfileTimeline(self._memory_profile())
+
+        # Depending on the file suffix, save the data as json.gz or json.
+        # For html, we can embed the image into an HTML file.
+        if path.endswith(".html"):
+            self.mem_tl.export_memory_timeline_html(path, device)
+        elif path.endswith(".gz"):
+            fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=False)
+            fp.close()
+            if path.endswith("raw.json.gz"):
+                self.mem_tl.export_memory_timeline_raw(fp.name, device)
+            else:
+                self.mem_tl.export_memory_timeline(fp.name, device)
+            with open(fp.name) as fin:
+                with gzip.open(path, "wt") as fout:
+                    fout.writelines(fin)
+            os.remove(fp.name)
+        else:
+            self.mem_tl.export_memory_timeline(path, device)
 
 
 class ProfilerAction(Enum):
     """
     Profiler actions that can be taken at the specified intervals
     """
+
     NONE = 0
     WARMUP = 1
     RECORD = 2
     RECORD_AND_SAVE = 3
 
 
-def schedule(*, wait: int, warmup: int, active: int, repeat: int = 0, skip_first: int = 0) -> Callable:
+def schedule(
+    *, wait: int, warmup: int, active: int, repeat: int = 0, skip_first: int = 0
+) -> Callable:
     """
     Returns a callable that can be used as profiler ``schedule`` argument. The profiler will skip
     the first ``skip_first`` steps, then wait for ``wait`` steps, then do the warmup for the next ``warmup`` steps,
@@ -216,6 +311,7 @@ def schedule(*, wait: int, warmup: int, active: int, repeat: int = 0, skip_first
     The optional number of cycles is specified with the ``repeat`` parameter, the zero value means that
     the cycles will continue until the profiling is finished.
     """
+
     def schedule_fn(step: int) -> ProfilerAction:
         assert step >= 0
         if step < skip_first:
@@ -231,10 +327,15 @@ def schedule(*, wait: int, warmup: int, active: int, repeat: int = 0, skip_first
         elif mod_step < wait + warmup:
             return ProfilerAction.WARMUP
         else:
-            return ProfilerAction.RECORD if mod_step < num_steps - 1 \
+            return (
+                ProfilerAction.RECORD
+                if mod_step < num_steps - 1
                 else ProfilerAction.RECORD_AND_SAVE
-    assert wait >= 0 and warmup >= 0 and active > 0 and \
-           repeat >= 0 and skip_first >= 0, "Invalid profiler schedule arguments"
+            )
+
+    assert (
+        wait >= 0 and warmup >= 0 and active > 0 and repeat >= 0 and skip_first >= 0
+    ), "Invalid profiler schedule arguments"
     if warmup == 0:
         warn("Profiler won't be using warmup, this can skew profiler results")
     return schedule_fn
@@ -247,7 +348,10 @@ def _default_schedule_fn(_: int) -> ProfilerAction:
     """
     return ProfilerAction.RECORD
 
-def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, use_gzip: bool = False):
+
+def tensorboard_trace_handler(
+    dir_name: str, worker_name: Optional[str] = None, use_gzip: bool = False
+):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
     directly delivered to tensorboard as logdir.
@@ -263,14 +367,16 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
         if not os.path.isdir(dir_name):
             try:
                 os.makedirs(dir_name, exist_ok=True)
-            except Exception:
-                raise RuntimeError("Can't create directory: " + dir_name)
+            except Exception as e:
+                raise RuntimeError("Can't create directory: " + dir_name) from e
         if not worker_name:
-            worker_name = "{}_{}".format(socket.gethostname(), str(os.getpid()))
-        file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
+            worker_name = f"{socket.gethostname()}_{os.getpid()}"
+        # Use nanosecond here to avoid naming clash when exporting the trace
+        file_name = f"{worker_name}.{time.time_ns()}.pt.trace.json"
         if use_gzip:
-            file_name = file_name + '.gz'
+            file_name = file_name + ".gz"
         prof.export_chrome_trace(os.path.join(dir_name, file_name))
+
     return handler_fn
 
 
@@ -281,9 +387,9 @@ class profile(_KinetoProfile):
         activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
             ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``.
             Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA.
-        schedule (callable): callable that takes step (int) as a single parameter and returns
+        schedule (Callable): callable that takes step (int) as a single parameter and returns
             ``ProfilerAction`` value that specifies the profiler action to perform at each step.
-        on_trace_ready (callable): callable that is called at each step when ``schedule``
+        on_trace_ready (Callable): callable that is called at each step when ``schedule``
             returns ``ProfilerAction.RECORD_AND_SAVE`` during the profiling.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation.
@@ -362,7 +468,7 @@ class profile(_KinetoProfile):
                 torch.profiler.ProfilerActivity.CUDA,
             ],
 
-            # In this example with wait=1, warmup=1, active=2,
+            # In this example with wait=1, warmup=1, active=2, repeat=1,
             # profiler will skip the first step/iteration,
             # start warming up on the second, record
             # the third and the forth iterations,
@@ -373,7 +479,8 @@ class profile(_KinetoProfile):
             schedule=torch.profiler.schedule(
                 wait=1,
                 warmup=1,
-                active=2),
+                active=2,
+                repeat=1),
             on_trace_ready=trace_handler
             # on_trace_ready=torch.profiler.tensorboard_trace_handler('./log')
             # used when outputting for tensorboard
@@ -383,21 +490,22 @@ class profile(_KinetoProfile):
                     # send a signal to the profiler that the next iteration has started
                     p.step()
     """
-    def __init__(
-            self,
-            *,
-            activities: Optional[Iterable[ProfilerActivity]] = None,
-            schedule: Optional[Callable[[int], ProfilerAction]] = None,
-            on_trace_ready: Optional[Callable[..., Any]] = None,
-            record_shapes: bool = False,
-            profile_memory: bool = False,
-            with_stack: bool = False,
-            with_flops: bool = False,
-            with_modules: bool = False,
-            experimental_config: Optional[_ExperimentalConfig] = None,
-            # deprecated:
-            use_cuda: Optional[bool] = None):
 
+    def __init__(
+        self,
+        *,
+        activities: Optional[Iterable[ProfilerActivity]] = None,
+        schedule: Optional[Callable[[int], ProfilerAction]] = None,
+        on_trace_ready: Optional[Callable[..., Any]] = None,
+        record_shapes: bool = False,
+        profile_memory: bool = False,
+        with_stack: bool = False,
+        with_flops: bool = False,
+        with_modules: bool = False,
+        experimental_config: Optional[_ExperimentalConfig] = None,
+        # deprecated:
+        use_cuda: Optional[bool] = None,
+    ):
         activities_set = set(activities) if activities else supported_activities()
         if use_cuda is not None:
             warn("use_cuda is deprecated, use activities argument instead")
@@ -429,56 +537,87 @@ class profile(_KinetoProfile):
         self.current_action = self.schedule(self.step_num)
         self.step_rec_fn: Optional[prof.record_function] = None
 
-        self.action_map: Dict[Tuple[ProfilerAction, Optional[ProfilerAction]], List[Any]] = {
+        self.action_map: Dict[
+            Tuple[ProfilerAction, Optional[ProfilerAction]], List[Any]
+        ] = {
             # key is (prev_action, current_action), value is action list corresponding to the state pair.
             (ProfilerAction.NONE, ProfilerAction.NONE): [],
             (ProfilerAction.NONE, ProfilerAction.WARMUP): [self.prepare_trace],
-            (ProfilerAction.NONE, ProfilerAction.RECORD): [self.prepare_trace, self.start_trace],
-            (ProfilerAction.NONE, ProfilerAction.RECORD_AND_SAVE): [self.prepare_trace, self.start_trace],
+            (ProfilerAction.NONE, ProfilerAction.RECORD): [
+                self.prepare_trace,
+                self.start_trace,
+            ],
+            (ProfilerAction.NONE, ProfilerAction.RECORD_AND_SAVE): [
+                self.prepare_trace,
+                self.start_trace,
+            ],
             (ProfilerAction.WARMUP, ProfilerAction.NONE): [
                 partial(warn, "Incorrect schedule: WARMUP followed by NONE"),
                 self.start_trace,
-                self.stop_trace],
+                self.stop_trace,
+            ],
             (ProfilerAction.WARMUP, ProfilerAction.WARMUP): [],
             (ProfilerAction.WARMUP, ProfilerAction.RECORD): [self.start_trace],
             (ProfilerAction.WARMUP, ProfilerAction.RECORD_AND_SAVE): [self.start_trace],
             (ProfilerAction.RECORD, ProfilerAction.NONE): [
                 partial(warn, "Incorrect schedule: RECORD followed by NONE"),
-                self.stop_trace],
+                self.stop_trace,
+            ],
             (ProfilerAction.RECORD, ProfilerAction.WARMUP): [
                 partial(warn, "Incorrect schedule: RECORD followed by WARMUP"),
-                self.stop_trace],
+                self.stop_trace,
+            ],
             (ProfilerAction.RECORD, ProfilerAction.RECORD): [],
             (ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE): [],
-            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.NONE): [self.stop_trace, self._trace_ready],
-            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.WARMUP): [self.stop_trace, self._trace_ready, self.prepare_trace],
+            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.NONE): [
+                self.stop_trace,
+                self._trace_ready,
+            ],
+            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.WARMUP): [
+                self.stop_trace,
+                self._trace_ready,
+                self.prepare_trace,
+            ],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD): [
                 self.stop_trace,
                 self._trace_ready,
                 self.prepare_trace,
-                self.start_trace],
+                self.start_trace,
+            ],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD_AND_SAVE): [
                 self.stop_trace,
                 self._trace_ready,
                 self.prepare_trace,
-                self.start_trace],
+                self.start_trace,
+            ],
             # used for exit action
             (ProfilerAction.WARMUP, None): [self.start_trace, self.stop_trace],
             (ProfilerAction.RECORD, None): [self.stop_trace, self._trace_ready],
-            (ProfilerAction.RECORD_AND_SAVE, None): [self.stop_trace, self._trace_ready]
+            (ProfilerAction.RECORD_AND_SAVE, None): [
+                self.stop_trace,
+                self._trace_ready,
+            ],
         }
+        # Start tracking increments to profiler step, this will be used
+        # by Kineto
+        prof.KinetoStepTracker.init_step_count(PROFILER_STEP_NAME)
 
     def __enter__(self):
+        prof._enable_dynamo_cache_lookup_profiler(True)
         self.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
+        prof._enable_dynamo_cache_lookup_profiler(False)
+        prof.KinetoStepTracker.erase_step_count(PROFILER_STEP_NAME)
 
     def start(self):
         self._transit_action(ProfilerAction.NONE, self.current_action)
         if self.record_steps:
-            self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
+            self.step_rec_fn = prof.record_function(
+                "ProfilerStep#" + str(self.step_num)
+            )
             self.step_rec_fn.__enter__()
 
     def stop(self):
@@ -498,8 +637,8 @@ class profile(_KinetoProfile):
         self.current_action = self.schedule(self.step_num)
 
         self._transit_action(prev_action, self.current_action)
+        prof.KinetoStepTracker.increment_step(PROFILER_STEP_NAME)
 
-        prof.kineto_step()
         if self.record_steps:
             self.step_rec_fn = prof.record_function("ProfilerStep#" + str(cur_step))
             self.step_rec_fn.__enter__()
@@ -515,27 +654,27 @@ class profile(_KinetoProfile):
                 action()
 
 
+class ExecutionTraceObserver:
+    """Execution Trace Observer
 
-class ExecutionGraphObserver:
-    """Execution Graph Observer
-
-    Each process can have a single ExecutionGraphObserver instance. The observer
+    Each process can have a single ExecutionTraceObserver instance. The observer
     can be added to record function callbacks via calling register_callback()
     explicitly. Without calling unregister_callback(), repeated calls to
     register_callback() will not add additional observers to record function
-    callbacks. Once an ExecutionGraphObserver is created, the start() and stop()
+    callbacks. Once an ExecutionTraceObserver is created, the start() and stop()
     methods control when the event data is recorded.
 
     Deleting or calling unregister_callback() will remove the observer from the
     record function callbacks, finalize the output file, and will stop
     incurring any overheads.
     """
+
     def __init__(self):
         """
         Initializes the default states.
         """
         self._registered = False
-        self._execution_graph_running = False
+        self._execution_trace_running = False
 
     def __del__(self):
         """
@@ -545,40 +684,59 @@ class ExecutionGraphObserver:
 
     def register_callback(self, output_file_path: str):
         """
-        Adds EG observer to record function callbacks. The the data will be
+        Adds ET observer to record function callbacks. The the data will be
         written to output_file_path.
         """
         if not self._registered:
             self._output_file_path = output_file_path
-            self._registered = _add_execution_graph_observer(output_file_path)
+            self._registered = _add_execution_trace_observer(output_file_path)
 
     def unregister_callback(self):
         """
-        Removes EG observer from record function callbacks.
+        Removes ET observer from record function callbacks.
         """
         if self._registered:
             self.stop()
-            _remove_execution_graph_observer()
+            _remove_execution_trace_observer()
             self._registered = False
+
+    @property
+    def is_registered(self):
+        """
+        Returns True if the execution trace observer is registered, otherwise False.
+        """
+        return self._registered
+
+    def is_running(self):
+        """
+        Returns True if the observer is running, otherwise False.
+        """
+        return self._execution_trace_running
 
     def start(self):
         """
         Starts to capture.
         """
-        if self._registered and not self._execution_graph_running:
-            _enable_execution_graph_observer()
-            self._execution_graph_running = True
+        if self._registered and not self._execution_trace_running:
+            _enable_execution_trace_observer()
+            self._execution_trace_running = True
 
     def stop(self):
         """
         Stops to capture.
         """
-        if self._execution_graph_running:
-            _disable_execution_graph_observer()
-            self._execution_graph_running = False
+        if self._execution_trace_running:
+            _disable_execution_trace_observer()
+            self._execution_trace_running = False
 
     def get_output_file_path(self) -> str:
         """
         Returns the output file name.
         """
-        return self._output_file_path
+        if self.is_registered:
+            return self._output_file_path
+        else:
+            raise RuntimeError(
+                "A callback to the ET profiler needs to be registered "
+                "first before getting the output file path"
+            )

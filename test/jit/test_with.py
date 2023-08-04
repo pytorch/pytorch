@@ -6,6 +6,7 @@ import sys
 from typing import Any, List
 
 import torch
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 
@@ -32,7 +33,7 @@ class TestWith(JitTestCase):
         to targets work as expected.
         """
         @torch.jit.script
-        class Context(object):
+        class Context:
             """
             This class implements a basic context manager interface for use in
             the unit tests. Unlike Context, the stateful part of this class
@@ -189,7 +190,7 @@ class TestWith(JitTestCase):
         to targets work as expected.
         """
         @torch.jit.script
-        class Context(object):
+        class Context:
             """
             This class implements a basic context manager interface for use in
             the unit tests. Unlike Context, the stateful part of this class
@@ -345,7 +346,7 @@ class TestWith(JitTestCase):
         handled correctly.
         """
         @torch.jit.script
-        class Context(object):
+        class Context:
             """
             This class implements a basic context manager interface for use in
             the unit tests. Unlike Context, the stateful part of this class
@@ -433,7 +434,7 @@ class TestWith(JitTestCase):
         """
 
         @torch.jit.script
-        class NoEnterNoExit(object):
+        class NoEnterNoExit:
             """
             This class is missing __enter__ and __exit__ methods.
             """
@@ -442,7 +443,7 @@ class TestWith(JitTestCase):
                 self.count = 1
 
         @torch.jit.script
-        class BadEnter(object):
+        class BadEnter:
             """
             This class has an __enter__ method with an incorrect signature.
             """
@@ -450,14 +451,14 @@ class TestWith(JitTestCase):
             def __init__(self):
                 self.count = 1
 
-            def __enter__(self, incr: int):
+            def __enter__(self, incr: int):  # noqa: PLE0302
                 self.count += incr
 
             def __exit__(self, type: Any, value: Any, tb: Any):
                 pass
 
         @torch.jit.script
-        class BadExit(object):
+        class BadExit:
             """
             This class has an __exit__ method with an incorrect signature.
             """
@@ -468,11 +469,11 @@ class TestWith(JitTestCase):
             def __enter__(self):
                 self.count += 1
 
-            def __exit__(self, type: Any, value: Any):
+            def __exit__(self, type: Any, value: Any):  # noqa: PLE0302
                 pass
 
         @torch.jit.script
-        class ExitIncorrectTypes(object):
+        class ExitIncorrectTypes:
             """
             This class has an __exit__ method with unsupported argument types.
             """
@@ -580,9 +581,6 @@ class TestWith(JitTestCase):
         # Check that @torch.jit.ignored functions respect no_grad when it is
         # called in JIT mode.
         class NoGradModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             @torch.jit.ignore
             def adder(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 w = x + y
@@ -599,6 +597,7 @@ class TestWith(JitTestCase):
 
         self.assertFalse(w.requires_grad)
 
+    @skipIfTorchDynamo("Torchdynamo cannot correctly handle profiler.profile calls")
     def test_with_record_function(self):
         """
         Check that torch.autograd.profiler.record_function context manager is

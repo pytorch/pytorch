@@ -1,7 +1,16 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/native/cpu/MaxUnpoolKernel.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/max_unpool2d_native.h>
+#include <ATen/ops/max_unpool3d_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -11,6 +20,10 @@ Tensor& max_unpooling2d_forward_out_cpu(
     const Tensor& indices_,
     IntArrayRef output_size,
     Tensor& output) {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic with duplicate indices
+  at::globalContext().alertNotDeterministic("max_unpooling2d_forward_out");
+
   auto oheight = output_size[0];
   auto owidth = output_size[1];
   TORCH_CHECK(
@@ -71,9 +84,7 @@ static void max_unpooling3d_shape_check(
     IntArrayRef stride,
     IntArrayRef padding,
     const char *fn_name) {
-  int64_t oT = output_size[0];
-  int64_t oH = output_size[1];
-  int64_t oW = output_size[2];
+
   TORCH_CHECK(
       indices.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type int64");
@@ -104,6 +115,10 @@ static void max_unpooling3d_shape_check(
       stride[0] > 0 && stride[1] > 0 && stride[2] > 0,
       "strides should be greater than zero, but got stride: ",
       stride);
+
+  int64_t oT = output_size[0];
+  int64_t oH = output_size[1];
+  int64_t oW = output_size[2];
 
   int dimw = 3;
   int dimh = 2;
@@ -149,16 +164,21 @@ Tensor& max_unpooling3d_forward_out_cpu(const Tensor& self_,
     IntArrayRef stride,
     IntArrayRef padding,
     Tensor& output) {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic with duplicate indices
+  at::globalContext().alertNotDeterministic("max_unpooling3d_forward_out");
+
   TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
-  int64_t oT = output_size[0];
-  int64_t oH = output_size[1];
-  int64_t oW = output_size[2];
 
   auto self = self_.contiguous();
   auto indices = indices_.contiguous();
 
   max_unpooling3d_shape_check(
     self_, Tensor(), indices_, output_size, stride, padding, "max_unpooling3d_forward_out_cpu()");
+
+  int64_t oT = output_size[0];
+  int64_t oH = output_size[1];
+  int64_t oW = output_size[2];
 
   if (self_.ndimension() == 5) {
     output.resize_({self.size(0), self.size(1), oT, oH, oW});

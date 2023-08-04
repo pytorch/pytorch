@@ -5,9 +5,7 @@ import torch.nn as nn
 from torch.distributed import distributed_c10d
 from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
-    _PartialTensor
 )
-from .replicated_tensor import ReplicatedTensor
 from .sharding_spec import (
     ShardingSpec,
     ChunkShardingSpec
@@ -119,31 +117,7 @@ def shard_parameter(
     st = _shard_tensor(tensor, sharding_spec, src_rank, process_group)
 
     # Replace param with ShardedTensor.
-
-    # Need to delete the attribute first since param_name might be
-    # torch.nn.Parameter and can't be replaced with ShardedTensor which is
-    # not torch.nn.Parameter.
-    delattr(module, param_name)
-
-    # Now we can set the attribute appropriately.
-    setattr(module, param_name, st)
-
-
-def _replicate_tensor(tensor: torch.Tensor, process_group=None) -> ReplicatedTensor:
-    """
-    Given a :class:`torch.Tensor`, mark it as a ReplicatedTensor where all
-    ranks have the same value.
-
-    Args:
-        tensor (:class:`torch.Tensor`): the tensor to be marked as replicated.
-    Keyword args:
-        process_group (ProcessGroup, optional): The process group to replicate on.
-            If None, the default process group will be used.
-    Returns:
-        A :class:`ReplicatedTensor` from the given tensor.
-
-    """
-    return ReplicatedTensor(tensor, process_group=process_group)
+    module.register_parameter(param_name, nn.Parameter(st))
 
 # Tracks the current process group in the load context manager.
 _CURRENT_PROCESS_GROUP = None
@@ -151,7 +125,7 @@ _CURRENT_PROCESS_GROUP = None
 @contextmanager
 def load_with_process_group(process_group):
     """
-    Context manager to set the process group with which to load a ShardedTensor/ReplicatedTensor.
+    Context manager to set the process group with which to load a ShardedTensor.
     """
     global _CURRENT_PROCESS_GROUP
     if _CURRENT_PROCESS_GROUP is not None:
@@ -191,7 +165,7 @@ def _reshard_output(
         A :class:`torch.nn.Module` object with reshard API hooked.
     """
     def hook_func(_module, _input, output):
-        if isinstance(output, ShardedTensor) or isinstance(output, _PartialTensor):
+        if isinstance(output, ShardedTensor):
             return output.reshard(resharding_spec)
         return output
     module.register_forward_hook(hook_func)
@@ -236,9 +210,9 @@ def shard_module(
     process_group=None
 ):
     """
-    Shards a given module according to the provided sharding_plan. This method
-    first shards all the parameters according to the given sharding_plan. Then if
-    `output_plan` and `return_local_tensor` are specified in the sharding_plan, it
+    Shards a given module according to the provided sharding `plan`. This method
+    first shards all the parameters according to the given sharding `plan`. Then if
+    `output_plan` and `return_local_tensor` are specified in the sharding `plan`, it
     will tag the output of modules according `output_plan`, convert the module's
     output back to data parallel according to `return_local_tensor`.
 
@@ -246,7 +220,7 @@ def shard_module(
 
     Args:
         module (:class:`torch.nn.Module`): The module to apply sharding to
-        sharding_plan (:class:`torch.distributed._shard.sharding_plan.ShardingPlan`):
+        plan (:class:`torch.distributed._shard.sharding_plan.ShardingPlan`):
             The ShardingPlan which specified param name to ShardingSpec to apply to
             each parameter.
 

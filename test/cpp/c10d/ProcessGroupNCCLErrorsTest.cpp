@@ -1,9 +1,9 @@
 #include <chrono>
 
 #include <c10/util/irange.h>
-#include <c10d/FileStore.hpp>
-#include <c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/cuda/nccl.h>
+#include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"
 
@@ -224,7 +224,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   // Now run all reduce with errors.
   pg.set_timedout_error();
   work = pg.allreduce(tensors_);
-  EXPECT_THROW(work->wait(), c10::Error);
+  EXPECT_THROW(work->wait(), std::runtime_error);
 
   // Communicators might be aborted here, further operations would fail.
 }

@@ -10,9 +10,9 @@
 namespace torch {
 namespace lazy {
 
-// TODO(alanwaketan): Use the backend API to get the default device type.
-// In the future, we should also get the default device ordinal.
-BackendDevice::BackendDevice() : type_(std::make_shared<BackendDeviceType>()) {}
+BackendDevice::BackendDevice()
+    : type_(getBackend()->GetDefaultDeviceType()),
+      ordinal_(getBackend()->GetDefaultDeviceOrdinal()) {}
 
 BackendDevice::BackendDevice(
     std::shared_ptr<BackendDeviceType>&& type,
@@ -41,11 +41,11 @@ std::ostream& operator<<(std::ostream& os, const BackendDevice& device) {
   return os;
 }
 
-// TODO(whc) refactor this: we need to support non-zero default ordinal for
-// torch/XLA.
 BackendDevice atenDeviceToBackendDevice(const c10::Device& device) {
   TORCH_CHECK(device.type() == at::kLazy, device);
-  int64_t ordinal = device.has_index() ? device.index() : 0;
+  int64_t ordinal = device.has_index()
+      ? device.index()
+      : getBackend()->GetDefaultDeviceOrdinal();
   return BackendDevice(getBackend()->GetDefaultDeviceType(), ordinal);
 }
 
@@ -54,13 +54,17 @@ c10::Device backendDeviceToAtenDevice(const BackendDevice& device) {
   return c10::Device(at::kLazy, device.ordinal());
 }
 
-c10::optional<BackendDevice> GetBackendDevice(const at::TensorList tensors) {
+c10::optional<BackendDevice> GetBackendDevice(at::ITensorListRef tensors) {
   for (auto& tensor : tensors) {
     if (auto lt = TryGetLtcTensor(tensor)) {
       return lt->GetDevice();
     }
   }
   return c10::nullopt;
+}
+
+c10::optional<BackendDevice> GetBackendDevice(at::TensorList tensors) {
+  return GetBackendDevice(at::ITensorListRef(tensors));
 }
 
 c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
@@ -71,7 +75,7 @@ c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
 }
 
 c10::optional<BackendDevice> GetBackendDevice(
-    const c10::optional<c10::Device> device) {
+    const c10::optional<c10::Device>& device) {
   if (device) {
     return c10::make_optional(atenDeviceToBackendDevice(*device));
   }

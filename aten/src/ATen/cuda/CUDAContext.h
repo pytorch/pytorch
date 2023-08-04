@@ -10,10 +10,15 @@
 #include <cusolverDn.h>
 #endif
 
+#if defined(USE_ROCM) && ROCM_VERSION >= 50300
+#include <hipsolver/hipsolver.h>
+#endif
+
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/Context.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/util/Logging.h>
 #include <ATen/cuda/Exceptions.h>
 
 namespace at {
@@ -72,7 +77,9 @@ TORCH_CUDA_CPP_API Allocator* getCUDADeviceAllocator();
 TORCH_CUDA_CPP_API cusparseHandle_t getCurrentCUDASparseHandle();
 TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle();
 
-#ifdef CUDART_VERSION
+TORCH_CUDA_CPP_API void clearCublasWorkspaces();
+
+#if defined(CUDART_VERSION) || defined(USE_ROCM) && ROCM_VERSION >= 50300
 TORCH_CUDA_CPP_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
 #endif
 

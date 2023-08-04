@@ -2,14 +2,14 @@ PyTorch Contribution Guide
 ==========================
 
 PyTorch is a GPU-accelerated Python tensor computation package for
-building deep neural networks using a on tape-based autograd systems.
+building deep neural networks using a tape-based autograd systems.
 
 Contribution Process
 --------------------
 
 The PyTorch organization is governed by :doc:`PyTorch
 Governance <governance>` and the technical guide to contributing
-can be found in `CONTRIBUTING.md <https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md>`_.
+can be found in `CONTRIBUTING.md <https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md>`_.
 
 The PyTorch development process involves a healthy amount of open
 discussions between the core development team and the community.
@@ -41,7 +41,7 @@ here is the basic process.
    requests are small; in that case, no need to let us know about what
    you want to do, just get cracking. But if the change is going to be
    large, it's usually a good idea to get some design comments about it
-   first.
+   first by `submitting an RFC <https://github.com/pytorch/rfcs/blob/master/README.md>`__.
 
    -  If you don't know how big a change is going to be, we can help you
       figure it out! Just post about it on
@@ -61,29 +61,31 @@ here is the basic process.
         open an issue first before implementing a PR.
 
    -  Core changes and refactors can be quite difficult to coordinate
-      since the pace of development on PyTorch master is quite fast.
+      since the pace of development on the PyTorch main branch is quite fast.
       Definitely reach out about fundamental or cross-cutting changes;
       we can often give guidance about how to stage such changes into
       more easily reviewable pieces.
 
 -  **Code it out!**
 
-   -  See the `CONTRIBUTING.md <https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md>`_ file for advice for working with PyTorch in a
+   -  See the `CONTRIBUTING.md <https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md>`_ file for advice for working with PyTorch in a
       technical form.
 
 -  **Open a pull request.**
 
-   -  If you are not ready for the pull request to be reviewed, tag it
-      with [WIP]. We will ignore it when doing review passes. If you are
-      working on a complex change, it's good to start things off as WIP,
-      because you will need to spend time looking at CI results to see
-      if things worked out or not.
+   -  If you are not ready for the pull request to be reviewed, create a draft
+      pull request first - you can later convert it to a full PR by pressing
+      "Ready for review" button. You can also prepend the title of the PR with
+      "[WIP]" ("work in progress") while it's still in draft. We will ignore
+      draft PRs when doing review passes. If you are working on a complex change,
+      it's good to start things off as a draft, because you will need to spend
+      time looking at CI results to see if things worked out or not.
    -  Find an appropriate reviewer for your change. We have some folks
       who regularly go through the PR queue and try to review
       everything, but if you happen to know who the maintainer for a
       given subsystem affected by your patch is, feel free to include
       them directly on the pull request. You can learn more about
-      `Persons of Interest <https://pytorch.org/docs/master/community/persons_of_interest.html>`_
+      `Persons of Interest <https://pytorch.org/docs/main/community/persons_of_interest.html>`_
       that could review your code.
 
 -  **Iterate on the pull request until it's accepted!**
@@ -127,7 +129,7 @@ proposed solution. The PyTorch team can provide guidance that saves you
 time.
 
 Issues that are labeled first-new-issue, low, or medium priority provide
-the best entrance point are great places to start.
+the best entrance points and are great places to start.
 
 Adding Tutorials
 ~~~~~~~~~~~~~~~~
@@ -136,7 +138,7 @@ A great deal of the tutorials on `pytorch.org <https://pytorch.org/>`__
 come from the community itself and we welcome additional contributions.
 To learn more about how to contribute a new tutorial you can learn more
 here: `PyTorch.org Tutorial Contribution Guide on
-Github <https://github.com/pytorch/tutorials/#contributing>`__
+GitHub <https://github.com/pytorch/tutorials/#contributing>`__
 
 Improving Documentation & Tutorials
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -294,9 +296,9 @@ Frequently Asked Questions
    tasks or pull requests with your environment details is helpful and
    appreciated.
 -  **CI tests failed, what does it mean?** Maybe your PR is based
-   off a broken master? You can try to rebase your change on top
-   of the latest master. You can also see the current status of
-   master's CI at https://hud.pytorch.org/.
+   off a broken main bracnh? You can try to rebase your change on top
+   of the latest main branch. You can also see the current status of
+   main branch's CI at https://hud.pytorch.org/.
 -  **What are the most high risk changes?** Anything that touches build
    configuration is a risky area. Please avoid changing these unless
    you've had a discussion with the team beforehand.
@@ -313,14 +315,14 @@ Python Docs
 
 PyTorch documentation is generated from python source using
 `Sphinx <https://www.sphinx-doc.org/en/master/>`__. Generated HTML is
-copied to the docs folder in the master branch of
+copied to the docs folder in the main branch of
 `pytorch.github.io <https://github.com/pytorch/pytorch.github.io/tree/master/docs>`__,
 and is served via GitHub pages.
 
 -  Site: https://pytorch.org/docs
--  GitHub: https://github.com/pytorch/pytorch/tree/master/docs
+-  GitHub: https://github.com/pytorch/pytorch/tree/main/docs
 -  Served from:
-   `https://github.com/pytorch/pytorch.github.io/tree/master/doc <https://github.com/pytorch/pytorch.github.io/tree/master/docs>`__
+   `https://github.com/pytorch/pytorch.github.io/tree/master/docs <https://github.com/pytorch/pytorch.github.io/tree/master/docs>`__
 
 C++ Docs
 ~~~~~~~~
@@ -331,7 +333,7 @@ https://github.com/pytorch/cppdocs repo, and are served from GitHub
 pages.
 
 -  Site: https://pytorch.org/cppdocs
--  GitHub: https://github.com/pytorch/pytorch/tree/master/docs/cpp
+-  GitHub: https://github.com/pytorch/pytorch/tree/main/docs/cpp
 -  Served from: https://github.com/pytorch/cppdocs
 
 Tutorials

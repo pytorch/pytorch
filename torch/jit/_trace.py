@@ -7,21 +7,26 @@ This module contains functionality to support the JIT's tracing frontend, notabl
 This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
-import torch
+import contextlib
 
 import copy
-import os
-import contextlib
 import functools
-import warnings
 import inspect
+import os
 import re
-from typing import Any, Dict, List, Optional, Set
+import warnings
+from typing import Any, Callable, Dict, List, Optional, Set
 
-from torch.jit._state import _python_cu, _enabled
-from torch.jit._script import ScriptModule, _CachedForward, script
-from torch._jit_internal import _qualified_name, is_scripting, get_callable_argument_names
+import torch
+from torch._jit_internal import (
+    _qualified_name,
+    get_callable_argument_names,
+    is_scripting,
+)
 from torch.autograd import function
+from torch.jit._script import _CachedForward, script, ScriptModule
+
+from torch.jit._state import _enabled, _python_cu
 from torch.nn import Module
 
 from torch.testing._comparison import default_tolerances
@@ -81,7 +86,7 @@ class ONNXTracedModule(torch.nn.Module):
         return_inputs=False,
         return_inputs_states=False,
     ):
-        super(ONNXTracedModule, self).__init__()
+        super().__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
         # us avoid a special casing functions versus modules.
@@ -105,14 +110,15 @@ class ONNXTracedModule(torch.nn.Module):
             in_args: List[torch.Tensor] = []
             for i in range(len(in_vars)):
                 if not isinstance(args[i], torch.Tensor):
-                    raise RuntimeError('Expected Tensor argument')
+                    raise RuntimeError("Expected Tensor argument")
                 in_args.append(args[i])
 
             trace_inputs = _unflatten(in_args, in_desc)
 
-            ret_inputs.append(
-                tuple(x.clone(memory_format=torch.preserve_format) for x in args)
-            )
+            if self._return_inputs:
+                ret_inputs.append(
+                    tuple(x.clone(memory_format=torch.preserve_format) for x in args)
+                )
             if self._return_inputs_states:
                 inputs_states.append(_unflatten(in_args, in_desc))
             outs.append(self.inner(*trace_inputs))
@@ -182,7 +188,7 @@ def _time(trace_name, name, time=True):
     finally:
         stream.record_event(end)
         end.synchronize()
-        print("{} {} time: {} ms".format(trace_name, name, start.elapsed_time(end)))
+        print(f"{trace_name} {name} time: {start.elapsed_time(end)} ms")
 
 
 def verify(model, args, loss_fn=torch.sum, devices=None):
@@ -302,7 +308,7 @@ class TracingCheckError(Exception):
                 " encountered untraceable code.\n"
             )
             self.message += indent(tensor_compare_error) + "\n"
-        super(TracingCheckError, self).__init__(self.message)
+        super().__init__(self.message)
 
 
 # Check the traced module against a set of user-provided validation inputs
@@ -316,10 +322,10 @@ def _check_trace(
     force_outplace,
     is_trace_module,
     _module_class,
+    example_inputs_is_kwarg=False,
 ):
     # Note: tracing is independent of optimizations, which consume the trace
     for inputs in check_inputs:
-
         if isinstance(inputs, torch.Tensor):
             inputs = (inputs,)
 
@@ -328,27 +334,45 @@ def _check_trace(
             for name, data in inputs.items():
                 copied_dict[name] = _clone_inputs(data)
             check_mod = torch.jit.trace_module(
-                func.__self__ if hasattr(func, "__self__") else func,
+                getattr(func, "__self__", func),
                 copied_dict,
                 check_trace=False,
                 strict=strict,
                 _force_outplace=force_outplace,
                 _module_class=_module_class,
                 _compilation_unit=torch._C.CompilationUnit(),
+                example_inputs_is_kwarg=example_inputs_is_kwarg,
+                _store_inputs=False,
             )
             check_mod_func = check_mod._c._get_method(traced_func.name)
             inputs = inputs[traced_func.name]
-            if isinstance(inputs, (torch.Tensor, dict)):
+            if (
+                isinstance(inputs, (torch.Tensor))
+                or isinstance(inputs, dict)
+                and not example_inputs_is_kwarg
+            ):
                 inputs = (inputs,)
         else:
-            check_mod = torch.jit.trace(
-                func,
-                _clone_inputs(inputs),
-                check_trace=False,
-                strict=strict,
-                _force_outplace=force_outplace,
-                _module_class=_module_class,
-            )
+            if example_inputs_is_kwarg:
+                check_mod = torch.jit.trace(
+                    func,
+                    check_trace=False,
+                    strict=strict,
+                    _force_outplace=force_outplace,
+                    _module_class=_module_class,
+                    example_kwarg_inputs=_clone_inputs(inputs),
+                    _store_inputs=False,
+                )
+            else:
+                check_mod = torch.jit.trace(
+                    func,
+                    _clone_inputs(inputs),
+                    check_trace=False,
+                    strict=strict,
+                    _force_outplace=force_outplace,
+                    _module_class=_module_class,
+                    _store_inputs=False,
+                )
             check_mod_func = check_mod
 
         def graph_diagnostic_info():
@@ -417,7 +441,9 @@ def _check_trace(
                     check_tensor_val = n_check.t("value")
 
                     try:
-                        torch.testing.assert_close(mod_tensor_val, check_tensor_val, equal_nan=True)
+                        torch.testing.assert_close(
+                            mod_tensor_val, check_tensor_val, equal_nan=True
+                        )
                     except (RuntimeError, AssertionError) as e:
                         if tensor_compare_errors is None:
                             tensor_compare_errors = ""
@@ -440,7 +466,10 @@ def _check_trace(
 
         def run_mod_and_filter_tensor_outputs(mod, inputs, running_what):
             try:
-                outs = wrap_retval(mod(*_clone_inputs(inputs)))
+                if isinstance(inputs, dict) and example_inputs_is_kwarg:
+                    outs = wrap_retval(mod(**inputs))
+                else:
+                    outs = wrap_retval(mod(*_clone_inputs(inputs)))
                 outs = [out for out in outs if isinstance(out, torch.Tensor)]
                 return outs
             except Exception as e:
@@ -498,13 +527,22 @@ def _check_trace(
                             equal_nan=True,
                         )
                     else:
-                        torch.testing.assert_close(
-                            orig.double(),
-                            ref.double(),
-                            rtol=check_tolerance,
-                            atol=default_tolerances(orig, ref)[1],
-                            equal_nan=True,
-                        )
+                        if orig.is_mps or ref.is_mps:
+                            torch.testing.assert_close(
+                                orig.float(),
+                                ref.float(),
+                                rtol=check_tolerance,
+                                atol=default_tolerances(orig, ref)[1],
+                                equal_nan=True,
+                            )
+                        else:
+                            torch.testing.assert_close(
+                                orig.double(),
+                                ref.double(),
+                                rtol=check_tolerance,
+                                atol=default_tolerances(orig, ref)[1],
+                                equal_nan=True,
+                            )
                 except AssertionError as e:
                     maybe_warn_nondeterministic()
                     warnings.warn(
@@ -563,13 +601,9 @@ def make_module(mod, _module_class, _compilation_unit):
     if isinstance(mod, ScriptModule):
         return mod
     elif torch._jit_internal.module_has_exports(mod):
-
         infer_methods_stubs_fn = torch.jit._recursive.make_stubs_from_exported_methods
         return torch.jit._recursive.create_script_module(
-            mod,
-            infer_methods_stubs_fn,
-            share_types=False,
-            is_tracing=True
+            mod, infer_methods_stubs_fn, share_types=False, is_tracing=True
         )
     else:
         if _module_class is None:
@@ -586,7 +620,7 @@ def wrap_check_inputs(check_inputs):
 
 def trace(
     func,
-    example_inputs,
+    example_inputs=None,
     optimize=None,
     check_trace=True,
     check_inputs=None,
@@ -595,6 +629,8 @@ def trace(
     _force_outplace=False,
     _module_class=None,
     _compilation_unit=_python_cu,
+    example_kwarg_inputs=None,
+    _store_inputs=True,
 ):
     """
     Trace a function and return an executable  or :class:`ScriptFunction`
@@ -650,14 +686,17 @@ def trace(
             tensors. When a module is passed `torch.jit.trace`, only the
             ``forward`` method is run and traced (see :func:`torch.jit.trace
             <torch.jit.trace_module>` for details).
-        example_inputs (tuple or torch.Tensor):  A tuple of example inputs that
-            will be passed to the function while tracing. The resulting trace
-            can be run with inputs of different types and shapes assuming the
-            traced operations support those types and shapes. `example_inputs`
-            may also be a single Tensor in which case it is automatically
-            wrapped in a tuple.
 
     Keyword arguments:
+        example_inputs (tuple or torch.Tensor or None, optional): A tuple of example
+            inputs that will be passed to the function while tracing.
+            Default: ``None``. Either this argument or ``example_kwarg_inputs``
+            should be specified. The resulting trace can be run with inputs of
+            different types and shapes assuming the traced operations support those
+            types and shapes. `example_inputs` may also be a single Tensor in which
+            case it is automatically wrapped in a tuple. When the value is None,
+            ``example_kwarg_inputs`` should be specified.
+
         check_trace (``bool``, optional): Check if the same inputs run through
             traced code produce the same outputs. Default: ``True``. You might want
             to disable this if, for example, your network contains non-
@@ -681,6 +720,12 @@ def trace(
             and you are sure that the container you are using in your
             problem is a ``constant`` structure and does not get used as
             control flow (if, for) conditions.
+        example_kwarg_inputs (dict, optional): This parameter is a pack of keyword
+            arguments of example inputs that will be passed to the function while
+            tracing. Default: ``None``. Either this argument or ``example_inputs``
+            should be specified. The dict will be unpacking by the arguments name
+            of the traced function. If the keys of the dict don't not match with
+            the traced function's arguments name, a runtime exception will be raised.
 
     Returns:
         If `func` is `nn.Module` or ``forward`` of `nn.Module`, `trace` returns
@@ -712,7 +757,7 @@ def trace(
 
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 
             def forward(self, x):
@@ -747,6 +792,11 @@ def trace(
         return func
 
     if isinstance(func, torch.nn.Module):
+        if example_inputs is None:
+            if isinstance(example_kwarg_inputs, dict):
+                example_inputs = example_kwarg_inputs
+            else:
+                raise RuntimeError("example_kwarg_inputs should be a dict")
         return trace_module(
             func,
             {"forward": example_inputs},
@@ -757,13 +807,19 @@ def trace(
             strict,
             _force_outplace,
             _module_class,
+            example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
+            _store_inputs=_store_inputs,
         )
-
     if (
         hasattr(func, "__self__")
         and isinstance(func.__self__, torch.nn.Module)
         and func.__name__ == "forward"
     ):
+        if example_inputs is None:
+            if isinstance(example_kwarg_inputs, dict):
+                example_inputs = example_kwarg_inputs
+            else:
+                raise RuntimeError("example_kwarg_inputs should be a dict")
         return trace_module(
             func.__self__,
             {"forward": example_inputs},
@@ -774,13 +830,18 @@ def trace(
             strict,
             _force_outplace,
             _module_class,
+            example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
+            _store_inputs=_store_inputs,
         )
 
     # Special case for common case of passing a single Tensor
-    if isinstance(example_inputs, (torch.Tensor, dict)):
+    if (
+        isinstance(example_inputs, (torch.Tensor, dict))
+        and example_kwarg_inputs is None
+    ):
         example_inputs = (example_inputs,)
     # done primarily so that weird iterables fail here and not pybind11 code
-    elif not isinstance(example_inputs, tuple):
+    elif example_kwarg_inputs is None and not isinstance(example_inputs, tuple):
         example_inputs = tuple(example_inputs)
 
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
@@ -792,15 +853,27 @@ def trace(
         )
 
     name = _qualified_name(func)
-    traced = torch._C._create_function_from_trace(
-        name,
-        func,
-        example_inputs,
-        var_lookup_fn,
-        strict,
-        _force_outplace,
-        get_callable_argument_names(func)
-    )
+    if isinstance(example_kwarg_inputs, dict):
+        example_inputs = example_kwarg_inputs
+        traced = torch._C._create_function_from_trace_with_dict(
+            name,
+            func,
+            example_kwarg_inputs,
+            var_lookup_fn,
+            strict,
+            _force_outplace,
+            get_callable_argument_names(func),
+        )
+    else:
+        traced = torch._C._create_function_from_trace(
+            name,
+            func,
+            example_inputs,
+            var_lookup_fn,
+            strict,
+            _force_outplace,
+            get_callable_argument_names(func),
+        )
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
@@ -814,6 +887,7 @@ def trace(
                 _force_outplace,
                 False,
                 _module_class,
+                example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
             )
         else:
             _check_trace(
@@ -825,8 +899,11 @@ def trace(
                 _force_outplace,
                 False,
                 _module_class,
+                example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
             )
 
+    # Allow torch.compile() to inline
+    traced._torchdynamo_inline = func  # type: ignore[attr-defined]
     return traced
 
 
@@ -844,6 +921,8 @@ def trace_module(
     _force_outplace=False,
     _module_class=None,
     _compilation_unit=_python_cu,
+    example_inputs_is_kwarg=False,
+    _store_inputs=True,
 ):
     """
     Trace a module and return an executable :class:`ScriptModule` that will be optimized
@@ -878,6 +957,8 @@ def trace_module(
         check_tolerance (float, optional): Floating-point comparison tolerance to use in the checker procedure.
                                            This can be used to relax the checker strictness in the event that
                                            results diverge numerically for a known reason, such as operator fusion.
+        example_inputs_is_kwarg (``bool``, optional): This parameter indicate whether the example inputs is a pack
+                                           pack of keyword arguments. Default: ``False``.
 
     Returns:
         A :class:`ScriptModule` object with a single ``forward`` method containing the traced code.
@@ -891,7 +972,7 @@ def trace_module(
 
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 
             def forward(self, x):
@@ -962,17 +1043,38 @@ def trace_module(
                 func = getattr(mod, method_name)
                 argument_names = get_callable_argument_names(func)
 
-            example_inputs = make_tuple(example_inputs)
+            if isinstance(example_inputs, dict) and example_inputs_is_kwarg:
+                # Raise exception when the user provided key names are not aligned with forward() method's arguments' name/
+                for key in example_inputs:
+                    if key not in argument_names:
+                        valid_arguments = "[" + ",".join(argument_names) + "]"
+                        raise NameError(
+                            f"""'{key}' is not in forward() method's arguments,
+                         valid arguments name are {valid_arguments}"""
+                        )
+                module._c._create_method_from_trace_with_dict(
+                    method_name,
+                    func,
+                    example_inputs,
+                    var_lookup_fn,
+                    strict,
+                    _force_outplace,
+                    argument_names,
+                    _store_inputs,
+                )
+            else:
+                example_inputs = make_tuple(example_inputs)
+                module._c._create_method_from_trace(
+                    method_name,
+                    func,
+                    example_inputs,
+                    var_lookup_fn,
+                    strict,
+                    _force_outplace,
+                    argument_names,
+                    _store_inputs,
+                )
 
-            module._c._create_method_from_trace(
-                method_name,
-                func,
-                example_inputs,
-                var_lookup_fn,
-                strict,
-                _force_outplace,
-                argument_names,
-            )
             check_trace_method = module._c._get_method(method_name)
 
             # Check the trace against new traces created from user-specified inputs
@@ -987,6 +1089,7 @@ def trace_module(
                         _force_outplace,
                         True,
                         _module_class,
+                        example_inputs_is_kwarg=example_inputs_is_kwarg,
                     )
                 else:
                     _check_trace(
@@ -998,6 +1101,7 @@ def trace_module(
                         _force_outplace,
                         True,
                         _module_class,
+                        example_inputs_is_kwarg=example_inputs_is_kwarg,
                     )
     finally:
         torch.jit._trace._trace_module_map = old_module_map
@@ -1020,7 +1124,7 @@ class TracedModule(ScriptModule):
 
     def __init__(self, orig, id_set=None, _compilation_unit=None):
         # XXX: orig can be a nn.Module or a function!
-        super(TracedModule, self).__init__()
+        super().__init__()
         assert isinstance(orig, torch.nn.Module)
 
         # Copy a subset of `orig` to a temporary nn.Module.
@@ -1046,6 +1150,7 @@ class TracedModule(ScriptModule):
                     "TracedModules don't support parameter sharing between modules"
                 )
             id_set.add(param)
+
         tmp_module.training = orig.training
 
         for name, param in orig._parameters.items():
@@ -1091,23 +1196,23 @@ class TracedModule(ScriptModule):
 
     def __getattr__(self, attr):
         if "_actual_script_module" not in self.__dict__:
-            return super(TracedModule, self).__getattr__(attr)
+            return super().__getattr__(attr)
         return getattr(self._actual_script_module, attr)
 
     def __setattr__(self, attr, value):
         if "_actual_script_module" not in self.__dict__:
-            return super(TracedModule, self).__setattr__(attr, value)
+            return super().__setattr__(attr, value)
         setattr(self._actual_script_module, attr, value)
 
     def _get_name(self):
         return self._name
 
     def extra_repr(self):
-        return "original_name={}".format(self._name)
+        return f"original_name={self._name}"
 
 
 class TopLevelTracedModule(TracedModule):
-    forward = _CachedForward()
+    forward: Callable[..., Any] = _CachedForward()  # type: ignore[assignment]
 
     def _reconstruct(self, cpp_module):
         """
@@ -1135,8 +1240,15 @@ def _script_if_tracing(fn):
     return wrapper
 
 
-def _get_trace_graph(f, args=(), kwargs=None, strict=True, _force_outplace=False,
-                     return_inputs=False, _return_inputs_states=False):
+def _get_trace_graph(
+    f,
+    args=(),
+    kwargs=None,
+    strict=True,
+    _force_outplace=False,
+    return_inputs=False,
+    _return_inputs_states=False,
+):
     """
     .. warning::
         This function is internal-only and should only be used by the ONNX
@@ -1172,5 +1284,7 @@ def _get_trace_graph(f, args=(), kwargs=None, strict=True, _force_outplace=False
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    outs = ONNXTracedModule(f, strict, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
+    outs = ONNXTracedModule(
+        f, strict, _force_outplace, return_inputs, _return_inputs_states
+    )(*args, **kwargs)
     return outs

@@ -17,7 +17,6 @@ Implement functions for controlling execution of nets and steps, including
 
 
 from caffe2.python import core
-from future.utils import viewitems
 
 
 # Used to generate names of the steps created by the control functions.
@@ -201,7 +200,7 @@ def MergeConditionNets(name, condition_nets, relation):
         else:
             last_cond = merged_net.__getattr__(relation)([last_cond, curr_cond])
         # merge attributes
-        for k, v in viewitems(condition_nets[i]._attr_dict):
+        for k, v in condition_nets[i]._attr_dict.items():
             merged_net._attr_dict[k] += v
 
     merged_net.AddExternalOutput(last_cond)

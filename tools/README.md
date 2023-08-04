@@ -25,11 +25,6 @@ Build system pieces:
 * [build_libtorch.py](build_libtorch.py) - Script for building
   libtorch, a standalone C++ library without Python support.  This
   build script is tested in CI.
-* [fast_nvcc](fast_nvcc) - Mostly-transparent wrapper over nvcc that
-  parallelizes compilation when used to build CUDA files for multiple
-  architectures at once.
-  * [fast_nvcc.py](fast_nvcc/fast_nvcc.py) - Python script, entrypoint to the
-    fast nvcc wrapper.
 
 Developer tools which you might find useful:
 
@@ -39,8 +34,6 @@ Developer tools which you might find useful:
   can conveniently run diffs on them when working on code-generation.
   (See also [generated_dirs.txt](generated_dirs.txt) which
   specifies the list of directories with generated files.)
-* [stats/test_history.py](stats/test_history.py) - Query S3 to display history of a single
-  test across multiple jobs over time.
 
 Important if you want to run on AMD GPU:
 
@@ -58,11 +51,8 @@ Tools which are only situationally useful:
   https://github.com/pytorch/pytorch/issues/1619
 * [download_mnist.py](download_mnist.py) - Download the MNIST
   dataset; this is necessary if you want to run the C++ API tests.
-* [run-clang-tidy-in-ci.sh](run-clang-tidy-in-ci.sh) - Responsible
-  for checking that C++ code is clang-tidy clean in CI on Travis
 
 [actions/github-script]: https://github.com/actions/github-script
-[clang-tidy]: https://clang.llvm.org/extra/clang-tidy/
 [flake8]: https://flake8.pycqa.org/en/latest/
 [github actions expressions]: https://docs.github.com/en/actions/reference/context-and-expression-syntax-for-github-actions#about-contexts-and-expressions
 [pytorch/add-annotations-github-action]: https://github.com/pytorch/add-annotations-github-action

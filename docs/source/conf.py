@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 #
 # PyTorch documentation build configuration file, created by
 # sphinx-quickstart on Fri Dec 23 13:31:47 2016.
@@ -17,9 +16,11 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
 import os
-from os import path
+
 # import sys
 import pkgutil
+import re
+from os import path
 
 # source code directory, relative to this file, for sphinx-autobuild
 # sys.path.insert(0, os.path.abspath('../..'))
@@ -30,9 +31,10 @@ try:
     import torchvision  # noqa: F401
 except ImportError:
     import warnings
+
     warnings.warn('unable to load "torchvision" package')
 
-RELEASE = os.environ.get('RELEASE', False)
+RELEASE = os.environ.get("RELEASE", False)
 
 import pytorch_sphinx_theme
 
@@ -40,24 +42,25 @@ import pytorch_sphinx_theme
 
 # If your documentation needs a minimal Sphinx version, state it here.
 #
-needs_sphinx = '3.1.2'
+needs_sphinx = "3.1.2"
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'sphinx.ext.autodoc',
-    'sphinx.ext.autosummary',
-    'sphinx.ext.doctest',
-    'sphinx.ext.intersphinx',
-    'sphinx.ext.todo',
-    'sphinx.ext.coverage',
-    'sphinx.ext.napoleon',
-    'sphinx.ext.viewcode',
-    'sphinxcontrib.katex',
-    'sphinx.ext.autosectionlabel',
-    'sphinx_copybutton',
-    'sphinx_panels'
+    "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary",
+    "sphinx.ext.doctest",
+    "sphinx.ext.intersphinx",
+    "sphinx.ext.todo",
+    "sphinx.ext.coverage",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.viewcode",
+    "sphinxcontrib.katex",
+    "sphinx.ext.autosectionlabel",
+    "sphinx_copybutton",
+    "sphinx_panels",
+    "myst_parser",
 ]
 
 # build the templated autosummary files
@@ -81,7 +84,7 @@ katex_prerender = True
 napoleon_use_ivar = True
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ['_templates']
+templates_path = ["_templates"]
 
 # TODO: document these and remove them from here.
 
@@ -95,6 +98,9 @@ coverage_ignore_functions = [
     "check_error",
     "cudart",
     "is_bf16_supported",
+    # torch.cuda._sanitizer
+    "zip_arguments",
+    "zip_by_key",
     # torch.distributed.autograd
     "is_available",
     # torch.distributed.elastic.events
@@ -133,8 +139,6 @@ coverage_ignore_functions = [
     "unregister_custom_op_symbolic",
     # torch.ao.quantization
     "default_eval_fn",
-    # torch.ao.quantization.backend_config
-    "validate_backend_config_dict",
     # torch.backends
     "disable_global_flags",
     "flags_frozen",
@@ -171,6 +175,7 @@ coverage_ignore_classes = [
     "AnyType",
     "Argument",
     "ArgumentSpec",
+    "AwaitType",
     "BenchmarkConfig",
     "BenchmarkExecutionStats",
     "Block",
@@ -188,7 +193,10 @@ coverage_ignore_classes = [
     "DeserializationStorageContext",
     "DeviceObjType",
     "DictType",
+    "DispatchKey",
+    "DispatchKeySet",
     "EnumType",
+    "ExcludeDispatchKeyGuard",
     "ExecutionPlan",
     "FileCheck",
     "FloatType",
@@ -231,6 +239,7 @@ coverage_ignore_classes = [
     "StaticModule",
     "StringType",
     "SymIntType",
+    "SymBoolType",
     "ThroughputBenchmark",
     "TracingState",
     "TupleType",
@@ -264,6 +273,16 @@ coverage_ignore_classes = [
     "ShortStorage",
     "ShortTensor",
     "cudaStatus",
+    # torch.cuda._sanitizer
+    "Access",
+    "AccessType",
+    "Await",
+    "CUDASanitizer",
+    "CUDASanitizerDispatchMode",
+    "CUDASanitizerErrors",
+    "EventHandler",
+    "SynchronizationError",
+    "UnsynchronizedAccessError",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",
@@ -315,27 +334,26 @@ coverage_ignore_classes = [
     "DDPCommHookType",
     # torch.jit.mobile
     "LiteScriptModule",
-    # torch.nn.quantized.modules
+    # torch.ao.nn.quantized.modules
     "DeQuantize",
     "Quantize",
     # torch.utils.backcompat
     "Warning",
-    "SymbolicIntNode"
 ]
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
 #
 # source_suffix = ['.rst', '.md']
-source_suffix = '.rst'
+source_suffix = ".rst"
 
 # The master toctree document.
-master_doc = 'index'
+master_doc = "index"
 
 # General information about the project.
-project = 'PyTorch'
-copyright = '2022, PyTorch Contributors'
-author = 'PyTorch Contributors'
+project = "PyTorch"
+copyright = "2023, PyTorch Contributors"
+author = "PyTorch Contributors"
 torch_version = str(torch.__version__)
 
 # The version info for the project you're documenting, acts as replacement for
@@ -344,10 +362,10 @@ torch_version = str(torch.__version__)
 #
 # The short X.Y version.
 # TODO: change to [:2] at v1.0
-version = 'master (' + torch_version + ' )'
+version = "main (" + torch_version + " )"
 # The full version, including alpha/beta/rc tags.
 # TODO: verify this works as expected
-release = 'master'
+release = "main"
 
 # Customized html_title here.
 # Default is " ".join(project, release, "documentation") if not set
@@ -355,7 +373,7 @@ if RELEASE:
     # Turn 1.11.0aHASH into 1.11
     # Note: the release candidates should no longer have the aHASH suffix, but in any
     # case we wish to leave only major.minor, even for rc builds.
-    version = '.'.join(torch_version.split('.')[:2])
+    version = ".".join(torch_version.split(".")[:2])
     html_title = " ".join((project, version, "documentation"))
     release = version
 
@@ -372,7 +390,7 @@ language = "en"
 exclude_patterns = []
 
 # The name of the Pygments (syntax highlighting) style to use.
-pygments_style = 'sphinx'
+pygments_style = "sphinx"
 
 # If true, `todo` and `todoList` produce output, else they produce nothing.
 todo_include_todos = True
@@ -380,8 +398,34 @@ todo_include_todos = True
 # Disable docstring inheritance
 autodoc_inherit_docstrings = False
 
-# Disable displaying type annotations, these can be very verbose
-autodoc_typehints = 'none'
+# Show type hints in the description
+autodoc_typehints = "description"
+
+# Add parameter types if the parameter is documented in the docstring
+autodoc_typehints_description_target = "documented_params"
+
+# Type aliases for common types
+# Sphinx type aliases only works with Postponed Evaluation of Annotations
+# (PEP 563) enabled (via `from __future__ import annotations`), which keeps the
+# type annotations in string form instead of resolving them to actual types.
+# However, PEP 563 does not work well with JIT, which uses the type information
+# to generate the code. Therefore, the following dict does not have any effect
+# until PEP 563 is supported by JIT and enabled in files.
+autodoc_type_aliases = {
+    "_size_1_t": "int or tuple[int]",
+    "_size_2_t": "int or tuple[int, int]",
+    "_size_3_t": "int or tuple[int, int, int]",
+    "_size_4_t": "int or tuple[int, int, int, int]",
+    "_size_5_t": "int or tuple[int, int, int, int, int]",
+    "_size_6_t": "int or tuple[int, int, int, int, int, int]",
+    "_size_any_opt_t": "int or None or tuple",
+    "_size_2_opt_t": "int or None or 2-tuple",
+    "_size_3_opt_t": "int or None or 3-tuple",
+    "_ratio_2_t": "float or tuple[float, float]",
+    "_ratio_3_t": "float or tuple[float, float, float]",
+    "_ratio_any_t": "float or tuple",
+    "_tensor_list_t": "Tensor or tuple[Tensor]",
+}
 
 # Enable overriding of function signatures in the first line of the docstring.
 autodoc_docstring_signature = True
@@ -400,7 +444,7 @@ autodoc_docstring_signature = True
 #
 #
 
-html_theme = 'pytorch_sphinx_theme'
+html_theme = "pytorch_sphinx_theme"
 html_theme_path = [pytorch_sphinx_theme.get_html_theme_path()]
 
 # Theme options are theme-specific and customize the look and feel of a theme
@@ -408,29 +452,30 @@ html_theme_path = [pytorch_sphinx_theme.get_html_theme_path()]
 # documentation.
 
 html_theme_options = {
-    'pytorch_project': 'docs',
-    'canonical_url': 'https://pytorch.org/docs/stable/',
-    'collapse_navigation': False,
-    'display_version': True,
-    'logo_only': True,
-    'analytics_id': 'UA-117752657-2',
+    "pytorch_project": "docs",
+    "canonical_url": "https://pytorch.org/docs/stable/",
+    "collapse_navigation": False,
+    "display_version": True,
+    "logo_only": True,
+    "analytics_id": "GTM-T8XT4PS",
 }
 
-html_logo = '_static/img/pytorch-logo-dark-unstable.png'
+html_logo = "_static/img/pytorch-logo-dark-unstable.png"
 if RELEASE:
-    html_logo = '_static/img/pytorch-logo-dark.svg'
+    html_logo = "_static/img/pytorch-logo-dark.svg"
 
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
+html_static_path = ["_static"]
 
 html_css_files = [
-    'css/jit.css',
+    "css/jit.css",
 ]
 
 from sphinx.ext.coverage import CoverageBuilder
+
 
 def coverage_post_process(app, exception):
     if exception is not None:
@@ -441,14 +486,16 @@ def coverage_post_process(app, exception):
         return
 
     if not torch.distributed.is_available():
-        raise RuntimeError("The coverage tool cannot run with a version "
-                           "of PyTorch that was built with USE_DISTRIBUTED=0 "
-                           "as this module's API changes.")
+        raise RuntimeError(
+            "The coverage tool cannot run with a version "
+            "of PyTorch that was built with USE_DISTRIBUTED=0 "
+            "as this module's API changes."
+        )
 
     # These are all the modules that have "automodule" in an rst file
     # These modules are the ones for which coverage is checked
     # Here, we make sure that no module is missing from that list
-    modules = app.env.domaindata['py']['modules']
+    modules = app.env.domaindata["py"]["modules"]
 
     # We go through all the torch submodules and make sure they are
     # properly tested
@@ -465,8 +512,9 @@ def coverage_post_process(app, exception):
     if "torch" not in modules:
         missing.add("torch")
 
-    for _, modname, ispkg in pkgutil.walk_packages(path=torch.__path__,
-                                                   prefix=torch.__name__ + '.'):
+    for _, modname, ispkg in pkgutil.walk_packages(
+        path=torch.__path__, prefix=torch.__name__ + "."
+    ):
         if ispkg and is_not_internal(modname):
             if modname not in modules:
                 missing.add(modname)
@@ -475,21 +523,68 @@ def coverage_post_process(app, exception):
 
     if missing:
         mods = ", ".join(missing)
-        output.append(f"\nYou added the following module(s) to the PyTorch namespace '{mods}' "
-                      "but they have no corresponding entry in a doc .rst file. You should "
-                      "either make sure that the .rst file that contains the module's documentation "
-                      "properly contains either '.. automodule:: mod_name' (if you do not want "
-                      "the paragraph added by the automodule, you can simply use '.. py:module:: mod_name') "
-                      " or make the module private (by appending an '_' at the beginning of its name).")
+        output.append(
+            f"\nYou added the following module(s) to the PyTorch namespace '{mods}' "
+            "but they have no corresponding entry in a doc .rst file. You should "
+            "either make sure that the .rst file that contains the module's documentation "
+            "properly contains either '.. automodule:: mod_name' (if you do not want "
+            "the paragraph added by the automodule, you can simply use '.. py:module:: mod_name') "
+            " or make the module private (by appending an '_' at the beginning of its name)."
+        )
 
     # The output file is hard-coded by the coverage tool
     # Our CI is setup to fail if any line is added to this file
-    output_file = path.join(app.outdir, 'python.txt')
+    output_file = path.join(app.outdir, "python.txt")
 
     if output:
         with open(output_file, "a") as f:
             for o in output:
                 f.write(o)
+
+
+def process_docstring(app, what_, name, obj, options, lines):
+    """
+    Custom process to transform docstring lines Remove "Ignore" blocks
+
+    Args:
+        app (sphinx.application.Sphinx): the Sphinx application object
+
+        what (str):
+            the type of the object which the docstring belongs to (one of
+            "module", "class", "exception", "function", "method", "attribute")
+
+        name (str): the fully qualified name of the object
+
+        obj: the object itself
+
+        options: the options given to the directive: an object with
+            attributes inherited_members, undoc_members, show_inheritance
+            and noindex that are true if the flag option of same name was
+            given to the auto directive
+
+        lines (List[str]): the lines of the docstring, see above
+
+    References:
+        https://www.sphinx-doc.org/en/1.5.1/_modules/sphinx/ext/autodoc.html
+        https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html
+    """
+    import re
+
+    remove_directives = [
+        # Remove all xdoctest directives
+        re.compile(r"\s*>>>\s*#\s*x?doctest:\s*.*"),
+        re.compile(r"\s*>>>\s*#\s*x?doc:\s*.*"),
+    ]
+    filtered_lines = [
+        line for line in lines if not any(pat.match(line) for pat in remove_directives)
+    ]
+    # Modify the lines inplace
+    lines[:] = filtered_lines
+
+    # make sure there is a blank line at the end
+    if lines and lines[-1].strip():
+        lines.append("")
+
 
 # Called automatically by Sphinx, making this `conf.py` an "extension".
 def setup(app):
@@ -497,16 +592,18 @@ def setup(app):
     # and can be moved outside of this function (and the setup(app) function
     # can be deleted).
     html_css_files = [
-        'https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css'
+        "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css"
     ]
 
     # In Sphinx 1.8 it was renamed to `add_css_file`, 1.7 and prior it is
     # `add_stylesheet` (deprecated in 1.8).
-    add_css = getattr(app, 'add_css_file', app.add_stylesheet)
+    add_css = getattr(app, "add_css_file", app.add_stylesheet)
     for css_file in html_css_files:
         add_css(css_file)
 
     app.connect("build-finished", coverage_post_process)
+    app.connect("autodoc-process-docstring", process_docstring)
+
 
 # From PyTorch 1.5, we now use autogenerated files to document classes and
 # functions. This breaks older references since
@@ -520,13 +617,14 @@ def setup(app):
 
 from sphinx.writers import html, html5
 
+
 def replace(Klass):
     old_call = Klass.visit_reference
 
     def visit_reference(self, node):
-        if 'refuri' in node and 'generated' in node.get('refuri'):
-            ref = node.get('refuri')
-            ref_anchor = ref.split('#')
+        if "refuri" in node and "generated" in node.get("refuri"):
+            ref = node.get("refuri")
+            ref_anchor = ref.split("#")
             if len(ref_anchor) > 1:
                 # Only add the id if the node href and the text match,
                 # i.e. the href is "torch.flip#torch.flip" and the content is
@@ -534,10 +632,12 @@ def replace(Klass):
                 # to autogenerated content
                 anchor = ref_anchor[1]
                 txt = node.parent.astext()
-                if txt == anchor or txt == anchor.split('.')[-1]:
-                    self.body.append('<p id="{}"/>'.format(ref_anchor[1]))
+                if txt == anchor or txt == anchor.split(".")[-1]:
+                    self.body.append(f'<p id="{ref_anchor[1]}"/>')
         return old_call(self, node)
+
     Klass.visit_reference = visit_reference
+
 
 replace(html.HTMLTranslator)
 replace(html5.HTML5Translator)
@@ -545,7 +645,7 @@ replace(html5.HTML5Translator)
 # -- Options for HTMLHelp output ------------------------------------------
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'PyTorchdoc'
+htmlhelp_basename = "PyTorchdoc"
 
 
 # -- Options for LaTeX output ---------------------------------------------
@@ -554,15 +654,12 @@ latex_elements = {
     # The paper size ('letterpaper' or 'a4paper').
     #
     # 'papersize': 'letterpaper',
-
     # The font size ('10pt', '11pt' or '12pt').
     #
     # 'pointsize': '10pt',
-
     # Additional stuff for the LaTeX preamble.
     #
     # 'preamble': '',
-
     # Latex figure (float) alignment
     #
     # 'figure_align': 'htbp',
@@ -572,8 +669,13 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, 'pytorch.tex', 'PyTorch Documentation',
-     'Torch Contributors', 'manual'),
+    (
+        master_doc,
+        "pytorch.tex",
+        "PyTorch Documentation",
+        "Torch Contributors",
+        "manual",
+    ),
 ]
 
 
@@ -581,10 +683,7 @@ latex_documents = [
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [
-    (master_doc, 'PyTorch', 'PyTorch Documentation',
-     [author], 1)
-]
+man_pages = [(master_doc, "PyTorch", "PyTorch Documentation", [author], 1)]
 
 
 # -- Options for Texinfo output -------------------------------------------
@@ -593,36 +692,43 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'PyTorch', 'PyTorch Documentation',
-     author, 'PyTorch', 'One line description of project.',
-     'Miscellaneous'),
+    (
+        master_doc,
+        "PyTorch",
+        "PyTorch Documentation",
+        author,
+        "PyTorch",
+        "One line description of project.",
+        "Miscellaneous",
+    ),
 ]
 
 
 # Example configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {
-    'python': ('https://docs.python.org/3', None),
-    'numpy': ('https://numpy.org/doc/stable', None),
+    "python": ("https://docs.python.org/3", None),
+    "numpy": ("https://numpy.org/doc/stable", None),
 }
+
+import sphinx.ext.doctest
 
 # -- A patch that prevents Sphinx from cross-referencing ivar tags -------
 # See http://stackoverflow.com/a/41184353/3343043
 
 from docutils import nodes
-from sphinx.util.docfields import TypedField
 from sphinx import addnodes
-import sphinx.ext.doctest
+from sphinx.util.docfields import TypedField
 
 # Without this, doctest adds any example with a `>>>` as a test
-doctest_test_doctest_blocks = ''
+doctest_test_doctest_blocks = ""
 doctest_default_flags = sphinx.ext.doctest.doctest.ELLIPSIS
-doctest_global_setup = '''
+doctest_global_setup = """
 import torch
 try:
     import torchvision
 except ImportError:
     torchvision = None
-'''
+"""
 
 
 def patched_make_field(self, types, domain, items, **kw):
@@ -632,43 +738,51 @@ def patched_make_field(self, types, domain, items, **kw):
     # type: (List, unicode, Tuple) -> nodes.field
     def handle_item(fieldarg, content):
         par = nodes.paragraph()
-        par += addnodes.literal_strong('', fieldarg)  # Patch: this line added
+        par += addnodes.literal_strong("", fieldarg)  # Patch: this line added
         # par.extend(self.make_xrefs(self.rolename, domain, fieldarg,
         #                           addnodes.literal_strong))
         if fieldarg in types:
-            par += nodes.Text(' (')
+            par += nodes.Text(" (")
             # NOTE: using .pop() here to prevent a single type node to be
             # inserted twice into the doctree, which leads to
             # inconsistencies later when references are resolved
             fieldtype = types.pop(fieldarg)
             if len(fieldtype) == 1 and isinstance(fieldtype[0], nodes.Text):
-                typename = u''.join(n.astext() for n in fieldtype)
-                typename = typename.replace('int', 'python:int')
-                typename = typename.replace('long', 'python:long')
-                typename = typename.replace('float', 'python:float')
-                typename = typename.replace('bool', 'python:bool')
-                typename = typename.replace('type', 'python:type')
-                par.extend(self.make_xrefs(self.typerolename, domain, typename,
-                                           addnodes.literal_emphasis, **kw))
+                typename = fieldtype[0].astext()
+                builtin_types = ["int", "long", "float", "bool", "type"]
+                for builtin_type in builtin_types:
+                    pattern = rf"(?<![\w.]){builtin_type}(?![\w.])"
+                    repl = f"python:{builtin_type}"
+                    typename = re.sub(pattern, repl, typename)
+                par.extend(
+                    self.make_xrefs(
+                        self.typerolename,
+                        domain,
+                        typename,
+                        addnodes.literal_emphasis,
+                        **kw,
+                    )
+                )
             else:
                 par += fieldtype
-            par += nodes.Text(')')
-        par += nodes.Text(' -- ')
+            par += nodes.Text(")")
+        par += nodes.Text(" -- ")
         par += content
         return par
 
-    fieldname = nodes.field_name('', self.label)
+    fieldname = nodes.field_name("", self.label)
     if len(items) == 1 and self.can_collapse:
         fieldarg, content = items[0]
         bodynode = handle_item(fieldarg, content)
     else:
         bodynode = self.list_type()
         for fieldarg, content in items:
-            bodynode += nodes.list_item('', handle_item(fieldarg, content))
-    fieldbody = nodes.field_body('', bodynode)
-    return nodes.field('', fieldname, fieldbody)
+            bodynode += nodes.list_item("", handle_item(fieldarg, content))
+    fieldbody = nodes.field_body("", bodynode)
+    return nodes.field("", fieldname, fieldbody)
+
 
 TypedField.make_field = patched_make_field
 
-copybutton_prompt_text = r'>>> |\.\.\. '
+copybutton_prompt_text = r">>> |\.\.\. "
 copybutton_prompt_is_regexp = True

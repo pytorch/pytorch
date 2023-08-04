@@ -11,7 +11,7 @@ namespace {
 size_t ComputeStartIndex(
     const TensorCPU& tensor,
     const std::vector<int>& index) {
-  DCHECK_EQ(index.size(), tensor.dim());
+  TORCH_DCHECK_EQ(index.size(), tensor.dim());
 
   size_t ret = 0;
   // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
@@ -27,7 +27,7 @@ template <class T>
 utils::ConstTensorView<T> GetSubTensorView(
     const TensorCPU& tensor,
     int dim0_start_index) {
-  DCHECK_EQ(tensor.dtype().itemsize(), sizeof(T));
+  TORCH_DCHECK_EQ(tensor.dtype().itemsize(), sizeof(T));
 
   if (tensor.numel() == 0) {
     return utils::ConstTensorView<T>(nullptr, {});
@@ -81,7 +81,7 @@ ERMatXf ComputeAllAnchors(
         ConstEigenVectorMap<float>(shift_zero.data(), shift_zero.size());
   }
 
-  // Broacast anchors over shifts to enumerate all anchors at all positions
+  // Broadcast anchors over shifts to enumerate all anchors at all positions
   // in the (H, W) grid:
   //   - add A anchors of shape (1, A, box_dim) to
   //   - K shifts of shape (K, 1, box_dim) to get
@@ -244,7 +244,7 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
   // 3. remove predicted boxes with either height or width < min_size
   auto keep =
       utils::filter_boxes(proposals, min_size, im_info, legacy_plus_one_);
-  DCHECK_LE(keep.size(), scores_sorted.size());
+  TORCH_DCHECK_LE(keep.size(), scores_sorted.size());
 
   // 6. apply loose nms (e.g. threshold = 0.7)
   // 7. take after_nms_topN (e.g. 300)
@@ -370,7 +370,7 @@ OPERATOR_SCHEMA(GenerateProposals)
     .NumInputs(4)
     .NumOutputs(2)
     .SetDoc(R"DOC(
-Generate bounding box proposals for Faster RCNN. The propoasls are generated for
+Generate bounding box proposals for Faster RCNN. The proposals are generated for
 a list of images based on image score 'score', bounding box regression result
 'deltas' as well as predefined bounding box shapes 'anchors'. Greedy
 non-maximum suppression is applied to generate the final bounding boxes.

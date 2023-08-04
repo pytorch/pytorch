@@ -8,10 +8,10 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
+#include <torch/csrc/utils/byte_order.h>
 #include <string>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ::c10::IValue;
 
@@ -88,7 +88,16 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         // no op, there is nothing to tag
         break;
       case c10::SymIntType::Kind:
-        TORCH_CHECK(!w.value.toSymInt().is_symbolic());
+        // TODO: Can this really show up though? :think:
+        TORCH_CHECK(!w.value.toSymInt().is_heap_allocated());
+        // no op, there is nothing to tag
+        break;
+      case c10::SymFloatType::Kind:
+        TORCH_CHECK(!w.value.toSymFloat().is_symbolic());
+        // no op, there is nothing to tag
+        break;
+      case c10::SymBoolType::Kind:
+        TORCH_CHECK(!w.value.toSymBool().is_symbolic());
         // no op, there is nothing to tag
         break;
       case DynamicType::Kind:
@@ -110,6 +119,13 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
           to_process.emplace_back(std::move(elem));
         }
       } break;
+      case AwaitType::Kind: {
+        auto aw = w.value.toAwait();
+        if (aw->completed()) {
+          Work elem = {w.type->containedType(0), aw->wait()};
+          to_process.emplace_back(std::move(elem));
+        }
+      } break;
       case OptionalType::Kind: {
         if (!w.value.isNone()) {
           Work elem = {w.type->containedType(0), w.value};
@@ -125,7 +141,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         auto elem_type = w.type->containedType(0);
         auto lst = w.value.toList();
         lst.unsafeSetElementType(elem_type);
-        for (const IValue item : lst) {
+        for (const IValue& item : lst) {
           Work elem = {elem_type, item};
           to_process.emplace_back(std::move(elem));
         }
@@ -172,7 +188,9 @@ bool is(const Type& type) {
 }
 } // namespace
 
-void restoreContainerTypeTags(const IValue& ivalue, const TypePtr& type) {
+static void restoreContainerTypeTags(
+    const IValue& ivalue,
+    const TypePtr& type) {
   if (is<DictType>(*type)) {
     auto dict = ivalue.toGenericDict();
     dict.unsafeSetKeyType(type->containedType(0));
@@ -200,6 +218,7 @@ IValue Unpickler::parse_ivalue() {
 double Unpickler::readFloat() {
   AT_ASSERT(sizeof(double) == 8);
   double big_endian = read<double>();
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double little_endian;
 
@@ -211,6 +230,11 @@ double Unpickler::readFloat() {
       reinterpret_cast<char*>(&little_endian));
 
   return little_endian;
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+  return big_endian;
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
 }
 
 void Unpickler::run() {
@@ -306,37 +330,48 @@ PickleOpCode Unpickler::readInstruction() {
       stack_.emplace_back(false);
     } break;
     case PickleOpCode::NONE: {
-      stack_.emplace_back(IValue());
+      stack_.emplace_back();
     } break;
     case PickleOpCode::BININT1: {
       uint8_t value = read<uint8_t>();
       stack_.emplace_back(int64_t(value));
     } break;
     case PickleOpCode::BININT2: {
-      uint16_t value = read<uint16_t>();
+      uint16_t value = from_le16(read<uint16_t>());
       stack_.emplace_back(int64_t(value));
     } break;
     case PickleOpCode::BININT: {
-      int32_t value = read<int32_t>();
+      int32_t value = from_le32(read<int32_t>());
       stack_.emplace_back(int64_t(value));
     } break;
     case PickleOpCode::LONG1: {
       // Only read LONG1s with 8 as the length
       uint8_t length = read<uint8_t>();
       TORCH_CHECK(length == 8, "Expected length to be 8, got ", int(length));
-      stack_.emplace_back(int64_t(read<int64_t>()));
+      stack_.emplace_back(int64_t(from_le64(read<int64_t>())));
     } break;
     case PickleOpCode::BINUNICODE: {
-      uint32_t length = read<uint32_t>();
+      uint32_t length = from_le32(read<uint32_t>());
+      stack_.emplace_back(readBytes(length));
+    } break;
+    case PickleOpCode::BINUNICODE8: {
+      int64_t length = from_le64(read<int64_t>());
       stack_.emplace_back(readBytes(length));
     } break;
     case PickleOpCode::BINFLOAT:
       stack_.emplace_back(readFloat());
       break;
     case PickleOpCode::TUPLE: {
+      TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
       size_t start = marks_.back();
       marks_.pop_back();
       std::vector<IValue> elements;
+      TORCH_CHECK(
+          stack_.size() >= start,
+          "Parsing error: wrong start index ",
+          start,
+          " for stack_ of size ",
+          stack_.size());
       const auto tupleSize = stack_.size() - start;
       switch (tupleSize) {
         case 3: {
@@ -370,15 +405,30 @@ PickleOpCode Unpickler::readInstruction() {
       }
     } break;
     case PickleOpCode::TUPLE1: {
+      TORCH_CHECK(
+          stack_.size() > 0,
+          "Parsing error: stack_ contains ",
+          stack_.size(),
+          " elements, at least 1 expected");
       stack_.emplace_back(c10::ivalue::Tuple::create(pop(stack_)));
     } break;
     case PickleOpCode::TUPLE2: {
+      TORCH_CHECK(
+          stack_.size() > 1,
+          "Parsing error: stack_ contains ",
+          stack_.size(),
+          " elements, at least 2 expected");
       auto e2 = pop(stack_);
       auto e1 = pop(stack_);
       stack_.emplace_back(
           c10::ivalue::Tuple::create(std::move(e1), std::move(e2)));
     } break;
     case PickleOpCode::TUPLE3: {
+      TORCH_CHECK(
+          stack_.size() > 2,
+          "Parsing error: stack_ contains ",
+          stack_.size(),
+          " elements, at least 3 expected");
       auto e3 = pop(stack_);
       auto e2 = pop(stack_);
       auto e1 = pop(stack_);
@@ -390,7 +440,14 @@ PickleOpCode Unpickler::readInstruction() {
           c10::impl::GenericDict(AnyType::get(), AnyType::get()));
       break;
     case PickleOpCode::APPENDS: {
+      TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
       size_t start = marks_.back();
+      TORCH_CHECK(
+          start > 0 && start <= stack_.size(),
+          "Parsing error: wrong start index ",
+          start,
+          " for stack_ of size ",
+          stack_.size());
       auto list_ivalue = stack_.at(start - 1);
       readList(list_ivalue);
     } break;
@@ -400,9 +457,23 @@ PickleOpCode Unpickler::readInstruction() {
       stack_.push_back(std::move(list_ivalue));
     } break;
     case PickleOpCode::DICT: {
+      TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
       size_t start = marks_.back();
       marks_.pop_back();
+      TORCH_CHECK(
+          stack_.size() > start,
+          "Parsing error: wrong start index ",
+          start,
+          " for stack_ which of size ",
+          stack_.size());
       auto dict = c10::impl::GenericDict(AnyType::get(), AnyType::get());
+      TORCH_CHECK(
+          stack_.size() % 2 == 0 && start % 2 == 0,
+          "Parsing error: stack_ is of size ",
+          stack_.size(),
+          " and start index is ",
+          start,
+          ", but stack_ expected to contain even number of elements");
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(stack_[i], stack_[i + 1]);
       }
@@ -410,8 +481,12 @@ PickleOpCode Unpickler::readInstruction() {
       stack_.emplace_back(std::move(dict));
     } break;
     case PickleOpCode::SETITEMS: {
+      TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
       size_t start = marks_.back();
       marks_.pop_back();
+      TORCH_CHECK(
+          start > 0 && start <= stack_.size(),
+          "Parsing error: wrong start index for stack_");
       auto dict = stack_.at(start - 1).toGenericDict();
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(stack_[i], stack_[i + 1]);
@@ -419,10 +494,24 @@ PickleOpCode Unpickler::readInstruction() {
       stack_.erase(stack_.begin() + start, stack_.end());
     } break;
     case PickleOpCode::BINGET: {
-      stack_.push_back(memo_table_.at(read<uint8_t>()));
+      auto pos = read<uint8_t>();
+      TORCH_CHECK(
+          memo_table_.size() > pos,
+          "Parsing error: out of bounds access at ",
+          (size_t)pos,
+          " to memo_table_ which is of size ",
+          memo_table_.size());
+      stack_.push_back(memo_table_.at(pos));
     } break;
     case PickleOpCode::LONG_BINGET: {
-      stack_.push_back(memo_table_.at(read<uint32_t>()));
+      auto pos = read<uint32_t>();
+      TORCH_CHECK(
+          memo_table_.size() > pos,
+          "Parsing error: out of bounds access at ",
+          (size_t)pos,
+          " to memo_table_ which is of size ",
+          memo_table_.size());
+      stack_.push_back(memo_table_.at(pos));
     } break;
     case PickleOpCode::STOP:
       break;
@@ -433,6 +522,7 @@ PickleOpCode Unpickler::readInstruction() {
       readGlobal(module_name, class_name);
     } break;
     case PickleOpCode::NEWOBJ: {
+      TORCH_CHECK(!stack_.empty(), "Parsing error: stack_ is empty");
       // pop empty tuple, the actual action is stored in the globals_stack_
       stack_.pop_back();
     } break;
@@ -442,13 +532,22 @@ PickleOpCode Unpickler::readInstruction() {
     case PickleOpCode::REDUCE: {
       // stack is: <functor_idx> <functor_arg>
       // extract <functor_idx> and remove from the stack:
+      TORCH_CHECK(
+          stack_.size() > 1,
+          "Parsing error: stack_ contains ",
+          stack_.size(),
+          " elements, at least 2 expected");
       std::swap(*(stack_.end() - 2), *(stack_.end() - 1));
       size_t idx = stack_.back().toInt();
       stack_.pop_back();
       // stack is: <functor_arg>
+      TORCH_CHECK(
+          idx < globals_.size(),
+          "Parsing error: out of bounds access to globals_");
       globals_.at(idx)();
     } break;
     case PickleOpCode::BINPERSID: {
+      TORCH_CHECK(!stack_.empty(), "Parsing error: stack_ is empty");
       auto tuple = pop(stack_).toTuple();
       const auto& args = tuple->elements();
       AT_ASSERT(
@@ -459,7 +558,8 @@ PickleOpCode Unpickler::readInstruction() {
       const std::string& key = args.at(2).toStringRef();
 
       at::Device device(args.at(3).toStringRef());
-      if (device_) {
+      // remap device location if it's not meta
+      if (device_ && !device.is_meta()) {
         device = *device_;
       }
 
@@ -505,14 +605,42 @@ PickleOpCode Unpickler::readInstruction() {
         tensor = at::empty({0}, options).set_(storage);
       }
 
-      if (device.is_cuda() || device.is_xpu() || device.is_meta()) {
+      if (device.is_cuda() || device.is_xpu() || device.is_meta() ||
+          device.is_hpu() || device.is_mps() || device.is_privateuseone()) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(
-            "supported devices include CPU and CUDA, however got ",
+            "supported devices include CPU, CUDA, HPU and ",
+            c10::get_privateuse1_backend(),
+            " however got ",
             DeviceTypeName(device.type(), false));
       }
       stack_.emplace_back(std::move(tensor));
+    } break;
+    case PickleOpCode::SETITEM: {
+      // At this OpCode, stack looks like
+      // | Stack Bottom |
+      // | ......       |
+      // | Dict         | -> (stack_size - 3)
+      // | Key          | -> (stack_size - 2)
+      // | Value        | -> (stack_size - 1)
+      TORCH_CHECK(
+          stack_.size() >= 3,
+          "Parsing error: stack doesn't have enough elements");
+
+      auto stack_size = stack_.size();
+      auto dict_pos = stack_size - 3;
+      auto key_pos = stack_size - 2;
+      auto val_pos = stack_size - 1;
+
+      TORCH_CHECK(
+          (dict_pos < stack_size) && (key_pos < stack_size) &&
+              (val_pos < stack_size),
+          "Parsing error: attempted out-of-bounds access while processing SETITEM opcode");
+
+      auto dict = stack_.at(dict_pos).toGenericDict();
+      dict.insert_or_assign(stack_.at(key_pos), stack_.at(val_pos));
+      stack_.erase(stack_.begin() + (key_pos), stack_.end());
     } break;
     default: {
       AT_ERROR(
@@ -528,6 +656,23 @@ PickleOpCode Unpickler::readInstruction() {
 void Unpickler::readGlobal(
     const std::string& module_name,
     const std::string& class_name) {
+  if (this->skip_next_read_global) {
+    // See [NOTE] skip_next_read_global
+    this->skip_next_read_global--;
+    if (this->skip_next_read_global == 1) {
+      // Pass through to the correct handler
+    } else if (this->skip_next_read_global == 0) {
+      // Corresponds to the type of `Tensor` being unpickled
+      if (module_name != "torch" || class_name != "Tensor") {
+        TORCH_WARN(
+            "Trying to load a Subclassed Tensor, it will be converted to at::Tensor in C++");
+      }
+      stack_.emplace_back(int64_t(globals_.size() - 1));
+      return;
+    } else {
+      TORCH_CHECK(false, "INVALID VALUES")
+    }
+  }
   // TODO [unpickler refactor] __main__ isn't used by the pickler anymore, this
   // is only here for bc-compatibility reasons
   if (module_name == "__main__") {
@@ -614,6 +759,12 @@ void Unpickler::readGlobal(
     bool quantized = class_name == "_rebuild_qtensor";
     rebuildTensor(quantized);
   } else if (
+      module_name == "torch._tensor" &&
+      (class_name == "_rebuild_from_type_v2")) {
+    // Unpickle a Tensor with Python attributes or
+    // a Subclassed Tensor.
+    rebuildTensorFromTypeV2();
+  } else if (
       module_name == "torch._utils" && class_name == "_rebuild_sparse_tensor") {
     rebuildSparseTensor();
   } else if (module_name == "builtins" && class_name == "complex") {
@@ -685,7 +836,12 @@ void Unpickler::readGlobal(
         class_name,
         "'");
   } else {
-    AT_ASSERT(type_resolver_);
+    TORCH_CHECK(
+        type_resolver_,
+        "Unpickler found unknown type ",
+        module_name,
+        ".",
+        class_name);
     at::StrongTypePtr type =
         type_resolver_(c10::QualifiedName(module_name, class_name));
     if (auto enum_type = type.type_->cast<c10::EnumType>()) {
@@ -800,14 +956,62 @@ void Unpickler::rebuildTensor(bool quantized) {
     } else {
       result = at::empty({0}, storage_tensor.options());
     }
-    bool requires_grad = elements.at(idx).toBool();
-    // elements[idx++] is empty backwards hooks
+    bool requires_grad = elements.at(idx++).toBool();
+    idx++; // backwards hooks is empty
     at::TensorImpl* impl = result.unsafeGetTensorImpl();
     impl->set_storage_keep_dtype(storage_tensor.storage());
     impl->set_storage_offset(storage_offset);
     impl->set_sizes_and_strides(size, stride);
     result = autograd::make_variable(result, requires_grad);
+
+    // Handle if math_bits were pickled.
+    // See `args` of _reduce_ex_internal
+    // for a regular tensor (final else case).
+    // Tensors pickled before this patch didn't
+    // have this argument for storing MathBits,
+    // in that case, we do nothing.
+    // NOTE: `math_bits` is the 7th arg.
+    // NOTE: This is only meant for regular tensor and not quantized
+    //       which also has 7 args serialized.
+    if (!quantized && elements.size() == 7) {
+      auto math_bits = elements.at(idx++).toGenericDict();
+      torch::jit::setTensorMetadata(result, math_bits);
+    }
+
     stack_.emplace_back(std::move(result));
+  });
+}
+
+void Unpickler::rebuildTensorFromTypeV2() {
+  // [NOTE] skip_next_read_global
+  // When rebuilding Tensor with Python Attr or Subclassed Tensor,
+  // we receive `(func, type(self), args, state)` on stack for
+  // `rebuildTensorFromTypeV2`.
+  // Thus next call to readGlobal corresponds to `func` which is
+  // the function to rebuild the base tensor.
+  // The call after `func` to readGlobal corresponds to `type` of the
+  // Tensor where we raise warning if the type is not `torch.Tensor`.
+  this->skip_next_read_global = 2;
+  auto curr_globals_idx = globals_.size();
+  globals_.emplace_back([this, curr_globals_idx] {
+    // args is a tuple with following data
+    //  (function to rebuild base tensor, type of tensor,
+    //   arguments to construct base tensor, Python State (as dict))
+    auto args = pop(stack_).toTuple();
+    size_t tup_idx = 0;
+    const auto args_elems = args->elements();
+    auto base_tensor_args = args_elems.at(tup_idx + 2).toTuple();
+    auto py_state = args_elems.at(tup_idx + 3).toGenericDict();
+    if (!py_state.empty()) {
+      TORCH_WARN(
+          "Loading Tensor with Python attributes will return at::Tensor with Python attributes being discarded");
+    }
+    // This calls the function to rebuild the
+    // base tensor.
+    // Eg. `rebuildTensor`, `rebuildSpareTensor`.
+    stack_.emplace_back(base_tensor_args);
+    globals_[curr_globals_idx + 1]();
+    stack_.emplace_back(pop(stack_));
   });
 }
 
@@ -879,6 +1083,11 @@ void Unpickler::readSlowWithBuffer(char* dest, size_t sz) {
 std::string Unpickler::readBytes(size_t length) {
   std::string data;
   static const size_t kSmallString = 64;
+  TORCH_CHECK(
+      length <= data.max_size(),
+      "Parsing error: can't read ",
+      length,
+      " bytes to a string");
   if (length <= buffer_remaining_) {
     // Fast-path: entirely in buffer.
     data.assign(buffer_.data() + buffer_pos_, length);
@@ -912,6 +1121,7 @@ std::string Unpickler::readBytes(size_t length) {
 // Pop all the list items off of the stack and append them to the list at
 // the corresponding MARK
 void Unpickler::readList(IValue list_ivalue) {
+  TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
   size_t start = marks_.back();
   marks_.pop_back();
   auto num_elements = stack_.size() - start;
@@ -992,5 +1202,4 @@ std::string Unpickler::readString() {
   return ss;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

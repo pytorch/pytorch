@@ -1,5 +1,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/jit_type.h>
+#include <c10/core/GradMode.h>
+
+#include <utility>
 
 namespace c10 {
 
@@ -416,22 +419,21 @@ VaryingShape<int64_t> TensorType::strides() const {
       ss[*s.stride_index_] = *s.stride_;
     }
   }
-  return VaryingShape<int64_t>(ss);
+  return VaryingShape<int64_t>(std::move(ss));
 }
 
 TensorType::TensorType(
     c10::optional<at::ScalarType> scalar_type,
     c10::optional<Device> device,
-    // NOLINTNEXTLINE(modernize-pass-by-value)
-    const SymbolicShape& sizes,
-    const VaryingShape<Stride>& strides,
+    SymbolicShape sizes,
+    VaryingShape<Stride> strides,
     c10::optional<bool> requires_grad,
     c10::optional<bool> undefined)
     : SharedType(TypeKind::TensorType),
       scalar_type_(scalar_type),
       device_(device),
-      sizes_(sizes),
-      strides_(strides),
+      sizes_(std::move(sizes)),
+      strides_(std::move(strides)),
       requires_grad_(requires_grad),
       undefined_(undefined) {}
 

@@ -117,7 +117,7 @@ class TORCH_API DistAutogradContainer {
     std::unordered_map<int64_t, ContextPtr> contexts;
   };
 
-  DistAutogradContainer();
+  DistAutogradContainer() = delete;
   ~DistAutogradContainer() = default;
 
   static DistAutogradContainer& getInstanceInternal();

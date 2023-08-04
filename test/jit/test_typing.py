@@ -4,10 +4,10 @@ import os
 import sys
 
 import torch
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.testing._internal.common_utils import IS_WINDOWS
 from collections import namedtuple
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Dict, NamedTuple
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -89,7 +89,7 @@ class TestTyping(JitTestCase):
         def fn():
             l1 = [1, 2, "foo", 3]
             l2 = ["foo", "bar", "baz", "qux"]
-            d: Dict[int, str] = {k : v for k, v in zip(l1, l2)}
+            d: Dict[int, str] = dict(zip(l1, l2))
             return d
 
         with self.assertRaisesRegex(RuntimeError, "Dicts may only "
@@ -102,7 +102,7 @@ class TestTyping(JitTestCase):
         def fn():
             l1 = ["foo", "bar", "baz", "qux"]
             l2 = [1, 2, "foo", 3]
-            d: Dict[str, int] = {k : v for k, v in zip(l1, l2)}
+            d: Dict[str, int] = dict(zip(l1, l2))
             return d
 
         with self.assertRaisesRegex(RuntimeError, "Dict type annotation"
@@ -196,7 +196,7 @@ class TestTyping(JitTestCase):
         li_1, li_2, li_3 = stuff4([True])
         li_3 = li_3[0]
         for li in [li_1, li_2, li_3]:
-            self.assertTrue(type(li[0]) == type(True))
+            self.assertTrue(type(li[0]) == bool)
 
     def test_nested_list(self):
         def foo(z):
@@ -592,3 +592,52 @@ class TestTyping(JitTestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     r'aka NamedTuple\(logits, aux_logits2, aux_logits1\)'):
             out = foo(_GoogLeNetOutputs(logits="3", aux_logits2="4", aux_logits1="5"))
+
+    def test_namedtuple_error_source_attribution(self):
+        class _NamedTupleBadMemberType(NamedTuple):
+            f1: torch.Tensor
+            f2: "ABadForwardRefType"
+
+        make_global(_NamedTupleBadMemberType)  # see [local resolution in python]
+
+        def fn(x: _NamedTupleBadMemberType) -> torch.Tensor:
+            return x.f1.relu()
+
+        # assert that this has a location associated with the error.
+        # note the " +" is regex (i.e. "at least one space")
+        with self.assertRaisesRegex(ValueError, "at +File"):
+            torch.jit.script(fn)
+
+    def test_inherited_annotations_python_310(self):
+        # See #104484
+        # In python >=3.10, inspect.get_annotations doesn't always return the same values.
+        # Sometimes it will show all annotations; other times it will show only annotations
+        # that show in that class, not classes it inherits fro.
+        class BaseModule(torch.nn.Module):
+            state: List[int]
+
+            def forward(self, x):
+                pass
+
+        def do_something_with_list(x: List[int]):
+            if x:
+                return x[-1]
+            return 5
+
+        class Submodule(BaseModule):
+            def __init__(self, self_x_value):
+                super().__init__()
+                self.x = self_x_value
+                self.state = []
+
+            def forward(self, x):
+                return self.x + x + do_something_with_list(self.state)
+
+        class LowestModule(Submodule):
+            def __init__(self):
+                super().__init__(123)
+
+        mod = LowestModule()
+        mod2 = LowestModule()
+        mod_s = torch.jit.script(mod)
+        mod2_s = torch.jit.script(mod2)

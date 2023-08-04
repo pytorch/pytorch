@@ -1,46 +1,56 @@
 # Owner(s): ["oncall: distributed"]
 
-from enum import Enum, auto
 import functools
+import itertools
 import os
 import tempfile
 import unittest
+from enum import auto, Enum
+from typing import Callable, Union
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributed.fsdp._wrap_utils import _validate_frozen_params
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    FullyShardedDataParallel as FSDP,
-    CPUOffload,
     BackwardPrefetch,
+    CPUOffload,
+    FullyShardedDataParallel as FSDP,
+    MixedPrecision,
+    ShardingStrategy,
 )
 from torch.distributed.fsdp.wrap import (
-    always_wrap_policy,
-    size_based_auto_wrap_policy,
-    enable_wrap,
     _or_policy,
-    wrap,
-    _wrap_batchnorm_individually,
+    _Policy,
+    _wrap_module_cls_individually,
+    always_wrap_policy,
+    CustomPolicy,
+    enable_wrap,
+    ModuleWrapPolicy,
+    size_based_auto_wrap_policy,
     transformer_auto_wrap_policy,
+    wrap,
 )
-from torch.testing._internal.common_distributed import (
-    skip_if_lt_x_gpu,
-)
+from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
+from torch.nn.modules.batchnorm import _BatchNorm
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    DummyProcessGroup,
-    FSDPTest,
-    FSDPInitMode,
     _maybe_cuda,
+    CUDAInitMode,
+    DummyProcessGroup,
+    FSDPInitMode,
+    FSDPTest,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
-    run_tests,
     find_free_port,
-    TestCase,
-    parametrize,
     instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
 )
-from torch.nn import TransformerEncoderLayer, TransformerDecoderLayer
+
 
 class BatchNormNet(nn.Module):
     def __init__(self):
@@ -51,13 +61,62 @@ class BatchNormNet(nn.Module):
         self.bn3 = nn.BatchNorm3d(10)
         self.sync_bn = nn.SyncBatchNorm(10)
 
+
+class LoraModel(nn.Module):
+    """This is a toy LoRA decoder model."""
+
+    def __init__(self):
+        super().__init__()
+        self.embed_tokens = nn.Embedding(100, 32)
+        self.layers = nn.ModuleList([LoraDecoder() for _ in range(4)])
+        self.norm = nn.LayerNorm(32)
+        self.embed_tokens.weight.requires_grad_(False)
+        self.norm.weight.requires_grad_(False)
+        self.norm.bias.requires_grad_(False)
+
+
+class LoraDecoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.attn = LoraAttention()
+        self.mlp = LoraMLP()
+        self.inp_layernorm = nn.LayerNorm(32)
+        self.post_attn_layernorm = nn.LayerNorm(32)
+        self.inp_layernorm.weight.requires_grad_(False)
+        self.inp_layernorm.bias.requires_grad_(False)
+        self.post_attn_layernorm.weight.requires_grad_(False)
+        self.post_attn_layernorm.bias.requires_grad_(False)
+
+
+class LoraAttention(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.q_proj = nn.Linear(32, 32, bias=False)
+        self.lora_A = nn.Linear(32, 8, bias=False)
+        self.lora_B = nn.Linear(8, 32, bias=False)
+        self.k_proj = nn.Linear(32, 32, bias=False)
+        self.v_proj = nn.Linear(32, 32, bias=False)
+        self.o_proj = nn.Linear(32, 32, bias=False)
+        self.q_proj.weight.requires_grad_(False)
+        self.k_proj.weight.requires_grad_(False)
+        self.v_proj.weight.requires_grad_(False)
+        self.o_proj.weight.requires_grad_(False)
+
+
+class LoraMLP(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.proj1 = nn.Linear(32, 128, bias=False)
+        self.proj2 = nn.Linear(128, 32, bias=False)
+        self.proj1.weight.requires_grad_(False)
+        self.proj2.weight.requires_grad_(False)
+
+
 class WrapMethod(Enum):
     FSDP_CTOR = auto()
     # FSDP_CTOR is the supported way forward, but keep WRAP_API in case we miss
     # any use cases and fix them to work with FSDP_CTOR over time.
     WRAP_API = auto()
-
-
 
 
 class TestFSDPWrap(FSDPTest):
@@ -104,7 +163,7 @@ class TestFSDPWrap(FSDPTest):
         return nn.Linear(fin, fout, bias=False)
 
     def _get_already_wrapped_fsdp(
-        self, fsdp_init_mode=FSDPInitMode.CUDA_BEFORE, nested=False
+        self, cuda_init_mode=CUDAInitMode.CUDA_BEFORE, nested=False
     ) -> FSDP:
         fn_self = self
 
@@ -112,7 +171,7 @@ class TestFSDPWrap(FSDPTest):
             def __init__(self, nested):
                 super().__init__()
                 # TODO: test the various init modes.
-                move_to_cuda = fsdp_init_mode == FSDPInitMode.CUDA_BEFORE
+                move_to_cuda = cuda_init_mode == CUDAInitMode.CUDA_BEFORE
                 # if nested=True, the FSDP module will be nested one layer deep
                 # and we should pick that up.
                 if nested:
@@ -135,18 +194,25 @@ class TestFSDPWrap(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("nested", [True, False])
-    @parametrize("fsdp_init_mode", [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE])
-    def test_error_already_wrapped(self, nested, fsdp_init_mode):
+    @parametrize("cuda_init_mode", [CUDAInitMode.CUDA_AFTER, CUDAInitMode.CUDA_BEFORE])
+    def test_error_already_wrapped(self, nested, cuda_init_mode):
         """
         Test that an error is raised if we attempt to wrap when submodules are
         already FSDP.
         """
-        wrapped_fsdp = self._get_already_wrapped_fsdp(nested=nested, fsdp_init_mode=fsdp_init_mode)
-        if fsdp_init_mode == FSDPInitMode.CUDA_AFTER:
+        wrapped_fsdp = self._get_already_wrapped_fsdp(
+            nested=nested, cuda_init_mode=cuda_init_mode
+        )
+        if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
             wrapped_fsdp = wrapped_fsdp.cuda()
 
-        with self.assertRaisesRegex(ValueError, "to NOT be FullyShardedDataParallel"):
-            mod = FSDP(wrapped_fsdp, auto_wrap_policy=size_based_auto_wrap_policy)
+        wrapped_module_name = "lin1.1" if nested else "lin1"
+        with self.assertRaisesRegex(
+            ValueError,
+            "FSDP auto wrapping requires modules to not already have FSDP "
+            f"applied but found {wrapped_module_name} in",
+        ):
+            FSDP(wrapped_fsdp, auto_wrap_policy=size_based_auto_wrap_policy)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_or_policy", [True, False])
@@ -154,11 +220,18 @@ class TestFSDPWrap(FSDPTest):
         def never_wrap_policy(*args, **kwargs):
             return False
 
+        wrap_batchnorm_individually = functools.partial(
+            _wrap_module_cls_individually,
+            module_classes=[
+                _BatchNorm,
+            ],
+        )
         policy = (
             functools.partial(
-                _or_policy,
-                policies=[never_wrap_policy, _wrap_batchnorm_individually]
-            ) if use_or_policy else _wrap_batchnorm_individually
+                _or_policy, policies=[never_wrap_policy, wrap_batchnorm_individually]
+            )
+            if use_or_policy
+            else wrap_batchnorm_individually
         )
         model = BatchNormNet()
         fsdp = FSDP(model, auto_wrap_policy=policy)
@@ -171,10 +244,11 @@ class TestFSDPWrap(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_bn_always_wrapped_individually(self):
         """
-        Ensures that by using _or_policy with _wrap_batchnorm_individually, even
+        Ensures that by using _or_policy with _wrap_module_cls_individually, even
         if the other policy results in a module containing a BN unit being
         wrapped, the contained BN unit will still be individually wrapped.
         """
+
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -185,9 +259,15 @@ class TestFSDPWrap(FSDPTest):
                 return True
             return isinstance(module, BatchNormNet)
 
+        wrap_batchnorm_individually = functools.partial(
+            _wrap_module_cls_individually,
+            module_classes=[
+                _BatchNorm,
+            ],
+        )
+
         my_policy = functools.partial(
-            _or_policy,
-            policies=[wrap_bn_container, _wrap_batchnorm_individually]
+            _or_policy, policies=[wrap_bn_container, wrap_batchnorm_individually]
         )
         mod = MyModule()
         fsdp = FSDP(mod, auto_wrap_policy=my_policy)
@@ -200,7 +280,7 @@ class TestFSDPWrap(FSDPTest):
             fsdp.bn_container.bn1,
             fsdp.bn_container.bn2,
             fsdp.bn_container.bn3,
-            fsdp.bn_container.sync_bn
+            fsdp.bn_container.sync_bn,
         ]:
             self.assertTrue(isinstance(bn, FSDP))
 
@@ -213,31 +293,33 @@ class TestFSDPWrap(FSDPTest):
             fsdp.bn_container.bn1,
             fsdp.bn_container.bn2,
             fsdp.bn_container.bn3,
-            fsdp.bn_container.sync_bn
+            fsdp.bn_container.sync_bn,
         ]:
             self.assertFalse(isinstance(bn, FSDP))
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",
-        [CPUOffload(offload_params=False), CPUOffload(offload_params=True)]
+        [CPUOffload(offload_params=False), CPUOffload(offload_params=True)],
     )
     @parametrize(
         "backward_prefetch",
-        [BackwardPrefetch.BACKWARD_POST, BackwardPrefetch.BACKWARD_PRE]
+        [BackwardPrefetch.BACKWARD_POST, BackwardPrefetch.BACKWARD_PRE],
     )
-    @parametrize("forward_prefetch", [True, False])
-    @parametrize(
-        "fsdp_init_mode",
-        [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE]
-    )
-    def test_main_wrap_api(self, cpu_offload, backward_prefetch, forward_prefetch, fsdp_init_mode):
-
-        if fsdp_init_mode == FSDPInitMode.CUDA_AFTER and cpu_offload.offload_params:
+    @parametrize("forward_prefetch", [False, True])
+    @parametrize("cuda_init_mode", [CUDAInitMode.CUDA_AFTER, CUDAInitMode.CUDA_BEFORE])
+    def test_main_wrap_api(
+        self,
+        cpu_offload: CPUOffload,
+        backward_prefetch: BackwardPrefetch,
+        forward_prefetch: bool,
+        cuda_init_mode: CUDAInitMode,
+    ):
+        if cuda_init_mode == CUDAInitMode.CUDA_AFTER and cpu_offload.offload_params:
             # they don't work together, expected
             return
 
-        move_to_cuda = fsdp_init_mode == FSDPInitMode.CUDA_BEFORE
+        move_to_cuda = cuda_init_mode == CUDAInitMode.CUDA_BEFORE
 
         class Nested(nn.Module):
             def __init__(self):
@@ -269,7 +351,7 @@ class TestFSDPWrap(FSDPTest):
             backward_prefetch=backward_prefetch,
             forward_prefetch=forward_prefetch,
         )
-        if fsdp_init_mode == FSDPInitMode.CUDA_AFTER:
+        if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
             wrapped_model = wrapped_model.cuda()
 
         modules_in_fsdp_graph_order = [
@@ -278,7 +360,7 @@ class TestFSDPWrap(FSDPTest):
             wrapped_model.module.lin3,
             wrapped_model.module.lin4.module.nested_lin,
             wrapped_model.module.lin4,
-            wrapped_model
+            wrapped_model,
         ]
 
         for module in modules_in_fsdp_graph_order:
@@ -295,14 +377,6 @@ class TestFSDPWrap(FSDPTest):
             loss = wrapped_model(inp).sum()
             loss.backward()
             optim.step()
-
-        # Since we ran with backward prefetch, verify backward prefetch related
-        # data.
-        for i, module in enumerate(modules_in_fsdp_graph_order):
-            self.assertEqual(i, module._my_fsdp_idx_in_graph)
-            self.assertTrue(
-                module._fsdp_graph_order == modules_in_fsdp_graph_order
-            )
 
 
 class TestAutoWrap(TestCase):
@@ -322,7 +396,9 @@ class TestAutoWrap(TestCase):
             layer = FSDP(
                 nn.Linear(5, 5),
                 process_group=self.process_group,
-                auto_wrap_policy=functools.partial(size_based_auto_wrap_policy, min_num_params=1)
+                auto_wrap_policy=functools.partial(
+                    size_based_auto_wrap_policy, min_num_params=1
+                ),
             )
         self.assertTrue(isinstance(layer, FSDP))
         self.assertEqual(layer.rank, self.process_group.rank())
@@ -362,26 +438,151 @@ class TestAutoWrap(TestCase):
         passed into FSDP, all submodules are wrapped.
         """
         seq = TestFSDPWrap.NestedSequentialModel.get_model(cuda=True)
-        model = FSDP(seq, process_group=self.process_group, auto_wrap_policy=always_wrap_policy)
+        model = FSDP(
+            seq, process_group=self.process_group, auto_wrap_policy=always_wrap_policy
+        )
         TestFSDPWrap.NestedSequentialModel.verify_model_all_wrapped(self, model)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "Requires at least 2 GPUs")
     def test_transformer_auto_wrap_policy(self):
-        model = TransformerWithSharedParams(group=self.process_group)
-        my_auto_wrap_policy = functools.partial(
+        """Tests the ``transformer_auto_wrap_policy``."""
+        auto_wrap_policy = functools.partial(
             transformer_auto_wrap_policy,
-            transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer}
+            transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer},
         )
-        fsdp_model = FSDP(
+        self._test_transformer_wrapping(auto_wrap_policy)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "Requires at least 2 GPUs")
+    def test_module_wrap_policy(self):
+        """Tests the ``ModuleWrapPolicy``."""
+        auto_wrap_policy = ModuleWrapPolicy(
+            {TransformerEncoderLayer, TransformerDecoderLayer}
+        )
+        self._test_transformer_wrapping(auto_wrap_policy)
+
+    def _test_transformer_wrapping(self, auto_wrap_policy: Union[Callable, _Policy]):
+        fsdp_kwargs = {"auto_wrap_policy": auto_wrap_policy}
+        fsdp_model = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.RECURSIVE,
+            CUDAInitMode.CUDA_BEFORE,
+            fsdp_kwargs,
+        )
+        modules = list(fsdp_model.modules())
+        encoder_layers = set(fsdp_model.module.transformer.encoder.layers)
+        decoder_layers = set(fsdp_model.module.transformer.decoder.layers)
+        for module in modules:
+            if (
+                module is fsdp_model
+                or module in encoder_layers
+                or module in decoder_layers
+            ):
+                self.assertTrue(isinstance(module, FSDP))
+            else:
+                self.assertFalse(isinstance(module, FSDP))
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "Requires at least 2 GPUs")
+    def test_custom_policy(self):
+        """
+        Tests ``CustomPolicy`` with both a lambda function that uses uniform
+        kwargs (so only returns ``False`` or ``True``) and a lambda function
+        that uses non-uniform kwargs (so returns a dict to override the root
+        kwargs).
+        """
+        for use_uniform_kwargs in [False, True]:
+            self._test_custom_policy(use_uniform_kwargs)
+
+    def _test_custom_policy(self, use_uniform_kwargs: bool):
+        print(f"use_uniform_kwargs={use_uniform_kwargs}")
+        model = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.NO_FSDP,
+            CUDAInitMode.CUDA_BEFORE,
+            {},
+        )
+
+        if use_uniform_kwargs:
+
+            def lambda_fn(module: nn.Module):
+                if module is model.bn:
+                    return True
+                elif isinstance(
+                    module, (TransformerEncoderLayer, TransformerDecoderLayer)
+                ):
+                    return True
+                return False
+
+        else:
+
+            def lambda_fn(module: nn.Module):
+                if module is model.bn:
+                    return {"sharding_strategy": ShardingStrategy.NO_SHARD}
+                elif isinstance(module, TransformerEncoderLayer):
+                    return True
+                elif isinstance(module, TransformerDecoderLayer):
+                    return {
+                        "sharding_strategy": ShardingStrategy.SHARD_GRAD_OP,
+                        "backward_prefetch": BackwardPrefetch.BACKWARD_POST,
+                    }
+                return False
+
+        policy = CustomPolicy(lambda_fn)
+        # Use a size-2 dummy PG to avoid clamping the sharding strategy to
+        # `NO_SHARD` as for a size-1 PG
+        process_group = DummyProcessGroup(rank=0, size=2)
+        fp16_mp = MixedPrecision(param_dtype=torch.float16)
+        fp32_mp = MixedPrecision()
+        model = FSDP(
             model,
-            process_group=self.process_group,
-            auto_wrap_policy=my_auto_wrap_policy
+            process_group=process_group,
+            auto_wrap_policy=policy,
+            mixed_precision=fp16_mp,
         )
-        self.assertTrue(isinstance(fsdp_model, FSDP))
-        for layer in fsdp_model.module.transformer.encoder.layers:
-            self.assertTrue(isinstance(layer, FSDP))
-        for layer in fsdp_model.module.transformer.decoder.layers:
-            self.assertTrue(isinstance(layer, FSDP))
+        encoder_layers = set(model.module.transformer.encoder.layers)
+        decoder_layers = set(model.module.transformer.decoder.layers)
+        bn = model.module.bn
+        bn_strategy = (
+            ShardingStrategy.FULL_SHARD
+            if use_uniform_kwargs
+            else ShardingStrategy.NO_SHARD
+        )
+        bn_prefetch = BackwardPrefetch.BACKWARD_PRE
+        encoder_strategy = root_strategy = ShardingStrategy.FULL_SHARD
+        encoder_prefetch = root_prefetch = BackwardPrefetch.BACKWARD_PRE
+        decoder_strategy = (
+            ShardingStrategy.FULL_SHARD
+            if use_uniform_kwargs
+            else ShardingStrategy.SHARD_GRAD_OP
+        )
+        decoder_prefetch = (
+            BackwardPrefetch.BACKWARD_PRE
+            if use_uniform_kwargs
+            else BackwardPrefetch.BACKWARD_POST
+        )
+        for module in model.modules():
+            if module is bn:
+                self.assertTrue(isinstance(module, FSDP))
+                self.assertEqual(module.sharding_strategy, bn_strategy)
+                self.assertEqual(module.backward_prefetch, bn_prefetch)
+                # We currently override batch norm modules to use fp32
+                self.assertEqual(module.mixed_precision, fp32_mp)
+            elif module in encoder_layers:
+                self.assertTrue(isinstance(module, FSDP))
+                self.assertEqual(module.sharding_strategy, encoder_strategy)
+                self.assertEqual(module.backward_prefetch, encoder_prefetch)
+                self.assertEqual(module.mixed_precision, fp16_mp)
+            elif module in decoder_layers:
+                self.assertTrue(isinstance(module, FSDP))
+                self.assertEqual(module.sharding_strategy, decoder_strategy)
+                self.assertEqual(module.backward_prefetch, decoder_prefetch)
+                self.assertEqual(module.mixed_precision, fp16_mp)
+            elif module is model:
+                self.assertTrue(isinstance(module, FSDP))
+                self.assertEqual(module.sharding_strategy, root_strategy)
+                self.assertEqual(module.backward_prefetch, root_prefetch)
+                self.assertEqual(module.mixed_precision, fp16_mp)
+            else:
+                self.assertFalse(isinstance(module, FSDP))
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "Requires at least 2 GPUs")
     def test_auto_wrap_api(self):
@@ -396,7 +597,7 @@ class TestAutoWrap(TestCase):
         model = FSDP(
             sequential,
             process_group=self.process_group,
-            auto_wrap_policy=my_auto_wrap_policy
+            auto_wrap_policy=my_auto_wrap_policy,
         )
 
         TestFSDPWrap.NestedSequentialModel.verify_model(self, model)
@@ -415,7 +616,7 @@ class TestAutoWrap(TestCase):
         model = FSDP(
             sequential,
             process_group=self.process_group,
-            auto_wrap_policy=my_auto_wrap_policy
+            auto_wrap_policy=my_auto_wrap_policy,
         )
 
         self.assertTrue(isinstance(model, FSDP))
@@ -432,7 +633,11 @@ class TestAutoWrap(TestCase):
         my_auto_wrap_policy = functools.partial(
             size_based_auto_wrap_policy, min_num_params=40
         )
-        model = FSDP(sequential, process_group=self.process_group, auto_wrap_policy=my_auto_wrap_policy)
+        model = FSDP(
+            sequential,
+            process_group=self.process_group,
+            auto_wrap_policy=my_auto_wrap_policy,
+        )
 
         self.assertTrue(isinstance(model, FSDP))
         self.assertTrue(isinstance(model[0], FSDP))
@@ -447,7 +652,11 @@ class TestAutoWrap(TestCase):
         my_auto_wrap_policy = functools.partial(
             size_based_auto_wrap_policy, min_num_params=40
         )
-        model = FSDP(sequential, process_group=self.process_group, auto_wrap_policy=my_auto_wrap_policy)
+        model = FSDP(
+            sequential,
+            process_group=self.process_group,
+            auto_wrap_policy=my_auto_wrap_policy,
+        )
         self.assertTrue(isinstance(model.module[0], FSDP))
         # Assert children of multihead attention are not wrapped
         self.assertTrue(isinstance(model.module[1], nn.MultiheadAttention))
@@ -468,24 +677,26 @@ class TestAutoWrap(TestCase):
         sequential = nn.Sequential(
             nn.Linear(10, 10), nn.ModuleList([nn.Linear(10, 10)])
         )
-        model = FSDP(sequential, process_group=self.process_group, auto_wrap_policy=my_auto_wrap_policy)
+        model = FSDP(
+            sequential,
+            process_group=self.process_group,
+            auto_wrap_policy=my_auto_wrap_policy,
+        )
         # Model was wrapped in FSDP as no inner modules were wrapped.
         self.assertTrue(isinstance(model, FSDP))
         self.assertTrue(isinstance(model.module[0], nn.Linear))
         self.assertTrue(isinstance(model.module[1], nn.ModuleList))
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test Requires CUDA")
-    @parametrize("fsdp_init_mode", [FSDPInitMode.CUDA_BEFORE, FSDPInitMode.CUDA_AFTER])
+    @parametrize("cuda_init_mode", [CUDAInitMode.CUDA_BEFORE, CUDAInitMode.CUDA_AFTER])
     @parametrize(
         "cpu_offload",
-        [CPUOffload(offload_params=False), CPUOffload(offload_params=True)]
+        [CPUOffload(offload_params=False), CPUOffload(offload_params=True)],
     )
     @parametrize("use_device_id", [True, False])
-    def test_auto_wrap_smoke_test(self, fsdp_init_mode, cpu_offload, use_device_id):
+    def test_auto_wrap_smoke_test(self, cuda_init_mode, cpu_offload, use_device_id):
         # CPU offload and CUDA after don't work together as expected.
-        if (
-            cpu_offload.offload_params and fsdp_init_mode == FSDPInitMode.CUDA_AFTER
-        ):
+        if cpu_offload.offload_params and cuda_init_mode == CUDAInitMode.CUDA_AFTER:
             return
 
         device = torch.device("cuda")
@@ -508,14 +719,19 @@ class TestAutoWrap(TestCase):
 
         # NOTE: We move model to CUDA after init with FSDP to simulate real use
         # cases where full model cannot be loaded onto GPU, but their shards can.
-        cuda_after_init = fsdp_init_mode == FSDPInitMode.CUDA_AFTER
+        cuda_after_init = cuda_init_mode == CUDAInitMode.CUDA_AFTER
         try:
-            sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=(not cuda_after_init))
+            sequential = TestFSDPWrap.NestedSequentialModel.get_model(
+                cuda=(not cuda_after_init)
+            )
             my_auto_wrap_policy = functools.partial(
                 size_based_auto_wrap_policy, min_num_params=40
             )
             model = FSDP(
-                sequential, cpu_offload=cpu_offload, auto_wrap_policy=my_auto_wrap_policy, device_id=device_id
+                sequential,
+                cpu_offload=cpu_offload,
+                auto_wrap_policy=my_auto_wrap_policy,
+                device_id=device_id,
             )
             TestFSDPWrap.NestedSequentialModel.verify_model(self, model)
             if cuda_after_init:
@@ -563,7 +779,8 @@ class TestAutoWrap(TestCase):
         sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=False)
         ignored_modules = [sequential[1], sequential[2][0]]
         my_auto_wrap_policy = functools.partial(
-            size_based_auto_wrap_policy, min_num_params=40,
+            size_based_auto_wrap_policy,
+            min_num_params=40,
         )
         fsdp_kwargs = {
             "process_group": self.process_group,
@@ -588,6 +805,138 @@ class TestAutoWrap(TestCase):
         self.assertTrue(isinstance(model.module[2], nn.Sequential))
         self.assertTrue(isinstance(model.module[2][0], nn.Linear))
         self.assertTrue(isinstance(model.module[2][1], nn.Linear))
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "Requires at least 2 GPUs")
+    def test_frozen_params(self):
+        """
+        Tests that mixing frozen/non-frozen parameters in an FSDP instance
+        raises for ``use_orig_params=False`` and warns for ``True``.
+        """
+        module_classes = (LoraAttention, LoraMLP, LoraDecoder)
+        module_wrap_policy = ModuleWrapPolicy(module_classes)
+
+        def lambda_fn_uniform(module: nn.Module):
+            return isinstance(module, module_classes)
+
+        def lambda_fn_nonuniform(module: nn.Module):
+            if isinstance(module, LoraAttention):
+                return {"sharding_strategy": ShardingStrategy.SHARD_GRAD_OP}
+            elif isinstance(module, module_classes):
+                return True
+            return False
+
+        lambda_wrap_policy_uniform = CustomPolicy(lambda_fn_uniform)
+        lambda_wrap_policy_nonuniform = CustomPolicy(lambda_fn_nonuniform)
+
+        for use_orig_params, policy in itertools.product(
+            [True, False],
+            [
+                module_wrap_policy,
+                lambda_wrap_policy_uniform,
+                lambda_wrap_policy_nonuniform,
+            ],
+        ):
+            self._test_frozen_params(use_orig_params, policy)
+
+    def _test_frozen_params(self, use_orig_params: bool, policy: _Policy):
+        model = LoraModel().cuda()
+        msg = "layers.0.attn has both parameters with requires_grad=True and False. "
+        if use_orig_params:
+            msg += "We do not recommend wrapping such modules"
+            ctx = self.assertWarnsRegex(UserWarning, msg)
+        else:
+            msg += "FSDP does not support wrapping such modules when use_orig_params=False."
+            ctx = self.assertRaisesRegex(ValueError, msg)
+        with ctx:
+            FSDP(
+                model,
+                process_group=self.process_group,
+                auto_wrap_policy=policy,
+                use_orig_params=use_orig_params,
+            )
+
+
+class TestWrapUtils(TestCase):
+    def test_validate_frozen_params(self):
+        """Tests the method ``_validate_frozen_params()``."""
+        for use_orig_params in [True, False]:
+            self._test_validate_frozen_params(use_orig_params)
+
+    def _test_validate_frozen_params(self, use_orig_params: bool):
+        model = LoraModel()
+        # Wrap only LoRA modules
+        modules_to_wrap = {
+            module
+            for module_name, module in model.named_modules()
+            if "lora_A" in module_name or "lora_B" in module_name
+        }
+        _validate_frozen_params(model, modules_to_wrap, set(), use_orig_params)
+        # Additionally wrap attention
+        for module in model.modules():
+            if isinstance(module, LoraAttention):
+                modules_to_wrap.add(module)
+        _validate_frozen_params(model, modules_to_wrap, set(), use_orig_params)
+        # Additionally wrap decoders
+        for module in model.modules():
+            if isinstance(module, LoraDecoder):
+                modules_to_wrap.add(module)
+        _validate_frozen_params(model, modules_to_wrap, set(), use_orig_params)
+        # Do not wrap the LoRA-A modules (meaning mixed frozen/non-frozen)
+        for module_name, module in model.named_modules():
+            if "lora_A" in module_name:
+                modules_to_wrap.remove(module)
+        regex = "layers.0.attn has both parameters with requires_grad=True and False."
+        if use_orig_params:
+            # Wrapping the attention manages all parameters except those from
+            # the LoRA-B module, which is separately wrapped and all nonfrozen
+            lorab_numel = sum(
+                p.numel() for p in model.layers[0].attn.lora_B.parameters()
+            )
+            attn_frozen_param_numel = sum(
+                p.numel()
+                for p in model.layers[0].attn.parameters()
+                if not p.requires_grad
+            )
+            attn_nonfrozen_param_numel = (
+                sum(
+                    p.numel()
+                    for p in model.layers[0].attn.parameters()
+                    if p.requires_grad
+                )
+                - lorab_numel
+            )
+            attn_total_param_numel = (
+                attn_frozen_param_numel + attn_nonfrozen_param_numel
+            )
+            regex += (
+                " We do not recommend wrapping such modules since the "
+                r"gradient memory usage will be higher than expected \("
+                f"{attn_total_param_numel} numel instead of {attn_nonfrozen_param_numel} numel "
+                r"before sharding via reduce-scatter\). "
+            )
+        else:
+            regex += " FSDP does not support wrapping such modules when use_orig_params=False. "
+        regex += "If possible, wrap the frozen parameters with FSDP separately.\n"
+        regex += (
+            "The following parameters have requires_grad=True:\n"
+            r"\['layers.0.attn.lora_A.weight'\]\n"
+            "The following parameters have requires_grad=False:\n"
+            r"\['layers.0.attn.q_proj.weight', 'layers.0.attn.k_proj.weight', "
+            r"'layers.0.attn.v_proj.weight', 'layers.0.attn.o_proj.weight'\]"
+        )
+        if use_orig_params:
+            ctx = self.assertWarnsRegex(UserWarning, regex)
+        else:
+            ctx = self.assertRaisesRegex(ValueError, regex)
+        with ctx:
+            _validate_frozen_params(model, modules_to_wrap, set(), use_orig_params)
+        # Now ignore those LoRA-A modules' parameters
+        ignored_params = set()
+        for module_name, module in model.named_modules():
+            if "lora_A" in module_name:
+                for param in module.parameters():
+                    ignored_params.add(param)
+        _validate_frozen_params(model, modules_to_wrap, ignored_params, use_orig_params)
 
 
 instantiate_parametrized_tests(TestFSDPWrap)

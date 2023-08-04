@@ -1,8 +1,6 @@
-#include <gtest/gtest.h>
-#include <iostream>
-#include "c10/core/DeviceType.h"
-
 #include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <gtest/gtest.h>
 #include <test/cpp/lazy/test_lazy_ops_util.h>
 #include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/helpers.h>
@@ -13,6 +11,7 @@
 #include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 #include <torch/csrc/lazy/ts_backend/ts_backend_impl.h>
 #include <torch/torch.h>
+#include <iostream>
 
 namespace torch {
 namespace lazy {
@@ -22,7 +21,9 @@ namespace lazy {
 #ifndef FBCODE_CAFFE2
 
 namespace {
-// This registers the torchscript backend, without which lazy device won't work
+// This registers the torchscript backend, without which lazy device won't work.
+// FIXME: This registers the backend for the whole test binary. We should
+// probably do it and undo it in the test fixture below.
 static bool inline init_backend() {
   torch::lazy::InitTorchScriptBackend();
   return true;
@@ -81,33 +82,6 @@ static inline at::DeviceType DefaultDevice() {
 }
 
 } // namespace
-
-TEST(LazyDynamicOpsTest, NarrowCopy) {
-  auto x = torch::rand({5, 10, 10}).to(kLazy);
-  const size_t Y_DIM = 3;
-  const size_t X_DIM_INDEX = 2;
-  auto y = torch::rand({Y_DIM}).to(kLazy);
-  auto ly = torch::lazy::TryGetLtcTensor(y);
-  auto dim_node = MakeNode<SizeNode>(ly->GetIrValue(), 0);
-  auto lmn = std::make_shared<torch::lazy::SymbolicIntNode>(dim_node);
-  auto z = x.narrow_copy_symint(X_DIM_INDEX, 0, lmn->toSymInt());
-  AllClose(z.cpu(), x.cpu().narrow_copy(X_DIM_INDEX, 0, Y_DIM));
-}
-
-TEST(LazyDynamicOpsTest, NarrowCopyViaSymSizes) {
-  FLAGS_ltc_enable_symbolic_shapes = true;
-  auto xc = torch::rand({10});
-  auto x = xc.to(kLazy);
-  const size_t Y_DIM = 3;
-  const size_t X_DIM_INDEX = 0;
-  auto y = torch::rand({Y_DIM}).to(kLazy);
-  auto z = x.narrow_copy_symint(X_DIM_INDEX, 0, y.sym_sizes()[0]);
-  auto zc = xc.narrow_copy(X_DIM_INDEX, 0, Y_DIM);
-  ASSERT_EQ(z.sizes()[0], xc.sizes()[0]); // note, xc not zc
-  // shape inference assumes narrow_copy can copy the whole tensor
-  AllClose(z.cpu(), zc);
-  FLAGS_ltc_enable_symbolic_shapes = false;
-}
 
 TEST_F(LazyOpsTest, TestScalarTensor) {
   torch::Tensor scalar_tensor = torch::scalar_tensor(
@@ -982,7 +956,7 @@ TEST_F(LazyOpsTest, TestIntegerAdd) {
       torch::Tensor b =
           torch::randint(0, 63, {2, 2}, torch::TensorOptions(type));
       torch::Scalar one =
-          isIntegralType(type) ? torch::Scalar(1) : torch::Scalar(1.0);
+          isIntegralType(type, false) ? torch::Scalar(1) : torch::Scalar(1.0);
       torch::Tensor c = torch::add(b, one);
 
       torch::Tensor lazy_a = CopyToDevice(a, device);
@@ -1050,39 +1024,6 @@ TEST_F(LazyOpsTest, TestQR) {
             /*rtol=*/1e-3,
             /*atol=*/1e-4);
       });
-    }
-  }
-}
-
-TEST_F(LazyOpsTest, TestSymEig) {
-  static const int dims[] = {4, 7};
-  for (auto m : dims) {
-    for (bool eigenvectors : {true, false}) {
-      for (bool upper : {true, false}) {
-        torch::Tensor a = torch::rand(
-            {m, m},
-            torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-        torch::Tensor sym_a = a.mm(a.t());
-        auto b = torch::symeig(sym_a, eigenvectors, upper);
-        ForEachDevice([&](const torch::Device& device) {
-          torch::Tensor lazy_a = CopyToDevice(sym_a, device);
-          auto lazy_b = torch::symeig(lazy_a, eigenvectors, upper);
-          AllClose(
-              std::get<0>(b),
-              std::get<0>(lazy_b),
-              /*rtol=*/3e-2,
-              /*atol=*/1e-2);
-          if (eigenvectors) {
-            AllClose(
-                std::get<1>(b).abs(),
-                std::get<1>(lazy_b).abs(),
-                /*rtol=*/3e-2,
-                /*atol=*/1e-2);
-          } else {
-            EXPECT_EQ(std::get<1>(b).sizes(), std::get<1>(lazy_b).sizes());
-          }
-        });
-      }
     }
   }
 }
@@ -1612,7 +1553,7 @@ TEST_F(LazyOpsTest, TestStdWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   // int rank = a.dim();
-  c10::optional<int64_t> corrections[] = {1, 2, c10::nullopt};
+  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
   for (const auto& correction : corrections) {
     for (auto keepdim : {true, false}) {
       for (const auto& dim :
@@ -1632,7 +1573,7 @@ TEST_F(LazyOpsTest, TestStdMeanWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   // int rank = a.dim();
-  c10::optional<int64_t> corrections[] = {1, 2, c10::nullopt};
+  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
   for (const auto& correction : corrections) {
     for (auto keepdim : {true, false}) {
       for (const auto& dim :
@@ -1769,7 +1710,7 @@ TEST_F(LazyOpsTest, TestVarWithDim) {
 TEST_F(LazyOpsTest, TestVarWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  c10::optional<int64_t> corrections[] = {1, 2, c10::nullopt};
+  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
   for (const auto& dim : std::vector<std::vector<int64_t>>{{0, 1}, {-3, -2}}) {
     for (bool keepDim : {true, false}) {
       for (const auto& correction : corrections) {
@@ -1789,7 +1730,7 @@ TEST_F(LazyOpsTest, TestVarWithCorrection) {
 TEST_F(LazyOpsTest, TestVarMeanWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  c10::optional<int64_t> corrections[] = {1, 2, c10::nullopt};
+  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
   for (const auto& dim : std::vector<std::vector<int64_t>>{{0, 1}, {-3, -2}}) {
     for (const auto& correction : corrections) {
       for (auto keepdim : {true, false}) {
@@ -2050,17 +1991,6 @@ TEST_F(LazyOpsTest, TestNormNuclear) {
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_a = CopyToDevice(a, device);
     torch::Tensor lazy_b = torch::norm(lazy_a, 1);
-    AllClose(b, lazy_b);
-  });
-}
-
-TEST_F(LazyOpsTest, TestFrobeniusNorm) {
-  torch::Tensor a = torch::rand(
-      {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  torch::Tensor b = torch::frobenius_norm(a);
-  ForEachDevice([&](const torch::Device& device) {
-    torch::Tensor lazy_a = CopyToDevice(a, device);
-    torch::Tensor lazy_b = torch::frobenius_norm(lazy_a);
     AllClose(b, lazy_b);
   });
 }

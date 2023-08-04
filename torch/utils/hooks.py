@@ -2,28 +2,50 @@ import torch
 from collections import OrderedDict
 import weakref
 import warnings
-import functools
-from typing import Any
+from typing import Any, Tuple
 
+__all__ = ["RemovableHandle", "unserializable_hook", "warn_if_has_hooks", "BackwardHook"]
 
-class RemovableHandle(object):
-    """A handle which provides the capability to remove a hook."""
+class RemovableHandle:
+    r"""
+    A handle which provides the capability to remove a hook.
+
+    Args:
+        hooks_dict (dict): A dictionary of hooks, indexed by hook ``id``.
+        extra_dict (Union[dict, List[dict]]): An additional dictionary or list of
+            dictionaries whose keys will be deleted when the same keys are
+            removed from ``hooks_dict``.
+    """
 
     id: int
     next_id: int = 0
 
-    def __init__(self, hooks_dict: Any) -> None:
+    def __init__(self, hooks_dict: Any, *, extra_dict: Any = None) -> None:
         self.hooks_dict_ref = weakref.ref(hooks_dict)
         self.id = RemovableHandle.next_id
         RemovableHandle.next_id += 1
+
+        self.extra_dict_ref: Tuple = ()
+        if isinstance(extra_dict, dict):
+            self.extra_dict_ref = (weakref.ref(extra_dict),)
+        elif isinstance(extra_dict, list):
+            self.extra_dict_ref = tuple(weakref.ref(d) for d in extra_dict)
 
     def remove(self) -> None:
         hooks_dict = self.hooks_dict_ref()
         if hooks_dict is not None and self.id in hooks_dict:
             del hooks_dict[self.id]
 
+        for ref in self.extra_dict_ref:
+            extra_dict = ref()
+            if extra_dict is not None and self.id in extra_dict:
+                del extra_dict[self.id]
+
     def __getstate__(self):
-        return (self.hooks_dict_ref(), self.id)
+        if self.extra_dict_ref is None:
+            return (self.hooks_dict_ref(), self.id)
+        else:
+            return (self.hooks_dict_ref(), self.id, tuple(ref() for ref in self.extra_dict_ref))
 
     def __setstate__(self, state) -> None:
         if state[0] is None:
@@ -34,7 +56,12 @@ class RemovableHandle(object):
         self.id = state[1]
         RemovableHandle.next_id = max(RemovableHandle.next_id, self.id + 1)
 
-    def __enter__(self) -> 'RemovableHandle':
+        if len(state) < 3 or state[2] is None:
+            self.extra_dict_ref = ()
+        else:
+            self.extra_dict_ref = tuple(weakref.ref(d) for d in state[2])
+
+    def __enter__(self) -> "RemovableHandle":
         return self
 
     def __exit__(self, type: Any, value: Any, tb: Any) -> None:
@@ -61,7 +88,7 @@ def warn_if_has_hooks(tensor):
                               "decorate the function with @torch.utils.hooks.unserializable_hook "
                               "to suppress this warning".format(repr(hook)))
 
-class BackwardHook(object):
+class BackwardHook:
     """
     A wrapper class to implement nn.Module backward hooks.
     It handles:
@@ -71,8 +98,9 @@ class BackwardHook(object):
       - Calling the user hook once both output and input gradients are available
     """
 
-    def __init__(self, module, user_hooks):
+    def __init__(self, module, user_hooks, user_pre_hooks):
         self.user_hooks = user_hooks
+        self.user_pre_hooks = user_pre_hooks
         self.module = module
 
         self.grad_outputs = None
@@ -95,26 +123,31 @@ class BackwardHook(object):
 
         return tuple(res)
 
-    def _set_user_hook(self, grad_fn, user_hook):
-        @functools.wraps(user_hook)
+    def _set_user_hook(self, grad_fn):
         def hook(grad_input, _):
             if self.grad_outputs is None:
-                raise RuntimeError("Module backward hook for grad_input is called before "
-                                   "the grad_output one. This happens because the gradient "
-                                   "in your nn.Module flows to the Module's input without "
-                                   "passing through the Module's output. Make sure that the "
-                                   "output depends on the input and that the loss is computed "
-                                   "based on the output.")
+                # This happens because the gradient in your nn.Module flows to
+                # the Module's input without " passing through the Module's
+                # output, e.g. when you're doing double backward.
+                return
+            res = self._pack_with_none(self.input_tensors_index, grad_input, self.n_inputs)
 
-            grad_input = self._pack_with_none(self.input_tensors_index, grad_input, self.n_inputs)
-            res = user_hook(self.module, grad_input, self.grad_outputs)
-            if res is None:
-                return res
+            for hook in self.user_hooks:
+                out = hook(self.module, res, self.grad_outputs)
 
-            if len(res) != len(grad_input):
-                raise RuntimeError("Backward hook returned an invalid number of grad_input, "
-                                   "got {}, but expected {}".format(len(res), len(grad_input)))
+                if out is None:
+                    continue
+
+                if len(out) != len(res):
+                    raise RuntimeError("Backward hook returned an invalid number of grad_input, "
+                                       "got {}, but expected {}".format(len(out), len(res)))
+
+                res = out
+
+            self.grad_outputs = None
+
             return self._unpack_none(self.input_tensors_index, res)
+
         grad_fn.register_hook(hook)
 
     def _apply_on_tensors(self, fn, args):
@@ -152,8 +185,7 @@ class BackwardHook(object):
 
     def setup_input_hook(self, args):
         def fn(grad_fn):
-            for hook in self.user_hooks:
-                self._set_user_hook(grad_fn, hook)
+            self._set_user_hook(grad_fn)
 
         res, input_idx = self._apply_on_tensors(fn, args)
         self.n_inputs = len(args)
@@ -167,6 +199,19 @@ class BackwardHook(object):
                                                          grad_output,
                                                          self.n_outputs)
 
+                if self.user_pre_hooks:
+                    expected_len = len(self.grad_outputs)
+                    for user_pre_hook in self.user_pre_hooks:
+                        hook_grad_outputs = user_pre_hook(self.module, self.grad_outputs)
+                        if hook_grad_outputs is None:
+                            continue
+
+                        actual_len = len(hook_grad_outputs)
+                        if actual_len != expected_len:
+                            raise RuntimeError("Backward pre hook returned an invalid number of grad_output, "
+                                               "got {}, but expected {}".format(actual_len, expected_len))
+                        self.grad_outputs = hook_grad_outputs
+
                 # Special case if no input required gradients, this hook should call the user
                 # hook directly
                 if self.input_tensors_index is None:
@@ -176,6 +221,11 @@ class BackwardHook(object):
                         if res is not None and not (isinstance(res, tuple) and all(el is None for el in res)):
                             raise RuntimeError("Backward hook for Modules where no input requires "
                                                "gradient should always return None or None for all gradients.")
+                    self.grad_outputs = None
+
+                if self.grad_outputs is not None:
+                    assert self.output_tensors_index is not None  # mypy
+                    return tuple(self.grad_outputs[i] for i in self.output_tensors_index)
 
             grad_fn.register_hook(hook)
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/Parallel.h>
@@ -9,8 +9,7 @@
 
 #include <algorithm>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template <typename T>
 static void im2col(
@@ -147,5 +146,4 @@ static void col2im(
   }
 }
 
-} // native
-} // at
+} // namespace at::native

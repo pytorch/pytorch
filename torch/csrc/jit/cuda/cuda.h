@@ -17,11 +17,10 @@ class CUDAStream final : public CustomClassHolder {
   CUDAStream(
       c10::optional<c10::Device> device = c10::nullopt,
       int64_t priority = 0) {
-    constexpr int64_t PRIORITY_INDEX = 0;
     c10::DeviceIndex device_index =
         device.has_value() ? device->index() : c10::cuda::current_device();
     stream_ = std::make_unique<c10::cuda::CUDAStream>(
-        c10::cuda::getStreamFromPool(priority < PRIORITY_INDEX, device_index));
+        c10::cuda::getStreamFromPool(static_cast<int>(priority), device_index));
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -58,13 +57,6 @@ class CUDAStream final : public CustomClassHolder {
   /// Return the stream ID corresponding to this particular stream.
   int64_t id() const {
     return stream_->id();
-  }
-
-  /// Pack a CUDAStream to uint64_t representation.
-  /// The CUDAStream can be unpacked using unpack().  The format of
-  /// the uint64_t is unspecified and may be changed.
-  int64_t pack() const {
-    return stream_->pack();
   }
 
  private:
@@ -180,7 +172,6 @@ TORCH_LIBRARY(cuda, m) {
       .def("wait_stream", &CUDAStream::waitStream)
       .def("device_index", &CUDAStream::device_index)
       .def_property("device", &CUDAStream::device)
-      .def("pack", &CUDAStream::pack)
       .def("id", &CUDAStream::id);
 
   event_class.def("elapsed_time", &CUDAEvent::elapsedTime)

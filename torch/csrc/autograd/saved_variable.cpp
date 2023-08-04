@@ -59,7 +59,8 @@ SavedVariable::SavedVariable(
 
     auto maybe_hooks = get_default_hooks();
 
-    if (maybe_hooks) {
+    // Avoid wrapped numbers from being leaked to the user
+    if (maybe_hooks && !variable.unsafeGetTensorImpl()->is_wrapped_number()) {
       save_metadata(variable);
       set_hooks_and_pack_data(std::move(maybe_hooks), variable);
       return;
@@ -143,7 +144,16 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
                 : grad_fn_;
 
   if (!is_leaf_ && !grad_fn) {
-    TORCH_INTERNAL_ASSERT(saved_for, "No grad_fn for non-leaf saved tensor");
+    // This issue was introduced when we added logic to save the original
+    // because now we rely on data_.grad_fn(), but can be unreliable if the
+    // autograd_meta of that saved tensor is cleared with an in-place detach.
+    // As a simple fix, we choose to disallow that behavior here even though
+    // it makes behavior inconsistent depending on whether you are saving
+    // input or output.
+    TORCH_CHECK(
+        saved_for,
+        "Trying to use a saved tensor that has been detached in-place, i.e. with .detach_()."
+        "This is not supported, please use out-of-place `.detach()` instead");
     grad_fn = std::move(saved_for);
   }
 
@@ -159,7 +169,12 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
       message
           << "one of the variables needed for gradient computation has been "
              "modified by an inplace operation: ["
-          << data_.toString() << " " << data_.sizes() << "]";
+          << data_.toString() << " ";
+      if (data_.is_nested()) {
+        message << data_._nested_tensor_size() << "]";
+      } else {
+        message << data_.sizes() << "]";
+      }
       if (grad_fn) {
         message << ", which is output " << output_nr_ << " of "
                 << grad_fn->name() << ",";
@@ -181,7 +196,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   }
 
   // The version counter is correct.
-  // Additionnally, if we deal with a non-leaf variable, we have its correct
+  // Additionally, if we deal with a non-leaf variable, we have its correct
   // grad_fn.
 
   // If we have the original variable, we simply return it
@@ -202,15 +217,6 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   }
 
   impl::set_version_counter(var, version_counter_);
-
-  // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we
-  // should have saved the grad accumulator. Even if the Variable is no longer
-  // alive, the accumulator should be kept alive by the references in the
-  // graph.
-  if (is_leaf_ && requires_grad_) {
-    TORCH_INTERNAL_ASSERT(
-        !grad_accumulator_.expired(), "No grad accumulator for a saved leaf");
-  }
   impl::set_grad_accumulator(var, grad_accumulator_);
 
   // NB: var here is never a view so there is no need to make anything special

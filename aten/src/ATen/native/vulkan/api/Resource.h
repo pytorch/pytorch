@@ -3,7 +3,11 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Allocator.h>
-#include <c10/util/hash.h>
+#include <ATen/native/vulkan/api/Utils.h>
+
+#include <c10/core/ScalarType.h>
+#include <c10/util/flat_hash_map.h>
+#include <c10/util/typeid.h>
 
 #include <stack>
 
@@ -14,7 +18,12 @@ namespace api {
 
 typedef uint8_t MemoryAccessFlags;
 
-VkFormat vk_format(const caffe2::TypeMeta dtype);
+VkFormat vk_format(const at::ScalarType dtype);
+
+c10::ScalarType c10_scalartype(const VkFormat image_format);
+
+constexpr VmaAllocationCreateFlags DEFAULT_ALLOCATION_STRATEGY =
+    VMA_ALLOCATION_CREATE_STRATEGY_MIN_MEMORY_BIT;
 
 enum MemoryAccessType : MemoryAccessFlags {
   NONE = 0u << 0u,
@@ -33,6 +42,8 @@ struct MemoryBarrier final {
 class VulkanBuffer final {
  public:
   struct MemoryProperties final {
+    VmaAllocationCreateFlags create_flags;
+
     VmaMemoryUsage memory_usage;
     VkMemoryPropertyFlags required_mem_flags;
     VkMemoryPropertyFlags preferred_mem_flags;
@@ -49,7 +60,9 @@ class VulkanBuffer final {
   explicit VulkanBuffer();
 
   explicit VulkanBuffer(
-      const VmaAllocator, const VkDeviceSize, const MemoryProperties&);
+      const VmaAllocator,
+      const VkDeviceSize,
+      const MemoryProperties&);
 
   VulkanBuffer(const VulkanBuffer&) = delete;
   VulkanBuffer& operator=(const VulkanBuffer&) = delete;
@@ -97,6 +110,10 @@ class VulkanBuffer final {
     return buffer_properties_.mem_range;
   }
 
+  inline VkDeviceSize mem_size() const {
+    return buffer_properties_.size;
+  }
+
   operator bool() const {
     return (allocation_ != VK_NULL_HANDLE);
   }
@@ -104,7 +121,9 @@ class VulkanBuffer final {
 
 class MemoryMap final {
  public:
-  explicit MemoryMap(const VulkanBuffer& buffer, const MemoryAccessFlags access);
+  explicit MemoryMap(
+      const VulkanBuffer& buffer,
+      const MemoryAccessFlags access);
 
   MemoryMap(const MemoryMap&) = delete;
   MemoryMap& operator=(const MemoryMap&) = delete;
@@ -119,11 +138,16 @@ class MemoryMap final {
   VmaAllocator allocator_;
   VmaAllocation allocation_;
   void* data_;
+  VkDeviceSize data_len_;
 
  public:
-  template<typename T>
+  template <typename T>
   T* data() {
     return reinterpret_cast<T*>(data_);
+  }
+
+  inline size_t nbytes() {
+    return utils::safe_downcast<size_t>(data_len_);
   }
 
   void invalidate();
@@ -179,6 +203,8 @@ class ImageSampler final {
 class VulkanImage final {
  public:
   struct MemoryProperties final {
+    VmaAllocationCreateFlags create_flags;
+
     VmaMemoryUsage memory_usage;
     VkMemoryPropertyFlags required_mem_flags;
     VkMemoryPropertyFlags preferred_mem_flags;
@@ -256,6 +282,10 @@ class VulkanImage final {
     return allocation_;
   }
 
+  inline VkFormat format() const {
+    return image_properties_.image_format;
+  }
+
   inline VkExtent3D extents() const {
     return image_properties_.image_extents;
   }
@@ -274,10 +304,10 @@ class VulkanImage final {
 
   Package package() const {
     return {
-      handles_.image,
-      layout_,
-      handles_.image_view,
-      handles_.sampler,
+        handles_.image,
+        layout_,
+        handles_.image_view,
+        handles_.sampler,
     };
   }
 
@@ -356,18 +386,30 @@ class MemoryAllocator final {
   VmaAllocator allocator_;
 
  public:
-  VulkanImage create_image3d_fp(
+  VulkanImage create_image(
       const VkExtent3D&,
+      const VkFormat,
+      const VkImageType,
+      const VkImageViewType,
       const VulkanImage::SamplerProperties&,
       const VkSampler,
       const bool allow_transfer = false);
 
   VulkanBuffer create_storage_buffer(
-      const VkDeviceSize, const bool gpu_only = true);
+      const VkDeviceSize,
+      const bool gpu_only = true);
 
   VulkanBuffer create_staging_buffer(const VkDeviceSize);
 
-  template<typename Block>
+  /*
+   * Create a uniform buffer with a specified size
+   */
+  VulkanBuffer create_uniform_buffer(const VkDeviceSize);
+
+  /*
+   * Create a uniform buffer containing the data in an arbitrary struct
+   */
+  template <typename Block>
   VulkanBuffer create_params_buffer(const Block& block);
 };
 
@@ -425,10 +467,7 @@ struct FencePool final {
 
   std::stack<VulkanFence> pool_;
 
-  explicit FencePool(const VkDevice device)
-    : device_(device),
-      pool_{} {
-  }
+  explicit FencePool(const VkDevice device) : device_(device), pool_{} {}
 
   // Returns an rvalue reference to a fence, so that it can be moved
   inline VulkanFence get_fence() {
@@ -453,16 +492,9 @@ struct FencePool final {
 // Impl
 //
 
-template<typename Block>
+template <typename Block>
 inline VulkanBuffer MemoryAllocator::create_params_buffer(const Block& block) {
-  const VulkanBuffer::MemoryProperties mem_props{
-    VMA_MEMORY_USAGE_CPU_TO_GPU,
-    0u,
-    0u,
-    VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-  };
-
-  VulkanBuffer uniform_buffer(allocator_, sizeof(Block), mem_props);
+  VulkanBuffer uniform_buffer = create_uniform_buffer(sizeof(Block));
 
   // Fill the uniform buffer with data in block
   {

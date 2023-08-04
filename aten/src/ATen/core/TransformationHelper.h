@@ -55,13 +55,13 @@ C10_HOST_DEVICE inline T uniform_int_full_range(V val) {
  */
 template <typename T, typename V>
 C10_HOST_DEVICE inline typename std::enable_if<!(std::is_floating_point<T>::value), T>::type uniform_int(V val) {
-  if (std::is_same<T, bool>::value) {
+  if constexpr (std::is_same_v<T, bool>) {
     return static_cast<bool>(val & 1);
-  } else if (std::is_same<T, int64_t>::value) {
+  } else if constexpr (std::is_same_v<T, int64_t>) {
     return static_cast<T>(val % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
-  } else if (std::is_same<T, at::Half>::value || std::is_same<T, at::BFloat16>::value) {
+  } else if constexpr (std::is_same_v<T, at::Half> || std::is_same<T, at::BFloat16>::value) {
     return static_cast<T>(val % static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1));
-  } else if (std::is_integral<T>::value) {
+  } else if constexpr (std::is_integral_v<T>) {
     return static_cast<T>(val % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
   } else {
     assert(false);
@@ -123,7 +123,7 @@ C10_HOST_DEVICE inline double cauchy(double val, double median, double sigma) {
  * exponentialy distributed with `lambda` parameter of the distribution.
  */
 template <typename T>
-C10_HOST_DEVICE __ubsan_ignore_float_divide_by_zero__ inline T exponential(T val, T lambda) {
+C10_HOST_DEVICE inline T exponential(T val, T lambda) {
   // https://en.wikipedia.org/wiki/Exponential_distribution#Generating_exponential_variates
   // Different implementations for CUDA and CPU to preserve original logic
   // TODO: must be investigated and unified!!!
@@ -138,7 +138,7 @@ C10_HOST_DEVICE __ubsan_ignore_float_divide_by_zero__ inline T exponential(T val
       : at::log(val);
   return static_cast<T>(-1.0) / lambda * log;
 #else
-  return static_cast<T>(-1.0) / lambda * at::log(static_cast<T>(1.0) - val);
+  return static_cast<T>(-1.0) / lambda * at::log1p(-val);
 #endif
 }
 
@@ -149,7 +149,7 @@ C10_HOST_DEVICE __ubsan_ignore_float_divide_by_zero__ inline T exponential(T val
 template <typename T>
 C10_HOST_DEVICE inline T geometric(T val, T p) {
   // https://en.wikipedia.org/wiki/Geometric_distribution#Related_distributions
-  return static_cast<T>(::ceil(at::log(val) / at::log(static_cast<T>(1.0) - p)));
+  return static_cast<T>(::ceil(at::log(val) / at::log1p(-p)));
 }
 
 /**

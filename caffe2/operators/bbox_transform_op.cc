@@ -52,7 +52,7 @@ Transform proposal bounding boxes to target bounding box using bounding box
         "If proposals from multiple images in a batch are present, they "
         "should be grouped sequentially and in incremental order."
         "For rotated boxes, this would have an additional angle (in degrees) "
-        "in the format [<optionaal_batch_id>, ctr_x, ctr_y, w, h, angle].")
+        "in the format [<optional_batch_id>, ctr_x, ctr_y, w, h, angle].")
     .Input(
         1,
         "deltas",
@@ -100,7 +100,7 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(iminfo_in.dim32(1), 3);
   const int batch_size = iminfo_in.dim32(0);
 
-  DCHECK_EQ(weights_.size(), 4);
+  TORCH_DCHECK_EQ(weights_.size(), 4);
 
   Eigen::Map<const ERArrXXf> boxes0(
       roi_in.data<float>(), roi_in.dim32(0), roi_in.dim32(1));

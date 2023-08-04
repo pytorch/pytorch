@@ -27,7 +27,7 @@ class TagContext(context.DefaultManaged):
         self.tags = self.tags[:-len(tags)]
 
 
-class Tags(object):
+class Tags:
     # TODO(amalevich): Tags might need to live in their own contexts, add this
     # split later
     EXCLUDE_FROM_TRAIN = 'exclude_from_train'

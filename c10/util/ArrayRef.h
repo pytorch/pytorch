@@ -203,7 +203,9 @@ class ArrayRef final {
   }
 
   /// slice(n) - Chop off the first N elements of the array.
-  constexpr ArrayRef<T> slice(size_t N) const {
+  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA ArrayRef<T> slice(size_t N) const {
+    TORCH_CHECK(
+        N <= size(), "ArrayRef: invalid slice, N = ", N, "; size = ", size());
     return slice(N, size() - N);
   }
 
@@ -255,7 +257,7 @@ template <typename T>
 std::ostream& operator<<(std::ostream& out, ArrayRef<T> list) {
   int i = 0;
   out << "[";
-  for (auto e : list) {
+  for (const auto& e : list) {
     if (i++ > 0)
       out << ", ";
     out << e;

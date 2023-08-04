@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
 from torch.testing._internal.common_cuda import SM53OrLater
+from torch._prims_common import corresponding_complex_dtype
 
 from setuptools import distutils
 from typing import Optional, List
@@ -737,11 +738,7 @@ class TestFFT(TestCase):
 
     # Legacy fft tests
     def _test_fft_ifft_rfft_irfft(self, device, dtype):
-        complex_dtype = {
-            torch.float16: torch.complex32,
-            torch.float32: torch.complex64,
-            torch.float64: torch.complex128
-        }[dtype]
+        complex_dtype = corresponding_complex_dtype(dtype)
 
         def _test_complex(sizes, signal_ndim, prepro_fn=lambda x: x):
             x = prepro_fn(torch.randn(*sizes, dtype=complex_dtype, device=device))
@@ -814,8 +811,10 @@ class TestFFT(TestCase):
                 plan_cache = torch.backends.cuda.cufft_plan_cache[device]
             original = plan_cache.max_size
             plan_cache.max_size = n
-            yield
-            plan_cache.max_size = original
+            try:
+                yield
+            finally:
+                plan_cache.max_size = original
 
         with plan_cache_max_size(devices[0], max(1, torch.backends.cuda.cufft_plan_cache.size - 10)):
             self._test_fft_ifft_rfft_irfft(devices[0], dtype)
@@ -947,6 +946,52 @@ class TestFFT(TestCase):
         _test((10,), 3, win_length=5, expected_error=RuntimeError)
         _test((10,), 5, 4, win_sizes=(11,), expected_error=RuntimeError)
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
+
+    @skipCPUIfNoFFT
+    @onlyNativeDeviceTypes
+    @dtypes(torch.double)
+    def test_istft_against_librosa(self, device, dtype):
+        if not TEST_LIBROSA:
+            raise unittest.SkipTest('librosa not found')
+
+        def librosa_istft(x, n_fft, hop_length, win_length, window, length, center):
+            if window is None:
+                window = np.ones(n_fft if win_length is None else win_length)
+            else:
+                window = window.cpu().numpy()
+
+            return librosa.istft(x.cpu().numpy(), n_fft=n_fft, hop_length=hop_length,
+                                 win_length=win_length, length=length, window=window, center=center)
+
+        def _test(size, n_fft, hop_length=None, win_length=None, win_sizes=None,
+                  length=None, center=True):
+            x = torch.randn(size, dtype=dtype, device=device)
+            if win_sizes is not None:
+                window = torch.randn(*win_sizes, dtype=dtype, device=device)
+            else:
+                window = None
+
+            x_stft = x.stft(n_fft, hop_length, win_length, window, center=center,
+                            onesided=True, return_complex=True)
+
+            ref_result = librosa_istft(x_stft, n_fft, hop_length, win_length,
+                                       window, length, center)
+            result = x_stft.istft(n_fft, hop_length, win_length, window,
+                                  length=length, center=center)
+            self.assertEqual(result, ref_result)
+
+        for center in [True, False]:
+            _test(10, 7, center=center)
+            _test(4000, 1024, center=center)
+            _test(4000, 1024, center=center, length=4000)
+
+            _test(10, 7, 2, center=center)
+            _test(4000, 1024, 512, center=center)
+            _test(4000, 1024, 512, center=center, length=4000)
+
+            _test(10, 7, 2, win_sizes=(7,), center=center)
+            _test(4000, 1024, 512, win_sizes=(1024,), center=center)
+            _test(4000, 1024, 512, win_sizes=(1024,), center=center, length=4000)
 
     @onlyNativeDeviceTypes
     @skipCPUIfNoFFT
@@ -1135,9 +1180,8 @@ class TestFFT(TestCase):
     @skipCPUIfNoFFT
     def test_stft_requires_complex(self, device):
         x = torch.rand(100)
-        y = x.stft(10, pad_mode='constant')
-        # with self.assertRaisesRegex(RuntimeError, 'stft requires the return_complex parameter'):
-        #     y = x.stft(10, pad_mode='constant')
+        with self.assertRaisesRegex(RuntimeError, 'stft requires the return_complex parameter'):
+            y = x.stft(10, pad_mode='constant')
 
     @skipCPUIfNoFFT
     def test_fft_input_modification(self, device):
@@ -1345,20 +1389,22 @@ class TestFFT(TestCase):
     @skipCPUIfNoFFT
     @dtypes(torch.double)
     def test_istft_of_sine(self, device, dtype):
+        complex_dtype = corresponding_complex_dtype(dtype)
+
         def _test(amplitude, L, n):
             # stft of amplitude*sin(2*pi/L*n*x) with the hop length and window size equaling L
             x = torch.arange(2 * L + 1, device=device, dtype=dtype)
             original = amplitude * torch.sin(2 * math.pi / L * x * n)
             # stft = torch.stft(original, L, hop_length=L, win_length=L,
             #                   window=torch.ones(L), center=False, normalized=False)
-            stft = torch.zeros((L // 2 + 1, 2, 2), device=device, dtype=dtype)
+            stft = torch.zeros((L // 2 + 1, 2), device=device, dtype=complex_dtype)
             stft_largest_val = (amplitude * L) / 2.0
             if n < stft.size(0):
-                stft[n, :, 1] = -stft_largest_val
+                stft[n].imag = torch.tensor(-stft_largest_val, dtype=dtype)
 
             if 0 <= L - n < stft.size(0):
                 # symmetric about L // 2
-                stft[L - n, :, 1] = stft_largest_val
+                stft[L - n].imag = torch.tensor(stft_largest_val, dtype=dtype)
 
             inverse = torch.istft(
                 stft, L, hop_length=L, win_length=L,
@@ -1380,11 +1426,12 @@ class TestFFT(TestCase):
     @dtypes(torch.double)
     def test_istft_linearity(self, device, dtype):
         num_trials = 100
+        complex_dtype = corresponding_complex_dtype(dtype)
 
         def _test(data_size, kwargs):
             for i in range(num_trials):
-                tensor1 = torch.randn(data_size, device=device, dtype=dtype)
-                tensor2 = torch.randn(data_size, device=device, dtype=dtype)
+                tensor1 = torch.randn(data_size, device=device, dtype=complex_dtype)
+                tensor2 = torch.randn(data_size, device=device, dtype=complex_dtype)
                 a, b = torch.rand(2, dtype=dtype, device=device)
                 # Also compare method vs. functional call signature
                 istft1 = tensor1.istft(**kwargs)
@@ -1395,7 +1442,7 @@ class TestFFT(TestCase):
         patterns = [
             # hann_window, centered, normalized, onesided
             (
-                (2, 7, 7, 2),
+                (2, 7, 7),
                 {
                     'n_fft': 12,
                     'window': torch.hann_window(12, device=device, dtype=dtype),
@@ -1406,7 +1453,7 @@ class TestFFT(TestCase):
             ),
             # hann_window, centered, not normalized, not onesided
             (
-                (2, 12, 7, 2),
+                (2, 12, 7),
                 {
                     'n_fft': 12,
                     'window': torch.hann_window(12, device=device, dtype=dtype),
@@ -1417,7 +1464,7 @@ class TestFFT(TestCase):
             ),
             # hamming_window, centered, normalized, not onesided
             (
-                (2, 12, 7, 2),
+                (2, 12, 7),
                 {
                     'n_fft': 12,
                     'window': torch.hamming_window(12, device=device, dtype=dtype),
@@ -1428,7 +1475,7 @@ class TestFFT(TestCase):
             ),
             # hamming_window, not centered, not normalized, onesided
             (
-                (2, 7, 3, 2),
+                (2, 7, 3),
                 {
                     'n_fft': 12,
                     'window': torch.hamming_window(12, device=device, dtype=dtype),
@@ -1445,13 +1492,13 @@ class TestFFT(TestCase):
     @skipCPUIfNoFFT
     def test_batch_istft(self, device):
         original = torch.tensor([
-            [[4., 0.], [4., 0.], [4., 0.], [4., 0.], [4., 0.]],
-            [[0., 0.], [0., 0.], [0., 0.], [0., 0.], [0., 0.]],
-            [[0., 0.], [0., 0.], [0., 0.], [0., 0.], [0., 0.]]
-        ], device=device)
+            [4., 4., 4., 4., 4.],
+            [0., 0., 0., 0., 0.],
+            [0., 0., 0., 0., 0.]
+        ], device=device, dtype=torch.complex64)
 
-        single = original.repeat(1, 1, 1, 1)
-        multi = original.repeat(4, 1, 1, 1)
+        single = original.repeat(1, 1, 1)
+        multi = original.repeat(4, 1, 1)
 
         i_original = torch.istft(original, n_fft=4, length=4)
         i_single = torch.istft(single, n_fft=4, length=4)
@@ -1493,7 +1540,7 @@ class FFTDocTestFinder:
         doctests = []
 
         modname = name if name is not None else obj.__name__
-        globs = dict() if globs is None else globs
+        globs = {} if globs is None else globs
 
         for fname in obj.__all__:
             func = getattr(obj, fname)

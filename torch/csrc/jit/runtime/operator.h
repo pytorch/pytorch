@@ -137,6 +137,22 @@ struct TORCH_API Operator {
         });
   }
 
+  Operation getOperationForDispatchKey(c10::DispatchKey dk) const {
+    // TODO: some sort of caching mechanism?
+    return op_.fold<Operation>(
+        [dk](const C10Operator& op) {
+          return [op, dk](Stack& stack) {
+            op.handle_.callBoxedForDispatchKey(dk, stack);
+          };
+        },
+        [](const JitOnlyOperator& op) {
+          TORCH_CHECK(
+              false,
+              "calling a JIT operator for dispatch key is not supported");
+          return nullptr;
+        });
+  }
+
   const FunctionSchema& schema() const {
     return op_.fold<const FunctionSchema&>(
         [](const C10Operator& op) -> const FunctionSchema& {
@@ -215,10 +231,10 @@ struct TORCH_API Operator {
       std::vector<Argument> returns,
       AliasAnalysisKind alias_analysis) {
     auto result = FunctionSchema(
-        name,
-        overload_name,
-        arguments,
-        returns,
+        std::move(name),
+        std::move(overload_name),
+        std::move(arguments),
+        std::move(returns),
         /*is_vararg*/ false,
         /*is_varret*/ false);
     result.setAliasAnalysis(alias_analysis);

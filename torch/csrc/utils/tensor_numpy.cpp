@@ -7,7 +7,7 @@
 #ifndef USE_NUMPY
 namespace torch {
 namespace utils {
-PyObject* tensor_to_numpy(const at::Tensor& tensor) {
+PyObject* tensor_to_numpy(const at::Tensor&, bool) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 at::Tensor tensor_from_numpy(
@@ -28,6 +28,17 @@ bool is_numpy_scalar(PyObject* obj) {
 }
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
+}
+
+void warn_numpy_not_writeable() {
+  throw std::runtime_error("PyTorch was compiled without NumPy support");
+}
+
+// No-op stubs.
+void validate_numpy_for_dlpack_deleter_bug() {}
+
+bool is_numpy_dlpack_deleter_bugged() {
+  return false;
 }
 } // namespace utils
 } // namespace torch
@@ -164,7 +175,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force /*=false*/) {
 
   auto array = THPObjectPtr(PyArray_New(
       &PyArray_Type,
-      prepared_tensor.dim(),
+      static_cast<int>(prepared_tensor.dim()),
       sizes.data(),
       dtype,
       strides.data(),
@@ -232,7 +243,6 @@ at::Tensor tensor_from_numpy(
     stride /= element_size_in_bytes;
   }
 
-  size_t storage_size = 1;
   for (const auto i : c10::irange(ndim)) {
     if (strides[i] < 0) {
       throw ValueError(
@@ -241,8 +251,6 @@ at::Tensor tensor_from_numpy(
           "(You can probably work around this by making a copy of your array "
           " with array.copy().) ");
     }
-    // XXX: this won't work for negative strides
-    storage_size += (sizes[i] - 1) * strides[i];
   }
 
   void* data_ptr = PyArray_DATA(array);
@@ -252,7 +260,7 @@ at::Tensor tensor_from_numpy(
         "Conversion between byte orders is currently not supported.");
   }
   Py_INCREF(obj);
-  return at::from_blob(
+  return at::lift_fresh(at::from_blob(
       data_ptr,
       sizes,
       strides,
@@ -260,7 +268,7 @@ at::Tensor tensor_from_numpy(
         pybind11::gil_scoped_acquire gil;
         Py_DECREF(obj);
       },
-      at::device(kCPU).dtype(numpy_dtype_to_aten(PyArray_TYPE(array))));
+      at::device(kCPU).dtype(numpy_dtype_to_aten(PyArray_TYPE(array)))));
 }
 
 int aten_to_numpy_dtype(const ScalarType scalar_type) {
@@ -344,6 +352,10 @@ bool is_numpy_int(PyObject* obj) {
   return is_numpy_available() && PyArray_IsScalar((obj), Integer);
 }
 
+bool is_numpy_bool(PyObject* obj) {
+  return is_numpy_available() && PyArray_IsScalar((obj), Bool);
+}
+
 bool is_numpy_scalar(PyObject* obj) {
   return is_numpy_available() &&
       (is_numpy_int(obj) || PyArray_IsScalar(obj, Bool) ||
@@ -359,7 +371,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
       THPObjectPtr(PyObject_GetAttrString(obj, "__cuda_array_interface__"));
   TORCH_INTERNAL_ASSERT(cuda_dict);
 
-  if (!PyDict_Check(cuda_dict)) {
+  if (!PyDict_Check(cuda_dict.get())) {
     throw TypeError("`__cuda_array_interface__` must be a dict");
   }
 
@@ -374,6 +386,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   }
 
   // Extract the `obj.__cuda_array_interface__['typestr']` attribute
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ScalarType dtype;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int dtype_size_in_bytes;
@@ -454,6 +467,68 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
         Py_DECREF(obj);
       },
       at::device(kCUDA).dtype(dtype));
+}
+
+// Mutated only once (during module init); behaves as an immutable variable
+// thereafter.
+bool numpy_with_dlpack_deleter_bug_installed = false;
+
+// NumPy implemented support for Dlpack capsules in version 1.22.0. However, the
+// initial implementation did not correctly handle the invocation of
+// `DLManagedTensor::deleter` in a no-GIL context. Until PyTorch 1.13.0, we
+// were implicitly holding the GIL when the deleter was invoked, but this
+// incurred a significant performance overhead when mem-unmapping large tensors.
+// Starting with PyTorch 1.13.0, we release the GIL in `THPVariable_clear` just
+// before deallocation, but this triggers the aforementioned bug in NumPy.
+//
+// The NumPy bug should be fixed in version 1.24.0, but all releases
+// between 1.22.0 and 1.23.5 result in internal assertion failures that
+// consequently lead to segfaults. To work around this, we need to selectively
+// disable the optimization whenever we detect a buggy NumPy installation.
+// We would ideally restrict the "fix" just to Dlpack-backed tensors that stem
+// from NumPy, but given that it is difficult to confidently detect the
+// provenance of such tensors, we have to resort to a more general approach.
+//
+// References:
+//  https://github.com/pytorch/pytorch/issues/88082
+//  https://github.com/pytorch/pytorch/issues/77139
+//  https://github.com/numpy/numpy/issues/22507
+void validate_numpy_for_dlpack_deleter_bug() {
+  // Ensure that we don't call this more than once per session.
+  static bool validated = false;
+  TORCH_INTERNAL_ASSERT(validated == false);
+  validated = true;
+
+  THPObjectPtr numpy_module(PyImport_ImportModule("numpy"));
+  if (!numpy_module) {
+    PyErr_Clear();
+    return;
+  }
+
+  THPObjectPtr version_attr(
+      PyObject_GetAttrString(numpy_module.get(), "__version__"));
+  if (!version_attr) {
+    PyErr_Clear();
+    return;
+  }
+
+  Py_ssize_t version_utf8_size = 0;
+  const char* version_utf8 =
+      PyUnicode_AsUTF8AndSize(version_attr.get(), &version_utf8_size);
+  if (!version_utf8_size) {
+    PyErr_Clear();
+    return;
+  }
+  std::string version(version_utf8, version_utf8_size);
+  if (version_utf8_size < 4)
+    return;
+  std::string truncated_version(version.substr(0, 4));
+  numpy_with_dlpack_deleter_bug_installed =
+      truncated_version == "1.22" || truncated_version == "1.23";
+}
+
+bool is_numpy_dlpack_deleter_bugged() {
+  return numpy_with_dlpack_deleter_bug_installed;
 }
 } // namespace utils
 } // namespace torch

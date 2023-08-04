@@ -3,36 +3,17 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/Types.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
+
+#include <mutex>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
-
-struct ShaderSource final {
-  enum class Type {
-    GLSL,
-    SPIRV
-  } type;
-
-  union {
-    struct {
-      const char* src; // Null-terminated
-      uint32_t unused; // padding
-    } glsl;
-    struct {
-      const uint32_t* bin;
-      uint32_t size;
-    } spirv;
-  } src_code;
-
-  std::string kernel_name;
-  explicit ShaderSource(std::string name, const char* glsl);
-  explicit ShaderSource(
-      std::string name, const uint32_t* spirv, uint32_t bytes);
-};
 
 class ShaderLayout final {
  public:
@@ -63,9 +44,44 @@ class ShaderLayout final {
   friend void swap(ShaderLayout& lhs, ShaderLayout& rhs) noexcept;
 };
 
+struct ShaderInfo final {
+  struct {
+    const uint32_t* bin;
+    uint32_t size;
+  } src_code;
+
+  std::string kernel_name{""};
+  ShaderLayout::Signature kernel_layout{};
+
+  // Shader Metadata
+  utils::uvec3 out_tile_size{1u, 1u, 1u};
+
+  c10::SmallVector<uint32_t, 4> tile_size;
+  StorageType bias_storage_type{StorageType::UNKNOWN};
+  StorageType weight_storage_type{StorageType::UNKNOWN};
+
+  explicit ShaderInfo();
+  explicit ShaderInfo(std::string, const char*);
+  explicit ShaderInfo(
+      std::string,
+      const uint32_t*,
+      const uint32_t,
+      const std::vector<VkDescriptorType>&);
+  explicit ShaderInfo(
+      std::string,
+      const uint32_t*,
+      const uint32_t,
+      const std::vector<VkDescriptorType>&,
+      const std::vector<uint32_t>& tile_size,
+      const StorageType bias_storage_type,
+      const StorageType weight_storage_type);
+};
+
+bool operator==(const ShaderInfo& _1, const ShaderInfo& _2);
+
 class ShaderModule final {
  public:
-  explicit ShaderModule(const VkDevice device, const ShaderSource& source);
+  explicit ShaderModule(const VkDevice device, const ShaderInfo& source);
 
   ShaderModule(const ShaderModule&) = delete;
   ShaderModule& operator=(const ShaderModule&) = delete;
@@ -110,9 +126,7 @@ class ShaderLayoutCache final {
       size_t hashed = 0u;
 
       for (const VkDescriptorType type : signature) {
-        hashed = c10::hash_combine(
-            hashed,
-            c10::get_hash(type));
+        hashed = c10::hash_combine(hashed, c10::get_hash(type));
       }
 
       return hashed;
@@ -130,7 +144,6 @@ class ShaderLayoutCache final {
  public:
   VkDescriptorSetLayout retrieve(const Key&);
   void purge();
-
 };
 
 class ShaderCache final {
@@ -145,18 +158,14 @@ class ShaderCache final {
 
   ~ShaderCache();
 
-  using Key = ShaderSource;
+  using Key = ShaderInfo;
   using Value = ShaderModule;
 
   struct Hasher {
-    inline size_t operator()(const ShaderSource& source) const {
-      return c10::get_hash(
-          source.type,
-          source.src_code.spirv.bin,
-          source.src_code.spirv.size);
+    inline size_t operator()(const ShaderInfo& source) const {
+      return c10::get_hash(source.src_code.bin, source.src_code.size);
     }
   };
-
 
  private:
   // Multiple threads could potentially be adding entries into the cache, so use
@@ -179,12 +188,11 @@ class ShaderCache final {
 inline bool operator==(
     const VkDescriptorSetLayoutBinding& _1,
     const VkDescriptorSetLayoutBinding& _2) {
-
-  return (_1.binding == _2.binding && \
-          _1.descriptorType == _2.descriptorType && \
-          _1.descriptorCount == _2.descriptorCount && \
-          _1.stageFlags == _2.stageFlags && \
-          _1.pImmutableSamplers == _2.pImmutableSamplers);
+  return (
+      _1.binding == _2.binding && _1.descriptorType == _2.descriptorType &&
+      _1.descriptorCount == _2.descriptorCount &&
+      _1.stageFlags == _2.stageFlags &&
+      _1.pImmutableSamplers == _2.pImmutableSamplers);
 }
 
 #endif /* USE_VULKAN_API */

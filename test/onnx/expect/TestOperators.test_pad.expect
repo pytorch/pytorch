@@ -77,6 +77,11 @@ graph {
     output: "onnx::Slice_13"
     name: "Reshape_5"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   node {
     output: "onnx::Slice_14"
@@ -176,6 +181,11 @@ graph {
     output: "onnx::Cast_21"
     name: "Reshape_13"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   node {
     input: "onnx::Cast_21"
@@ -247,5 +257,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 14
 }

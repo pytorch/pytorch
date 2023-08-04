@@ -1,5 +1,5 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 
@@ -31,6 +31,16 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
 #include <ATen/cuda/Exceptions.h>
 
 #include <ATen/TensorUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cudnn_batch_norm_backward_native.h>
+#include <ATen/ops/cudnn_batch_norm_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#endif
 
 namespace at { namespace native {
 
@@ -187,12 +197,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
         at::maybe_data_ptr(running_mean),
         at::maybe_data_ptr(running_var),
         epsilon,
-        save_mean.data_ptr(),
-        save_var.data_ptr(),
+        save_mean.mutable_data_ptr(),
+        save_var.mutable_data_ptr(),
         nullptr,
         workspace.data_ptr(),
         workspace_size,
-        reserve.data_ptr(),
+        reserve.mutable_data_ptr(),
         reserve_size));
 #else
     reserve = at::empty({0}, input->options().dtype(kByte));
@@ -207,8 +217,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
       at::maybe_data_ptr(running_mean),
       at::maybe_data_ptr(running_var),
       epsilon,
-      save_mean.data_ptr(),
-      save_var.data_ptr()));
+      save_mean.mutable_data_ptr(),
+      save_var.mutable_data_ptr()));
 #endif // CUDNN_VERSION >= 7400
   } else {
     reserve = at::empty({0}, input->options().dtype(kByte));

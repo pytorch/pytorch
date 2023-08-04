@@ -1,19 +1,25 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/CPUFallback.h>
 
 #include <sstream>
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
-#include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#else
+#include <ATen/ops/_copy_from_and_resize.h>
+#include <ATen/ops/_to_cpu.h>
+#endif
+
 
 namespace at { namespace native {
 
 // convenience helper for converting tensors to cpu
 
-std::vector<at::Tensor> to_cpu(const at::TensorList& tensors) {
+static std::vector<at::Tensor> to_cpu(const at::TensorList& tensors) {
     // We can't just call at::to_cpu() on the entire list of Tensors
     // Because it will break on undefined tensors. Separate out undefined tensors first.
     std::vector<at::Tensor> cpu_tensors(tensors.size());
@@ -40,11 +46,11 @@ std::vector<at::Tensor> to_cpu(const at::TensorList& tensors) {
   return cpu_tensors;
 }
 
-c10::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args, std::vector<c10::List<at::Tensor>> tlist_args) {
+static c10::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args, std::vector<c10::List<at::Tensor>> tlist_args) {
   // Decide what device to move the output tensor(s) to.
   // The current convention is that we use the first tensor arg to pick the device
   // Barring that, we take the first tensor from a TensorList arg.
-  if (t_args.size() > 0) {
+  if (!t_args.empty()) {
     return t_args[0].device();
   } else {
     // We need to loop through all of the (potentially multiple) TensorList arguments
@@ -59,7 +65,7 @@ c10::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args
 }
 
 
-void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool error_on_views) {
   auto& schema_args = op.schema().arguments();
   const auto num_arguments = schema_args.size();
   auto arguments = torch::jit::last(stack, num_arguments);
@@ -170,9 +176,15 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
             } else {
                 dev_str << "<none>";
             }
-            TORCH_WARN(false, "The operator ", op.schema().operator_name(), " appears to be a view operator, ",
-                        "but it has no implementation for the backend \"", dev_str.str(), "\". View operators don't support ",
-                        "falling back to run on the CPU, since the tensor's storage cannot be shared across devices.");
+            if (error_on_views) {
+                TORCH_CHECK(false, "The operator ", op.schema().operator_name(), " appears to be a view operator, ",
+                            "but it has no implementation for the backend \"", dev_str.str(), "\". View operators don't support ",
+                            "falling back to run on the CPU, since the tensor's storage cannot be shared across devices.");
+            } else {
+                TORCH_WARN(false, "The operator ", op.schema().operator_name(), " appears to be a view operator, ",
+                            "but it has no implementation for the backend \"", dev_str.str(), "\". View operators don't support ",
+                            "falling back to run on the CPU, since the tensor's storage cannot be shared across devices.");
+            }
           }
           // Case (2): copy case. Copy the cpu output tensor to the original device.
 

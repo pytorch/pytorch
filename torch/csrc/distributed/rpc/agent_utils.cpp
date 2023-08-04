@@ -41,7 +41,7 @@ std::unordered_map<std::string, worker_id_t> collectNames(
   return nameToId;
 }
 
-std::vector<std::string> splitString(
+static std::vector<std::string> splitString(
     const std::string& s,
     const std::string& delim) {
   std::vector<std::string> tokens;
@@ -154,7 +154,7 @@ const string storeKeyActiveCallCount = "ACTIVE_CALLS";
 const string storeKeyReady = "READY";
 static std::atomic<int> barrierId(0);
 
-std::tuple<std::string, std::string, std::string> getNextKeyIds() {
+static std::tuple<std::string, std::string, std::string> getNextKeyIds() {
   barrierId++;
   std::string processCountKey =
       fmt::format("{}{}{}", storeKeyProcessCount, storeKeyBarrierId, barrierId);
@@ -176,7 +176,7 @@ int syncCallCount(
   std::tie(processCountKey, activeCallCountKey, readyKey) = getNextKeyIds();
 
   // Add to keys which will record the number of processes and active calls
-  int totalCallCount = store.add(activeCallCountKey, activeCalls);
+  store.add(activeCallCountKey, activeCalls);
   int totalProcessCount = store.add(processCountKey, 1);
 
   // The last worker will need to set the ready key
@@ -189,7 +189,7 @@ int syncCallCount(
 
   // Read count of active calls which may have changed
   auto activeCallCountData = store.get(activeCallCountKey);
-  totalCallCount = std::stoi(
+  int totalCallCount = std::stoi(
       std::string(activeCallCountData.begin(), activeCallCountData.end()));
   return totalCallCount;
 }

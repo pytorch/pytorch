@@ -176,7 +176,7 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
 
   CAFFE_ENFORCE(&Y != &X, "Cannot backpropagate through an in-place PReLU");
 
-  DCHECK_EQ(dY.numel(), Y.numel());
+  TORCH_DCHECK_EQ(dY.numel(), Y.numel());
   auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   auto* dW = Output(1, W.sizes(), at::dtype<float>());
 
@@ -275,8 +275,8 @@ Note, is slope is size 1, the value is shared across the channels, otherwise $X$
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/prelu_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/prelu_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/prelu_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/prelu_op.cc
 
 
 <details>

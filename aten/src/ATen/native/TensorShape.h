@@ -1,9 +1,12 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
+#include <ATen/core/IListRef.h>
 
-namespace at {
-namespace native {
+namespace at::native {
+
+TORCH_API at::Tensor clone_preserve_strides(const at::Tensor& self);
+
 inline bool cat_should_skip_tensor(const Tensor& t) {
   return t.numel() == 0 && t.dim() == 1;
 }
@@ -26,11 +29,12 @@ inline void check_cat_shape_except_dim(const Tensor & first, const Tensor & seco
    }
  }
 
-inline void check_cat_no_zero_dim(at::ArrayRef<Tensor> tensors) {
-  for(const auto i : c10::irange(tensors.size())) {
-    auto& t = tensors[i];
+inline void check_cat_no_zero_dim(const MaterializedITensorListRef& tensors) {
+  int64_t i = 0;
+  for(const Tensor& t : tensors) {
     TORCH_CHECK(t.dim() > 0,
              "zero-dimensional tensor (at position ", i, ") cannot be concatenated");
+    i++;
   }
 }
 
@@ -51,11 +55,4 @@ inline int64_t get_num_splits(const Tensor& self, int64_t split_size, int64_t di
   return num_splits;
 }
 
-///
-/// For more information, see
-/// https://pytorch.org/docs/master/generated/torch.Tensor.unfold.html#torch.Tensor.unfold
-///
-
-Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step);
-
-}} // namespace at::native
+} // namespace at::native

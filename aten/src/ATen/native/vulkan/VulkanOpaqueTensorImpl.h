@@ -23,11 +23,14 @@ struct VulkanOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
             opaque_handle,
             sizes,
             false),
-        strides_(strides.vec()) {
-  }
+        strides_(strides.vec()) {}
 
   IntArrayRef strides_custom() const override {
     return strides_;
+  }
+
+  SymIntArrayRef sym_strides_custom() const override {
+    return c10::fromIntArrayRefKnownNonNegative(strides_);
   }
 
   bool is_contiguous_custom(c10::MemoryFormat memory_format) const override {

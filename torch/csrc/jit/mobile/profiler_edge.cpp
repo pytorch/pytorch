@@ -18,15 +18,27 @@ KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
     const bool profile_memory,
     const bool with_stack,
     const bool with_flops,
-    const bool with_modules)
+    const bool with_modules,
+    std::vector<std::string> events,
+    const bool adjust_vulkan_timestamps)
     : m_(m), trace_file_name_(fname) {
+  torch::profiler::impl::ExperimentalConfig experimental_config;
+  // Enable hardware counters
+  if (events.size()) {
+    experimental_config.performance_events = std::move(events);
+  }
+
+  // Adjust vulkan timestamps from query pool to align with cpu event times
+  experimental_config.adjust_timestamps = adjust_vulkan_timestamps;
+
   torch::profiler::impl::ProfilerConfig config(
       torch::profiler::impl::ProfilerState::KINETO,
       report_input_shapes,
       profile_memory,
       with_stack,
       with_flops,
-      with_modules);
+      with_modules,
+      experimental_config);
   torch::autograd::profiler::prepareProfiler(
       config, {torch::autograd::profiler::ActivityType::CPU});
   if (with_modules || with_stack) {
@@ -70,8 +82,8 @@ KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
 void KinetoEdgeCPUProfiler::recordBackendMemoryEvent(
     void* ptr,
     int64_t alloc_size,
-    int64_t total_allocated,
-    int64_t total_reserved,
+    size_t total_allocated,
+    size_t total_reserved,
     c10::Device device) {
   c10::reportMemoryUsageToProfiler(
       ptr, alloc_size, total_allocated, total_reserved, device);

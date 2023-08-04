@@ -1,10 +1,10 @@
-
 import ast
 import inspect
-import sys
 import textwrap
-import torch
 import warnings
+
+import torch
+
 
 class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
     """
@@ -59,16 +59,16 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
     """
 
     def check(self, nn_module: torch.nn.Module) -> None:
-        # Check if we have a Python version <3.8
-        self.using_deprecated_ast: bool = sys.version_info < (3, 8)
-
         source_lines = inspect.getsource(nn_module.__class__.__init__)
 
         # Ignore comments no matter the indentation
         def is_useless_comment(line):
             line = line.strip()
             return line.startswith("#") and not line.startswith("# type:")
-        source_lines = "\n".join([l for l in source_lines.split("\n") if not is_useless_comment(l)])
+
+        source_lines = "\n".join(
+            [l for l in source_lines.split("\n") if not is_useless_comment(l)]
+        )
 
         # This AST only contains the `__init__` method of the nn.Module
         init_ast = ast.parse(textwrap.dedent(source_lines))
@@ -99,12 +99,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         elif ann_type == "Optional":
             # Assigning `None` to an `Optional` type gives you a
             # Node where value=Constant(value=None, kind=None)
-            # or, in Python <3.8, value=NameConstant(value=None)
-            if (not self.using_deprecated_ast
-                    and not isinstance(node, ast.Constant)):
-                return False
-            if (self.using_deprecated_ast
-                    and not isinstance(node, ast.NameConstant)):
+            if not isinstance(node, ast.Constant):
                 return False
             if node.value:  # type: ignore[attr-defined]
                 return False
@@ -123,8 +118,10 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         target built in.)
         """
         try:
-            if (isinstance(node.value, ast.Call)
-                    and node.targets[0].attr in self.class_level_annotations):
+            if (
+                isinstance(node.value, ast.Call)
+                and node.targets[0].attr in self.class_level_annotations
+            ):
                 self.visiting_class_level_ann = True
         except AttributeError:
             return
@@ -178,11 +175,13 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         if not self._is_empty_container(node.value, ann_type):
             return
 
-        warnings.warn("The TorchScript type system doesn't support "
-                      "instance-level annotations on empty non-base "
-                      "types in `__init__`. Instead, either 1) use a "
-                      "type annotation in the class body, or 2) wrap "
-                      "the type in `torch.jit.Attribute`.")
+        warnings.warn(
+            "The TorchScript type system doesn't support "
+            "instance-level annotations on empty non-base "
+            "types in `__init__`. Instead, either 1) use a "
+            "type annotation in the class body, or 2) wrap "
+            "the type in `torch.jit.Attribute`."
+        )
 
     def visit_Call(self, node):
         """
@@ -197,12 +196,15 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
 
         # If this isn't a call to `torch.jit.annotate`
         try:
-            if (node.func.value.value.id != "torch"
-                    or node.func.value.attr != "jit"
-                    or node.func.attr != "annotate"):
+            if (
+                node.func.value.value.id != "torch"
+                or node.func.value.attr != "jit"
+                or node.func.attr != "annotate"
+            ):
                 self.generic_visit(node)
-            elif (node.func.value.value.id != "jit"
-                    or node.func.value.attr != "annotate"):
+            elif (
+                node.func.value.value.id != "jit" or node.func.value.attr != "annotate"
+            ):
                 self.generic_visit(node)
         except AttributeError:
             # Looks like we didn't even have the right node structure
@@ -226,7 +228,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         containers = {"List", "Dict", "Optional"}
 
         try:
-            ann_type = node.args[0].value.id    # type: ignore[attr-defined]
+            ann_type = node.args[0].value.id  # type: ignore[attr-defined]
         except AttributeError:
             return
 
@@ -237,8 +239,10 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         if not self._is_empty_container(node.args[1], ann_type):
             return
 
-        warnings.warn("The TorchScript type system doesn't support "
-                      "instance-level annotations on empty non-base "
-                      "types in `__init__`. Instead, either 1) use a "
-                      "type annotation in the class body, or 2) wrap "
-                      "the type in `torch.jit.Attribute`.")
+        warnings.warn(
+            "The TorchScript type system doesn't support "
+            "instance-level annotations on empty non-base "
+            "types in `__init__`. Instead, either 1) use a "
+            "type annotation in the class body, or 2) wrap "
+            "the type in `torch.jit.Attribute`."
+        )

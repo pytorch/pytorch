@@ -7,14 +7,17 @@ class SyncBatchNorm(Function):
 
     @staticmethod
     def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, process_group, world_size):
-        if not input.is_contiguous(memory_format=torch.channels_last):
+        if not (
+            input.is_contiguous(memory_format=torch.channels_last) or
+            input.is_contiguous(memory_format=torch.channels_last_3d)
+        ):
             input = input.contiguous()
         if weight is not None:
             weight = weight.contiguous()
 
         size = int(input.numel() // input.size(1))
         if size == 1 and world_size < 2:
-            raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
+            raise ValueError(f'Expected more than 1 value per channel when training, got input size {size}')
 
         num_channels = input.shape[1]
         if input.numel() > 0:
@@ -46,14 +49,15 @@ class SyncBatchNorm(Function):
         # batch_norm_gather_stats_with_counts calculates global mean & invstd based on
         # all gathered mean, invstd and count.
         # for nccl backend, use the optimized version of all gather.
-        if process_group._get_backend_name() == 'nccl':
+        # The Gloo backend does not support `all_gather_into_tensor`.
+        if process_group._get_backend_name() != "gloo":
             # world_size * (2C + 1)
             combined_size = combined.numel()
             combined_flat = torch.empty(1,
                                         combined_size * world_size,
                                         dtype=combined.dtype,
                                         device=combined.device)
-            dist._all_gather_base(combined_flat, combined, process_group, async_op=False)
+            dist.all_gather_into_tensor(combined_flat, combined, process_group, async_op=False)
             combined = torch.reshape(combined_flat, (world_size, combined_size))
             # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
             mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
@@ -67,7 +71,7 @@ class SyncBatchNorm(Function):
             # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
             mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
 
-        if not torch.cuda.is_current_stream_capturing():
+        if not (torch.cuda.is_available() and torch.cuda.is_current_stream_capturing()):
             # The lines below force a synchronization between CUDA and CPU, because
             # the shape of the result count_all depends on the values in mask tensor.
             # Such synchronizations break CUDA Graph capturing.
@@ -82,6 +86,9 @@ class SyncBatchNorm(Function):
             invstd_all = invstd_all[mask]
 
         # calculate global mean & invstd
+        counts = count_all.view(-1)
+        if running_mean is not None and counts.dtype != running_mean.dtype:
+            counts = counts.to(running_mean.dtype)
         mean, invstd = torch.batch_norm_gather_stats_with_counts(
             input,
             mean_all,
@@ -90,7 +97,7 @@ class SyncBatchNorm(Function):
             running_var,
             momentum,
             eps,
-            count_all.view(-1)
+            counts,
         )
 
         self.save_for_backward(input, weight, mean, invstd, count_all.to(torch.int32))
@@ -104,7 +111,10 @@ class SyncBatchNorm(Function):
 
     @staticmethod
     def backward(self, grad_output):
-        if not grad_output.is_contiguous(memory_format=torch.channels_last):
+        if not (
+            grad_output.is_contiguous(memory_format=torch.channels_last) or
+            grad_output.is_contiguous(memory_format=torch.channels_last_3d)
+        ):
             grad_output = grad_output.contiguous()
         saved_input, weight, mean, invstd, count_tensor = self.saved_tensors
         grad_input = grad_weight = grad_bias = None
@@ -132,6 +142,8 @@ class SyncBatchNorm(Function):
                 sum_dy, sum_dy_xmu = torch.split(combined, num_channels)
 
                 # backward pass for gradient calculation
+                if weight is not None and weight.dtype != mean.dtype:
+                    weight = weight.to(mean.dtype)
                 grad_input = torch.batch_norm_backward_elemt(
                     grad_output,
                     saved_input,
@@ -154,7 +166,7 @@ class SyncBatchNorm(Function):
             # Although this process can directly set grad_input as an empty
             # tensor of zeros, it still needs to participate in the collective
             # communication to unblock its peers, as other peer processes might
-            # have recieved non-empty inputs.
+            # have received non-empty inputs.
             num_channels = saved_input.shape[1]
             if self.needs_input_grad[0]:
                 # launch all_reduce to unblock other peer processes
@@ -181,7 +193,8 @@ class CrossMapLRN2d(Function):
         ctx.k = k
         ctx.scale = None
 
-        assert input.dim() == 4
+        if input.dim() != 4:
+            raise ValueError(f"CrossMapLRN2d: Expected input to be 4D, got {input.dim()}D instead.")
 
         ctx.scale = ctx.scale or input.new()
         output = input.new()

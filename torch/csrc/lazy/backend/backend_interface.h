@@ -4,7 +4,9 @@
 #include <torch/csrc/lazy/backend/backend_data.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/backend/lowering_context.h>
+#include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/core/shape.h>
+#include <torch/csrc/lazy/core/tensor.h>
 #include <atomic>
 
 namespace torch {
@@ -57,7 +59,7 @@ class TORCH_API BackendImplInterface {
 
   // Gets backend data if the node is a device data node. Otherwise returns
   // nullptr
-  virtual BackendDataPtr GetComputationDataFromNode(Node*) const = 0;
+  virtual BackendDataPtr GetComputationDataFromNode(const Node*) const = 0;
 
   virtual at::Tensor MakeTensorFromComputationData(
       const BackendDataPtr data,
@@ -70,7 +72,7 @@ class TORCH_API BackendImplInterface {
   virtual std::unique_ptr<LoweringContext> CreateLoweringContext(
       const std::string& name,
       BackendDevice device,
-      c10::ArrayRef<torch::lazy::Node*> post_order,
+      c10::ArrayRef<const torch::lazy::Node*> post_order,
       Util::EmissionMap emit_status) const = 0;
 
   virtual std::unique_ptr<LoweringContext> CreateLoweringContext(
@@ -95,11 +97,17 @@ class TORCH_API BackendImplInterface {
    * */
 
   // Set or get the default device type.
-  // For backends used with virtual c10:: Devices, this configures what real
+  // For backends used with virtual c10::Devices, this configures what real
   // device type the backend should use, and matters if the backend supports
   // more than one type of real device.
   virtual std::shared_ptr<BackendDeviceType> GetDefaultDeviceType() const = 0;
-  virtual void SetDefaultDeviceType(std::string) = 0;
+  virtual void SetDefaultDeviceType(int8_t type) = 0;
+
+  // Set or get the default device ordinal.
+  // For backends that supports multi-device, this configures what the
+  // default device the backend should use.
+  virtual int64_t GetDefaultDeviceOrdinal() const = 0;
+  virtual void SetDefaultDeviceOrdinal(int64_t) = 0;
 
   // Specify which aten device should be used for eager fallback
   // may change depending on current 'Default' DeviceType

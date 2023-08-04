@@ -1,12 +1,23 @@
 // Functions that fill Tensors with constants.
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
 #include <ATen/native/Fill.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/Utils.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/fill_diagonal_native.h>
+#include <ATen/ops/fill_native.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/zero_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -26,7 +37,7 @@ Tensor& fill_out(Tensor& self, const Scalar& value) {
   return self;
 }
 
-Tensor& fill_out_quantized(Tensor& self, const Scalar& value) {
+static Tensor& fill_out_quantized(Tensor& self, const Scalar& value) {
   at::Tensor out = at::ones(self.sizes()).to(kFloat) * value;
   out = out.to(self.device()).to(self.suggest_memory_format());
   // Trust the `copy_` to handle the quantization and the boundary chacks.
@@ -120,7 +131,7 @@ Tensor& fill_diagonal_(Tensor& self, const Scalar& fill_value, bool wrap) {
   return self;
 }
 
-Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
+static Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
   void* ptr = self.data_ptr();
   if (nullptr == ptr) {
     return self.fill_(0);

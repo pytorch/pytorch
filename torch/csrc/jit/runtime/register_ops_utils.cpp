@@ -108,7 +108,7 @@ void checkImplicitTensorToNum(const at::Tensor& t, bool toInt) {
     throw std::runtime_error(
         "Cannot input a tensor that requires grad as a scalar argument");
   }
-  if (t.sizes().size() != 0) {
+  if (!t.sizes().empty()) {
     throw std::runtime_error(
         "Cannot input a tensor of dimension other than 0 as a scalar argument");
   }

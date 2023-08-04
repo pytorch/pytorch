@@ -11,7 +11,9 @@ import sys
 import torch
 import torch.testing._internal.jit_utils
 import torch.nn as nn
+import unittest
 from torch.testing._internal.common_utils import freeze_rng_state
+from torch.testing._internal.jit_utils import RUN_CUDA_HALF
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -169,6 +171,39 @@ class TestMisc(JitTestCase):
         torch.index_put_(input1, [index1], value1, accumulate=False)
         self.assertEqual(input, input1)
 
+    def test_unsafe_hacked_twin(self):
+
+        def gen_data():
+            with freeze_rng_state():
+                return torch.randn(10), torch.randint(10, (20,)), torch.randn(20)
+
+        input, index, value, = gen_data()
+        input1, index1, value1, = gen_data()
+        out1 = torch.ops.aten._unsafe_index_put.hacked_twin(input, [index], value, accumulate=False)
+        out2 = torch.index_put(input1, [index1], value1, accumulate=False)
+        self.assertEqual(out1, out2)
+
+        torch.ops.aten._unsafe_index.Tensor_hacked_twin(input, [index])
+        torch.index_put(input1, [index1], value1, accumulate=False)
+        self.assertEqual(input, input1)
+
+        def index_put_fn(input, index, value):
+            return torch.ops.aten._unsafe_index_put(input, [index], value, accumulate=False)
+
+        input2, index2, value2 = gen_data()
+        script_index_put_fn = torch.jit.script(index_put_fn)
+        expect = index_put_fn(input2.clone(), index2, value2)
+        actual = script_index_put_fn(input2.clone(), index2, value2)
+        self.assertEqual(expect, actual)
+
+        def index_fn(input, index, value):
+            return torch.ops.aten._unsafe_index_put(input, [index], value, accumulate=False)
+
+        script_index_fn = torch.jit.script(index_fn)
+        expect = index_fn(input2.clone(), index2, value2)
+        actual = script_index_fn(input2.clone(), index2, value2)
+        self.assertEqual(expect, actual)
+
     def test_export_opnames_interface(self):
 
         @torch.jit.interface
@@ -208,7 +243,7 @@ class TestMisc(JitTestCase):
             sub : OneTwoModule
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.sub = BarMod()
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -219,11 +254,11 @@ class TestMisc(JitTestCase):
 
         torch._C._enable_mobile_interface_call_export()
         scripted_M_mod = torch.jit.script(M())
-        self.assertTrue(set(['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal']).issubset(
+        self.assertTrue({'aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal'}.issubset(
             set(torch.jit.export_opnames(scripted_M_mod))))
 
         scripted_M_mod.sub = torch.jit.script(FooMod())
-        self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
+        self.assertTrue({'aten::add.Tensor', 'aten::mul.Scalar'}.issubset(
             set(torch.jit.export_opnames(scripted_M_mod))))
 
     def test_math_inf(self):
@@ -361,3 +396,40 @@ class TestMisc(JitTestCase):
         ret = func()
         self.assertTrue(ret.numel() == 1)
         self.assertTrue(len(ret.size()) == 1)
+
+
+    def test_script_many_decorators(self):
+        def no_op_decorator(f):
+            return f
+
+        @no_op_decorator
+        @no_op_decorator
+        @no_op_decorator
+        @no_op_decorator
+        @no_op_decorator
+        def foo(x, dim: int):
+            return x.unsqueeze(dim)
+
+        x = torch.randn(1,)
+        expected = foo(x, 0)
+        scripted = torch.jit.script(foo)
+        actual = scripted(x, 0)
+        torch.testing.assert_close(expected, actual)
+
+    @unittest.skipIf(not RUN_CUDA_HALF, "need CUDA half support")
+    def test_pow_multiple_dtype(self):
+        # https://github.com/pytorch/pytorch/issues/75476
+        def fn(p: torch.Tensor, gamma: float = 2.0) -> torch.Tensor:
+            p = torch.sigmoid(p)
+            result = p ** gamma
+            return result
+
+        x = torch.rand((2, 2), dtype=torch.half, device='cuda')
+
+        ref = fn(x)
+
+        script_fn = torch.jit.script(fn)
+        for i in range(4):
+            res = script_fn(x)
+
+        self.assertEqual(ref, res)

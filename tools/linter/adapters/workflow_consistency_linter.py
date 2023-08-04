@@ -5,12 +5,18 @@ Any job with a specific `sync-tag` must match all other jobs with the same `sync
 import argparse
 import itertools
 import json
-from pathlib import Path
-from typing import Iterable, Any, Optional, NamedTuple, Dict
-from enum import Enum
 from collections import defaultdict
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, Iterable, NamedTuple, Optional
 
-from yaml import load, CSafeLoader, dump
+from yaml import dump, load
+
+# Safely load fast C Yaml loader/dumper if they are available
+try:
+    from yaml import CSafeLoader as Loader
+except ImportError:
+    from yaml import SafeLoader as Loader  # type: ignore[assignment, misc]
 
 
 class LintSeverity(str, Enum):
@@ -38,7 +44,7 @@ def glob_yamls(path: Path) -> Iterable[Path]:
 
 def load_yaml(path: Path) -> Any:
     with open(path) as f:
-        return load(f, CSafeLoader)
+        return load(f, Loader)
 
 
 def is_workflow(yaml: Any) -> bool:
@@ -95,6 +101,10 @@ if __name__ == "__main__":
             # trunk, say.)
             if "if" in job:
                 del job["if"]
+
+            # same is true for ['with']['test-matrix']
+            if "test-matrix" in job.get("with", {}):
+                del job["with"]["test-matrix"]
 
             tag_to_jobs[sync_tag].append((path, {job_id: job}))
 

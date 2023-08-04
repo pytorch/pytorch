@@ -6,9 +6,7 @@
 #include <ATen/native/xnnpack/Common.h>
 #include <ATen/Tensor.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
+namespace at::native::xnnpack {
 
 using SerializationTypeLinearPrePack = std::tuple<
     Tensor,
@@ -149,6 +147,13 @@ class TransposeConv2dOpContext : public torch::jit::CustomClassHolder {
 class XNNPackConv2dOpContext final : public Conv2dOpContext {
  private:
   ContextConv2D op_context_;
+  // xnnpack convs use indirection buffer.
+  // These buffers need setup at runtime and/or when input
+  // dims change. If we are running the same model on multiple
+  // threads, this can lead to contention where indirection buffer
+  // is being accessed and updated at the same time from two different
+  // threads.
+  std::mutex xnnp_mutex_;
 
  public:
   XNNPackConv2dOpContext(
@@ -190,6 +195,13 @@ class XNNPackConv2dOpContext final : public Conv2dOpContext {
 class XNNPackTransposeConv2dOpContext final : public TransposeConv2dOpContext {
  private:
   ContextConv2D op_context_;
+  // xnnpack convs use indirection buffer.
+  // These buffers need setup at runtime and/or when input
+  // dims change. If we are running the same model on multiple
+  // threads, this can lead to contention where indirection buffer
+  // is being accessed and updated at the same time from two different
+  // threads.
+  std::mutex xnnp_mutex_;
 
  public:
   XNNPackTransposeConv2dOpContext(
@@ -231,9 +243,6 @@ class XNNPackTransposeConv2dOpContext final : public TransposeConv2dOpContext {
       const c10::optional<Scalar>& output_max);
 };
 
-} // namespace xnnpack
-
-} // namespace native
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

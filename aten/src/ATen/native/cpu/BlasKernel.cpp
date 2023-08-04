@@ -2,9 +2,9 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/CPUBlas.h>
 #include <c10/util/irange.h>
+#include <c10/util/Unroll.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace cpublas {
 namespace {
 
@@ -30,15 +30,43 @@ void scale_(int64_t m, int64_t n, opmath_t alpha, scalar_t *a, int64_t lda) {
   }
 }
 
+template <typename Func>
+auto sum(int64_t N, Func f) {
+  constexpr int ilp_factor = 4;
+  using acc_t = decltype(f(0));
+
+  // Calculate independent partial sums then add together at the end
+  std::array<acc_t, ilp_factor> partial_sums{};
+
+  int64_t i = 0;
+  for (; i + ilp_factor <= N; i += ilp_factor) {
+    c10::ForcedUnroll<ilp_factor>{}([&](int k) {
+      partial_sums[k] += f(i + k);
+    });
+  }
+  for (; i < N; ++i) {
+    partial_sums[0] += f(i);
+  }
+  for (int k = 1; k < ilp_factor; ++k) {
+    partial_sums[0] += partial_sums[k];
+  }
+  return partial_sums[0];
+}
 
 template <typename scalar_t, typename opmath_t>
-void gemm_notrans_(
-    int64_t m, int64_t n, int64_t k,
+typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
+gemm_notrans_(
+    int64_t m,
+    int64_t n,
+    int64_t k,
     opmath_t alpha,
-    const scalar_t *a, int64_t lda,
-    const scalar_t *b, int64_t ldb,
+    const scalar_t* a,
+    int64_t lda,
+    const scalar_t* b,
+    int64_t ldb,
     opmath_t beta,
-    scalar_t *c, int64_t ldc) {
+    scalar_t* c,
+    int64_t ldc) {
   // c *= beta
   scale_(m, n, beta, c, ldc);
 
@@ -60,6 +88,37 @@ void gemm_notrans_(
   }
 }
 
+// std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
+template <typename scalar_t, typename opmath_t>
+typename std::enable_if<!std::is_same<scalar_t, opmath_t>::value, void>::type
+gemm_notrans_(
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    opmath_t alpha,
+    const scalar_t* a,
+    int64_t lda,
+    const scalar_t* b,
+    int64_t ldb,
+    opmath_t beta,
+    scalar_t* c,
+    int64_t ldc) {
+  // c += alpha * (a @ b)
+  for (const auto i : c10::irange(m)) {
+    for (const auto j : c10::irange(n)) {
+      const auto dot = sum(k, [&](int64_t l) -> opmath_t {
+        return static_cast<opmath_t>(a[l * lda + i]) *
+            static_cast<opmath_t>(b[j * ldb + l]);
+      });
+      if (beta == opmath_t(0)) {
+        c[j * ldc + i] = alpha * dot;
+      } else {
+        c[j * ldc + i] = beta * c[j * ldc + i] + alpha * dot;
+      }
+    }
+  }
+}
+
 template <typename scalar_t, typename opmath_t>
 void gemm_transa_(
     int64_t m, int64_t n, int64_t k,
@@ -73,28 +132,34 @@ void gemm_transa_(
   for (const auto i : c10::irange(m)) {
     const scalar_t *b_ = b;
     for (const auto j : c10::irange(n)) {
-      opmath_t sum = 0;
-      for (const auto l : c10::irange(k)) {
-        sum += static_cast<opmath_t>(a_[l]) * static_cast<opmath_t>(b_[l]);
-      }
+      const auto dot = sum(k, [&](int64_t l) -> opmath_t {
+        return static_cast<opmath_t>(a_[l]) * static_cast<opmath_t>(b_[l]);
+      });
       b_ += ldb;
-      if (beta == scalar_t(0))
-        c[j*ldc+i] = alpha*sum;
-      else
-        c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
+      if (beta == opmath_t(0)) {
+        c[j*ldc+i] = alpha*dot;
+      } else {
+        c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
+      }
     }
     a_ += lda;
   }
 }
 
 template <typename scalar_t, typename opmath_t>
-void gemm_transb_(
-    int64_t m, int64_t n, int64_t k,
+typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
+gemm_transb_(
+    int64_t m,
+    int64_t n,
+    int64_t k,
     opmath_t alpha,
-    const scalar_t *a, int64_t lda,
-    const scalar_t *b, int64_t ldb,
+    const scalar_t* a,
+    int64_t lda,
+    const scalar_t* b,
+    int64_t ldb,
     opmath_t beta,
-    scalar_t *c, int64_t ldc) {
+    scalar_t* c,
+    int64_t ldc) {
   // c *= beta
   scale_(m, n, beta, c, ldc);
 
@@ -116,6 +181,37 @@ void gemm_transb_(
   }
 }
 
+// std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
+template <typename scalar_t, typename opmath_t>
+typename std::enable_if<!std::is_same<scalar_t, opmath_t>::value, void>::type
+gemm_transb_(
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    opmath_t alpha,
+    const scalar_t* a,
+    int64_t lda,
+    const scalar_t* b,
+    int64_t ldb,
+    opmath_t beta,
+    scalar_t* c,
+    int64_t ldc) {
+  // c += alpha * (a @ b.T)
+  for (const auto i : c10::irange(m)) {
+    for (const auto j : c10::irange(n)) {
+      const auto dot = sum(k, [&](int64_t l) -> opmath_t {
+        return static_cast<opmath_t>(a[l * lda + i]) *
+            static_cast<opmath_t>(b[l * ldb + j]);
+      });
+      if (beta == opmath_t(0)) {
+        c[j * ldc + i] = alpha * dot;
+      } else {
+        c[j * ldc + i] = beta * c[j * ldc + i] + alpha * dot;
+      }
+    }
+  }
+}
+
 template <typename scalar_t, typename opmath_t>
 void gemm_transab_(
     int64_t m, int64_t n, int64_t k,
@@ -124,26 +220,19 @@ void gemm_transab_(
     const scalar_t *b, int64_t ldb,
     opmath_t beta,
     scalar_t *c, int64_t ldc) {
-  // c *= beta
-  scale_(m, n, beta, c, ldc);
-
-  // c += alpha * (a.T @ b.T)
+  // c = beta * c + alpha * (a.T @ b.T)
   for (const auto i : c10::irange(m)) {
     for (const auto j : c10::irange(n)) {
-      int64_t l_k = k / 4;
-      for (const auto l_l : c10::irange(l_k)) {
-        c[j * ldc + i] += a[i * lda + l_l * 4 + 0] //
-            * (b[(l_l * 4 + 0) * ldb + j] * alpha);
-        c[j * ldc + i] += a[i * lda + l_l * 4 + 1] //
-            * (b[(l_l * 4 + 1) * ldb + j] * alpha);
-        c[j * ldc + i] += a[i * lda + l_l * 4 + 2] //
-            * (b[(l_l * 4 + 2) * ldb + j] * alpha);
-        c[j * ldc + i] += a[i * lda + l_l * 4 + 3] //
-            * (b[(l_l * 4 + 3) * ldb + j] * alpha);
+      const auto dot = sum(k, [&](int64_t l) -> opmath_t {
+        return static_cast<opmath_t>(a[i * lda + l]) *
+            static_cast<opmath_t>(b[l * ldb + j]);
+      });
+
+      if (beta == opmath_t(0)) {
+        c[j * ldc + i] = alpha * dot;
+      } else {
+        c[j * ldc + i] = beta * c[j * ldc + i] + alpha * dot;
       }
-      int64_t l = l_k * 4;
-      for (; l < k; l++)
-        c[j * ldc + i] += a[i * lda + l] * (b[l * ldb + j] * alpha);
     }
   }
 }
@@ -157,17 +246,34 @@ void gemm_core_(
     const scalar_t *b, int64_t ldb,
     opmath_t beta,
     scalar_t *c, int64_t ldc) {
-  if(transa == TransposeType::NoTranspose && transb == TransposeType::NoTranspose) {
+  if (transa == TransposeType::NoTranspose &&
+      transb == TransposeType::NoTranspose) {
     return gemm_notrans_(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
-  } else if(transa == TransposeType::Transpose && transb != TransposeType::Transpose) {
+  } else if (
+      transa == TransposeType::Transpose &&
+      transb != TransposeType::Transpose) {
     gemm_transa_(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
-  } else if(transa == TransposeType::NoTranspose && transb == TransposeType::Transpose) {
+  } else if (
+      transa == TransposeType::NoTranspose &&
+      transb == TransposeType::Transpose) {
     gemm_transb_(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
-  } else {  // transa == TransposeType::Transpose && transb == TransposeType::Transpose
+  } else { // transa == TransposeType::Transpose && transb ==
+           // TransposeType::Transpose
     gemm_transab_(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
   }
 }
 
+#if !defined(C10_MOBILE)
+#define _AT_DISPATCH_GEMM_TYPES(TYPE, NAME, ...)                  \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                   \
+            kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn,       \
+            TYPE, NAME, __VA_ARGS__)
+#else
+#define _AT_DISPATCH_GEMM_TYPES(TYPE, NAME, ...)         \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(          \
+            kHalf, kBFloat16,                            \
+            TYPE, NAME, __VA_ARGS__)
+#endif
 void cpublas_gemm_impl(
     at::ScalarType type,
     TransposeType transa, TransposeType transb,
@@ -177,9 +283,7 @@ void cpublas_gemm_impl(
     const void *b, int64_t ldb,
     const Scalar& beta,
     void *c, int64_t ldc) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::kHalf, at::kBFloat16,
-    type, "cpublas_gemm_impl",
-      [&]{
+  _AT_DISPATCH_GEMM_TYPES(type, "cpublas_gemm_impl", [&]{
         using opmath_t = at::opmath_type<scalar_t>;
         gemm_core_(
             transa, transb, m, n, k,
@@ -231,4 +335,4 @@ REGISTER_DISPATCH(cpublas::gemm_stub, &cpublas::cpublas_gemm_impl);
 REGISTER_DISPATCH(cpublas::axpy_stub, &cpublas::cpublas_axpy_impl);
 REGISTER_DISPATCH(cpublas::copy_stub, &cpublas::cpublas_copy_impl);
 
-}}  // namespace at::native
+}  // namespace at::native

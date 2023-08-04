@@ -5,7 +5,8 @@ import collections
 import functools
 import numbers
 import sys
-from torch.utils.data.datapipes._hook_iterator import hook_iterator
+
+from torch.utils.data.datapipes._hook_iterator import hook_iterator, _SnapshotState
 from typing import (Any, Dict, Iterator, Generic, List, Set, Tuple, TypeVar, Union,
                     get_type_hints)
 from typing import _eval_type, _tp_cache, _type_check, _type_repr  # type: ignore[attr-defined]
@@ -100,7 +101,7 @@ def _decompose_type(t, to_list=True):
             return None
         ts = [t]
     # Ignored: Generator has incompatible item type "object"; expected "Type[Any]"
-    ts = list(TYPE2ABC.get(_t, _t) for _t in ts)  # type: ignore[misc]
+    ts = [TYPE2ABC.get(_t, _t) for _t in ts]  # type: ignore[misc]
     return ts
 
 
@@ -233,7 +234,7 @@ class _DataPipeType:
             return issubtype(self.param, other.param)
         if isinstance(other, type):
             return issubtype(self.param, other)
-        raise TypeError("Expected '_DataPipeType' or 'type', but found {}".format(type(other)))
+        raise TypeError(f"Expected '_DataPipeType' or 'type', but found {type(other)}")
 
     def issubtype_of_instance(self, other):
         return issubinstance(other, self.param)
@@ -278,13 +279,13 @@ class _DataPipeMeta(GenericMeta):
     @_tp_cache
     def _getitem_(self, params):
         if params is None:
-            raise TypeError('{}[t]: t can not be None'.format(self.__name__))
+            raise TypeError(f'{self.__name__}[t]: t can not be None')
         if isinstance(params, str):
             params = ForwardRef(params)
         if not isinstance(params, tuple):
             params = (params, )
 
-        msg = "{}[t]: t must be a type".format(self.__name__)
+        msg = f"{self.__name__}[t]: t must be a type"
         params = tuple(_type_check(p, msg) for p in params)
 
         if isinstance(self.type.param, _GenericAlias):
@@ -302,13 +303,12 @@ class _DataPipeMeta(GenericMeta):
                                        '__type_class__': True})
 
         if len(params) > 1:
-            raise TypeError('Too many parameters for {} actual {}, expected 1'.format(self, len(params)))
+            raise TypeError(f'Too many parameters for {self} actual {len(params)}, expected 1')
 
         t = _DataPipeType(params[0])
 
         if not t.issubtype(self.type):
-            raise TypeError('Can not subclass a DataPipe[{}] from DataPipe[{}]'
-                            .format(t, self.type))
+            raise TypeError(f'Can not subclass a DataPipe[{t}] from DataPipe[{self.type}]')
 
         # Types are equal, fast path for inheritance
         if self.type == t:
@@ -350,35 +350,22 @@ class _IterDataPipeMeta(_DataPipeMeta):
             @functools.wraps(reset_func)
             def conditional_reset(*args, **kwargs):
                 r"""
-                Only execute DataPipe's `reset()` method if `_restored` is False. This allows recently
+                Only execute DataPipe's `reset()` method if `_SnapshotState` is `Iterating` or `NotStarted`. This allows recently
                 restored DataPipe to preserve its restored state during the initial `__iter__` call.
                 """
                 datapipe = args[0]
-                if datapipe._restored is True:
-                    datapipe._restored = False
-                else:
+                if datapipe._snapshot_state in (_SnapshotState.Iterating, _SnapshotState.NotStarted):
+                    # Reset `NotStarted` is necessary because the `source_datapipe` of a DataPipe might have
+                    # already begun iterating.
                     datapipe._number_of_samples_yielded = 0
+                    datapipe._fast_forward_iterator = None
                     reset_func(*args, **kwargs)
+                datapipe._snapshot_state = _SnapshotState.Iterating
 
             namespace['reset'] = conditional_reset
 
-        if '__setstate__' in namespace:
-            setstate_func = namespace['__setstate__']
-
-            @functools.wraps(setstate_func)
-            def wrap_setstate(*args, **kwargs):
-                r"""
-                Set `_restored` to True during `__setstate__`, such that the next `reset()` call during
-                iterator creation will not actually reset the state of the DataPipe.
-                """
-                datapipe = args[0]
-                datapipe._restored = True
-                return setstate_func(*args, **kwargs)
-
-            namespace['__setstate__'] = wrap_setstate
-
         if '__iter__' in namespace:
-            hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
+            hook_iterator(namespace)
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
 
@@ -400,8 +387,7 @@ def _dp_init_subclass(sub_cls, *args, **kwargs):
             param = _eval_type(sub_cls.type.param, base_globals, locals())
             sub_cls.type.param = param
         except TypeError as e:
-            raise TypeError("{} is not supported by Python typing"
-                            .format(sub_cls.type.param.__forward_arg__)) from e
+            raise TypeError(f"{sub_cls.type.param.__forward_arg__} is not supported by Python typing") from e
 
     if '__iter__' in sub_cls.__dict__:
         iter_fn = sub_cls.__dict__['__iter__']
@@ -433,8 +419,7 @@ def reinforce_type(self, expected_type):
     _type_check(expected_type, msg="'expected_type' must be a type")
 
     if not issubtype(expected_type, self.type.param):
-        raise TypeError("Expected 'expected_type' as subtype of {}, but found {}"
-                        .format(self.type, _type_repr(expected_type)))
+        raise TypeError(f"Expected 'expected_type' as subtype of {self.type}, but found {_type_repr(expected_type)}")
 
     self.type = _DataPipeType(expected_type)
     return self

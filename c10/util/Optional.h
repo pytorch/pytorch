@@ -39,6 +39,7 @@
 #include <type_traits>
 #include <utility>
 
+#include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
@@ -53,6 +54,11 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 #endif
 #if C10_CLANG_HAS_WARNING("-Wimplicit-int-conversion")
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-conversion")
+#endif
+
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(push)
+#pragma warning(disable : 4624) // destructor was implicitly defined as deleted
 #endif
 
 #define TR2_OPTIONAL_REQUIRES(...) \
@@ -171,7 +177,7 @@ class bad_optional_access : public std::logic_error {
 
 template <class T>
 union storage_t {
-  unsigned char dummy_;
+  unsigned char dummy_{};
   T value_;
 
 #if __cplusplus >= 202002L
@@ -500,13 +506,8 @@ class arrayref_optional_base {
       : storage_(v) {}
 
   constexpr bool initialized() const noexcept {
-    typename storage::raw repr;
-    // Cast to void* to suppress GCC's -Wclass-memaccess.
-    memcpy(
-        static_cast<void*>(&repr),
-        static_cast<const void*>(&storage_),
-        sizeof(storage_));
-    return repr.p != nullptr || repr.sz == 0;
+    return storage_.uninitialized_.p != nullptr ||
+        storage_.uninitialized_.sz == 0;
   }
 
   void setInitialized(bool init) noexcept {
@@ -629,7 +630,7 @@ class optional : private OptionalBase<T> {
   typedef T value_type;
 
   // 20.5.5.1, constructors
-  constexpr optional() noexcept : OptionalBase<T>(){};
+  constexpr optional() noexcept = default;
   constexpr optional(nullopt_t) noexcept : OptionalBase<T>(){};
 
   optional(const optional& rhs) = default;
@@ -1238,7 +1239,7 @@ constexpr optional<X&> make_optional(std::reference_wrapper<X> v) {
 namespace std {
 template <typename T>
 struct hash<c10::optional<T>> {
-  typedef typename hash<T>::result_type result_type;
+  typedef c10::invoke_result_t<std::hash<T>, T> result_type;
   typedef c10::optional<T> argument_type;
 
   constexpr result_type operator()(argument_type const& arg) const {
@@ -1262,5 +1263,9 @@ struct hash<c10::optional<T&>> {
 #undef TR2_OPTIONAL_HOST_CONSTEXPR
 
 C10_CLANG_DIAGNOSTIC_POP()
+
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(pop)
+#endif
 
 #endif // C10_UTIL_OPTIONAL_H_

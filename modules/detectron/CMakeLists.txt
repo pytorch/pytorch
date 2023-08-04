@@ -3,10 +3,6 @@ file(GLOB Detectron_GPU_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/*.cu)
 file(GLOB_RECURSE Detectron_HIP_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/*.hip)
 
 if(BUILD_CAFFE2_OPS)
-  if(USE_OPENMP AND OPENMP_FOUND)
-    Set(OpenMP_link ${OpenMP_CXX_LIBRARIES})
-  endif()
-
   # Note(ilijar): Since Detectron ops currently have no
   # CPU implementation, we only build GPU ops for now.
   if(USE_CUDA)
@@ -15,9 +11,12 @@ if(BUILD_CAFFE2_OPS)
         ${Detectron_CPU_SRCS}
         ${Detectron_GPU_SRCS})
 
-    torch_set_target_props(caffe2_detectron_ops_gpu)
-    target_link_libraries(caffe2_detectron_ops_gpu PRIVATE torch ${OpenMP_link})
-    if(CAFFE2_USE_MKLDNN)
+    target_link_libraries(caffe2_detectron_ops_gpu PRIVATE torch)
+    if(USE_OPENMP)
+      target_link_libraries(caffe2_detectron_ops_gpu PRIVATE caffe2::openmp)
+    endif()
+
+    if(USE_MKLDNN)
       target_link_libraries(caffe2_detectron_ops_gpu PRIVATE caffe2::mkldnn)
     endif()
     install(TARGETS caffe2_detectron_ops_gpu DESTINATION lib)
@@ -31,9 +30,8 @@ if(BUILD_CAFFE2_OPS)
         caffe2_detectron_ops_hip SHARED
         ${Detectron_CPU_SRCS}
         ${Detectron_HIP_SRCS})
-    torch_set_target_props(caffe2_detectron_ops_hip)
     target_compile_options(caffe2_detectron_ops_hip PRIVATE ${HIP_CXX_FLAGS})
-    if(CAFFE2_USE_MKLDNN)
+    if(USE_MKLDNN)
       target_link_libraries(caffe2_detectron_ops_hip PRIVATE caffe2::mkldnn)
     endif()
     target_link_libraries(caffe2_detectron_ops_hip PRIVATE torch)
@@ -44,9 +42,11 @@ if(BUILD_CAFFE2_OPS)
       set_target_properties(caffe2_detectron_ops PROPERTIES
         VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
     endif()
-    torch_set_target_props(caffe2_detectron_ops)
-    target_link_libraries(caffe2_detectron_ops PRIVATE torch ${OpenMP_link})
-    if(CAFFE2_USE_MKLDNN)
+    target_link_libraries(caffe2_detectron_ops PRIVATE torch)
+    if(USE_OPENMP)
+      target_link_libraries(caffe2_detectron_ops PRIVATE caffe2::openmp)
+    endif()
+    if(USE_MKLDNN)
       target_link_libraries(caffe2_detectron_ops PRIVATE caffe2::mkldnn)
     endif()
     install(TARGETS caffe2_detectron_ops DESTINATION lib)

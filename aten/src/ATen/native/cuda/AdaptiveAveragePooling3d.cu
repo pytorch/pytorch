@@ -15,25 +15,26 @@
 #include <ATen/ops/adaptive_avg_pool3d_backward_native.h>
 #include <ATen/ops/adaptive_avg_pool3d_native.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/zeros_like.h>
+#include <ATen/ops/empty_like.h>
 #endif
+
+#include <ATen/native/AdaptivePooling.h>
 
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
 
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
-__device__ inline int start_index(int a, int b, int c) {
-  return (int)std::floor((float)(a * c) / b);
+__device__ inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
+  return (a / b) * c + ((a % b) * c) / b;
 }
 
-__device__ inline int end_index(int a, int b, int c) {
-  return (int)std::ceil((float)((a + 1) * c) / b);
+__device__ inline int64_t end_index(int64_t a, int64_t b, int64_t c) {
+  return 1 + ((a + 1) * c - 1) / b;
 }
 
 // 5d tensor B x D x T x H x W
@@ -49,7 +50,7 @@ __device__ inline int end_index(int a, int b, int c) {
  */
 template <typename scalar_t, typename accscalar_t>
 __global__ void adaptiveaveragepool(
-    scalar_t *input, scalar_t *output,
+    const scalar_t *input, scalar_t *output,
     int isizeT, int isizeH, int isizeW,
     int osizeT, int osizeH, int osizeW,
     int64_t istrideD,
@@ -77,7 +78,7 @@ __global__ void adaptiveaveragepool(
   int kT = iendT - istartT;
 
   // input offset by slice/feature and earliest relevant frame/time
-  scalar_t *input_dt = input + d*istrideD + istartT*istrideT;
+  const scalar_t *input_dt = input + d*istrideD + istartT*istrideT;
   // output offset by slice/feature and frame/time
   scalar_t *output_dt = output + o_plane*osizeH*osizeW;
 
@@ -93,7 +94,7 @@ __global__ void adaptiveaveragepool(
       int kW = iendW - istartW;
 
       // Compute the average pooling from corresponding input pixels
-      scalar_t *ptr_input = input_dt + istartH*istrideH + istartW*istrideW;
+      const scalar_t *ptr_input = input_dt + istartH*istrideH + istartW*istrideW;
       scalar_t *ptr_output = output_dt + oh*osizeW + ow;
       accscalar_t sum = static_cast<accscalar_t>(0);
 
@@ -116,7 +117,7 @@ __global__ void adaptiveaveragepool(
 
 template <typename scalar_t, typename accscalar_t>
 void adaptiveaveragepool_loop(
-    scalar_t *input_data, scalar_t *output_data,
+    const scalar_t *input_data, scalar_t *output_data,
     int64_t totalZ,
     int isizeT, int isizeH, int isizeW,
     int osizeT, int osizeH, int osizeW,
@@ -150,7 +151,7 @@ void adaptiveaveragepool_loop(
  */
 template <typename scalar_t, typename accscalar_t>
 __global__ void adaptiveaveragegradinput(
-    scalar_t *gradInput, scalar_t *gradOutput,
+    scalar_t *gradInput, const scalar_t *gradOutput,
     int isizeT, int isizeH, int isizeW,
     int osizeT, int osizeH, int osizeW,
     int64_t offsetZ)
@@ -178,7 +179,7 @@ __global__ void adaptiveaveragegradinput(
   // gradInput offset by slice/feature and frame/time.
   scalar_t *gradInput_dt = gradInput + i_plane*isizeH*isizeW;
   // gradOutput offset by slice/feature and earliest relevant frame/time
-  scalar_t *gradOutput_dt = gradOutput + (d*osizeT + ostartT)*osizeH*osizeW;
+  const scalar_t *gradOutput_dt = gradOutput + (d*osizeT + ostartT)*osizeH*osizeW;
 
   // For all input pixels...
   for (ih = istartH; ih < iendH; ih += istepH) {
@@ -191,7 +192,7 @@ __global__ void adaptiveaveragegradinput(
 
       // Compute the gradients from corresponding output pixels
       scalar_t *ptr_gradInput = gradInput_dt + ih*isizeW + iw;
-      scalar_t *ptr_gradOutput = gradOutput_dt;
+      const scalar_t *ptr_gradOutput = gradOutput_dt;
 
       // for all relevant output pixels
       int ot, oh, ow;
@@ -214,7 +215,7 @@ __global__ void adaptiveaveragegradinput(
 
 template <typename scalar_t, typename accscalar_t>
 void adaptiveaveragegradinput_loop(
-    scalar_t *gradInput_data, scalar_t *gradOutput_data,
+    scalar_t *gradInput_data, const scalar_t *gradOutput_data,
     int64_t totalZ,
     int isizeT, int isizeH, int isizeW,
     int osizeT, int osizeH, int osizeW) {
@@ -248,7 +249,7 @@ void adaptiveaveragegradinput_loop(
  */
 template <typename scalar_t>
 __global__ void atomicadaptiveaveragegradinput(
-    scalar_t *gradInput, scalar_t *gradOutput,
+    scalar_t *gradInput, const scalar_t *gradOutput,
     int isizeT, int isizeH, int isizeW,
     int osizeT, int osizeH, int osizeW,
     int64_t offsetZ)
@@ -277,7 +278,7 @@ __global__ void atomicadaptiveaveragegradinput(
   // gradInput offset by slice/feature and earliest relevant frame/time
   scalar_t *gradInput_nt = gradInput + (d*isizeT + istartT)*isizeH*isizeW;
   // gradOutput offset by slice/feature and frame/time
-  scalar_t *gradOutput_nt = gradOutput + o_plane*osizeH*osizeW;
+  const scalar_t *gradOutput_nt = gradOutput + o_plane*osizeH*osizeW;
 
   // For all output pixels...
   for (oh = ostartH; oh < oendH; oh += ostepH) {
@@ -292,7 +293,7 @@ __global__ void atomicadaptiveaveragegradinput(
 
       // Compute the gradients from corresponding input pixels
       scalar_t *ptr_gradInput = gradInput_nt + istartH*isizeW + istartW;
-      scalar_t *ptr_gradOutput = gradOutput_nt + oh*osizeW + ow;
+      const scalar_t *ptr_gradOutput = gradOutput_nt + oh*osizeW + ow;
       scalar_t grad_delta = *ptr_gradOutput / kT / kH / kW;
 
       int it, ih, iw;
@@ -310,7 +311,7 @@ __global__ void atomicadaptiveaveragegradinput(
 
 template <typename scalar_t>
 void atomicadaptiveaveragegradinput_loop(
-    scalar_t* gradInput_data, scalar_t* gradOutput_data,
+    scalar_t* gradInput_data, const scalar_t* gradOutput_data,
     int64_t totalZ,
     int isizeT, int isizeH, int isizeW,
     int osizeT, int osizeH, int osizeW) {
@@ -406,8 +407,8 @@ void adaptive_avg_pool3d_out_cuda_template(
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
       input.scalar_type(), "adaptive_avg_pool3d_cuda", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
-        scalar_t* input_data = input.data_ptr<scalar_t>();
-        scalar_t* output_data = output.data_ptr<scalar_t>();
+        const scalar_t* input_data = input.const_data_ptr<scalar_t>();
+        scalar_t* output_data = output.mutable_data_ptr<scalar_t>();
 
         adaptiveaveragepool_loop<scalar_t, accscalar_t>(
             input_data, output_data,
@@ -425,6 +426,8 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
   TensorArg grad_input_arg{gradInput, "gradInput", 1};
   TensorArg grad_output_arg{gradOutput_, "gradOutput_", 2};
   TensorArg input_arg{input, "input", 3};
+
+  adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool3d_backward");
 
   checkAllSameGPU(
       "adaptive_avg_pool3d_out_cuda",
@@ -475,8 +478,8 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
   if (atomic) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_backward_cuda", [&] {
-          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
-          scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
+          scalar_t* gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
+          const scalar_t* gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
 
           atomicadaptiveaveragegradinput_loop(
               gradInput_data, gradOutput_data,
@@ -489,8 +492,8 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
         input.scalar_type(), "adaptive_avg_pool3d_backward_cuda", [&] {
           using accscalar_t = at::acc_type<scalar_t, true>;
 
-          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
-          scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
+          scalar_t* gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
+          const scalar_t* gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
 
           adaptiveaveragegradinput_loop<scalar_t, accscalar_t>(
               gradInput_data, gradOutput_data,
@@ -534,10 +537,9 @@ Tensor adaptive_avg_pool3d_backward_cuda(
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("adaptive_avg_pool3d_backward_cuda");
-  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto gradInput = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   adaptive_avg_pool3d_backward_out_cuda_template(gradInput, gradOutput_, input);
   return gradInput;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

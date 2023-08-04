@@ -4,16 +4,16 @@
 import multiprocessing
 import os
 import platform
-import re
-from subprocess import check_call, check_output, CalledProcessError
 import sys
 import sysconfig
 from distutils.version import LooseVersion
-from typing import IO, Any, Dict, List, Optional, Union, cast
+from subprocess import CalledProcessError, check_call, check_output
+from typing import Any, cast, Dict, List, Optional
 
 from . import which
-from .env import BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS, check_negative_env_flag
-from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
+from .cmake_utils import CMakeValue, get_cmake_cache_variables_from_file
+from .env import BUILD_DIR, check_negative_env_flag, IS_64BIT, IS_DARWIN, IS_WINDOWS
+from .numpy_ import NUMPY_INCLUDE_DIR, USE_NUMPY
 
 
 def _mkdir_p(d: str) -> None:
@@ -29,84 +29,8 @@ def _mkdir_p(d: str) -> None:
 # Use ninja if it is on the PATH. Previous version of PyTorch required the
 # ninja python package, but we no longer use it, so we do not have to import it
 USE_NINJA = not check_negative_env_flag("USE_NINJA") and which("ninja") is not None
-
-
-CMakeValue = Optional[Union[bool, str]]
-
-
-def convert_cmake_value_to_python_value(
-    cmake_value: str, cmake_type: str
-) -> CMakeValue:
-    r"""Convert a CMake value in a string form to a Python value.
-
-    Args:
-      cmake_value (string): The CMake value in a string form (e.g., "ON", "OFF", "1").
-      cmake_type (string): The CMake type of :attr:`cmake_value`.
-
-    Returns:
-      A Python value corresponding to :attr:`cmake_value` with type :attr:`cmake_type`.
-    """
-
-    cmake_type = cmake_type.upper()
-    up_val = cmake_value.upper()
-    if cmake_type == "BOOL":
-        # https://gitlab.kitware.com/cmake/community/wikis/doc/cmake/VariablesListsStrings#boolean-values-in-cmake
-        return not (
-            up_val in ("FALSE", "OFF", "N", "NO", "0", "", "NOTFOUND")
-            or up_val.endswith("-NOTFOUND")
-        )
-    elif cmake_type == "FILEPATH":
-        if up_val.endswith("-NOTFOUND"):
-            return None
-        else:
-            return cmake_value
-    else:  # Directly return the cmake_value.
-        return cmake_value
-
-
-def get_cmake_cache_variables_from_file(
-    cmake_cache_file: IO[str],
-) -> Dict[str, CMakeValue]:
-    r"""Gets values in CMakeCache.txt into a dictionary.
-
-    Args:
-      cmake_cache_file: A CMakeCache.txt file object.
-    Returns:
-      dict: A ``dict`` containing the value of cached CMake variables.
-    """
-
-    results = dict()
-    for i, line in enumerate(cmake_cache_file, 1):
-        line = line.strip()
-        if not line or line.startswith(("#", "//")):
-            # Blank or comment line, skip
-            continue
-
-        # Almost any character can be part of variable name and value. As a practical matter, we assume the type must be
-        # valid if it were a C variable name. It should match the following kinds of strings:
-        #
-        #   USE_CUDA:BOOL=ON
-        #   "USE_CUDA":BOOL=ON
-        #   USE_CUDA=ON
-        #   USE_CUDA:=ON
-        #   Intel(R) MKL-DNN_SOURCE_DIR:STATIC=/path/to/pytorch/third_party/ideep/mkl-dnn
-        #   "OpenMP_COMPILE_RESULT_CXX_openmp:experimental":INTERNAL=FALSE
-        matched = re.match(
-            r'("?)(.+?)\1(?::\s*([a-zA-Z_-][a-zA-Z0-9_-]*)?)?\s*=\s*(.*)', line
-        )
-        if matched is None:  # Illegal line
-            raise ValueError(
-                "Unexpected line {} in {}: {}".format(i, repr(cmake_cache_file), line)
-            )
-        _, variable, type_, value = matched.groups()
-        if type_ is None:
-            type_ = ""
-        if type_.upper() in ("INTERNAL", "STATIC"):
-            # CMake internal variable, do not touch
-            continue
-        results[variable] = convert_cmake_value_to_python_value(value, type_)
-
-    return results
+if "CMAKE_GENERATOR" in os.environ:
+    USE_NINJA = os.environ["CMAKE_GENERATOR"].lower() == "ninja"
 
 
 class CMake:
@@ -135,14 +59,12 @@ class CMake:
         cmake3_version = CMake._get_version(which("cmake3"))
         cmake_version = CMake._get_version(which("cmake"))
 
-        _cmake_min_version = LooseVersion("3.13.0")
+        _cmake_min_version = LooseVersion("3.18.0")
         if all(
-            (
-                ver is None or ver < _cmake_min_version
-                for ver in [cmake_version, cmake3_version]
-            )
+            ver is None or ver < _cmake_min_version
+            for ver in [cmake_version, cmake3_version]
         ):
-            raise RuntimeError("no cmake or cmake3 with version >= 3.13.0 found")
+            raise RuntimeError("no cmake or cmake3 with version >= 3.18.0 found")
 
         if cmake3_version is None:
             cmake_command = "cmake"
@@ -184,7 +106,7 @@ class CMake:
         "Adds definitions to a cmake argument list."
         for key, value in sorted(kwargs.items()):
             if value is not None:
-                args.append("-D{}={}".format(key, value))
+                args.append(f"-D{key}={value}")
 
     def get_cmake_cache_variables(self) -> Dict[str, CMakeValue]:
         r"""Gets values in CMakeCache.txt into a dictionary.
@@ -221,8 +143,8 @@ class CMake:
             os.environ["CMAKE_GENERATOR"] = "Ninja"
             args.append("-GNinja")
         elif IS_WINDOWS:
-            generator = os.getenv("CMAKE_GENERATOR", "Visual Studio 15 2017")
-            supported = ["Visual Studio 15 2017", "Visual Studio 16 2019"]
+            generator = os.getenv("CMAKE_GENERATOR", "Visual Studio 16 2019")
+            supported = ["Visual Studio 16 2019", "Visual Studio 17 2022"]
             if generator not in supported:
                 print("Unsupported `CMAKE_GENERATOR`: " + generator)
                 print("Please set it to one of the following values: ")
@@ -248,9 +170,7 @@ class CMake:
                     args.append("-Ax64")
                     toolset_dict["host"] = "x64"
             if toolset_dict:
-                toolset_expr = ",".join(
-                    ["{}={}".format(k, v) for k, v in toolset_dict.items()]
-                )
+                toolset_expr = ",".join([f"{k}={v}" for k, v in toolset_dict.items()])
                 args.append("-T" + toolset_expr)
 
         base_dir = os.path.dirname(
@@ -281,10 +201,11 @@ class CMake:
                 # CMakeLists.txt.
                 var: var
                 for var in (
+                    "UBSAN_FLAGS",
                     "BLAS",
                     "WITH_BLAS",
                     "BUILDING_WITH_TORCH_LIBS",
-                    "CUDA_HOST_COMILER",
+                    "CUDA_HOST_COMPILER",
                     "CUDA_NVCC_EXECUTABLE",
                     "CUDA_SEPARABLE_COMPILATION",
                     "CUDNN_LIBRARY",
@@ -307,6 +228,9 @@ class CMake:
                     "WERROR",
                     "OPENSSL_ROOT_DIR",
                     "STATIC_DISPATCH_BACKEND",
+                    "SELECTED_OP_LIST",
+                    "TORCH_CUDA_ARCH_LIST",
+                    "TRACING_BASED",
                 )
             }
         )
@@ -394,11 +318,9 @@ class CMake:
         expected_wrapper = "/usr/local/opt/ccache/libexec"
         if IS_DARWIN and os.path.exists(expected_wrapper):
             if "CMAKE_C_COMPILER" not in build_options and "CC" not in os.environ:
-                CMake.defines(args, CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper))
+                CMake.defines(args, CMAKE_C_COMPILER=f"{expected_wrapper}/gcc")
             if "CMAKE_CXX_COMPILER" not in build_options and "CXX" not in os.environ:
-                CMake.defines(
-                    args, CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper)
-                )
+                CMake.defines(args, CMAKE_CXX_COMPILER=f"{expected_wrapper}/g++")
 
         for env_var_name in my_env:
             if env_var_name.startswith("gh"):
@@ -407,11 +329,9 @@ class CMake:
                 try:
                     my_env[env_var_name] = str(my_env[env_var_name].encode("utf-8"))
                 except UnicodeDecodeError as e:
-                    shex = ":".join(
-                        "{:02x}".format(ord(c)) for c in my_env[env_var_name]
-                    )
+                    shex = ":".join(f"{ord(c):02x}" for c in my_env[env_var_name])
                     print(
-                        "Invalid ENV[{}] = {}".format(env_var_name, shex),
+                        f"Invalid ENV[{env_var_name}] = {shex}",
                         file=sys.stderr,
                     )
                     print(e, file=sys.stderr)
@@ -468,7 +388,7 @@ class CMake:
             build_args += ["--"]
             if IS_WINDOWS and not USE_NINJA:
                 # We are likely using msbuild here
-                build_args += ["/p:CL_MPCount={}".format(max_jobs)]
+                build_args += [f"/p:CL_MPCount={max_jobs}"]
             else:
                 build_args += ["-j", max_jobs]
         self.run(build_args, my_env)

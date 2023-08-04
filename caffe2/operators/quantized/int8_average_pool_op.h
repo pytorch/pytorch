@@ -23,7 +23,7 @@ class Int8AveragePoolOp final : public ConvPoolOpBase<CPUContext> {
         this->order_ == StorageOrder::NHWC, "Int8 only supports NHWC order.");
   }
 
-  ~Int8AveragePoolOp() {
+  ~Int8AveragePoolOp() override {
     if (this->qnnpackOperator_ != nullptr) {
       qnnp_delete_operator(this->qnnpackOperator_);
       this->qnnpackOperator_ = nullptr;
@@ -43,7 +43,7 @@ class Int8AveragePoolOp final : public ConvPoolOpBase<CPUContext> {
     Y->scale = Y_scale;
     Y->zero_point = Y_zero_point;
 
-    CHECK_EQ(X.t.dim(), 4);
+    TORCH_CHECK_EQ(X.t.dim(), 4);
     const int channels = X.t.dim32(3);
     ConvPoolOpBase<CPUContext>::SetOutputSize(X.t, &(Y->t), channels);
 

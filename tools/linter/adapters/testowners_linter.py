@@ -8,10 +8,10 @@ has valid ownership information in a comment header. Valid means:
   - Each owner label actually exists in PyTorch
   - Each owner label starts with "module: " or "oncall: " or is in ACCEPTABLE_OWNER_LABELS
 """
-import json
 import argparse
+import json
 from enum import Enum
-from typing import List, Any, Optional, NamedTuple
+from typing import Any, List, NamedTuple, Optional
 from urllib.request import urlopen
 
 
@@ -80,11 +80,7 @@ def check_labels(
                 )
             )
 
-        if (
-            label.startswith("module:")
-            or label.startswith("oncall:")
-            or label in ACCEPTABLE_OWNER_LABELS
-        ):
+        if label.startswith(("module:", "oncall:")) or label in ACCEPTABLE_OWNER_LABELS:
             continue
 
         lint_messages.append(

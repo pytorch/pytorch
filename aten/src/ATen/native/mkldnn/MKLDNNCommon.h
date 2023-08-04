@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 
 #if AT_MKLDNN_ENABLED()
@@ -10,6 +10,9 @@ namespace at { namespace native {
 
 // Mapping ScalarType to ideep tensor data_type
 TORCH_API ideep::tensor::data_type get_mkldnn_dtype(ScalarType type);
+static inline ideep::tensor::data_type get_mkldnn_dtype(const Tensor& t) {
+  return get_mkldnn_dtype(t.scalar_type());
+}
 
 // Construct aten MKL-DNN tensor given an ideep tensor
 TORCH_API Tensor new_with_itensor_mkldnn(ideep::tensor&& it, c10::optional<ScalarType> dtype, c10::optional<Device> device);
@@ -21,8 +24,17 @@ TORCH_API ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
 // ideep::tensor will share the underlying buffer
 TORCH_API ideep::tensor itensor_view_from_dense(const Tensor& tensor);
 
+// Construct an `ideep::tensor` "view" from dense tensor using given desc, note
+// the ideep::tensor will share the underlying buffer
+TORCH_API ideep::tensor itensor_view_from_dense(
+    const at::Tensor& tensor,
+    const ideep::tensor::desc& desc);
+
 // Helper function for getting an ideep tensor out of an aten Tensor or MKL-DNN tensor.
 TORCH_API ideep::tensor itensor_from_tensor(const Tensor& tensor);
+
+// Set MKLDNN verbose level
+TORCH_API int set_verbose(int level);
 
 }}
 

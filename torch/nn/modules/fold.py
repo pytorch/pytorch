@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from .module import Module
 from .. import functional as F
 
@@ -50,13 +49,13 @@ class Fold(Module):
         output_size (int or tuple): the shape of the spatial dimensions of the
                                     output (i.e., ``output.sizes()[2:]``)
         kernel_size (int or tuple): the size of the sliding blocks
-        stride (int or tuple): the stride of the sliding blocks in the input
-                               spatial dimensions. Default: 1
-        padding (int or tuple, optional): implicit zero padding to be added on
-                                          both sides of input. Default: 0
         dilation (int or tuple, optional): a parameter that controls the
                                            stride of elements within the
                                            neighborhood. Default: 1
+        padding (int or tuple, optional): implicit zero padding to be added on
+                                          both sides of input. Default: 0
+        stride (int or tuple): the stride of the sliding blocks in the input
+                               spatial dimensions. Default: 1
 
     * If :attr:`output_size`, :attr:`kernel_size`, :attr:`dilation`,
       :attr:`padding` or :attr:`stride` is an int or a tuple of length 1 then
@@ -91,6 +90,7 @@ class Fold(Module):
         where ``divisor`` is a tensor that depends only on the shape
         and dtype of the ``input``:
 
+        >>> # xdoctest: +SKIP
         >>> input_ones = torch.ones(input.shape, dtype=input.dtype)
         >>> divisor = fold(unfold(input_ones))
 
@@ -134,7 +134,7 @@ class Fold(Module):
         padding: _size_any_t = 0,
         stride: _size_any_t = 1
     ) -> None:
-        super(Fold, self).__init__()
+        super().__init__()
         self.output_size = output_size
         self.kernel_size = kernel_size
         self.dilation = dilation
@@ -191,13 +191,13 @@ class Unfold(Module):
 
     Args:
         kernel_size (int or tuple): the size of the sliding blocks
-        stride (int or tuple, optional): the stride of the sliding blocks in the input
-                                         spatial dimensions. Default: 1
-        padding (int or tuple, optional): implicit zero padding to be added on
-                                          both sides of input. Default: 0
         dilation (int or tuple, optional): a parameter that controls the
                                            stride of elements within the
                                            neighborhood. Default: 1
+        padding (int or tuple, optional): implicit zero padding to be added on
+                                          both sides of input. Default: 0
+        stride (int or tuple, optional): the stride of the sliding blocks in the input
+                                         spatial dimensions. Default: 1
 
     * If :attr:`kernel_size`, :attr:`dilation`, :attr:`padding` or
       :attr:`stride` is an int or a tuple of length 1, their values will be
@@ -232,6 +232,7 @@ class Unfold(Module):
         where ``divisor`` is a tensor that depends only on the shape
         and dtype of the ``input``:
 
+        >>> # xdoctest: +SKIP
         >>> input_ones = torch.ones(input.shape, dtype=input.dtype)
         >>> divisor = fold(unfold(input_ones))
 
@@ -257,6 +258,7 @@ class Unfold(Module):
         >>> output.size()
         torch.Size([2, 30, 4])
 
+        >>> # xdoctest: +IGNORE_WANT
         >>> # Convolution is equivalent with Unfold + Matrix Multiplication + Fold (or view to output shape)
         >>> inp = torch.randn(1, 3, 10, 12)
         >>> w = torch.randn(2, 3, 4, 5)
@@ -285,7 +287,7 @@ class Unfold(Module):
         padding: _size_any_t = 0,
         stride: _size_any_t = 1
     ) -> None:
-        super(Unfold, self).__init__()
+        super().__init__()
         self.kernel_size = kernel_size
         self.dilation = dilation
         self.padding = padding

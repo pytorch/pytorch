@@ -4,14 +4,13 @@
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace torch {
 namespace autograd {
 
 struct PyAnomalyMetadata : public AnomalyMetadata {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-writable-strings)
   static constexpr const char* ANOMALY_TRACE_KEY = "traceback_";
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-writable-strings)
   static constexpr const char* ANOMALY_PARENT_KEY = "parent_";
 
   PyAnomalyMetadata() {

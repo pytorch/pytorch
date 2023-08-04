@@ -17,6 +17,7 @@
 #include <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
 typedef id<MTLCommandQueue> MTLCommandQueue_t;
 typedef id<MTLCommandBuffer> MTLCommandBuffer_t;
+typedef id<MTLComputeCommandEncoder> MTLComputeCommandEncoder_t;
 typedef id<MTLSharedEvent> MTLSharedEvent_t;
 typedef id<MTLDevice> MTLDevice_t;
 #else
@@ -24,6 +25,7 @@ typedef void* MTLCommandQueue_t;
 typedef void* MTLCommandQueue;
 typedef void* MTLCommandBuffer_t;
 typedef void* MTLCommandBuffer;
+typedef void* MTLComputeCommandEncoder_t;
 typedef void* MTLSharedEvent_t;
 typedef void* dispatch_queue_t;
 typedef void* MTLDevice_t;
@@ -38,10 +40,19 @@ namespace mps {
 //  MPSStream
 //-----------------------------------------------------------------
 
+enum class SyncType {
+  NONE,               // no commit to command buffer
+  COMMIT,             // commit and flush the command buffer
+  COMMIT_AND_WAIT,    // flush and wait for command buffer execution to finish
+  COMMIT_AND_CONTINUE,// commit and continue with a new underlying command buffer
+  COMMIT_ADAPTIVE,    // commit adaptively based on available memory
+};
+
 class TORCH_API MPSStream
 {
 public:
   enum Unchecked { UNCHECKED };
+
   /// Construct a MPSStream from a Stream.  This construction is checked,
   /// and will raise an error if the Stream is not, in fact, a MPS stream.
   explicit MPSStream(Stream stream);
@@ -50,12 +61,19 @@ public:
   MTLCommandQueue_t commandQueue() const { return _commandQueue; };
   dispatch_queue_t queue() const { return _serialQueue; }
 
-  MTLCommandBuffer_t commandBuffer();
-  void commit(bool flush);
-  void commitAndWait();
-  void synchronize();
-
-  void flush();
+  MPSCommandBuffer* commandBuffer();
+  MTLComputeCommandEncoder_t commandEncoder();
+  void endKernelCoalescing();
+  void synchronize(SyncType syncType);
+  void fill(id<MTLBuffer> buffer, uint8_t value, size_t length, size_t offset, SyncType syncType = SyncType::NONE);
+  void copy(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer,
+            size_t length, size_t srcOffset, size_t dstOffset,
+            uint64_t profileId, SyncType syncType = SyncType::NONE);
+  void copy_and_sync(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer,
+                     size_t length, size_t srcOffset, size_t dstOffset,
+                     bool non_blocking, uint64_t profileId);
+  void executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results, SyncType syncType = SyncType::NONE);
+  void addCompletedHandler(MTLCommandBufferHandler block);
 
   /// Get the MPS device index that this stream is associated with.
   c10::DeviceIndex device_index() const { return _stream.device_index(); }
@@ -69,11 +87,21 @@ public:
 
 private:
   Stream _stream;
-  MTLCommandQueue_t   _commandQueue = nil;
-  MTLCommandBuffer_t  _commandBuffer = nil;
-  void _flush(bool commitAndWait) const;
+  MTLCommandQueue_t _commandQueue = nil;
+  MPSCommandBuffer* _commandBuffer = nil;
+  MPSCommandBuffer* _prevCommandBuffer = nil;
+  MTLComputeCommandEncoder_t _commandEncoder = nil;
+  MPSGraphExecutionDescriptor *_executionDescriptor = nil;
+  MPSGraphCompilationDescriptor *_compilationDescriptor = nil;
+  dispatch_queue_t _serialQueue = nullptr;
+  // CommitAndContinue is enabled by default
+  bool _enableCommitAndContinue = true;
 
-  dispatch_queue_t    _serialQueue = nullptr;
+  // use synchronize() to access any of these commit functions outside MPSStream
+  void commit();
+  void commitAndWait();
+  void commitAndContinue();
+  void flush();
 };
 
 /**
@@ -110,21 +138,27 @@ class TORCH_API MPSStreamImpl
 
 struct TORCH_API MPSEvent
 {
-  MPSEvent();
-  // MPSEvent(id<MTLDevice> device);
-
+  // for a new instance of MPSEvent, sometimes we want an empty shell and don't
+  // necessarily want to create events or listeners. So we defer initialization
+  // until we actually use the event (e.g., record, notify, etc.)
+  MPSEvent(bool deferInitialization = true);
   ~MPSEvent();
   MTLSharedEvent_t event() const {return _event; }
 
-  void recordEvent(MPSStream *stream);
-  void waitForEvent(MPSStream *queue); // waits on the cpu
-  bool queryEvent();
-  uint64_t getCurrentValue() { return _currentValue; }
-  void setCurrentValue(uint64_t currValue) { _currentValue = currValue; }
+  void recordEvent(bool syncEvent = false);
+  void waitForEvent(bool syncEvent = false); // waits on the cpu
+  void notifyEvent(MTLSharedEventNotificationBlock block);
+  bool queryEvent() const;
+  uint64_t getCurrentValue() const { return _signalCounter; }
+  void setCurrentValue(uint64_t currValue) { _signalCounter = currValue; }
 private:
-  bool _isRecorded = false;
-  uint64_t  _currentValue = 0;
+  bool is_initialized;
+  uint64_t _signalCounter;
+  MPSStream* _stream;
   MTLSharedEvent_t _event;
+  MTLSharedEventListener* _listener;
+
+  void initialize();
 };
 
 typedef MPSEvent* mpsEvent_t;

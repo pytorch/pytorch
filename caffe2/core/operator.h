@@ -74,7 +74,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
   explicit OperatorBase(
       const c10::FunctionSchema& schema,
       std::vector<c10::IValue> inputs,
-      c10::List<at::Tensor> outputs);
+      std::vector<caffe2::Tensor> outputs);
 #endif
 
   virtual ~OperatorBase() noexcept;
@@ -157,7 +157,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
         !std::is_same<T, Tensor>::value,
         "You should use Input<Tensor>(int, DeviceType) for "
         "Tensor.");
-    DCHECK_LT((size_t)idx, inputs_.size());
+    TORCH_DCHECK_LT((size_t)idx, inputs_.size());
     try {
       return inputs_.at(idx)->template Get<T>();
     } catch (::caffe2::EnforceNotMet& enf) {
@@ -178,7 +178,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
       static_assert(
           std::is_same<T, Tensor>::value,
           "Input(int, DeviceType) is only available for Tensor");
-      DCHECK_LT((size_t)idx, inputs_.size());
+      TORCH_DCHECK_LT((size_t)idx, inputs_.size());
       try {
         // TODO(jerryzh): We'll need to check device type in Get<T>() later
         // Get<T>() -> Get<T>(type)
@@ -193,7 +193,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     }
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-    DCHECK_LT(0U, newstyle_inputs_.size());
+    TORCH_DCHECK_LT(0U, newstyle_inputs_.size());
     IValue ival;
     if (newstyle_inputs_[0].isTensorList()) {
       // if the first input is a tensor list, we get input tensors by indexing
@@ -201,12 +201,12 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
       // are accessible as inputs. any hypothetical input tensors that come
       // after the list are not accessible.
       auto tensorList = newstyle_inputs_[0].toTensorVector();
-      DCHECK_LT((size_t)idx, tensorList.size());
+      TORCH_DCHECK_LT((size_t)idx, tensorList.size());
       ival = tensorList[idx];
     } else {
       // if the first input is not a tensor list, we get input tensors by
       // indexing into the inputs.
-      DCHECK_LT((size_t)idx, newstyle_inputs_.size());
+      TORCH_DCHECK_LT((size_t)idx, newstyle_inputs_.size());
       ival = newstyle_inputs_[idx];
     }
     CAFFE_ENFORCE(
@@ -250,15 +250,12 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     }
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-    at::Tensor output = newstyle_outputs_[idx];
-    if (!output.defined() || caffe2::Tensor(output).GetDeviceType() != type) {
+    auto &output = output_tensors_[idx];
+    if (!output.defined() || output.GetDeviceType() != type) {
       // Fix tensor type
-      Tensor tensor = Tensor(type);
-      output = at::Tensor(std::move(tensor.getIntrusivePtr()));
+      output = Tensor(type);
     }
-    output_tensors_[idx] = caffe2::Tensor(output);
-    newstyle_outputs_[idx] = std::move(output);
-    return &output_tensors_[idx];
+    return &output;
 #else
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
 #endif
@@ -280,9 +277,6 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     if (!isLegacyOperator()) {
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-      newstyle_outputs_[idx] = at::Tensor(tensor);
-
-      // also update the tensor in the hack
       output_tensors_[idx] = std::move(tensor);
 #else
       CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
@@ -310,16 +304,12 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     }
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-    at::Tensor output = newstyle_outputs_[idx];
-    Tensor tensor = output.defined()
-        ? GetSizedTensorWithOptions(caffe2::Tensor(output), dims, options)
+    auto &output = output_tensors_[idx];
+    output = output.defined()
+        ? GetSizedTensorWithOptions(std::move(output), dims, options)
         : caffe2::empty(dims, options);
-    // assign it back in case it changed
-    output = at::Tensor(std::move(tensor.getIntrusivePtr()));
 
-    output_tensors_[idx] = caffe2::Tensor(output);
-    newstyle_outputs_[idx] = std::move(output);
-    return &output_tensors_[idx];
+    return &output;
 #else
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
 #endif
@@ -434,7 +424,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     }
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-    return newstyle_outputs_.size();
+    return output_tensors_.size();
 #else
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
 #endif
@@ -599,8 +589,8 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
 
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-  c10::List<at::Tensor> move_newstyle_outputs() && {
-    return std::move(newstyle_outputs_);
+  std::vector<caffe2::Tensor> move_output_tensors() && {
+    return std::move(output_tensors_);
   }
 #endif
 
@@ -620,7 +610,6 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   std::unique_ptr<const c10::FunctionSchema> fn_schema_;
   vector<c10::IValue> newstyle_inputs_;
-  c10::List<at::Tensor> newstyle_outputs_;
 #endif
   // HACK
   // We preserve the fact that Output() returns Tensor*
@@ -819,7 +808,7 @@ class Operator : public OperatorBase {
   explicit Operator(
       const c10::FunctionSchema& fn_schema,
       std::vector<c10::IValue> inputs,
-      c10::List<at::Tensor> outputs,
+      std::vector<caffe2::Tensor> outputs,
       StreamId stream = 0)
       : OperatorBase(fn_schema, std::move(inputs), std::move(outputs)) {
     // In the constructor, we switch to the device so that the child class
@@ -1168,7 +1157,7 @@ class Operator : public OperatorBase {
   template <class... Args>                                \
   explicit name(Args&&... args)                           \
       : Operator<Context>(std::forward<Args>(args)...) {} \
-  virtual ~name() noexcept {}
+  virtual ~name() noexcept override {}
 
 // Helpers to implement runtime op polymorphism. Often it's convenient to make
 // an op work on different input types (e.g. i32 vs i64 indices) or special-case

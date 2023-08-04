@@ -1,10 +1,14 @@
 #pragma once
 
+#include <ATen/core/boxing/OperatorKernel.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
 #include <c10/util/TypeList.h>
+#include <ATen/core/IListRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/Metaprogramming.h>
+
+#include <utility>
 
 namespace c10 {
 
@@ -64,27 +68,6 @@ class OperatorHandle;
  * the expected operator signature at each call site.
  */
 
-/**
- * Inherit from OperatorKernel to implement a c10 kernel.
- *
- * Example:
- * > namespace {
- * >   class my_kernel_cpu final : public c10::OperatorKernel {
- * >   public:
- * >     Tensor operator()(Tensor a, Tensor b) {...}
- * >   };
- * > }
- *
- * The kernel class is allowed to have members but these are equivalent
- * to global variables. The kernel implementation is responsible for
- * preventing race conditions on them.
- *
- * See below for how to register this kernel with PyTorch.
- */
-struct TORCH_API OperatorKernel : public c10::intrusive_ptr_target {
-  virtual ~OperatorKernel() = default;
-};
-
 namespace impl {
   // supported_primitive_arg_types defines which primitive types we allow in
   // kernel functions as arguments or returns.
@@ -122,12 +105,12 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes, class Enable = void>
   struct assert_is_valid_input_type {
     assert_is_valid_input_type() {
-      guts::if_constexpr<guts::typelist::contains<supported_primitive_arg_types, T>::value>([] {
+      if constexpr (guts::typelist::contains<supported_primitive_arg_types, T>::value) {
         /* everything is ok, this is a primitive type */
-      }, /* else */ [] {
+      } else {
         /* otherwise this must be an instance of a valid custom class, since it can only
            have been created via IValue(x), which ensures this. */
-      });
+      }
     }
   };
 
@@ -228,12 +211,12 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes, class Enable = void>
   struct assert_is_valid_output_type {
     assert_is_valid_output_type() {
-      guts::if_constexpr<guts::typelist::contains<supported_primitive_arg_types, T>::value>([] {
+      if constexpr(guts::typelist::contains<supported_primitive_arg_types, T>::value) {
         /* everything is ok, this is a primitive type */
-      }, /* else */ [] {
+      } else {
         /* otherwise T is verified to be a registered custom class in the IValue
           constructor, so no benefit in double-checking here */
-      });
+      }
     }
   };
 
@@ -362,6 +345,13 @@ namespace impl {
     }
   };
 
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<at::ITensorListRef, AllowDeprecatedTypes> final {
+    static List<at::Tensor> call(IValue& v) {
+      return v.toTensorList();
+    }
+  };
+
   template<class T, bool AllowDeprecatedTypes>
   struct ivalue_to_arg<ArrayRef<T>, AllowDeprecatedTypes> final {
     // If an argument is ArrayRef<T>, convert the IValue to a std::vector<T> and pass that
@@ -373,7 +363,27 @@ namespace impl {
   template<bool AllowDeprecatedTypes>
   struct ivalue_to_arg<c10::SymIntArrayRef, AllowDeprecatedTypes> final {
     static std::vector<c10::SymInt> call(IValue& v) {
-      return ivalue_to_arg<std::vector<c10::SymInt>, AllowDeprecatedTypes>::call(v);
+      if (v.isIntList()) {
+        std::vector<c10::SymInt> r;
+        auto src = v.toIntList();
+        std::transform(src.begin(), src.end(), std::back_inserter(r), [](int64_t i) { return c10::SymInt(i); });
+        return r;
+      } else {
+        return ivalue_to_arg<std::vector<c10::SymInt>, AllowDeprecatedTypes>::call(v);
+      }
+    }
+  };
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<c10::OptionalArray<c10::SymInt>, AllowDeprecatedTypes> final {
+    static OptionalArray<c10::SymInt> call(IValue& v) {
+      if (v.isIntList()) {
+        std::vector<c10::SymInt> r;
+        auto src = v.toIntList();
+        std::transform(src.begin(), src.end(), std::back_inserter(r), [](int64_t i) { return c10::SymInt(i); });
+        return OptionalArray<c10::SymInt>(std::move(r));
+      } else {
+        return std::move(v).to<OptionalArray<c10::SymInt>>();
+      }
     }
   };
   template<class T, bool AllowDeprecatedTypes>
@@ -561,34 +571,19 @@ namespace impl {
       using ArgTypes = typename c10::remove_DispatchKeySet_arg_from_func<KernelFunctor>::parameter_types;
       constexpr bool has_outputs = !std::is_same<void, ReturnType>::value;
       constexpr size_t num_inputs = guts::typelist::size<ArgTypes>::value;
-#ifdef __cpp_if_constexpr
       if constexpr (has_outputs) {
-#else
-      guts::if_constexpr<has_outputs>([&] (auto delay_check) {
-#endif
         // Decay ReturnType to ReturnType_ so that if a reference gets returned, we actually store it by value
         // and don't get a dangling reference. This is only required because some kernels still return `Tensor&`.
-#ifdef __cpp_if_constexpr
-        using ReturnType_ = std::decay_t<ReturnType>;
+        // [Note: VC++ and 'std': ambiguous symbol]
+        using ReturnType_ = ::std::decay_t<ReturnType>;
         ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack);
-#else
-        using ReturnType_ = std::decay_t<typename decltype(delay_check)::template type_identity<ReturnType>>;
-        ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, delay_check(stack));
-#endif
         torch::jit::drop(*stack, num_inputs);
-        push_outputs<ReturnType_, AllowDeprecatedTypes>::call(std::move(output), stack);
-#ifdef __cpp_if_constexpr
+        // See note [ VC++ and 'std': ambiguous symbol]
+        push_outputs<ReturnType_, AllowDeprecatedTypes>::call(::std::move(output), stack);
       } else {
-#else
-      }, /* else */ [&] {
-#endif
         call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack);
         torch::jit::drop(*stack, num_inputs);
-#ifdef __cpp_if_constexpr
       }
-#else
-      });
-#endif
     }
   };
 } // namespace impl

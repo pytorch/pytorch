@@ -3,9 +3,9 @@
 #include <ATen/native/xnnpack/Linear.h>
 #include <ATen/native/xnnpack/OpContext.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
+#include <ATen/Context.h>
+
+namespace at::native::xnnpack {
 
 c10::intrusive_ptr<LinearOpContext>
 XNNPackLinearOpContext::create_context(
@@ -133,10 +133,12 @@ XNNPackTransposeConv2dOpContext::create_context(at::Tensor&& weight,
 }
 
 Tensor XNNPackConv2dOpContext::run(const Tensor& input) {
+  std::lock_guard<std::mutex> lock(xnnp_mutex_);
   return xnnpack::internal::convolution2d::run(op_context_, input);
 }
 
 Tensor XNNPackTransposeConv2dOpContext::run(const Tensor& input) {
+  std::lock_guard<std::mutex> lock(xnnp_mutex_);
   return xnnpack::internal::convolution2d::run(op_context_, input);
 }
 
@@ -152,8 +154,6 @@ void XNNPackTransposeConv2dOpContext::free_orig_weight_and_bias() {
   orig_bias_.reset();
 }
 
-} // namespace xnnpack
-} // namespace native
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

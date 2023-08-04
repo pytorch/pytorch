@@ -616,8 +616,7 @@ struct UnCopyableDataset : public datasets::Dataset<UnCopyableDataset> {
   UnCopyableDataset(UnCopyableDataset&&) = default;
   UnCopyableDataset& operator=(UnCopyableDataset&&) = default;
 
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~UnCopyableDataset() = default;
+  ~UnCopyableDataset() override = default;
 
   Example<> get(size_t index) override {
     return {
@@ -836,12 +835,10 @@ TEST(DataTest, CanUseCustomTypeAsIndexType) {
   auto data_loader = torch::data::make_data_loader(
       TestIndexDataset(23), TestIndexSampler(23), kBatchSize);
 
-  size_t i = 0;
   for (auto batch : *data_loader) {
     for (const auto j : c10::irange(kBatchSize)) {
       ASSERT_EQ(batch.at(j), 10 + j);
     }
-    i += 1;
   }
 }
 
@@ -1052,12 +1049,10 @@ TEST(DataLoaderTest, MakeDataLoaderDefaultsAsExpected) {
 }
 
 struct UnsizedDataset : public datasets::Dataset<UnsizedDataset> {
-  // NOLINTNEXTLINE(cppcoreguidelines-explicit--functions,modernize-use-override)
-  torch::data::Example<> get(size_t i) {
+  torch::data::Example<> get(size_t i) override {
     return {torch::ones(i), torch::ones(i)};
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-explicit--functions,modernize-use-override)
-  torch::optional<size_t> size() const noexcept {
+  torch::optional<size_t> size() const noexcept override {
     return torch::nullopt;
   }
 };

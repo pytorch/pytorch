@@ -38,7 +38,7 @@ void processRemoteProfiledEvents(
   TORCH_CHECK(
       enabled,
       "Profiler was expected to be enabled. This can happen in callback "
-      " continutations that run in different threads, and the TLS of the "
+      " continuations that run in different threads, and the TLS of the "
       " profiler was not propagated.");
   std::vector<LegacyEvent> events = rpcWithProfilingResp.getProfiledEvents();
   const auto& profilingId = rpcWithProfilingResp.getProfilingId();
@@ -92,7 +92,7 @@ std::string makeRPCError(
   return fmt::format(
       "{}:{}:{}",
       torch::distributed::rpc::kRPCErrorPrefix,
-      errorType,
+      static_cast<int>(errorType),
       rpcErrorStr);
 }
 
@@ -298,7 +298,7 @@ parseWireSections(const void* data, size_t data_size) {
       break;
     }
     size_t sz = c10::stoll(std::string(sizePtr, ptr - sizePtr));
-    headerEnts.emplace_back(std::make_pair(name, sz));
+    headerEnts.emplace_back(name, sz);
     ++ptr; // past the '\n'
   }
   if (!ok) {
@@ -502,8 +502,8 @@ std::vector<at::IValue> readWrappedPayload(
   payload.resize(indexToRead);
 
   TORCH_INTERNAL_ASSERT(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      payload.size() > additionalPayloadSize,
+      additionalPayloadSize > 0 &&
+          static_cast<int64_t>(payload.size()) > additionalPayloadSize,
       "Wrong payload sizes: payload.size() is ",
       payload.size(),
       " but additional payload size is ",

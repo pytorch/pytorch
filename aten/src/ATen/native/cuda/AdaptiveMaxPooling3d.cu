@@ -23,17 +23,16 @@
 #include <cmath>
 
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
-__device__ inline int start_index(int a, int b, int c) {
-  return (int)std::floor((float)(a * c) / b);
+__device__ inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
+  return (a / b) * c + ((a % b) * c) / b;
 }
 
-__device__ inline int end_index(int a, int b, int c) {
-  return (int)std::ceil((float)((a + 1) * c) / b);
+__device__ inline int64_t end_index(int64_t a, int64_t b, int64_t c) {
+  return 1 + ((a + 1) * c - 1) / b;
 }
 
 // 5d tensor B x D x T x H x W
@@ -45,7 +44,7 @@ __device__ inline int end_index(int a, int b, int c) {
  */
  template <typename T>
 __global__ void adaptivemaxpool(
-                        T *input, T *output, int64_t *indices,
+                        const T *input, T *output, int64_t *indices,
                         int isizeT, int isizeH, int isizeW,
                         int osizeT, int osizeH, int osizeW,
                         int64_t istrideD,
@@ -74,7 +73,7 @@ __global__ void adaptivemaxpool(
   int kT = iendT - istartT;
 
   // input offset by slice/feature and earliest relevant frame/time
-  T *input_dt = input + d*istrideD + istartT*istrideT;
+  const T *input_dt = input + d*istrideD + istartT*istrideT;
   // output offset by slice/feature and frame/time
   T *output_dt = output + o_plane*osizeH*osizeW;
   // indices offset by slice/feature and frame/time
@@ -94,7 +93,7 @@ __global__ void adaptivemaxpool(
       int kW = iendW - istartW;
 
       // Compute the average pooling from corresponding input pixels
-      T *ptr_input = input_dt + istartH*istrideH + istartW*istrideW;
+      const T *ptr_input = input_dt + istartH*istrideH + istartW*istrideW;
       T *ptr_output = output_dt + oh*osizeW + ow;
       int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
       int64_t argmax = istartT*isizeH*isizeW + istartH*isizeW + istartW;
@@ -122,7 +121,7 @@ __global__ void adaptivemaxpool(
 
 template <typename scalar_t>
 void adaptivemaxpool_loop(
-                        scalar_t *input_data,
+                        const scalar_t *input_data,
                         scalar_t *output_data,
                         int64_t *indices_data,
                         int64_t totalZ,
@@ -159,7 +158,7 @@ void adaptivemaxpool_loop(
  */
  template <typename T>
 __global__ void adaptivemaxgradinput(
-  T *gradInput, T *gradOutput, int64_t *indices,
+  T *gradInput, const T *gradOutput, const int64_t *indices,
   int isizeT, int isizeH, int isizeW,
   int osizeT, int osizeH, int osizeW,
   int64_t offsetZ
@@ -183,16 +182,16 @@ __global__ void adaptivemaxgradinput(
   // gradInput offset by slice/feature
   T *gradInput_d = gradInput + d*isizeT*isizeH*isizeW;
   // gradOutput offset by slice/feature and frame/otme
-  T *gradOutput_dt = gradOutput + o_plane*osizeH*osizeW;
+  const T *gradOutput_dt = gradOutput + o_plane*osizeH*osizeW;
   // indices offset by slice/feature and frame/otme
-  int64_t *indices_dt = indices + o_plane*osizeH*osizeW;
+  const int64_t *indices_dt = indices + o_plane*osizeH*osizeW;
 
   // For all output pixels...
   for(oh = ostartH; oh < oendH; oh += ostepH) {
     for(ow = ostartW; ow < oendW; ow += ostepW) {
       // Compute the gradients for the argmax input pixel
-      T *ptr_gradOutput = gradOutput_dt + oh*osizeW + ow;
-      int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
+      const T *ptr_gradOutput = gradOutput_dt + oh*osizeW + ow;
+      const int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
       T grad_delta = *ptr_gradOutput;
       int argmax = (*ptr_ind);
       gradInput_d[argmax] += grad_delta;
@@ -203,8 +202,8 @@ __global__ void adaptivemaxgradinput(
 template <typename scalar_t>
 void adaptivemaxgradinput_loop(
   scalar_t *gradInput_data,
-  scalar_t *gradOutput_data,
-  int64_t *indices_data,
+  const scalar_t *gradOutput_data,
+  const int64_t *indices_data,
   int64_t totalZ,
   int isizeT, int isizeH, int isizeW,
   int osizeT, int osizeH, int osizeW)
@@ -235,7 +234,7 @@ void adaptivemaxgradinput_loop(
  */
  template <typename T>
 __global__ void atomicadaptivemaxgradinput(
-  T *gradInput, T *gradOutput, int64_t *indices,
+  T *gradInput, const T *gradOutput, const int64_t *indices,
   int isizeT, int isizeH, int isizeW,
   int osizeT, int osizeH, int osizeW,
   int64_t offsetZ
@@ -259,16 +258,16 @@ __global__ void atomicadaptivemaxgradinput(
   // gradInput offset by slice/feature
   T *gradInput_d = gradInput + d*isizeT*isizeH*isizeW;
   // gradOutput offset by slice/feature and frame/otme
-  T *gradOutput_dt = gradOutput + o_plane*osizeH*osizeW;
+  const T *gradOutput_dt = gradOutput + o_plane*osizeH*osizeW;
   // indices offset by slice/feature and frame/otme
-  int64_t *indices_dt = indices + o_plane*osizeH*osizeW;
+  const int64_t *indices_dt = indices + o_plane*osizeH*osizeW;
 
   // For all output pixels...
   for(oh = ostartH; oh < oendH; oh += ostepH) {
     for(ow = ostartW; ow < oendW; ow += ostepW) {
       // Compute the gradients for the argmax input pixel
-      T *ptr_gradOutput = gradOutput_dt + oh*osizeW + ow;
-      int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
+      const T *ptr_gradOutput = gradOutput_dt + oh*osizeW + ow;
+      const int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
       T grad_delta = *ptr_gradOutput;
       int64_t argmax = (*ptr_ind);
       gpuAtomicAddNoReturn(&(gradInput_d[argmax]), grad_delta);
@@ -279,8 +278,8 @@ __global__ void atomicadaptivemaxgradinput(
 template <typename scalar_t>
 void atomicadaptivemaxgradinput_loop(
   scalar_t *gradInput_data,
-  scalar_t *gradOutput_data,
-  int64_t *indices_data,
+  const scalar_t *gradOutput_data,
+  const int64_t *indices_data,
   int64_t totalZ,
   int isizeT, int isizeH, int isizeW,
   int osizeT, int osizeH, int osizeW)
@@ -314,7 +313,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cuda)
 
   checkAllSameGPU(
       __func__, {output_arg, indices_arg, input_arg});
-  if (input.numel() == 0) {
+  if (input.numel() == 0 || output.numel() == 0) {
     return;
   }
 
@@ -357,9 +356,9 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cuda)
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, input_.scalar_type(), "adaptive_max_pool3d_cuda", [&] {
-        scalar_t* input_data = input_.data_ptr<scalar_t>();
-        scalar_t* output_data = output.data_ptr<scalar_t>();
-        int64_t* indices_data = indices.data_ptr<int64_t>();
+        const scalar_t* input_data = input_.const_data_ptr<scalar_t>();
+        scalar_t* output_data = output.mutable_data_ptr<scalar_t>();
+        int64_t* indices_data = indices.mutable_data_ptr<int64_t>();
 
         adaptivemaxpool_loop(
             input_data,
@@ -441,9 +440,9 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cuda)
         input.scalar_type(),
         "adaptive_max_pool3d_backward_cuda",
         [&] {
-          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
-          scalar_t* gradOutput_data = gradOutput_.data_ptr<scalar_t>();
-          int64_t* indices_data = indices.data_ptr<int64_t>();
+          scalar_t* gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
+          const scalar_t* gradOutput_data = gradOutput_.const_data_ptr<scalar_t>();
+          const int64_t* indices_data = indices.const_data_ptr<int64_t>();
 
           atomicadaptivemaxgradinput_loop(
               gradInput_data,
@@ -464,9 +463,9 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cuda)
         input.scalar_type(),
         "adaptive_max_pool3d_backward_cuda",
         [&] {
-          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
-          scalar_t* gradOutput_data = gradOutput_.data_ptr<scalar_t>();
-          int64_t* indices_data = indices.data_ptr<int64_t>();
+          scalar_t* gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
+          const scalar_t* gradOutput_data = gradOutput_.const_data_ptr<scalar_t>();
+          const int64_t* indices_data = indices.const_data_ptr<int64_t>();
 
           adaptivemaxgradinput_loop(
               gradInput_data,
@@ -482,5 +481,4 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cuda)
         });
   }
  }
-} // at::native
-} // at
+} // namespace at::native

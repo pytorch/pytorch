@@ -75,11 +75,8 @@ class TORCH_API SGD : public Optimizer {
         "Nesterov momentum requires a momentum and zero dampening");
   }
 
-  explicit SGD(
-      std::vector<Tensor> params,
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      SGDOptions defaults)
-      : SGD({std::move(OptimizerParamGroup(params))}, defaults) {}
+  explicit SGD(std::vector<Tensor> params, SGDOptions defaults)
+      : SGD({OptimizerParamGroup(std::move(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;
 

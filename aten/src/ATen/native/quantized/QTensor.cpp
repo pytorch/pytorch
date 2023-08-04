@@ -1,12 +1,14 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 
 #include <c10/util/irange.h>
+
+#include <cmath>
+#include <utility>
 
 namespace at {
 namespace native {
@@ -173,7 +175,7 @@ Tensor& set_storage_quantized_(
     IntArrayRef sizes,
     IntArrayRef strides) {
   auto* self_ = self.unsafeGetTensorImpl();
-  self_->set_storage_keep_dtype(storage);
+  self_->set_storage_keep_dtype(std::move(storage));
   self_->set_storage_offset(storage_offset);
   self_->set_sizes_and_strides(sizes, strides);
   return self;
@@ -229,7 +231,7 @@ bool equal_quantized_cpu(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(
       self.device().type() == kCPU && other.device().type() == kCPU,
       "quantized_equal is implemented only for the QuantizedCPU backend");
-  if (!other.is_quantized()) {
+  if (!self.is_quantized() || !other.is_quantized()) {
     return false;
   }
 
@@ -283,7 +285,7 @@ std::tuple<double, int64_t> _choose_qparams_per_tensor(
   return std::make_tuple(q_params.scale, q_params.zero_point);
 }
 
-float calculate_quant_loss(
+static float calculate_quant_loss(
     const float* input,
     int numel,
     float xmin,
@@ -310,7 +312,7 @@ float calculate_quant_loss(
   // remainder loop
   for (; i < numel; i++) {
     q_input[i] = std::max(
-        0.0f, std::min<float>(nearbyint((input[i] - xmin) * inverse_scale), qmax));
+        0.0f, std::min<float>(std::nearbyint((input[i] - xmin) * inverse_scale), qmax));
     q_input[i] = q_input[i] * scale + xmin;
     norm += (input[i] - q_input[i]) * (input[i] - q_input[i]);
   }
@@ -330,6 +332,12 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
     const double ratio,
     int64_t bit_width) {
 
+  if (numel < 0 || numel > input_tensor.numel()) {
+    TORCH_CHECK(false, "numel is out of the bound of input tensor");
+  }
+
+  TORCH_CHECK(numel <= input_tensor.numel(), "numel ", numel,
+      " greater than input_tensor.numel() ", input_tensor.numel());
   const float* input_row = input_tensor.data_ptr<float>();
   float xmin = *std::min_element(input_row, input_row + numel);
   float xmax = *std::max_element(input_row, input_row + numel);

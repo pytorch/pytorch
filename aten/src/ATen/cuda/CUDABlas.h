@@ -55,22 +55,16 @@ template <>
 void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double));
 template <>
 void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
-#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 21000)
-  template <>
-  void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>));
-#endif
-#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 21000)
-  template <>
-  void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
-#endif
+template <>
+void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>));
+template <>
+void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
 template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
-#if defined(USE_ROCM) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
-#endif
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER)
+#if !defined(USE_ROCM) && !defined(_MSC_VER)
 enum GEMMAndBiasActivationEpilogue {
   None,
   RELU,
@@ -95,6 +89,19 @@ void gemm_and_bias(
     Dtype* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None);
+
+void int8_gemm(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    const int8_t* mat1_ptr,
+    int64_t mat1_ld,
+    const int8_t* mat2_ptr,
+    int64_t mat2_ld,
+    int32_t* result_ptr,
+    int64_t result_ld);
 #endif
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                        \
@@ -118,15 +125,21 @@ template <>
 void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>));
 template <>
 void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
-#if defined(USE_ROCM) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template <>
 void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
-#endif
 
+#if defined(USE_ROCM) && ROCM_VERSION <= 55000
+// ROCm 5.6 hipblas matches the const Dtype *A API, but prior hipblas does not.
+#define CUDABLAS_TRSM_ARGTYPES(Dtype)                                  \
+  hipblasHandle_t handle, hipblasSideMode_t side, hipblasFillMode_t uplo, \
+      hipblasOperation_t trans, hipblasDiagType_t diag, int m, int n,    \
+      const Dtype *alpha,       Dtype *A, int lda, Dtype *B, int ldb
+#else
 #define CUDABLAS_TRSM_ARGTYPES(Dtype)                                  \
   cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, \
       cublasOperation_t trans, cublasDiagType_t diag, int m, int n,    \
       const Dtype *alpha, const Dtype *A, int lda, Dtype *B, int ldb
+#endif
 
 template <typename Dtype>
 inline void trsm(CUDABLAS_TRSM_ARGTYPES(Dtype)) {
@@ -180,18 +193,14 @@ template <>
 void gemv<double>(CUDABLAS_GEMV_ARGTYPES(double));
 template <>
 void gemv<float>(CUDABLAS_GEMV_ARGTYPES(float));
-#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 21000)
 template <>
 void gemv<c10::complex<double>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<double>));
 template <>
 void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>));
-#endif
 template <>
 void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half));
-#if defined(USE_ROCM) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template <>
 void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16));
-#endif
 
 /* LEVEL 1 BLAS FUNCTIONS */
 
@@ -226,9 +235,6 @@ template <>
 void vdot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>));
 template <>
 void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>));
-
-// This guards blocks use of getrsBatched, geqrfBatched, getrfBatched, getriBatched on platforms other than cuda
-#ifdef CUDART_VERSION
 
 #define CUDABLAS_GETRS_ARGTYPES(Dtype)  \
   cublasHandle_t handle, cublasOperation_t trans, \
@@ -287,22 +293,6 @@ TORCH_CUDA_CU_API void getrfBatched<c10::complex<double>>(CUDABLAS_GETRF_ARGTYPE
 template<>
 TORCH_CUDA_CU_API void getrfBatched<c10::complex<float>>(CUDABLAS_GETRF_ARGTYPES(c10::complex<float>));
 
-#define CUDABLAS_GETRI_ARGTYPES(Dtype)  \
-  int n, Dtype** dA_array, int ldda, int* ipiv_array, Dtype** dC_array, int lddc, int* info_array, int batchsize
-
-template<class Dtype>
-void getriBatched(CUDABLAS_GETRI_ARGTYPES(Dtype)) {
-  TORCH_CHECK(false, "at::cuda::blas::getriBatched: not implemented for ", typeid(Dtype).name());
-}
-template<>
-TORCH_CUDA_CU_API void getriBatched<float>(CUDABLAS_GETRI_ARGTYPES(float));
-template<>
-TORCH_CUDA_CU_API void getriBatched<double>(CUDABLAS_GETRI_ARGTYPES(double));
-template<>
-TORCH_CUDA_CU_API void getriBatched<c10::complex<double>>(CUDABLAS_GETRI_ARGTYPES(c10::complex<double>));
-template<>
-TORCH_CUDA_CU_API void getriBatched<c10::complex<float>>(CUDABLAS_GETRI_ARGTYPES(c10::complex<float>));
-
 #define CUDABLAS_GELS_BATCHED_ARGTYPES(Dtype)  \
   cublasHandle_t handle, cublasOperation_t trans, int m, int n, int nrhs, Dtype** dA_array, int ldda, Dtype** dC_array, int lddc, int* info, int *devInfoArray, int batchSize
 
@@ -319,8 +309,6 @@ template<>
 TORCH_CUDA_CU_API void gelsBatched<c10::complex<double>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::complex<double>));
 template<>
 TORCH_CUDA_CU_API void gelsBatched<c10::complex<float>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::complex<float>));
-
-#endif // CUDART_VERSION
 
 } // namespace blas
 } // namespace cuda

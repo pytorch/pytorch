@@ -1,12 +1,13 @@
 from numbers import Number
 
 import torch
-from torch._six import nan
+from torch import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
-__all__ = ['Uniform']
+__all__ = ["Uniform"]
+
 
 class Uniform(Distribution):
     r"""
@@ -17,6 +18,7 @@ class Uniform(Distribution):
 
         >>> m = Uniform(torch.tensor([0.0]), torch.tensor([5.0]))
         >>> m.sample()  # uniformly distributed in the range [0.0, 5.0)
+        >>> # xdoctest: +SKIP
         tensor([ 2.3418])
 
     Args:
@@ -24,8 +26,10 @@ class Uniform(Distribution):
         high (float or Tensor): upper range (exclusive).
     """
     # TODO allow (loc,scale) parameterization to allow independent constraints.
-    arg_constraints = {'low': constraints.dependent(is_discrete=False, event_dim=0),
-                       'high': constraints.dependent(is_discrete=False, event_dim=0)}
+    arg_constraints = {
+        "low": constraints.dependent(is_discrete=False, event_dim=0),
+        "high": constraints.dependent(is_discrete=False, event_dim=0),
+    }
     has_rsample = True
 
     @property
@@ -51,7 +55,7 @@ class Uniform(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = self.low.size()
-        super(Uniform, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
         if self._validate_args and not torch.lt(self.low, self.high).all():
             raise ValueError("Uniform is not defined when low>= high")

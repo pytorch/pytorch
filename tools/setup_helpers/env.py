@@ -3,7 +3,7 @@ import platform
 import struct
 import sys
 from itertools import chain
-from typing import Iterable, List, Optional, cast
+from typing import cast, Iterable, List, Optional
 
 
 IS_WINDOWS = platform.system() == "Windows"
@@ -13,7 +13,7 @@ IS_LINUX = platform.system() == "Linux"
 IS_CONDA = (
     "conda" in sys.version
     or "Continuum" in sys.version
-    or any([x.startswith("CONDA") for x in os.environ])
+    or any(x.startswith("CONDA") for x in os.environ)
 )
 CONDA_DIR = os.path.join(os.path.dirname(sys.executable), "..")
 
@@ -43,7 +43,7 @@ if "CFLAGS" in os.environ and "CXXFLAGS" not in os.environ:
     os.environ["CXXFLAGS"] = os.environ["CFLAGS"]
 
 
-class BuildType(object):
+class BuildType:
     """Checks build type. The build type will be given in :attr:`cmake_build_type_env`. If :attr:`cmake_build_type_env`
     is ``None``, then the build type will be inferred from ``CMakeCache.txt``. If ``CMakeCache.txt`` does not exist,
     os.environ['CMAKE_BUILD_TYPE'] will be used.
@@ -62,7 +62,7 @@ class BuildType(object):
         cmake_cache_txt = os.path.join(BUILD_DIR, "CMakeCache.txt")
         if os.path.isfile(cmake_cache_txt):
             # Found CMakeCache.txt. Use the build type specified in it.
-            from .cmake import get_cmake_cache_variables_from_file
+            from .cmake_utils import get_cmake_cache_variables_from_file
 
             with open(cmake_cache_txt) as f:
                 cmake_cache_vars = get_cmake_cache_variables_from_file(f)

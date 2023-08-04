@@ -49,10 +49,10 @@ class TORCH_API SizeNode : public TsNode, public DimensionNode {
  public:
   SizeNode(Value input, size_t dim);
   int64_t getStaticValue() const override;
-  bool isDynamic() const override;
+  bool isSymbolic() const override;
   std::string ToString() const override;
   size_t dim_ = 0;
-  virtual torch::lazy::TSOpVector Lower(
+  torch::lazy::TSOpVector Lower(
       std::shared_ptr<torch::jit::GraphFunction> function,
       TSLoweringContext* loctx) const override;
 };
@@ -61,7 +61,7 @@ class TORCH_API SizeAdd : public TsNode, public DimensionNode {
  public:
   SizeAdd(Value a, Value b);
   int64_t getStaticValue() const override;
-  bool isDynamic() const override;
+  bool isSymbolic() const override;
   std::string ToString() const override;
 };
 
@@ -69,7 +69,7 @@ class TORCH_API SizeMul : public TsNode, public DimensionNode {
  public:
   SizeMul(Value a, Value b);
   int64_t getStaticValue() const override;
-  bool isDynamic() const override;
+  bool isSymbolic() const override;
   std::string ToString() const override;
 };
 
@@ -77,7 +77,7 @@ class TORCH_API SizeDiv : public TsNode, public DimensionNode {
  public:
   SizeDiv(Value a, Value b);
   int64_t getStaticValue() const override;
-  bool isDynamic() const override;
+  bool isSymbolic() const override;
   std::string ToString() const override;
 };
 

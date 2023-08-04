@@ -1,17 +1,31 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/cuda/Exceptions.h>
-#include <ATen/InitialTensorOptions.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/native/RNN.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cudnn_init_dropout_state.h>
+#include <ATen/ops/_cudnn_init_dropout_state_native.h>
+#include <ATen/ops/_cudnn_rnn.h>
+#include <ATen/ops/_cudnn_rnn_backward_native.h>
+#include <ATen/ops/_cudnn_rnn_flatten_weight_native.h>
+#include <ATen/ops/_cudnn_rnn_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 #if !AT_CUDNN_ENABLED()
 
@@ -56,7 +70,7 @@ Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_see
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   AT_ERROR("_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
 }
@@ -76,7 +90,7 @@ namespace {
     bool train;
     double dropout;
     Tensor dropout_state;
-    DropoutDescriptorParams() {}
+    DropoutDescriptorParams() = default;
     void set(bool train_, double dropout_, Tensor dropout_state_) {
       train = train_;
       dropout = dropout_;
@@ -1069,7 +1083,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           descs.hy_desc.desc(), hy.data_ptr(),
           descs.cy_desc.desc(), cy.defined() ? cy.data_ptr() : nullptr,
           workspace.data_ptr(), workspace.size(0),
-          reserve.data_ptr(), reserve.size(0)
+          reserve.mutable_data_ptr(), reserve.size(0)
           ));
   } else { // inference
     reserve = at::empty({0}, input.options().dtype(kByte));
@@ -1449,7 +1463,7 @@ struct DropoutState {
   at::Tensor buffer;
   c10::optional<cuda::CUDAEvent> event;
   std::mutex mutex;
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM)
   // cudaStreamGetCaptureInfo will never give back a capture id of 0, so 0 can serve
   // as a sentinel value that capture was not underway.
   cuda::CaptureId_t capture_id_last_lock = 0;
@@ -1467,7 +1481,7 @@ struct DropoutState {
     // could then define it before we get to unlock().
     mutex.lock();
     if (event) {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM)
       // See Note [DropoutState and CUDA graph capture]
       cudaStreamCaptureStatus status;
       AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
@@ -1488,7 +1502,7 @@ struct DropoutState {
   void unlock() {
     if (event) {
       event->record();
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM)
       // See Note [DropoutState and CUDA graph capture]
       cudaStreamCaptureStatus status;
       AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
@@ -1514,32 +1528,46 @@ DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions opti
 
   std::unique_lock<std::mutex> lock {state_cache_mut};
   auto& state = dropout_state_cache.at(device);
-  if (train && dropout_p > 0 && !state.buffer.defined()) {
-    std::unique_lock<std::mutex> lock {state.mutex};
-    int64_t seed = at::empty({}, at::kLong).random_().item<int64_t>();
-    state.buffer = at::_cudnn_init_dropout_state(
-      dropout_p, train, seed, options.dtype(at::kByte));
-    // NB: CUDA binds the event to a device at creation time, so we can initialize it
-    // only now, when we know we're on the correct device.
-    state.event.emplace();
+  if (train && dropout_p > 0) {
+    const auto &gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator(device);
+    auto gen_impl = gen.get<at::CUDAGeneratorImpl>();
+    bool reset_rnn_state = gen_impl->reset_rnn_state();
+    if (!state.buffer.defined() || reset_rnn_state) {
+      std::unique_lock<std::mutex> lock {state.mutex};
+      int64_t seed = at::empty({}, options.dtype(at::kLong)).random_(gen).item<int64_t>();
+      state.buffer = at::_cudnn_init_dropout_state(
+          dropout_p, train, seed, options.dtype(at::kByte));
+      // NB: CUDA binds the event to a device at creation time, so we can initialize it
+      // only now, when we know we're on the correct device.
+      if (!state.event.has_value()) {
+        state.event.emplace();
+      }
+    }
   }
   return state;
 }
 
 Tensor try_get_weight_buf(
       const Tensor& input, TensorList parameters, bool has_biases,
-      cudnnRNNMode_t mode, int64_t hidden_size, int64_t proj_size, int64_t num_layers, bool bidirectional) {
+      cudnnRNNMode_t mode, c10::SymInt hidden_size, c10::SymInt proj_size, int64_t num_layers, bool bidirectional) {
 
   // Prepare all relevant descriptors
   auto handle = getCudnnHandle();
   auto & any_param = parameters.at(0);
   auto datatype = getCudnnDataType(any_param);
 
+  // Something very naughty is happening here.  try_get_weight_buf
+  // is called from _cudnn_impl, which is a *composite*.  In other words,
+  // inside the composite function we need to query cudnn to figure out how big
+  // the weight buf actually is going to be.  This clearly cannot be done
+  // symbolically.  For now, we insert guards here; but once we have the black
+  // box handling for dynamic shapes, we could also hypothetically infer out
+  // the relationships
   RNNDescriptorParams rnn;
-  rnn.set(mode, hidden_size, proj_size, num_layers, bidirectional, promote_rnn_math_type(datatype), datatype);
+  rnn.set(mode, hidden_size.guard_int(__FILE__, __LINE__), proj_size.guard_int(__FILE__, __LINE__), num_layers, bidirectional, promote_rnn_math_type(datatype), datatype);
   RNNDescriptor rnn_desc = rnn.descriptor(handle);
 
-  TensorGeometry x_geom ({1, input.size(-1)});
+  TensorGeometry x_geom ({1, input.sym_size(-1).guard_int(__FILE__, __LINE__)});
   TensorDescriptor x_desc;
   // datatype for x_desc comes from any_param, not input.
   // try_get_weight_buf's job is to check "is the weight buffer correctly laid out
@@ -1603,12 +1631,12 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
   Tensor hx, cx;
   std::tie(hx, cx) = unpack_hidden(hidden);
-  int64_t hidden_size = hx.size(2);
-  int64_t proj_size = 0;
+  auto hidden_size = hx.sym_size(2);
+  SymInt proj_size = 0;
   // For LSTM models with projections hidden size could be different
-  if (cx.defined() && cx.size(2) != hx.size(2)) {
-    hidden_size = cx.size(2);
-    proj_size = hx.size(2);
+  if (cx.defined() && cx.sym_size(2) != hx.sym_size(2)) {
+    hidden_size = cx.sym_size(2);
+    proj_size = hx.sym_size(2);
   }
 
   // TODO:  try_get_weight_buf returns a Tensor, but _cudnn_rnn below takes a c10::optional<Tensor>
@@ -1627,11 +1655,12 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   if (proj_size != 0) {
     ++num_params;
   }
+  auto sym_batch_sizes = c10::SymIntArrayRef(reinterpret_cast<const c10::SymInt*>(batch_sizes.data()), batch_sizes.size());
   // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
-  auto cudnn_output = at::_cudnn_rnn(
+  auto cudnn_output = at::_cudnn_rnn_symint(
       input, params, num_params, weight_buf,
       hx, cx, static_cast<int>(mode), hidden_size, proj_size, num_layers, /*batch_first=*/false,
-      dropout_p, train, bidirectional, batch_sizes, dropout_state.buffer);
+      dropout_p, train, bidirectional, sym_batch_sizes, dropout_state.buffer);
 
   return {std::get<0>(cudnn_output),
           pack_hidden<hidden_type>(std::get<1>(cudnn_output), std::get<2>(cudnn_output))};
@@ -1644,12 +1673,12 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   Tensor hx, cx;
   std::tie(hx, cx) = unpack_hidden(hidden);
-  int64_t hidden_size = hx.size(2);
-  int64_t proj_size = 0;
+  auto hidden_size = hx.sym_size(2);
+  c10::SymInt proj_size = 0;
   // For LSTM models with projections hidden size could be different
-  if (cx.defined() && cx.size(2) != hx.size(2)) {
-    hidden_size = cx.size(2);
-    proj_size = hx.size(2);
+  if (cx.defined() && cx.sym_size(2) != hx.sym_size(2)) {
+    hidden_size = cx.sym_size(2);
+    proj_size = hx.sym_size(2);
   }
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   auto weight_buf = try_get_weight_buf(
@@ -1661,7 +1690,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
     ++num_params;
   }
   // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
-  auto cudnn_output = at::_cudnn_rnn(
+  auto cudnn_output = at::_cudnn_rnn_symint(
       input, params, num_params, weight_buf,
       hx, cx, static_cast<int>(mode), hidden_size, proj_size, num_layers, batch_first, dropout_p,
       train, bidirectional, /*batch_sizes=*/{}, dropout_state.buffer);

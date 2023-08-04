@@ -7,7 +7,8 @@ from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
+from torch.utils.data.datapipes.utils.common import (_check_unpickable_fn,
+                                                     validate_input_col)
 
 __all__ = [
     "CollatorIterDataPipe",
@@ -42,6 +43,7 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
             - Key is used for dict. New key is acceptable.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.iter import IterableWrapper, Mapper
         >>> def add_one(x):
         ...     return x + 1
@@ -79,6 +81,7 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
                 raise ValueError("`output_col` must be a single-element list or tuple")
             output_col = output_col[0]
         self.output_col = output_col
+        validate_input_col(fn, input_col)
 
     def _apply_fn(self, data):
         if self.input_col is None and self.output_col is None:
@@ -123,7 +126,7 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
         raise TypeError(
-            "{} instance doesn't have valid length".format(type(self).__name__)
+            f"{type(self).__name__} instance doesn't have valid length"
         )
 
 
@@ -151,8 +154,8 @@ def _collate_helper(conversion, item):
             try:
                 import torcharrow.pytorch as tap  # type: ignore[import]
                 collation_fn = tap.rec.Default()
-            except Exception:
-                raise Exception("unable to import default collation function from the TorchArrrow")
+            except Exception as e:
+                raise Exception("unable to import default collation function from the TorchArrow") from e
 
         tuple_names.append(str(name))
         value = collation_fn(df[name])
@@ -180,7 +183,9 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         collate_fn: Customized collate function to collect and combine data or a batch of data.
             Default function collates to Tensor(s) based on data type.
 
-    Example: Convert integer data to float Tensor
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> # Convert integer data to float Tensor
         >>> class MyIterDataPipe(torch.utils.data.IterDataPipe):
         ...     def __init__(self, start, end):
         ...         super(MyIterDataPipe).__init__()

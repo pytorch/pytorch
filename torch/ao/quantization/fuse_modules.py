@@ -4,12 +4,18 @@ import copy
 import torch.nn as nn
 
 from torch.ao.quantization.fuser_method_mappings import get_fuser_method
-# for backward compatiblity
+# for backward compatibility
 from torch.ao.quantization.fuser_method_mappings import fuse_conv_bn  # noqa: F401
 from torch.ao.quantization.fuser_method_mappings import fuse_conv_bn_relu  # noqa: F401
 from torch.nn.utils.parametrize import type_before_parametrizations
 
 from typing import List, Optional
+
+__all__ = [
+    "fuse_known_modules",
+    "fuse_modules",
+    "fuse_modules_qat",
+]
 
 # Generalization of getattr
 def _get_module(model, submodule_key):
@@ -45,18 +51,18 @@ def fuse_known_modules(mod_list, is_qat, additional_fuser_method_mapping=None):
     types = tuple(type_before_parametrizations(m) for m in mod_list)
     fuser_method = get_fuser_method(types, additional_fuser_method_mapping)
     if fuser_method is None:
-        raise NotImplementedError("Cannot fuse modules: {}".format(types))
+        raise NotImplementedError(f"Cannot fuse modules: {types}")
     new_mod : List[Optional[nn.Module]] = [None] * len(mod_list)
     fused = fuser_method(is_qat, *mod_list)
     # NOTE: forward hooks not processed in the two following for loops will be lost after the fusion
     # Move pre forward hooks of the base module to resulting fused module
-    for handle_id, pre_hook_fn in mod_list[0]._forward_pre_hooks.items():
+    for pre_hook_fn in mod_list[0]._forward_pre_hooks.values():
         fused.register_forward_pre_hook(pre_hook_fn)
-        del mod_list[0]._forward_pre_hooks[handle_id]
+    mod_list[0]._forward_pre_hooks.clear()
     # Move post forward hooks of the last module to resulting fused module
-    for handle_id, hook_fn in mod_list[-1]._forward_hooks.items():
+    for hook_fn in mod_list[-1]._forward_hooks.values():
         fused.register_forward_hook(hook_fn)
-        del mod_list[-1]._forward_hooks[handle_id]
+    mod_list[-1]._forward_hooks.clear()
     new_mod[0] = fused
 
     for i in range(1, len(mod_list)):
@@ -135,6 +141,7 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
 
     Examples::
 
+            >>> # xdoctest: +SKIP
             >>> m = M().eval()
             >>> # m is a module containing the sub-modules below
             >>> modules_to_fuse = [ ['conv1', 'bn1', 'relu1'], ['submodule.conv', 'submodule.relu']]
@@ -153,8 +160,8 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
         modules_to_fuse,
         is_qat=False,
         inplace=inplace,
-        fuser_func=fuse_known_modules,
-        fuse_custom_config_dict=None)
+        fuser_func=fuser_func,
+        fuse_custom_config_dict=fuse_custom_config_dict)
 
 def fuse_modules_qat(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
     """ QAT version for `fuse_modules`
@@ -164,5 +171,5 @@ def fuse_modules_qat(model, modules_to_fuse, inplace=False, fuser_func=fuse_know
         modules_to_fuse,
         is_qat=True,
         inplace=inplace,
-        fuser_func=fuse_known_modules,
-        fuse_custom_config_dict=None)
+        fuser_func=fuser_func,
+        fuse_custom_config_dict=fuse_custom_config_dict)

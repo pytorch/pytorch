@@ -10,6 +10,7 @@
 
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/VariableHooksInterface.h>
 #include <c10/util/Exception.h>
 
 #include <cstdint>
@@ -181,12 +182,13 @@ TORCH_API void set_name(const Variable&, const std::string& name);
 
 TORCH_API void add_hook(
     const at::TensorBase&,
-    std::shared_ptr<FunctionPreHook> hook);
-TORCH_API const std::vector<std::shared_ptr<FunctionPreHook>>& hooks(
-    const Variable&);
+    std::unique_ptr<FunctionPreHook> hook);
+TORCH_API std::vector<std::unique_ptr<FunctionPreHook>>& hooks(const Variable&);
 TORCH_API void clear_hooks(const at::TensorBase&);
 
-TORCH_API void create_cpp_hook(const at::TensorBase&);
+TORCH_API void create_cpp_hook(
+    const at::TensorBase&,
+    bool is_retains_grad_hooks = false);
 } // namespace impl
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -216,18 +218,26 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // must be protected by mutex_
   std::shared_ptr<ForwardGrad> fw_grad_;
 
-  std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
+  // The hooks_ field is actually reused by both python and cpp logic
+  // For both cases, we have a data structure, cpp_hooks_list_ (cpp)
+  // or dict (python) which is the canonical copy.
+  // Then, for both cases, we always register a single hook to
+  // hooks_ which wraps all the hooks in the list/dict.
+  // And, again in both cases, if the grad_fn exists on that tensor
+  // we will additionally register a single hook to the grad_fn.
+  //
+  // Note that the cpp and python use cases aren't actually aware of
+  // each other, so using both is not defined behavior.
+  std::vector<std::unique_ptr<FunctionPreHook>> hooks_;
   std::shared_ptr<hooks_list> cpp_hooks_list_;
 
   // Only meaningful on leaf variables (must be false otherwise)
-  bool requires_grad_;
+  bool requires_grad_{false};
 
-  // Only meaningful on non-leaf variables (must be -1 otherwise)
-  // The value of retains_grad_ indicates the index of it in cpp_hooks_list_
-  // A value of -1 indicates that the tensor does not retain grad
-  int64_t retains_grad_;
+  // Only meaningful on non-leaf variables (must be false otherwise)
+  bool retains_grad_{false};
 
-  bool is_view_;
+  bool is_view_{false};
 
   // The "output number" of this variable; e.g., if this variable
   // was the second output of a function, then output_nr == 1.
@@ -276,17 +286,13 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
       uint64_t level,
       bool is_inplace_op) override;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AutogradMeta(
       at::TensorImpl* self_impl = nullptr,
       bool requires_grad = false,
-      Edge gradient_edge = Edge()) {
-    grad_fn_ = std::move(gradient_edge.function);
-    requires_grad_ = false;
-    retains_grad_ = -1;
-    is_view_ = false;
-    output_nr_ = gradient_edge.input_nr;
+      Edge gradient_edge = Edge())
+      : grad_fn_(std::move(gradient_edge.function)),
 
+        output_nr_(gradient_edge.input_nr) {
     // set_requires_grad also checks error conditions.
     if (requires_grad) {
       TORCH_INTERNAL_ASSERT(self_impl);
@@ -687,37 +693,26 @@ inline Variable make_variable_differentiable_view(
     CreationMeta creation_meta,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
-    // If we already did a TensorImpl allocation for data, just reuse it.
-    // Otherwise(e.g tensor.swapdim(0, 0) when we return the same tensor as
-    // input), we have to use shallow_copy_and_detach to create a new TensorImpl
-    // to avoid moving leaf node into graph interior. This guarantees only 1
-    // TensorImpl allocation happens in view ops.
-    if (data.getIntrusivePtr().unique() &&
-        data.getIntrusivePtr()->unique_version()) {
-      at::TensorImpl* data_impl = data.unsafeGetTensorImpl();
-      data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      data_impl->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
-          data_impl,
-          std::move(backward_info),
-          std::move(forward_info),
-          shared_view_info,
-          creation_meta));
-      return data;
-    } else {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      c10::intrusive_ptr<at::TensorImpl> data_impl_copy =
-          data.getIntrusivePtr()->shallow_copy_and_detach(
-              /*version_counter=*/0,
-              /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-      data_impl_copy->set_autograd_meta(
-          std::make_unique<DifferentiableViewMeta>(
-              data_impl_copy.get(),
-              std::move(backward_info),
-              std::move(forward_info),
-              shared_view_info,
-              creation_meta));
-      return Variable(data_impl_copy);
-    }
+    TORCH_CHECK(
+        data.getIntrusivePtr()->autograd_meta() == nullptr,
+        "Attempted to make a tensor into a differentiable view, but the "
+        "tensor already had autograd metadata associated with it.  If you are "
+        "using a __torch_dispatch__ mode, the most common cause for this "
+        "problem is that you used torch.overrides.enable_reentrant_dispatch() "
+        "improperly; tensors created within the extent of reentrant dispatch "
+        "MUST NOT be directly returned from __torch_dispatch__; instead, they "
+        "must be wrapped into fresh tensors that serve as the output.  If you "
+        "are not using wrappers, you probably don't need reentrant dispatch.  "
+        "If this doesn't seem applicable, please file a bug to PyTorch.");
+    at::TensorImpl* data_impl = data.unsafeGetTensorImpl();
+    data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    data_impl->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
+        data_impl,
+        std::move(backward_info),
+        std::move(forward_info),
+        shared_view_info,
+        creation_meta));
+    return data;
   }
   return Variable();
 }
@@ -802,6 +797,45 @@ inline Variable make_variable(
   return Variable();
 }
 
+struct VariableHooks final : at::impl::VariableHooksInterface {
+  at::TensorBase tensor_data(const at::TensorBase&) const override;
+  at::TensorBase variable_data(const at::TensorBase&) const override;
+  const std::shared_ptr<torch::autograd::Node>& grad_fn(
+      const at::TensorBase&) const override;
+  unsigned _register_hook(
+      const at::TensorBase&,
+      std::function<at::TensorBase(const at::TensorBase&)> hook) const override;
+  void remove_hook(const at::TensorBase&, unsigned pos) const override;
+  bool is_view(const at::TensorBase&) const override;
+  const at::TensorBase& base(const at::TensorBase&) const override;
+  const std::string& name(const at::TensorBase&) const override;
+  bool is_leaf(const at::TensorBase&) const override;
+  int64_t output_nr(const at::TensorBase&) const override;
+  void set_data(const at::TensorBase& self, const at::TensorBase& new_data)
+      const override;
+  at::TensorBase data(const at::TensorBase& self) const override;
+  int64_t _version(const at::TensorBase& self) const override;
+  void retain_grad(const at::TensorBase& self) const override;
+  bool retains_grad(const at::TensorBase& self) const override;
+  void _backward(
+      const at::Tensor& self,
+      at::TensorList inputs,
+      const c10::optional<at::Tensor>& gradient,
+      c10::optional<bool> keep_graph,
+      bool create_graph) const override;
+  void requires_grad_(const at::TensorBase& self, bool _requires_grad)
+      const override;
+  void basic_autograd_not_implemented_fallback(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet dispatch_keys,
+      torch::jit::Stack* stack) const override;
+};
+
+namespace utils {
+
+TORCH_API bool has_same_meta(const Variable& base, const Variable& other);
+
+} // namespace utils
 } // namespace autograd
 } // namespace torch
 

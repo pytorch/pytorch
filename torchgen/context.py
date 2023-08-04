@@ -1,16 +1,17 @@
-from torchgen.utils import S, T, context
+import contextlib
+
+import functools
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, Union
+
+import torchgen.local as local
 from torchgen.model import (
+    BackendIndex,
+    DispatchKey,
     NativeFunction,
     NativeFunctionsGroup,
     NativeFunctionsViewGroup,
-    BackendIndex,
-    DispatchKey,
 )
-import torchgen.local as local
-
-import functools
-from typing import TypeVar, Union, Iterator, Callable, Dict, Optional
-import contextlib
+from torchgen.utils import context, S, T
 
 # Helper functions for defining generators on things in the model
 
@@ -29,7 +30,10 @@ F2 = TypeVar(
     NativeFunctionsGroup,
     Optional[NativeFunction],
     bool,
+    str,
 )
+
+F3 = TypeVar("F3", Tuple[NativeFunction, Any], List[NativeFunction])
 
 
 @contextlib.contextmanager
@@ -49,7 +53,8 @@ def native_function_manager(
         f = g
     with context(lambda: f"in native_functions.yaml line {f.loc}:\n  {f.func}"):
         with local.parametrize(
-            use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors
+            use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors,
+            use_ilistref_for_tensor_lists=f.part_of_structured_group,
         ):
             yield
 
@@ -82,6 +87,17 @@ def method_with_native_function(func: Callable[[S, F], T]) -> Callable[[S, F], T
     @functools.wraps(func)
     def wrapper(slf: S, f: F) -> T:
         with native_function_manager(f):
+            return func(slf, f)
+
+    return wrapper
+
+
+def method_with_nested_native_function(
+    func: Callable[[S, F3], T]
+) -> Callable[[S, F3], T]:
+    @functools.wraps(func)
+    def wrapper(slf: S, f: F3) -> T:
+        with native_function_manager(f[0]):
             return func(slf, f)
 
     return wrapper

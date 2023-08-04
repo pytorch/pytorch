@@ -12,7 +12,7 @@
 
 #include <type_traits>
 
-namespace at { namespace native {
+namespace at::native {
 
 void logical_not_kernel_cuda(TensorIteratorBase& iter) {
   // error check -- this is just ensuring we don't dispatch on types that aren't in ALL_TYPES_AND_COMPLEX_AND3(...)
@@ -25,7 +25,7 @@ void logical_not_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 // NB: Ignores the negative bit on tensors
-const char neg_name[] = "neg_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char neg_name[] = "neg_kernel";
 void neg_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.dtype();
   if (at::isComplexType(dtype)) {
@@ -96,7 +96,7 @@ C10_HOST_DEVICE static inline c10::complex<T> sgn_wrapper(c10::complex<T> z) {
   }
 }
 
-const char sgn_name[] = "sgn_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char sgn_name[] = "sgn_kernel";
 void sgn_kernel_cuda(TensorIteratorBase& iter){
   auto dtype = iter.dtype();
   #if AT_USE_JITERATOR()
@@ -134,4 +134,4 @@ REGISTER_DISPATCH(sign_stub, &sign_kernel_cuda);
 REGISTER_DISPATCH(signbit_stub, &signbit_kernel_cuda);
 REGISTER_DISPATCH(sgn_stub, &sgn_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

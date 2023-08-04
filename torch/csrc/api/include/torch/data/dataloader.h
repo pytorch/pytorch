@@ -24,10 +24,7 @@ torch::disable_if_t<
     std::unique_ptr<StatelessDataLoader<Dataset, Sampler>>>
 make_data_loader(Dataset dataset, Sampler sampler, DataLoaderOptions options) {
   return torch::make_unique<StatelessDataLoader<Dataset, Sampler>>(
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      std::move(dataset),
-      std::move(sampler),
-      std::move(options));
+      std::move(dataset), std::move(sampler), std::move(options));
 }
 
 /// Creates a `DataLoader` instance for a stateless `dataset` and some
@@ -46,10 +43,7 @@ make_data_loader(
       "Expected the dataset to be sized in "
       "order to construct the Sampler");
   return make_data_loader(
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      std::move(dataset),
-      Sampler(*size),
-      std::move(options));
+      std::move(dataset), Sampler(*size), std::move(options));
 }
 
 /// Creates a `DataLoader` for a stateful `dataset` and some `options`.
@@ -58,9 +52,7 @@ std::unique_ptr<StatefulDataLoader<Dataset>> make_data_loader(
     Dataset dataset,
     DataLoaderOptions options = DataLoaderOptions()) {
   return torch::make_unique<StatefulDataLoader<Dataset>>(
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      std::move(dataset),
-      std::move(options));
+      std::move(dataset), std::move(options));
 }
 } // namespace data
 } // namespace torch

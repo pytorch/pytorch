@@ -1,15 +1,21 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
 
 #if AT_CUDNN_ENABLED()
 
 #include <ATen/native/cudnn/Macros.h>
+#include <ATen/core/Tensor.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <limits>
 #include <vector>
-#include <sstream>
-#include <functional>
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/cuda/Exceptions.h>
@@ -131,7 +137,7 @@ struct Workspace {
     // Sometimes cuDNN returns a workspace size > 2^63, this could makes the allocation of
     // workspace fail with some 64bit indexing error instead of an OOM error. In such case,
     // we manually fail with OOM.
-    TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
+    TORCH_CHECK_WITH(OutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
     data = c10::cuda::CUDACachingAllocator::raw_alloc(size);
   }
   Workspace(const Workspace&) = delete;
@@ -199,10 +205,11 @@ size_t getMaxWorkspaceSize(
 {
   size_t max_ws_size = 0;
   size_t max_block_size = 0;
-  size_t tmp_bytes = 0;  // Only used for filling pointer parameters that aren't used later
 
   const auto device = c10::cuda::current_device();
-  c10::cuda::CUDACachingAllocator::cacheInfo(device, &tmp_bytes, &max_block_size);
+  // For the native allocator, retrieves the size of the largest unused block.
+  // For cudaMallocAsync, see c10/cuda/CUDAMallocAsync.cpp:cacheInfo for details.
+  c10::cuda::CUDACachingAllocator::cacheInfo(device, &max_block_size);
 
   for (const auto i : c10::irange(n_algo)) {
     cudnnStatus_t err;
@@ -505,7 +512,7 @@ public:
       try {
         f(algoPerf);
         return;
-      } catch (c10::CUDAOutOfMemoryError &e) {
+      } catch (c10::OutOfMemoryError &e) {
         cudaGetLastError(); // clear CUDA error
       }
     }
@@ -516,7 +523,7 @@ public:
         f(algoPerf);
         cache.insert(args.params, algoPerf);
         return;
-      } catch (c10::CUDAOutOfMemoryError &e) {
+      } catch (c10::OutOfMemoryError &e) {
         cudaGetLastError(); // clear CUDA error
       } catch (c10::CuDNNError &e) {
         cudaGetLastError(); // clear CUDA error
@@ -530,7 +537,7 @@ inline Tensor allocate_workspace(size_t size, const Tensor &other) {
   // Sometimes cuDNN returns a workspace size > 2^63, this could makes the allocation of
   // workspace fail with some 64bit indexing error instead of an OOM error. In such case,
   // we manually fail with OOM.
-  TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
+  TORCH_CHECK_WITH(OutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
   return at::empty({static_cast<int64_t>(size)}, other.options().dtype(kByte));
 }
 
@@ -628,8 +635,8 @@ void raw_cudnn_convolution_forward_out_32bit(
 
   ConvolutionArgs args{ input, output, weight };
   args.handle = getCudnnHandle();
-  setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(input, weight);
+  setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32, memory_format);
   args.idesc.set(input, memory_format);
   args.wdesc.set(weight, memory_format, 0);
   args.odesc.set(output, memory_format);
@@ -692,8 +699,8 @@ void raw_cudnn_convolution_backward_input_out_32bit(
 
   ConvolutionArgs args{ grad_input, grad_output, weight };
   args.handle = getCudnnHandle();
-  setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(grad_input, weight);
+  setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic, allow_tf32, memory_format);
   args.idesc.set(grad_input, memory_format);
   args.wdesc.set(weight, memory_format, 0);
   args.odesc.set(grad_output, memory_format);
@@ -717,11 +724,11 @@ void raw_cudnn_convolution_backward_input_out_32bit(
           &one, args.wdesc.desc(), weight.data_ptr(),
           args.odesc.desc(), grad_output.data_ptr(),
           args.cdesc.desc(), bwdDataAlgPerf.algo, workspace.data_ptr(), bwdDataAlgPerf.memory,
-          &zero, args.idesc.desc(), grad_input.data_ptr()),
+          &zero, args.idesc.desc(), grad_input.mutable_data_ptr()),
         args,
         "Additional pointer addresses: \n",
         "    grad_output: ", grad_output.data_ptr(), "\n",
-        "    grad_input: ", grad_input.data_ptr(), "\n",
+        "    grad_input: ", grad_input.mutable_data_ptr(), "\n",
         "Backward data algorithm: ", static_cast<int>(bwdDataAlgPerf.algo), "\n");
     }
   );
@@ -755,8 +762,8 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
 
   ConvolutionArgs args{ input, grad_output, grad_weight };
   args.handle = getCudnnHandle();
-  setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(input, grad_weight);
+  setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic, allow_tf32, memory_format);
   args.idesc.set(input, memory_format);
   args.wdesc.set(grad_weight, memory_format, 0);
   args.odesc.set(grad_output, memory_format);
@@ -868,6 +875,7 @@ void raw_cudnn_convolution_add_relu_out_v7(
   auto dataType = getCudnnDataType(input);
   ConvolutionArgs args{input, output, weight};
   args.handle = getCudnnHandle();
+  at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(input, weight);
   setConvolutionParams(
       &args.params,
       input,
@@ -877,8 +885,8 @@ void raw_cudnn_convolution_add_relu_out_v7(
       dilation,
       groups,
       deterministic,
-      allow_tf32);
-  at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(input, weight);
+      allow_tf32,
+      memory_format);
   args.idesc.set(input, memory_format);
   args.wdesc.set(weight, memory_format, 0);
   args.odesc.set(output, memory_format);

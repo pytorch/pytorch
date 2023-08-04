@@ -26,12 +26,12 @@ using torch::autograd::ReadyQueue;
 using torch::autograd::validate_outputs;
 using torch::autograd::variable_list;
 
-static constexpr char* kNumBackwardPasses = "num_current_backward_passes";
-static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
+static constexpr const char* kNumBackwardPasses = "num_current_backward_passes";
+static constexpr const char* kNumAutogradContexts = "num_autograd_contexts";
 
 // This hook does 3 things:
 //   1. Call pre hooks of the original AccumulateGrad to modify the input grad.
-//   2. Accumuate the gard to RPC context.
+//   2. Accumurate the guard to RPC context.
 //   3. Call post hooks of the original AccumulateGrad.
 class DistAccumulateGradCaptureHook
     : public GraphTask::ExecInfo::Capture::GradCaptureHook {
@@ -46,11 +46,10 @@ class DistAccumulateGradCaptureHook
     ThreadLocalDistAutogradContext contextGuard{ContextPtr(autogradContext_)};
     variable_list inputGrads = {grad};
     // It's intended that pre/post hooks are still called even if the grad is
-    // undenfined here.
+    // undefined here.
     for (const auto& hook : accumulateGrad_->pre_hooks()) {
       inputGrads = (*hook)(inputGrads);
     }
-
     // It is possible that the grad is not defined since a separate
     // invocation of the autograd engine on the same node might actually
     // compute this gradient.
@@ -185,6 +184,13 @@ void DistEngine::computeDependencies(
     bool retainGraph) {
   TORCH_INTERNAL_ASSERT(graphRoot, "graphRoot is null!");
 
+  // Store root nodes so we can traverse through the graph later
+  // e.g., for get_current_graph_task_execution_order
+  c10::SmallVector<Node*, 4> temp_roots{rootEdges.size()};
+  for (const auto i : c10::irange(rootEdges.size())) {
+    temp_roots[i] = rootEdges[i].function.get();
+  }
+
   // Build the graph task and graph root.
   // NOTE: we don't need to build and pass a cpu_ready_queue to GraphTask
   // as we use execute_graph_task_until_ready_queue_empty, which will build
@@ -194,6 +200,7 @@ void DistEngine::computeDependencies(
       /* create_graph */ false,
       /* depth */ 0,
       /* cpu_ready_queue */ global_cpu_ready_queue_,
+      /* graph_roots */ temp_roots,
       /* exit_on_error */ true);
 
   // Run BFS to traverse the graph locally. The roots of the graph are
@@ -308,7 +315,10 @@ void DistEngine::computeDependencies(
       // to be captured.
       if (auto accumulateGradFn = dynamic_cast<AccumulateGrad*>(fn)) {
         for (auto& capture : *execInfo.captures_) {
-          capture.hooks_.push_back(
+          // Capture hooks are technically deprecated, but as an exception below
+          // is the single and only instance of capture hooks usage that we
+          // support. See NOTE [Deprecated capture hooks] for more context.
+          capture.DO_NOT_USE_DEPRECATED_register_capture_hook(
               std::make_unique<DistAccumulateGradCaptureHook>(
                   std::dynamic_pointer_cast<AccumulateGrad>(
                       accumulateGradFn->shared_from_this()),

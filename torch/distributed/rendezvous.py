@@ -1,17 +1,16 @@
 try:
     from urllib.parse import urlparse, urlunparse
-except ImportError:
+except ImportError as e:
     raise ImportError(
         "urllib cannot be found, urlparse from python2 is no longer supported."
-    )
+    ) from e
 
 import numbers
 import os
 import sys
 from datetime import timedelta
-from typing import Dict
+from typing import Dict, Optional
 
-import torch._six as six
 from torch.distributed import FileStore, PrefixStore, Store, TCPStore
 
 from .constants import default_pg_timeout
@@ -46,78 +45,63 @@ def register_rendezvous_handler(scheme, handler):
     global _rendezvous_handlers
     if scheme in _rendezvous_handlers:
         raise RuntimeError(
-            "Rendezvous handler for {}:// already registered".format(scheme)
+            f"Rendezvous handler for {scheme}:// already registered"
         )
     _rendezvous_handlers[scheme] = handler
+
 
 # Query will have format "rank=0&world_size=1" and is
 # converted into {"rank": 0, "world_size": 1}
 def _query_to_dict(query: str) -> Dict[str, str]:
-    return dict((pair[0], pair[1]) for pair in (pair.split("=") for pair in filter(None, query.split("&"))))
+    return {pair[0]: pair[1] for pair in (pair.split("=") for pair in filter(None, query.split("&")))}
 
-def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
-    if not isinstance(url, six.string_classes):
-        raise RuntimeError("`url` must be a string. {}: {}".format(type(url), url))
 
-    if not isinstance(rank, numbers.Integral):
-        raise RuntimeError("`rank` must be an integer. {}".format(rank))
-
-    if not isinstance(world_size, numbers.Integral):
-        raise RuntimeError("`world_size` must be an integer. {}".format(world_size))
-
-    # Append node-specific arguments.
+def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwargs):
     result = urlparse(url)
-    if rank != -1 or world_size != -1:
+    if world_size_opt is None:
+        world_size = -1
+        if result.scheme == "env":
+            rank = int(os.environ.get("RANK", rank))
+            # If the world_size env variable is not present then it is a dynamic group
+            world_size = int(os.environ.get("WORLD_SIZE", world_size))
+    else:
+        world_size = world_size_opt
+    if rank != -1 or world_size != -1 or world_size_opt is None:
         query_dict = _query_to_dict(result.query)
         assert (
             "rank" not in query_dict and "world_size" not in query_dict
-        ), "The url: {url} has node-specific arguments(rank, world_size) already.".format(
-            url=url
-        )
+        ), f"The url: {url} has node-specific arguments(rank, world_size) already."
         if rank != -1:
-            query_dict["rank"] = rank
-        if world_size != -1:
-            query_dict["world_size"] = world_size
-
+            query_dict["rank"] = str(rank)
+        if world_size != -1 or world_size_opt is None:
+            query_dict["world_size"] = str(world_size)
         result = result._replace(
-            query="{}".format(
-                "&".join(["{}={}".format(k, v) for k, v in query_dict.items()])
-            )
+            query=f"{'&'.join([f'{k}={v}' for k, v in query_dict.items()])}"
         )
         url = urlunparse(result)
 
     if result.scheme not in _rendezvous_handlers:
-        raise RuntimeError("No rendezvous handler for {}://".format(result.scheme))
+        raise RuntimeError(f"No rendezvous handler for {result.scheme}://")
     return _rendezvous_handlers[result.scheme](url, **kwargs)
 
+
+def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
+    if not isinstance(url, (str, bytes)):
+        raise RuntimeError(f"`url` must be a string. {type(url)}: {url}")
+
+    if not isinstance(rank, numbers.Integral):
+        raise RuntimeError(f"`rank` must be an integer. {rank}")
+
+    if not isinstance(world_size, numbers.Integral):
+        raise RuntimeError(f"`world_size` must be an integer. {world_size}")
+
+    return _rendezvous_helper(url, rank, world_size, **kwargs)
+
+
 def _create_store_from_options(backend_options, rank):
-    result = urlparse(backend_options.init_method)
-
-    # If using env initialization, get rank and world_size from env
-    world_size = -1
-    if result.scheme == "env":
-        rank = os.environ.get("RANK", rank)
-        # Here, the world_size has already beeen initialized to -1 in init_rpc
-        # If the world_size env variable is also not present then it is a dynamic group
-        world_size = int(os.environ.get("WORLD_SIZE", world_size))
-
-    query_dict = _query_to_dict(result.query)
-    # if rank is -1 then intentionally exclude rank for the query, error will be thrown later
-    if rank != -1:
-        query_dict["rank"] = str(rank)
-    query_dict["world_size"] = str(world_size)
-
-    result = result._replace(
-        query="{}".format(
-            "&".join(["{}={}".format(k, v) for k, v in query_dict.items()])
-        )
-    )
-
-    url = urlunparse(result)
-    if result.scheme not in _rendezvous_handlers:
-        raise RuntimeError("No handler for {}://".format(result.scheme))
-    store, _, _ = next(_rendezvous_handlers[result.scheme](url))
+    store, _, _ = next(_rendezvous_helper(backend_options.init_method, rank, None))
     return store
+
 
 def _rendezvous_error(msg):
     return ValueError("Error initializing torch.distributed using " + msg)
@@ -224,7 +208,7 @@ def _env_rendezvous_handler(
         return _rendezvous_error("env:// rendezvous: " + msg)
 
     def _env_error(var):
-        return _error("environment variable %s expected, but not set" % var)
+        return _error(f"environment variable {var} expected, but not set")
 
     def _get_env_or_raise(env_var: str) -> str:
         env_val = os.environ.get(env_var, None)

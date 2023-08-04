@@ -36,10 +36,7 @@
 #include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cpu/vec/vec.h>
 
-#ifndef _MSC_VER
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-but-set-parameter"
-#endif
+#include <utility>
 
 namespace at { namespace native { inline namespace CPU_CAPABILITY {
 
@@ -259,8 +256,8 @@ struct VectorizedLoop2d {
   static constexpr int ntensors = traits::arity + 1;
   using data_t = std::array<char*, ntensors>;
 
-  VectorizedLoop2d(const op_t &op, const vop_t &vop):
-    op(op), vop(vop) {}
+  VectorizedLoop2d(const op_t &op, vop_t vop):
+    op(op), vop(std::move(vop)) {}
 
   static void advance(data_t &data, const int64_t *outer_strides) {
     for (const auto arg : c10::irange(data.size())) {
@@ -274,8 +271,7 @@ struct VectorizedLoop2d {
     const int64_t *outer_strides = &strides[ntensors];
 
     if (is_contiguous<traits>(strides)) {
-      for (const auto i : c10::irange(size1)) {
-        (void)i;
+      for (const auto i C10_UNUSED : c10::irange(size1)) {
         vectorized_loop(data.data(), size0, 0, op, vop);
         advance(data, outer_strides);
       }
@@ -283,14 +279,12 @@ struct VectorizedLoop2d {
       using Indices = std::make_index_sequence<traits::arity>;
       unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t idx) {
         if (idx) {
-          for (const auto i : c10::irange(size1)) {
-            (void)i;
+          for (const auto i C10_UNUSED : c10::irange(size1)) {
             vectorized_loop(data.data(), size0, idx, op, vop);
             advance(data, outer_strides);
           }
         } else {
-          for (const auto i : c10::irange(size1)) {
-            (void)i;
+          for (const auto i C10_UNUSED : c10::irange(size1)) {
             basic_loop(data.data(), strides, 0, size0, op);
             advance(data, outer_strides);
           }
@@ -351,9 +345,9 @@ void cpu_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop, int
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
   // dynamic casting not currently supported on CPU, but some kernels (like Fill)
   // explicitly dynamic_cast, so we give the opt-out of checking.
-  c10::guts::if_constexpr<check_dynamic_cast>([&] {
+  if constexpr (check_dynamic_cast) {
     TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
-  });
+  }
 
   iter.for_each(make_vectorized_loop2d(op, vop), grain_size);
   iter.cast_outputs();
@@ -398,7 +392,3 @@ void cpu_serial_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& v
 }
 
 }}}  // namespace at::native::<anonymous>
-
-#ifndef _MSC_VER
-#pragma GCC diagnostic pop
-#endif

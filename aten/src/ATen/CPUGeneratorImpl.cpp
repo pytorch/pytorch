@@ -1,7 +1,6 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/Utils.h>
 #include <ATen/core/MT19937RNGEngine.h>
-#include <c10/util/C++17.h>
 #include <c10/util/MathConstants.h>
 #include <algorithm>
 
@@ -96,6 +95,21 @@ void CPUGeneratorImpl::set_current_seed(uint64_t seed) {
 }
 
 /**
+ * Sets the offset of RNG state.
+ * See Note [Acquire lock when using random generators]
+ */
+void CPUGeneratorImpl::set_offset(uint64_t offset) {
+  TORCH_CHECK(false, "CPU Generator does not use offset");
+}
+
+/**
+ * Gets the current offset of CPUGeneratorImpl.
+ */
+uint64_t CPUGeneratorImpl::get_offset() const {
+  TORCH_CHECK(false, "CPU Generator does not use offset");
+}
+
+/**
  * Gets the current seed of CPUGeneratorImpl.
  */
 uint64_t CPUGeneratorImpl::current_seed() const {
@@ -127,8 +141,8 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   using detail::CPUGeneratorImplState;
   using detail::CPUGeneratorImplStateLegacy;
 
-  static_assert(std::is_pod<CPUGeneratorImplStateLegacy>::value, "CPUGeneratorImplStateLegacy is not a PODType");
-  static_assert(std::is_pod<CPUGeneratorImplState>::value, "CPUGeneratorImplState is not a PODType");
+  static_assert(std::is_standard_layout<CPUGeneratorImplStateLegacy>::value, "CPUGeneratorImplStateLegacy is not a PODType");
+  static_assert(std::is_standard_layout<CPUGeneratorImplState>::value, "CPUGeneratorImplState is not a PODType");
 
   static const size_t size_legacy = sizeof(CPUGeneratorImplStateLegacy);
   static const size_t size_current = sizeof(CPUGeneratorImplState);
@@ -207,7 +221,7 @@ c10::intrusive_ptr<c10::TensorImpl> CPUGeneratorImpl::get_state() const {
   using detail::CPUGeneratorImplState;
 
   static const size_t size = sizeof(CPUGeneratorImplState);
-  static_assert(std::is_pod<CPUGeneratorImplState>::value, "CPUGeneratorImplState is not a PODType");
+  static_assert(std::is_standard_layout<CPUGeneratorImplState>::value, "CPUGeneratorImplState is not a PODType");
 
   auto state_tensor = at::detail::empty_cpu({(int64_t)size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
   auto rng_state = state_tensor.data_ptr();

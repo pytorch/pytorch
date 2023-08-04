@@ -2,14 +2,15 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
-#include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/Export.h>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <utility>
 
 namespace c10d {
 
 // Broadcast many tensors to all processes in the process group.
 TORCH_API void broadcast_coalesced(
-    c10::intrusive_ptr<c10d::ProcessGroup> process_group,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
     at::TensorList tensors,
     size_t buffer_size,
     int rank = 0);
@@ -20,18 +21,20 @@ class TORCH_API GradBucket {
   explicit GradBucket(
       size_t index,
       size_t bucket_count,
-      const at::Tensor& tensor,
-      const std::vector<size_t>& offsets,
-      const std::vector<size_t>& lengths,
-      const std::vector<c10::IntArrayRef>& sizes_vec,
-      const std::vector<at::Tensor>& parameters)
+      at::Tensor tensor,
+      std::vector<size_t> offsets,
+      std::vector<size_t> lengths,
+      std::vector<c10::IntArrayRef> sizes_vec,
+      std::vector<at::Tensor> parameters,
+      c10::optional<at::Tensor> sparse_grad_indices)
       : index_(index),
         bucket_count_(bucket_count),
-        buffer_(tensor),
-        offsets_(offsets),
-        lengths_(lengths),
-        sizes_vec_(sizes_vec),
-        parameters_(parameters) {}
+        buffer_(std::move(tensor)),
+        offsets_(std::move(offsets)),
+        lengths_(std::move(lengths)),
+        sizes_vec_(std::move(sizes_vec)),
+        parameters_(std::move(parameters)),
+        sparse_grad_indices_(std::move(sparse_grad_indices)) {}
 
   // Returns the index of the bucket, which is unique across all the buckets.
   size_t getIndex() const {
@@ -69,6 +72,10 @@ class TORCH_API GradBucket {
     return index_ == bucket_count_ - 1;
   }
 
+  c10::optional<at::Tensor>& getSparseGradIndices() {
+    return sparse_grad_indices_;
+  }
+
  private:
   size_t index_;
   size_t bucket_count_;
@@ -78,8 +85,13 @@ class TORCH_API GradBucket {
   std::vector<size_t> offsets_;
   std::vector<size_t> lengths_;
   std::vector<c10::IntArrayRef> sizes_vec_;
+
   // Model parameters for this bucket.
   const std::vector<at::Tensor> parameters_;
+
+  // Predefined sparse indices for this bucket (only used for sparse tensors).
+  // The gradients will be updated to have indices with these tensor values
+  c10::optional<at::Tensor> sparse_grad_indices_;
 };
 
 // Base class of both `PythonCommHook` and `CppCommHook`.
@@ -106,7 +118,7 @@ class TORCH_API CommHookInterface {
 namespace detail {
 // This helper function is called both by CppCommHookInterface below and inside
 // reducer.
- at::Tensor parseCppCommHookResult(const c10::IValue& result);
+TORCH_API at::Tensor parseCppCommHookResult(const c10::IValue& result);
 } // namespace detail
 
 // This CppCommHook interface only requires implementing runHook method that
@@ -114,7 +126,7 @@ namespace detail {
 template <typename T>
 class CppCommHookInterface : public CommHookInterface {
  public:
-  explicit CppCommHookInterface(const T& state) : state_(state) {}
+  explicit CppCommHookInterface(T state) : state_(std::move(state)) {}
 
   ~CppCommHookInterface() override = default;
 

@@ -15,7 +15,9 @@ import torch.multiprocessing as mp
 import torch.utils.hooks
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN,
-                                                  load_tests, slowTest, TEST_WITH_TSAN, TEST_WITH_ROCM)
+                                                  load_tests, slowTest, TEST_WITH_TSAN, TEST_WITH_TORCHDYNAMO,
+                                                  TEST_WITH_ROCM, IS_MACOS)
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -23,15 +25,20 @@ load_tests = load_tests
 
 TEST_REPEATS = 30
 HAS_SHM_FILES = os.path.isdir('/dev/shm')
+MAX_WAITING_TIME_IN_SECONDS = 30
 TEST_CUDA_IPC = torch.cuda.is_available() and \
     sys.platform != 'darwin' and \
-    sys.platform != 'win32'
+    sys.platform != 'win32' and \
+    not TEST_WITH_ROCM  # https://github.com/pytorch/pytorch/issues/90940
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
+
+if TEST_CUDA_IPC:
+    torch.cuda.memory._set_allocator_settings('expandable_segments:False')
 
 
 class SubProcess(mp.Process):
     def __init__(self, tensor):
-        super(SubProcess, self).__init__()
+        super().__init__()
         self.tensor = tensor
         self.daemon = True
 
@@ -181,7 +188,7 @@ def fs_sharing():
         mp.set_sharing_strategy(prev_strategy)
 
 
-class leak_checker(object):
+class leak_checker:
 
     def __init__(self, test_case):
         self.checked_pids = [os.getpid()]
@@ -219,10 +226,19 @@ class leak_checker(object):
     def has_shm_files(self, wait=True):
         if not HAS_SHM_FILES:
             return False
+
         result = self._has_shm_files()
-        if result and mp.get_sharing_strategy() == 'file_system' and wait:
-            time.sleep(0.5)
-            return self._has_shm_files()
+        if not result or mp.get_sharing_strategy() != 'file_system' or not wait:
+            return result
+
+        total_waiting_time = 0
+        waiting_time = 0.5
+
+        while total_waiting_time <= MAX_WAITING_TIME_IN_SECONDS and result:
+            time.sleep(waiting_time)
+            total_waiting_time += waiting_time
+            result = self._has_shm_files()
+
         return result
 
     def _has_shm_files(self):
@@ -248,26 +264,41 @@ class TestMultiprocessing(TestCase):
             x = torch.zeros(5, 5).to(device, dtype)
             q = ctx.Queue()
             e = ctx.Event()
+
             data = [x, x[:, 1]]
             q.put(data)
+
             p = ctx.Process(target=simple_fill, args=(q, e))
             p.daemon = True
             lc.check_pid(p.pid)
             p.start()
-            e.wait(10)
-            self.assertTrue(e.is_set())
+
+            total_waiting_time = 0
+            waiting_time = 0.5
+            is_set = False
+            # Once the child process is done, it will set the event to notify the
+            # parent accordingly
+            while total_waiting_time <= MAX_WAITING_TIME_IN_SECONDS and not is_set:
+                time.sleep(waiting_time)
+                total_waiting_time += waiting_time
+                is_set = e.is_set()
+
+            self.assertTrue(is_set)
             self.assertTrue(data[0].eq(4).all())
             self.assertTrue(data[1].eq(4).all())
+
             p.join(100)
             self.assertFalse(p.is_alive())
 
         def test_receive():
             q = ctx.Queue()
             e = ctx.Event()
+
             p = ctx.Process(target=send_tensor, args=(q, e, device, dtype))
             p.daemon = True
             lc.check_pid(p.pid)
             p.start()
+
             t1 = q.get()
             t2 = q.get()
             self.assertTrue(t1.eq(1).all())
@@ -276,9 +307,12 @@ class TestMultiprocessing(TestCase):
             self.assertEqual(type(s1), type(s2))
             self.assertEqual(s1.data_ptr(), s1.data_ptr())
             self.assertEqual(s1, s2)
+
             # We need to delete this tensors to allow producer (child process)
             # collect them properly
             del t1, t2
+
+            # Mark the event as done and join the process
             e.set()
             p.join(100)
             self.assertFalse(p.is_alive())
@@ -342,19 +376,30 @@ class TestMultiprocessing(TestCase):
 
     @unittest.skipIf(TEST_WITH_ASAN,
                      "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326")
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO,
+                     "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467")
     def test_fs_sharing(self):
         with fs_sharing():
-            self._test_sharing(repeat=TEST_REPEATS)
+            # The test works but is very slow on MacOS, see https://github.com/pytorch/pytorch/pull/93183,
+            # so run it only once there. The delay is in waiting for the child process to terminate (join)
+            repeat = 1 if IS_MACOS else TEST_REPEATS
+            self._test_sharing(repeat=repeat)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO,
+                     "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467")
     def test_fs_preserve_sharing(self):
         with fs_sharing():
             self._test_preserve_sharing(repeat=TEST_REPEATS)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO,
+                     "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467")
     def test_fs_pool(self):
         with fs_sharing():
             self._test_pool(repeat=TEST_REPEATS)
 
     @unittest.skipIf(not HAS_SHM_FILES, "don't not how to check if shm files exist")
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO,
+                     "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467")
     def test_fs(self):
         def queue_put():
             x = torch.DoubleStorage(4)
@@ -418,8 +463,7 @@ class TestMultiprocessing(TestCase):
         t = []
         for _ in range(5):
             t.append(q.get())
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(t[0], torch.full([5], 0.))
+        self.assertEqual(t[0], torch.full([5], 0, dtype=torch.int32))
         del t
         e.set()
         p.join(1)
@@ -590,7 +634,6 @@ if __name__ == "__main__":
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
-    @unittest.skipIf(TEST_WITH_ROCM, 'Skip the test for ROCm')
     def test_event_multiprocess(self):
         event = torch.cuda.Event(enable_timing=False, interprocess=True)
         self.assertTrue(event.query())
@@ -643,13 +686,12 @@ if __name__ == "__main__":
         c2p.put(0)  # notify parent child is ready
         p2c.get()  # wait for record in parent
         e1.synchronize()
-        c2p.put(1)  # nofity synchronization is done in child
+        c2p.put(1)  # notify synchronization is done in child
         p2c.get()  # wait for parent to finish before destructing child event
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
-    @unittest.skipIf(TEST_WITH_ROCM, 'Skip the test for ROCm')
     def test_event_handle_importer(self):
         e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
         self.assertTrue(e0.query())
@@ -689,7 +731,6 @@ if __name__ == "__main__":
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
-    @unittest.skipIf(TEST_WITH_ROCM, 'Skip the test for ROCm')
     def test_event_handle_exporter(self):
         e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
 
@@ -782,6 +823,8 @@ if __name__ == "__main__":
         time.sleep(5)
         p.join()
 
+    @unittest.skipIf(TEST_WITH_ASAN,
+                     "non-deterministically hangs with ASAN https://github.com/pytorch/pytorch/issues/94024")
     def test_variable_sharing(self):
         for requires_grad in [True, False]:
             var = torch.arange(1., 26).view(5, 5).requires_grad_(requires_grad)

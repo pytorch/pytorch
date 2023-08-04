@@ -2,9 +2,16 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/ATen.h>
+#include <ATen/core/List.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/vulkan/api/api.h>
-#include <ATen/native/vulkan/ops/Tensor.h>
+#include <ATen/native/vulkan/impl/Common.h>
+#include <ATen/native/vulkan/ops/Convert.h>
+
+#define VK_KERNEL(shader_name) \
+  ::at::native::vulkan::get_shader_info(#shader_name)
+#define VK_LOOKUP_KERNEL(op_name) \
+  ::at::native::vulkan::look_up_shader_info(#op_name)
 
 namespace at {
 namespace native {
@@ -43,12 +50,41 @@ struct Layout final {
   };
 };
 
-uint32_t batch_size(const Tensor& tensor);
-uint32_t channels_size(const Tensor& tensor);
-uint32_t height_size(const Tensor& tensor);
-uint32_t width_size(const Tensor& tensor);
+/*
+ * The functions below safely return the size of the dimension at the N-th
+ * innermost index. If the dimensionality of the size array is not sufficient
+ * then 1 will be returned. The structs above are intended to be used with
+ * these functions.
+ */
+template <uint32_t N>
+uint32_t get_dim(const IntArrayRef sizes) {
+  const uint32_t dims = sizes.size();
+  return dims < N ? 1 : api::utils::safe_downcast<uint32_t>(sizes[dims - N]);
+}
 
-api::utils::uvec3 adaptive_work_group_size(const api::utils::uvec3& global_work_group);
+template <uint32_t N>
+uint32_t get_dim(const Tensor& t_in) {
+  return get_dim<N>(t_in.sizes());
+}
+
+template <uint32_t N>
+uint32_t get_dim(const vTensor& v_in) {
+  return get_dim<N>(v_in.sizes());
+}
+
+inline c10::optional<Tensor> get_optional_tensor(
+    const c10::impl::GenericList& gen_list,
+    const uint32_t idx) {
+  return gen_list.get(idx).isTensor() ? gen_list.get(idx).toTensor()
+                                      : c10::optional<Tensor>();
+}
+
+inline c10::optional<Scalar> get_optional_scalar(
+    const c10::impl::GenericList& gen_list,
+    const uint32_t idx) {
+  return gen_list.get(idx).isScalar() ? gen_list.get(idx).toScalar()
+                                      : c10::optional<Scalar>();
+}
 
 } // namespace ops
 } // namespace vulkan

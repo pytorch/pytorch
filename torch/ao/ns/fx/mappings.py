@@ -5,350 +5,386 @@ import torch.nn as nn
 import torch.nn.functional as F
 toq = torch.ops.quantized
 
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
-import torch.nn.intrinsic.quantized as nniq
-import torch.nn.intrinsic.quantized.dynamic as nniqd
-import torch.nn.intrinsic.qat as nniqat
-import torch.nn.intrinsic as nni
-import torch.nn.qat as nnqat
-import torch.nn.qat.dynamic as nnqatd
-from torch.ao.quantization.backend_config import get_native_backend_config_dict
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
+import torch.ao.nn.intrinsic.quantized as nniq
+import torch.ao.nn.intrinsic.quantized.dynamic as nniqd
+import torch.ao.nn.intrinsic.qat as nniqat
+import torch.ao.nn.intrinsic as nni
+import torch.ao.nn.qat as nnqat
+import torch.ao.nn.qat.dynamic as nnqatd
+from torch.ao.quantization.backend_config import get_native_backend_config
 import torch.ao.quantization.fx._lower_to_native_backend as \
     _lower_to_native_backend
 import torch.ao.quantization.quantization_mappings as quantization_mappings
 
 from .ns_types import NSNodeTargetType
 
-from typing import Set, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 
 def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
-    # note: this set is modified below by items from backend_config_dict
+    # note: this set is modified below by items from backend_config
     sets_of_related_ops: List[Set[NSNodeTargetType]] = [
         # conv modules
-        set([
+        {
             nn.Conv1d,
-        ]),
-        set([
+        },
+        {
             nn.Conv2d,
-        ]),
-        set([
+        },
+        {
             nn.Conv3d,
-        ]),
+        },
         # conv functionals
-        set([
+        {
             F.conv1d,
-        ]),
-        set([
+        },
+        {
             F.conv2d,
-        ]),
-        set([
+        },
+        {
             F.conv3d,
-        ]),
+        },
         # linear modules
-        set([
+        {
             nn.Linear,
-        ]),
+        },
         # linear functionals
-        set([
+        {
             F.linear,
-        ]),
+        },
         # average pool
-        set([
+        {
             nn.AvgPool1d,
             torch.avg_pool1d,
-        ]),
-        set([
+        },
+        {
             nn.AvgPool2d,
             torch._C._nn.avg_pool2d,
-        ]),
-        set([
+        },
+        {
             nn.AvgPool3d,
             torch._C._nn.avg_pool3d,
-        ]),
+        },
         # adaptive average pool
-        set([
+        {
             nn.AdaptiveAvgPool1d,
             F.adaptive_avg_pool1d,
-        ]),
-        set([
+        },
+        {
             nn.AdaptiveAvgPool2d,
             F.adaptive_avg_pool2d,
-        ]),
-        set([
+        },
+        {
             nn.AdaptiveAvgPool3d,
             F.adaptive_avg_pool3d,
-        ]),
+        },
         # LSTM
-        set([
+        {
             nn.LSTM,
-        ]),
+        },
         # add
-        set([
+        {
             torch.add,
             operator.add,  # x + y
-        ]),
+        },
         # cat
-        set([
+        {
             torch.cat,
-        ]),
+        },
         # mul
-        set([
+        {
             torch.mul,
             operator.mul,
-        ]),
+        },
         # relu
-        set([
+        {
             F.relu,
             nn.ReLU,
             'relu',
             'relu_',
             torch.relu,
-        ]),
+        },
         # maxpool
-        set([
+        {
             nn.MaxPool1d,
             F.max_pool1d,
-        ]),
-        set([
+        },
+        {
             nn.MaxPool2d,
             F.max_pool2d,
-        ]),
-        set([
+        },
+        {
             nn.MaxPool3d,
             F.max_pool3d,
-        ]),
+        },
         # sigmoid
-        set([
+        {
             torch.sigmoid,
             'sigmoid',
             'sigmoid_',
             nn.Sigmoid,
             F.sigmoid,
-        ]),
+        },
         # BatchNorm
-        set([
+        {
             nn.BatchNorm2d,
-        ]),
-        set([
+        },
+        {
             nn.BatchNorm3d,
-        ]),
+        },
         # ConvTranspose
-        set([
+        {
             nn.ConvTranspose1d,
-        ]),
-        set([
+        },
+        {
             nn.ConvTranspose2d,
-        ]),
-        set([
+        },
+        {
             nn.ConvTranspose3d,
-        ]),
+        },
+        # functional transposed conv
+        {
+            F.conv_transpose1d,
+        },
+        {
+            F.conv_transpose2d,
+        },
+        {
+            F.conv_transpose3d,
+        },
         # ELU
-        set([
+        {
             nn.ELU,
-        ]),
+        },
         # Embedding
-        set([
+        {
             nn.Embedding,
-        ]),
+        },
         # EmbeddingBag
-        set([
+        {
             nn.EmbeddingBag,
-        ]),
+        },
         # GroupNorm
-        set([
+        {
             nn.GroupNorm,
-        ]),
+        },
         # Hardswish
-        set([
+        {
             nn.Hardswish,
-        ]),
+        },
         # InstanceNorm
-        set([
+        {
             nn.InstanceNorm1d,
-        ]),
-        set([
+        },
+        {
             nn.InstanceNorm2d,
-        ]),
-        set([
+        },
+        {
             nn.InstanceNorm3d,
-        ]),
+        },
         # LayerNorm
-        set([
+        {
             nn.LayerNorm,
-        ]),
+        },
         # LeakyReLU
-        set([
+        {
             nn.LeakyReLU,
-        ]),
+        },
         # ReLU6
-        set([
+        {
             nn.ReLU6,
             F.relu6,
-        ]),
+        },
         # F.elu
-        set([
+        {
             F.elu,
-        ]),
+        },
         # F.hardswish
-        set([
+        {
             F.hardswish,
-        ]),
+        },
+        # F.group_norm
+        {
+            F.group_norm,
+        },
         # F.instance_norm
-        set([
+        {
             F.instance_norm,
-        ]),
+        },
         # F.layer_norm
-        set([
+        {
             F.layer_norm,
-        ]),
+        },
         # F.leaky_relu
-        set([
+        {
             F.leaky_relu,
-        ]),
+        },
         # F.silu
-        set([
+        {
             nn.SiLU,
             F.silu,
-        ]),
+        },
         # F.mish
-        set([
+        {
             nn.Mish,
             F.mish,
-        ]),
+        },
         # F.tanh
-        set([
+        {
             nn.Tanh,
             F.tanh,
             torch.tanh,
             'tanh_',
             'tanh',
-        ]),
+        },
         # F.hardsigmoid
-        set([
+        {
             'hardsigmoid_',
             'hardsigmoid',
             F.hardsigmoid,
             nn.Hardsigmoid,
-        ]),
+        },
         # F.hardtanh
-        set([
+        {
             nn.Hardtanh,
             F.hardtanh,
             F.hardtanh_,
-        ]),
+        },
         # floordiv
-        set([
+        {
             operator.floordiv,
-        ]),
+        },
         # unsqueeze
-        set([
+        {
             torch.unsqueeze,
-        ]),
+        },
         # stack
-        set([
+        {
             torch.stack,
-        ]),
+        },
         # squeeze
-        set([
+        {
             torch.squeeze,
-        ]),
+        },
         # sort
-        set([
+        {
             torch.sort,
-        ]),
+        },
         # repeat_interleave
-        set([
+        {
             torch.repeat_interleave,
-        ]),
+        },
         # min
-        set([
+        {
             torch.min,
-        ]),
+        },
         # mean
-        set([
+        {
             torch.mean,
-        ]),
+        },
         # max
-        set([
+        {
             torch.max,
-        ]),
+        },
         # transpose
-        set([
+        {
             torch.transpose,
-        ]),
+        },
         # flatten
-        set([
+        {
             torch.flatten,
-        ]),
+        },
         # clamp
-        set([
+        {
             torch.clamp,
-        ]),
+        },
         # chunk
-        set([
+        {
             torch.chunk,
-        ]),
+        },
         # interpolate
-        set([
+        {
             torch.nn.functional.interpolate,
-        ]),
+        },
         # dropout
-        set([
+        {
             nn.Dropout,
-        ]),
+        },
         # F.dropout
-        set([
+        {
             F.dropout,
-        ]),
+        },
         # matmul
-        set([
+        {
             torch.matmul,
-        ]),
+        },
         # Softmax
-        set([
+        {
             nn.Softmax,
-        ]),
+        },
+        # PReLU
+        {
+            nn.PReLU,
+            nnq.PReLU,
+        },
+        # F.prelu
+        {
+            F.prelu,
+            toq.prelu,
+        },
+        # pixel shuffle
+        {
+            nn.PixelShuffle,
+        },
+        {
+            F.pixel_shuffle,
+        },
+        # pixel unshuffle
+        {
+            nn.PixelUnshuffle,
+        },
+        {
+            F.pixel_unshuffle,
+        },
+        # narrow
+        {
+            torch.narrow,
+        },
     ]
 
     # for each floating point op, add versions of the op added by
-    # backend_config_dict
-    backend_config_dict = get_native_backend_config_dict()
+    # backend_config
+    backend_config = get_native_backend_config()
 
-    new_connections = [
+    new_connections: List[Tuple[Callable, Callable]] = [
         # technical debt edge case
         (nn.Linear, nn.modules.linear.NonDynamicallyQuantizableLinear),
     ]
 
-    for config in backend_config_dict['configs']:
+    for pattern, config in backend_config._pattern_complex_format_to_config.items():
 
-        if 'pattern' not in config:
-            continue
-
-        # format: (c, (b, a))
-        pattern = config['pattern']
+        # pattern format: (c, (b, a))
         first_element = pattern
         # look from the end, because pattern is in reverse order
         while isinstance(first_element, (list, tuple)):
             first_element = first_element[-1]
 
-        if 'fused_module' in config:
+        if config.fused_module is not None:
             # case 1: pattern fuses a pattern of ops into an op
             # example: nn.Conv1d, nn.ReLU fused into nni.ConvReLU1d
-            new_connections.append((first_element, config['fused_module']))
+            new_connections.append((first_element, config.fused_module))
 
-        if 'qat_module' in config:
+        if config.qat_module is not None:
             # case 2: pattern swaps a module into a QAT module
             # example: nni.ConvReLU1d swapped into nniqat.ConvReLU1d
-            new_connections.append((first_element, config['qat_module']))
+            new_connections.append((first_element, config.qat_module))
 
-        if 'reference_quantized_module_for_root' in config:
+        if config.reference_quantized_module is not None:
             # case 3: reference version of floating point module, such as
             # nn.Conv2d and nnqr.Conv2d
-            new_connections.append(
-                (first_element, config['reference_quantized_module_for_root'])
-            )
+            new_connections.append((first_element, config.reference_quantized_module))
 
     #
     # Add reference module swaps from default lowering path
@@ -365,6 +401,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
 
     for source_to_double_target in (
         _lower_to_native_backend.STATIC_LOWER_FUSED_MODULE_MAP,
+        _lower_to_native_backend.STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP,
         _lower_to_native_backend.DYNAMIC_LOWER_FUSED_MODULE_MAP,
     ):
         for source, (target1, target2) in source_to_double_target.items():  # type: ignore[attr-defined]
@@ -399,7 +436,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             new_connections.append((source, target))
 
 
-    # add the new connections from backend_config_dict
+    # add the new connections from backend_config
     for item1, item2 in new_connections:
         for set_of_related_ops in sets_of_related_ops:
             if item1 in set_of_related_ops or item2 in set_of_related_ops:
@@ -434,7 +471,7 @@ def add_op_to_sets_of_related_ops(
     related_op: Optional[NSNodeTargetType],
 ) -> None:
     if related_op is not None:
-        for base_name, set_of_related_ops in base_name_to_sets_of_related_ops.items():
+        for set_of_related_ops in base_name_to_sets_of_related_ops.values():
             if related_op in set_of_related_ops:
                 set_of_related_ops.add(op)
                 return
@@ -444,12 +481,12 @@ def add_op_to_sets_of_related_ops(
         counter = 0
         while str(counter) in base_name_to_sets_of_related_ops:
             counter += 1
-        base_name_to_sets_of_related_ops[str(counter)] = set([op])
+        base_name_to_sets_of_related_ops[str(counter)] = {op}
 
 
 # TODO(future PR): clean this up
 def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
-    FUNS_IO_TYPE_FP32: Set[NSNodeTargetType] = set([
+    FUNS_IO_TYPE_FP32: Set[NSNodeTargetType] = {
         F.linear,
         F.conv1d,
         F.conv2d,
@@ -468,11 +505,12 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         operator.mul,
         torch.mul,
         torch.sum,
-    ])
+        F.prelu,
+    }
 
     FUNS_IO_TYPE_FP16: Set[NSNodeTargetType] = set()
 
-    FUNS_IO_TYPE_INT8: Set[NSNodeTargetType] = set([
+    FUNS_IO_TYPE_INT8: Set[NSNodeTargetType] = {
         toq.linear,
         toq.linear_relu,
         toq.conv1d,
@@ -488,13 +526,14 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         toq.layer_norm,
         toq.leaky_relu,
         toq.dropout,
+        toq.prelu,
         # TODO(future PR): implement shadowing for binary ops and
         # uncomment below
         # toq.add,
         # toq.mul,
-    ])
+    }
 
-    FUNS_IO_TYPE_FP32_OR_INT8: Set[NSNodeTargetType] = set([
+    FUNS_IO_TYPE_FP32_OR_INT8: Set[NSNodeTargetType] = {
         F.relu,
         F.tanh,
         torch.tanh,
@@ -513,6 +552,8 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         F.max_pool2d,
         F.max_pool3d,
         F.relu6,
+        F.pixel_shuffle,
+        F.pixel_unshuffle,
         torch.avg_pool1d,
         torch._C._nn.avg_pool2d,
         torch._C._nn.avg_pool3d,
@@ -524,15 +565,16 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         torch.max,
         torch.mean,
         torch.min,
+        torch.narrow,
         torch.repeat_interleave,
         torch.sort,
         torch.squeeze,
         torch.stack,
         torch.unsqueeze,
         operator.add,
-    ])
+    }
 
-    MODS_IO_TYPE_FP32: Set[NSNodeTargetType] = set([
+    MODS_IO_TYPE_FP32: Set[NSNodeTargetType] = {
         nn.Linear,
         nnqat.Linear,
         nnqatd.Linear,
@@ -568,6 +610,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nn.SiLU,
         nn.Mish,
         nn.Softmax,
+        nn.PReLU,
         nni.BNReLU2d,
         nni.BNReLU3d,
         nni.ConvReLU1d,
@@ -590,9 +633,13 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniqat.LinearReLU,
         nniqat.LinearBn1d,
         nniqd.LinearReLU,
-    ])
+        nni.LinearLeakyReLU,
+        nni.LinearTanh,
+        nni.ConvAdd2d,
+        nni.ConvAddReLU2d,
+    }
 
-    MODS_IO_TYPE_INT8: Set[NSNodeTargetType] = set([
+    MODS_IO_TYPE_INT8: Set[NSNodeTargetType] = {
         nnq.Linear,
         nnq.Conv1d,
         nnq.Conv2d,
@@ -613,15 +660,20 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.EmbeddingBag,
         nnq.Dropout,
         nnq.Softmax,
+        nnq.PReLU,
         nniq.BNReLU2d,
         nniq.BNReLU3d,
         nniq.ConvReLU1d,
         nniq.ConvReLU2d,
         nniq.ConvReLU3d,
         nniq.LinearReLU,
-    ])
+        nniq.LinearLeakyReLU,
+        nniq.LinearTanh,
+        nniq.ConvAdd2d,
+        nniq.ConvAddReLU2d,
+    }
 
-    MODS_IO_TYPE_FP32_OR_INT8: Set[NSNodeTargetType] = set([
+    MODS_IO_TYPE_FP32_OR_INT8: Set[NSNodeTargetType] = {
         nn.ReLU,
         nn.Tanh,
         nn.Sigmoid,
@@ -638,10 +690,12 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nn.MaxPool1d,
         nn.MaxPool2d,
         nn.MaxPool3d,
+        nn.PixelShuffle,
+        nn.PixelUnshuffle,
         nn.ReLU6,
-    ])
+    }
 
-    METHS_IO_TYPE_FP32_OR_INT8: Set[NSNodeTargetType] = set([
+    METHS_IO_TYPE_FP32_OR_INT8: Set[NSNodeTargetType] = {
         'sigmoid_',
         'sigmoid',
         'tanh_',
@@ -650,7 +704,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         'hardsigmoid',
         'relu_',
         'relu',
-    ])
+    }
 
     return {
         'funs_io_type_fp32': FUNS_IO_TYPE_FP32,
@@ -666,16 +720,16 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
 
 def get_unmatchable_types_map() -> Dict[str, Set[NSNodeTargetType]]:
 
-    FUNS_UNMATCHABLE: Set[NSNodeTargetType] = set([
+    FUNS_UNMATCHABLE: Set[NSNodeTargetType] = {
         torch.quantize_per_tensor,
         operator.getitem,
-    ])
+    }
 
-    MODS_UNMATCHABLE: Set[NSNodeTargetType] = set([
+    MODS_UNMATCHABLE: Set[NSNodeTargetType] = {
         nn.Identity,
-    ])
+    }
 
-    METHS_UNMATCHABLE: Set[NSNodeTargetType] = set([
+    METHS_UNMATCHABLE: Set[NSNodeTargetType] = {
         'to',
         'dequantize',
         'reshape',
@@ -698,7 +752,7 @@ def get_unmatchable_types_map() -> Dict[str, Set[NSNodeTargetType]]:
         'contiguous',
         'clamp',
         'chunk',
-    ])
+    }
 
     return {
         'funs_unmatchable': FUNS_UNMATCHABLE,

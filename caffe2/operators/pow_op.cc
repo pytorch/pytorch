@@ -13,8 +13,7 @@ struct EigenPowFunctor {
   template <int b_is_scalar, typename T1, typename T2, typename R>
   inline void
   Run(size_t n, const T1* a, const T2* b, T2 e, R* out, CPUContext*) {
-    // NOLINTNEXTLINE(modernize-use-nullptr)
-    if (b == NULL) {
+    if (b == nullptr) {
       EigenVectorArrayMap<R>(out, n) =
           EIGEN_POW((ConstEigenVectorArrayMap<T1>(a, n)), (e));
     } else {
@@ -105,8 +104,8 @@ The *Pow* op takes an input data tensor $X$ and an exponent parameter *exponent*
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pow_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pow_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/pow_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/pow_op.cc
 
 
 <details>

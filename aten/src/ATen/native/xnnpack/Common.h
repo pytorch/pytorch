@@ -1,15 +1,14 @@
 #pragma once
 
-#include <ATen/ATen.h>
-
 #ifdef USE_XNNPACK
 
 #include <xnnpack.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+#include <c10/util/ArrayRef.h>
+#include <limits>
+#include <memory>
 
-namespace at {
-namespace native {
-namespace xnnpack {
+namespace at::native::xnnpack {
 
 struct Deleter final {
   void operator()(const xnn_operator_t op) const {
@@ -25,10 +24,7 @@ struct ContextLinear final {
 
   ContextLinear() = delete;
 
-  ContextLinear(Operator&& o, int64_t o_channels) {
-    op = std::move(o);
-    output_channels = o_channels;
-  }
+  ContextLinear(Operator&& o, int64_t o_channels) : op(std::move(o)), output_channels(o_channels) {}
   static constexpr float kMin = -std::numeric_limits<float>::infinity();
   static constexpr float kMax = std::numeric_limits<float>::infinity();
 };
@@ -67,8 +63,6 @@ struct ContextConv2D final {
   static constexpr float kMax = std::numeric_limits<float>::infinity();
 };
 
-
-bool available();
 
 namespace internal {
 
@@ -125,8 +119,10 @@ struct Layout final {
   };
 };
 } // namespace internal
-} // namespace xnnpack
-} // namespace native
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */
+
+namespace at::native::xnnpack {
+bool available();
+} // namespace at::native::xnnpack

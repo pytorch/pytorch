@@ -18,6 +18,7 @@ class DLDeviceType(enum.IntEnum):
     kDLVPI = 9,
     kDLROCM = 10,
     kDLExtDev = 12,
+    kDLOneAPI = 14,
 
 
 torch._C._add_docstr(to_dlpack, r"""to_dlpack(tensor) -> PyCapsule
@@ -42,9 +43,10 @@ Args:
 The DLPack capsule shares the tensor's memory.
 """)
 
+
 # TODO: add a typing.Protocol to be able to tell Mypy that only objects with
 # __dlpack__ and __dlpack_device__ methods are accepted.
-def from_dlpack(ext_tensor: Any) -> torch.Tensor:
+def from_dlpack(ext_tensor: Any) -> 'torch.Tensor':
     """from_dlpack(ext_tensor) -> Tensor
 
     Converts a tensor from an external library into a ``torch.Tensor``.
@@ -82,7 +84,7 @@ def from_dlpack(ext_tensor: Any) -> torch.Tensor:
         # The old-style DLPack usage, with an intermediate capsule object
         >>> capsule = torch.utils.dlpack.to_dlpack(t)
         >>> capsule
-        <capsule object "dltensor" at 0x7f6017d14300>
+        <capsule object "dltensor" at ...>
         >>> t3 = torch.from_dlpack(capsule)
         >>> t3
         tensor([-1, -1,  2,  3])
@@ -100,12 +102,12 @@ def from_dlpack(ext_tensor: Any) -> torch.Tensor:
         # device is either CUDA or ROCm, we need to pass the current
         # stream
         if device[0] in (DLDeviceType.kDLGPU, DLDeviceType.kDLROCM):
-            stream = torch.cuda.current_stream('cuda:{}'.format(device[1]))
+            stream = torch.cuda.current_stream(f'cuda:{device[1]}')
             # cuda_stream is the pointer to the stream and it is a public
             # attribute, but it is not documented
             # The array API specify that the default legacy stream must be passed
             # with a value of 1 for CUDA
-            # https://data-apis.org/array-api/latest/API_specification/array_object.html?dlpack-self-stream-none#dlpack-self-stream-none  # NOQA
+            # https://data-apis.org/array-api/latest/API_specification/array_object.html?dlpack-self-stream-none#dlpack-self-stream-none
             is_cuda = device[0] == DLDeviceType.kDLGPU
             # Since pytorch is not using PTDS by default, lets directly pass
             # the legacy stream

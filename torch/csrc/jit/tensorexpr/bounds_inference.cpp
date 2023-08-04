@@ -10,9 +10,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 using namespace analysis;
 
@@ -72,21 +70,21 @@ BoundsInfo mergeTensorAccesses(
   return ret;
 }
 
-std::unordered_map<VarPtr, BufPtr> getAllBufs(StmtPtr s) {
+static std::unordered_map<VarPtr, BufPtr> getAllBufs(StmtPtr s) {
   std::unordered_map<VarPtr, BufPtr> varToBuf;
 
   auto bufs = NodeFinder<Buf>::find(s);
-  for (auto b : bufs) {
+  for (const auto& b : bufs) {
     varToBuf[b->base_handle()] = b;
   }
   return varToBuf;
 }
 
-std::unordered_map<VarPtr, BufPtr> getAllBufs(ExprPtr e) {
+static std::unordered_map<VarPtr, BufPtr> getAllBufs(ExprPtr e) {
   std::unordered_map<VarPtr, BufPtr> varToBuf;
 
   auto bufs = NodeFinder<Buf>::find(e);
-  for (auto b : bufs) {
+  for (const auto& b : bufs) {
     varToBuf[b->base_handle()] = b;
   }
   return varToBuf;
@@ -164,7 +162,7 @@ std::vector<ExprPtr> getBoundExtents(
   std::vector<ExprPtr> starts;
   std::vector<ExprPtr> stops;
 
-  // Find the safe size of the temprorary buffer by determining the outer
+  // Find the safe size of the temporary buffer by determining the outer
   // extents of a union of all bounds.
   for (const TensorAccessBoundsInfo& p : infos) {
     for (const auto i : c10::irange(p.start.size())) {
@@ -197,7 +195,7 @@ std::vector<ExprPtr> getBoundExtents(
 
 using BoundSet = std::unordered_set<Bound, BoundHash>;
 
-BoundSet convertBounds(
+static BoundSet convertBounds(
     const std::vector<TensorAccessBoundsInfo>& bounds,
     TensorAccessKind filter = kMutate) {
   BoundSet ret;
@@ -211,7 +209,7 @@ BoundSet convertBounds(
   return ret;
 }
 
-BoundSet convertBounds(
+static BoundSet convertBounds(
     BoundsInfo& bounds,
     BufPtr buf,
     TensorAccessKind filter = kMutate) {
@@ -229,9 +227,6 @@ HazardKind getPotentialHazards(
     StmtPtr B) {
   BoundsInfo aBounds = getInferredBounds(analyzer, A, true);
   BoundsInfo bBounds = getInferredBounds(analyzer, B, true);
-
-  BoundSet aWrites;
-  BoundSet aReads;
 
   for (auto& pair : bBounds) {
     BufPtr buf = pair.first;
@@ -276,7 +271,7 @@ HazardKind getPotentialHazards(
   return HazardKind::NoDependency;
 }
 
-IndexBounds getIndexBounds(const TensorAccessBoundsInfo& tabi) {
+static IndexBounds getIndexBounds(const TensorAccessBoundsInfo& tabi) {
   TORCH_INTERNAL_ASSERT(
       tabi.start.size() == tabi.stop.size(), buildErrorMessage());
   IndexBounds ret(tabi.start.size());
@@ -289,7 +284,7 @@ IndexBounds getIndexBounds(const TensorAccessBoundsInfo& tabi) {
   return ret;
 }
 
-std::vector<IndexBounds> getIndexBounds(
+static std::vector<IndexBounds> getIndexBounds(
     const std::vector<TensorAccessBoundsInfo>& vTABI,
     TensorAccessKind filter = kMutate) {
   std::vector<IndexBounds> bounds;
@@ -301,7 +296,7 @@ std::vector<IndexBounds> getIndexBounds(
   return bounds;
 }
 
-bool hasConflictingOverlap(
+static bool hasConflictingOverlap(
     const BoundsInfo& aBounds,
     const BoundsInfo& bBounds,
     TensorAccessKind aFilter = kMutate,
@@ -369,6 +364,4 @@ bool isOverlapping(
   return hasConflictingOverlap(sBounds, lBounds, kStore, kLoad);
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

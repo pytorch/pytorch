@@ -2,7 +2,7 @@
 # Now it only builds the Torch python bindings.
 
 if(NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
+  cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
   project(torch CXX C)
   find_package(torch REQUIRED)
   option(USE_CUDA "Use CUDA" ON)
@@ -44,9 +44,6 @@ set(TORCH_PYTHON_SRCS
     )
 append_filelist("libtorch_python_core_sources" TORCH_PYTHON_SRCS)
 
-list(APPEND TORCH_PYTHON_SRCS
-    ${TORCH_SRC_DIR}/csrc/init_flatbuffer_module.cpp)
-
 # NB: This has to match the condition under which the JIT test directory
 #     is included (at the time of writing that's in caffe2/CMakeLists.txt).
 if(BUILD_TEST)
@@ -74,6 +71,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
     ${TORCH_ROOT}/third_party/flatbuffers/include
+    ${TORCH_ROOT}/third_party/kineto/libkineto/include
 
     ${TORCH_SRC_DIR}/csrc
     ${TORCH_SRC_DIR}/csrc/api/include
@@ -88,6 +86,16 @@ set(TORCH_PYTHON_LINK_LIBRARIES
     shm
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)
+
+if(USE_ASAN AND TARGET Sanitizer::address)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::address)
+endif()
+if(USE_ASAN AND TARGET Sanitizer::undefined)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::undefined)
+endif()
+if(USE_TSAN AND TARGET Sanitizer::thread)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::thread)
+endif()
 
 set(TORCH_PYTHON_COMPILE_DEFINITIONS)
 
@@ -108,13 +116,14 @@ elseif(APPLE)
 else()
     list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
       -fno-strict-aliasing
-      -Wno-write-strings
       -Wno-strict-aliasing)
 endif()
 
-if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
-      -Wno-writable-strings)
+if(USE_ITT)
+  list(APPEND TORCH_PYTHON_SRCS
+    ${TORCH_SRC_DIR}/csrc/itt.cpp
+  )
+  list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_ITT)
 endif()
 
 if(USE_CUDA)
@@ -124,6 +133,7 @@ if(USE_CUDA)
 
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDA)
     if(USE_CUDNN)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::cudnn)
         list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDNN)
     endif()
 
@@ -139,7 +149,6 @@ if(USE_ROCM)
       __HIP_PLATFORM_HCC__
       )
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
-    list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${roctracer_INCLUDE_DIRS})
 endif()
 
 if(USE_EXPERIMENTAL_CUDNN_V8_API)
@@ -199,6 +208,10 @@ add_custom_target(torch_python_stubs DEPENDS
     "${TORCH_SRC_DIR}/nn/functional.pyi"
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
 )
+
+file(GLOB_RECURSE torchgen_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
+file(GLOB_RECURSE autograd_python "${TOOLS_PATH}/autograd/*.py")
+file(GLOB_RECURSE pyi_python "${TOOLS_PATH}/pyi/*.py")
 add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/_C/__init__.pyi"
@@ -210,13 +223,15 @@ add_custom_command(
       --tags-path "aten/src/ATen/native/tags.yaml"
       --deprecated-functions-path "tools/autograd/deprecated.yaml"
     DEPENDS
-    "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
-    "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
-    "${TORCH_SRC_DIR}/nn/functional.pyi.in"
-    "${TOOLS_PATH}/pyi/gen_pyi.py"
-    "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
-    "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"
-    "${TORCH_ROOT}/tools/autograd/deprecated.yaml"
+      "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
+      "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
+      "${TORCH_SRC_DIR}/nn/functional.pyi.in"
+      "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+      "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"
+      "${TORCH_ROOT}/tools/autograd/deprecated.yaml"
+      ${pyi_python}
+      ${autograd_python}
+      ${torchgen_python}
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
 )
@@ -265,94 +280,14 @@ if(USE_NCCL AND NOT WIN32)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
 endif()
 
-
-# WARNING- any TORCH_PYTHON_COMPILE_DEFINITIONS above this line
-#          affect both torch_python and DEPLOY interpreter.
-if(USE_DEPLOY)
-  add_library(torch_python_obj OBJECT ${TORCH_PYTHON_SRCS})
-  if(NOT MSVC)
-    target_compile_options(torch_python_obj PRIVATE -Wno-unused-variable)
-    target_compile_options(torch_python_obj PRIVATE -Wno-unused-local-typedefs)
-  endif()
-  if(USE_DISTRIBUTED)
-    # Set c10d-related compile definitions. For a "normal" build of
-    # libtorch_python, these are set on libtorch as PUBLIC so they are
-    # automatically propagated when libtorch_python links against libtorch. But
-    # since in the deploy build we are intentionally *not* linking against
-    # libtorch, we need to set them manually here.
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
-    if(USE_GLOO AND USE_C10D_GLOO)
-      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_GLOO)
-    endif()
-    if(USE_NCCL AND USE_C10D_NCCL)
-        list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_NCCL)
-        # Put nccl headers on the include path. We are specifically only setting
-        # include dirs here instead of linking against __caffe2_nccl wholesale
-        # to ensure we aren't accidentally replicating the nccl lib.
-        target_include_directories(torch_python_obj PRIVATE $<TARGET_PROPERTY:__caffe2_nccl,INTERFACE_INCLUDE_DIRECTORIES>)
-    endif()
-    if(USE_MPI AND USE_C10D_MPI)
-      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_MPI)
-    endif()
-
-    # Pass USE_RPC in order to reduce use of
-    # #if defined(USE_DISTRIBUTED) && !defined(_WIN32)
-    # need to be removed when RPC is supported
-    if(NOT WIN32)
-      target_compile_definitions(torch_cpu PUBLIC USE_RPC)
-    endif()
-    if(USE_TENSORPIPE)
-      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_TENSORPIPE)
-    endif()
-
-    # Set c10d-related include directories as well.
-    target_include_directories(torch_python_obj PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
-  endif()
-  target_compile_definitions(torch_python_obj PRIVATE "-DTHP_BUILD_MAIN_LIB -DUSE_DEPLOY")
-
-  target_compile_definitions(torch_python_obj PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
-
-  target_compile_definitions(torch_python_obj PUBLIC ${TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS})
-
-  target_compile_options(torch_python_obj PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
-
-  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-    target_compile_options(torch_python_obj PRIVATE -fno-gnu-unique)
-  endif()
-
-  target_include_directories(torch_python_obj PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
-  target_include_directories(torch_python_obj PRIVATE ../third_party/fmt/include)
-
-  # need to specify the dependency so the generated headers exist,
-  # missing dependency since torch_python_obj doesn't link onnx, the interpreter lib does.
-  add_dependencies(torch_python_obj onnx)
-
-  target_include_directories(torch_python_obj SYSTEM PRIVATE
-      ${PYTHON_INCLUDE_DIRS}
-      ${pybind11_INCLUDE_DIRS})
-
-  if(HAVE_SOVERSION)
-    set_target_properties(torch_python_obj PROPERTIES
-        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
-  endif()
-  add_dependencies(torch_python_obj torch_python_stubs)
-
-  # Required workaround for generated sources
-  # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
-  add_dependencies(torch_python_obj generate-torch-sources)
-  set_source_files_properties(
-      ${GENERATED_THNN_SOURCES}
-      ${GENERATED_CXX_PYTHON}
-      PROPERTIES GENERATED TRUE
-      )
-
-  add_dependencies(torch_python_obj gen_torch_version)
-
-endif()
-
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/utils/throughput_benchmark.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
+
+if(NOT MSVC)
+  # cudaProfilerInitialize must go away
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/shared/cudart.cpp PROPERTIES COMPILE_FLAGS "-Wno-deprecated-declarations")
 endif()
 
 # coreml
@@ -384,7 +319,6 @@ endif()
 
 if(NOT MSVC)
   target_compile_options(torch_python PRIVATE -Wno-unused-variable)
-  target_compile_options(torch_python PRIVATE -Wno-unused-local-typedefs)
 endif()
 
 # Required workaround for generated sources
@@ -399,9 +333,6 @@ set_source_files_properties(
 # Disable certain warnings for GCC-9.X
 if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/Module.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-  set_source_files_properties(
-    ${TORCH_SRC_DIR}/csrc/init_flatbuffer_module.cpp
-    PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
 endif()
 
@@ -429,6 +360,11 @@ target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 
 target_include_directories(torch_python PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
 
+if(USE_UCC)
+  target_link_libraries(torch_python PRIVATE __caffe2_ucc)
+  target_compile_definitions(torch_python PRIVATE USE_UCC)
+endif()
+
 if(BUILD_ONEDNN_GRAPH)
   target_compile_definitions(torch_python PRIVATE "-DBUILD_ONEDNN_GRAPH")
   target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
@@ -453,9 +389,9 @@ add_custom_command(
     "${PYTHON_EXECUTABLE}" -c \"from pathlib import Path\; Path('${TOOLS_PATH}/generate_torch_version.py').touch()\"
   COMMAND
     "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
-      --is_debug=${TORCH_VERSION_DEBUG}
-      --cuda_version=${CUDA_VERSION}
-      --hip_version=${HIP_VERSION}
+      --is-debug=${TORCH_VERSION_DEBUG}
+      --cuda-version=${CUDA_VERSION}
+      --hip-version=${HIP_VERSION}
   DEPENDS ${TOOLS_PATH}/generate_torch_version.py
   WORKING_DIRECTORY ${TORCH_ROOT}
 )
@@ -476,3 +412,6 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   # Pybind11 requires explicit linking of the torch_python library
   target_link_libraries(nnapi_backend PRIVATE torch torch_python pybind::pybind11)
 endif()
+
+set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
+set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)

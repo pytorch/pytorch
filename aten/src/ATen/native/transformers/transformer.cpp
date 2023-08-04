@@ -2,6 +2,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
+#include <c10/util/Exception.h>
 
 #include <torch/library.h>
 
@@ -49,14 +50,6 @@ Tensor ffn(
   return res;
 }
 
-void add_in_place(Tensor& input, const Tensor& arg, bool use_nested_tensor) {
-  if (use_nested_tensor) {
-    NestedTensor_add_NestedTensor_in_place(input, arg);
-  } else {
-    input.add_(arg);
-  }
-}
-
 Tensor norm(
     const Tensor& input,
     const int64_t embed_dim,
@@ -64,11 +57,7 @@ Tensor norm(
     const Tensor& weight,
     const Tensor& bias,
     const bool use_nested_tensor) {
-  if (use_nested_tensor) {
-    return NestedTensor_layer_norm(input, weight, bias, eps);
-  } else {
-    return at::layer_norm(input, {embed_dim}, weight, bias, eps, true);
-  }
+  return at::layer_norm(input, {embed_dim}, weight, bias, eps, true);
 }
 
 } // namespace
@@ -92,21 +81,25 @@ Tensor transformer_encoder_layer_forward(
     const Tensor& ffn_bias_1,
     const Tensor& ffn_weight_2,
     const Tensor& ffn_bias_2,
-    const c10::optional<Tensor>& mask) {
+    const c10::optional<Tensor>& mask,
+    const c10::optional<int64_t> mask_type) {
   {
     const Tensor& check_for_empty = src.is_nested() ? get_nested_tensor_impl(src)->get_buffer() : src;
     if (check_for_empty.numel() == 0) {
       return src.is_nested()
-        ? at::detail::make_tensor<NestedTensorImpl>(check_for_empty, get_nested_tensor_impl(src)->get_nested_size_tensor())
+        ? at::detail::make_tensor<NestedTensorImpl>(check_for_empty, get_nested_tensor_impl(src)->get_nested_sizes())
         : src.clone();
     }
   }
-  TORCH_CHECK(!norm_first, "norm_first is not supported yet");
   const bool use_nested_tensor = src.is_nested();
-  auto x = std::get<0>(native_multi_head_attention(
-      src,
-      src,
-      src,
+  Tensor x = src;
+  if (norm_first) {
+    x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_1, layer_norm_bias_1, use_nested_tensor);
+  }
+  x = std::get<0>(at::_native_multi_head_attention(
+      x,
+      x,
+      x,
       embed_dim,
       num_heads,
       qkv_weight,
@@ -114,11 +107,21 @@ Tensor transformer_encoder_layer_forward(
       proj_weight,
       proj_bias,
       mask,
-      false /* need_weights */));
-  add_in_place(x, src, use_nested_tensor);
-  x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_1, layer_norm_bias_1, use_nested_tensor);
+      false /* need_weights */,
+      true /* average_attn_weights */,
+      mask_type));
+
+  x.add_(src);
+  if (!norm_first) {
+    x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_1, layer_norm_bias_1, use_nested_tensor);
+  }
+
 
   auto pre_ffn_res = x;
+
+  if (norm_first) {
+    x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_2, layer_norm_bias_2, use_nested_tensor);
+  }
   x = ffn(
       x,
       ffn_weight_1,
@@ -127,100 +130,11 @@ Tensor transformer_encoder_layer_forward(
       ffn_bias_2,
       use_gelu,
       /* add_norm* */ false);
-  add_in_place(x, pre_ffn_res, use_nested_tensor);
-  x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_2, layer_norm_bias_2, use_nested_tensor);
+  x.add_(pre_ffn_res);
+  if (!norm_first) {
+    x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_2, layer_norm_bias_2, use_nested_tensor);
+  }
   return x;
-}
-
-std::tuple<Tensor, Tensor, Tensor>  transformer_decoder_only_layer_forward(
-    const Tensor& src,
-    const int64_t embed_dim,
-    const int64_t num_heads,
-    const Tensor& qkv_weight,
-    const Tensor& qkv_bias,
-    const Tensor& proj_weight,
-    const Tensor& proj_bias,
-    const bool use_gelu,
-    const bool norm_first,
-    const double layer_norm_eps,
-    const Tensor& layer_norm_weight_1,
-    const Tensor& layer_norm_bias_1,
-    const Tensor& layer_norm_weight_2,
-    const Tensor& layer_norm_bias_2,
-    const Tensor& ffn_weight_1,
-    const Tensor& ffn_bias_1,
-    const Tensor& ffn_weight_2,
-    const Tensor& ffn_bias_2,
-    const c10::optional<Tensor>& mask,
-    const c10::optional<Tensor>& incr_key,
-    const c10::optional<Tensor>& incr_value) {
-  {
-    const Tensor& check_for_empty = src.is_nested() ? get_nested_tensor_impl(src)->get_buffer() : src;
-    if (check_for_empty.numel() == 0) {
-      auto src_out = src.is_nested()
-        ? at::detail::make_tensor<NestedTensorImpl>(check_for_empty, get_nested_tensor_impl(src)->get_nested_size_tensor())
-        : src.clone();
-      return std::make_tuple(src_out, incr_key.value(), incr_value.value());
-    }
-  }
-  TORCH_CHECK(!norm_first, "norm_first is not supported yet");
-  const bool use_nested_tensor = src.is_nested();
-  auto mha_out = native_decoder_only_multi_head_attention(
-      src,
-      src,
-      src,
-      embed_dim,
-      num_heads,
-      qkv_weight,
-      qkv_bias,
-      proj_weight,
-      proj_bias,
-      mask,
-      incr_key,
-      incr_value,
-      false /* need_weights */);
-  auto x = std::get<0>(mha_out);
-  auto incr_key_out = std::get<2>(mha_out);
-  auto incr_value_out = std::get<3>(mha_out);
-  if (use_nested_tensor) {
-    NestedTensor_add_NestedTensor_in_place(x, src);
-    x = NestedTensor_layer_norm(
-        x, layer_norm_weight_1, layer_norm_bias_1, layer_norm_eps);
-  } else {
-    x.add_(src);
-    x = at::layer_norm(
-        x,
-        {embed_dim},
-        layer_norm_weight_1,
-        layer_norm_bias_1,
-        layer_norm_eps,
-        true);
-  }
-
-  auto pre_ffn_res = x;
-  x = ffn(
-      x,
-      ffn_weight_1,
-      ffn_bias_1,
-      ffn_weight_2,
-      ffn_bias_2,
-      use_gelu,
-      /* add_norm* */ false);
-  if (use_nested_tensor) {
-    NestedTensor_add_NestedTensor_in_place(x, pre_ffn_res);
-    x = NestedTensor_layer_norm(
-        x, layer_norm_weight_2, layer_norm_bias_2, layer_norm_eps);
-  } else {
-    x.add_(pre_ffn_res);
-    x = at::layer_norm(
-        x,
-        {embed_dim},
-        layer_norm_weight_2,
-        layer_norm_bias_2,
-        layer_norm_eps,
-        true);
-  }
-  return std::make_tuple(std::move(x), std::move(incr_key_out), std::move(incr_value_out));
 }
 
 } // namespace native

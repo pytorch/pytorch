@@ -13,12 +13,6 @@ option_parser = OptionParser.new do |opts|
  opts.on('-p', '--platform ', 'platform for the current build, OS or SIMULATOR') { |value|
     options[:platform] = value
  }
- opts.on('-c', '--provisioning_profile ', 'provisioning profile for code signing') { |value|
-    options[:profile] = value
- }
- opts.on('-t', '--team_id ', 'development team ID') { |value|
-    options[:team_id] = value
- }
 end.parse!
 puts options.inspect
 
@@ -42,11 +36,6 @@ target.build_configurations.each do |config|
     config.build_settings['LIBRARY_SEARCH_PATHS']   = libraries_search_path
     config.build_settings['OTHER_LDFLAGS']          = other_linker_flags
     config.build_settings['ENABLE_BITCODE']         = 'No'
-    dev_team_id = options[:team_id]
-    if not dev_team_id and options[:platform] == 'OS'
-        raise "Please sepecify a valid development team id for code signing"
-    end
-    config.build_settings['DEVELOPMENT_TEAM']       = dev_team_id
 end
 
 # link static libraries
@@ -84,10 +73,5 @@ else
     raise "unsupported platform #{options[:platform]}"
 end
 
-profile = options[:profile]
-if not profile and options[:platform] == 'OS'
-    raise "no provisioning profile found!"
-end
-
 # run xcodebuild
-exec "xcodebuild clean build  -project #{xcodeproj_path}  -target #{target.name} -sdk #{sdk} -configuration Release PROVISIONING_PROFILE_SPECIFIER=#{profile} -arch #{arch}"
+exec "xcodebuild clean build -project #{xcodeproj_path} -target #{target.name} -sdk #{sdk} -configuration Release -arch #{arch}"

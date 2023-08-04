@@ -70,7 +70,7 @@ class TestPipeline(TestCase):
         output = FetchRecord(dst_blobs, ws=ws)
         num_dequeues = ws.blobs[str(counter)].fetch()
 
-        self.assertEquals(
+        self.assertEqual(
             num_dequeues, int(math.ceil(float(N) / NUM_DEQUEUE_RECORDS)))
 
         for a, b in zip(output.field_blobs(), expected_dst.field_blobs()):

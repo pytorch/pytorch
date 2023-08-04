@@ -1,157 +1,150 @@
+import heapq
 import json
+import math
 import os
 import subprocess
+from pathlib import Path
 
-from tools.stats.s3_stat_parser import (
-    get_previous_reports_for_branch,
-    Report,
-    Version2Report,
-    HAVE_BOTO3,
-)
+from typing import Callable, Dict, List, NamedTuple, Optional, Set, Tuple
+from warnings import warn
+
+from tools.shared.logging_utils import duration_to_str, pluralize
+
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
+from tools.stats.upload_stats_lib import emit_metric
 
-from typing import Any, Dict, List, Optional, Tuple, cast
-from typing_extensions import TypedDict
+IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
+
+# NUM_PROCS_FOR_SHARDING_CALC must remain consistent across all shards of a job
+# to ensure that sharding is consistent, NUM_PROCS is the actual number of procs
+# used to run tests.  If they are not equal, the only consequence should be
+# unequal shards.
+IS_ROCM = os.path.exists("/opt/rocm")
+NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 2
+NUM_PROCS_FOR_SHARDING_CALC = NUM_PROCS if not IS_ROCM or IS_MEM_LEAK_CHECK else 2
+THRESHOLD = 60 * 10  # 10 minutes
+
+# See Note [ROCm parallel CI testing]
+# Special logic for ROCm GHA runners to query number of GPUs available.
+# torch.version.hip was not available to check if this was a ROCm self-hosted runner.
+# Must check for ROCm runner in another way. We look for /opt/rocm directory.
+if IS_ROCM and not IS_MEM_LEAK_CHECK:
+    try:
+        # This is the same logic used in GHA health check, see .github/templates/common.yml.j2
+        lines = (
+            subprocess.check_output(["rocminfo"], encoding="ascii").strip().split("\n")
+        )
+        count = 0
+        for line in lines:
+            if " gfx" in line:
+                count += 1
+        assert count > 0  # there must be at least 1 GPU
+        # Limiting to 8 GPUs(PROCS)
+        NUM_PROCS = 8 if count > 8 else count
+    except subprocess.CalledProcessError as e:
+        # The safe default for ROCm GHA runners is to run tests serially.
+        NUM_PROCS = 1
 
 
-class JobTimeJSON(TypedDict):
-    commit: str
-    JOB_BASE_NAME: str
-    job_times: Dict[str, float]
+class ShardedTest(NamedTuple):
+    name: str
+    shard: int
+    num_shards: int
+    time: Optional[float]  # In seconds
+
+    def __str__(self) -> str:
+        return f"{self.name} {self.shard}/{self.num_shards}"
+
+    def get_time(self) -> float:
+        return self.time or 0
 
 
-def _get_stripped_CI_job() -> str:
-    return os.environ.get("BUILD_ENVIRONMENT", "")
+class ShardJob:
+    def __init__(self) -> None:
+        self.serial: List[ShardedTest] = []
+        self.parallel: List[ShardedTest] = []
+
+    def get_total_time(self) -> float:
+        procs = [0.0 for _ in range(NUM_PROCS_FOR_SHARDING_CALC)]
+        for test in self.parallel:
+            min_index = procs.index(min(procs))
+            procs[min_index] += test.get_time()
+        time = max(procs) + sum(test.get_time() for test in self.serial)
+        return time
+
+    def convert_to_tuple(self) -> Tuple[float, List[ShardedTest]]:
+        return (self.get_total_time(), self.serial + self.parallel)
 
 
-def _get_job_times_json(job_times: Dict[str, float]) -> JobTimeJSON:
-    return {
-        "commit": subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], encoding="ascii"
-        ).strip(),
-        "JOB_BASE_NAME": _get_stripped_CI_job(),
-        "job_times": job_times,
-    }
-
-
-def _calculate_job_times(reports: List["Report"]) -> Dict[str, float]:
-    """Compute test runtime by filename: ("test_file_name" -> (current_avg, # values))"""
-    jobs_to_times: Dict[str, Tuple[float, int]] = dict()
-    for report in reports:
-        v_report = cast(Version2Report, report)
-        assert (
-            "format_version" in v_report.keys() and v_report.get("format_version") == 2
-        ), "S3 format currently handled is version 2 only"
-        files: Dict[str, Any] = v_report["files"]
-        for name, test_file in files.items():
-            if name not in jobs_to_times:
-                jobs_to_times[name] = (test_file["total_seconds"], 1)
-            else:
-                curr_avg, curr_count = jobs_to_times[name]
-                new_count = curr_count + 1
-                new_avg = (
-                    curr_avg * curr_count + test_file["total_seconds"]
-                ) / new_count
-                jobs_to_times[name] = (new_avg, new_count)
-
-    return {job: time for job, (time, _) in jobs_to_times.items()}
+def get_with_pytest_shard(
+    tests: List[str], test_file_times: Dict[str, float]
+) -> List[ShardedTest]:
+    sharded_tests: List[ShardedTest] = []
+    for test in tests:
+        duration = test_file_times[test]
+        if duration > THRESHOLD:
+            num_shards = math.ceil(duration / THRESHOLD)
+            for i in range(num_shards):
+                sharded_tests.append(
+                    ShardedTest(test, i + 1, num_shards, duration / num_shards)
+                )
+        else:
+            sharded_tests.append(ShardedTest(test, 1, 1, duration))
+    return sharded_tests
 
 
 def calculate_shards(
-    num_shards: int, tests: List[str], job_times: Dict[str, float]
-) -> List[Tuple[float, List[str]]]:
-    filtered_job_times: Dict[str, float] = dict()
-    unknown_jobs: List[str] = []
-    for test in tests:
-        if test in job_times:
-            filtered_job_times[test] = job_times[test]
-        else:
-            unknown_jobs.append(test)
+    num_shards: int,
+    tests: List[str],
+    test_file_times: Dict[str, float],
+    must_serial: Optional[Callable[[str], bool]] = None,
+) -> List[Tuple[float, List[ShardedTest]]]:
+    must_serial = must_serial or (lambda x: True)
 
-    # The following attempts to implement a partition approximation greedy algorithm
-    # See more at https://en.wikipedia.org/wiki/Greedy_number_partitioning
-    sorted_jobs = sorted(
-        filtered_job_times, key=lambda j: filtered_job_times[j], reverse=True
+    known_tests = [x for x in tests if x in test_file_times]
+    unknown_tests: List[str] = [x for x in tests if x not in known_tests]
+
+    sorted_tests = sorted(
+        get_with_pytest_shard(known_tests, test_file_times),
+        key=lambda j: j.get_time(),
+        reverse=True,
     )
-    sharded_jobs: List[Tuple[float, List[str]]] = [(0.0, []) for _ in range(num_shards)]
-    for job in sorted_jobs:
-        min_shard_index = sorted(range(num_shards), key=lambda i: sharded_jobs[i][0])[0]
-        curr_shard_time, curr_shard_jobs = sharded_jobs[min_shard_index]
-        curr_shard_jobs.append(job)
-        sharded_jobs[min_shard_index] = (
-            curr_shard_time + filtered_job_times[job],
-            curr_shard_jobs,
-        )
+
+    sharded_jobs: List[ShardJob] = [ShardJob() for _ in range(num_shards)]
+    for test in sorted_tests:
+        if must_serial(test.name):
+            min_sharded_job = min(sharded_jobs, key=lambda j: j.get_total_time())
+            min_sharded_job.serial.append(test)
+        else:
+            min_sharded_job = min(sharded_jobs, key=lambda j: j.get_total_time())
+            min_sharded_job.parallel.append(test)
 
     # Round robin the unknown jobs starting with the smallest shard
-    index = sorted(range(num_shards), key=lambda i: sharded_jobs[i][0])[0]
-    for job in unknown_jobs:
-        sharded_jobs[index][1].append(job)
+    index = min(range(num_shards), key=lambda i: sharded_jobs[i].get_total_time())
+    for unknown_test in unknown_tests:
+        sharded_jobs[index].serial.append(ShardedTest(unknown_test, 1, 1, None))
         index = (index + 1) % num_shards
-    return sharded_jobs
-
-
-def _pull_job_times_from_S3() -> Dict[str, float]:
-    if HAVE_BOTO3:
-        ci_job_prefix = _get_stripped_CI_job()
-        s3_reports: List["Report"] = get_previous_reports_for_branch(
-            "origin/viable/strict", ci_job_prefix
-        )
-    else:
-        print(
-            "Uh oh, boto3 is not found. Either it is not installed or we failed to import s3_stat_parser."
-        )
-        print(
-            "If not installed, please install boto3 for automatic sharding and test categorization."
-        )
-        s3_reports = []
-
-    if len(s3_reports) == 0:
-        print("::warning:: Gathered no reports from S3. Please proceed without them.")
-        return dict()
-
-    return _calculate_job_times(s3_reports)
-
-
-def _query_past_job_times(test_times_file: Optional[str] = None) -> Dict[str, float]:
-    """Read historic test job times from a file.
-
-    If the file doesn't exist or isn't matching current commit. It will download data from S3 and exported it.
-    """
-    if test_times_file and os.path.exists(test_times_file):
-        with open(test_times_file) as file:
-            test_times_json: JobTimeJSON = json.load(file)
-
-        curr_commit = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], encoding="ascii"
-        ).strip()
-        file_commit = test_times_json.get("commit", "")
-        curr_ci_job = _get_stripped_CI_job()
-        file_ci_job = test_times_json.get("JOB_BASE_NAME", "N/A")
-        if curr_commit != file_commit:
-            print(f"Current test times file is from different commit {file_commit}.")
-        elif curr_ci_job != file_ci_job:
-            print(f"Current test times file is for different CI job {file_ci_job}.")
-        else:
-            print(
-                f"Found stats for current commit: {curr_commit} and job: {curr_ci_job}. Proceeding with those values."
-            )
-            return test_times_json.get("job_times", {})
-
-        # Found file, but commit or CI job in JSON doesn't match
-        print(
-            f"Overwriting current file with stats based on current commit: {curr_commit} and CI job: {curr_ci_job}"
-        )
-
-    job_times = export_S3_test_times(test_times_file)
-
-    return job_times
+    return [job.convert_to_tuple() for job in sharded_jobs]
 
 
 def _query_changed_test_files() -> List[str]:
-    default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'master')}"
-    cmd = ["git", "diff", "--name-only", default_branch, "HEAD"]
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'main')}"
+    merge_base = (
+        subprocess.check_output(["git", "merge-base", default_branch, "HEAD"])
+        .decode()
+        .strip()
+    )
+
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
+
+    base_commit = merge_base
+    if base_commit == head:
+        # We are on the default branch, so check for changes since the last commit
+        base_commit = "HEAD^"
+
+    proc = subprocess.run(
+        ["git", "diff", "--name-only", base_commit, "HEAD"], capture_output=True
+    )
 
     if proc.returncode != 0:
         raise RuntimeError("Unable to get changed files")
@@ -161,99 +154,193 @@ def _query_changed_test_files() -> List[str]:
     return lines
 
 
-# Get sharded test allocation based on historic S3 data.
-def get_shard_based_on_S3(
-    which_shard: int, num_shards: int, tests: List[str], test_times_file: str
-) -> List[str]:
-    # Short circuit and don't do any work if there's only 1 shard
-    if num_shards == 1:
-        return tests
+def _get_previously_failing_tests() -> Set[str]:
+    PYTEST_FAILED_TESTS_CACHE_FILE_PATH = Path(".pytest_cache/v/cache/lastfailed")
 
-    jobs_to_times = _query_past_job_times(test_times_file)
-
-    # Got no stats from S3, returning early to save runtime
-    if len(jobs_to_times) == 0:
-        print(
-            "::warning:: Gathered no stats from S3. Proceeding with default sharding plan."
+    if not PYTEST_FAILED_TESTS_CACHE_FILE_PATH.exists():
+        warn(
+            f"No pytorch cache found at {PYTEST_FAILED_TESTS_CACHE_FILE_PATH.absolute()}"
         )
-        return tests[which_shard - 1 :: num_shards]
+        return set()
 
-    shards = calculate_shards(num_shards, tests, jobs_to_times)
-    _, tests_from_shard = shards[which_shard - 1]
-    return tests_from_shard
+    with open(PYTEST_FAILED_TESTS_CACHE_FILE_PATH) as f:
+        last_failed_tests = json.load(f)
 
-
-def get_slow_tests_based_on_S3(
-    test_list: List[str], td_list: List[str], slow_test_threshold: int
-) -> List[str]:
-    """Get list of slow tests based on historic S3 data."""
-    jobs_to_times: Dict[str, float] = _query_past_job_times()
-
-    # Got no stats from S3, returning early to save runtime
-    if len(jobs_to_times) == 0:
-        print("::warning:: Gathered no stats from S3. No new slow tests calculated.")
-        return []
-
-    slow_tests: List[str] = []
-    for test in test_list:
-        if test in jobs_to_times and test not in td_list:
-            if jobs_to_times[test] > slow_test_threshold:
-                slow_tests.append(test)
-    return slow_tests
+    prioritized_tests = _parse_prev_failing_test_files(last_failed_tests)
+    return _python_test_file_to_test_name(prioritized_tests)
 
 
-def get_reordered_tests(tests: List[str]) -> List[str]:
-    """Get the reordered test filename list based on github PR history or git changed file."""
-    prioritized_tests: List[str] = []
-    if len(prioritized_tests) == 0:
-        try:
-            changed_files = _query_changed_test_files()
-        except Exception:
-            # If unable to get changed files from git, quit without doing any sorting
-            return tests
+def _parse_prev_failing_test_files(last_failed_tests: Dict[str, bool]) -> Set[str]:
+    prioritized_tests = set()
 
-        prefix = f"test{os.path.sep}"
-        prioritized_tests = [
-            f for f in changed_files if f.startswith(prefix) and f.endswith(".py")
-        ]
-        prioritized_tests = [f[len(prefix) :] for f in prioritized_tests]
-        prioritized_tests = [f[: -len(".py")] for f in prioritized_tests]
-        print("Prioritized test from test file changes.")
+    # The keys are formatted as "test_file.py::test_class::test_method[params]"
+    # We just need the test_file part
+    for test in last_failed_tests:
+        parts = test.split("::")
+        if len(parts) > 1:
+            test_file = parts[0]
+            prioritized_tests.add(test_file)
+
+    return prioritized_tests
+
+
+def _get_modified_tests() -> Set[str]:
+    try:
+        changed_files = _query_changed_test_files()
+    except Exception as e:
+        warn(f"Can't query changed test files due to {e}")
+        # If unable to get changed files from git, quit without doing any sorting
+        return set()
+
+    return _python_test_file_to_test_name(set(changed_files))
+
+
+def _python_test_file_to_test_name(tests: Set[str]) -> Set[str]:
+    prefix = f"test{os.path.sep}"
+    valid_tests = {f for f in tests if f.startswith(prefix) and f.endswith(".py")}
+    valid_tests = {f[len(prefix) : -len(".py")] for f in valid_tests}
+
+    return valid_tests
+
+
+class PoolTimes:
+    def __init__(self, num_procs: int) -> None:
+        self.pool_times = [0.0 for _ in range(num_procs)]
+        self.serial_times = 0.0
+
+    def next_test_start_time(self, serial: bool) -> float:
+        if serial:
+            # Serial tests are run after all parallel tests complete
+            return max(self.pool_times) + self.serial_times
+
+        return self.pool_times[0]
+
+    def schedule_test(self, test: ShardedTest, serial: bool) -> None:
+        if serial:
+            self.serial_times += test.get_time()
+        else:
+            # pool_times[0] is always the thread with the least amount of time scheduled
+            heapq.heappushpop(self.pool_times, self.pool_times[0] + test.get_time())
+
+
+def log_time_savings(
+    selected_tests: List[ShardedTest],
+    prioritized_tests: List[ShardedTest],
+    is_serial_test_fn: Callable[[str], bool],
+    num_procs: int = NUM_PROCS,  # make this customizable for testing
+) -> float:
+    # The tests will be run in [num_procs] parallel threads, so we assume each test
+    # is allocated to the thread that'll free up first.
+    # This isn't an exact match (since other factors could change which thread
+    # pool a test gets scheduled on) but it's a good approximation.
+
+    # Simulates the scheduled tests on each thread pool
+    default_pool = PoolTimes(num_procs)  # originally scheduled run
+    prioritized_pool = PoolTimes(num_procs)  # run for prioritized tests
+    max_time_savings_sec = 0.0
+
+    # It's easier to look up prioritized tests by name
+    prioritized_test_names = {test.name for test in prioritized_tests}
+
+    for test in selected_tests:
+        serial = is_serial_test_fn(test.name)
+        if test.name in prioritized_test_names:
+            # Successive tests will always have a greater time savings
+            max_time_savings_sec = default_pool.next_test_start_time(
+                serial
+            ) - prioritized_pool.next_test_start_time(serial)
+
+            # "schedule" this test on the prioritized pool to get time savings for future prioritized tests
+            prioritized_pool.schedule_test(test, serial)
+
+        # always schedule on the default pool to know what the unprioritized timeline would've looked like
+        default_pool.schedule_test(test, serial)
+
+    print(
+        f"Prioritized tests will run about {duration_to_str(max_time_savings_sec)} sooner than they would've otherwise"
+    )
+
+    emit_metric(
+        "test_reordering_time_savings",
+        {
+            "time_savings_sec": max_time_savings_sec,
+        },
+    )
+
+    # Return value used by tests
+    return max_time_savings_sec
+
+
+def get_reordered_tests(
+    tests: List[ShardedTest],
+) -> Tuple[List[ShardedTest], List[ShardedTest]]:
+    """
+    Get the reordered test filename list based on github PR history or git changed file.
+    We prioritize running test files that were changed.
+    """
+
+    def print_tests(tests: Set[str], test_group_description: str) -> None:
+        if not tests:
+            return
+
+        print(f"{test_group_description}:")
+        for test in tests:
+            print(f"  {test}")
+
+    prioritized_tests: Set[str] = set()
+
+    pri_test = _get_previously_failing_tests()
+    print_tests(
+        pri_test, "If run, these tests will prioritized because they previously failed"
+    )
+    prioritized_tests |= pri_test
+
+    pri_test |= _get_modified_tests()
+    print_tests(
+        pri_test, "If run, these tests will be prioritized because they were modified"
+    )
+    prioritized_tests |= pri_test
 
     bring_to_front = []
     the_rest = []
 
     for test in tests:
-        if test in prioritized_tests:
+        if test.name in prioritized_tests:
             bring_to_front.append(test)
         else:
             the_rest.append(test)
-    if len(tests) == len(bring_to_front) + len(the_rest):
-        print(
-            f"reordering tests for PR:\n"
-            f"prioritized: {bring_to_front}\nthe rest: {the_rest}\n"
-        )
-        return bring_to_front + the_rest
-    else:
+
+    if len(tests) != len(bring_to_front) + len(the_rest):
         print(
             f"Something went wrong in CI reordering, expecting total of {len(tests)}:\n"
             f"but found prioritized: {len(bring_to_front)}\nthe rest: {len(the_rest)}\n"
         )
-        return tests
+        return ([], tests)
 
+    prioritized_test_names = []
+    remaining_test_names = []
+    if bring_to_front:
+        test_cnt_str = pluralize(len(tests), "test")
+        print(f"Reordering tests: Prioritizing {len(bring_to_front)} of {test_cnt_str}")
 
-# TODO Refactor this and unify with tools.stats.export_slow_tests
-def export_S3_test_times(test_times_filename: Optional[str] = None) -> Dict[str, float]:
-    test_times: Dict[str, float] = _pull_job_times_from_S3()
-    if test_times_filename is not None:
-        print(f"Exporting S3 test stats to {test_times_filename}.")
-        if os.path.exists(test_times_filename):
-            print(f"Overwriting existent file: {test_times_filename}")
-        with open(test_times_filename, "w+") as file:
-            job_times_json = _get_job_times_json(test_times)
-            json.dump(job_times_json, file, indent="    ", separators=(",", ": "))
-            file.write("\n")
-    return test_times
+        prioritized_test_names = [t.name for t in bring_to_front]
+        print(f"Prioritized: {prioritized_test_names}")
+        remaining_test_names = [t.name for t in the_rest]
+        print(f"The Rest: {remaining_test_names}")
+    else:
+        print("Didn't find any tests to prioritize")
+
+    emit_metric(
+        "test_reordering_prioritized_tests",
+        {
+            "prioritized_test_cnt": len(bring_to_front),
+            "total_test_cnt": len(tests),
+            "prioritized_tests": prioritized_test_names,
+            "remaining_tests": remaining_test_names,
+        },
+    )
+
+    return (bring_to_front, the_rest)
 
 
 def get_test_case_configs(dirpath: str) -> None:

@@ -18,9 +18,10 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/ones.h>
+#include <ATen/ops/zeros.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 using namespace vec;
@@ -80,7 +81,7 @@ void batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
 
   Tensor alpha = at::empty({n_channel}, input.options());
   Tensor beta = at::empty({n_channel}, input.options());
-  scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
+  scalar_t* alpha_data = alpha.mutable_data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
   batch_norm_cpu_collect_linear_and_constant_terms<scalar_t, scalar_t>(
@@ -131,7 +132,7 @@ void batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
 
   Tensor alpha = at::empty({n_channel}, input.options());
   Tensor beta = at::empty({n_channel}, input.options());
-  scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
+  scalar_t* alpha_data = alpha.mutable_data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
   batch_norm_cpu_collect_linear_and_constant_terms<scalar_t, scalar_t>(
@@ -234,7 +235,7 @@ void batch_norm_cpu_collect_stats_channels_last_impl(
   // Normal size of C should fit in L1, otherwise consider blocking on C.
   //
   int num_threads = at::get_num_threads();
-  Tensor buffer = at::empty({num_threads, n_channel}, input.options()).zero_();
+  Tensor buffer = at::zeros({num_threads, n_channel}, input.options());
   scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
 
   // compute mean per input
@@ -310,7 +311,7 @@ void batch_norm_cpu_backward_contiguous_impl(Tensor& grad_input, Tensor& grad_we
   const scalar_t* grad_output_data = grad_output.data_ptr<scalar_t>();
   const scalar_t* input_data = input.data_ptr<scalar_t>();
 
-  scalar_t* grad_input_data = grad_input.defined() ? grad_input.data_ptr<scalar_t>() : nullptr;
+  scalar_t* grad_input_data = grad_input.defined() ? grad_input.mutable_data_ptr<scalar_t>() : nullptr;
   scalar_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<scalar_t>() : nullptr;
   scalar_t* grad_bias_data = grad_bias.defined() ? grad_bias.data_ptr<scalar_t>() : nullptr;
   const bool grad_input_null = grad_input_data == nullptr;
@@ -428,7 +429,7 @@ void batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad
   const scalar_t* grad_output_data = grad_output.data_ptr<scalar_t>();
   const scalar_t* input_data = input.data_ptr<scalar_t>();
 
-  scalar_t* grad_input_data = grad_input.defined() ? grad_input.data_ptr<scalar_t>() : nullptr;
+  scalar_t* grad_input_data = grad_input.defined() ? grad_input.mutable_data_ptr<scalar_t>() : nullptr;
   scalar_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<scalar_t>() : nullptr;
   scalar_t* grad_bias_data = grad_bias.defined() ? grad_bias.data_ptr<scalar_t>() : nullptr;
 
@@ -464,7 +465,7 @@ void batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad
   // Second path: parallel along dim1 of the immediate buffer.
   //
   int num_threads = at::get_num_threads();
-  Tensor buffer = at::empty({2, num_threads, n_channel}, input.options()).zero_();
+  Tensor buffer = at::zeros({2, num_threads, n_channel}, input.options());
   scalar_t* sum_data = buffer.data_ptr<scalar_t>();
   scalar_t* dotp_data = sum_data + num_threads * n_channel;
 
@@ -607,7 +608,7 @@ void batch_norm_cpu_contiguous_impl<BFloat16>(Tensor& output, const Tensor& inpu
   // use float as acc type
   Tensor alpha = at::empty({n_channel}, input.options().dtype(kFloat));
   Tensor beta = at::empty({n_channel}, input.options().dtype(kFloat));
-  float* alpha_data = alpha.data_ptr<float>();
+  float* alpha_data = alpha.mutable_data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
   const bool mixed_type = is_mixed_type(input, weight, bias, save_mean, save_invstd, running_mean, running_var);
@@ -670,7 +671,7 @@ void batch_norm_cpu_channels_last_impl<BFloat16>(Tensor& output, const Tensor& i
 
   Tensor alpha = at::empty({n_channel}, input.options().dtype(kFloat));
   Tensor beta = at::empty({n_channel}, input.options().dtype(kFloat));
-  float* alpha_data = alpha.data_ptr<float>();
+  float* alpha_data = alpha.mutable_data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
   const bool mixed_type = is_mixed_type(input, weight, bias, save_mean, save_invstd, running_mean, running_var);
@@ -788,15 +789,6 @@ void batch_norm_cpu_collect_stats_contiguous_impl<BFloat16>(
   }
 }
 
-static inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const BFloat16* ptr) {
-  return convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr));
-}
-
-static inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr) {
-  using Vec = Vectorized<float>;
-  return std::make_tuple(Vec::loadu(ptr), Vec::loadu(ptr + Vec::size()));
-}
-
 template <typename param_t>
 inline void batch_norm_cpu_collect_stats_channels_last_internal(
     Tensor& mean, Tensor& var_sum, const Tensor& input) {
@@ -811,7 +803,7 @@ inline void batch_norm_cpu_collect_stats_channels_last_internal(
   param_t* var_sum_data = var_sum.data_ptr<param_t>();
 
   int num_threads = at::get_num_threads();
-  Tensor buffer = at::empty({num_threads, n_channel}, input.options().dtype(kFloat)).zero_();
+  Tensor buffer = at::zeros({num_threads, n_channel}, input.options().dtype(kFloat));
   float* buffer_data = buffer.data_ptr<float>();
 
   at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
@@ -909,7 +901,7 @@ void batch_norm_cpu_backward_contiguous_internal(Tensor& grad_input, Tensor& gra
   const BFloat16* grad_output_data = grad_output.data_ptr<BFloat16>();
   const BFloat16* input_data = input.data_ptr<BFloat16>();
 
-  BFloat16* grad_input_data = grad_input.defined() ? grad_input.data_ptr<BFloat16>() : nullptr;
+  BFloat16* grad_input_data = grad_input.defined() ? grad_input.mutable_data_ptr<BFloat16>() : nullptr;
   param_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<param_t>() : nullptr;
   param_t* grad_bias_data = grad_bias.defined() ? grad_bias.data_ptr<param_t>() : nullptr;
   const bool grad_input_null = grad_input_data == nullptr;
@@ -1032,7 +1024,7 @@ void batch_norm_cpu_backward_channels_last_internal(Tensor& grad_input, Tensor& 
   const BFloat16* grad_output_data = grad_output.data_ptr<BFloat16>();
   const BFloat16* input_data = input.data_ptr<BFloat16>();
 
-  BFloat16* grad_input_data = grad_input.defined() ? grad_input.data_ptr<BFloat16>() : nullptr;
+  BFloat16* grad_input_data = grad_input.defined() ? grad_input.mutable_data_ptr<BFloat16>() : nullptr;
   param_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<param_t>() : nullptr;
   param_t* grad_bias_data = grad_bias.defined() ? grad_bias.data_ptr<param_t>() : nullptr;
 
@@ -1064,7 +1056,7 @@ void batch_norm_cpu_backward_channels_last_internal(Tensor& grad_input, Tensor& 
   }
 
   int num_threads = at::get_num_threads();
-  Tensor buffer = at::empty({2, num_threads, n_channel}, input.options().dtype(kFloat)).zero_();
+  Tensor buffer = at::zeros({2, num_threads, n_channel}, input.options().dtype(kFloat));
   float* sum_data = buffer.data_ptr<float>();
   float* dotp_data = sum_data + num_threads * n_channel;
 
@@ -1244,7 +1236,7 @@ void batch_norm_cpu_kernel(Tensor& output, const Tensor& input,
             save_mean, save_invstd, running_mean, running_var, train, eps);
       }
     });
-  } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+  } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast) || input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
     AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_channels_last", [&] {
       batch_norm_cpu_channels_last_impl<scalar_t>(output, input, weight, bias,
           save_mean, save_invstd, running_mean, running_var, train, eps);
@@ -1265,7 +1257,7 @@ void batch_norm_cpu_collect_stats_kernel(
         batch_norm_cpu_collect_stats_contiguous_impl<scalar_t>(mean, var_sum, input);
       }
     });
-  } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+  } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast) || input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
     AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_collect_stats_channels_last", [&] {
       batch_norm_cpu_collect_stats_channels_last_impl<scalar_t>(mean, var_sum, input);
     });
@@ -1289,7 +1281,7 @@ void batch_norm_cpu_backward_kernel(Tensor& grad_input, Tensor& grad_weight, Ten
             grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
       }
     });
-  } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+  } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast) || input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
     AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_backward_channels_last", [&] {
       batch_norm_cpu_backward_channels_last_impl<scalar_t>(grad_input, grad_weight, grad_bias,
           grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
@@ -1305,4 +1297,4 @@ REGISTER_DISPATCH(batch_norm_cpu_stub, &batch_norm_cpu_kernel);
 REGISTER_DISPATCH(batch_norm_cpu_collect_stats_stub, &batch_norm_cpu_collect_stats_kernel);
 REGISTER_DISPATCH(batch_norm_cpu_backward_stub, &batch_norm_cpu_backward_kernel);
 
-}} // namespace at::native
+} // namespace at::native

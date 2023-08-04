@@ -1,9 +1,11 @@
+#include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/alignment.h>
 #include <c10/core/impl/alloc_cpu.h>
 #include <c10/mobile/CPUCachingAllocator.h>
 #include <c10/mobile/CPUProfilingAllocator.h>
+#include <c10/util/Logging.h>
 
 // TODO: rename flag to C10
 C10_DEFINE_bool(
@@ -16,7 +18,13 @@ namespace c10 {
 struct C10_API DefaultCPUAllocator final : at::Allocator {
   DefaultCPUAllocator() = default;
   at::DataPtr allocate(size_t nbytes) const override {
-    void* data = alloc_cpu(nbytes);
+    void* data = nullptr;
+    try {
+      data = c10::alloc_cpu(nbytes);
+    } catch (c10::Error& e) {
+      profiledCPUMemoryReporter().OutOfMemory(nbytes);
+      throw e;
+    }
     profiledCPUMemoryReporter().New(data, nbytes);
     return {data, data, &ReportAndDelete, at::Device(at::DeviceType::CPU)};
   }
@@ -64,7 +72,6 @@ template <uint32_t PreGuardBytes, uint32_t PostGuardBytes>
 class DefaultMobileCPUAllocator final : public at::Allocator {
  public:
   DefaultMobileCPUAllocator() = default;
-  // NOLINTNEXTLINE(modernize-use-override)
   ~DefaultMobileCPUAllocator() override = default;
 
   static void deleter(void* const pointer) {
@@ -112,13 +119,18 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     } else if (profiling_allocator_ptr != nullptr) {
       data = profiling_allocator_ptr->allocate(alloc_size);
     } else {
-      data = c10::alloc_cpu(alloc_size);
+      try {
+        data = c10::alloc_cpu(alloc_size);
+      } catch (c10::Error& e) {
+        profiledCPUMemoryReporter().OutOfMemory(alloc_size);
+        throw e;
+      }
       auto allocation_planner = GetThreadLocalAllocationPlanner();
       if (allocation_planner != nullptr) {
         allocation_planner->record_allocation(alloc_size, data);
       }
     }
-    //  profiledCPUMemoryReporter().New(data, alloc_size);
+    profiledCPUMemoryReporter().New(data, alloc_size);
     return {
         reinterpret_cast<uint8_t*>(data) + PreGuardBytes,
         data,
@@ -196,7 +208,11 @@ void ProfiledCPUMemoryReporter::New(void* ptr, size_t nbytes) {
   }
   if (profile_memory) {
     reportMemoryUsageToProfiler(
-        ptr, nbytes, allocated, 0, c10::Device(c10::DeviceType::CPU));
+        ptr,
+        static_cast<int64_t>(nbytes),
+        allocated,
+        0,
+        c10::Device(c10::DeviceType::CPU));
   }
 }
 
@@ -231,7 +247,35 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
   }
   if (profile_memory) {
     reportMemoryUsageToProfiler(
-        ptr, -nbytes, allocated, 0, c10::Device(c10::DeviceType::CPU));
+        ptr,
+        -static_cast<int64_t>(nbytes),
+        allocated,
+        0,
+        c10::Device(c10::DeviceType::CPU));
+  }
+}
+
+void ProfiledCPUMemoryReporter::OutOfMemory(size_t nbytes) {
+  auto profile_memory = memoryProfilingEnabled();
+  size_t allocated = 0;
+  if (FLAGS_caffe2_report_cpu_memory_usage || profile_memory) {
+    std::lock_guard<std::mutex> guard(mutex_);
+
+    allocated = allocated_;
+  }
+  if (nbytes == 0) {
+    return;
+  }
+  if (FLAGS_caffe2_report_cpu_memory_usage) {
+    LOG(INFO) << "C10 Out of Memory. Trying to allocate " << nbytes
+              << " bytes, total alloc " << allocated << " bytes.";
+  }
+  if (profile_memory) {
+    reportOutOfMemoryToProfiler(
+        static_cast<int64_t>(nbytes),
+        allocated,
+        0,
+        c10::Device(c10::DeviceType::CPU));
   }
 }
 

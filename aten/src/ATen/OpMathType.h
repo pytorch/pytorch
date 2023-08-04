@@ -3,6 +3,8 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Float8_e4m3fn.h>
+#include <c10/util/Float8_e5m2.h>
 #include <c10/util/Half.h>
 
 namespace at {
@@ -21,6 +23,14 @@ struct OpMathType<at::BFloat16> {
   using type = float;
 };
 template <>
+struct OpMathType<at::Float8_e5m2> {
+  using type = float;
+};
+template <>
+struct OpMathType<at::Float8_e4m3fn> {
+  using type = float;
+};
+template <>
 struct OpMathType<c10::complex<Half>> {
   using type = c10::complex<float>;
 };
@@ -30,7 +40,7 @@ using opmath_type = typename OpMathType<T>::type;
 
 namespace {
 
-c10::ScalarType toOpMathType(const c10::ScalarType type) {
+inline c10::ScalarType toOpMathType(const c10::ScalarType type) {
   switch (type) {
 #define DEFINE_CASE(scalar_t, TypeNum) \
   case ScalarType::TypeNum:            \

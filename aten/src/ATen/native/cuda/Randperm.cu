@@ -18,8 +18,7 @@
 
 #include <limits>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // [Algorithm of randperm]
 //
@@ -94,13 +93,13 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
     auto keys = at::empty(result.sizes(), opt.dtype(kInt)).random_(
       std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), generator);
     auto keys_tmp = at::empty_like(keys);
-    auto keys_out = keys_tmp.data_ptr<int>();
+    auto keys_out = keys_tmp.mutable_data_ptr<int>();
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
       using dtype = OpaqueType<sizeof(scalar_t)>;
       auto shuffled_data_ = reinterpret_cast<dtype*>(shuffled_data);
-      dtype* range_data = reinterpret_cast<dtype*>(range.data_ptr());
+      auto* range_data = reinterpret_cast<const dtype*>(range.const_data_ptr());
       at::cuda::cub::radix_sort_pairs<int, dtype>(
-        keys.data_ptr<int>(), keys_out,
+        keys.const_data_ptr<int>(), keys_out,
         range_data, shuffled_data_,
         n, false, 0, bits);
 
@@ -110,13 +109,13 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
     auto keys = at::empty(result.sizes(), opt.dtype(kLong)).random_(
       std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max(), generator);
     auto keys_tmp = at::empty_like(keys);
-    auto keys_out = keys_tmp.data_ptr<int64_t>();
+    auto keys_out = keys_tmp.mutable_data_ptr<int64_t>();
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
       using dtype = OpaqueType<sizeof(scalar_t)>;
       auto shuffled_data_ = reinterpret_cast<dtype*>(shuffled_data);
-      dtype* range_data = reinterpret_cast<dtype*>(range.data_ptr());
+      auto* range_data = reinterpret_cast<const dtype*>(range.data_ptr());
       at::cuda::cub::radix_sort_pairs<int64_t, dtype>(
-        keys.data_ptr<int64_t>(), keys_out,
+        keys.const_data_ptr<int64_t>(), keys_out,
         range_data, shuffled_data_,
         n, false, 0, bits);
 
@@ -131,4 +130,4 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
   return result;
 }
 
-}} // namespace at::native
+} // namespace at::native

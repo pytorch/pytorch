@@ -1,19 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/native/cpu/PixelShuffleKernel.h>
+
+#include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/utils.h>
-#include <ATen/native/cpu/PixelShuffleKernel.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
 template <typename scalar_t>
 void cpu_pixel_shuffle(
-    Tensor& output,
-    const Tensor& input,
+    TensorBase& output,
+    const TensorBase& input,
     int64_t upscale_factor) {
   auto input_data = input.data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
@@ -52,8 +54,8 @@ void cpu_pixel_shuffle(
 
 template <typename scalar_t>
 void cpu_pixel_shuffle_channels_last(
-    Tensor& output,
-    const Tensor& input,
+    TensorBase& output,
+    const TensorBase& input,
     int64_t upscale_factor) {
   TORCH_CHECK(input.ndimension() == 4,
               "pixel shuffle with channels last format supports tensors with 4 dims");
@@ -110,8 +112,8 @@ void cpu_pixel_shuffle_channels_last(
 
 template <typename scalar_t>
 void cpu_pixel_unshuffle(
-    Tensor& output,
-    const Tensor& input,
+    TensorBase& output,
+    const TensorBase& input,
     int64_t downscale_factor) {
   auto input_data = input.data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
@@ -151,8 +153,8 @@ void cpu_pixel_unshuffle(
 
 template <typename scalar_t>
 void cpu_pixel_unshuffle_channels_last(
-    Tensor& output,
-    const Tensor& input,
+    TensorBase& output,
+    const TensorBase& input,
     int64_t downscale_factor) {
   TORCH_CHECK(input.ndimension() == 4,
               "pixel unshuffle with channels last format supports tensors with 4 dims");
@@ -192,8 +194,8 @@ void cpu_pixel_unshuffle_channels_last(
 }
 
 void pixel_shuffle_kernel_impl(
-    Tensor& output,
-    const Tensor& input,
+    TensorBase& output,
+    const TensorBase& input,
     int64_t upscale_factor) {
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
@@ -216,8 +218,8 @@ void pixel_shuffle_kernel_impl(
 }
 
 void pixel_unshuffle_kernel_impl(
-    Tensor& output,
-    const Tensor& input,
+    TensorBase& output,
+    const TensorBase& input,
     int64_t downscale_factor) {
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
@@ -248,4 +250,4 @@ void pixel_unshuffle_kernel_impl(
 REGISTER_DISPATCH(pixel_shuffle_kernel, &pixel_shuffle_kernel_impl);
 REGISTER_DISPATCH(pixel_unshuffle_kernel, &pixel_unshuffle_kernel_impl);
 
-}} // at::native
+} // at::native

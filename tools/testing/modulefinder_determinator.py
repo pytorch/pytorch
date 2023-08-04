@@ -1,9 +1,9 @@
-import os
 import modulefinder
-import sys
+import os
 import pathlib
+import sys
 import warnings
-from typing import Dict, Any, List, Set
+from typing import Any, Dict, List, Set
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
@@ -20,6 +20,7 @@ TARGET_DET_LIST = [
     "test_cpp_extensions_aot_ninja",
     "test_cpp_extensions_aot_no_ninja",
     "test_cpp_extensions_jit",
+    "test_cpp_extensions_open_device_registration",
     "test_cuda",
     "test_cuda_primary_ctx",
     "test_dataloader",
@@ -112,7 +113,7 @@ def test_impact_of_file(filename: str) -> str:
         CI - CI configuration files
     """
     parts = filename.split(os.sep)
-    if parts[0] in [".jenkins", ".circleci"]:
+    if parts[0] in [".jenkins", ".circleci", ".ci"]:
         return "CI"
     if parts[0] in ["docs", "scripts", "CODEOWNERS", "README.md"]:
         return "NONE"
@@ -132,11 +133,7 @@ def test_impact_of_file(filename: str) -> str:
 def log_test_reason(file_type: str, filename: str, test: str, options: Any) -> None:
     if options.verbose:
         print_to_stderr(
-            "Determination found {} file {} -- running {}".format(
-                file_type,
-                filename,
-                test,
-            )
+            f"Determination found {file_type} file {filename} -- running {test}"
         )
 
 

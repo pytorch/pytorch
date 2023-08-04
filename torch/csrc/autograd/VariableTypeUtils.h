@@ -2,6 +2,9 @@
 
 #include <c10/util/irange.h>
 
+#include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/dispatch/Dispatcher.h>
+
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
@@ -11,6 +14,7 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <torch/csrc/autograd/functions/utils.h>
+#include <torch/csrc/autograd/jit_decomp_interface.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <array>
@@ -46,18 +50,20 @@ inline void check_inplace(const at::Tensor& tensor, bool requires_grad) {
       // This can throw or warn
       handle_view_on_rebase(diff_view_meta);
       if (tensor.requires_grad() && tensor._base().is_leaf()) {
-        AT_ERROR(
+        TORCH_CHECK(
+            false,
             "a view of a leaf Variable that requires grad is being used in an in-place operation.");
       }
     }
     if (tensor.requires_grad() && tensor.is_leaf()) {
-      AT_ERROR(
+      TORCH_CHECK(
+          false,
           "a leaf Variable that requires grad is being used in an in-place operation.");
     }
   }
 }
 
-inline void check_inplace(const at::TensorList tensors, bool requires_grad) {
+inline void check_inplace(at::ITensorListRef tensors, bool requires_grad) {
   for (const auto& tensor : tensors) {
     check_inplace(tensor, requires_grad);
   }
@@ -81,8 +87,20 @@ inline void throw_error_for_complex_autograd(
   }
 }
 
+inline void throw_error_if_base_and_tensor_are_same(
+    const at::Tensor& base,
+    const at::Tensor& tensor) {
+  TORCH_CHECK(
+      base.unsafeGetTensorImpl() != tensor.unsafeGetTensorImpl(),
+      "View operation returned a tensor that is the same as the input base tensor.  This "
+      "is no longer allowed; you must explicitly create a new tensor (e.g., using .detach()). "
+      "As a user, you could have made a mistake implementing __torch_dispatch__ or a Python "
+      "operator decomposition or meta registration; if that's not the case, please "
+      "report a bug to PyTorch or the backend you are using.");
+}
+
 inline void throw_error_for_complex_autograd(
-    const at::TensorList& tensorlist,
+    at::ITensorListRef tensorlist,
     const char* name) {
   for (const auto& tensor : tensorlist) {
     throw_error_for_complex_autograd(tensor, name);
@@ -104,10 +122,8 @@ inline void rebase_history(
   if (grad_fn) {
     for (auto& var : vars) {
       if (var.defined()) {
-        // TODO: eliminate const_cast
-        // NOLINTNEXTLINE(bugprone-use-after-move)
         auto output_nr = grad_fn->add_input_metadata(var);
-        impl::rebase_history(var, {std::move(grad_fn), output_nr});
+        impl::rebase_history(var, {grad_fn, output_nr});
       } else {
         grad_fn->add_input_metadata(Node::undefined_input());
       }
@@ -167,12 +183,14 @@ inline at::Tensor as_view(
   // be used for both of them.
   if ((!diff_view_meta || diff_view_meta->shared_view_info()) &&
       is_bw_differentiable && is_fw_differentiable) {
+    throw_error_if_base_and_tensor_are_same(base, tensor);
     if (diff_view_meta) {
       creation_meta = propagate_creation_meta(
           diff_view_meta->get_creation_meta(), creation_meta);
       return make_variable_differentiable_view(
           tensor,
-          diff_view_meta->get_backward_view().chain(base, tensor, view_func),
+          diff_view_meta->get_backward_view().chain(
+              base, tensor, std::move(view_func)),
           c10::nullopt,
           /*shared_view_info*/ true,
           creation_meta,
@@ -180,7 +198,7 @@ inline at::Tensor as_view(
     } else {
       return make_variable_differentiable_view(
           tensor,
-          ViewInfo(base, view_func),
+          ViewInfo(base, std::move(view_func)),
           c10::nullopt,
           /*shared_view_info*/ true,
           creation_meta,
@@ -209,9 +227,9 @@ inline at::Tensor as_view(
     // Check if base is a forward differentiable view
     if (diff_view_meta && diff_view_meta->has_fw_view()) {
       const auto& base_fw_info = diff_view_meta->get_forward_view();
-      new_fw_info = base_fw_info.chain(base, tensor, view_func);
+      new_fw_info = base_fw_info.chain(base, tensor, std::move(view_func));
     } else {
-      new_fw_info = ViewInfo(base, view_func);
+      new_fw_info = ViewInfo(base, std::move(view_func));
     }
   }
 
@@ -220,6 +238,7 @@ inline at::Tensor as_view(
       creation_meta = propagate_creation_meta(
           diff_view_meta->get_creation_meta(), creation_meta);
     }
+    throw_error_if_base_and_tensor_are_same(base, tensor);
     return make_variable_differentiable_view(
         tensor,
         std::move(new_bw_info),
@@ -313,7 +332,7 @@ inline std::vector<at::Tensor> as_view(
         "Non-backward differentiable views must have creation_meta=CreationMeta::DEFAULT");
   }
   if (is_fw_differentiable) {
-    // Check if base is a forward differentiabble view
+    // Check if base is a forward differentiable view
     auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
     if (diff_view_meta && diff_view_meta->has_fw_view()) {
       const auto& base_fw_info = diff_view_meta->get_forward_view();
@@ -377,7 +396,7 @@ inline void check_no_requires_grad(
 }
 
 inline void check_no_requires_grad(
-    at::TensorList tensors,
+    at::ITensorListRef tensors,
     const char* name,
     const char* fn_name = "") {
   // GradMode check is expensive, so check it only once for TensorLists
@@ -406,41 +425,110 @@ inline void check_no_requires_grad(
 
 // Assumed that saved tensor lists are never inplace outputs
 inline std::vector<SavedVariable> make_saved_variable_list(
-    at::TensorList tensors) {
-  return fmap(tensors, [](const at::Tensor& tensor) -> SavedVariable {
-    return SavedVariable{tensor, false /* is output */};
+    at::ITensorListRef tensors,
+    const bool is_output = false) {
+  return fmap(tensors, [&is_output](const at::Tensor& tensor) -> SavedVariable {
+    return SavedVariable{tensor, is_output /* is output */};
   });
 }
 
 // Assumed that saved tensor lists are never inplace outputs
 inline std::vector<SavedVariable> make_saved_variable_list(
-    const c10::List<c10::optional<at::Tensor>>& tensors) {
+    const c10::List<c10::optional<at::Tensor>>& tensors,
+    const bool is_output = false) {
   return fmap(
-      tensors, [](const c10::optional<at::Tensor>& tensor) -> SavedVariable {
+      tensors,
+      [&is_output](const c10::optional<at::Tensor>& tensor) -> SavedVariable {
         if (tensor.has_value()) {
-          return SavedVariable{*tensor, false /* is output */};
+          return SavedVariable{*tensor, is_output /* is output */};
         } else {
-          return SavedVariable{at::Tensor(), false /* is output */};
+          return SavedVariable{at::Tensor(), is_output /* is output */};
         }
       });
 }
 
-inline std::vector<std::vector<int64_t>> to_args_sizes(at::TensorList tensors) {
+inline std::vector<std::vector<int64_t>> to_args_sizes(
+    at::ITensorListRef tensors) {
   std::vector<std::vector<int64_t>> args_sizes(tensors.size());
-  for (const auto i : c10::irange(tensors.size())) {
-    args_sizes[i] = tensors[i].sizes().vec();
+  size_t i = 0;
+  for (const auto& t : tensors) {
+    args_sizes[i++] = t.sizes().vec();
+  }
+  return args_sizes;
+}
+
+inline std::vector<std::vector<c10::SymInt>> to_args_sizes_symint(
+    at::ITensorListRef tensors) {
+  std::vector<std::vector<c10::SymInt>> args_sizes(tensors.size());
+  size_t i = 0;
+  for (const auto& t : tensors) {
+    args_sizes[i++] = t.sym_sizes().vec();
   }
   return args_sizes;
 }
 
 inline std::vector<c10::ScalarType> to_args_scalartypes(
-    at::TensorList tensors) {
+    at::ITensorListRef tensors) {
   std::vector<c10::ScalarType> args_scalartypes(tensors.size());
-  for (const auto i : c10::irange(tensors.size())) {
-    args_scalartypes[i] = tensors[i].scalar_type();
+  size_t i = 0;
+  for (const auto& t : tensors) {
+    args_scalartypes[i++] = t.scalar_type();
   }
   return args_scalartypes;
 }
+
+namespace impl {
+
+namespace {
+
+// If run_jit_decomposition were not a member function, we would be able
+// to pass this as a template parameter to c10::Boxedkernel::makeFromFunction.
+// However, member functions cannot be passed this way - instead we wrap our
+// call in this functor so it can be passed to c10::BoxedKernel::makeFromFunctor
+class WrapperFunctor final : public c10::OperatorKernel {
+ public:
+  WrapperFunctor(JitDecompInterface* impl) : impl_(impl){};
+
+  void operator()(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet ks,
+      torch::jit::Stack* stack) {
+    impl_->run_jit_decomposition(op, stack);
+  }
+  JitDecompInterface* impl_;
+};
+
+} // namespace
+
+template <class Return, class... Args>
+Return run_jit_decomposition_with_args_for_jvp(
+    c10::string_view name,
+    const c10::OperatorHandle& opHandle,
+    c10::DispatchKeySet dispatchKeySet,
+    Args&&... args) {
+  // see NOTE: [Jit Decomposition Interface]
+  JitDecompInterface* impl = getJitDecompImpl();
+
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      impl && impl->has_jit_decomposition(opHandle.schema()),
+      "Trying to use forward AD with ",
+      name,
+      " that does not support it because it has not been implemented yet.\nPlease file an issue "
+      "to PyTorch at https://github.com/pytorch/pytorch/issues/new?template=feature-request.yml "
+      "so that we can prioritize its implementation.\n"
+      "Note that forward AD support for some operators require PyTorch to be built with "
+      "TorchScript and for JIT to be enabled. "
+      "If the environment var PYTORCH_JIT=0 is set or if the library is not built with TorchScript, "
+      "some operators may no longer be used with forward AD.");
+
+  return c10::KernelFunction::makeFromBoxedKernel(
+             c10::BoxedKernel::makeFromFunctor(
+                 std::make_unique<WrapperFunctor>(impl)))
+      .call<Return, Args...>(
+          opHandle, dispatchKeySet, std::forward<Args>(args)...);
+}
+
+} // namespace impl
 
 } // namespace autograd
 } // namespace torch

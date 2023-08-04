@@ -21,7 +21,7 @@
 #include <utility>
 #include <type_traits>
 
-namespace at { namespace native {
+namespace at::native {
 
 void bernoulli_tensor_kernel(const TensorBase &self, const TensorBase &p_, c10::optional<Generator> gen_) {
   auto generator = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
@@ -37,4 +37,4 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, c10::optional<Gen
 REGISTER_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel);
 REGISTER_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel);
 
-}} // namespace at::native
+} // namespace at::native

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright 2019 Kakao Brain
 #
 # Copyright (c) Facebook, Inc. and its affiliates. All rights reserved.
@@ -23,7 +22,7 @@ from .skip.tracker import SkipTrackerThroughPotals, use_skip_tracker
 from .stream import AbstractStream, current_stream, use_device
 from .worker import Task, create_workers
 
-__all__: List[str] = []
+__all__: List[str] = ["Pipeline"]
 
 
 Tensors = Sequence[Tensor]

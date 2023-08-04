@@ -28,11 +28,18 @@ class TORCH_API Store : public torch::CustomClassHolder {
   explicit Store(const std::chrono::milliseconds& timeout)
       : timeout_(timeout) {}
 
-  virtual ~Store();
+  ~Store() override;
+
+  void set(const std::string& key, const std::string& value);
 
   virtual void set(
       const std::string& key,
       const std::vector<uint8_t>& value) = 0;
+
+  std::string compareSet(
+      const std::string& key,
+      const std::string& currentValue,
+      const std::string& newValue);
 
   virtual std::vector<uint8_t> compareSet(
       const std::string& key,
@@ -40,6 +47,8 @@ class TORCH_API Store : public torch::CustomClassHolder {
       const std::vector<uint8_t>& newValue) {
     TORCH_INTERNAL_ASSERT(false, "Not implemented.");
   }
+
+  std::string get_to_str(const std::string& key);
 
   virtual std::vector<uint8_t> get(const std::string& key) = 0;
 
@@ -61,21 +70,28 @@ class TORCH_API Store : public torch::CustomClassHolder {
 
   virtual void setTimeout(const std::chrono::milliseconds& timeout);
 
-  // watchKey() takes two arguments: key and callback function. The callback
-  // should be run whenever the key is changed (create, update, or delete). The
-  // callback function takes two parameters: currentValue and newValue, which
-  // are optional depending on how the key is changed. These key updates should
-  // trigger the callback as follows:
-  // CREATE: callback(c10::nullopt, newValue) // null currentValue
-  // UPDATE: callback(currentValue, newValue)
-  // DELETE: callback(currentValue, c10::nullopt) // null newValue
+
+  // watchKey() is deprecated and no longer supported.
   virtual void watchKey(
       const std::string& /* unused */,
       WatchKeyCallback /* unused */) {
     TORCH_CHECK(
         false,
-        "watchKey only implemented for TCPStore and PrefixStore that wraps TCPStore.");
+        "watchKey is deprecated, no implementation support it.");
   }
+
+  virtual void append(
+      const std::string& key,
+      const std::vector<uint8_t>& value);
+
+  virtual std::vector<std::vector<uint8_t>> multiGet(const std::vector<std::string>& keys);
+
+  virtual void multiSet(
+    const std::vector<std::string>& keys,
+    const std::vector<std::vector<uint8_t>>& values);
+
+  // Returns true if this store support append, multiGet and multiSet
+  virtual bool hasExtendedApi() const;
 
  protected:
   std::chrono::milliseconds timeout_;

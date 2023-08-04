@@ -25,11 +25,11 @@ namespace jit {
  * is considered safe.
  *
  * There is a special alias set called the "wildcard set", which indicates that
- * we're not sure what this value may alias. To be conservative, we consider
- * the wildcard alias set as potentially aliasing any value within the same
- * type class. Whenever a value becomes contained by another value, such as
- * when a Tensor is appended to a List[Tensor], the contained element becomes
- * part of the wildcard set.
+ * we're not sure what this value may alias. To be conservative, we consider the
+ * wildcard alias set as potentially aliasing any other wildcard value within
+ * the same type class. Whenever a value becomes contained by another value,
+ * such as when a Tensor is appended to a List[Tensor], the contained element
+ * becomes part of the wildcard set.
  *
  * Values that contain other mutable types, such as List[Tensor], are
  * initialized as containing the Wildcard set for all contained mutable types.
@@ -225,6 +225,8 @@ class AliasDb {
   void analyzeBroadcastingChunk(Node* node);
   void analyzeFork(Node* node);
   void analyzeWait(Node* node);
+  void analyzeAwaitable(Node* node);
+  void analyzeAwaitableWait(Node* node);
   void analyzeRpcAsync(Node* node);
   void analyzeBatchNorm(Node* node);
   void analyzeInstanceNorm(Node* node);
@@ -314,7 +316,7 @@ class AliasDb {
 // Helper check that invariants over AliasDb are maintained.
 // Useful if you are using the AliasDb mutation API and want to check you did
 // the right thing.
-void Lint(const AliasDb* db);
+TORCH_API void Lint(const AliasDb* db);
 
 } // namespace jit
 } // namespace torch

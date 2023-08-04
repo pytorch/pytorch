@@ -15,6 +15,9 @@
 #include <limits>
 #include <sstream>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+PyObject* THPUpperModuleOfDevice = nullptr;
+
 PyObject* THPDevice_New(const at::Device& device) {
   auto type = (PyTypeObject*)&THPDeviceType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
@@ -50,10 +53,14 @@ PyObject* THPDevice_pynew(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser(
-      {"Device(Device device)",
-       "Device(c10::string_view type, int64_t? index=-1)"});
+      {"device(Device device)",
+       "device(c10::string_view type, int64_t? index=-1)"});
   torch::ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.has_torch_function()) {
+    return handle_torch_function(
+        r, nullptr, args, kwargs, THPUpperModuleOfDevice, "torch");
+  }
   if (r.idx == 0) {
     auto device = r.device(0);
     return THPDevice_New(device);
@@ -169,6 +176,36 @@ PyObject* THPDevice_reduce(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPDevice_enter(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  py::object mode = py::module::import("torch.utils._device")
+                        .attr("DeviceContext")(py::handle(self));
+  at::impl::PythonTorchFunctionTLS::push_onto_stack(
+      std::make_shared<c10::SafePyObject>(
+          mode.release().ptr(), getPyInterpreter()));
+  // So that with torch.device('cuda') as dev: works
+  Py_INCREF(self);
+  return self;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPDevice_exit(PyObject* self, PyObject* unused) {
+  HANDLE_TH_ERRORS
+  at::impl::PythonTorchFunctionTLS::pop_stack();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPDevice_call(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  py::object deco =
+      py::module::import("torch.utils._device").attr("device_decorator");
+  return deco(py::handle(self), *py::handle(args), **py::handle(kwargs))
+      .release()
+      .ptr();
+  END_HANDLE_TH_ERRORS
+}
+
 typedef PyObject* (*getter)(PyObject*, void*);
 
 // NB: If you edit these properties/methods, update torch/_C/__init__.pyi.in
@@ -182,6 +219,8 @@ static struct PyGetSetDef THPDevice_properties[] = {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static PyMethodDef THPDevice_methods[] = {
     {"__reduce__", THPDevice_reduce, METH_NOARGS, nullptr},
+    {"__enter__", THPDevice_enter, METH_NOARGS, nullptr},
+    {"__exit__", THPDevice_exit, METH_VARARGS, nullptr},
     {nullptr} /* Sentinel */
 };
 
@@ -199,6 +238,11 @@ PyTypeObject THPDeviceType = {
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
     (hashfunc)THPDevice_hash, /* tp_hash  */
+    // TODO: We're not sure if this is a good idea or not, because making
+    // torch.device callable means that it will start returning true
+    // for callable() queries, and that is unexpected.  We can always add
+    // this later, so for now, don't actually implement this
+    // THPDevice_call, /* tp_call */
     nullptr, /* tp_call */
     (reprfunc)THPDevice_str, /* tp_str */
     nullptr, /* tp_getattro */
@@ -230,6 +274,7 @@ void THPDevice_init(PyObject* module) {
     throw python_error();
   }
   Py_INCREF(&THPDeviceType);
+  THPUpperModuleOfDevice = module;
   if (PyModule_AddObject(module, "device", (PyObject*)&THPDeviceType) != 0) {
     throw python_error();
   }

@@ -5,6 +5,7 @@
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
+#include <c10/util/flat_hash_map.h>
 
 namespace at {
 namespace native {
@@ -98,8 +99,7 @@ struct DescriptorPoolConfig final {
 
 class DescriptorPool final {
  public:
-  explicit DescriptorPool(
-      const VkDevice, const DescriptorPoolConfig&);
+  explicit DescriptorPool(const VkDevice, const DescriptorPoolConfig&);
 
   DescriptorPool(const DescriptorPool&) = delete;
   DescriptorPool& operator=(const DescriptorPool&) = delete;

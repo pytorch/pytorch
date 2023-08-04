@@ -4,6 +4,7 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <structmember.h>
 
+#include <ATen/core/GeneratorForPrivateuseone.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
@@ -13,8 +14,14 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_types.h>
 
+#include <utility>
+
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAGeneratorImpl.h>
+#endif
+
+#ifdef USE_MPS
+#include <ATen/mps/MPSGeneratorImpl.h>
 #endif
 
 using namespace at;
@@ -28,7 +35,7 @@ PyObject* THPGenerator_initDefaultGenerator(at::Generator cdata) {
   if (!self)
     throw python_error();
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
-  self_->cdata = cdata;
+  self_->cdata = std::move(cdata);
   return self.release();
 }
 
@@ -52,25 +59,26 @@ static PyObject* THPGenerator_pynew(
   auto device = r.deviceWithDefault(0, at::Device(at::kCPU));
 
   THPGeneratorPtr self((THPGenerator*)type->tp_alloc(type, 0));
-#ifdef USE_CUDA
   if (device.type() == at::kCPU) {
     self->cdata = make_generator<CPUGeneratorImpl>();
-  } else if (device.type() == at::kCUDA) {
+  }
+#ifdef USE_CUDA
+  else if (device.type() == at::kCUDA) {
     self->cdata = make_generator<CUDAGeneratorImpl>(device.index());
+  }
+#elif USE_MPS
+  else if (device.type() == at::kMPS) {
+    self->cdata = make_generator<MPSGeneratorImpl>();
+  }
+#endif
+  else if (device.type() == at::kPrivateUse1) {
+    self->cdata = at::GetGeneratorForPrivateuse1(device.index());
   } else {
     AT_ERROR(
         "Device type ",
         c10::DeviceTypeName(device.type()),
         " is not supported for torch.Generator() api.");
   }
-#else
-  TORCH_CHECK(
-      device.type() == at::kCPU,
-      "Device type ",
-      c10::DeviceTypeName(device.type()),
-      " is not supported for torch.Generator() api.");
-  self->cdata = make_generator<CPUGeneratorImpl>();
-#endif
   return (PyObject*)self.release();
   END_HANDLE_TH_ERRORS
 }
@@ -81,7 +89,7 @@ static PyObject* THPGenerator_getState(PyObject* _self, PyObject* noargs) {
   auto& gen = ((THPGenerator*)_self)->cdata;
 
   // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen.mutex());
+  std::scoped_lock<std::mutex> lock(gen.mutex());
   auto state_tensor = gen.get_state();
 
   return THPVariable_Wrap(std::move(state_tensor));
@@ -102,12 +110,33 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
   const auto& new_state_tensor = THPVariable_Unpack(_new_state);
 
   // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen.mutex());
+  std::scoped_lock<std::mutex> lock(gen.mutex());
   gen.set_state(new_state_tensor);
 
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
+}
+
+uint64_t unpack_uint64(PyObject* pyobj) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  uint64_t unsigned_obj;
+  try {
+    // First try to interpret as unsigned long
+    unsigned_obj = THPUtils_unpackUInt64(pyobj);
+  } catch (...) {
+    if (PyErr_ExceptionMatches(PyExc_OverflowError)) {
+      // If an overflow happened, then the pyobj could be negative,
+      // so try to interpret it as signed long
+      PyErr_Clear();
+      int64_t obj = THPUtils_unpackLong(pyobj);
+      unsigned_obj = *(reinterpret_cast<uint64_t*>(&obj));
+    } else {
+      // If any other type of exception happened, rethrow it
+      throw;
+    }
+  }
+  return unsigned_obj;
 }
 
 static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
@@ -119,26 +148,28 @@ static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
       "manual_seed expected a long, "
       "but got %s",
       THPUtils_typename(seed));
+  uint64_t unsigned_seed = unpack_uint64(seed);
   // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(generator.mutex());
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  uint64_t seed_unpacked;
-  try {
-    // First try to interpret as unsigned long
-    seed_unpacked = THPUtils_unpackUInt64(seed);
-  } catch (...) {
-    if (PyErr_ExceptionMatches(PyExc_OverflowError)) {
-      // If an overflow happened, then the seed could be negative,
-      // so try to interpret it as signed long
-      PyErr_Clear();
-      int64_t seed_unpacked_signed = THPUtils_unpackLong(seed);
-      seed_unpacked = *(reinterpret_cast<uint64_t*>(&seed_unpacked_signed));
-    } else {
-      // If any other type of exception happened, rethrow it
-      throw;
-    }
-  }
-  generator.set_current_seed(seed_unpacked);
+  std::scoped_lock<std::mutex> lock(generator.mutex());
+  generator.set_current_seed(unsigned_seed);
+  Py_INCREF(self);
+  return (PyObject*)self;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPGenerator_setOffset(PyObject* _self, PyObject* offset) {
+  HANDLE_TH_ERRORS
+  auto self = (THPGenerator*)_self;
+  auto generator = self->cdata;
+  THPUtils_assert(
+      THPUtils_checkLong(offset),
+      "manual_offset expected a long, "
+      "but got %s",
+      THPUtils_typename(offset));
+  uint64_t unsigned_offset = unpack_uint64(offset);
+  // See Note [Acquire lock when using random generators]
+  std::scoped_lock<std::mutex> lock(generator.mutex());
+  generator.set_offset(unsigned_offset);
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
@@ -148,7 +179,7 @@ static PyObject* THPGenerator_seed(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   // See Note [Acquire lock when using random generators]
   auto self = (THPGenerator*)_self;
-  std::lock_guard<std::mutex> lock(self->cdata.mutex());
+  std::scoped_lock<std::mutex> lock(self->cdata.mutex());
   uint64_t seed_val = self->cdata.seed();
   return THPUtils_packUInt64(seed_val);
   END_HANDLE_TH_ERRORS
@@ -158,6 +189,13 @@ static PyObject* THPGenerator_initialSeed(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = (THPGenerator*)_self;
   return THPUtils_packUInt64(self->cdata.current_seed());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPGenerator_getOffset(PyObject* _self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto self = (THPGenerator*)_self;
+  return THPUtils_packUInt64(self->cdata.get_offset());
   END_HANDLE_TH_ERRORS
 }
 
@@ -176,9 +214,11 @@ static struct PyGetSetDef THPGenerator_properties[] = {
 static PyMethodDef THPGenerator_methods[] = {
     {"get_state", THPGenerator_getState, METH_NOARGS, nullptr},
     {"set_state", THPGenerator_setState, METH_O, nullptr},
+    {"set_offset", THPGenerator_setOffset, METH_O, nullptr},
     {"manual_seed", THPGenerator_manualSeed, METH_O, nullptr},
     {"seed", THPGenerator_seed, METH_NOARGS, nullptr},
     {"initial_seed", THPGenerator_initialSeed, METH_NOARGS, nullptr},
+    {"get_offset", THPGenerator_getOffset, METH_NOARGS, nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)

@@ -14,7 +14,7 @@ class AddBias(ModelLayer):
 
     def __init__(self, model, input_record, bias_init=None,
                  bias_optim=None, name='add_bias'):
-        super(AddBias, self).__init__(model, name, input_record)
+        super().__init__(model, name, input_record)
         assert isinstance(input_record, schema.Scalar), "Incorrect input type"
         assert len(input_record.field_type().shape) > 0, (
             "AddBias expects limited dimensions of the input tensor")

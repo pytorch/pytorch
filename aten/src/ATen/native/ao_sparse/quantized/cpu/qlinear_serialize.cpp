@@ -5,6 +5,8 @@
 #endif
 #ifdef USE_PYTORCH_QNNPACK
 #include <ATen/native/ao_sparse/quantized/cpu/qnnpack_utils.h>
+
+#include <utility>
 #endif
 
 namespace ao {
@@ -21,10 +23,11 @@ at::Tensor wrap_vector(T& vec, c10::ScalarType dtype) {
   at::Tensor t = at::empty(
       {static_cast<long>(vec.size())}, at::device(c10::kCPU).dtype(dtype));
   std::copy(
-      vec.data(), vec.data() + vec.size(), t.data_ptr<UNDERLYING_DTYPE>());
+      vec.data(), vec.data() + vec.size(), t.mutable_data_ptr<UNDERLYING_DTYPE>());
   return t;
 }
 
+#ifdef USE_FBGEMM
 /**
  * Adapted from Fbgemm BCSRMatrix::pack, but with zero points, without tiling,
  * and without determining row_offsets
@@ -93,6 +96,7 @@ ao::sparse::BCSR pack_bcsr(
   return ao::sparse::BCSR(
       std::move(values), std::move(rowBPtr), std::move(colBIdx));
 }
+#endif // USE_FBGEMM
 } // namespace
 
 #ifdef USE_FBGEMM
@@ -125,7 +129,7 @@ BCSRSerializationType PackedLinearWeight::serialize() {
   std::transform(
       packed_weight_values.begin(),
       packed_weight_values.end(),
-      weight_values.data_ptr<uint8_t>(),
+      weight_values.mutable_data_ptr<uint8_t>(),
       [](int8_t v) {
         return static_cast<uint8_t>(static_cast<int16_t>(v) + 128);
       });
@@ -166,8 +170,8 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
     w_zero_points_compact =
         at::empty({1}, at::device(c10::kCPU).dtype(c10::kChar));
 
-    w_scales_compact.data_ptr<float>()[0] = w_scales_data_ptr[0];
-    w_zero_points_compact.data_ptr<int8_t>()[0] =
+    w_scales_compact.mutable_data_ptr<float>()[0] = w_scales_data_ptr[0];
+    w_zero_points_compact.mutable_data_ptr<int8_t>()[0] =
         static_cast<int8_t>(static_cast<int16_t>(w_zero_points_[0]) - 128);
   } else if (q_scheme_ == at::kPerChannelAffine) {
     w_scales_compact =
@@ -179,7 +183,7 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
         w_scales_data_ptr,
         w_scales_data_ptr +
             output_channels_, // Don't go to the end because of padding
-        w_scales_compact.data_ptr<float>());
+        w_scales_compact.mutable_data_ptr<float>());
 
     // Subtract 128 from each zero point, to reverse addition done during
     // prepacking
@@ -187,10 +191,41 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
         w_zero_points_.begin(),
         w_zero_points_.begin() +
             output_channels_, // Don't go to the end because of padding
-        w_zero_points_compact.data_ptr<int8_t>(),
-        subtract_128);
+        w_zero_points_compact.mutable_data_ptr<int8_t>(),
+        std::move(subtract_128));
   } else {
     TORCH_CHECK(false, "Unsupported quantization scheme.");
+  }
+
+  at::Tensor wrapped_row_values;
+  at::Tensor wrapped_col_indices;
+
+  const uint32_t max_index = bcsr_matrix_->max_index();
+
+  if (max_index <= std::numeric_limits<uint8_t>::max()) {
+    // Cast from uint8_t range to int8_t
+    wrapped_row_values = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int8_t>(typed_bcsr->row_values, c10::kChar); });
+    wrapped_col_indices = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int8_t>(typed_bcsr->col_indices, c10::kChar); });
+  } else if (max_index <= std::numeric_limits<uint16_t>::max()) {
+    // Cast from uint16_t range to int16_t
+    wrapped_row_values = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int16_t>(typed_bcsr->row_values, c10::kShort); });
+    wrapped_col_indices = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int16_t>(typed_bcsr->col_indices, c10::kShort); });
+  } else {
+    // Cast from uint32_t range to int32_t
+    wrapped_row_values = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int>(typed_bcsr->row_values, c10::kInt); });
+    wrapped_col_indices = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int>(typed_bcsr->col_indices, c10::kInt); });
   }
 
   return BCSRSerializationType(
@@ -201,10 +236,8 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
       std::move(w_scales_compact),
       std::move(w_zero_points_compact),
       (q_scheme_ == c10::kPerTensorAffine),
-      wrap_vector<int>(
-          bcsr_matrix_->row_values, c10::kInt), // Casting from uint32_t to int
-      wrap_vector<int>(
-          bcsr_matrix_->col_indices, c10::kInt), // Casting from uint32_t to int
+      wrapped_row_values,
+      wrapped_col_indices,
       wrap_vector<uint8_t>(bcsr_matrix_->values, c10::kByte),
       output_channels_,
       input_channels_);

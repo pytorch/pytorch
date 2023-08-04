@@ -40,6 +40,6 @@ class TestConsumeOp(unittest.TestCase):
         value = r(x)
 
         self.assertTrue(
-            all([torch.allclose(t1, t2) for t1, t2 in zip(value, torch.chunk(x, 2))])
+            all(torch.allclose(t1, t2) for t1, t2 in zip(value, torch.chunk(x, 2)))
         )
         self.assertEqual(occurance, iters)

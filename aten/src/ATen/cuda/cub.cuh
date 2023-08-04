@@ -177,15 +177,12 @@ inline void unique_by_key(
   RealKeysOutputIteratorT keys_out_;
   auto allocator = c10::cuda::CUDACachingAllocator::get();
   c10::DataPtr keys_out_owner;
-  c10::guts::if_constexpr<null_keys_out>(
-    [&](auto _) {
-      keys_out_owner = allocator->allocate(num_input_items * sizeof(KeyT));
-      keys_out_ = static_cast<KeyT *>(keys_out_owner.get());
-    },
-    [&](auto _) {
-      keys_out_ = keys_out;
-    }
-  );
+  if constexpr (null_keys_out) {
+    keys_out_owner = allocator->allocate(num_input_items * sizeof(KeyT));
+    keys_out_ = static_cast<KeyT *>(keys_out_owner.get());
+  } else {
+    keys_out_ = keys_out;
+  }
   CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceSelect::UniqueByKey,
     keys_in, values_in, keys_out_, values_out, num_selected, num_input_items, c10::cuda::getCurrentCUDAStream());
 }
@@ -384,5 +381,37 @@ inline void inclusive_scan_by_key(KeysInputIteratorT keys, ValuesInputIteratorT 
 }
 
 #endif
+
+template <typename InputIteratorT, typename OutputIteratorT, typename NumSelectedIteratorT>
+void unique(InputIteratorT input, OutputIteratorT output,
+            NumSelectedIteratorT num_selected_out, int64_t num_items) {
+  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
+              "cub unique does not support more than INT_MAX elements");
+  CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceSelect::Unique,
+              input, output, num_selected_out, num_items, at::cuda::getCurrentCUDAStream());
+}
+
+template <typename InputIteratorT, typename OutputIteratorT, typename CountsOutputIteratorT,
+          typename LengthOutputIteratorT>
+void run_length_encode(InputIteratorT input, OutputIteratorT output, CountsOutputIteratorT counts_out,
+                       LengthOutputIteratorT length_out, int64_t num_items) {
+  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
+              "cub run_length_encode does not support more than INT_MAX elements");
+  CUB_WRAPPER(
+      NO_ROCM(at_cuda_detail)::cub::DeviceRunLengthEncode::Encode,
+      input, output, counts_out, length_out, num_items,
+      at::cuda::getCurrentCUDAStream());
+}
+
+template <typename InputIteratorT, typename OutputIteratorT, typename ReductionOpT, typename T>
+void reduce(InputIteratorT input, OutputIteratorT output, int64_t num_items, ReductionOpT op, T init) {
+  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
+              "cub reduce does not support more than INT_MAX elements");
+  CUB_WRAPPER(
+      NO_ROCM(at_cuda_detail)::cub::DeviceReduce::Reduce,
+      input, output, num_items, op, init,
+      at::cuda::getCurrentCUDAStream());
+
+}
 
 }}}  // namespace at::cuda::cub

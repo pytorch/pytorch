@@ -37,7 +37,7 @@ struct FunctionalGraphSlicer {
  private:
   bool isEmptyFunctionalGraph(Node* n) {
     auto g = n->g(attr::Subgraph);
-    return g->inputs().size() == 0 && g->outputs().size() == 0;
+    return g->inputs().empty() && g->outputs().empty();
   }
 
   void nonConstNodes(Block* block, size_t* num) {

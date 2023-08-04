@@ -199,11 +199,11 @@ class MetaTracer(torch.fx.Tracer):
 
         return rv
 
-    def _module_getattr(self, attr, attr_val, parameter_proxy_cache):
+    def getattr(self, attr, attr_val, parameter_proxy_cache):
         if getattr(self, '_disable_module_getattr', False):
             return attr_val
         else:
-            return super()._module_getattr(attr, attr_val, parameter_proxy_cache)
+            return super().getattr(attr, attr_val, parameter_proxy_cache)
 
     def call_module(self, m, forward, args, kwargs):
         self.orig_forward = forward
@@ -259,7 +259,7 @@ class MetaTracer(torch.fx.Tracer):
 
 
 def symbolic_trace(root : Union[torch.nn.Module, Callable[..., Any]],
-                   meta_args : Dict[str, torch.Tensor] = None,
+                   meta_args : Optional[Dict[str, torch.Tensor]] = None,
                    concrete_args: Optional[Dict[str, Any]] = None) -> torch.fx.GraphModule:
     tracer = MetaTracer()
     graph = tracer.trace(root, meta_args, concrete_args)

@@ -1,6 +1,5 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/irange.h>
-#include <iostream>
 
 namespace c10 {
 
@@ -28,6 +27,7 @@ constexpr DispatchKeySet non_functional_backend_dispatch_keyset =
     backend_dispatch_keyset
         // XLA and LazyTensor are currently the only 2 backends in core
         // that use functionalization pass in eager mode.
+        .remove(DispatchKey::Sparse)
         .remove_backend(BackendComponent::XLABit)
         .remove_backend(BackendComponent::LazyBit);
 
@@ -45,8 +45,21 @@ bool isBackendDispatchKey(DispatchKey t) {
 // math_dispatch_keyset contains all keys in backend_dispatch_keyset and
 // autograd_dispatch_keyset Alias key DispatchKey::CompositeImplicitAutograd
 // maps to [math_dispatch_keyset x full_backend_mask]
-constexpr DispatchKeySet math_dispatch_keyset =
-    backend_dispatch_keyset | autograd_dispatch_keyset;
+constexpr DispatchKeySet math_dispatch_keyset = backend_dispatch_keyset |
+    autograd_dispatch_keyset |
+    // See Note [NestedTensor Not Included in Backend Keys]
+    // The caveat to that note is that nested_tensor is a special case
+    // where we would like to support composite implicit kernels but not
+    // explicit kernels therefore we manually add the key to the
+    // math_dispatch_keyset
+    DispatchKeySet{DispatchKey::NestedTensor} |
+    // Functionalize should always re-use CompositeImplicit decomps.
+    DispatchKeySet{DispatchKey::Functionalize};
+
+constexpr DispatchKeySet nested_dispatch_keyset =
+    DispatchKeySet(
+        {DispatchKey::AutogradNestedTensor, DispatchKey::NestedTensor}) |
+    DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
 
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
@@ -60,6 +73,8 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
           DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
     case DispatchKey::CompositeImplicitAutograd:
       return math_dispatch_keyset;
+    case DispatchKey::CompositeImplicitAutogradNestedTensor:
+      return nested_dispatch_keyset;
     case DispatchKey::CompositeExplicitAutograd:
       return backend_dispatch_keyset;
     case DispatchKey::CompositeExplicitAutogradNonFunctional:
@@ -77,6 +92,9 @@ bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) {
     case DispatchKey::CompositeImplicitAutograd:
       // See Note [NestedTensor Not Included in Backend Keys]
       return math_dispatch_keyset.has(k);
+    case DispatchKey::CompositeImplicitAutogradNestedTensor:
+      // See Note [NestedTensor Not Included in Backend Keys]
+      return nested_dispatch_keyset.has(k);
     case DispatchKey::CompositeExplicitAutograd:
       // See Note [NestedTensor Not Included in Backend Keys]
       return k != DispatchKey::NestedTensor && backend_dispatch_keyset.has(k);
@@ -84,6 +102,8 @@ bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) {
       // See Note [NestedTensor Not Included in Backend Keys]
       return k != DispatchKey::NestedTensor &&
           non_functional_backend_dispatch_keyset.has(k);
+    case DispatchKey::FuncTorchBatchedDecomposition:
+      return functorch_batched_ks.has(k);
     default:
       return t == k;
   }
@@ -240,7 +260,7 @@ std::array<FunctionalityOffsetAndMask, num_functionality_keys>
 initializeFunctionalityOffsetsAndMasks() {
   std::array<FunctionalityOffsetAndMask, num_functionality_keys>
       offsets_and_masks;
-  // manualy set the first entry, which corresponds to Undefined.
+  // manually set the first entry, which corresponds to Undefined.
   offsets_and_masks[0] = FunctionalityOffsetAndMask(0, 0);
   // loop through every functionality key (aside from Undefined).
   for (const auto functionality_idx : c10::irange(1, num_functionality_keys)) {

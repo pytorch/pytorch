@@ -1,18 +1,26 @@
 import gc
+
 import torch
+from torch.utils._pytree import (
+    tree_flatten as _tree_flatten,
+    tree_unflatten as _tree_unflatten,
+)
 
 from ._utils import _dummy_type
 
-
-if not hasattr(torch._C, '_CudaStreamBase'):
+if not hasattr(torch._C, "_CudaStreamBase"):
     # Define dummy base classes
-    torch._C.__dict__['_CUDAGraph'] = _dummy_type('_CUDAGraph')
-    torch._C.__dict__['_graph_pool_handle'] = _dummy_type('_graph_pool_handle')
-    torch._C.__dict__['_cuda_isCurrentStreamCapturing'] = _dummy_type('_cuda_isCurrentStreamCapturing')
+    torch._C.__dict__["_CUDAGraph"] = _dummy_type("_CUDAGraph")
+    torch._C.__dict__["_graph_pool_handle"] = _dummy_type("_graph_pool_handle")
+    torch._C.__dict__["_cuda_isCurrentStreamCapturing"] = _dummy_type(
+        "_cuda_isCurrentStreamCapturing"
+    )
 
-from torch._C import _CUDAGraph  # noqa: F401
-from torch._C import _graph_pool_handle
-from torch._C import _cuda_isCurrentStreamCapturing
+from torch._C import (  # noqa: F401
+    _cuda_isCurrentStreamCapturing,
+    _CUDAGraph,
+    _graph_pool_handle,
+)
 
 
 def is_current_stream_capturing():
@@ -22,6 +30,7 @@ def is_current_stream_capturing():
     If a CUDA context does not exist on the current device, returns False without initializing the context.
     """
     return _cuda_isCurrentStreamCapturing()
+
 
 # Python shim helps Sphinx process docstrings more reliably.
 def graph_pool_handle():
@@ -43,11 +52,9 @@ class CUDAGraph(torch._C._CUDAGraph):
     .. warning::
         This API is in beta and may change in future releases.
     """
-    def __new__(cls):
-        return super(CUDAGraph, cls).__new__(cls)
 
-    def __init__(self):
-        super(CUDAGraph, self).__init__()
+    def __new__(cls):
+        return super().__new__(cls)
 
     def capture_begin(self, pool=None):
         r"""
@@ -65,9 +72,9 @@ class CUDAGraph(torch._C._CUDAGraph):
         # I'm not sure if pybind11 converts a None arg to the default defined on the C++ side,
         # so I'm not taking any chances.
         if pool is None:
-            super(CUDAGraph, self).capture_begin()
+            super().capture_begin()
         else:
-            super(CUDAGraph, self).capture_begin(pool)
+            super().capture_begin(pool)
 
     def capture_end(self):
         r"""
@@ -78,19 +85,19 @@ class CUDAGraph(torch._C._CUDAGraph):
         Use :class:`~torch.cuda.graph` or :func:`~torch.cuda.make_graphed_callables`,
         which call ``capture_end`` internally.
         """
-        super(CUDAGraph, self).capture_end()
+        super().capture_end()
 
     def replay(self):
         r"""
         Replays the CUDA work captured by this graph.
         """
-        super(CUDAGraph, self).replay()
+        super().replay()
 
     def reset(self):
         r"""
         Deletes the graph currently held by this instance.
         """
-        super(CUDAGraph, self).reset()
+        super().reset()
 
     def pool(self):
         r"""
@@ -98,10 +105,26 @@ class CUDAGraph(torch._C._CUDAGraph):
         This id can optionally be passed to another graph's ``capture_begin``,
         which hints the other graph may share the same memory pool.
         """
-        return super(CUDAGraph, self).pool()
+        return super().pool()
+
+    def enable_debug_mode(self):
+        r"""
+        Enables debugging mode for CUDAGraph.debug_dump.
+        """
+        return super().enable_debug_mode()
+
+    def debug_dump(self, debug_path):
+        r"""
+        Arguments:
+            debug_path (required): Path to dump the graph to.
+
+        Calls a debugging function to dump the graph if the debugging is
+        enabled via CUDAGraph.enable_debug_mode()
+        """
+        return super().debug_dump(debug_path)
 
 
-class graph(object):
+class graph:
     r"""
     Context-manager that captures CUDA work into a :class:`torch.cuda.CUDAGraph`
     object for later replay.
@@ -126,10 +149,7 @@ class graph(object):
     """
     default_capture_stream = None
 
-    def __init__(self,
-                 cuda_graph,
-                 pool=None,
-                 stream=None):
+    def __init__(self, cuda_graph, pool=None, stream=None):
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
         # restriction that only one capture may be underway at a time in the process.
@@ -137,7 +157,9 @@ class graph(object):
             self.__class__.default_capture_stream = torch.cuda.Stream()
 
         self.pool = () if pool is None else (pool,)
-        self.capture_stream = stream if stream is not None else self.__class__.default_capture_stream
+        self.capture_stream = (
+            stream if stream is not None else self.__class__.default_capture_stream
+        )
         assert self.capture_stream is not None
         self.stream_ctx = torch.cuda.stream(self.capture_stream)
         self.cuda_graph = cuda_graph
@@ -154,14 +176,15 @@ class graph(object):
 
         self.cuda_graph.capture_begin(*self.pool)
 
-
     def __exit__(self, exc_type, exc_value, traceback):
         self.cuda_graph.capture_end()
         self.stream_ctx.__exit__(exc_type, exc_value, traceback)
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
 
 
-def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
+def make_graphed_callables(
+    callables, sample_args, num_warmup_iters=3, allow_unused_input=False
+):
     r"""
     Accepts callables (functions or :class:`nn.Module<torch.nn.Module>`\ s)
     and returns graphed versions.
@@ -191,6 +214,8 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
             If a tuple of callables was passed, ``sample_args`` must be tuple of tuples of argument Tensors.
         num_warmup_iters (int): The number of warmup iterations. Currently, ``DataDistributedParallel`` needs
             11 iterations for warm up. Default: ``3``.
+        allow_unused_input (bool): If False, specifying inputs that were not used when computing outputs
+            (and therefore their grad is always zero) is an error. Defaults to False.
 
     .. note::
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
@@ -200,8 +225,7 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
         This API is in beta and may change in future releases.
 
     .. warning::
-        ``sample_args`` for each callable must be a tuple of Tensors. Other types and keyword args
-        are not allowed.
+        ``sample_args`` for each callable must contain only Tensors. Other types are not allowed.
 
     .. warning::
         Returned callables do not support higher order differentiation (e.g., double backward).
@@ -224,8 +248,14 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
         they appeared in that callable's ``sample_args``.
 
     .. warning::
-        All Tensor outputs of graphed callables must require grad.
+        The automatic mixed precision is supported in :func:`~torch.cuda.make_graphed_callables` only with disabled
+        caching. The context manager `torch.cuda.amp.autocast()` must have `cache_enabled=False`.
     """
+    if torch.is_autocast_enabled() and torch.is_autocast_cache_enabled():
+        raise RuntimeError(
+            "make_graphed_callables does not support the autocast caching. Please set `cache_enabled=False`."
+        )
+
     just_one_callable = False
 
     if not isinstance(callables, tuple):
@@ -233,25 +263,41 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
         callables = (callables,)
         sample_args = (sample_args,)
 
+    flatten_sample_args = []
+
     for c, args in zip(callables, sample_args):
         if isinstance(c, torch.nn.Module):
-            assert len(c._backward_hooks) == 0 and len(c._forward_hooks) == 0 and len(c._forward_pre_hooks) == 0, \
-                "Modules must not have hooks registered at the time they are passed. However, registering hooks " + \
-                "on modules after passing them through make_graphed_callables is allowed."
-            assert all(b.requires_grad is False for b in c.buffers()), "In any :class:`~torch.nn.Module` passed to " + \
-                ":func:`~make_graphed_callables`, only parameters may be trainable. All buffers must have " + \
-                "``requires_grad=False``."
-        assert all(isinstance(arg, torch.Tensor) for arg in args), "In the beta API, sample_args " + \
-            "for each callable must be a tuple of Tensors. Other types and keyword args are not allowed."
-
+            assert (
+                len(c._backward_hooks) == 0
+                and len(c._forward_hooks) == 0
+                and len(c._forward_pre_hooks) == 0
+            ), (
+                "Modules must not have hooks registered at the time they are passed. However, registering hooks "
+                + "on modules after passing them through make_graphed_callables is allowed."
+            )
+            assert all(b.requires_grad is False for b in c.buffers()), (
+                "In any :class:`~torch.nn.Module` passed to "
+                + ":func:`~make_graphed_callables`, only parameters may be trainable. All buffers must have "
+                + "``requires_grad=False``."
+            )
+        flatten_arg, _ = _tree_flatten(args)
+        flatten_sample_args.append(tuple(flatten_arg))
+        assert all(isinstance(arg, torch.Tensor) for arg in flatten_arg), (
+            "In the beta API, sample_args "
+            + "for each callable must contain only Tensors. Other types are not allowed."
+        )
 
     # If a callable is an nn.Module, its graph's full input surface is the args the user explicitly
     # passes to forward (ie, its sample_args) AND the module's parameter attributes.
-    per_callable_len_user_args = [len(args) for args in sample_args]
-    per_callable_module_params = [tuple(c.parameters()) if isinstance(c, torch.nn.Module) else ()
-                                  for c in callables]
-    per_callable_static_input_surfaces = [sample_args[i] + per_callable_module_params[i]
-                                          for i in range(len(callables))]
+    per_callable_len_user_args = [len(args) for args in flatten_sample_args]
+    per_callable_module_params = [
+        tuple(c.parameters()) if isinstance(c, torch.nn.Module) else ()
+        for c in callables
+    ]
+    per_callable_static_input_surfaces = [
+        flatten_sample_args[i] + per_callable_module_params[i]
+        for i in range(len(callables))
+    ]
 
     fwd_graphs = [torch.cuda.CUDAGraph() for _ in range(len(callables))]
     bwd_graphs = [torch.cuda.CUDAGraph() for _ in range(len(callables))]
@@ -263,17 +309,20 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
     # from ending up in any captures.
     torch.cuda.synchronize()
     with torch.cuda.stream(torch.cuda.Stream()):
-        for func, args, static_input_surface in zip(callables,
-                                                    sample_args,
-                                                    per_callable_static_input_surfaces):
+        for func, args, static_input_surface in zip(
+            callables, sample_args, per_callable_static_input_surfaces
+        ):
             for _ in range(num_warmup_iters):
-                outputs = func(*args)
-                outputs = (outputs,) if isinstance(outputs, torch.Tensor) else outputs
-                grad_inputs = torch.autograd.grad(outputs=outputs,
-                                                  inputs=tuple(i for i in static_input_surface if i.requires_grad),
-                                                  grad_outputs=tuple(torch.empty_like(o) for o in outputs),
-                                                  only_inputs=True,
-                                                  allow_unused=False)
+                outputs, _ = _tree_flatten(func(*args))
+                grad_inputs = torch.autograd.grad(
+                    outputs=tuple(o for o in outputs if o.requires_grad),
+                    inputs=tuple(i for i in static_input_surface if i.requires_grad),
+                    grad_outputs=tuple(
+                        torch.empty_like(o) for o in outputs if o.requires_grad
+                    ),
+                    only_inputs=True,
+                    allow_unused=allow_unused_input,
+                )
             del outputs, grad_inputs
     torch.cuda.synchronize()
 
@@ -283,41 +332,38 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
 
     # Capture forward graphs
     per_callable_static_outputs = []
-    per_callable_output_was_tensor = []
-    for func, args, fwd_graph in zip(callables,
-                                     sample_args,
-                                     fwd_graphs):
+    per_callable_output_unflatten_spec = []
+    for func, args, fwd_graph in zip(callables, sample_args, fwd_graphs):
         with torch.cuda.graph(fwd_graph, pool=mempool):
             outputs = func(*args)
 
-        # Assumes model output is a tensor or tuple of tensors
-        if isinstance(outputs, torch.Tensor):
-            per_callable_output_was_tensor.append(True)
-            outputs = (outputs,)
-        else:
-            per_callable_output_was_tensor.append(False)
-
-        per_callable_static_outputs.append(outputs)
+        flatten_outputs, spec = _tree_flatten(outputs)
+        per_callable_static_outputs.append(tuple(flatten_outputs))
+        per_callable_output_unflatten_spec.append(spec)
 
     # Capture backward graphs in reverse order
     per_callable_static_grad_outputs = []
     per_callable_static_grad_inputs = []
-    for static_input_surface, static_outputs, bwd_graph, module_params in \
-            zip(reversed(per_callable_static_input_surfaces),
-                reversed(per_callable_static_outputs),
-                reversed(bwd_graphs),
-                reversed(per_callable_module_params)):
-
+    for static_input_surface, static_outputs, bwd_graph, module_params in zip(
+        reversed(per_callable_static_input_surfaces),
+        reversed(per_callable_static_outputs),
+        reversed(bwd_graphs),
+        reversed(per_callable_module_params),
+    ):
         # For now, assumes all static_outputs require grad
-        assert all(o.requires_grad for o in static_outputs), "Outputs of graphed callables must require grad."
-        static_grad_outputs = tuple(torch.empty_like(o) for o in static_outputs)
+        # assert all(o.requires_grad for o in static_outputs), "Outputs of graphed callables must require grad."
+        static_grad_outputs = tuple(
+            torch.empty_like(o) if o.requires_grad else None for o in static_outputs
+        )
 
         with torch.cuda.graph(bwd_graph, pool=mempool):
-            grad_inputs = torch.autograd.grad(outputs=static_outputs,
-                                              inputs=tuple(i for i in static_input_surface if i.requires_grad),
-                                              grad_outputs=static_grad_outputs,
-                                              only_inputs=True,
-                                              allow_unused=False)
+            grad_inputs = torch.autograd.grad(
+                outputs=tuple(o for o in static_outputs if o.requires_grad),
+                inputs=tuple(i for i in static_input_surface if i.requires_grad),
+                grad_outputs=tuple(o for o in static_grad_outputs if o is not None),
+                only_inputs=True,
+                allow_unused=allow_unused_input,
+            )
 
         # Constructs a tuple suitable for returning from Graphed.backward:
         # Pads out the actually-needed grads with Nones in gradient slots for inputs that don't require grad.
@@ -340,15 +386,17 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
     per_callable_static_grad_inputs = list(reversed(per_callable_static_grad_inputs))
     # Now for every per_callable list, per_callable_*[i] holds the stuff for the ith callable.
 
-    def make_graphed_autograd_function(fwd_graph,
-                                       bwd_graph,
-                                       module_params,
-                                       len_user_args,
-                                       output_was_tensor,
-                                       static_input_surface,
-                                       static_outputs,
-                                       static_grad_outputs,
-                                       static_grad_inputs):
+    def make_graphed_autograd_function(
+        fwd_graph,
+        bwd_graph,
+        module_params,
+        len_user_args,
+        output_unflatten_spec,
+        static_input_surface,
+        static_outputs,
+        static_grad_outputs,
+        static_grad_inputs,
+    ):
         class Graphed(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *inputs):
@@ -363,10 +411,9 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
             @staticmethod
             @torch.autograd.function.once_differentiable
             def backward(ctx, *grads):
+                assert len(grads) == len(static_grad_outputs)
                 for g, grad in zip(static_grad_outputs, grads):
-                    if g is None:
-                        assert grad is None
-                    else:
+                    if g is not None:
                         # don't copy if autograd gods have been kind and the
                         # incoming grad is already in the right place
                         if g.data_ptr() != grad.data_ptr():
@@ -375,31 +422,37 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
 
                 # Input args that didn't require grad expect a None gradient.
                 assert isinstance(static_grad_inputs, tuple)
-                return tuple(b.detach() if b is not None else b for b in static_grad_inputs)
+                return tuple(
+                    b.detach() if b is not None else b for b in static_grad_inputs
+                )
 
         def functionalized(*user_args):
             # Runs the autograd function with inputs == all inputs to the graph that might require grad
             # (explicit user args + module parameters)
             # Assumes module params didn't change since capture.
-            out = Graphed.apply(*(user_args + module_params))
-            return out[0] if output_was_tensor else out
+            flatten_user_args, _ = _tree_flatten(user_args)
+            out = Graphed.apply(*(tuple(flatten_user_args) + module_params))
+            return _tree_unflatten(out, output_unflatten_spec)
 
         return functionalized
 
     # Put together the final graphed callables
     ret = []
     for i, func in enumerate(callables):
-        graphed = make_graphed_autograd_function(fwd_graphs[i],
-                                                 bwd_graphs[i],
-                                                 per_callable_module_params[i],
-                                                 per_callable_len_user_args[i],
-                                                 per_callable_output_was_tensor[i],
-                                                 per_callable_static_input_surfaces[i],
-                                                 per_callable_static_outputs[i],
-                                                 per_callable_static_grad_outputs[i],
-                                                 per_callable_static_grad_inputs[i])
+        graphed = make_graphed_autograd_function(
+            fwd_graphs[i],
+            bwd_graphs[i],
+            per_callable_module_params[i],
+            per_callable_len_user_args[i],
+            per_callable_output_unflatten_spec[i],
+            per_callable_static_input_surfaces[i],
+            per_callable_static_outputs[i],
+            per_callable_static_grad_outputs[i],
+            per_callable_static_grad_inputs[i],
+        )
 
         if isinstance(func, torch.nn.Module):
+
             def make_graphed_forward(func, graph_training_state, graphed, orig_fwd):
                 def new_fwd(*user_args):
                     # If the module's training-or-eval state matches what we graphed,
@@ -408,7 +461,9 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
                         return graphed(*user_args)
                     else:
                         return orig_fwd(*user_args)
+
                 return new_fwd
+
             func.forward = make_graphed_forward(func, func.training, graphed, func.forward)  # type: ignore[assignment]
             ret.append(func)
         else:

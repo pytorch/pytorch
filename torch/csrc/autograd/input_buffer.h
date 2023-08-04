@@ -5,7 +5,6 @@
 // values in-place (adding an input twice will accumulate the result).
 // This behaviour is needed and used only in backward graphs.
 
-#include <ATen/ATen.h>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -18,18 +17,16 @@ namespace torch {
 namespace autograd {
 
 struct InputBuffer {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit InputBuffer(size_t size) : buffer(size) {}
   InputBuffer(const InputBuffer& other) = delete;
   InputBuffer(InputBuffer&& other) = default;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit InputBuffer(variable_list&& inputs) : buffer(std::move(inputs)){};
   InputBuffer& operator=(InputBuffer&& other) = default;
 
   // Accumulates the variable at a specified index.
   // The optional CUDA streams determine which stream the accumulation
   // is run on and how the addition is synchronized.
-  void add(
+  TORCH_API void add(
       size_t pos,
       Variable&& var,
       const c10::optional<c10::Stream>& opt_producer_stream,
@@ -44,7 +41,6 @@ struct InputBuffer {
   // Returns the inputs as a list of variables. Destroys given InputBuffer.
   static std::vector<Variable> variables(InputBuffer&& g);
 
- private:
   std::vector<Variable> buffer;
 };
 

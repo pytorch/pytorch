@@ -1,9 +1,17 @@
 import torch
 import torch.nn as nn
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 
 import torch.ao.quantization
 import torch.ao.ns._numeric_suite as ns
+
+__all__ = [
+    "get_module",
+    "parent_child_names",
+    "get_param",
+    "MeanShadowLogger",
+    "bias_correction",
+]
 
 _supported_modules = {nn.Linear, nn.Conv2d}
 _supported_modules_quantized = {nnq.Linear, nnq.Conv2d}
@@ -37,7 +45,7 @@ class MeanShadowLogger(ns.Logger):
     of the data passed to the floating point and quantized models
     """
     def __init__(self):
-        super(MeanShadowLogger, self).__init__()
+        super().__init__()
         self.stats["float"] = None
         self.stats["quantized"] = None
         self.count = 0

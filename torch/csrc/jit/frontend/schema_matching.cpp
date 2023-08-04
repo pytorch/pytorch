@@ -14,8 +14,7 @@
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static inline TypePtr unwrapOptional(TypePtr opt_type) {
   if (auto dyn = opt_type->castRaw<c10::DynamicType>()) {
@@ -324,14 +323,24 @@ static bool varargsCanBeUsedAsList(
       !typevar_list;
 }
 
-// Note (@zasdfgbnm):
-// This is a workaround for https://github.com/pytorch/pytorch/issues/47964
-// Currently JIT does not distinguish ScalarType vs int, so there is really
-// no way to distinguish x.view(1) vs x.view(torch.int8). So we have to hardcode
-// the aten::view.dtype here to block this overload. This blocklist should be
-// removed when JIT fully suports ScalarType as its own type.
 bool isBlockListedSchema(const FunctionSchema& schema) {
+  // Note (@zasdfgbnm):
+  // This is a workaround for https://github.com/pytorch/pytorch/issues/47964
+  // Currently JIT does not distinguish ScalarType vs int, so there is really
+  // no way to distinguish x.view(1) vs x.view(torch.int8). So we have to
+  // hardcode the aten::view.dtype here to block this overload. This blocklist
+  // should be removed when JIT fully suports ScalarType as its own type.
   if (schema.name() == "aten::view" && schema.overload_name() == "dtype") {
+    return true;
+  }
+  // Note (@tugsbayasgalan)
+  // TorchScript doesn't suport kwargs so this op collides with aten.max.others
+  // since both of them have 2 Tensor inputs. Since we don't expect users to
+  // use this op in TS, we just skip it
+  if (schema.name() == "aten::max" && schema.overload_name() == "unary_out") {
+    return true;
+  }
+  if (schema.name() == "aten::min" && schema.overload_name() == "unary_out") {
     return true;
   }
   return false;
@@ -539,17 +548,6 @@ MatchedSchema matchSchema(
   throw ErrorReport(loc) << failure_messages.str();
 }
 
-MatchedSchema matchSchema(
-    const ::c10::FunctionSchema& schema,
-    const SourceRange& loc,
-    Graph& graph,
-    at::ArrayRef<Value*> args,
-    at::ArrayRef<NamedValue> kwargs) {
-  std::vector<NamedValue> named_args =
-      fmap(args, [](Value* v) { return NamedValue(v); });
-  return matchSchema(schema, loc, graph, named_args, kwargs);
-}
-
 static std::string prefixLine(
     const std::string& str,
     const std::string& prefix) {
@@ -572,7 +570,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
     at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self,
     bool render_errors) {
-  TORCH_INTERNAL_ASSERT(schemas.size() > 0);
+  TORCH_INTERNAL_ASSERT(!schemas.empty());
   // if there is only one schema, we do not need to try without conversions
   // first. this is faster and puts less dead code in the graph.
   if (schemas.size() == 1) {
@@ -661,7 +659,7 @@ static Value* emitBuiltinNode(
 }
 
 std::string getFullSchemaName(const ::c10::FunctionSchema& schema) {
-  if (schema.overload_name() != "") {
+  if (!schema.overload_name().empty()) {
     return schema.operator_name().name + "." + schema.overload_name();
   }
   return schema.operator_name().name;
@@ -679,12 +677,8 @@ Value* emitBuiltinCall(
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
 
-#if ENABLE_UPGRADERS
   // first let's set the graph's version
   auto graph_version = graph.get_op_version();
-#else
-  c10::optional<size_t> graph_version = c10::nullopt;
-#endif
 
   std::stringstream failure_messages;
   std::vector<const FunctionSchema*> schemas;
@@ -741,12 +735,12 @@ Value* emitBuiltinCall(
   }
 
   // no operators found with the same name, print out similarly named operators
-  if (schemas.size() == 0) {
+  if (schemas.empty()) {
     const auto close_symbols = findSimilarOperators(name);
     auto error = ErrorReport(loc);
     const auto& user_function_name = name.toQualString();
     error << "Unknown builtin op: " << user_function_name << ".\n";
-    if (close_symbols.size() == 0) {
+    if (close_symbols.empty()) {
       error
           << "Could not find any similar ops to " << user_function_name
           << ". This op may not exist or may not be currently supported in TorchScript.\n";
@@ -774,5 +768,4 @@ Value* emitBuiltinCall(
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

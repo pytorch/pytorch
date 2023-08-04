@@ -1,7 +1,6 @@
-import six
-
 from .utils import typename
 
+__all__ = ["VariadicSignatureType", "isvariadic", "VariadicSignatureMeta", "Variadic"]
 
 class VariadicSignatureType(type):
     # checking if subclass is a subclass of self
@@ -43,6 +42,7 @@ def isvariadic(obj):
         Whether or not `obj` is variadic
     Examples
     --------
+    >>> # xdoctest: +SKIP
     >>> isvariadic(int)
     False
     >>> isvariadic(Variadic[int])
@@ -64,17 +64,18 @@ class VariadicSignatureMeta(type):
         if not isinstance(variadic_type, tuple):
             variadic_type = variadic_type,
         return VariadicSignatureType(
-            'Variadic[%s]' % typename(variadic_type),
+            f'Variadic[{typename(variadic_type)}]',
             (),
             dict(variadic_type=variadic_type, __slots__=())
         )
 
 
-class Variadic(six.with_metaclass(VariadicSignatureMeta)):
+class Variadic(metaclass=VariadicSignatureMeta):
     """A class whose getitem method can be used to generate a new type
     representing a specific variadic signature.
     Examples
     --------
+    >>> # xdoctest: +SKIP
     >>> Variadic[int]  # any number of int arguments
     <class 'multipledispatch.variadic.Variadic[int]'>
     >>> Variadic[(int, str)]  # any number of one of int or str arguments

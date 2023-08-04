@@ -1,6 +1,6 @@
 import itertools
-from typing_extensions import Protocol
 import warnings
+from typing import Protocol
 
 import torch
 from ..parameter import is_lazy
@@ -74,6 +74,7 @@ class LazyModuleMixin:
     These "dry runs" send inputs of the correct size, dtype, and device through
     the network and to each one of its lazy modules. After this the network can be used as usual.
 
+    >>> # xdoctest: +SKIP
     >>> class LazyMLP(torch.nn.Module):
     ...    def __init__(self):
     ...        super().__init__()
@@ -222,7 +223,7 @@ class LazyModuleMixin:
         This adds an interface to isolate parameter initialization from the
         forward pass when doing parameter shape inference.
         """
-        raise NotImplementedError('initialize_parameters is not implemented for {}'.format(self.__class__.__name__))
+        raise NotImplementedError(f'initialize_parameters is not implemented for {self.__class__.__name__}')
 
     def has_uninitialized_params(self: _LazyProtocol):
         r"""Check if a module has parameters that are not initialized
@@ -248,7 +249,7 @@ class LazyModuleMixin:
         """
         module.initialize_parameters(*input)
         if module.has_uninitialized_params():
-            raise RuntimeError('module {} has not been fully initialized'.format(self._get_name()))
+            raise RuntimeError(f'module {self._get_name()} has not been fully initialized')
         module._initialize_hook.remove()
         module._load_hook.remove()
         delattr(module, '_initialize_hook')

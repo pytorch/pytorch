@@ -102,7 +102,7 @@ void MemoryDAG::collectAllContainedMemoryLocationsImpl(
 bool MemoryDAG::mayContainAlias(
     const Element* a,
     const at::ArrayRef<Element*> b) const {
-  if (b.size() == 0) {
+  if (b.empty()) {
     return false;
   }
 
@@ -115,7 +115,7 @@ bool MemoryDAG::mayContainAlias(
 bool MemoryDAG::mayContainAlias(
     const at::ArrayRef<Element*> a,
     const at::ArrayRef<Element*> b) const {
-  if (a.size() == 0 || b.size() == 0) {
+  if (a.empty() || b.empty()) {
     return false;
   }
 
@@ -186,7 +186,7 @@ void MemoryDAG::setWildcards(
     auto wildcardElement = getWildcardElement(v);
     TORCH_INTERNAL_ASSERT(wildcardElement);
 
-    const MemoryLocations pointeeSet = getMemoryLocations(elementMap.at(v));
+    const MemoryLocations& pointeeSet = getMemoryLocations(elementMap.at(v));
     for (const auto& pointee : pointeeSet) {
       auto from = this->fromIndex(pointee);
       // avoid cycles where the wildcard points to itself

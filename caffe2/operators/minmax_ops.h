@@ -122,7 +122,7 @@ class MaxGradientOp final : public SelectGradientOpBase<T, Context> {
   explicit MaxGradientOp(Args&&... args)
       : SelectGradientOpBase<T, Context>(std::forward<Args>(args)...) {}
 
-  ~MaxGradientOp() = default;
+  ~MaxGradientOp() override = default;
 };
 
 template <typename T, class Context>
@@ -132,7 +132,7 @@ class MinGradientOp final : public SelectGradientOpBase<T, Context> {
   explicit MinGradientOp(Args&&... args)
       : SelectGradientOpBase<T, Context>(std::forward<Args>(args)...) {}
 
-  ~MinGradientOp() = default;
+  ~MinGradientOp() override = default;
 };
 
 } // namespace caffe2

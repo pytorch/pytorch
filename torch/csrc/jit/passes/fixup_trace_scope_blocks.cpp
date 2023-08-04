@@ -155,7 +155,7 @@ struct ConvertTracedAttrReferences {
         for (Value* v : sub_unresolved) {
           n->addInput(v);
         }
-      } else if (n->blocks().size()) {
+      } else if (!n->blocks().empty()) {
         for (Block* sub_block : n->blocks()) {
           auto sub_unresolved =
               convertAttrReferencesToLocalGetAttrs(sub_block, prefix, self);
@@ -259,21 +259,23 @@ struct MakeDefsDominateUses {
 
       // Already lifted to this level by a previously processed Use, switch to
       // remapped value
-      if (remap.count(inp)) {
-        n->replaceInput(i, remap[inp]);
-        inp = remap[inp];
+      Value* inp_remapped = inp;
+      if (remap.count(inp_remapped)) {
+        n->replaceInput(i, remap[inp_remapped]);
+        inp_remapped = remap[inp_remapped];
       }
 
       // This conditional isn't strictly necessary, but saves a lot of
       // computation in the common case that we're using a local value.
-      if (inp->node()->owningBlock() != b) {
+      if (inp_remapped->node()->owningBlock() != b) {
         // Find the common ancestor block between this node and the node that
         // produced this input. For this input Use to be valid, the Value's
         // def must be present in this common ancestor node.
-        Block* common_ancestor = n->findCommonAncestorBlockWith(inp->node());
+        Block* common_ancestor =
+            n->findCommonAncestorBlockWith(inp_remapped->node());
 
-        Value* v_itr = inp;
-        Block* b_itr = inp->node()->owningBlock();
+        Value* v_itr = inp_remapped;
+        Block* b_itr = inp_remapped->node()->owningBlock();
 
         // Starting from the initial def for this input, iterate to
         // wider and wider blocks, adding Block outputs and Node outputs
@@ -288,7 +290,7 @@ struct MakeDefsDominateUses {
           b_itr = b_itr->owningNode()->owningBlock();
         }
         // From now on, references to `inp` will be replaced with
-        // references to `v_iter`, the lifted Value
+        // references to `v_itr`, the lifted Value
         remap[inp] = v_itr;
         n->replaceInput(i, remap[inp]);
       }
@@ -326,7 +328,7 @@ void convertReturnsToTuples(Block* b) {
           WithInsertPoint guard(sub_block->return_node());
           Node* return_tup =
               g->insertNode(g->createTuple(sub_block->outputs()));
-          while (sub_block->outputs().size()) {
+          while (!sub_block->outputs().empty()) {
             sub_block->eraseOutput(0);
           }
           sub_block->registerOutput(return_tup->output());
@@ -344,7 +346,7 @@ void convertReturnsToTuples(Block* b) {
           n->output(rev_idx)->replaceAllUsesWith(tup_unpack->output(rev_idx));
           n->eraseOutput(rev_idx);
         }
-      } else if (sub_block->outputs().size() == 0) {
+      } else if (sub_block->outputs().empty()) {
         WithInsertPoint guard(sub_block->return_node());
         sub_block->registerOutput(g->insertNode(g->createNone())->output());
         n->addOutput()->setType(NoneType::get());

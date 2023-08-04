@@ -1,10 +1,52 @@
 #include <ATen/ThreadLocalState.h>
-#include <c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 
 #include <c10/util/Logging.h>
 #include <fmt/format.h>
 
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupMPI.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
+
 namespace c10d {
+
+static ProcessGroup::BackendType strToBackendType(std::string backend) {
+  if (backend == "undefined") {
+    return ProcessGroup::BackendType::UNDEFINED;
+  } else if (backend == "gloo") {
+    return ProcessGroup::BackendType::GLOO;
+  } else if (backend == "nccl") {
+    return ProcessGroup::BackendType::NCCL;
+  } else if (backend == "ucc") {
+    return ProcessGroup::BackendType::UCC;
+  } else if (backend == "mpi") {
+    return ProcessGroup::BackendType::MPI;
+  } else {
+    return ProcessGroup::BackendType::CUSTOM;
+  }
+}
+
+static std::string backendTypeToStr(ProcessGroup::BackendType backendType) {
+  switch (backendType) {
+    case ProcessGroup::BackendType::UNDEFINED:
+      return "undefined";
+    case ProcessGroup::BackendType::GLOO:
+      return "gloo";
+    case ProcessGroup::BackendType::NCCL:
+      return "nccl";
+    case ProcessGroup::BackendType::UCC:
+      return "ucc";
+    case ProcessGroup::BackendType::MPI:
+      return "mpi";
+    case ProcessGroup::BackendType::CUSTOM:
+      return "custom";
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unknown backend type");
+  }
+}
 
 std::string opTypeToString(OpType opType) {
   switch (opType) {
@@ -57,190 +99,58 @@ bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
       opType == OpType::RECVANYSOURCE;
 }
 
-ProcessGroup::Work::Work(
-    int rank,
-    OpType opType,
-    const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputTensors)
-    : rank_(rank), opType_(opType) {
-  if (profilingTitle != nullptr) {
-    auto recordingFunction =
-        std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
-    if (recordingFunction->isActive()) {
-      // Work events follow a future like pattern and can potentially be marked
-      // as complete by different threads, so explicitly set as async event.
-      recordingFunction->_setAsync();
-      // Passing input tensor to recordFunction allows for shape information in
-      // profiling output.
-      std::vector<c10::IValue> inputs;
-      if (inputTensors) {
-        inputs.reserve(inputTensors->size());
-        for (const auto& tensor : *inputTensors) {
-          inputs.emplace_back(tensor);
-        }
-      }
-      recordingFunction->before(
-          profilingTitle,
-          c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
-      std::function<void()> end_handler = [recordingFunction]() {
-        recordingFunction->end();
-      };
-      recordFunctionEndCallback_ = at::wrapPropagateTLSState(end_handler);
-    }
+c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
+    c10::DeviceType deviceType) {
+  // If there is a backend associated with this device type then return it
+  if (deviceTypeToBackend_.find(deviceType) != deviceTypeToBackend_.end()) {
+    return deviceTypeToBackend_.at(deviceType);
   }
-}
 
-OpType ProcessGroup::Work::retrieveOpType() {
-  return opType_;
-}
+  // Get the backend type associated with the device
+  ProcessGroup::BackendType backendType;
+  try {
+    backendType = deviceTypeToBackendType_.at(deviceType);
+  } catch (const std::out_of_range& e) {
+    TORCH_CHECK(
+        false, "No backend type associated with device type ", deviceType);
+  }
 
-ProcessGroup::Work::~Work() = default;
+  // Check if the backend has already been initialized
+  if (backendTypeToBackend_.find(backendType) != backendTypeToBackend_.end()) {
+    auto backend = backendTypeToBackend_.at(backendType);
+    deviceTypeToBackend_[deviceType] = backend;
+    return backend;
+  }
 
-bool ProcessGroup::Work::isCompleted() {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return completed_;
-}
-
-bool ProcessGroup::Work::isSuccess() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return !exception_;
-}
-
-std::exception_ptr ProcessGroup::Work::exception() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return exception_;
-}
-
-int ProcessGroup::Work::sourceRank() const {
   TORCH_CHECK(
       false,
-      "sourceRank() may only be called on work objects "
-      "that correspond to a recv or recv-from-any call.");
+      "Could not retrieve or create the backend ",
+      backendType,
+      " for device type ",
+      deviceType);
 }
 
-std::vector<at::Tensor> ProcessGroup::Work::result() {
-  TORCH_CHECK(false, "result() not implemented.");
-}
-
-void ProcessGroup::Work::synchronize() {}
-
-bool ProcessGroup::Work::wait(std::chrono::milliseconds timeout) {
-  std::unique_lock<std::mutex> lock(mutex_);
-  if (timeout == kNoTimeout) {
-    // This waits without a timeout.
-    cv_.wait(lock, [&] { return completed_; });
-  } else {
-    // Waits for the user-provided timeout.
-    cv_.wait_for(lock, timeout, [&] { return completed_; });
-    if (!completed_) {
-      // Throw exception if the wait operation timed out and the work was not
-      // completed.
-      TORCH_CHECK(false, "Operation timed out!");
-    }
-  }
-  if (exception_) {
-    std::rethrow_exception(exception_);
-  }
-  synchronize();
-  // Always return true, because abort API is not implemented.
-  return true;
-}
-
-void ProcessGroup::Work::abort() {
-  TORCH_CHECK(false, "ProcessGroup::Work::abort not implemented.");
-}
-
-c10::intrusive_ptr<c10::ivalue::Future> ProcessGroup::Work::getFuture() {
-  TORCH_CHECK(false, "ProcessGroup::Work::getFuture not implemented.")
-}
-
-void ProcessGroup::Work::finish(std::exception_ptr exception) {
-  std::unique_lock<std::mutex> lock(mutex_);
-  completed_ = true;
-  exception_ = exception;
-  if (recordFunctionEndCallback_) {
-    recordFunctionEndCallback_();
-    recordFunctionEndCallback_ = nullptr;
-  }
-  lock.unlock();
-  cv_.notify_all();
-}
-
-void ProcessGroup::Work::finishAndThrow(std::exception_ptr exception) {
-  std::unique_lock<std::mutex> lock(mutex_);
-  completed_ = true;
-  exception_ = exception;
-  if (recordFunctionEndCallback_) {
-    recordFunctionEndCallback_();
-    recordFunctionEndCallback_ = nullptr;
-  }
-  if (exception_) {
-    std::rethrow_exception(exception_);
-  }
-}
-
-ProcessGroup::ProcessGroup(int rank, int size)
-    : rank_(rank), size_(size), dist_debug_level_(debug_level()) {
+ProcessGroup::ProcessGroup(
+    const c10::intrusive_ptr<::c10d::Store>& store,
+    int rank,
+    int size,
+    c10::intrusive_ptr<Options> options)
+    : store_(store),
+      rank_(rank),
+      size_(size),
+      options_(options),
+      backendType_(strToBackendType(options->backend)),
+      dist_debug_level_(debug_level()) {
   C10_LOG_API_USAGE_ONCE("c10d.process_group");
 }
 
-ProcessGroup::~ProcessGroup() {}
+ProcessGroup::ProcessGroup(int rank, int size)
+    : rank_(rank), size_(size), backendType_(BackendType::UNDEFINED) {}
+
+ProcessGroup::~ProcessGroup() = default;
 
 void ProcessGroup::init() {
   C10_LOG_API_USAGE_ONCE(
       fmt::format("c10d.process_group_{}", getBackendName()));
-}
-
-class FutureWrappingWork : public ProcessGroup::Work {
- public:
-  FutureWrappingWork(c10::intrusive_ptr<c10::ivalue::Future> fut)
-      : Work(), _fut(fut) {}
-
-  ~FutureWrappingWork() {}
-
-  bool isCompleted() override {
-    return _fut->completed();
-  }
-
-  bool isSuccess() const override {
-    return _fut->hasValue();
-  }
-
-  std::exception_ptr exception() const override {
-    return _fut->exception_ptr();
-  }
-
-  int sourceRank() const override {
-    TORCH_CHECK(false, "FutureWrappingWork::sourceRank() not implemented");
-  }
-
-  std::vector<at::Tensor> result() override {
-    return _fut->value().toPyObjectHolder()->extractTensors();
-  }
-
-  bool wait(std::chrono::milliseconds timeout) override {
-    // FIXME
-    TORCH_CHECK(
-        timeout == kNoTimeout,
-        "FutureWrappingWork::wait() with finite timeout not implemented");
-    _fut->wait();
-    return true;
-  }
-
-  void abort() override {
-    TORCH_CHECK(false, "FutureWrappingWork::abort() not implemented");
-  }
-
-  c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
-    return _fut;
-  }
-
- private:
-  c10::intrusive_ptr<c10::ivalue::Future> _fut;
-};
-
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::Work::create_from_future(
-    c10::intrusive_ptr<c10::ivalue::Future> future) {
-  return c10::make_intrusive<FutureWrappingWork>(future);
 }
 } // namespace c10d

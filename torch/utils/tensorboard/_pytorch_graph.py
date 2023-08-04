@@ -1,4 +1,5 @@
 from collections import OrderedDict
+import contextlib
 from typing import Dict, Any
 
 from tensorboard.compat.proto.config_pb2 import RunMetadata
@@ -31,7 +32,7 @@ GETATTR_KIND = "prim::GetAttr"
 CLASSTYPE_KIND = "ClassType"
 
 
-class NodeBase(object):
+class NodeBase:
     def __init__(
         self,
         debugName=None,
@@ -63,7 +64,7 @@ class NodeBase(object):
 
 class NodePy(NodeBase):
     def __init__(self, node_cpp, valid_methods):
-        super(NodePy, self).__init__(node_cpp)
+        super().__init__(node_cpp)
         valid_methods = valid_methods[:]
         self.inputs = []
 
@@ -88,7 +89,7 @@ class NodePy(NodeBase):
 
 class NodePyIO(NodePy):
     def __init__(self, node_cpp, input_or_output=None):
-        super(NodePyIO, self).__init__(node_cpp, methods_IO)
+        super().__init__(node_cpp, methods_IO)
         try:
             tensor_size = node_cpp.type().sizes()
         except RuntimeError:
@@ -108,16 +109,16 @@ class NodePyIO(NodePy):
 
 class NodePyOP(NodePy):
     def __init__(self, node_cpp):
-        super(NodePyOP, self).__init__(node_cpp, methods_OP)
+        super().__init__(node_cpp, methods_OP)
         # Replace single quote which causes strange behavior in TensorBoard
         # TODO: See if we can remove this in the future
         self.attributes = str(
-            {k: node_cpp[k] for k in node_cpp.attributeNames()}
+            {k: _node_get(node_cpp, k) for k in node_cpp.attributeNames()}
         ).replace("'", " ")
         self.kind = node_cpp.kind()
 
 
-class GraphPy(object):
+class GraphPy:
     """Helper class to convert torch.nn.Module to GraphDef proto and visualization
     with TensorBoard.
 
@@ -257,7 +258,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
         if node.type().kind() != CLASSTYPE_KIND:
             nodes_py.append(NodePyIO(node, "input"))
 
-    attr_to_scope: Dict[Any, str] = dict()
+    attr_to_scope: Dict[Any, str] = {}
     for node in graph.nodes():
         if node.kind() == GETATTR_KIND:
             attr_name = node.s("name")
@@ -270,11 +271,9 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
                 parent_attr_key = parent.output().debugName()
                 parent_scope = attr_to_scope[parent_attr_key]
                 attr_scope = parent_scope.split("/")[-1]
-                attr_to_scope[attr_key] = "{}/{}.{}".format(
-                    parent_scope, attr_scope, attr_name
-                )
+                attr_to_scope[attr_key] = f"{parent_scope}/{attr_scope}.{attr_name}"
             else:
-                attr_to_scope[attr_key] = "__module.{}".format(attr_name)
+                attr_to_scope[attr_key] = f"__module.{attr_name}"
             # We don't need classtype nodes; scope will provide this information
             if node.output().type().kind() != CLASSTYPE_KIND:
                 node_py = NodePyOP(node)
@@ -285,7 +284,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
 
     for i, node in enumerate(graph.outputs()):  # Create sink nodes for output ops
         node_pyio = NodePyIO(node, "output")
-        node_pyio.debugName = "output.{}".format(i + 1)
+        node_pyio.debugName = f"output.{i + 1}"
         node_pyio.inputs = [node.debugName()]
         nodes_py.append(node_pyio)
 
@@ -296,12 +295,12 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
             module_name = getattr(module, "original_name", "Module")
         return module_name
 
-    alias_to_name = dict()
+    alias_to_name = {}
     base_name = parse_traced_name(trace)
     for name, module in trace.named_modules(prefix="__module"):
         mod_name = parse_traced_name(module)
         attr_name = name.split(".")[-1]
-        alias_to_name[name] = "{}[{}]".format(mod_name, attr_name)
+        alias_to_name[name] = f"{mod_name}[{attr_name}]"
 
     for node in nodes_py.nodes_op:
         module_aliases = node.scopeName.split("/")
@@ -331,9 +330,7 @@ def graph(model, args, verbose=False, use_strict_trace=True):
         `torch.jit.trace`. Pass False when you want the tracer to
         record your mutable container types (list, dict)
     """
-    with torch.onnx.select_model_mode_for_export(
-        model, torch.onnx.TrainingMode.EVAL
-    ):  # TODO: move outside of torch.onnx?
+    with _set_model_to_eval(model):
         try:
             trace = torch.jit.trace(model, args, strict=use_strict_trace)
             graph = trace.graph
@@ -362,3 +359,27 @@ def graph(model, args, verbose=False, use_strict_trace=True):
     return GraphDef(node=list_of_nodes, versions=VersionDef(producer=22)), stepstats
     # The producer version has been reverse engineered from standard
     # TensorBoard logged data.
+
+
+@contextlib.contextmanager
+def _set_model_to_eval(model):
+    """A context manager to temporarily set the training mode of ``model`` to eval."""
+    if not isinstance(model, torch.jit.ScriptFunction):
+        originally_training = model.training
+        model.train(False)
+        try:
+            yield
+        finally:
+            model.train(originally_training)
+    else:
+        # Do nothing for ScriptFunction
+        try:
+            yield
+        finally:
+            pass
+
+
+def _node_get(node: torch._C.Node, key: str):
+    """Gets attributes of a node which is polymorphic over return type."""
+    sel = node.kindOf(key)
+    return getattr(node, sel)(key)

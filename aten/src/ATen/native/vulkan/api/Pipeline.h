@@ -5,7 +5,10 @@
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
-#include <c10/util/hash.h>
+#include <c10/util/SmallVector.h>
+#include <c10/util/flat_hash_map.h>
+
+#include <mutex>
 
 namespace at {
 namespace native {
@@ -22,10 +25,8 @@ struct PipelineBarrier final {
   c10::SmallVector<ImageMemoryBarrier, 4u> images;
 
   inline operator bool() const {
-    return (0u != stage.src) ||
-           (0u != stage.dst) ||
-           !buffers.empty() ||
-           !images.empty();
+    return (0u != stage.src) || (0u != stage.dst) || !buffers.empty() ||
+        !images.empty();
   }
 };
 

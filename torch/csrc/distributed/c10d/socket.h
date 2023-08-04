@@ -12,7 +12,7 @@
 #include <string>
 
 #include <c10/macros/Macros.h>
-#include <c10d/exception.h>
+#include <torch/csrc/distributed/c10d/exception.h>
 
 namespace c10d {
 namespace detail {
@@ -54,6 +54,8 @@ class Socket {
 
   static Socket listen(std::uint16_t port, const SocketOptions& opts = {});
 
+  static Socket listenFromFd(int fd, std::uint16_t expected_port);
+
   static Socket connect(
       const std::string& host,
       std::uint16_t port,
@@ -76,6 +78,8 @@ class Socket {
   int handle() const noexcept;
 
   std::uint16_t port() const;
+
+  bool waitForInput(std::chrono::milliseconds timeout);
 
  private:
   explicit Socket(std::unique_ptr<SocketImpl>&& impl) noexcept;

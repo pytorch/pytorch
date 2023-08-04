@@ -1,20 +1,33 @@
 """
 Utils shared by different modes of quantization (eager/graph)
 """
-import warnings
 import functools
+import warnings
+from collections import OrderedDict
+from inspect import getfullargspec, signature
+from typing import Any, Callable, Dict, Optional, Tuple, Union
+
 import torch
 from torch.ao.quantization.quant_type import QuantType
-from typing import Tuple, Any, Union, Callable, Dict, Optional
+from torch.fx import Node
 from torch.nn.utils.parametrize import is_parametrized
-from collections import OrderedDict
-from inspect import signature
-from inspect import getfullargspec
+
+NodePattern = Union[Tuple[Node, Node], Tuple[Node, Tuple[Node, Node]], Any]
+NodePattern.__module__ = "torch.ao.quantization.utils"
+
+# This is the Quantizer class instance from torch/quantization/fx/quantize.py.
+# Define separately to prevent circular imports.
+# TODO(future PR): improve this.
+# make this public once fixed (can't be public as is because setting the module directly
+# doesn't work)
+QuantizerCls = Any
 
 # Type for fusion patterns, it can be more complicated than the following actually,
 # see pattern.md for docs
 # TODO: not sure if typing supports recursive data types
-Pattern = Union[Callable, Tuple[Callable, Callable], Tuple[Callable, Tuple[Callable, Callable]], Any]
+Pattern = Union[
+    Callable, Tuple[Callable, Callable], Tuple[Callable, Tuple[Callable, Callable]], Any
+]
 Pattern.__module__ = "torch.ao.quantization.utils"
 
 # TODO: maybe rename this to MatchInputNode
@@ -127,13 +140,26 @@ def getattr_from_fqn(obj: Any, fqn: str) -> Any:
     """
     return functools.reduce(getattr, fqn.split("."), obj)
 
+def to_underlying_dtype(qdtype):
+    DTYPE_MAPPING = {
+        torch.quint8: torch.uint8,
+        torch.qint8: torch.int8,
+        torch.qint32: torch.int32,
+        torch.quint4x2: torch.uint8,
+        torch.quint2x4: torch.uint8,
+    }
+    assert qdtype in DTYPE_MAPPING, "Unsupported dtype: " + qdtype
+    return DTYPE_MAPPING[qdtype]
+
 def get_qparam_dict(observer_or_fake_quant):
-    qscheme = observer_or_fake_quant.qscheme if hasattr(observer_or_fake_quant, "qscheme") else None
+    from torch.ao.quantization.observer import PlaceholderObserver
+
+    qscheme = getattr(observer_or_fake_quant, "qscheme", None)
     dtype = observer_or_fake_quant.dtype
     qparams = {"qscheme": qscheme, "dtype": dtype}
 
-    if not qscheme:
-        return qparams
+    if not qscheme or isinstance(observer_or_fake_quant, PlaceholderObserver):
+        return {"qscheme": None, "dtype": dtype}
 
     if is_per_tensor(qscheme):
         qscheme = torch.per_tensor_affine
@@ -152,6 +178,11 @@ def get_qparam_dict(observer_or_fake_quant):
     scale, zero_point = observer_or_fake_quant.calculate_qparams()
     qparams["scale"] = scale
     qparams["zero_point"] = zero_point
+
+    if hasattr(observer_or_fake_quant, "quant_min"):
+        qparams["quant_min"] = observer_or_fake_quant.quant_min
+    if hasattr(observer_or_fake_quant, "quant_max"):
+        qparams["quant_max"] = observer_or_fake_quant.quant_max
 
     return qparams
 
@@ -185,19 +216,21 @@ def weight_dtype(qconfig):
 
 def activation_is_statically_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
-    quantized or not, this includes quantizing to quint8, qint8 and float16
+    quantized or not, this includes quantizing to quint8, qint8 and qint32 and float16
     """
-    return activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16]
+    return (
+        activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.qint32, torch.float16]
+        and (not activation_is_dynamically_quantized(qconfig))
+    )
 
 def activation_is_dynamically_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
     dynamically quantized or not, this includes dynamically quantizing to
     quint8, qint8 and float16
     """
-    activation_dtype, _, activation_compute_dtype = \
+    activation_dtype, _, activation_is_dynamic = \
         get_qconfig_dtypes(qconfig)
-    return activation_dtype == torch.float and \
-        activation_compute_dtype in [torch.quint8, torch.qint8, torch.float16]
+    return activation_is_dynamic
 
 def activation_is_int8_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
@@ -227,40 +260,40 @@ def op_is_int8_dynamically_quantized(qconfig) -> bool:
     """ Given a qconfig, returns True if this op is using int8 dynamic
     quantization
     """
-    activation_dtype, weight_dtype, activation_compute_dtype = \
+    activation_dtype, weight_dtype, activation_is_dynamic = \
         get_qconfig_dtypes(qconfig)
     return (
-        activation_dtype is torch.float and
+        activation_dtype is torch.quint8 and
         # for now, the lines below assume fbgemm or qnnpack
         weight_dtype is torch.qint8 and
-        activation_compute_dtype is torch.quint8
+        activation_is_dynamic
     )
 
 def get_qconfig_dtypes(qconfig):
     r""" returns the qconfig tuple for qconfig:
-    (activation_dtype, weight_dtype, activation_compute_dtype)
+    (activation_dtype, weight_dtype, activation_is_dynamic)
     """
     assert qconfig is not None
     activation = qconfig.activation()
     weight = qconfig.weight()
-    compute_dtype = activation.compute_dtype if hasattr(activation, 'compute_dtype') else None
-    return (activation.dtype, weight.dtype, compute_dtype)
+    act_is_dynamic = getattr(activation, "is_dynamic", False)
+    return (activation.dtype, weight.dtype, act_is_dynamic)
 
 def get_quant_type(qconfig):
     assert qconfig is not None
     activation = qconfig.activation()
     weight = qconfig.weight()
-    static_dtypes = [torch.quint8, torch.qint8, torch.quint4x2]
+    static_dtypes = [torch.quint8, torch.qint8, torch.quint4x2, torch.qint32]
     if weight.dtype in static_dtypes:
-        if activation.dtype in static_dtypes:
-            return QuantType.STATIC
-        elif hasattr(activation, 'compute_dtype') and activation.compute_dtype in static_dtypes:
+        if hasattr(activation, 'is_dynamic') and activation.is_dynamic:
             return QuantType.DYNAMIC
+        elif activation.dtype in static_dtypes:
+            return QuantType.STATIC
         else:
             return QuantType.WEIGHT_ONLY
 
     if weight.dtype == torch.float16:
-        if activation.dtype == torch.float:
+        if hasattr(activation, 'is_dynamic') and activation.is_dynamic:
             return QuantType.DYNAMIC
         elif activation.dtype == torch.float16:
             return QuantType.STATIC
@@ -288,13 +321,11 @@ def check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
 
             return False
 
-        assert min_val <= max_val, "min {} should be less than max {}".format(
-            min_val, max_val
-        )
+        assert min_val <= max_val, f"min {min_val} should be less than max {max_val}"
     else:
         assert torch.all(
             min_val <= max_val
-        ), "min {} should be less than max {}".format(min_val, max_val)
+        ), f"min {min_val} should be less than max {max_val}"
 
     return True
 
@@ -310,7 +341,7 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
         # using of refinement to decouple initial_qmin and initial_qmax from quantization range.
         # The actual values of initial_qmin and initial_qmax will be reset below.
         if dtype == torch.qint32:
-            initial_quant_min, initial_quant_max = 0, 2**31 - 1
+            initial_quant_min, initial_quant_max = 0, 2**32 - 1
         else:
             initial_quant_min, initial_quant_max = 0, 255
         # The following assignment of self.qmin and self.qmax to the local variables and the if check refine the
@@ -329,7 +360,7 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
             ), "quantization range should be positive and not exceed the maximum bit range (=256)."
         elif dtype == torch.qint32:
             assert (
-                0 < qrange_len <= 2**31
+                0 < qrange_len <= 2**32
             ), "quantization range should be positive and not exceed the maximum bit range (=4294967296)."
         if reduce_range:
             quant_min, quant_max = quant_min // 2, quant_max // 2
@@ -450,6 +481,105 @@ def _normalize_kwargs(func: Callable, loc: Dict[str, Any]) -> "OrderedDict[str, 
             normalized_kwargs[attr] = val
     return normalized_kwargs
 
+def validate_qmin_qmax(quant_min: int, quant_max: int) -> None:
+    r"""Validates that the user-specified quantization range is properly initialized
+    and within the given bound supported by the observer dtype.
+
+    To accommodate lower-bit quantization with respect to the existing torch.qint8 and
+    torch.quint8 datatypes, the user can choose to use dynamic quantization range by passing
+    in a tuple of initial qmin and qmax values. One use case is these customized qmin and qmax
+    values are used to calculate static estimates of the scale and zero point for aggressive lower-bit
+    fake quantization. These estimates are compared against parameters learned through backpropagation.
+    The related literatures for scale and zero point via backpropagation are as follows:
+
+    Learned Step Size Quantization: https://openreview.net/pdf?id=rkgO66VKDS
+    Trained Quantization Thresholds: https://arxiv.org/pdf/1903.08066.pdf
+    """
+    # The variable names are prefixed with "initial" because their values (qmin and qmax) might be adjusted
+    # based on whether quantization range is reduced and the datatype (signed/unsigned) used by the observer.
+    assert (
+        quant_min <= 0 <= quant_max
+    ), "Used-specified quantization range must include 0."
+    assert (
+        quant_min < quant_max
+    ), "qmin must be strictly less than qmax for user-specified quantization range."
+
+
+# Functionally equivalent to '_calculate_qparams' in observer.py. Observers must be torchscriptable however and qscheme
+# as far as I can tell is not allowed to passed as a parameter in torchscript functions. This makes refactoring observer
+# to use this utility a massive pain and very gross. For now Im opting just to duplicate as this code seems unlikey to change
+# (last update over 1 year ago) and when torchscript is fully deprecated we can refactor. TODO(jakeszwe, jerryzh168)
+def determine_qparams(
+        min_val: torch.Tensor, max_val: torch.Tensor, quant_min: int, quant_max: int,
+        dtype: torch.dtype, eps: torch.Tensor, has_customized_qrange: bool,
+        qscheme: torch.qscheme = torch.per_tensor_affine) -> Tuple[torch.Tensor, torch.Tensor]:
+    r"""Calculates the quantization parameters, given min and max
+    value tensors. Works for both per tensor and per channel cases
+
+    Args:
+        min_val: Minimum values per channel
+        max_val: Maximum values per channel
+
+    Returns:
+        scales: Scales tensor of shape (#channels,)
+        zero_points: Zero points tensor of shape (#channels,)
+    """
+    if not check_min_max_valid(min_val, max_val):
+        return torch.tensor([1.0], device=min_val.device.type), torch.tensor([0], device=min_val.device.type)
+
+    min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
+    max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
+
+    device = min_val_neg.device
+    scale = torch.ones(min_val_neg.size(), dtype=torch.double, device=device)
+    zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
+
+    if (
+        qscheme == torch.per_tensor_symmetric
+        or qscheme == torch.per_channel_symmetric
+    ):
+        max_val_pos = torch.max(-min_val_neg, max_val_pos)
+        scale = max_val_pos / (float(quant_max - quant_min) / 2)
+        scale = torch.max(scale, eps)
+        if dtype == torch.uint8 or dtype == torch.quint8:
+            if has_customized_qrange:
+                # When customized quantization range is used, down-rounded midpoint of the range is chosen.
+                zero_point = zero_point.new_full(
+                    zero_point.size(), (quant_min + quant_max) // 2
+                )
+            else:
+                zero_point = zero_point.new_full(zero_point.size(), 128)
+    elif qscheme == torch.per_channel_affine_float_qparams:
+        scale = (max_val - min_val) / float(quant_max - quant_min)
+        scale = torch.where(scale > eps, scale, torch.ones_like(scale))
+        # We use the quantize function
+        # xq = Round(Xf * inv_scale + zero_point),
+        # setting zero_point to (-1 * min *inv_scale) we get
+        # Xq = Round((Xf - min) * inv_scale)
+        zero_point = -1 * min_val / scale
+    else:
+        scale = (max_val_pos - min_val_neg) / float(quant_max - quant_min)
+        scale = torch.max(scale, eps)
+        zero_point = quant_min - torch.round(min_val_neg / scale).to(torch.int)
+        zero_point = torch.clamp(zero_point, quant_min, quant_max)
+
+    # For scalar values, cast them to Tensors of size 1 to keep the shape
+    # consistent with default values in FakeQuantize.
+    if len(scale.shape) == 0:
+        # TODO: switch to scale.item() after adding JIT support
+        scale = torch.tensor([float(scale)], dtype=scale.dtype, device=device)
+    if len(zero_point.shape) == 0:
+        # TODO: switch to zero_point.item() after adding JIT support
+        zero_point = torch.tensor(
+            [int(zero_point)], dtype=zero_point.dtype, device=device
+        )
+        if qscheme == torch.per_channel_affine_float_qparams:
+            zero_point = torch.tensor(
+                [float(zero_point)], dtype=zero_point.dtype, device=device
+            )
+
+    return scale.to(torch.double), zero_point.to(torch.int64)
+
 def _get_num_pos_args(f: Callable) -> int:
     """ Get number of positional args for a function
 
@@ -471,7 +601,7 @@ def get_fqn_to_example_inputs(
     e.g. {"linear1": (tensor1,), "linear2": (tensor2,), "sub": (tensor3,),
           "sub.linear1": (tensor4,), ...}
 
-    Used to make quantizing submodules easier now that FX Graph Mode Quantization requries
+    Used to make quantizing submodules easier now that FX Graph Mode Quantization requires
     example inputs.
 
     Also works for keyword arguments with default values, we would flatten keyword
@@ -519,8 +649,8 @@ def get_fqn_to_example_inputs(
         torch.nn.Module.__call__ = orig_module_call
     return fqn_to_example_inputs
 
-
 __all__ = [
+    "NodePattern",
     "Pattern",
     "MatchAllNode",
     "check_node",
@@ -545,4 +675,7 @@ __all__ = [
     "calculate_qmin_qmax",
     "has_no_children_ignoring_parametrizations",
     "get_fqn_to_example_inputs",
+    "to_underlying_dtype",
+    "determine_qparams",
+    "validate_qmin_qmax",
 ]

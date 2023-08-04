@@ -4,40 +4,46 @@
 # if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
 # The fallback is expected to mimick this codegen, so we should keep the two in sync.
 
+from typing import Dict, List, Optional, Sequence, Tuple
+
 from torchgen.api import cpp
 from torchgen.api.autograd import (
-    NativeFunctionWithDifferentiabilityInfo,
-    gen_differentiable_outputs,
     dispatch_strategy,
+    gen_differentiable_outputs,
+    NativeFunctionWithDifferentiabilityInfo,
 )
 from torchgen.api.types import (
-    Binding,
-    DispatcherSignature,
-    CType,
     BaseCType,
-    OptionalCType,
-    longT,
+    Binding,
     boolT,
+    ConstRefCType,
+    CType,
+    DispatcherSignature,
     intArrayRefT,
+    longT,
+    OptionalCType,
     symIntArrayRefT,
+    SymIntT,
+    # See Note [Nested Arg Types]
+    tensorT,
 )
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
 from torchgen.model import (
-    Type,
     NativeFunction,
+    SchemaKind,
     SelfArgument,
     TensorOptionsArguments,
-    SchemaKind,
+    Type,
 )
-from typing import List, Optional, Sequence, Tuple, Dict
 from torchgen.utils import FileManager
+
 from .context import with_native_function_with_differentiability_info
 from .gen_trace_type import (
-    MANUAL_AUTOGRAD,
-    type_wrapper_name,
-    tie_return_values,
     get_return_value,
+    MANUAL_AUTOGRAD,
+    tie_return_values,
+    type_wrapper_name,
 )
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
@@ -53,6 +59,7 @@ VIEW_FUNCTIONS_WITH_METADATA_CHANGE = [
     "view_as_real",
     "_conj",
     "_neg_view",
+    "_nested_view_from_buffer",
 ]
 
 VIEW_FUNCTIONS = {
@@ -88,6 +95,7 @@ VIEW_FUNCTIONS = {
     # FIXME: clone indices on construction.
     "sparse_coo_tensor_with_dims_and_tensors": "values",
     "_reshape_alias": "self",
+    "_test_autograd_multiple_dispatch_view": "self",
 }
 
 for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
@@ -151,7 +159,8 @@ at::_ops::${unambiguous_name}::call(${unpacked_args})"""
 SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate(
     """\
 std::function<at::Tensor(const at::Tensor&)> func=nullptr;
-if (${is_view_with_metadata_change} || !self.unsafeGetTensorImpl()->support_as_strided()) {
+if (${is_view_with_metadata_change} || !self.unsafeGetTensorImpl()->support_as_strided() ||
+    c10::AutogradState::get_tls_state().get_view_replay_enabled()) {
   ${replay_view_func}
 }
 """
@@ -213,6 +222,7 @@ ${assign_return_values} ([&]() {
 
 TMP_VAR = "_tmp"
 
+
 # FIXME: Ideally these functions should be methods on Type class, but we have a
 #        comment in codegen/model.py there saying these concepts are not well defined.
 #        Thus we put a version that commonly used by autograd codegen here.
@@ -247,6 +257,7 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
         for r in cpp.argument(
             a,
             method=False,
+            symint=True,
             cpp_no_default_args=set(),
             faithful=False,
             has_tensor_options=False,
@@ -312,16 +323,20 @@ def emit_view_call(
 
 def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str:
     """Generate an additional lambda function to recover views in backward when as_strided is not supported.
-    See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details."""
+    See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details.
+    """
     input_base = "input_base"
     replay_view_func = ""
     updated_unpacked_args: List[str] = []
     known_view_arg_simple_types: List[CType] = [
         BaseCType(longT),
         OptionalCType(BaseCType(longT)),
+        BaseCType(SymIntT),
+        OptionalCType(BaseCType(SymIntT)),
         BaseCType(boolT),
         BaseCType(intArrayRefT),
         BaseCType(symIntArrayRefT),
+        ConstRefCType(BaseCType(tensorT)),
     ]
     for unpacked_binding in unpacked_bindings:
         arg, arg_type = unpacked_binding.name, unpacked_binding.nctype.type
@@ -336,7 +351,6 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
                 "over by value, also add a test in pytorch/xla/test/test_operations.py where this code "
                 "is exercised."
             )
-
         if arg_type == BaseCType(intArrayRefT) or arg_type == BaseCType(
             symIntArrayRefT
         ):
@@ -352,6 +366,13 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
                 arg=arg, val=arg_value, default="0"
             )
             updated_unpacked_args.append(arg_value)
+        elif (
+            arg == "nested_size_" or arg == "nested_strides_" or arg == "offsets_"
+        ) and arg_type == ConstRefCType(BaseCType(tensorT)):
+            # [NOTE] [Nested Arg Types]
+            # This is temporary. Nested tensors will be migrating to use SymInts and
+            # nested_size and nested_strides will no longer be tensors.
+            updated_unpacked_args.append(arg[:-1])
         else:
             updated_unpacked_args.append(arg)
 
@@ -492,7 +513,7 @@ def gen_formals(f: NativeFunction) -> str:
         # See Note [Plumbing Keys Through The Dispatcher] for details.
         ["c10::DispatchKeySet ks"]
         + [
-            f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
+            f'{cpp.argument_type(a, binds="__placeholder__", symint=True).cpp_type()} {a.name}'
             for a in f.func.schema_order_arguments()
         ]
     )
@@ -512,7 +533,7 @@ def inplace_or_view_method_definition(
     ):
         return None
     return METHOD_DEFINITION.substitute(
-        return_type=cpp.returns_type(f.func.returns).cpp_type(),
+        return_type=cpp.returns_type(f.func.returns, symint=True).cpp_type(),
         type_wrapper_name=type_wrapper_name(f),
         formals=gen_formals(f),
         type_definition_body=emit_inplace_or_view_body(fn),
@@ -579,7 +600,8 @@ def gen_inplace_or_view_type(
         [fn for fn in fns_with_infos if use_derived(fn)],
         key_fn=lambda fn: fn.func.root_name,
         base_env={
-            "generated_comment": f"@generated from {template_path}/ADInplaceOrViewType.cpp",
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/ADInplaceOrViewType.cpp",
         },
         env_callable=gen_inplace_or_view_type_env,
         num_shards=2,

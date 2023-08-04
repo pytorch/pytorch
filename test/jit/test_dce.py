@@ -22,7 +22,7 @@ class TestDCE(JitTestCase):
 
     def test_setattr_removed(self):
         @torch.jit.script
-        class Thing1(object):
+        class Thing1:
             def __init__(self):
                 self.x = torch.zeros([2, 2])
 

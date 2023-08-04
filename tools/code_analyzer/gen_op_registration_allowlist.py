@@ -9,10 +9,11 @@ and it will directly output root ops as the allowlist.
 """
 
 import argparse
-import yaml
 
 from collections import defaultdict
 from typing import Dict, List, Set
+
+import yaml
 
 DepGraph = Dict[str, Set[str]]
 
@@ -23,7 +24,7 @@ def canonical_name(opname: str) -> str:
 
 
 def load_op_dep_graph(fname: str) -> DepGraph:
-    with open(fname, "r") as stream:
+    with open(fname) as stream:
         result = defaultdict(set)
         for op in yaml.safe_load(stream):
             op_name = canonical_name(op["name"])
@@ -35,7 +36,7 @@ def load_op_dep_graph(fname: str) -> DepGraph:
 
 def load_root_ops(fname: str) -> List[str]:
     result = []
-    with open(fname, "r") as stream:
+    with open(fname) as stream:
         for op in yaml.safe_load(stream):
             result.append(canonical_name(op))
     return result

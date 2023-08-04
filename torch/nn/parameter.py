@@ -24,8 +24,11 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
 
     Args:
         data (Tensor): parameter tensor.
-        requires_grad (bool, optional): if the parameter requires gradient. See
-            :ref:`locally-disable-grad-doc` for more details. Default: `True`
+        requires_grad (bool, optional): if the parameter requires gradient. Note that
+            the torch.no_grad() context does NOT affect the default behavior of
+            Parameter creation--the Parameter will still have `requires_grad=True` in
+            :class:`~no_grad` mode. See :ref:`locally-disable-grad-doc` for more
+            details. Default: `True`
     """
     def __new__(cls, data=None, requires_grad=True):
         if data is None:
@@ -57,13 +60,22 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
             return result
 
     def __repr__(self):
-        return 'Parameter containing:\n' + super(Parameter, self).__repr__()
+        return 'Parameter containing:\n' + super().__repr__()
 
     def __reduce_ex__(self, proto):
+        state = torch._utils._get_obj_state(self)
+
         # See Note [Don't serialize hooks]
+        hooks = OrderedDict()
+        if not state:
+            return (
+                torch._utils._rebuild_parameter,
+                (self.data, self.requires_grad, hooks)
+            )
+
         return (
-            torch._utils._rebuild_parameter,
-            (self.data, self.requires_grad, OrderedDict())
+            torch._utils._rebuild_parameter_with_state,
+            (self.data, self.requires_grad, hooks, state)
         )
 
     __torch_function__ = _disabled_torch_function_impl
@@ -156,7 +168,7 @@ def is_lazy(param):
 class UninitializedParameter(UninitializedTensorMixin, Parameter):
     r"""A parameter that is not initialized.
 
-    Unitialized Parameters are a a special case of :class:`torch.nn.Parameter`
+    Uninitialized Parameters are a a special case of :class:`torch.nn.Parameter`
     where the shape of the data is still unknown.
 
     Unlike a :class:`torch.nn.Parameter`, uninitialized parameters
@@ -176,11 +188,86 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
         data = torch.empty(0, **factory_kwargs)
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        else:
+            result = type(self)(self.requires_grad, self.data.device, self.data.dtype)
+            memo[id(self)] = result
+            return result
+
+# Metaclass to combine _TensorMeta and the instance check override for Buffer.
+class _BufferMeta(torch._C._TensorMeta):
+    # Make `isinstance(t, Buffer)` return True for custom tensor instances that have the _is_buffer flag.
+    def __instancecheck__(self, instance):
+        return isinstance(instance, torch.Tensor) and getattr(instance, '_is_buffer', False)
+
+
+class Buffer(torch.Tensor, metaclass=_BufferMeta):
+    r"""A kind of Tensor that should not be considered a model
+    parameter. For example, BatchNorm's ``running_mean`` is not a parameter, but is part of the module's state.
+
+    Buffers are :class:`~torch.Tensor` subclasses, that have a
+    very special property when used with :class:`Module` s - when they're
+    assigned as Module attributes they are automatically added to the list of
+    its buffers, and will appear e.g. in :meth:`~Module.buffers` iterator.
+    Assigning a Tensor doesn't have such effect. One can still assign a Tensor as explicitly by using
+    a the modules `~register_buffer` function.
+
+    Args:
+        data (Tensor): buffer tensor.
+        requires_grad (bool, optional): if the buffer requires gradient.
+            Default: `False`
+        persistent (bool, optional): whether the buffer is part of the module's
+            :attr:`state_dict`. Default: `True`
+    """
+    def __new__(cls, data=None, requires_grad=False, persistent=True):
+        if data is None:
+            data = torch.empty(0)
+
+        # Path for custom tensors: set a flag on the instance to indicate buffer-ness.
+        t = data.detach().requires_grad_(requires_grad)
+        if type(t) is not type(data) and not isinstance(data, Parameter):
+            raise RuntimeError(f"Creating a Buffer from an instance of type {type(data).__name__} "
+                               "requires that detach() returns an instance of the same type, but return "
+                               f"type {type(t).__name__} was found instead. To use the type as a "
+                               "Buffer, please correct the detach() semantics defined by "
+                               "its __torch_dispatch__() implementation.")
+        t.persistent = persistent
+        t._is_buffer = True
+        return t
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        else:
+            result = type(self)(self.data.clone(memory_format=torch.preserve_format), self.requires_grad, self.persistent)
+            memo[id(self)] = result
+            return result
+
+    def __repr__(self):
+        return 'Buffer containing:\n' + super().__repr__()
+
+    def __reduce_ex__(self, proto):
+        state = torch._utils._get_obj_state(self)
+
+        if not state:
+            return (
+                torch._utils._rebuild_buffer,
+                (self.data, self.requires_grad, self.persistent)
+            )
+
+        return (
+            torch._utils._rebuild_buffer_with_state,
+            (self.data, self.requires_grad, self.persistent, state)
+        )
+
+    __torch_function__ = _disabled_torch_function_impl
 
 class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
     r"""A buffer that is not initialized.
 
-    Unitialized Buffer is a a special case of :class:`torch.Tensor`
+    Uninitialized Buffer is a a special case of :class:`torch.Tensor`
     where the shape of the data is still unknown.
 
     Unlike a :class:`torch.Tensor`, uninitialized parameters
@@ -195,7 +282,10 @@ class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
 
     cls_to_become = torch.Tensor
 
-    def __new__(cls, requires_grad=False, device=None, dtype=None) -> None:
+    def __new__(cls, requires_grad=False, device=None, dtype=None, persistent=True) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         data = torch.empty(0, **factory_kwargs)
-        return torch.Tensor._make_subclass(cls, data, requires_grad)
+        ret = torch.Tensor._make_subclass(cls, data, requires_grad)
+        ret.persistent = persistent
+        ret._is_buffer = True
+        return ret

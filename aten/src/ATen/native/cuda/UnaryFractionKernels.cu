@@ -8,7 +8,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Math.cuh>
 
-namespace at { namespace native {
+namespace at::native {
 
 // We manually overload ceil because std::ceil does not work with std::complex types.
 template <typename scalar_t>
@@ -117,12 +117,12 @@ __host__ __device__ static inline double nearbyint_wrapper(double a) {
   return ::nearbyint(a);
 }
 
+#pragma push
+#pragma nv_diag_suppress 177   // Function was declared but never referenced
 __host__ __device__ static inline c10::complex<float> nearbyint_wrapper(c10::complex<float> a) {
   return c10::complex<float>(::nearbyintf(static_cast<float>(a.real())), ::nearbyintf(static_cast<float>(a.imag())));
 }
 
-#pragma push
-#pragma diag_suppress 177   // Function was declared but never referenced
 __host__ __device__ static inline c10::complex<double> nearbyint_wrapper(c10::complex<double> a) {
   return c10::complex<double>(::nearbyint(static_cast<double>(a.real())), ::nearbyint(static_cast<double>(a.imag())));
 }
@@ -196,4 +196,4 @@ REGISTER_DISPATCH(round_stub, &round_kernel_cuda);
 REGISTER_DISPATCH(round_decimals_stub, &round_decimals_kernel_cuda);
 REGISTER_DISPATCH(trunc_stub, &trunc_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

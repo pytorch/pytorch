@@ -1,6 +1,8 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/native/TensorIterator.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
@@ -10,6 +12,20 @@
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_prelu_kernel_native.h>
+#include <ATen/ops/hardtanh_native.h>
+#include <ATen/ops/leaky_relu_native.h>
+#include <ATen/ops/prelu.h>
+#include <ATen/ops/prelu_native.h>
+#include <ATen/ops/quantize_per_tensor.h>
+#include <ATen/ops/relu_native.h>
+#endif
+
 #include <algorithm>
 
 namespace at {
@@ -17,9 +33,10 @@ namespace native {
 
 DEFINE_DISPATCH(qrelu_stub);
 DEFINE_DISPATCH(qrelu_leaky_stub);
+DEFINE_DISPATCH(qprelu_stub);
 
 #ifdef USE_PYTORCH_QNNPACK
-Tensor qnnpack_relu(Tensor input) {
+static Tensor qnnpack_relu(Tensor input) {
   Tensor qy;
   TORCH_CHECK(
       input.ndimension() > 0, "qnnpack_relu(): Got empty input tensor");
@@ -134,6 +151,32 @@ Tensor& leaky_relu_quantized_cpu_(Tensor& self, const Scalar& negval) {
   return self;
 }
 
+static Tensor _prelu_kernel_quantized_cpu_impl(const Tensor& self, const Tensor& weight,
+                                double output_scale, int64_t output_zero_point) {
+  auto ndim = self.dim();
+  // for ndim < 1 or > 5, go to reference path
+  if (ndim > 5 || ndim < 1) {
+    auto x = self.dequantize();
+    auto y = at::prelu(x, weight);
+    return at::quantize_per_tensor(y, output_scale, output_zero_point, c10::kQUInt8);
+  }
+
+  auto qy = at::_empty_affine_quantized(self.sizes(),
+      at::device(kCPU)
+        .dtype(self.scalar_type()),
+      output_scale,
+      output_zero_point,
+      self.suggest_memory_format());
+
+  qprelu_stub(self.device().type(), qy, self, weight);
+
+  return qy;
+}
+
+Tensor _prelu_kernel_quantized_cpu(const Tensor& self, const Tensor& weight) {
+  return _prelu_kernel_quantized_cpu_impl(self, weight, self.q_scale(), self.q_zero_point());
+}
+
 namespace {
 Tensor quantized_relu6(const Tensor& qx) {
   Tensor qy;
@@ -175,9 +218,17 @@ class QLeakyRelu final {
   }
 };
 
+class QPRelu final {
+ public:
+  static Tensor run(Tensor self, const Tensor& weight, double output_scale, int64_t output_zero_point) {
+  return _prelu_kernel_quantized_cpu_impl(self, weight, output_scale, output_zero_point);
+  }
+};
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::relu6"), TORCH_FN(QRelu6::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::leaky_relu"), TORCH_FN(QLeakyRelu::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::prelu"), TORCH_FN(QPRelu::run));
 }
 
 } // namespace

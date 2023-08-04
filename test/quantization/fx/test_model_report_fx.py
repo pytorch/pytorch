@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: quantization"]
 
 import torch
@@ -13,9 +12,14 @@ from torch.ao.quantization.fx._model_report.detector import (
     OutlierDetector,
 )
 from torch.ao.quantization.fx._model_report.model_report_observer import ModelReportObserver
+from torch.ao.quantization.fx._model_report.model_report_visualizer import ModelReportVisualizer
 from torch.ao.quantization.fx._model_report.model_report import ModelReport
-from torch.ao.quantization.observer import HistogramObserver, default_per_channel_weight_observer
-from torch.nn.intrinsic.modules.fused import ConvReLU2d, LinearReLU
+from torch.ao.quantization.observer import (
+    HistogramObserver,
+    default_per_channel_weight_observer,
+    default_observer
+)
+from torch.ao.nn.intrinsic.modules.fused import ConvReLU2d, LinearReLU
 from torch.testing._internal.common_quantization import (
     ConvModel,
     QuantizationTestCase,
@@ -76,19 +80,52 @@ FUSION_CONV_LINEAR_EXAMPLE = torch.nn.Sequential(
     torch.nn.Conv2d(3, 3, 2, 1),
 )
 
+# Test class
+# example model to use for tests
+class ThreeOps(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(3, 3)
+        self.bn = nn.BatchNorm2d(3)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        x = self.linear(x)
+        x = self.bn(x)
+        x = self.relu(x)
+        return x
+
+    def get_example_inputs(self):
+        return (torch.randn(1, 3, 3, 3),)
+
+class TwoThreeOps(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.block1 = ThreeOps()
+        self.block2 = ThreeOps()
+
+    def forward(self, x):
+        x = self.block1(x)
+        y = self.block2(x)
+        z = x + y
+        z = F.relu(z)
+        return z
+
+    def get_example_inputs(self):
+        return (torch.randn(1, 3, 3, 3),)
 
 class TestFxModelReportDetector(QuantizationTestCase):
 
-    """Prepares and callibrate the model"""
+    """Prepares and calibrate the model"""
 
     def _prepare_model_and_run_input(self, model, q_config_mapping, input):
         model_prep = torch.ao.quantization.quantize_fx.prepare_fx(model, q_config_mapping, input)  # prep model
-        model_prep(input).sum()  # callibrate the model
+        model_prep(input).sum()  # calibrate the model
         return model_prep
 
     """Case includes:
         one conv or linear
-        post training quantiztion
+        post training quantization
         composed as module
         qconfig uses per_channel weight observer
         Only 1 qconfig in qconfig dict
@@ -116,14 +153,16 @@ class TestFxModelReportDetector(QuantizationTestCase):
                 optims_str,
                 DEFAULT_NO_OPTIMS_ANSWER_STRING.format(torch.backends.quantized.engine),
             )
-            self.assertEqual(per_channel_info["backend"], torch.backends.quantized.engine)
-            self.assertEqual(len(per_channel_info["per_channel_status"]), 1)
-            self.assertEqual(list(per_channel_info["per_channel_status"])[0], "conv")
+
+            # there should only be one conv there in this model
+            self.assertEqual(per_channel_info["conv"]["backend"], torch.backends.quantized.engine)
+            self.assertEqual(len(per_channel_info), 1)
+            self.assertEqual(list(per_channel_info)[0], "conv")
             self.assertEqual(
-                per_channel_info["per_channel_status"]["conv"]["per_channel_supported"],
+                per_channel_info["conv"]["per_channel_quantization_supported"],
                 True,
             )
-            self.assertEqual(per_channel_info["per_channel_status"]["conv"]["per_channel_used"], True)
+            self.assertEqual(per_channel_info["conv"]["per_channel_quantization_used"], True)
 
     """Case includes:
         Multiple conv or linear
@@ -158,15 +197,17 @@ class TestFxModelReportDetector(QuantizationTestCase):
                 optims_str,
                 DEFAULT_NO_OPTIMS_ANSWER_STRING.format(torch.backends.quantized.engine),
             )
-            self.assertEqual(per_channel_info["backend"], torch.backends.quantized.engine)
-            self.assertEqual(len(per_channel_info["per_channel_status"]), 2)
+            # pick a random key to look at
+            rand_key: str = list(per_channel_info.keys())[0]
+            self.assertEqual(per_channel_info[rand_key]["backend"], torch.backends.quantized.engine)
+            self.assertEqual(len(per_channel_info), 2)
 
             # for each linear layer, should be supported but not used
-            for linear_key in per_channel_info["per_channel_status"].keys():
-                module_entry = per_channel_info["per_channel_status"][linear_key]
+            for linear_key in per_channel_info.keys():
+                module_entry = per_channel_info[linear_key]
 
-                self.assertEqual(module_entry["per_channel_supported"], True)
-                self.assertEqual(module_entry["per_channel_used"], False)
+                self.assertEqual(module_entry["per_channel_quantization_supported"], True)
+                self.assertEqual(module_entry["per_channel_quantization_used"], False)
 
     """Case includes:
         Multiple conv or linear
@@ -231,18 +272,18 @@ class TestFxModelReportDetector(QuantizationTestCase):
             )
 
             # to ensure it got into the nested layer
-            self.assertEqual(len(per_channel_info["per_channel_status"]), 4)
+            self.assertEqual(len(per_channel_info), 4)
 
             # for each layer, should be supported but not used
-            for key in per_channel_info["per_channel_status"].keys():
-                module_entry = per_channel_info["per_channel_status"][key]
-                self.assertEqual(module_entry["per_channel_supported"], True)
+            for key in per_channel_info.keys():
+                module_entry = per_channel_info[key]
+                self.assertEqual(module_entry["per_channel_quantization_supported"], True)
 
                 # if linear False, if conv2d true cuz it uses different config
                 if "fc" in key:
-                    self.assertEqual(module_entry["per_channel_used"], False)
+                    self.assertEqual(module_entry["per_channel_quantization_used"], False)
                 elif "conv" in key:
-                    self.assertEqual(module_entry["per_channel_used"], True)
+                    self.assertEqual(module_entry["per_channel_quantization_used"], True)
                 else:
                     raise ValueError("Should only contain conv and linear layers as key values")
 
@@ -281,14 +322,14 @@ class TestFxModelReportDetector(QuantizationTestCase):
             )
 
             # to ensure it got into the nested layer
-            self.assertEqual(len(per_channel_info["per_channel_status"]), 4)
+            self.assertEqual(len(per_channel_info), 4)
 
             # for each layer, should be supported but not used
-            for key in per_channel_info["per_channel_status"].keys():
-                module_entry = per_channel_info["per_channel_status"][key]
+            for key in per_channel_info.keys():
+                module_entry = per_channel_info[key]
 
-                self.assertEqual(module_entry["per_channel_supported"], True)
-                self.assertEqual(module_entry["per_channel_used"], False)
+                self.assertEqual(module_entry["per_channel_quantization_supported"], True)
+                self.assertEqual(module_entry["per_channel_quantization_used"], False)
 
     """Case includes:
         Multiple conv or linear
@@ -325,14 +366,14 @@ class TestFxModelReportDetector(QuantizationTestCase):
             )
 
             # to ensure it got into the nested layer and it considered the lazyConv2d
-            self.assertEqual(len(per_channel_info["per_channel_status"]), 4)
+            self.assertEqual(len(per_channel_info), 4)
 
             # for each layer, should be supported but not used
-            for key in per_channel_info["per_channel_status"].keys():
-                module_entry = per_channel_info["per_channel_status"][key]
+            for key in per_channel_info.keys():
+                module_entry = per_channel_info[key]
 
-                self.assertEqual(module_entry["per_channel_supported"], True)
-                self.assertEqual(module_entry["per_channel_used"], False)
+                self.assertEqual(module_entry["per_channel_quantization_supported"], True)
+                self.assertEqual(module_entry["per_channel_quantization_used"], False)
 
     """Case includes:
         Multiple conv or linear
@@ -369,13 +410,13 @@ class TestFxModelReportDetector(QuantizationTestCase):
             )
 
             # to ensure it got into the nested layer and it considered all the nested fusion components
-            self.assertEqual(len(per_channel_info["per_channel_status"]), 4)
+            self.assertEqual(len(per_channel_info), 4)
 
             # for each layer, should be supported but not used
-            for key in per_channel_info["per_channel_status"].keys():
-                module_entry = per_channel_info["per_channel_status"][key]
-                self.assertEqual(module_entry["per_channel_supported"], True)
-                self.assertEqual(module_entry["per_channel_used"], True)
+            for key in per_channel_info.keys():
+                module_entry = per_channel_info[key]
+                self.assertEqual(module_entry["per_channel_quantization_supported"], True)
+                self.assertEqual(module_entry["per_channel_quantization_used"], True)
 
     """Case includes:
         Multiple conv or linear
@@ -392,14 +433,14 @@ class TestFxModelReportDetector(QuantizationTestCase):
         # first we want a QAT model
         class QATConvLinearReluModel(torch.nn.Module):
             def __init__(self):
-                super(QATConvLinearReluModel, self).__init__()
+                super().__init__()
                 # QuantStub converts tensors from floating point to quantized
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
                 self.bn = torch.nn.BatchNorm2d(1)
                 self.relu = torch.nn.ReLU()
                 # DeQuantStub converts tensors from quantized to floating point
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -413,17 +454,17 @@ class TestFxModelReportDetector(QuantizationTestCase):
             # create a model instance
             model_fp32 = QATConvLinearReluModel()
 
-            model_fp32.qconfig = torch.quantization.get_default_qat_qconfig("qnnpack")
+            model_fp32.qconfig = torch.ao.quantization.get_default_qat_qconfig("qnnpack")
 
             # model must be in eval mode for fusion
             model_fp32.eval()
-            model_fp32_fused = torch.quantization.fuse_modules(model_fp32, [["conv", "bn", "relu"]])
+            model_fp32_fused = torch.ao.quantization.fuse_modules(model_fp32, [["conv", "bn", "relu"]])
 
             # model must be set to train mode for QAT logic to work
             model_fp32_fused.train()
 
             # prepare the model for QAT, different than for post training quantization
-            model_fp32_prepared = torch.quantization.prepare_qat(model_fp32_fused)
+            model_fp32_prepared = torch.ao.quantization.prepare_qat(model_fp32_fused)
 
             # run the detector
             per_channel_detector = PerChannelDetector(torch.backends.quantized.engine)
@@ -436,13 +477,13 @@ class TestFxModelReportDetector(QuantizationTestCase):
             )
 
             # make sure it was able to find the single conv in the fused model
-            self.assertEqual(len(per_channel_info["per_channel_status"]), 1)
+            self.assertEqual(len(per_channel_info), 1)
 
             # for the one conv, it should still give advice to use different qconfig
-            for key in per_channel_info["per_channel_status"].keys():
-                module_entry = per_channel_info["per_channel_status"][key]
-                self.assertEqual(module_entry["per_channel_supported"], True)
-                self.assertEqual(module_entry["per_channel_used"], False)
+            for key in per_channel_info.keys():
+                module_entry = per_channel_info[key]
+                self.assertEqual(module_entry["per_channel_quantization_supported"], True)
+                self.assertEqual(module_entry["per_channel_quantization_used"], False)
 
 
 """
@@ -492,23 +533,23 @@ class TestFxModelReportObserver(QuantizationTestCase):
 
             # quick check that a reset occurred
             self.assertEqual(
-                getattr(model, "obs1").average_batch_activation_range,
+                model.obs1.average_batch_activation_range,
                 torch.tensor(float(0)),
             )
-            self.assertEqual(getattr(model, "obs1").epoch_activation_min, torch.tensor(float("inf")))
-            self.assertEqual(getattr(model, "obs1").epoch_activation_max, torch.tensor(float("-inf")))
+            self.assertEqual(model.obs1.epoch_activation_min, torch.tensor(float("inf")))
+            self.assertEqual(model.obs1.epoch_activation_max, torch.tensor(float("-inf")))
 
             # loop through the batches and run through
             for index, batch in enumerate(split_up_data):
 
-                num_tracked_so_far = getattr(model, "obs1").num_batches_tracked
+                num_tracked_so_far = model.obs1.num_batches_tracked
                 self.assertEqual(num_tracked_so_far, index)
 
                 # get general info about the batch and the model to use later
                 batch_min, batch_max = torch.aminmax(batch)
-                current_average_range = getattr(model, "obs1").average_batch_activation_range
-                current_epoch_min = getattr(model, "obs1").epoch_activation_min
-                current_epoch_max = getattr(model, "obs1").epoch_activation_max
+                current_average_range = model.obs1.average_batch_activation_range
+                current_epoch_min = model.obs1.epoch_activation_min
+                current_epoch_max = model.obs1.epoch_activation_max
 
                 # run input through
                 model(ex_input)
@@ -518,13 +559,13 @@ class TestFxModelReportObserver(QuantizationTestCase):
                     num_tracked_so_far + 1
                 )
                 self.assertEqual(
-                    getattr(model, "obs1").average_batch_activation_range,
+                    model.obs1.average_batch_activation_range,
                     correct_updated_value,
                 )
 
                 if current_epoch_max - current_epoch_min > 0:
                     self.assertEqual(
-                        getattr(model, "obs1").get_batch_to_epoch_ratio(),
+                        model.obs1.get_batch_to_epoch_ratio(),
                         correct_updated_value / (current_epoch_max - current_epoch_min),
                     )
 
@@ -547,13 +588,13 @@ class TestFxModelReportObserver(QuantizationTestCase):
         self.run_model_and_common_checks(model, ex_input, 1, 1)
 
         # make sure final values are all 0
-        self.assertEqual(getattr(model, "obs1").epoch_activation_min, 0)
-        self.assertEqual(getattr(model, "obs1").epoch_activation_max, 0)
-        self.assertEqual(getattr(model, "obs1").average_batch_activation_range, 0)
+        self.assertEqual(model.obs1.epoch_activation_min, 0)
+        self.assertEqual(model.obs1.epoch_activation_max, 0)
+        self.assertEqual(model.obs1.average_batch_activation_range, 0)
 
         # we should get an error if we try to calculate the ratio
         with self.assertRaises(ValueError):
-            ratio_val = getattr(model, "obs1").get_batch_to_epoch_ratio()
+            ratio_val = model.obs1.get_batch_to_epoch_ratio()
 
     """Case includes:
     non-zero tensor
@@ -574,13 +615,13 @@ class TestFxModelReportObserver(QuantizationTestCase):
         self.run_model_and_common_checks(model, ex_input, 1, 1)
 
         # make sure final values are all 0 except for range
-        self.assertEqual(getattr(model, "obs1").epoch_activation_min, 1)
-        self.assertEqual(getattr(model, "obs1").epoch_activation_max, 1)
-        self.assertEqual(getattr(model, "obs1").average_batch_activation_range, 0)
+        self.assertEqual(model.obs1.epoch_activation_min, 1)
+        self.assertEqual(model.obs1.epoch_activation_max, 1)
+        self.assertEqual(model.obs1.average_batch_activation_range, 0)
 
         # we should get an error if we try to calculate the ratio
         with self.assertRaises(ValueError):
-            ratio_val = getattr(model, "obs1").get_batch_to_epoch_ratio()
+            ratio_val = model.obs1.get_batch_to_epoch_ratio()
 
     """Case includes:
     non-zero tensor
@@ -662,7 +703,7 @@ class TestFxModelReportObserver(QuantizationTestCase):
 
         class ModifiedThreeOps(torch.nn.Module):
             def __init__(self, batch_norm_dim):
-                super(ModifiedThreeOps, self).__init__()
+                super().__init__()
                 self.obs1 = ModelReportObserver()
                 self.linear = torch.nn.Linear(7, 3, 2)
                 self.obs2 = ModelReportObserver()
@@ -686,7 +727,7 @@ class TestFxModelReportObserver(QuantizationTestCase):
 
         class HighDimensionNet(torch.nn.Module):
             def __init__(self):
-                super(HighDimensionNet, self).__init__()
+                super().__init__()
                 self.obs1 = ModelReportObserver()
                 self.fc1 = torch.nn.Linear(3, 7)
                 self.block1 = ModifiedThreeOps(3)
@@ -745,7 +786,7 @@ class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
     def test_nested_detection_case(self):
         class SingleLinear(torch.nn.Module):
             def __init__(self):
-                super(SingleLinear, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
 
             def forward(self, x):
@@ -754,7 +795,7 @@ class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
 
         class TwoBlockNet(torch.nn.Module):
             def __init__(self):
-                super(TwoBlockNet, self).__init__()
+                super().__init__()
                 self.block1 = SingleLinear()
                 self.block2 = SingleLinear()
 
@@ -822,8 +863,8 @@ class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
             # one of the stats should be stationary, and the other non-stationary
             # as a result, dynamic should be recommended
             data_dist_info = [
-                dynam_vs_stat_dict[linear_fqn]["pre_observer_data_dist"],
-                dynam_vs_stat_dict[linear_fqn]["post_observer_data_dist"],
+                dynam_vs_stat_dict[linear_fqn][DynamicStaticDetector.PRE_OBS_DATA_DIST_KEY],
+                dynam_vs_stat_dict[linear_fqn][DynamicStaticDetector.POST_OBS_DATA_DIST_KEY],
             ]
 
             self.assertTrue("stationary" in data_dist_info)
@@ -831,33 +872,6 @@ class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
             self.assertTrue(dynam_vs_stat_dict[linear_fqn]["dynamic_recommended"])
 
 class TestFxModelReportClass(QuantizationTestCase):
-
-    # example model to use for tests
-    class ThreeOps(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.linear = nn.Linear(3, 3)
-            self.bn = nn.BatchNorm2d(3)
-            self.relu = nn.ReLU()
-
-        def forward(self, x):
-            x = self.linear(x)
-            x = self.bn(x)
-            x = self.relu(x)
-            return x
-
-    class TwoThreeOps(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.block1 = TestFxModelReportClass.ThreeOps()
-            self.block2 = TestFxModelReportClass.ThreeOps()
-
-        def forward(self, x):
-            x = self.block1(x)
-            y = self.block2(x)
-            z = x + y
-            z = F.relu(z)
-            return z
 
     @skipIfNoFBGEMM
     def test_constructor(self):
@@ -873,18 +887,24 @@ class TestFxModelReportClass(QuantizationTestCase):
             torch.backends.quantized.engine = "fbgemm"
             backend = torch.backends.quantized.engine
 
+            # create a model
+            model = ThreeOps()
+            q_config_mapping = QConfigMapping()
+            q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine))
+            model_prep = quantize_fx.prepare_fx(model, q_config_mapping, model.get_example_inputs()[0])
+
             # make an example set of detectors
-            test_detector_set = set([DynamicStaticDetector(), PerChannelDetector(backend)])
+            test_detector_set = {DynamicStaticDetector(), PerChannelDetector(backend)}
             # initialize with an empty detector
-            model_report = ModelReport(test_detector_set)
+            model_report = ModelReport(model_prep, test_detector_set)
 
             # make sure internal valid reports matches
-            detector_name_set = set([detector.get_detector_name() for detector in test_detector_set])
+            detector_name_set = {detector.get_detector_name() for detector in test_detector_set}
             self.assertEqual(model_report.get_desired_reports_names(), detector_name_set)
 
             # now attempt with no valid reports, should raise error
             with self.assertRaises(ValueError):
-                model_report = ModelReport(set([]))
+                model_report = ModelReport(model, set())
 
             # number of expected obs of interest entries
             num_expected_entries = len(test_detector_set)
@@ -903,53 +923,29 @@ class TestFxModelReportClass(QuantizationTestCase):
         - Whether the internal representation of observers of interest is updated
         """
 
-        # example model to use for tests
-        class ThreeOps(nn.Module):
-            def __init__(self):
-                super(ThreeOps, self).__init__()
-                self.linear = nn.Linear(3, 3)
-                self.bn = nn.BatchNorm2d(3)
-                self.relu = nn.ReLU()
-
-            def forward(self, x):
-                x = self.linear(x)
-                x = self.bn(x)
-                x = self.relu(x)
-                return x
-
-        class TwoThreeOps(nn.Module):
-            def __init__(self):
-                super(TwoThreeOps, self).__init__()
-                self.block1 = ThreeOps()
-                self.block2 = ThreeOps()
-
-            def forward(self, x):
-                x = self.block1(x)
-                y = self.block2(x)
-                z = x + y
-                z = F.relu(z)
-                return z
-
         with override_quantized_engine('fbgemm'):
             # create model report object
+
+            # create model
+            model = TwoThreeOps()
             # make an example set of detectors
             torch.backends.quantized.engine = "fbgemm"
             backend = torch.backends.quantized.engine
-            test_detector_set = set([DynamicStaticDetector(), PerChannelDetector(backend)])
+            test_detector_set = {DynamicStaticDetector(), PerChannelDetector(backend)}
             # initialize with an empty detector
-            model_report = ModelReport(test_detector_set)
 
             # prepare the model
-            model = TwoThreeOps()
-            example_input = torch.randn(1, 3, 3, 3)
+            example_input = model.get_example_inputs()[0]
             current_backend = torch.backends.quantized.engine
             q_config_mapping = QConfigMapping()
             q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine))
 
             model_prep = quantize_fx.prepare_fx(model, q_config_mapping, example_input)
 
+            model_report = ModelReport(model_prep, test_detector_set)
+
             # prepare the model for callibration
-            prepared_for_callibrate_model = model_report.prepare_detailed_calibration(model_prep)
+            prepared_for_callibrate_model = model_report.prepare_detailed_calibration()
 
             # see whether observers properly in regular nn.Module
             # there should be 4 observers present in this case
@@ -989,7 +985,7 @@ class TestFxModelReportClass(QuantizationTestCase):
 
             # ensure that we can prepare for callibration only once
             with self.assertRaises(ValueError):
-                prepared_for_callibrate_model = model_report.prepare_detailed_calibration(model_prep)
+                prepared_for_callibrate_model = model_report.prepare_detailed_calibration()
 
 
     def get_module_and_graph_cnts(self, callibrated_fx_module):
@@ -1032,19 +1028,16 @@ class TestFxModelReportClass(QuantizationTestCase):
             torch.backends.quantized.engine = "fbgemm"
 
             # check whether the correct number of reports are being generated
-            filled_detector_set = set([DynamicStaticDetector(), PerChannelDetector(torch.backends.quantized.engine)])
-            single_detector_set = set([DynamicStaticDetector()])
+            filled_detector_set = {DynamicStaticDetector(), PerChannelDetector(torch.backends.quantized.engine)}
+            single_detector_set = {DynamicStaticDetector()}
 
-            # initialize one with filled detector
-            model_report_full = ModelReport(filled_detector_set)
-            # initialize another with a single detector set
-            model_report_single = ModelReport(single_detector_set)
+            # create our models
+            model_full = TwoThreeOps()
+            model_single = TwoThreeOps()
 
             # prepare and callibrate two different instances of same model
             # prepare the model
-            model_full = TestFxModelReportClass.TwoThreeOps()
-            model_single = TestFxModelReportClass.TwoThreeOps()
-            example_input = torch.randn(1, 3, 3, 3)
+            example_input = model_full.get_example_inputs()[0]
             current_backend = torch.backends.quantized.engine
             q_config_mapping = QConfigMapping()
             q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine))
@@ -1052,9 +1045,14 @@ class TestFxModelReportClass(QuantizationTestCase):
             model_prep_full = quantize_fx.prepare_fx(model_full, q_config_mapping, example_input)
             model_prep_single = quantize_fx.prepare_fx(model_single, q_config_mapping, example_input)
 
+            # initialize one with filled detector
+            model_report_full = ModelReport(model_prep_full, filled_detector_set)
+            # initialize another with a single detector set
+            model_report_single = ModelReport(model_prep_single, single_detector_set)
+
             # prepare the models for callibration
-            prepared_for_callibrate_model_full = model_report_full.prepare_detailed_calibration(model_prep_full)
-            prepared_for_callibrate_model_single = model_report_single.prepare_detailed_calibration(model_prep_single)
+            prepared_for_callibrate_model_full = model_report_full.prepare_detailed_calibration()
+            prepared_for_callibrate_model_single = model_report_single.prepare_detailed_calibration()
 
             # now callibrate the two models
             num_iterations = 10
@@ -1064,10 +1062,8 @@ class TestFxModelReportClass(QuantizationTestCase):
                 prepared_for_callibrate_model_single(example_input)
 
             # now generate the reports
-            model_full_report = model_report_full.generate_model_report(
-                prepared_for_callibrate_model_full, True
-            )
-            model_single_report = model_report_single.generate_model_report(prepared_for_callibrate_model_single, False)
+            model_full_report = model_report_full.generate_model_report(True)
+            model_single_report = model_report_single.generate_model_report(False)
 
             # check that sizes are appropriate
             self.assertEqual(len(model_full_report), len(filled_detector_set))
@@ -1090,20 +1086,180 @@ class TestFxModelReportClass(QuantizationTestCase):
                 )
 
             # make sure we don't run into error for single report
-            model_single_report = model_report_single.generate_model_report(prepared_for_callibrate_model_single, False)
+            model_single_report = model_report_single.generate_model_report(False)
+
+    @skipIfNoFBGEMM
+    def test_generate_visualizer(self):
+        """
+        Tests that the ModelReport class can properly create the ModelReportVisualizer instance
+        Checks that:
+            - Correct number of modules are represented
+            - Modules are sorted
+            - Correct number of features for each module
+        """
+        with override_quantized_engine('fbgemm'):
+            # set the backend for this test
+            torch.backends.quantized.engine = "fbgemm"
+            # test with multiple detectors
+            detector_set = set()
+            detector_set.add(OutlierDetector(reference_percentile=0.95))
+            detector_set.add(InputWeightEqualizationDetector(0.5))
+
+            model = TwoThreeOps()
+
+            # get tst model and callibrate
+            prepared_for_callibrate_model, mod_report = _get_prepped_for_calibration_model_helper(
+                model, detector_set, model.get_example_inputs()[0]
+            )
+
+            # now we actually callibrate the model
+            example_input = model.get_example_inputs()[0]
+            example_input = example_input.to(torch.float)
+
+            prepared_for_callibrate_model(example_input)
+
+            # try to visualize without generating report, should throw error
+            with self.assertRaises(Exception):
+                mod_rep_visualizaiton = mod_report.generate_visualizer()
+
+            # now get the report by running it through ModelReport instance
+            generated_report = mod_report.generate_model_report(remove_inserted_observers=False)
+
+            # now we get the visualizer should not error
+            mod_rep_visualizer: ModelReportVisualizer = mod_report.generate_visualizer()
+
+            # since we tested with outlier detector, which looks at every base level module
+            # should be six entries in the ordered dict
+            mod_fqns_to_features = mod_rep_visualizer.generated_reports
+
+            self.assertEqual(len(mod_fqns_to_features), 6)
+
+            # outlier detector has 9 feature per module
+            # input-weight has 12 features per module
+            # there are 1 common data point, so should be 12 + 9 - 1 = 20 unique features per common modules
+            # all linears will be common
+            for module_fqn in mod_fqns_to_features:
+                if ".linear" in module_fqn:
+                    linear_info = mod_fqns_to_features[module_fqn]
+                    self.assertEqual(len(linear_info), 20)
+
+    @skipIfNoFBGEMM
+    def test_qconfig_mapping_generation(self):
+        """
+        Tests for generation of qconfigs by ModelReport API
+        - Tests that qconfigmapping is generated
+        - Tests that mappings include information for for relavent modules
+        """
+        with override_quantized_engine('fbgemm'):
+            # set the backend for this test
+            torch.backends.quantized.engine = "fbgemm"
+            # test with multiple detectors
+            detector_set = set()
+            detector_set.add(PerChannelDetector())
+            detector_set.add(DynamicStaticDetector())
+
+            model = TwoThreeOps()
+
+            # get tst model and callibrate
+            prepared_for_callibrate_model, mod_report = _get_prepped_for_calibration_model_helper(
+                model, detector_set, model.get_example_inputs()[0]
+            )
+
+            # now we actually callibrate the models
+            example_input = model.get_example_inputs()[0]
+            example_input = example_input.to(torch.float)
+
+            prepared_for_callibrate_model(example_input)
+
+
+            # get the mapping without error
+            qconfig_mapping = mod_report.generate_qconfig_mapping()
+
+            # now get the report by running it through ModelReport instance
+            generated_report = mod_report.generate_model_report(remove_inserted_observers=False)
+
+            # get the visualizer so we can get access to reformatted reports by module fqn
+            mod_reports_by_fqn = mod_report.generate_visualizer().generated_reports
+
+            # compare the entries of the mapping to those of the report
+            # we should have the same number of entries
+            self.assertEqual(len(qconfig_mapping.module_name_qconfigs), len(mod_reports_by_fqn))
+
+            # for the non_empty one, we should have 2 because we have only applicable linears
+            # so should have suggestions for each module named
+            self.assertEqual(len(qconfig_mapping.module_name_qconfigs), 2)
+
+            # only two linears, make sure per channel min max for weight since fbgemm
+            # also static distribution since a simple single callibration
+            for key in qconfig_mapping.module_name_qconfigs:
+                config = qconfig_mapping.module_name_qconfigs[key]
+                self.assertEqual(config.weight, default_per_channel_weight_observer)
+                self.assertEqual(config.activation, default_observer)
+
+            # make sure these can actually be used to prepare the model
+            prepared = quantize_fx.prepare_fx(TwoThreeOps(), qconfig_mapping, example_input)
+
+            # now convert the model to ensure no errors in conversion
+            converted = quantize_fx.convert_fx(prepared)
+
+    @skipIfNoFBGEMM
+    def test_equalization_mapping_generation(self):
+        """
+        Tests for generation of qconfigs by ModelReport API
+        - Tests that equalization config generated when input-weight equalization detector used
+        - Tests that mappings include information for for relavent modules
+        """
+        with override_quantized_engine('fbgemm'):
+            # set the backend for this test
+            torch.backends.quantized.engine = "fbgemm"
+            # test with multiple detectors
+            detector_set = set()
+            detector_set.add(InputWeightEqualizationDetector(0.6))
+
+            model = TwoThreeOps()
+
+            # get tst model and callibrate
+            prepared_for_callibrate_model, mod_report = _get_prepped_for_calibration_model_helper(
+                model, detector_set, model.get_example_inputs()[0]
+            )
+
+            # now we actually callibrate the models
+            example_input = model.get_example_inputs()[0]
+            example_input = example_input.to(torch.float)
+
+            prepared_for_callibrate_model(example_input)
+
+
+            # get the mapping without error
+            qconfig_mapping = mod_report.generate_qconfig_mapping()
+            equalization_mapping = mod_report.generate_equalization_mapping()
+
+            # tests a lot more simple for the equalization mapping
+
+            # shouldn't have any equalization suggestions for this case
+            self.assertEqual(len(qconfig_mapping.module_name_qconfigs), 2)
+
+
+            # make sure these can actually be used to prepare the model
+            prepared = quantize_fx.prepare_fx(
+                TwoThreeOps(),
+                qconfig_mapping,
+                example_input,
+                _equalization_config=equalization_mapping
+            )
+
+            # now convert the model to ensure no errors in conversion
+            converted = quantize_fx.convert_fx(prepared)
 
 class TestFxDetectInputWeightEqualization(QuantizationTestCase):
 
-    class LinearConv(torch.nn.Module):
-        def __init__(self):
+    class SimpleConv(torch.nn.Module):
+        def __init__(self, con_dims):
             super().__init__()
-            self.linear = torch.nn.Linear(3, 3)
             self.relu = torch.nn.ReLU()
-            self.conv = torch.nn.Conv2d(3, 3, 1)
+            self.conv = torch.nn.Conv2d(con_dims[0], con_dims[1], kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
 
         def forward(self, x):
-            x = self.linear(x)
-            x = self.relu(x)
             x = self.conv(x)
             x = self.relu(x)
             return x
@@ -1111,16 +1267,20 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
     class TwoBlockComplexNet(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.block1 = TestFxDetectInputWeightEqualization.LinearConv()
-            self.block2 = TestFxDetectInputWeightEqualization.LinearConv()
-            self.conv = torch.nn.Conv2d(3, 3, 1)
+            self.block1 = TestFxDetectInputWeightEqualization.SimpleConv((3, 32))
+            self.block2 = TestFxDetectInputWeightEqualization.SimpleConv((3, 3))
+            self.conv = torch.nn.Conv2d(32, 3, kernel_size=(1, 1), stride=(1, 1), padding=(1, 1), bias=False)
+            self.linear = torch.nn.Linear(768, 10)
             self.relu = torch.nn.ReLU()
 
         def forward(self, x):
             x = self.block1(x)
+            x = self.conv(x)
             y = self.block2(x)
+            y = y.repeat(1, 1, 2, 2)
             z = x + y
-            z = self.conv(z)
+            z = z.flatten(start_dim=1)
+            z = self.linear(z)
             z = self.relu(z)
             return z
 
@@ -1128,7 +1288,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
             return [['conv', 'relu']]
 
         def get_example_inputs(self):
-            return (torch.randn((1, 3, 3, 3)),)
+            return (torch.randn((1, 3, 28, 28)),)
 
     class ReluOnly(torch.nn.Module):
         def __init__(self):
@@ -1155,8 +1315,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
         # then create model report instance with detector
         with override_quantized_engine('fbgemm'):
 
-            detector_set = set([InputWeightEqualizationDetector(0.5)])
-            model_report = ModelReport(detector_set)
+            detector_set = {InputWeightEqualizationDetector(0.5)}
 
             # get tst model and callibrate
             non_fused = self._get_prepped_for_calibration_model(self.TwoBlockComplexNet(), detector_set)
@@ -1166,13 +1325,13 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
             for prepared_for_callibrate_model, mod_report in [non_fused, fused]:
 
                 # supported modules to check
-                mods_to_check = set([nn.Linear, nn.Conv2d])
+                mods_to_check = {nn.Linear, nn.Conv2d}
 
                 # get the set of all nodes in the graph their fqns
-                node_fqns = set([node.target for node in prepared_for_callibrate_model.graph.nodes])
+                node_fqns = {node.target for node in prepared_for_callibrate_model.graph.nodes}
 
-                # there should be 5 node fqns that have the observer inserted
-                correct_number_of_obs_inserted = 5
+                # there should be 4 node fqns that have the observer inserted
+                correct_number_of_obs_inserted = 4
                 number_of_obs_found = 0
                 obs_name_to_find = InputWeightEqualizationDetector.DEFAULT_PRE_OBSERVER_NAME
 
@@ -1186,7 +1345,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
                 # assert that each of the desired modules have the observers inserted
                 for fqn, module in prepared_for_callibrate_model.named_modules():
                     # check if module is a supported module
-                    is_in_include_list = sum(list(map(lambda x: isinstance(module, x), mods_to_check))) > 0
+                    is_in_include_list = sum([isinstance(module, x) for x in mods_to_check]) > 0
 
                     if is_in_include_list:
                         # make sure it has the observer attribute
@@ -1202,7 +1361,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
         with override_quantized_engine('fbgemm'):
 
             test_input_weight_detector = InputWeightEqualizationDetector(0.4)
-            detector_set = set([test_input_weight_detector])
+            detector_set = {test_input_weight_detector}
             model = self.TwoBlockComplexNet()
             # prepare the model for callibration
             prepared_for_callibrate_model, model_report = self._get_prepped_for_calibration_model(
@@ -1216,7 +1375,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
             prepared_for_callibrate_model(example_input)
 
             # now get the report by running it through ModelReport instance
-            generated_report = model_report.generate_model_report(prepared_for_callibrate_model, True)
+            generated_report = model_report.generate_model_report(True)
 
             # check that sizes are appropriate only 1 detector
             self.assertEqual(len(generated_report), 1)
@@ -1224,19 +1383,18 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
             # get the specific report for input weight equalization
             input_weight_str, input_weight_dict = generated_report[test_input_weight_detector.get_detector_name()]
 
-            # we should have 5 layers looked at since 5 conv / linear layers
-            self.assertEqual(len(input_weight_dict), 5)
+            # we should have 5 layers looked at since 4 conv / linear layers
+            self.assertEqual(len(input_weight_dict), 4)
 
             # we can validate that the max and min values of the detector were recorded properly for the first one
             # this is because no data has been processed yet, so it should be values from original input
 
-            example_input = example_input.reshape((3, 3, 3))  # reshape input
+            example_input = example_input.reshape((3, 28, 28))  # reshape input
             for module_fqn in input_weight_dict:
                 # look for the first linear
                 if "block1.linear" in module_fqn:
                     block_1_lin_recs = input_weight_dict[module_fqn]
                     # get input range info and the channel axis
-                    input_range_info = block_1_lin_recs[InputWeightEqualizationDetector.INPUT_INFO_KEY]
                     ch_axis = block_1_lin_recs[InputWeightEqualizationDetector.CHANNEL_KEY]
 
                     # ensure that the min and max values extracted match properly
@@ -1245,28 +1403,54 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
                     dimension_max = torch.amax(example_max, dim=ch_axis)
 
                     # make sure per channel min and max are as expected
-                    per_channel_min = input_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MIN_KEY]
-                    per_channel_max = input_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MAX_KEY]
+                    min_per_key = InputWeightEqualizationDetector.ACTIVATION_PREFIX
+                    min_per_key += InputWeightEqualizationDetector.PER_CHANNEL_MIN_KEY
+
+                    max_per_key = InputWeightEqualizationDetector.ACTIVATION_PREFIX
+                    max_per_key += InputWeightEqualizationDetector.PER_CHANNEL_MAX_KEY
+
+                    per_channel_min = block_1_lin_recs[min_per_key]
+                    per_channel_max = block_1_lin_recs[max_per_key]
                     self.assertEqual(per_channel_min, dimension_min)
                     self.assertEqual(per_channel_max, dimension_max)
 
+                    # make sure per channel min and max are as expected
+                    min_key = InputWeightEqualizationDetector.ACTIVATION_PREFIX
+                    min_key += InputWeightEqualizationDetector.GLOBAL_MIN_KEY
+
+                    max_key = InputWeightEqualizationDetector.ACTIVATION_PREFIX
+                    max_key += InputWeightEqualizationDetector.GLOBAL_MAX_KEY
+
                     # make sure the global min and max were correctly recorded and presented
-                    global_min = input_range_info[InputWeightEqualizationDetector.GLOBAL_MIN_KEY]
-                    global_max = input_range_info[InputWeightEqualizationDetector.GLOBAL_MAX_KEY]
+                    global_min = block_1_lin_recs[min_key]
+                    global_max = block_1_lin_recs[max_key]
                     self.assertEqual(global_min, min(dimension_min))
                     self.assertEqual(global_max, max(dimension_max))
 
                     input_ratio = torch.sqrt((per_channel_max - per_channel_min) / (global_max - global_min))
                     # ensure comparision stat passed back is sqrt of range ratios
                     # need to get the weight ratios first
-                    weight_range_info = block_1_lin_recs[InputWeightEqualizationDetector.WEIGHT_INFO_KEY]
+
+                    # make sure per channel min and max are as expected
+                    min_per_key = InputWeightEqualizationDetector.WEIGHT_PREFIX
+                    min_per_key += InputWeightEqualizationDetector.PER_CHANNEL_MIN_KEY
+
+                    max_per_key = InputWeightEqualizationDetector.WEIGHT_PREFIX
+                    max_per_key += InputWeightEqualizationDetector.PER_CHANNEL_MAX_KEY
 
                     # get weight per channel and global info
-                    per_channel_min = weight_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MIN_KEY]
-                    per_channel_max = weight_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MAX_KEY]
+                    per_channel_min = block_1_lin_recs[min_per_key]
+                    per_channel_max = block_1_lin_recs[max_per_key]
 
-                    global_min = weight_range_info[InputWeightEqualizationDetector.GLOBAL_MIN_KEY]
-                    global_max = weight_range_info[InputWeightEqualizationDetector.GLOBAL_MAX_KEY]
+                    # make sure per channel min and max are as expected
+                    min_key = InputWeightEqualizationDetector.WEIGHT_PREFIX
+                    min_key += InputWeightEqualizationDetector.GLOBAL_MIN_KEY
+
+                    max_key = InputWeightEqualizationDetector.WEIGHT_PREFIX
+                    max_key += InputWeightEqualizationDetector.GLOBAL_MAX_KEY
+
+                    global_min = block_1_lin_recs[min_key]
+                    global_max = block_1_lin_recs[max_key]
 
                     weight_ratio = torch.sqrt((per_channel_max - per_channel_min) / (global_max - global_min))
 
@@ -1286,7 +1470,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
         # then create model report instance with detector
         with override_quantized_engine('fbgemm'):
             test_input_weight_detector = InputWeightEqualizationDetector(0.4)
-            detector_set = set([test_input_weight_detector])
+            detector_set = {test_input_weight_detector}
             model = self.ReluOnly()
             # prepare the model for callibration
             prepared_for_callibrate_model, model_report = self._get_prepped_for_calibration_model(model, detector_set)
@@ -1298,7 +1482,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
             prepared_for_callibrate_model(example_input)
 
             # now get the report by running it through ModelReport instance
-            generated_report = model_report.generate_model_report(prepared_for_callibrate_model, True)
+            generated_report = model_report.generate_model_report(True)
 
             # check that sizes are appropriate only 1 detector
             self.assertEqual(len(generated_report), 1)
@@ -1316,11 +1500,12 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
 class TestFxDetectOutliers(QuantizationTestCase):
 
     class LargeBatchModel(torch.nn.Module):
-        def __init__(self):
+        def __init__(self, param_size):
             super().__init__()
-            self.linear = torch.nn.Linear(128, 128)
+            self.param_size = param_size
+            self.linear = torch.nn.Linear(param_size, param_size)
             self.relu_1 = torch.nn.ReLU()
-            self.conv = torch.nn.Conv2d(128, 128, 1)
+            self.conv = torch.nn.Conv2d(param_size, param_size, 1)
             self.relu_2 = torch.nn.ReLU()
 
         def forward(self, x):
@@ -1331,12 +1516,26 @@ class TestFxDetectOutliers(QuantizationTestCase):
             return x
 
         def get_example_inputs(self):
-            return (torch.randn((1, 128, 128, 128)),)
+            param_size = self.param_size
+            return (torch.randn((1, param_size, param_size, param_size)),)
 
-    def _get_prepped_for_calibration_model(self, model, detector_set):
+        def get_outlier_inputs(self):
+            param_size = self.param_size
+            random_vals = torch.randn((1, param_size, param_size, param_size))
+            # change one in some of them to be a massive value
+            random_vals[:, 0:param_size:2, 0, 3] = torch.tensor([3.28e8])
+            return (random_vals,)
+
+
+    def _get_prepped_for_calibration_model(self, model, detector_set, use_outlier_data=False):
         r"""Returns a model that has been prepared for callibration and corresponding model_report"""
         # call the general helper function to callibrate
         example_input = model.get_example_inputs()[0]
+
+        # if we specifically want to test data with outliers replace input
+        if use_outlier_data:
+            example_input = model.get_outlier_inputs()[0]
+
         return _get_prepped_for_calibration_model_helper(model, detector_set, example_input)
 
     @skipIfNoFBGEMM
@@ -1347,16 +1546,15 @@ class TestFxDetectOutliers(QuantizationTestCase):
         # not explicitly testing fusion because fx workflow automatically
         with override_quantized_engine('fbgemm'):
 
-            detector_set = set([OutlierDetector(reference_percentile=0.95)])
-            model_report = ModelReport(detector_set)
+            detector_set = {OutlierDetector(reference_percentile=0.95)}
 
             # get tst model and callibrate
             prepared_for_callibrate_model, mod_report = self._get_prepped_for_calibration_model(
-                self.LargeBatchModel(), detector_set
+                self.LargeBatchModel(param_size=128), detector_set
             )
 
             # supported modules to check
-            mods_to_check = set([nn.Linear, nn.Conv2d, nn.ReLU])
+            mods_to_check = {nn.Linear, nn.Conv2d, nn.ReLU}
 
             # there should be 4 node fqns that have the observer inserted
             correct_number_of_obs_inserted = 4
@@ -1380,13 +1578,366 @@ class TestFxDetectOutliers(QuantizationTestCase):
                     # if it's not a supported type, it shouldn't have observer attached
                     self.assertTrue(not hasattr(module, InputWeightEqualizationDetector.DEFAULT_PRE_OBSERVER_NAME))
 
+    @skipIfNoFBGEMM
+    def test_no_outlier_report_gen(self):
+        # use fbgemm and create our model instance
+        # then create model report instance with detector
+        with override_quantized_engine('fbgemm'):
+
+            # test with multiple detectors
+            outlier_detector = OutlierDetector(reference_percentile=0.95)
+            dynamic_static_detector = DynamicStaticDetector(tolerance=0.5)
+
+            param_size: int = 4
+            detector_set = {outlier_detector, dynamic_static_detector}
+            model = self.LargeBatchModel(param_size=param_size)
+
+            # get tst model and callibrate
+            prepared_for_callibrate_model, mod_report = self._get_prepped_for_calibration_model(
+                model, detector_set
+            )
+
+            # now we actually callibrate the model
+            example_input = model.get_example_inputs()[0]
+            example_input = example_input.to(torch.float)
+
+            prepared_for_callibrate_model(example_input)
+
+            # now get the report by running it through ModelReport instance
+            generated_report = mod_report.generate_model_report(True)
+
+            # check that sizes are appropriate only 2 detectors
+            self.assertEqual(len(generated_report), 2)
+
+            # get the specific report for input weight equalization
+            outlier_str, outlier_dict = generated_report[outlier_detector.get_detector_name()]
+
+            # we should have 5 layers looked at since 4 conv + linear + relu
+            self.assertEqual(len(outlier_dict), 4)
+
+            # assert the following are true for all the modules
+            for module_fqn in outlier_dict:
+                # get the info for the specific module
+                module_dict = outlier_dict[module_fqn]
+
+                # there really should not be any outliers since we used a normal distribution to perform this calculation
+                outlier_info = module_dict[OutlierDetector.OUTLIER_KEY]
+                self.assertEqual(sum(outlier_info), 0)
+
+                # ensure that the number of ratios and batches counted is the same as the number of params
+                self.assertEqual(len(module_dict[OutlierDetector.COMP_METRIC_KEY]), param_size)
+                self.assertEqual(len(module_dict[OutlierDetector.NUM_BATCHES_KEY]), param_size)
+
+
+    @skipIfNoFBGEMM
+    def test_all_outlier_report_gen(self):
+        # make the percentile 0 and the ratio 1, and then see that everything is outlier according to it
+        # use fbgemm and create our model instance
+        # then create model report instance with detector
+        with override_quantized_engine('fbgemm'):
+            # create detector of interest
+            outlier_detector = OutlierDetector(ratio_threshold=1, reference_percentile=0)
+
+            param_size: int = 16
+            detector_set = {outlier_detector}
+            model = self.LargeBatchModel(param_size=param_size)
+
+            # get tst model and callibrate
+            prepared_for_callibrate_model, mod_report = self._get_prepped_for_calibration_model(
+                model, detector_set
+            )
+
+            # now we actually callibrate the model
+            example_input = model.get_example_inputs()[0]
+            example_input = example_input.to(torch.float)
+
+            prepared_for_callibrate_model(example_input)
+
+            # now get the report by running it through ModelReport instance
+            generated_report = mod_report.generate_model_report(True)
+
+            # check that sizes are appropriate only 1 detector
+            self.assertEqual(len(generated_report), 1)
+
+            # get the specific report for input weight equalization
+            outlier_str, outlier_dict = generated_report[outlier_detector.get_detector_name()]
+
+            # we should have 5 layers looked at since 4 conv + linear + relu
+            self.assertEqual(len(outlier_dict), 4)
+
+            # assert the following are true for all the modules
+            for module_fqn in outlier_dict:
+                # get the info for the specific module
+                module_dict = outlier_dict[module_fqn]
+
+                # everything should be an outlier because we said that the max should be equal to the min for all of them
+                # however we will just test and say most should be in case we have several 0 channel values
+                outlier_info = module_dict[OutlierDetector.OUTLIER_KEY]
+                assert sum(outlier_info) >= len(outlier_info) / 2
+
+                # ensure that the number of ratios and batches counted is the same as the number of params
+                self.assertEqual(len(module_dict[OutlierDetector.COMP_METRIC_KEY]), param_size)
+                self.assertEqual(len(module_dict[OutlierDetector.NUM_BATCHES_KEY]), param_size)
+
+    @skipIfNoFBGEMM
+    def test_multiple_run_consistent_spike_outlier_report_gen(self):
+        # specifically make a row really high consistently in the number of batches that you are testing and try that
+        # generate report after just 1 run, and after many runs (30) and make sure above minimum threshold is there
+        with override_quantized_engine('fbgemm'):
+
+            # detector of interest
+            outlier_detector = OutlierDetector(reference_percentile=0.95)
+
+            param_size: int = 8
+            detector_set = {outlier_detector}
+            model = self.LargeBatchModel(param_size=param_size)
+
+            # get tst model and callibrate
+            prepared_for_callibrate_model, mod_report = self._get_prepped_for_calibration_model(
+                model, detector_set, use_outlier_data=True
+            )
+
+            # now we actually callibrate the model
+            example_input = model.get_outlier_inputs()[0]
+            example_input = example_input.to(torch.float)
+
+            # now callibrate minimum 30 times to make it above minimum threshold
+            for i in range(30):
+                example_input = model.get_outlier_inputs()[0]
+                example_input = example_input.to(torch.float)
+
+                # make 2 of the batches to have zero channel
+                if i % 14 == 0:
+                    # make one channel constant
+                    example_input[0][1] = torch.zeros_like(example_input[0][1])
+
+                prepared_for_callibrate_model(example_input)
+
+            # now get the report by running it through ModelReport instance
+            generated_report = mod_report.generate_model_report(True)
+
+            # check that sizes are appropriate only 1 detector
+            self.assertEqual(len(generated_report), 1)
+
+            # get the specific report for input weight equalization
+            outlier_str, outlier_dict = generated_report[outlier_detector.get_detector_name()]
+
+            # we should have 5 layers looked at since 4 conv + linear + relu
+            self.assertEqual(len(outlier_dict), 4)
+
+            # assert the following are true for all the modules
+            for module_fqn in outlier_dict:
+                # get the info for the specific module
+                module_dict = outlier_dict[module_fqn]
+
+                # because we ran 30 times, we should have at least a couple be significant
+                # could be less because some channels could possibly be all 0
+                sufficient_batches_info = module_dict[OutlierDetector.IS_SUFFICIENT_BATCHES_KEY]
+                assert sum(sufficient_batches_info) >= len(sufficient_batches_info) / 2
+
+                # half of them should be outliers, because we set a really high value every 2 channels
+                outlier_info = module_dict[OutlierDetector.OUTLIER_KEY]
+                self.assertEqual(sum(outlier_info), len(outlier_info) / 2)
+
+                # ensure that the number of ratios and batches counted is the same as the number of params
+                self.assertEqual(len(module_dict[OutlierDetector.COMP_METRIC_KEY]), param_size)
+                self.assertEqual(len(module_dict[OutlierDetector.NUM_BATCHES_KEY]), param_size)
+
+                # for the first one ensure the per channel max values are what we set
+                if module_fqn == "linear.0":
+
+                    # check that the non-zero channel count, at least 2 should be there
+                    # for the first module
+                    counts_info = module_dict[OutlierDetector.CONSTANT_COUNTS_KEY]
+                    assert sum(counts_info) >= 2
+
+                    # half of the recorded max values should be what we set
+                    matched_max = sum([val == 3.28e8 for val in module_dict[OutlierDetector.MAX_VALS_KEY]])
+                    self.assertEqual(matched_max, param_size / 2)
+
+
+class TestFxModelReportVisualizer(QuantizationTestCase):
+
+    def _callibrate_and_generate_visualizer(self, model, prepared_for_callibrate_model, mod_report):
+        r"""
+        Callibrates the passed in model, generates report, and returns the visualizer
+        """
+        # now we actually callibrate the model
+        example_input = model.get_example_inputs()[0]
+        example_input = example_input.to(torch.float)
+
+        prepared_for_callibrate_model(example_input)
+
+        # now get the report by running it through ModelReport instance
+        generated_report = mod_report.generate_model_report(remove_inserted_observers=False)
+
+        # now we get the visualizer should not error
+        mod_rep_visualizer: ModelReportVisualizer = mod_report.generate_visualizer()
+
+        return mod_rep_visualizer
+
+    @skipIfNoFBGEMM
+    def test_get_modules_and_features(self):
+        """
+        Tests the get_all_unique_module_fqns and get_all_unique_feature_names methods of
+        ModelReportVisualizer
+
+        Checks whether returned sets are of proper size and filtered properly
+        """
+        with override_quantized_engine('fbgemm'):
+            # set the backend for this test
+            torch.backends.quantized.engine = "fbgemm"
+            # test with multiple detectors
+            detector_set = set()
+            detector_set.add(OutlierDetector(reference_percentile=0.95))
+            detector_set.add(InputWeightEqualizationDetector(0.5))
+
+            model = TwoThreeOps()
+
+            # get tst model and callibrate
+            prepared_for_callibrate_model, mod_report = _get_prepped_for_calibration_model_helper(
+                model, detector_set, model.get_example_inputs()[0]
+            )
+
+            mod_rep_visualizer: ModelReportVisualizer = self._callibrate_and_generate_visualizer(
+                model, prepared_for_callibrate_model, mod_report
+            )
+
+            # ensure the module fqns match the ones given by the get_all_unique_feature_names method
+            actual_model_fqns = set(mod_rep_visualizer.generated_reports.keys())
+            returned_model_fqns = mod_rep_visualizer.get_all_unique_module_fqns()
+            self.assertEqual(returned_model_fqns, actual_model_fqns)
+
+            # now ensure that features are all properly returned
+            # all the linears have all the features for two detectors
+            # can use those as check that method is working reliably
+            b_1_linear_features = mod_rep_visualizer.generated_reports["block1.linear"]
+
+            # first test all features
+            returned_all_feats = mod_rep_visualizer.get_all_unique_feature_names(False)
+            self.assertEqual(returned_all_feats, set(b_1_linear_features.keys()))
+
+            # now test plottable features
+            plottable_set = set()
+
+            for feature_name in b_1_linear_features:
+                if type(b_1_linear_features[feature_name]) == torch.Tensor:
+                    plottable_set.add(feature_name)
+
+            returned_plottable_feats = mod_rep_visualizer.get_all_unique_feature_names()
+            self.assertEqual(returned_plottable_feats, plottable_set)
+
+    def _prep_visualizer_helper(self):
+        r"""
+        Returns a mod rep visualizer that we test in various ways
+        """
+        # set backend for test
+        torch.backends.quantized.engine = "fbgemm"
+
+        # test with multiple detectors
+        detector_set = set()
+        detector_set.add(OutlierDetector(reference_percentile=0.95))
+        detector_set.add(InputWeightEqualizationDetector(0.5))
+
+        model = TwoThreeOps()
+
+        # get tst model and callibrate
+        prepared_for_callibrate_model, mod_report = _get_prepped_for_calibration_model_helper(
+            model, detector_set, model.get_example_inputs()[0]
+        )
+
+        mod_rep_visualizer: ModelReportVisualizer = self._callibrate_and_generate_visualizer(
+            model, prepared_for_callibrate_model, mod_report
+        )
+
+        return mod_rep_visualizer
+
+    @skipIfNoFBGEMM
+    def test_generate_tables_match_with_report(self):
+        """
+        Tests the generate_table_view()
+        ModelReportVisualizer
+
+        Checks whether the generated dict has proper information
+            Visual check that the tables look correct performed during testing
+        """
+        with override_quantized_engine('fbgemm'):
+
+            # get the visualizer
+            mod_rep_visualizer = self._prep_visualizer_helper()
+
+            table_dict = mod_rep_visualizer.generate_filtered_tables()
+
+            # test primarily the dict since it has same info as str
+            tensor_headers, tensor_table = table_dict[ModelReportVisualizer.TABLE_TENSOR_KEY]
+            channel_headers, channel_table = table_dict[ModelReportVisualizer.TABLE_CHANNEL_KEY]
+
+            # these two together should be the same as the generated report info in terms of keys
+            tensor_info_modules = {row[1] for row in tensor_table}
+            channel_info_modules = {row[1] for row in channel_table}
+            combined_modules: Set = tensor_info_modules.union(channel_info_modules)
+
+            generated_report_keys: Set = set(mod_rep_visualizer.generated_reports.keys())
+            self.assertEqual(combined_modules, generated_report_keys)
+
+    @skipIfNoFBGEMM
+    def test_generate_tables_no_match(self):
+        """
+        Tests the generate_table_view()
+        ModelReportVisualizer
+
+        Checks whether the generated dict has proper information
+            Visual check that the tables look correct performed during testing
+        """
+        with override_quantized_engine('fbgemm'):
+            # get the visualizer
+            mod_rep_visualizer = self._prep_visualizer_helper()
+
+            # try a random filter and make sure that there are no rows for either table
+            empty_tables_dict = mod_rep_visualizer.generate_filtered_tables(module_fqn_filter="random not there module")
+
+            # test primarily the dict since it has same info as str
+            tensor_headers, tensor_table = empty_tables_dict[ModelReportVisualizer.TABLE_TENSOR_KEY]
+            channel_headers, channel_table = empty_tables_dict[ModelReportVisualizer.TABLE_CHANNEL_KEY]
+
+            tensor_info_modules = {row[1] for row in tensor_table}
+            channel_info_modules = {row[1] for row in channel_table}
+            combined_modules: Set = tensor_info_modules.union(channel_info_modules)
+            self.assertEqual(len(combined_modules), 0)  # should be no matching modules
+
+    @skipIfNoFBGEMM
+    def test_generate_tables_single_feat_match(self):
+        """
+        Tests the generate_table_view()
+        ModelReportVisualizer
+
+        Checks whether the generated dict has proper information
+            Visual check that the tables look correct performed during testing
+        """
+        with override_quantized_engine('fbgemm'):
+            # get the visualizer
+            mod_rep_visualizer = self._prep_visualizer_helper()
+
+            # try a matching filter for feature and make sure only those features show up
+            # if we filter to a very specific feature name, should only have 1 additional column in each table row
+            single_feat_dict = mod_rep_visualizer.generate_filtered_tables(feature_filter=OutlierDetector.MAX_VALS_KEY)
+
+            # test primarily the dict since it has same info as str
+            tensor_headers, tensor_table = single_feat_dict[ModelReportVisualizer.TABLE_TENSOR_KEY]
+            channel_headers, channel_table = single_feat_dict[ModelReportVisualizer.TABLE_CHANNEL_KEY]
+
+            # get the number of features in each of these
+            tensor_info_features = len(tensor_headers)
+            channel_info_features = len(channel_headers) - ModelReportVisualizer.NUM_NON_FEATURE_CHANNEL_HEADERS
+
+            # make sure that there are no tensor features, and that there is one channel level feature
+            self.assertEqual(tensor_info_features, 0)
+            self.assertEqual(channel_info_features, 1)
 
 def _get_prepped_for_calibration_model_helper(model, detector_set, example_input, fused: bool = False):
     r"""Returns a model that has been prepared for callibration and corresponding model_report"""
     # set the backend for this test
     torch.backends.quantized.engine = "fbgemm"
-
-    model_report = ModelReport(detector_set)
 
     # create model instance and prepare it
     example_input = example_input.to(torch.float)
@@ -1394,11 +1945,13 @@ def _get_prepped_for_calibration_model_helper(model, detector_set, example_input
 
     # if they passed in fusion paramter, make sure to test that
     if fused:
-        model = torch.quantization.fuse_modules(model, model.get_fusion_modules())
+        model = torch.ao.quantization.fuse_modules(model, model.get_fusion_modules())
 
     model_prep = quantize_fx.prepare_fx(model, q_config_mapping, example_input)
 
+    model_report = ModelReport(model_prep, detector_set)
+
     # prepare the model for callibration
-    prepared_for_callibrate_model = model_report.prepare_detailed_calibration(model_prep)
+    prepared_for_callibrate_model = model_report.prepare_detailed_calibration()
 
     return (prepared_for_callibrate_model, model_report)

@@ -1,15 +1,25 @@
 #ifdef TORCH_ENABLE_LLVM
 
+#include <c10/macros/Macros.h>
+
 #include <torch/csrc/jit/tensorexpr/external_functions.h>
 #include <torch/csrc/jit/tensorexpr/intrinsic_symbols.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
 #include <llvm/ExecutionEngine/JITSymbol.h>
+C10_DIAGNOSTIC_POP()
+
 #include <llvm/ExecutionEngine/Orc/CompileUtils.h>
 #include <llvm/ExecutionEngine/Orc/ExecutionUtils.h>
 #include <llvm/ExecutionEngine/Orc/IRCompileLayer.h>
+// llvm::SCEVPredicate has virtual function but non-virtual destructor
+// https://github.com/llvm/llvm-project/blob/c1a0a213378a458fbea1a5c77b315c7dce08fd05/llvm/include/llvm/Analysis/ScalarEvolution.h#L198
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
+#pragma GCC diagnostic pop
 #include <llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h>
 #include <llvm/ExecutionEngine/Orc/SymbolStringPool.h>
 #include <llvm/ExecutionEngine/RTDyldMemoryManager.h>
@@ -104,7 +114,11 @@ static void registerIntrinsics(
   using namespace llvm::orc;
 
   auto entry = [&](const char* name, auto ptr) -> SymbolMap::value_type {
+#if LLVM_VERSION_MAJOR >= 17
+    return {Mangle(name), {ExecutorAddr(toAddress(ptr)), JITSymbolFlags::None}};
+#else
     return {Mangle(name), {toAddress(ptr), JITSymbolFlags::None}};
+#endif
   };
 
   SymbolMap symbols;
@@ -143,10 +157,19 @@ class TORCH_API PytorchLLVMJITImpl {
       c10::optional<std::string> attrs)
       : TM(assertSuccess(makeTargetMachineBuilder(triple, cpu, attrs)
                              .createTargetMachine())),
-        LLJ(assertSuccess(LLJITBuilder()
-                              .setJITTargetMachineBuilder(
-                                  makeTargetMachineBuilder(triple, cpu, attrs))
-                              .create())) {
+        LLJ(assertSuccess(
+            LLJITBuilder()
+                .setJITTargetMachineBuilder(
+                    makeTargetMachineBuilder(triple, cpu, attrs))
+#if LLVM_VERSION_MAJOR >= 17
+                .setObjectLinkingLayerCreator([&](ExecutionSession& ES,
+                                                  const Triple& TT) {
+                  return std::make_unique<ObjectLinkingLayer>(
+                      ES,
+                      assertSuccess(jitlink::InProcessMemoryManager::Create()));
+                })
+#endif
+                .create())) {
     auto ProcSymbolsGenerator =
         assertSuccess(DynamicLibrarySearchGenerator::GetForCurrentProcess(
             LLJ->getDataLayout().getGlobalPrefix()));

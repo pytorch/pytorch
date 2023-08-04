@@ -27,12 +27,13 @@ static std::vector<optional<at::Tensor>> get_boxed_opt_tensor_vector() {
 }
 
 static std::vector<at::OptionalTensorRef> get_unboxed_opt_tensor_vector() {
+  static std::vector<at::Tensor> tensors;
   std::vector<at::OptionalTensorRef> optional_tensors;
-  const size_t SIZE = 5;
-  for (size_t i = 0; i < SIZE * 2; i++) {
-    auto opt_tensor = (i % 2 == 0) ? at::OptionalTensorRef(at::empty({0}))
-                                   : at::OptionalTensorRef();
-    optional_tensors.emplace_back(opt_tensor);
+  constexpr size_t SIZE = 5;
+  for (size_t i = 0; i < SIZE; i++) {
+    tensors.push_back(at::empty({0}));
+    optional_tensors.emplace_back(tensors[i]);
+    optional_tensors.emplace_back();
   }
   return optional_tensors;
 }
@@ -72,18 +73,18 @@ TEST(ITensorListRefTest, CtorUnboxed_IsUnboxed) {
 
 TEST(ITensorListRefTest, CtorUnboxedIndirect_IsUnboxed) {
   auto vec = get_tensor_vector();
-  auto check_is_unboxed = [](at::ITensorListRef list) {
+  auto check_is_unboxed = [](const at::ITensorListRef& list) {
     EXPECT_TRUE(list.isUnboxed());
   };
   check_is_unboxed(at::ITensorListRef{vec[0]});
   check_is_unboxed(at::ITensorListRef{vec.data(), vec.size()});
-  check_is_unboxed(at::ITensorListRef{&*vec.begin(), &*vec.end()});
+  check_is_unboxed(at::ITensorListRef{vec.data(), vec.data() + vec.size()});
   check_is_unboxed(vec);
   check_is_unboxed({vec[0], vec[1], vec[2]});
 }
 
 TEST(ITensorListRefTest, CtorTemp_IsUnboxed) {
-  auto check_is_unboxed = [](at::ITensorListRef list) {
+  auto check_is_unboxed = [](const at::ITensorListRef& list) {
     EXPECT_TRUE(list.isUnboxed());
   };
 
@@ -137,7 +138,7 @@ TEST(ITensorListRefTest, UnboxedIndirect_Equal) {
   // Implicit constructors
   check_elements_same(vec[0], std::vector<at::Tensor>{vec[0]}, /* use_count= */ 3);
   check_elements_same({vec.data(), vec.size()}, vec, /* use_count= */ 1);
-  check_elements_same({&*vec.begin(), &*vec.end()}, vec, /* use_count= */ 1);
+  check_elements_same({vec.data(), vec.data() + vec.size()}, vec, /* use_count= */ 1);
   // Vector constructor
   check_elements_same(vec, vec, /* use_count= */ 1);
   // InitializerList constructor
@@ -165,9 +166,15 @@ TEST(ITensorListRefTest, UnboxedMaterialize_Equal) {
 }
 
 TEST(ITensorListRefIteratorTest, CtorEmpty_ThrowsError) {
-  at::ITensorListRefIterator it;
+  at::ITensorListRefIterator* it = new at::ITensorListRefIterator();
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-  EXPECT_THROW(*it, c10::Error);
+  EXPECT_THROW(**it, c10::Error);
+
+#if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL == 2
+  EXPECT_THROW({ delete it; }, c10::Error);
+#else
+  delete it;
+#endif
 }
 
 TEST(ITensorListRefIteratorTest, Boxed_GetFirstElement) {

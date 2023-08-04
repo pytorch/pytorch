@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 
-import yaml
-import textwrap
-import subprocess
-import pathlib
 import argparse
 import fnmatch
+import pathlib
+import subprocess
+import textwrap
 
-from typing import Dict, List, Any
+from typing import Any, Dict, List
+
+import yaml
 
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent.parent
@@ -126,7 +127,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     touched_files = [CONFIG_YML]
-    with open(CONFIG_YML, "r") as f:
+    with open(CONFIG_YML) as f:
         config_yml = yaml.safe_load(f.read())
 
     config_yml["workflows"] = get_filtered_circleci_config(

@@ -3,57 +3,30 @@ import functools
 import hashlib
 import os
 import re
-import textwrap
 import sys
+import textwrap
 from argparse import Namespace
-from dataclasses import (
-    fields,
-    is_dataclass,
-)
+from dataclasses import fields, is_dataclass
+from enum import auto, Enum
 from typing import (
-    Tuple,
-    List,
+    Any,
+    Callable,
+    Dict,
+    Generic,
     Iterable,
     Iterator,
-    Callable,
-    Sequence,
-    TypeVar,
-    Optional,
-    Dict,
-    Any,
-    Union,
-    Set,
+    List,
+    Literal,
     NoReturn,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
 )
-from enum import Enum
 
 from torchgen.code_template import CodeTemplate
-
-# Safely load fast C Yaml loader/dumper if they are available
-try:
-    from yaml import CSafeLoader as Loader
-except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[misc]
-
-try:
-    from yaml import CSafeDumper as Dumper
-except ImportError:
-    from yaml import SafeDumper as Dumper  # type: ignore[misc]
-YamlDumper = Dumper
-
-# A custom loader for YAML that errors on duplicate keys.
-# This doesn't happen by default: see https://github.com/yaml/pyyaml/issues/165
-class YamlLoader(Loader):
-    def construct_mapping(self, node, deep=False):  # type: ignore[no-untyped-def]
-        mapping = []
-        for key_node, value_node in node.value:
-            key = self.construct_object(key_node, deep=deep)  # type: ignore[no-untyped-call]
-            assert (
-                key not in mapping
-            ), f"Found a duplicate key in the yaml. key={key}, line={node.start_mark.line}"
-            mapping.append(key)
-        mapping = super().construct_mapping(node, deep=deep)  # type: ignore[no-untyped-call]
-        return mapping
 
 
 # Many of these functions share logic for defining both the definition
@@ -62,27 +35,25 @@ class YamlLoader(Loader):
 # code we want.
 #
 # This is an OPEN enum (we may add more cases to it in the future), so be sure
-# to explicitly specify with Union[Literal[Target.XXX]] what targets are valid
-# for your use.
-Target = Enum(
-    "Target",
-    (
-        # top level namespace (not including at)
-        "DEFINITION",
-        "DECLARATION",
-        # TORCH_LIBRARY(...) { ... }
-        "REGISTRATION",
-        # namespace { ... }
-        "ANONYMOUS_DEFINITION",
-        # namespace cpu { ... }
-        "NAMESPACED_DEFINITION",
-        "NAMESPACED_DECLARATION",
-    ),
-)
+# to explicitly specify with Literal[Target.XXX] or Literal[Target.XXX, Target.YYY]
+# what targets are valid for your use.
+class Target(Enum):
+    # top level namespace (not including at)
+    DEFINITION = auto()
+    DECLARATION = auto()
+    # TORCH_LIBRARY(...) { ... }
+    REGISTRATION = auto()
+    # namespace { ... }
+    ANONYMOUS_DEFINITION = auto()
+    # namespace cpu { ... }
+    NAMESPACED_DEFINITION = auto()
+    NAMESPACED_DECLARATION = auto()
+
 
 # Matches "foo" in "foo, bar" but not "foobar". Used to search for the
 # occurrence of a parameter in the derivative formula
 IDENT_REGEX = r"(^|\W){}($|\W)"
+
 
 # TODO: Use a real parser here; this will get bamboozled
 def split_name_params(schema: str) -> Tuple[str, List[str]]:
@@ -99,6 +70,7 @@ S = TypeVar("S")
 # These two functions purposely return generators in analogy to map()
 # so that you don't mix up when you need to list() them
 
+
 # Map over function that may return None; omit Nones from output sequence
 def mapMaybe(func: Callable[[T], Optional[S]], xs: Iterable[T]) -> Iterator[S]:
     for x in xs:
@@ -110,8 +82,7 @@ def mapMaybe(func: Callable[[T], Optional[S]], xs: Iterable[T]) -> Iterator[S]:
 # Map over function that returns sequences and cat them all together
 def concatMap(func: Callable[[T], Sequence[S]], xs: Iterable[T]) -> Iterator[S]:
     for x in xs:
-        for r in func(x):
-            yield r
+        yield from func(x)
 
 
 # Conveniently add error context to exceptions raised.  Lets us
@@ -134,7 +105,7 @@ def context(msg_fn: Callable[[], str]) -> Iterator[None]:
 # for getting mypy to do exhaustiveness checking
 # TODO: put this somewhere else, maybe
 def assert_never(x: NoReturn) -> NoReturn:
-    raise AssertionError("Unhandled type: {}".format(type(x).__name__))
+    raise AssertionError(f"Unhandled type: {type(x).__name__}")
 
 
 @functools.lru_cache(maxsize=None)
@@ -166,9 +137,9 @@ class FileManager:
     def _write_if_changed(self, filename: str, contents: str) -> None:
         old_contents: Optional[str]
         try:
-            with open(filename, "r") as f:
+            with open(filename) as f:
                 old_contents = f.read()
-        except IOError:
+        except OSError:
             old_contents = None
         if contents != old_contents:
             # Create output directory if it doesn't exist
@@ -176,29 +147,40 @@ class FileManager:
             with open(filename, "w") as f:
                 f.write(contents)
 
+    # Read from template file and replace pattern with callable (type could be dict or str).
+    def substitute_with_template(
+        self, template_fn: str, env_callable: Callable[[], Union[str, Dict[str, Any]]]
+    ) -> str:
+        template_path = os.path.join(self.template_dir, template_fn)
+        env = env_callable()
+        if isinstance(env, dict):
+            # TODO: Update the comment reference to the correct location
+            if "generated_comment" not in env:
+                comment = "@" + "generated by torchgen/gen.py"
+                comment += f" from {os.path.basename(template_path)}"
+                env["generated_comment"] = comment
+            template = _read_template(template_path)
+            return template.substitute(env)
+        elif isinstance(env, str):
+            return env
+        else:
+            assert_never(env)
+
     def write_with_template(
         self,
         filename: str,
         template_fn: str,
         env_callable: Callable[[], Union[str, Dict[str, Any]]],
     ) -> None:
-        filename = "{}/{}".format(self.install_dir, filename)
+        filename = f"{self.install_dir}/{filename}"
         assert filename not in self.filenames, "duplicate file write {filename}"
         self.filenames.add(filename)
         if not self.dry_run:
-            env = env_callable()
-            if isinstance(env, dict):
-                # TODO: Update the comment reference to the correct location
-                if "generated_comment" not in env:
-                    comment = "@" + "generated by torchgen/gen.py"
-                    comment += " from {}".format(os.path.basename(template_fn))
-                    env["generated_comment"] = comment
-                template = _read_template(os.path.join(self.template_dir, template_fn))
-                self._write_if_changed(filename, template.substitute(env))
-            elif isinstance(env, str):
-                self._write_if_changed(filename, env)
-            else:
-                assert_never(env)
+            substitute_out = self.substitute_with_template(
+                template_fn=template_fn,
+                env_callable=env_callable,
+            )
+            self._write_if_changed(filename=filename, contents=substitute_out)
 
     def write(
         self,
@@ -218,7 +200,6 @@ class FileManager:
         base_env: Optional[Dict[str, Any]] = None,
         sharded_keys: Set[str],
     ) -> None:
-
         everything: Dict[str, Any] = {"shard_id": "Everything"}
         shards: List[Dict[str, Any]] = [
             {"shard_id": f"_{i}"} for i in range(num_shards)
@@ -281,6 +262,14 @@ class FileManager:
             "\n    ".join('"' + name + '"' for name in sorted(self.filenames)),
         )
         self._write_if_changed(filename, content)
+
+    def template_dir_for_comments(self) -> str:
+        """
+        This needs to be deterministic. The template dir is an absolute path
+        that varies across builds. So, just use the path relative to this file,
+        which will point to the codegen source but will be stable.
+        """
+        return os.path.relpath(self.template_dir, os.path.dirname(__file__))
 
 
 # Helper function to generate file manager
@@ -396,3 +385,113 @@ def _format(
     indent_str = " " * indent
     body = f", {delimiter}{curr_indent_str}".join(fields_str)
     return f"{start}{indent_str}{body}{end}"
+
+
+class NamespaceHelper:
+    """A helper for constructing the namespace open and close strings for a nested set of namespaces.
+
+    e.g. for namespace_str torch::lazy,
+
+    prologue:
+    namespace torch {
+    namespace lazy {
+
+    epilogue:
+    } // namespace lazy
+    } // namespace torch
+    """
+
+    def __init__(self, namespace_str: str, entity_name: str = "", max_level: int = 2):
+        # cpp_namespace can be a colon joined string such as torch::lazy
+        cpp_namespaces = namespace_str.split("::")
+        assert (
+            len(cpp_namespaces) <= max_level
+        ), f"Codegen doesn't support more than {max_level} level(s) of custom namespace. Got {namespace_str}."
+        self.cpp_namespace_ = namespace_str
+        self.prologue_ = "\n".join([f"namespace {n} {{" for n in cpp_namespaces])
+        self.epilogue_ = "\n".join(
+            [f"}} // namespace {n}" for n in reversed(cpp_namespaces)]
+        )
+        self.namespaces_ = cpp_namespaces
+        self.entity_name_ = entity_name
+
+    @staticmethod
+    def from_namespaced_entity(
+        namespaced_entity: str, max_level: int = 2
+    ) -> "NamespaceHelper":
+        """
+        Generate helper from nested namespaces as long as class/function name. E.g.: "torch::lazy::add"
+        """
+        names = namespaced_entity.split("::")
+        entity_name = names[-1]
+        namespace_str = "::".join(names[:-1])
+        return NamespaceHelper(
+            namespace_str=namespace_str, entity_name=entity_name, max_level=max_level
+        )
+
+    @property
+    def prologue(self) -> str:
+        return self.prologue_
+
+    @property
+    def epilogue(self) -> str:
+        return self.epilogue_
+
+    @property
+    def entity_name(self) -> str:
+        return self.entity_name_
+
+    # Only allow certain level of namespaces
+    def get_cpp_namespace(self, default: str = "") -> str:
+        """
+        Return the namespace string from joining all the namespaces by "::" (hence no leading "::").
+        Return default if namespace string is empty.
+        """
+        return self.cpp_namespace_ if self.cpp_namespace_ else default
+
+
+class OrderedSet(Generic[T]):
+    storage: Dict[T, Literal[None]]
+
+    def __init__(self, iterable: Optional[Iterable[T]] = None):
+        if iterable is None:
+            self.storage = {}
+        else:
+            self.storage = {k: None for k in iterable}
+
+    def __contains__(self, item: T) -> bool:
+        return item in self.storage
+
+    def __iter__(self) -> Iterator[T]:
+        return iter(self.storage.keys())
+
+    def update(self, items: "OrderedSet[T]") -> None:
+        self.storage.update(items.storage)
+
+    def add(self, item: T) -> None:
+        self.storage[item] = None
+
+    def copy(self) -> "OrderedSet[T]":
+        ret: OrderedSet[T] = OrderedSet()
+        ret.storage = self.storage.copy()
+        return ret
+
+    @staticmethod
+    def union(*args: "OrderedSet[T]") -> "OrderedSet[T]":
+        ret = args[0].copy()
+        for s in args[1:]:
+            ret.update(s)
+        return ret
+
+    def __or__(self, other: "OrderedSet[T]") -> "OrderedSet[T]":
+        return OrderedSet.union(self, other)
+
+    def __ior__(self, other: "OrderedSet[T]") -> "OrderedSet[T]":
+        self.update(other)
+        return self
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, OrderedSet):
+            return self.storage == other.storage
+        else:
+            return set(self.storage.keys()) == other

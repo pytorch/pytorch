@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 #cmake_policy(SET CMP0022 NEW)
 #cmake_policy(SET CMP0023 NEW)
 
@@ -8,16 +8,16 @@ cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
 cmake_policy(SET CMP0010 NEW)
 cmake_policy(SET CMP0025 NEW)
 
+# Enables CMake to set LTO on compilers other than Intel.
+cmake_policy(SET CMP0069 NEW)
+# Enable the policy for CMake subprojects.
+# protobuf currently causes issues
+#set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
+
 # Suppress warning flags in default MSVC configuration.  It's not
 # mandatory that we do this (and we don't if cmake is old), but it's
 # nice when it's possible, and it's possible on our Windows configs.
-if(NOT CMAKE_VERSION VERSION_LESS 3.15.0)
-  cmake_policy(SET CMP0092 NEW)
-endif()
-
-if(NOT CMAKE_VERSION VERSION_LESS 3.10)
-  set(FIND_CUDA_MODULE_DEPRECATED ON)
-endif()
+cmake_policy(SET CMP0092 NEW)
 
 # ---[ Project and semantic versioning.
 project(Torch CXX C)
@@ -35,15 +35,24 @@ string(FIND "${CMAKE_CXX_FLAGS}" "-std=c++" env_cxx_standard)
 if(env_cxx_standard GREATER -1)
   message(
       WARNING "C++ standard version definition detected in environment variable."
-      "PyTorch requires -std=c++14. Please remove -std=c++ settings in your environment.")
+      "PyTorch requires -std=c++17. Please remove -std=c++ settings in your environment.")
 endif()
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
+set(CMAKE_C_STANDARD   11 CACHE STRING "The C standard whose features are requested to build this target.")
 
-if(DEFINED GLIBCXX_USE_CXX11_ABI)
+# ---[ Utils
+include(cmake/public/utils.cmake)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  include(cmake/CheckAbi.cmake)
+  string(APPEND CMAKE_CXX_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
   if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=1")
+  else()
+    # Please note this is required in order to ensure compatibility between gcc 9 and gcc 7
+    # This could be removed when all Linux PyTorch binary builds are compiled by the same toolchain again
+    include(CheckCXXCompilerFlag)
+    append_cxx_flag_if_supported("-fabi-version=11" CMAKE_CXX_FLAGS)
   endif()
 endif()
 
@@ -83,7 +92,7 @@ if(APPLE)
 
   # Get clang version on macOS
   execute_process( COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_full_version_string )
-  string(REGEX REPLACE "Apple LLVM version ([0-9]+\\.[0-9]+).*" "\\1" CLANG_VERSION_STRING ${clang_full_version_string})
+  string(REGEX REPLACE "Apple (.*) version ([0-9]+\\.[0-9]+).*" "\\2" CLANG_VERSION_STRING ${clang_full_version_string})
   message( STATUS "CLANG_VERSION_STRING:         " ${CLANG_VERSION_STRING} )
 
 
@@ -161,9 +170,6 @@ option(BUILD_LITE_INTERPRETER "Master flag to build Lite Interpreter" OFF)
 cmake_dependent_option(
     BUILD_CAFFE2_OPS "Build Caffe2 operators" ON
     "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" OFF
-    "BUILD_CAFFE2" OFF)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
@@ -172,6 +178,7 @@ cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
+option(BUILD_AOT_INDUCTOR_TEST "Build C++ test binaries for aot-inductor" OFF)
 option(BUILD_STATIC_RUNTIME_BENCHMARK "Build C++ binaries for static runtime benchmarks (need gbenchmark)" OFF)
 option(BUILD_TENSOREXPR_BENCHMARK "Build C++ binaries for tensorexpr benchmarks (need gbenchmark)" OFF)
 option(BUILD_MOBILE_BENCHMARK "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
@@ -182,21 +189,16 @@ cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
 option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
-option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
-option(USE_ASAN "Use Address Sanitizer" OFF)
+option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
+option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
-# BUILD_SPLIT_CUDA must also be exported as an environment variable before building, with
-# `export BUILD_SPLIT_CUDA=1` because cpp_extension.py can only work properly if this variable
-# also exists in the environment.
-# This option is incompatible with CUDA_SEPARABLE_COMPILATION.
-cmake_dependent_option(
-    BUILD_SPLIT_CUDA "Split torch_cuda library into torch_cuda_cu and torch_cuda_cpp" OFF
-    "USE_CUDA AND NOT CUDA_SEPARABLE_COMPILATION" OFF)
 cmake_dependent_option(
      BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
-option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
-option(USE_ROCM "Use ROCm" ON)
+cmake_dependent_option(
+    BUILD_NVFUSER "Build NVFUSER" ON
+    "USE_CUDA OR USE_ROCM" OFF)
+cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
@@ -205,8 +207,11 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 cmake_dependent_option(
-    BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" ON
-    "USE_CUDA;BUILD_TEST" OFF)
+    USE_CUSPARSELT "Use cuSPARSELt" ON
+    "USE_CUDA" OFF)
+cmake_dependent_option(
+    BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" OFF
+    "USE_CUDA" OFF)
 cmake_dependent_option(
     USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" ON
     "USE_CUDNN" OFF)
@@ -252,9 +257,7 @@ option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
 option(USE_OPENCV "Use OpenCV" OFF)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
-cmake_dependent_option(
-    USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build. Requires cmake >= 3.16." OFF
-    "CMAKE_VERSION VERSION_GREATER_EQUAL \"3.16\"" OFF)
+option(USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build." OFF)
 
 option(USE_PROF "Use profiling" OFF)
 option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
@@ -280,17 +283,15 @@ option(USE_SOURCE_DEBUG_ON_MOBILE "Enable " ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable " ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
-option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation as opposed to build-time (needs libshaderc)" OFF)
 # option USE_XNNPACK: try to enable xnnpack by default.
-set(XNNPACK_MIN_CMAKE_VER 3.12)
-cmake_dependent_option(
-    USE_XNNPACK "Use XNNPACK. Requires cmake >= ${XNNPACK_MIN_CMAKE_VER}." ON
-    "CMAKE_VERSION VERSION_GREATER_EQUAL ${XNNPACK_MIN_CMAKE_VER}" OFF)
-if(NOT USE_XNNPACK AND CMAKE_VERSION VERSION_LESS ${XNNPACK_MIN_CMAKE_VER})
-  message(WARNING "USE_XNNPACK is set to OFF. XNNPACK requires CMake version ${XNNPACK_MIN_CMAKE_VER} or greater.")
-endif()
+option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
+option(TORCH_DISABLE_GPU_ASSERTS "Disable GPU asserts by default" OFF)
+# Ensure that an ITT build is the default for x86 CPUs
+cmake_dependent_option(
+  USE_ITT "Use Intel(R) VTune Profiler ITT functionality" ON
+  "CPU_INTEL" OFF)
 # Ensure that an MKLDNN build is the default for x86 CPUs
 # but optional for AArch64 (dependent on -DUSE_MKLDNN).
 cmake_dependent_option(
@@ -308,6 +309,14 @@ option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
     USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    USE_UCC "Use UCC. Only available if USE_DISTRIBUTED is on." OFF
+    "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    USE_SYSTEM_UCC "Use system-wide UCC" OFF
+    "USE_UCC" OFF)
+cmake_dependent_option(
+    USE_C10D_UCC "USE C10D UCC" ON "USE_DISTRIBUTED;USE_UCC" OFF)
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
@@ -332,17 +341,22 @@ cmake_dependent_option(
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG "Enable RelWithDebInfo for libtorch_cpu target only" OFF)
-cmake_dependent_option(
-    USE_DEPLOY "Build embedded torch::deploy interpreter.  See torch/csrc/deploy/README.md for more info." OFF
-    "BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
+option(DEBUG_CUDA "When compiling DEBUG, also attempt to compile CUDA with debug flags (may cause nvcc to OOM)" OFF)
 option(USE_COREML_DELEGATE "Use the CoreML backend through delegate APIs" OFF)
 option(USE_PER_OPERATOR_HEADERS "Whether ATen should generate separate headers for each operator" ON)
 cmake_dependent_option(
     BUILD_LAZY_TS_BACKEND "Build the lazy Torchscript backend, not compatible with mobile builds" ON
     "NOT INTERN_BUILD_MOBILE" OFF)
+cmake_dependent_option(
+    BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 
+option(USE_MIMALLOC "Use mimalloc" OFF)
+# Enable third party mimalloc library to improve memory allocation performance on Windows.
+if(WIN32)
+  set(USE_MIMALLOC ON)
+endif()
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
@@ -403,6 +417,7 @@ option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
 option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." OFF)
 option(USE_SYSTEM_ONNX "Use system-provided onnx." OFF)
 option(USE_SYSTEM_XNNPACK "Use system-provided xnnpack." OFF)
+option(USE_SYSTEM_ZSTD "Use system-provided zstd." OFF)
 option(USE_GOLD_LINKER "Use ld.gold to link" OFF)
 if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_CPUINFO ON)
@@ -418,8 +433,14 @@ if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_ONNX ON)
   set(USE_SYSTEM_XNNPACK ON)
   set(USE_SYSTEM_PYBIND11 ON)
+  if(USE_NCCL)
+    set(USE_SYSTEM_NCCL ON)
+  endif()
   if(USE_TBB)
     set(USE_SYSTEM_TBB ON)
+  endif()
+  if(USE_ZSTD)
+    set(USE_SYSTEM_ZSTD ON)
   endif()
 endif()
 
@@ -453,7 +474,7 @@ option(
   TRACING_BASED
   "Master flag to build Lite Interpreter with tracing build option"
   OFF)
-
+option(BUILD_EXECUTORCH "Master flag to build Executorch" ON)
 # This is a fix for a rare build issue on Ubuntu:
 # symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
 # https://software.intel.com/en-us/articles/symbol-lookup-error-when-linking-intel-mkl-with-gcc-on-ubuntu
@@ -474,21 +495,6 @@ if(MSVC)
         string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
       endif(${flag_var} MATCHES "/Z[iI]")
     endif(MSVC_Z7_OVERRIDE)
-    # Turn off warnings on Windows.  In an ideal world we'd be warning
-    # clean on Windows too, but this is too much work for our
-    # non-Windows developers.
-    #
-    # NB: Technically, this is not necessary if CMP0092 was applied
-    # properly, but only cmake >= 3.15 has this policy, so we nail
-    # it one more time just be safe.
-    #
-    # NB2: This is NOT enough to prevent warnings from nvcc on MSVC.  At the
-    # moment only CMP0092 is enough to prevent those warnings too.
-    string(REPLACE "/W3" "" ${flag_var} "${${flag_var}}")
-
-    # Turn off warnings (Windows build is currently is extremely warning
-    # unclean and the warnings aren't telling us anything useful.)
-    string(APPEND ${flag_var} " /w")
 
     if(${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       if(${flag_var} MATCHES "/MD")
@@ -538,16 +544,24 @@ if(MSVC)
     string(APPEND ${flag_var} " /ignore:4049 /ignore:4217 /ignore:4099")
   endforeach(flag_var)
 
+  foreach(flag_var
+      CMAKE_SHARED_LINKER_FLAGS)
+    # https://github.com/pytorch/pytorch/issues/91933: Don't set the manifest filename
+    # explicitly helps fix the linker error when linking torch_python.dll. The manifest
+    # file would still be there in the correct format torch_python.dll.manifest
+    if(${flag_var} MATCHES "/MANIFESTFILE:.*\\.manifest")
+      string(REGEX REPLACE "/MANIFESTFILE:.*\\.manifest" "" ${flag_var} "${${flag_var}}")
+    endif()
+  endforeach(flag_var)
+
   # Try harder
   string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler /w -w")
+
+  string(APPEND CMAKE_CXX_FLAGS " /FS")
+  string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler /FS")
 endif(MSVC)
 
 string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
-
-if(NOT MSVC)
-  string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -g -lineinfo --source-in-ptx")
-  string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -g -lineinfo --source-in-ptx")
-endif(NOT MSVC)
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
 # applicable to mobile are disabled by this variable.
@@ -558,6 +572,22 @@ if(ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
   set(INTERN_BUILD_MOBILE ON)
   message(WARNING "INTERN_BUILD_MOBILE is on, disabling BUILD_LAZY_TS_BACKEND")
   set(BUILD_LAZY_TS_BACKEND OFF)
+
+  # Set -ffunction-sections and -fdata-sections so that each method has its own
+  # text section. This allows the linker to remove unused section when the flag
+  # -Wl,-gc-sections is provided at link time.
+  string(APPEND CMAKE_CXX_FLAGS " -ffunction-sections")
+  string(APPEND CMAKE_C_FLAGS " -ffunction-sections")
+  string(APPEND CMAKE_CXX_FLAGS " -fdata-sections")
+  string(APPEND CMAKE_C_FLAGS " -fdata-sections")
+
+  # Please note that the use of the following flags is required when linking
+  # against libtorch_cpu.a for mobile builds.
+  # -Wl,--whole-archive -ltorch_cpu -Wl,--no-whole-archive
+  #
+  # This allows global constructors to be included and run. Global
+  # constructors are used for operator/kernel registration with the
+  # PyTorch Dispatcher.
 
   if(DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
     # C10_MOBILE is derived from Android/iOS toolchain macros in
@@ -575,18 +605,15 @@ if(ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
 endif()
 
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
-# It's disabled for caffe2 mobile library.
-if(INTERN_BUILD_MOBILE AND BUILD_CAFFE2_MOBILE)
-  set(INTERN_BUILD_ATEN_OPS OFF)
-else()
-  set(INTERN_BUILD_ATEN_OPS ON)
+set(INTERN_BUILD_ATEN_OPS ON)
+
+if(NOT DEFINED USE_BLAS)
+  set(USE_BLAS ON)
 endif()
 
-# BUILD_CAFFE2_MOBILE is the master switch to choose between libcaffe2 v.s. libtorch mobile build.
-# When it's enabled it builds original libcaffe2 mobile library without ATen/TH ops nor TorchScript support;
-# When it's disabled it builds libtorch mobile library, which contains ATen/TH ops and native support for
+# Build libtorch mobile library, which contains ATen/TH ops and native support for
 # TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
-if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+if(INTERN_BUILD_MOBILE)
   if(NOT BUILD_SHARED_LIBS AND NOT "${SELECTED_OP_LIST}" STREQUAL "")
     string(APPEND CMAKE_CXX_FLAGS " -DNO_EXPORT")
   endif()
@@ -596,20 +623,22 @@ if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
     set(INTERN_DISABLE_AUTOGRAD ON)
   endif()
   set(BUILD_PYTHON OFF)
+  set(BUILD_FUNCTORCH OFF)
   set(BUILD_CAFFE2_OPS OFF)
   set(USE_DISTRIBUTED OFF)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
   set(USE_QNNPACK OFF)
   set(INTERN_DISABLE_ONNX ON)
-  set(INTERN_USE_EIGEN_BLAS ON)
+  if(USE_BLAS)
+    set(INTERN_USE_EIGEN_BLAS ON)
+  else()
+    set(INTERN_USE_EIGEN_BLAS OFF)
+  endif()
   # Disable developing mobile interpreter for actual mobile build.
   # Enable it elsewhere to capture build error.
   set(INTERN_DISABLE_MOBILE_INTERP ON)
 endif()
-
-# ---[ Utils
-include(cmake/public/utils.cmake)
 
 # ---[ Version numbers for generated libraries
 file(READ version.txt TORCH_DEFAULT_VERSION)
@@ -691,15 +720,23 @@ set(BUILD_ONEDNN_GRAPH OFF)
 
 include(cmake/Dependencies.cmake)
 
-if(USE_CUDA AND (CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 10.2) AND (CMAKE_HOST_SYSTEM_NAME MATCHES "Windows"))
-  # CUDA < 10.2 doesn't support compiling and extracting header dependencies in
-  # one call, so instead CMake calls nvcc twice with && in between.
-  # However, on windows cmd.exe has a 8191 character limit for commands which we
-  # start hitting. This moves most argments into a file to avoid going over the limit
+# Moved this cmake set option down here because CMAKE_CUDA_COMPILER_VERSION is not avaialble until now
+cmake_dependent_option(
+  USE_FLASH_ATTENTION
+  "Whether to build the flash_attention kernel for scaled dot product attention" ON
+  "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
 
-  set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS ON)
-  set(CMAKE_NINJA_FORCE_RESPONSE_FILE ON CACHE INTERNAL "")
-endif()
+if(DEBUG_CUDA)
+  string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
+  string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -lineinfo")
+  # CUDA-12.1 crashes when trying to compile with --source-in-ptx
+  # See https://github.com/pytorch/pytorch/issues/102372#issuecomment-1572526893
+  if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 12.1)
+    string(APPEND CMAKE_CUDA_FLAGS_DEBUG " --source-in-ptx")
+    string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " --source-in-ptx")
+  endif()
+endif(DEBUG_CUDA)
+
 
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
@@ -733,9 +770,6 @@ if(USE_VULKAN)
     string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_RELAXED_PRECISION")
   endif()
 
-  if(USE_VULKAN_SHADERC_RUNTIME)
-    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
-  endif()
 endif()
 
 if(BUILD_LITE_INTERPRETER)
@@ -758,7 +792,7 @@ if(USE_SOURCE_DEBUG_ON_MOBILE)
   string(APPEND CMAKE_CXX_FLAGS " -DSYMBOLICATE_MOBILE_DEBUG_HANDLE")
 endif()
 
-if(USE_LITE_INTERPRETER_PROFILER)
+if(BUILD_LITE_INTERPRETER AND USE_LITE_INTERPRETER_PROFILER)
   string(APPEND CMAKE_CXX_FLAGS " -DEDGE_PROFILER_USE_KINETO")
 endif()
 
@@ -778,34 +812,32 @@ endif()
 # ---[ Build flags
 if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-narrowing")
   # Eigen fails to build with some versions, so convert this to a warning
   # Details at http://eigen.tuxfamily.org/bz/show_bug.cgi?id=1459
   string(APPEND CMAKE_CXX_FLAGS " -Wall")
   string(APPEND CMAKE_CXX_FLAGS " -Wextra")
-  string(APPEND CMAKE_CXX_FLAGS " -Werror=return-type")
-  if(NOT USE_CUDNN)
-    # Temporary fix to ignore non virtual dtor error if cudnn is used. A
-    # separate PR to cudnn_frontend is needed to address this later on
-    string(APPEND CMAKE_CXX_FLAGS " -Werror=non-virtual-dtor")
-  endif()
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-field-initializers")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-type-limits")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-array-bounds")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-unknown-pragmas")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-parameter")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-function")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-result")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-strict-overflow")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-strict-aliasing")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-error=deprecated-declarations")
+  append_cxx_flag_if_supported("-Werror=return-type" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Werror=non-virtual-dtor" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Werror=braced-scalar-init" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Werror=range-loop-construct" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Werror=bool-operation" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wnarrowing" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-missing-field-initializers" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-type-limits" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-array-bounds" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-unknown-pragmas" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-unused-parameter" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-unused-function" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-unused-result" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-strict-overflow" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wvla-extension" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wnewline-eof" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Winconsistent-missing-override" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Winconsistent-missing-destructor-override" CMAKE_CXX_FLAGS)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
-  endif()
-  if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 6.0.0))
-    # Suppress issue: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=43407
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-attributes")
   endif()
   if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
     string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
@@ -813,6 +845,12 @@ if(NOT MSVC)
   if(CMAKE_COMPILER_IS_GNUCXX)
     # Suppress "The ABI for passing parameters with 64-byte alignment has changed in GCC 4.6"
     string(APPEND CMAKE_CXX_FLAGS " -Wno-psabi")
+  endif()
+  if(NOT CMAKE_COMPILER_IS_GNUCXX OR GCC_VERSION VERSION_GREATER_EQUAL 9.2)
+    # Prior to GCC 9.2, this warning misfires when a method is
+    # labeled "final".
+    # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=78010
+    append_cxx_flag_if_supported("-Wsuggest-override" CMAKE_CXX_FLAGS)
   endif()
 
   # Use ld.gold if available, fall back to ld.bfd (the default ld) if not
@@ -839,70 +877,78 @@ if(NOT MSVC)
     endif()
   endif()
 
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-error=pedantic")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-error=redundant-decls")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-error=old-style-cast")
-  # These flags are not available in GCC-4.8.5. Set only when using clang.
-  # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
-  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    string(APPEND CMAKE_CXX_FLAGS " -Wconstant-conversion")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-invalid-partial-specialization")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-typedef-redefinition")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-unknown-warning-option")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-private-field")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-inconsistent-missing-override")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-aligned-allocation-unavailable")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-c++14-extensions")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-constexpr-not-const")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-braces")
-    string(APPEND CMAKE_CXX_FLAGS " -Qunused-arguments")
-    if(${COLORIZE_OUTPUT})
-      string(APPEND CMAKE_CXX_FLAGS " -fcolor-diagnostics")
+  append_cxx_flag_if_supported("-Wno-error=pedantic" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-error=inconsistent-missing-override" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-error=inconsistent-missing-destructor-override" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-invalid-partial-specialization" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wunused-lambda-capture" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
+
+  if(${USE_COLORIZE_OUTPUT})
+    # Why compiler checks are necessary even when `try_compile` is used
+    # Because of the bug in ccache that can incorrectly identify `-fcolor-diagnostics`
+    # As supported by GCC, see https://github.com/ccache/ccache/issues/740 (for older ccache)
+    # and https://github.com/ccache/ccache/issues/1275 (for newer ones)
+    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+      append_cxx_flag_if_supported("-fdiagnostics-color=always" CMAKE_CXX_FLAGS)
+    else()
+      append_cxx_flag_if_supported("-fcolor-diagnostics" CMAKE_CXX_FLAGS)
     endif()
   endif()
-  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.9)
-    if(${COLORIZE_OUTPUT})
-      string(APPEND CMAKE_CXX_FLAGS " -fdiagnostics-color=always")
-    endif()
-  endif()
-  if((APPLE AND (NOT ("${CLANG_VERSION_STRING}" VERSION_LESS "9.0")))
-    OR(CMAKE_COMPILER_IS_GNUCXX
-    AND(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0 AND NOT APPLE)))
-    string(APPEND CMAKE_CXX_FLAGS " -faligned-new")
-  endif()
+
+  append_cxx_flag_if_supported("-faligned-new" CMAKE_CXX_FLAGS)
+
   if(WERROR)
-    check_cxx_compiler_flag("-Werror" COMPILER_SUPPORT_WERROR)
+    append_cxx_flag_if_supported("-Werror" CMAKE_CXX_FLAGS)
     if(NOT COMPILER_SUPPORT_WERROR)
       set(WERROR FALSE)
-    else()
-      string(APPEND CMAKE_CXX_FLAGS " -Werror")
     endif()
-  endif(WERROR)
-  if(NOT APPLE)
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-but-set-variable")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-maybe-uninitialized")
   endif()
+  append_cxx_flag_if_supported("-Wno-unused-but-set-variable" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-maybe-uninitialized" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-fstandalone-debug" CMAKE_CXX_FLAGS_DEBUG)
   string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
   string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
-  string(APPEND CMAKE_CXX_FLAGS " -fno-math-errno")
-  string(APPEND CMAKE_CXX_FLAGS " -fno-trapping-math")
-  check_cxx_compiler_flag("-Werror=format" HAS_WERROR_FORMAT)
-  if(HAS_WERROR_FORMAT)
-    string(APPEND CMAKE_CXX_FLAGS " -Werror=format")
-  endif()
-  check_cxx_compiler_flag("-Werror=cast-function-type" HAS_WERROR_CAST_FUNCTION_TYPE)
-  if(HAS_WERROR_CAST_FUNCTION_TYPE)
-    string(APPEND CMAKE_CXX_FLAGS " -Werror=cast-function-type")
-  endif()
-  check_cxx_compiler_flag("-Werror=sign-compare" HAS_WERROR_SIGN_COMPARE)
-  # This doesn't work globally so we use the test on specific
-  # target_compile_options
+  append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Werror=cast-function-type" CMAKE_CXX_FLAGS)
+else()
+  # skip unwanted includes from windows.h
+  add_compile_definitions(WIN32_LEAN_AND_MEAN)
+  # Windows SDK broke compatibility since version 25131, but introduced this
+  # define for backward compatibility.
+  add_compile_definitions(_UCRT_LEGACY_INFINITY)
+  # disable min/max macros
+  add_compile_definitions(NOMINMAX)
+  # The source code is in utf-8 encoding
+  append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
+  # Turn off these warnings on Windows.
+  # destructor was implicitly defined as delete
+  append_cxx_flag_if_supported("/wd4624" CMAKE_CXX_FLAGS)
+  # unknown pragma
+  append_cxx_flag_if_supported("/wd4068" CMAKE_CXX_FLAGS)
+  # unexpected tokens following preprocessor directive - expected a newline
+  append_cxx_flag_if_supported("/wd4067" CMAKE_CXX_FLAGS)
+  # conversion from 'size_t' to 'unsigned int', possible loss of data
+  append_cxx_flag_if_supported("/wd4267" CMAKE_CXX_FLAGS)
+  # no suitable definition provided for explicit template instantiation request
+  append_cxx_flag_if_supported("/wd4661" CMAKE_CXX_FLAGS)
+  # recursive on all control paths, function will cause runtime stack overflow
+  append_cxx_flag_if_supported("/wd4717" CMAKE_CXX_FLAGS)
+  # conversion from '_Ty' to '_Ty', possible loss of data
+  append_cxx_flag_if_supported("/wd4244" CMAKE_CXX_FLAGS)
+  # unsafe use of type 'bool' in operation
+  append_cxx_flag_if_supported("/wd4804" CMAKE_CXX_FLAGS)
+  # inconsistent dll linkage
+  append_cxx_flag_if_supported("/wd4273" CMAKE_CXX_FLAGS)
 endif()
 
-if(USE_ASAN)
-    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fsanitize=address")
-    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=address")
-endif()
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
   include(CheckCSourceCompiles)
@@ -952,22 +998,21 @@ endif()
 
 if(APPLE)
     if(USE_MPS)
-      string(APPEND CMAKE_CXX_FLAGS " -DUSE_MPS -fno-objc-arc")
+      string(APPEND CMAKE_OBJCXX_FLAGS " -DUSE_MPS -fno-objc-arc")
+      string(APPEND CMAKE_CXX_FLAGS " -DUSE_MPS")
       string(APPEND CMAKE_SHARED_LINKER_FLAGS " -weak_framework Foundation -weak_framework MetalPerformanceShaders -weak_framework MetalPerformanceShadersGraph -weak_framework Metal")
+      # To suppress MPSGraph availability warnings
+      append_cxx_flag_if_supported("-Wno-unguarded-availability-new" CMAKE_OBJCXX_FLAGS)
     endif()
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-private-field")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-braces")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-c++14-extensions")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-constexpr-not-const")
+    append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
 endif()
 
 if(EMSCRIPTEN)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-implicit-function-declaration -DEMSCRIPTEN -s DISABLE_EXCEPTION_CATCHING=0")
 endif()
 
-if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0.0)
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
-endif()
+append_cxx_flag_if_supported("-Wno-stringop-overflow" CMAKE_CXX_FLAGS)
 
 if(ANDROID AND (NOT ANDROID_DEBUG_SYMBOLS))
   if(CMAKE_COMPILER_IS_GNUCXX)
@@ -996,6 +1041,16 @@ include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
 include_directories(BEFORE ${PROJECT_BINARY_DIR}/aten/src/)
+
+if(USE_MIMALLOC)
+  set(MI_OVERRIDE OFF)
+  set(MI_BUILD_SHARED OFF)
+  set(MI_BUILD_OBJECT OFF)
+  set(MI_BUILD_TESTS OFF)
+  add_definitions(-DUSE_MIMALLOC)
+  add_subdirectory(third_party/mimalloc)
+  include_directories(third_party/mimalloc/include)
+endif()
 
 # ---[ Main build
 add_subdirectory(c10)
@@ -1074,15 +1129,10 @@ endif()
 # https://cmake.org/pipermail/cmake/2016-May/063400.html
 if(BUILD_SHARED_LIBS)
   configure_file(
-      ${PROJECT_SOURCE_DIR}/cmake/Caffe2ConfigVersion.cmake.in
-      ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
-      @ONLY)
-  configure_file(
       ${PROJECT_SOURCE_DIR}/cmake/Caffe2Config.cmake.in
       ${PROJECT_BINARY_DIR}/Caffe2Config.cmake
       @ONLY)
   install(FILES
-      ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
       ${PROJECT_BINARY_DIR}/Caffe2Config.cmake
       DESTINATION share/cmake/Caffe2
       COMPONENT dev)
@@ -1093,13 +1143,20 @@ if(BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/public/mkl.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/mkldnn.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
-      ${PROJECT_SOURCE_DIR}/cmake/public/threads.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/LoadHIP.cmake
       DESTINATION share/cmake/Caffe2/public
       COMPONENT dev)
   install(DIRECTORY
       ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix
+      DESTINATION share/cmake/Caffe2/
+      COMPONENT dev)
+  install(FILES
+      ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDAToolkit.cmake
+      DESTINATION share/cmake/Caffe2/
+      COMPONENT dev)
+  install(FILES
+      ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUSPARSELT.cmake
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
 
@@ -1138,10 +1195,22 @@ if(BUILD_JNI)
   add_subdirectory(android/pytorch_android)
 endif()
 
+if(NOT USE_CUDA AND NOT USE_ROCM)
+  set(BUILD_NVFUSER OFF CACHE BOOL "BUILD nvfuser" FORCE)
+endif()
+
+if(BUILD_NVFUSER)
+  if(DEFINED ENV{NVFUSER_SOURCE_DIR})
+    add_subdirectory($ENV{NVFUSER_SOURCE_DIR} nvfuser)
+  else()
+    add_subdirectory(third_party/nvfuser nvfuser)
+  endif()
+  add_compile_definitions(BUILD_NVFUSER)
+endif()
+
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
 
-# ---[ Torch Deploy
-if(USE_DEPLOY)
-  add_subdirectory(torch/csrc/deploy)
+if(BUILD_FUNCTORCH)
+  add_subdirectory(functorch)
 endif()

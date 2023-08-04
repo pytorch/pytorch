@@ -1,17 +1,13 @@
 import itertools
-from typing import List, Sequence, Union, Dict
+from typing import Dict, List, Sequence, Union
+
+from torchgen.api import cpp
 
 from torchgen.api.types import DispatcherSignature
-from torchgen.api import cpp
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
+from torchgen.model import Argument, NativeFunction, SchemaKind, TensorOptionsArguments
 from torchgen.utils import FileManager
-from torchgen.model import (
-    Argument,
-    NativeFunction,
-    SchemaKind,
-    TensorOptionsArguments,
-)
 
 # Note [Manual Backend kernels]
 # For these ops, we want to manually register to dispatch key Backend and
@@ -23,33 +19,29 @@ from torchgen.model import (
 #   - all ops below are part of MANUAL_TRACER to skip codegen Tracer kernel registration
 # Note: we still register to dispatch key Profiler for these ops, keeping it untouched for now.
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_BACKEND = set(
-    [
-        "options",
-        "data",
-        "set_data",
-        "is_leaf",
-        "output_nr",
-        "_version",
-        "retain_grad",
-        "_backward",
-        "requires_grad_",
-    ]
-)
+MANUAL_BACKEND = {
+    "options",
+    "data",
+    "set_data",
+    "is_leaf",
+    "output_nr",
+    "_version",
+    "retain_grad",
+    "_backward",
+    "requires_grad_",
+}
 
 # For these ops we want to skip the codegen-ed registration to both Autograd and Tracer keys.
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_AUTOGRAD_AND_TRACER = set(
-    [
-        "resize_",
-        "resize_as_",
-        "detach",
-        "detach_",
-        "copy_",
-        "_fw_primal",
-        "_make_dual",
-    ]
-)
+MANUAL_AUTOGRAD_AND_TRACER = {
+    "resize_",
+    "resize_as_",
+    "detach",
+    "detach_",
+    "copy_",
+    "_fw_primal",
+    "_make_dual",
+}
 
 # Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:
 #   union(MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER)
@@ -173,9 +165,8 @@ def format_trace_inputs(f: NativeFunction) -> str:
         # *_out functions take the result as a separate argument, but we don't want to
         # trace that argument directly. Instead, we trace its TensorOptions.
         # So first, we need to remove the out argument from the list of arguments to trace.
-        # TODO: byte-for-byte compatible with old codegen behavior - it's incorrect to assume
-        # there is only one output argument.
-        args = args[:-1]
+        num_out_args = len(f.func.arguments.out)
+        args = args[:-num_out_args]
 
     trace_inputs = itertools.chain.from_iterable(
         dispatch_trace_input(arg) for arg in args
@@ -184,8 +175,12 @@ def format_trace_inputs(f: NativeFunction) -> str:
     if f.func.is_out_fn():
         # for *_out functions, handle the result argument differently for inplace/outplace.
         # For inplace: just add the input to the end to confirm with the JIT schema
-        name = f.func.arguments.out[0].name  # TODO: old codegen behavior - should fix
-        inplace = ADD_TRACE_INPUT.substitute(name=name, input=name)
+        inplace = [
+            ADD_TRACE_INPUT.substitute(
+                name=f.func.arguments.out[i].name, input=f.func.arguments.out[i].name
+            )
+            for i in range(num_out_args)
+        ]
 
         # for outplace: do nothing, except if the function is a factory.
         # Factories are a bit special because their out-of-place overloads
@@ -227,7 +222,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
                 SELECT.substitute(
                     cond="tracer_state->force_outplace",
                     true="\n".join(outplace),
-                    false=inplace,
+                    false="\n".join(inplace),
                 )
             ],
         )
@@ -387,7 +382,7 @@ def declare_returned_variables(f: NativeFunction) -> str:
         return ""
     if len(f.func.returns) == 1:
         return ""
-    types = map(cpp.return_type, f.func.returns)
+    types = [cpp.return_type(r, symint=True) for r in f.func.returns]
     names = cpp.return_names(f)
     return "\n".join(f"{type.cpp_type()} {name};" for type, name in zip(types, names))
 
@@ -462,11 +457,20 @@ ${return_type} ${type_wrapper_name}(${formals}) {
 )
 
 
-def type_wrapper_name(f: NativeFunction) -> str:
+def type_wrapper_name(f: NativeFunction, key: str = "Default") -> str:
     if f.func.name.overload_name:
-        return f"{cpp.name(f.func)}_{f.func.name.overload_name}"
+        name = f"{cpp.name(f.func)}_{f.func.name.overload_name}"
     else:
-        return cpp.name(f.func)
+        name = cpp.name(f.func)
+
+    # The key argument is only used in gen_variable_type where we need fns per autograd dispatch key.
+    # In gen_trace_type and gen_inplace_view_type where only one fn per native_fn must be generated,
+    # the key argument should not be passed.
+    # We do not append key if it is Default so that generated functions from
+    # before per-dispatch-key derivatives were added retain the same names.
+    if key != "Default":
+        name = name + f"_{key}"
+    return name
 
 
 @with_native_function
@@ -478,13 +482,13 @@ def method_definition(f: NativeFunction) -> str:
         # See Note [Plumbing Keys Through The Dispatcher] for details.
         ["c10::DispatchKeySet ks"]
         + [
-            f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
+            f'{cpp.argument_type(a, binds="__placeholder__", symint=True).cpp_type()} {a.name}'
             for a in f.func.schema_order_arguments()
         ]
     )
 
     return METHOD_DEFINITION.substitute(
-        return_type=cpp.returns_type(f.func.returns).cpp_type(),
+        return_type=cpp.returns_type(f.func.returns, symint=True).cpp_type(),
         type_wrapper_name=type_wrapper_name(f),
         formals=formals,
         type_definition_body=emit_trace_body(f),
@@ -530,7 +534,8 @@ def gen_trace_type(
         [fn for fn in native_functions if cpp.name(fn.func) not in MANUAL_TRACER],
         key_fn=lambda fn: fn.root_name,
         base_env={
-            "generated_comment": f"@generated from {template_path}/TraceType.cpp",
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/TraceType.cpp",
         },
         env_callable=gen_trace_type_func,
         num_shards=5,

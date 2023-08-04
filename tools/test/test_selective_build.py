@@ -1,8 +1,7 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import unittest
 
-from torchgen.selective_build.operator import *
+from torchgen.selective_build.operator import *  # noqa: F403
+from torchgen.model import Location, NativeFunction
 from torchgen.selective_build.selector import (
     combine_selective_builders,
     SelectiveBuilder,
@@ -279,3 +278,65 @@ include_all_non_op_selectives: True
         self.assertTrue(selector.is_kernel_dtype_selected("add_kernel", "int16"))
         self.assertTrue(selector.is_kernel_dtype_selected("add1_kernel", "int32"))
         self.assertTrue(selector.is_kernel_dtype_selected("add_kernel", "float"))
+
+    def test_custom_namespace_selected_correctly(self):
+        yaml_config = """
+operators:
+  aten::add.int:
+    is_used_for_training: No
+    is_root_operator: Yes
+    include_all_overloads: No
+  custom::add:
+    is_used_for_training: Yes
+    is_root_operator: No
+    include_all_overloads: Yes
+"""
+        selector = SelectiveBuilder.from_yaml_str(yaml_config)
+        native_function, _ = NativeFunction.from_yaml(
+            {"func": "custom::add() -> Tensor"},
+            loc=Location(__file__, 1),
+            valid_tags=set(),
+        )
+        self.assertTrue(selector.is_native_function_selected(native_function))
+
+
+class TestExecuTorchSelectiveBuild(unittest.TestCase):
+    def test_et_kernel_selected(self):
+        yaml_config = """
+et_kernel_metadata:
+  aten::add.out:
+   - "v1/6;0,1|6;0,1|6;0,1|6;0,1"
+  aten::sub.out:
+   - "v1/6;0,1|6;0,1|6;0,1|6;0,1"
+"""
+        selector = SelectiveBuilder.from_yaml_str(yaml_config)
+        self.assertListEqual(
+            ["v1/6;0,1|6;0,1|6;0,1|6;0,1"],
+            selector.et_get_selected_kernels(
+                "aten::add.out",
+                [
+                    "v1/6;0,1|6;0,1|6;0,1|6;0,1",
+                    "v1/3;0,1|3;0,1|3;0,1|3;0,1",
+                    "v1/6;1,0|6;0,1|6;0,1|6;0,1",
+                ],
+            ),
+        )
+        self.assertListEqual(
+            ["v1/6;0,1|6;0,1|6;0,1|6;0,1"],
+            selector.et_get_selected_kernels(
+                "aten::sub.out", ["v1/6;0,1|6;0,1|6;0,1|6;0,1"]
+            ),
+        )
+        self.assertListEqual(
+            [],
+            selector.et_get_selected_kernels(
+                "aten::mul.out", ["v1/6;0,1|6;0,1|6;0,1|6;0,1"]
+            ),
+        )
+        # We don't use version for now.
+        self.assertListEqual(
+            ["v2/6;0,1|6;0,1|6;0,1|6;0,1"],
+            selector.et_get_selected_kernels(
+                "aten::add.out", ["v2/6;0,1|6;0,1|6;0,1|6;0,1"]
+            ),
+        )

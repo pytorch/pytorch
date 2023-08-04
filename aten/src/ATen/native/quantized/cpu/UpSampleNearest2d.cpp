@@ -1,10 +1,18 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/UpSample.h>
-#include <ATen/native/cpu/Loops.h>
-#include <ATen/native/quantized/cpu/QuantizedOps.h>
-#include <ATen/quantized/Quantizer.h>
 #include <ATen/native/cpu/utils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_upsample_nearest_exact2d_native.h>
+#include <ATen/ops/upsample_nearest2d_native.h>
+#endif
 
 #include <c10/util/irange.h>
 
@@ -210,7 +218,7 @@ Tensor _upsample_nearest_exact2d_quantized_cpu(
   return _upsample_nearest2d_quantized_cpu<nearest_neighbor_exact_compute_source_index>(input, osize, scale_h, scale_w);
 }
 
-Tensor upsample_nearest2d_quantized_cpu(
+static Tensor upsample_nearest2d_quantized_cpu(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
@@ -220,7 +228,7 @@ Tensor upsample_nearest2d_quantized_cpu(
   return upsample_nearest2d_quantized_cpu(input, osize, scale_h, scale_w);
 }
 
-Tensor _upsample_nearest_exact2d_quantized_cpu(
+static Tensor _upsample_nearest_exact2d_quantized_cpu(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
     c10::optional<ArrayRef<double>> scale_factors) {

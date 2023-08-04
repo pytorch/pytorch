@@ -7,6 +7,29 @@ load(
 
 def define_targets(rules):
     rules.cc_library(
+        name = "caffe2_core_macros",
+        hdrs = [":caffe2_core_macros_h"],
+    )
+
+    rules.cmake_configure_file(
+        name = "caffe2_core_macros_h",
+        src = "caffe2/core/macros.h.in",
+        out = "caffe2/core/macros.h",
+        definitions = [
+            "CAFFE2_BUILD_SHARED_LIBS",
+            "CAFFE2_PERF_WITH_AVX",
+            "CAFFE2_PERF_WITH_AVX2",
+            "CAFFE2_PERF_WITH_AVX512",
+            "CAFFE2_USE_EXCEPTION_PTR",
+            "CAFFE2_USE_CUDNN",
+            "USE_MKLDNN",
+            "CAFFE2_USE_ITT",
+            "TORCH_DISABLE_GPU_ASSERTS",
+            "EIGEN_MPL2_ONLY",
+        ],
+    )
+
+    rules.cc_library(
         name = "caffe2_serialize",
         srcs = [
             "caffe2/serialize/file_adapter.cc",
@@ -14,18 +37,19 @@ def define_targets(rules):
             "caffe2/serialize/istream_adapter.cc",
             "caffe2/serialize/read_adapter_interface.cc",
         ],
+        copts = ["-fexceptions"],
         tags = [
+            "-fbcode",
             "supermodule:android/default/pytorch",
             "supermodule:ios/default/public.pytorch",
-            "-fbcode",
             "xplat",
         ],
         visibility = ["//visibility:public"],
         deps = [
             ":caffe2_headers",
-            "@com_github_glog//:glog",
             "//c10",
             "//third_party/miniz-2.1.0:miniz",
+            "@com_github_glog//:glog",
         ],
     )
 
@@ -68,19 +92,19 @@ def define_targets(rules):
     rules.genrule(
         name = "gen_aten",
         srcs = gen_aten_srcs,
-        tools = ["//torchgen:gen"],
         outs = gen_aten_outs,
         cmd = gen_aten_cmd,
+        tools = ["//torchgen:gen"],
     )
 
     rules.genrule(
         name = "gen_aten_hip",
         srcs = gen_aten_srcs,
-        tools = ["//torchgen:gen"],
         outs = gen_aten_outs_cuda,
         cmd = gen_aten_cmd + " --rocm",
         features = ["-create_bazel_outputs"],
         tags = ["-bazel"],
+        tools = ["//torchgen:gen"],
     )
 
     rules.genrule(
@@ -90,6 +114,7 @@ def define_targets(rules):
             ":DispatchKeyNativeFunctions.h",
             ":LazyIr.h",
             ":LazyNonNativeIr.h",
+            ":RegisterDispatchDefinitions.ini",
             ":RegisterDispatchKey.cpp",
             ":native_functions.yaml",
             ":shape_inference.h",
@@ -97,13 +122,13 @@ def define_targets(rules):
             ":ts_native_functions.cpp",
             ":ts_native_functions.yaml",
         ],
-        tools = ["//tools/setup_helpers:generate_code"],
         outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY,
         cmd = "$(execpath //tools/setup_helpers:generate_code) " +
               "--gen-dir=$(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +
               "--tags-path=$(location :tags.yaml) " +
               "--gen_lazy_ts_backend",
+        tools = ["//tools/setup_helpers:generate_code"],
     )
 
     rules.cc_library(
@@ -143,6 +168,7 @@ GENERATED_H = [
     "FunctionalInverses.h",
     "RedispatchFunctions.h",
     "RegistrationDeclarations.h",
+    "VmapGeneratedPlumbing.h",
 ]
 
 GENERATED_H_CORE = [
@@ -159,6 +185,8 @@ GENERATED_H_CORE = [
     "CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
     "CompositeImplicitAutogradFunctions.h",
     "CompositeImplicitAutogradFunctions_inl.h",
+    "CompositeImplicitAutogradNestedTensorFunctions.h",
+    "CompositeImplicitAutogradNestedTensorFunctions_inl.h",
     "MetaFunctions.h",
     "MetaFunctions_inl.h",
     "core/TensorBody.h",
@@ -190,8 +218,12 @@ GENERATED_CPP = [
     "RegisterSparseCsrCPU.cpp",
     "RegisterMkldnnCPU.cpp",
     "RegisterCompositeImplicitAutograd.cpp",
+    "RegisterCompositeImplicitAutogradNestedTensor.cpp",
     "RegisterZeroTensor.cpp",
     "RegisterMeta.cpp",
+    "RegisterQuantizedMeta.cpp",
+    "RegisterNestedTensorMeta.cpp",
+    "RegisterSparseMeta.cpp",
     "RegisterCompositeExplicitAutograd.cpp",
     "RegisterCompositeExplicitAutogradNonFunctional.cpp",
     "CompositeViewCopyKernels.cpp",
@@ -248,6 +280,7 @@ _GENERATED_AUTOGRAD_PYTHON_CPP = [
     "torch/csrc/autograd/generated/python_functions_3.cpp",
     "torch/csrc/autograd/generated/python_functions_4.cpp",
     "torch/csrc/autograd/generated/python_nn_functions.cpp",
+    "torch/csrc/autograd/generated/python_nested_functions.cpp",
     "torch/csrc/autograd/generated/python_fft_functions.cpp",
     "torch/csrc/autograd/generated/python_linalg_functions.cpp",
     "torch/csrc/autograd/generated/python_return_types.cpp",

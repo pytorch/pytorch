@@ -13,8 +13,8 @@ def tree_flatten_spec(pytree: PyTree, spec: TreeSpec) -> List[Any]:
         return [pytree]
     if spec.type not in SUPPORTED_NODES:
         raise RuntimeError(
-            f"{type(pytree)} does not have a flatten_fn_spec associated with it. Please register one with"
-            "torch.fx._pytree.register_pytree_flatten_spec.  If you have serialized your model, make"
+            f"{type(pytree)} does not have a flatten_fn_spec associated with it. Please register one with "
+            "torch.fx._pytree.register_pytree_flatten_spec.  If you have serialized your model, make "
             "sure that any custom pytrees have been registered before loading it.")
     flatten_fn_spec = SUPPORTED_NODES[spec.type]
     child_pytrees = flatten_fn_spec(pytree, spec)
@@ -25,7 +25,7 @@ def tree_flatten_spec(pytree: PyTree, spec: TreeSpec) -> List[Any]:
     return result
 
 def _dict_flatten_spec(d: Dict[Any, Any], spec: TreeSpec) -> List[Any]:
-    return list([d[k] for k in spec.context])
+    return [d[k] for k in spec.context]
 
 def _list_flatten_spec(d: List[Any], spec: TreeSpec) -> List[Any]:
     return [d[i] for i in range(len(spec.children_specs))]

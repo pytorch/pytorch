@@ -1,11 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/native/Pool.h>
 #include <c10/util/irange.h>
 #include <tuple>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/max_pool3d_with_indices_backward_native.h>
+#include <ATen/ops/max_pool3d_with_indices_native.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 namespace at {
 namespace native {
@@ -154,7 +164,7 @@ void max_pool3d_with_indices_out_cpu_template(
   const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
   const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
 
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 3,
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 3,
     "max_pool3d: stride must either be omitted, a single int, or a tuple of three ints")
   const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
   const int dH = stride.empty() ? kH :
@@ -163,7 +173,7 @@ void max_pool3d_with_indices_out_cpu_template(
                  stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 3,
-    "max_pool3d: padding must be either be a single int, or a tuple of three ints");
+    "max_pool3d: padding must either be a single int, or a tuple of three ints");
   const int pT = safe_downcast<int, int64_t>(padding[0]);
   const int pH = padding.size() == 1 ? pT : safe_downcast<int, int64_t>(padding[1]);
   const int pW = padding.size() == 1 ? pT : safe_downcast<int, int64_t>(padding[2]);
@@ -362,7 +372,7 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
   const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
   const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
 
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 3,
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 3,
     "max_pool3d: stride must either be omitted, a single int, or a tuple of three ints")
   const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
   const int dH = stride.empty() ? kH :
@@ -371,7 +381,7 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
                  stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 3,
-    "max_pool3d: padding must be either be a single int, or a tuple of three ints");
+    "max_pool3d: padding must either be a single int, or a tuple of three ints");
   const int pT = safe_downcast<int, int64_t>(padding[0]);
   const int pH = padding.size() == 1 ? pT : safe_downcast<int, int64_t>(padding[1]);
   const int pW = padding.size() == 1 ? pT : safe_downcast<int, int64_t>(padding[2]);

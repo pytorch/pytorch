@@ -7,7 +7,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   // Note(Yangqing): this one is copied from my Caffe implementation.
   auto& X = Input(0);
 
-  DCHECK_EQ(X.dim(), 4);
+  TORCH_DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
@@ -81,7 +81,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   // variants have I written...?
   auto& X = Input(0);
 
-  DCHECK_EQ(X.dim(), 4);
+  TORCH_DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
   const int W = X.dim32(2);
@@ -135,7 +135,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   auto& Y = Input(1);
   auto& dY = Input(2);
 
-  DCHECK_EQ(X.dim(), 4);
+  TORCH_DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
@@ -143,8 +143,8 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const int image_size = C * H * W;
   // Loosely checking the size, assuming that the shapes will be the same as
   // long as the sizes check out.
-  DCHECK_EQ(X.numel(), Y.numel());
-  DCHECK_EQ(X.numel(), dY.numel());
+  TORCH_DCHECK_EQ(X.numel(), Y.numel());
+  TORCH_DCHECK_EQ(X.numel(), dY.numel());
   auto* dX = Output(0, X.sizes(), at::dtype<float>());
 
   const float* Xdata = X.data<float>();
@@ -248,7 +248,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   auto& Y = Input(1);
   auto& dY = Input(2);
 
-  DCHECK_EQ(X.dim(), 4);
+  TORCH_DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
   const int W = X.dim32(2);
@@ -257,8 +257,8 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   const float* Xdata = X.data<float>();
   // Loosely checking the size, assuming that the shapes will be the same as
   // long as the sizes check out.
-  DCHECK_EQ(X.numel(), Y.numel());
-  DCHECK_EQ(X.numel(), dY.numel());
+  TORCH_DCHECK_EQ(X.numel(), Y.numel());
+  TORCH_DCHECK_EQ(X.numel(), dY.numel());
   auto* dX = Output(0, X.sizes(), at::dtype<float>());
   if (!scale_) {
     scale_ = &local_scale_tensor_;
@@ -342,8 +342,8 @@ $$b_{c} = a_{c}(bias + \frac{\alpha}{n}\sum_{c'=max(0,c-n/2)}^{min(N-1,c+n/2)} a
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/local_response_normalization_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/local_response_normalization_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/local_response_normalization_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/local_response_normalization_op.cc
 
 
 <details>

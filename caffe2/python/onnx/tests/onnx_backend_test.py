@@ -186,6 +186,11 @@ backend_test.exclude('(test_layer_normalization_.*'
                      '|test_sequencemap_.*'
                      ')')
 
+# Unsupported ops in opset 18
+backend_test.exclude('(test_center_crop_pad_.*'
+                     '|test_col2im*'
+                     '|test_bitwise*)')
+
 # Skip vgg to speed up CI
 if 'JENKINS_URL' in os.environ:
     backend_test.exclude(r'(test_vgg19|test_vgg)')

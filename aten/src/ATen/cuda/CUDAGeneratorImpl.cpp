@@ -101,6 +101,7 @@ CUDAGeneratorImpl::CUDAGeneratorImpl(DeviceIndex device_index)
   : c10::GeneratorImpl{Device(DeviceType::CUDA, device_index),
               DispatchKeySet(c10::DispatchKey::CUDA)} {
   at::cuda::assertNotCapturing("Cannot construct a new CUDAGeneratorImpl");
+  no_reset_rnn_state_.clear();
 }
 
 /**
@@ -113,6 +114,29 @@ void CUDAGeneratorImpl::set_current_seed(uint64_t seed) {
   at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::set_current_seed");
   seed_ = seed;
   philox_offset_per_thread_ = 0;
+  no_reset_rnn_state_.clear();
+}
+
+/**
+ * Sets the offset to be used by curandStatePhilox4_32_10
+ *
+ * See Note [Acquire lock when using random generators]
+ */
+void CUDAGeneratorImpl::set_offset(uint64_t offset) {
+  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::set_offset");
+  // the set function checks if the offset is a multiple of 4.
+  set_philox_offset_per_thread(offset);
+  no_reset_rnn_state_.clear();
+}
+
+/**
+ * Gets the current offset of CUDAGeneratorImpl.
+ */
+uint64_t CUDAGeneratorImpl::get_offset() const {
+  // Debatable if get_offset() should be allowed in captured regions.
+  // Conservatively disallow it for now.
+  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::get_offset");
+  return philox_offset_per_thread_;
 }
 
 #define CAPTURE_DEFAULT_GENS_MSG \
@@ -151,24 +175,16 @@ uint64_t CUDAGeneratorImpl::seed() {
  */
 c10::intrusive_ptr<c10::TensorImpl> CUDAGeneratorImpl::get_state() const {
   // The RNG state comprises the seed, and an offset used for Philox.
-  // The following line is just here for BC reason. sizeof curandStateMtgp32 is 4120.
-  // It used to be static const size_t states_size = MAX_NUM_BLOCKS * sizeof(curandStateMtgp32);
-  // MAX_NUM_BLOCKS was 200 and sizeof(curandStateMtgp32) is 4120. Hardcoding these numbers here
-  // because this is just host side code and we don't want to worry about linking with cuda
-  static const size_t states_size = 200 * sizeof(4120);
   static const size_t seed_size = sizeof(uint64_t);
   static const size_t offset_size = sizeof(int64_t);
-  static const size_t total_size = states_size + seed_size + offset_size;
+  static const size_t total_size = seed_size + offset_size;
 
   auto state_tensor = at::detail::empty_cpu({(int64_t)total_size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
   auto rng_state = state_tensor.data_ptr<uint8_t>();
-  // since curandStateMTGP is not used anymore, fill gen_states of THCGenerator with deterministic garbage value of -1
-  // gen_states in THCGenerator struct was an array of curandStateMtgp32s.
-  memset(rng_state, -1, states_size);
   auto current_seed = this->current_seed();
   auto offset = static_cast<int64_t>(this->philox_offset_per_thread()); // Note that old THCGeneratorState had offset as std::atomic<int64_t>
-  memcpy(rng_state + states_size, &current_seed, seed_size);
-  memcpy(rng_state + states_size + seed_size, &offset, offset_size);
+  memcpy(rng_state, &current_seed, seed_size);
+  memcpy(rng_state + seed_size, &offset, offset_size);
 
   return state_tensor.getIntrusivePtr();
 }
@@ -180,10 +196,9 @@ c10::intrusive_ptr<c10::TensorImpl> CUDAGeneratorImpl::get_state() const {
  * and size of the internal state.
  */
 void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
-  static const size_t states_size = 200 * sizeof(4120); // this line is just here for BC reason
   static const size_t seed_size = sizeof(uint64_t);
   static const size_t offset_size = sizeof(int64_t);
-  static const size_t total_size = states_size + seed_size + offset_size;
+  static const size_t total_size = seed_size + offset_size;
 
   detail::check_rng_state(new_state);
 
@@ -196,12 +211,12 @@ void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   }
 
   uint64_t input_seed;
-  auto new_rng_state = new_state.data<uint8_t>();
-  memcpy(&input_seed, new_rng_state + states_size, seed_size);
+  auto new_rng_state = new_state.data_dtype_initialized<uint8_t>();
+  memcpy(&input_seed, new_rng_state, seed_size);
   this->set_current_seed(input_seed);
   int64_t philox_offset = 0;
   if (!no_philox_seed) {
-    memcpy(&philox_offset, new_rng_state + states_size + seed_size, offset_size);
+    memcpy(&philox_offset, new_rng_state + seed_size, offset_size);
   }
   this->set_philox_offset_per_thread(static_cast<uint64_t>(philox_offset));
 }
@@ -231,7 +246,8 @@ uint64_t CUDAGeneratorImpl::philox_offset_per_thread() const {
  * offset_extragraph is the initial offset at the start of the graphed region.
  * offset_intragraph tracks the offset in the graphed region.
  */
-void CUDAGeneratorImpl::capture_prologue(int64_t* offset_extragraph) {
+void CUDAGeneratorImpl::capture_prologue(int64_t* seed_extragraph, int64_t* offset_extragraph) {
+  seed_extragraph_ = seed_extragraph;
   offset_extragraph_ = offset_extragraph;
   offset_intragraph_ = 0;
   graph_expects_this_gen_ = true;
@@ -279,7 +295,7 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
     TORCH_INTERNAL_ASSERT(this->offset_intragraph_ <=
                           std::numeric_limits<uint32_t>::max() - increment);
     this->offset_intragraph_ += increment;
-    return PhiloxCudaState(this->seed_,
+    return PhiloxCudaState(this->seed_extragraph_,
                            this->offset_extragraph_,
                            offset);
   } else {

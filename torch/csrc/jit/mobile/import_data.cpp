@@ -7,6 +7,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/file_format.h>
+#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/import_export_common.h>
 #include <torch/csrc/jit/mobile/module.h>
@@ -174,7 +175,7 @@ std::map<std::string, at::Tensor> load_parameters_from_zip(
   auto result = unpickler.deserialize(device).toGenericDict();
   std::map<std::string, at::Tensor> map;
   for (const auto& e : result) {
-    auto key = e.key().toString()->string();
+    auto key = e.key().toStringRef();
     auto value = e.value().toTensor().tensor_data();
     map[key] = value;
   }
@@ -237,7 +238,7 @@ std::map<std::string, at::Tensor> mobile_module_to_parameter_map(
       "' in deserialized mobile::Module");
 }
 
-std::map<std::string, at::Tensor> _load_parameters_bytes(
+static std::map<std::string, at::Tensor> _load_parameters_bytes(
     std::shared_ptr<char> data,
     size_t size,
     c10::optional<at::Device> device) {
@@ -247,14 +248,8 @@ std::map<std::string, at::Tensor> _load_parameters_bytes(
   std::map<std::string, at::Tensor> map;
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
-      if (load_flatbuffer_bytes_no_object != nullptr) {
-        auto m = load_flatbuffer_bytes_no_object(data, size, device);
-        map = mobile_module_to_parameter_map(m);
-      } else {
-        TORCH_CHECK(
-            false,
-            "Flatbuffer input file but the build hasn't enabled flatbuffer");
-      }
+      auto m = parse_flatbuffer_no_object(data, size, device);
+      map = mobile_module_to_parameter_map(m);
       break;
     }
 

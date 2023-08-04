@@ -3,7 +3,7 @@ from typing import List, Optional, Dict
 
 import torch.fx
 from torch.fx.graph import map_arg
-from .tools_common import NodeList, NodeSet
+from .tools_common import NodeList
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.utils import lift_subgraph_as_module, HolderModule
 
@@ -130,7 +130,7 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
     all_components: List[Component] = []
 
     # Stores nodes that will be used in main graph.
-    used_in_main: NodeSet = set()
+    used_in_main: Dict[torch.fx.Node, None] = {}
 
     # Main graph after split.
     main_g = torch.fx.Graph()
@@ -181,7 +181,7 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
         # Max order of upperstream components.
         mx = max((c.order for c in upstream_components), default=0)
 
-        # Expect the componet for `node` has higher order then its upstream components.
+        # Expect the component for `node` has higher order then its upstream components.
         assert comp.order >= mx
 
         # Map a input of `node` to nodes in the component's graph.
@@ -208,7 +208,7 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
                 comp.input_placeholders.append(
                     comp.graph.placeholder(x.name, type_expr=x.type)
                 )
-                used_in_main.add(x)
+                used_in_main[x] = None
 
             return comp.input_placeholders[
                 next(i for i, y in enumerate(comp.orig_inputs) if x is y)
@@ -231,7 +231,7 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
         else:
             # All component results consumed by the output node should be
             # marked as "used in main".
-            used_in_main.add(x)
+            used_in_main[x] = None
 
     # If a node is used in main graph then we mark it as an output in the component
     # it belongs to.

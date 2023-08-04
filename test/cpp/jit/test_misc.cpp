@@ -1,3 +1,4 @@
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
@@ -490,10 +491,20 @@ TEST(ControlFlowTest, Basic) {
   ASSERT_EQ(256, run_binary("while_test", 2, 0));
 }
 
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define HAS_ASANUBSAN 1
+#endif
+#endif
+
+#ifndef HAS_ASANUBSAN
+// This test fails vptr UBSAN checks
+
 TEST(ProtoTest, Basic) {
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
 }
+#endif
 
 // test a few features that are not directly used in schemas yet
 TEST(SchemaParserTest, NestedArrays) {
@@ -558,6 +569,37 @@ TEST(SchemaParserTest, Futures) {
 TEST(SchemaParserTest, AnnotatedAliasSets) {
   // test tensor with annotated alias sets
   parseSchema("at::what(Tensor(a) foo) -> (Tensor(a))");
+}
+
+TEST(SchemaParserTest, TensorListAnnotatedAliasSets) {
+  const auto s = parseSchema(
+      "at::foo(Tensor(a!) self, Tensor(b!)[] out)"
+      " -> ()");
+  const AliasInfo* selfAliasInfo = s.arguments().at(0).alias_info();
+  const AliasInfo* outAliasInfo = s.arguments().at(1).alias_info();
+  ASSERT_TRUE(
+      selfAliasInfo->beforeSets() ==
+      std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
+  ASSERT_TRUE(selfAliasInfo->isWrite());
+
+  ASSERT_TRUE(outAliasInfo->isWrite());
+  ASSERT_TRUE(outAliasInfo->beforeSets().empty());
+  ASSERT_EQ(outAliasInfo->containedTypes().size(), 1);
+
+  auto containedType = outAliasInfo->containedTypes()[0];
+
+  ASSERT_TRUE(containedType.isWrite());
+  ASSERT_TRUE(
+      containedType.beforeSets() ==
+      std::unordered_set<Symbol>{Symbol::fromQualString("alias::b")});
+}
+
+TEST(SchemaParserTest, AnnotatedAliasWithoutBeforeSet) {
+  EXPECT_THAT(
+      []() { parseSchema("at::foo(Tensor(!) self) -> Tensor"); },
+      ::testing::Throws<std::runtime_error>(::testing::Property(
+          &std::runtime_error::what,
+          ::testing::HasSubstr("expected ident but found '!' here"))));
 }
 
 TEST(SchemaParserTest, BeforeAfterSets) {
@@ -1130,7 +1172,7 @@ TEST(RecordFunctionTest, Callbacks) {
         },
         [](const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
           auto ctx = dynamic_cast<TestContext*>(ctx_ptr);
-          TORCH_CHECK(ctx_ptr != nullptr);
+          TORCH_CHECK(ctx != nullptr);
           TORCH_CHECK(ctx->a == 123);
           TORCH_CHECK(ctx->b == "test_str");
         }));
@@ -1293,8 +1335,8 @@ class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
     model_id_ = model_id;
   }
 
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~TestThreadLocalDebugInfo() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  virtual ~TestThreadLocalDebugInfo() override {}
 
  private:
   int model_id_ = 0;
@@ -2357,6 +2399,28 @@ TEST(FuturesTest, Basic) {
   ASSERT_EQ(sat2, 1);
 }
 
+// Sparse CUDA tensor test
+TEST(FutureTest, SparseTensor) {
+  // Skip test if CUDA is not available.
+  bool has_cuda = at::globalContext().hasCUDA();
+  if (!has_cuda) {
+    LOG(INFO) << "CUDA not available, skipping test";
+  }
+  for (int i = 0; i < 2; ++i) {
+    auto f = c10::make_intrusive<Future>(TensorType::get());
+    at::TensorOptions opts = at::TensorOptions().device(at::DeviceType::CUDA);
+    auto sparse_tensor = i == 0 ? at::ones(10).to_sparse()
+                                : at::sparse_coo_tensor(
+                                      at::arange(10).unsqueeze(0).to(at::kLong),
+                                      at::ones({10, 10}),
+                                      opts);
+    // Runs storage extraction for sparse CUDA tensors
+    f->markCompleted(sparse_tensor);
+    ASSERT_TRUE(f->completed());
+    ASSERT_FALSE(f->hasError());
+  }
+}
+
 // Basic error cases.
 TEST(FuturesTest, Error) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
@@ -3000,8 +3064,7 @@ TEST(TestShapeGraphLinting, Basic) {
 // fusion parameters
 class Composed : public ::testing::Test {
  public:
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  void SetUp() {
+  void SetUp() override {
     torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
   }
 };
@@ -3068,6 +3131,29 @@ TEST_F(Composed, ComposedOp) {
   ASSERT_TRUE(at::allclose(inp_2, ref1));
   torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = fusable_on_device;
 #endif
+}
+
+TEST(ConstantPropagation, CustomClassesCanBePropagated) {
+  const auto src = R"IR(
+    graph():
+        %none: NoneType = prim::Constant()
+        %dim: int = prim::Constant[value=3]()
+        %shape: int[] = prim::ListConstruct(%dim, %dim)
+        %weight: Tensor = aten::ones(%shape, %none, %none, %none, %none)
+        %scale: float = prim::Constant[value=1.]()
+        %zero_point: int = prim::Constant[value=0]()
+        %dtype: int = prim::Constant[value=12]()
+        %weight_q: Tensor = aten::quantize_per_tensor(%weight, %scale, %zero_point, %dtype)
+        %params: __torch__.torch.classes.quantized.LinearPackedParamsBase = quantized::linear_prepack(%weight_q, %none)
+        return (%params)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+
+  ConstantPropagation(graph);
+
+  testing::FileCheck().check_not("quantized::linear_prepack")->run(*graph);
 }
 
 } // namespace jit

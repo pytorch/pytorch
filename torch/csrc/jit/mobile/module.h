@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/mobile/debug_info.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/method.h>
+#include <torch/csrc/jit/mobile/quantization.h>
 
 namespace torch {
 namespace jit {
@@ -42,6 +43,10 @@ class CompilationUnit {
   Function* find_function(const c10::QualifiedName& qn);
   const Function* find_function(const c10::QualifiedName& qn) const;
 
+  void unsafeRemoveFunction(const int64_t index) {
+    methods_.erase(methods_.begin() + index);
+  }
+
  private:
   std::vector<std::unique_ptr<Function>> methods_;
 };
@@ -57,10 +62,9 @@ class CompilationUnit {
 class TORCH_API Module {
  public:
   Module(
-      // NOLINTNEXTLINE(modernize-pass-by-value)
       c10::intrusive_ptr<c10::ivalue::Object> object,
       std::shared_ptr<CompilationUnit> cu)
-      : object_(object), cu_(std::move(cu)) {}
+      : object_(std::move(object)), cu_(std::move(cu)) {}
   Module() = default;
   Method get_method(const std::string& method_name) const;
   template <typename... Types>
@@ -71,6 +75,7 @@ class TORCH_API Module {
     return get_method("forward")(std::move(inputs));
   }
   c10::optional<Method> find_method(const std::string& basename) const;
+
   const std::string name() const {
     return object_->name();
   }
@@ -152,6 +157,18 @@ class TORCH_API Module {
   }
 
  private:
+  friend class quantization::PTQQuanizationHelper;
+
+  bool compareMethodSchemas(
+      const std::string& name_1,
+      const std::string& name_2);
+
+  void unsafeRemoveMethod(const std::string& basename);
+
+  void unsafeCopyMethod(
+      const std::string& new_method_name,
+      const Function& to_be_copied);
+
   c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::unordered_map<std::string, std::string> metadata_;
   std::shared_ptr<CompilationUnit> cu_;

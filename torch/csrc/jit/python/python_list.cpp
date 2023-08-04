@@ -4,10 +4,10 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_list.h>
+#include <torch/csrc/utils/pybind.h>
 #include <stdexcept>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 IValue ScriptListIterator::next() {
   if (iter_ == end_) {
@@ -63,7 +63,7 @@ void initScriptListBindings(PyObject* module) {
       .def(py::init([](py::list list) {
         TypePtr type = nullptr;
 
-        if (list.size() > 0) {
+        if (!list.empty()) {
           // If the source list is nonempty, try to infer its type.
           auto inferred_type = tryToInferType(list);
 
@@ -96,7 +96,7 @@ void initScriptListBindings(PyObject* module) {
       .def(
           "__len__",
           [](const std::shared_ptr<ScriptList>& self) {
-            return toPyObject(self->len());
+            return toPyObject(static_cast<int64_t>(self->len()));
           })
       .def(
           "__contains__",
@@ -289,7 +289,7 @@ void initScriptListBindings(PyObject* module) {
           [](py::list list) { // __setstate__
             TypePtr type = nullptr;
 
-            if (list.size() > 0) {
+            if (!list.empty()) {
               // If the source list is nonempty, try to infer its type.
               auto inferred_type = tryToInferType(list);
 
@@ -312,5 +312,4 @@ void initScriptListBindings(PyObject* module) {
           }));
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

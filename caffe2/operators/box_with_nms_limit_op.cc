@@ -161,14 +161,14 @@ const auto& tscores = Input(0);
 
       // Pick the first `detections_per_im_` boxes with highest scores
       auto all_scores_sorted = get_all_scores_sorted();
-      DCHECK_GT(all_scores_sorted.size(), detections_per_im_);
+      TORCH_DCHECK_GT(all_scores_sorted.size(), detections_per_im_);
 
       // Reconstruct keeps from `all_scores_sorted`
       for (auto& cur_keep : keeps) {
         cur_keep.clear();
       }
       for (int i = 0; i < detections_per_im_; i++) {
-        DCHECK_GT(all_scores_sorted.size(), i);
+        TORCH_DCHECK_GT(all_scores_sorted.size(), i);
         auto& cur = all_scores_sorted[i];
         keeps[cur.first].push_back(cur.second);
       }
@@ -262,7 +262,7 @@ returned boxes.
 )DOC")
     .Arg("score_thresh", "(float) TEST.SCORE_THRESH")
     .Arg("nms", "(float) TEST.NMS")
-    .Arg("detections_per_im", "(int) TEST.DEECTIONS_PER_IM")
+    .Arg("detections_per_im", "(int) TEST.DETECTIONS_PER_IM")
     .Arg("soft_nms_enabled", "(bool) TEST.SOFT_NMS.ENABLED")
     .Arg("soft_nms_method", "(string) TEST.SOFT_NMS.METHOD")
     .Arg("soft_nms_sigma", "(float) TEST.SOFT_NMS.SIGMA")
@@ -280,7 +280,7 @@ returned boxes.
         "boxes",
         "Bounding box for each class, size (count, num_classes * 4). "
         "For rotated boxes, this would have an additional angle (in degrees) "
-        "in the format [<optionaal_batch_id>, ctr_x, ctr_y, w, h, angle]. "
+        "in the format [<optional_batch_id>, ctr_x, ctr_y, w, h, angle]. "
         "Size: (count, num_classes * 5).")
     .Input(
         2,

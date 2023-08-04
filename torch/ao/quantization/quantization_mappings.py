@@ -4,18 +4,21 @@ import torch
 from torch import nn
 
 import torch.nn.functional as F
-import torch.nn.intrinsic as nni
-import torch.nn.intrinsic.quantized as nniq
-import torch.nn.intrinsic.quantized.dynamic as nniqd
-import torch.nn.intrinsic.qat as nniqat
-import torch.nn.quantized as nnq
-import torch.nn.quantized._reference as nnqr
-import torch.nn.quantized.dynamic as nnqd
-import torch.nn.qat as nnqat
-import torch.nn.qat.dynamic as nnqatd
+import torch.ao.nn.intrinsic as nni
+import torch.ao.nn.intrinsic.quantized as nniq
+import torch.ao.nn.intrinsic.quantized.dynamic as nniqd
+import torch.ao.nn.intrinsic.qat as nniqat
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.reference as nnqr
+import torch.ao.nn.quantized.dynamic as nnqd
+import torch.ao.nn.qat as nnqat
+import torch.ao.nn.qat.dynamic as nnqatd
 
 from typing import Optional, Union, Dict, Set, Callable, Any
 
+# Because `torch.ao.nn` uses lazy imports, we need to make
+# sure we import the contents explicitly here.
+import torch.ao.nn.sparse
 import torch.ao.nn as ao_nn
 from torch.ao.quantization.stubs import QuantStub, DeQuantStub
 from torch.ao.quantization.fake_quantize import (
@@ -24,6 +27,32 @@ from torch.ao.quantization.fake_quantize import (
 )
 from torch.ao.quantization.utils import get_combined_dict
 from torch.nn.utils.parametrize import type_before_parametrizations
+
+__all__ = [
+    "DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS",
+    "DEFAULT_STATIC_QUANT_MODULE_MAPPINGS",
+    "DEFAULT_QAT_MODULE_MAPPINGS",
+    "DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS",
+    "DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS",
+    "DEFAULT_MODULE_TO_ACT_POST_PROCESS",
+    "DEFAULT_STATIC_SPARSE_QUANT_MODULE_MAPPINGS",
+    "DEFAULT_DYNAMIC_SPARSE_QUANT_MODULE_MAPPINGS",
+    "no_observer_set",
+    "get_default_static_quant_module_mappings",
+    "get_default_static_quant_reference_module_mappings",
+    "get_embedding_static_quant_module_mappings",
+    "get_default_static_sparse_quant_module_mappings",
+    "get_static_quant_module_class",
+    "get_dynamic_quant_module_class",
+    "get_default_qat_module_mappings",
+    "get_embedding_qat_module_mappings",
+    "get_default_dynamic_quant_module_mappings",
+    "get_default_dynamic_sparse_quant_module_mappings",
+    "get_default_qconfig_propagation_list",
+    "get_default_compare_output_module_list",
+    "get_default_float_to_quantized_operator_mappings",
+    "get_quantized_operator",
+]
 
 # Default map for swapping float module to reference quantized modules
 DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
@@ -71,6 +100,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Linear: nnq.Linear,
     nn.ReLU6: nnq.ReLU6,
     nn.Dropout: nnq.Dropout,
+    nn.PReLU: nnq.PReLU,
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
     # Intrinsic modules:
@@ -79,7 +109,11 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nni.ConvReLU1d: nniq.ConvReLU1d,
     nni.ConvReLU2d: nniq.ConvReLU2d,
     nni.ConvReLU3d: nniq.ConvReLU3d,
+    nni.ConvAdd2d: nniq.ConvAdd2d,
+    nni.ConvAddReLU2d: nniq.ConvAddReLU2d,
     nni.LinearReLU: nniq.LinearReLU,
+    nni.LinearLeakyReLU: nniq.LinearLeakyReLU,
+    nni.LinearTanh: nniq.LinearTanh,
     nniqat.ConvBn1d: nnq.Conv1d,
     nniqat.ConvBn2d: nnq.Conv2d,
     nniqat.ConvBn3d: nnq.Conv3d,
@@ -174,10 +208,10 @@ DEFAULT_DYNAMIC_SPARSE_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
 
 def no_observer_set() -> Set[Any]:
     r"""These modules cannot have observers inserted by default."""
-    no_observers = set([
+    no_observers = {
         nn.quantizable.LSTM,
         nn.quantizable.MultiheadAttention
-    ])
+    }
     return no_observers
 
 def get_default_static_quant_module_mappings() -> Dict[Callable, Any]:
@@ -217,7 +251,7 @@ def get_static_quant_module_class(
         else DEFAULT_STATIC_QUANT_MODULE_MAPPINGS, additional_static_quant_mapping)
     static_quant_module_class = all_mappings.get(float_module_class, None)
     assert static_quant_module_class is not None, \
-        "Floating point module class {}".format(str(float_module_class)) + \
+        f"Floating point module class {str(float_module_class)}" + \
         " does not have a corresponding quantized module class"
     return copy.deepcopy(static_quant_module_class)
 
@@ -232,7 +266,7 @@ def get_dynamic_quant_module_class(
     all_mappings = get_combined_dict(DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS, additional_dynamic_quant_mapping)
     dynamic_quant_module_class = all_mappings.get(float_module_class, None)
     assert dynamic_quant_module_class is not None, \
-        "Floating point module class {}".format(str(float_module_class)) + \
+        f"Floating point module class {str(float_module_class)}" + \
         " does not have a corresponding quantized module class"
     return copy.deepcopy(dynamic_quant_module_class)
 
@@ -266,10 +300,10 @@ def get_default_qconfig_propagation_list() -> Set[Callable]:
     attribute to in prepare
     '''
     QCONFIG_PROPAGATE_MODULE_CLASS_LIST = (
-        (set(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.keys()) |
-         set(DEFAULT_QAT_MODULE_MAPPINGS.keys()) |
-         set(DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS.keys()) |
-         _INCLUDE_QCONFIG_PROPAGATE_LIST)
+        set(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.keys()) |
+        set(DEFAULT_QAT_MODULE_MAPPINGS.keys()) |
+        set(DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS.keys()) |
+        _INCLUDE_QCONFIG_PROPAGATE_LIST
     )
     return copy.deepcopy(QCONFIG_PROPAGATE_MODULE_CLASS_LIST)
 
@@ -298,7 +332,7 @@ def get_quantized_operator(float_op: Union[Callable, str]) -> Callable:
     '''
     quantized_op = DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS.get(float_op, None)
     assert quantized_op is not None, \
-        'Operator {} does not have corresponding quantized op'.format(str(float_op))
+        f'Operator {str(float_op)} does not have corresponding quantized op'
     return quantized_op
 
 def _get_special_act_post_process(module: torch.nn.Module) -> Optional[Callable]:

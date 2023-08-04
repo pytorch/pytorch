@@ -1,5 +1,7 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/mkl/LinearAlgebra.h>
+#include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/Config.h>
 
 #include <c10/util/SmallBuffer.h>
@@ -19,8 +21,8 @@ extern "C" void zgemm_(char *transa, char *transb, int *m, int *n, int *k, void 
 #ifdef BLAS_HAS_SBGEMM
 extern "C" void sbgemm_(char *transa, char *transb, int *m, int *n, int *k,
                 float *alpha,
-                const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *a, int *lda,
-                const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *b, int *ldb,
+                const at::BFloat16 *a, int *lda,
+                const at::BFloat16 *b, int *ldb,
                 float *beta,
                 float *c, int *ldc);
 #endif  // BLAS_HAS_SBGEMM
@@ -288,19 +290,19 @@ void gemm(
 void gemm(
    TransposeType transa, TransposeType transb,
    int64_t m, int64_t n, int64_t k,
-   const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) alpha,
-   const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *a, int64_t lda,
-   const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *b, int64_t ldb,
-   const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) beta,
-   decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *c, int64_t ldc) {
+   const float alpha,
+   const at::BFloat16 *a, int64_t lda,
+   const at::BFloat16 *b, int64_t ldb,
+   const float beta,
+   at::BFloat16 *c, int64_t ldc) {
    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SBGEMM)
    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
-      // alpha and beta and C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
-      float alpha_ = (float) alpha, beta_ = (float) beta;
+      float alpha_ = alpha, beta_ = beta;
       int c_size = n_ * ldc_;
+      // C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
       std::vector<float> float_v(c, c + c_size);
       sbgemm_(&transa_, &transb_,
               &m_, &n_, &k_,
@@ -310,9 +312,14 @@ void gemm(
               &beta_,
               float_v.data(), &ldc_);
       for (auto cv: float_v) {
-        *(c++) = static_cast<_bfloat16_t>(cv);
+        *(c++) = c10::convert<at::BFloat16>(cv);
       }
       return;
+   }
+#endif
+#if AT_MKLDNN_ENABLED()
+   if (mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+     return;
    }
 #endif
    gemm_stub(
@@ -414,22 +421,19 @@ void gemm_batched(
     return gemm(transa, transb, m, n, k, alpha, a[0], lda, b[0], ldb, beta, c[0], ldc);
   }
 
-  c10::guts::if_constexpr<AT_MKL_ENABLED() && is_blas_library_type<scalar_t>::value>(
-      [&](auto _) {
-        internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
-        if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
-          gemm_batched_mkl_impl(
-              transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
-        } else {
-          gemm_batched_generic(
-              transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
-        }
-      },
-      [&](auto _) {
-        gemm_batched_generic(
-            transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
-      }
-    );
+  if constexpr (AT_MKL_ENABLED() && is_blas_library_type<scalar_t>::value) {
+    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+      gemm_batched_mkl_impl(
+          transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+    } else {
+      gemm_batched_generic(
+          transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+    }
+  } else {
+    gemm_batched_generic(
+        transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+  }
 }
 
 template <typename scalar_t>
@@ -462,33 +466,31 @@ void gemm_batched_with_stride(
     return gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
   }
 
-  c10::guts::if_constexpr<AT_MKL_ENABLED() && is_blas_library_type<scalar_t>::value>(
-      [&](auto _) {
-        internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
-        if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
-          c10::SmallBuffer<const scalar_t*, 16> a_ptrs(batch_size);
-          c10::SmallBuffer<const scalar_t*, 16> b_ptrs(batch_size);
-          c10::SmallBuffer<scalar_t*, 16> c_ptrs(batch_size);
+  if constexpr (AT_MKL_ENABLED() && is_blas_library_type<scalar_t>::value) {
+    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+      c10::SmallBuffer<const scalar_t*, 16> a_ptrs(batch_size);
+      c10::SmallBuffer<const scalar_t*, 16> b_ptrs(batch_size);
+      c10::SmallBuffer<scalar_t*, 16> c_ptrs(batch_size);
 
-          for (const auto batch : c10::irange(batch_size)) {
-            a_ptrs[batch] = a + batch_stride_a * batch;
-            b_ptrs[batch] = b + batch_stride_b * batch;
-            c_ptrs[batch] = c + batch_stride_c * batch;
-          }
-          gemm_batched_mkl_impl(
-              transa, transb, batch_size, m, n, k, alpha, a_ptrs.data(), lda,
-              b_ptrs.data(), ldb, beta, c_ptrs.data(), ldc);
-        } else {
-          gemm_batched_with_stride_generic(
-              transa, transb, batch_size, m, n, k, alpha, a, lda, batch_stride_a,
-              b, ldb, batch_stride_b, beta, c, ldc, batch_stride_c);
-        }
-      },
-      [&](auto _) {
-        gemm_batched_with_stride_generic(transa, transb, batch_size, m, n, k, alpha,
-                                         a, lda, batch_stride_a, b, ldb, batch_stride_b,
-                                         beta, c, ldc, batch_stride_c);
-      });
+      for (const auto batch : c10::irange(batch_size)) {
+        a_ptrs[batch] = a + batch_stride_a * batch;
+        b_ptrs[batch] = b + batch_stride_b * batch;
+        c_ptrs[batch] = c + batch_stride_c * batch;
+      }
+      gemm_batched_mkl_impl(
+          transa, transb, batch_size, m, n, k, alpha, a_ptrs.data(), lda,
+          b_ptrs.data(), ldb, beta, c_ptrs.data(), ldc);
+    } else {
+      gemm_batched_with_stride_generic(
+          transa, transb, batch_size, m, n, k, alpha, a, lda, batch_stride_a,
+          b, ldb, batch_stride_b, beta, c, ldc, batch_stride_c);
+    }
+  } else {
+    gemm_batched_with_stride_generic(transa, transb, batch_size, m, n, k, alpha,
+                                     a, lda, batch_stride_a, b, ldb, batch_stride_b,
+                                     beta, c, ldc, batch_stride_c);
+  }
 }
 
 #define INSTANTIATE_BATCHED_GEMM(scalar_t, DType)               \

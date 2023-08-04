@@ -1,25 +1,25 @@
-#include <c10d/reducer.hpp>
+#include <torch/csrc/distributed/c10d/reducer.hpp>
 
-#include <c10d/Utils.hpp>
-#include <c10d/default_comm_hooks.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/default_comm_hooks.hpp>
 
 #include <functional>
 
 #include <c10/core/DeviceGuard.h>
+#include <c10/core/ScalarType.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
-#include <c10d/comm.hpp>
-#include <c10d/logger.hpp>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
-#include <torch/csrc/distributed/c10d/Ops.hpp>
+#include <torch/csrc/distributed/c10d/comm.hpp>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
@@ -109,6 +109,8 @@ Reducer::Reducer(
       gradient_as_bucket_view_(gradient_as_bucket_view),
       local_used_map_reduced_(false),
       num_iterations_(0),
+      num_bwd_calls_(0),
+      first_autograd_hook_called_(false),
       num_buckets_ready_(0),
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
@@ -119,8 +121,7 @@ Reducer::Reducer(
       param_names_(std::move(param_names)),
       first_bucket_bytes_cap_(first_bucket_bytes_cap) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
-  TORCH_INTERNAL_ASSERT(
-      params_.size() >= 1, "Expected at least one parameter.");
+  TORCH_INTERNAL_ASSERT(!params_.empty(), "Expected at least one parameter.");
 
   if (ddp_debug_level_ != c10d::DebugLevel::Off) {
     LOG(INFO) << "Reducer initialized with bucket_bytes_cap: "
@@ -260,18 +261,7 @@ Reducer::Reducer(
 // be specified by calling `register_builtin_comm_hook` from Python API.
 
 Reducer::~Reducer() noexcept(false) {
-  // Remove all hooks on variables registered by this Reducer. This is necessary
-  // to make DDP failure recoverable. Otherwise, multiple Reducer instances
-  // (from recoveries) will add their hooks to the original model, and those
-  // hooks will try to invoke methods on a deleted Reducer objects.
-  for (auto& hook : hooks_) {
-    auto& key = hook.first;
-    auto& grad_accumulator = hook.second;
-
-    TORCH_INTERNAL_ASSERT(
-        grad_accumulator->del_post_hook(key),
-        "Reducer attempts to delete a non-existing hook.");
-  }
+  remove_autograd_hooks();
 }
 
 bool Reducer::dynamic_graph_find_unused() {
@@ -279,11 +269,11 @@ bool Reducer::dynamic_graph_find_unused() {
 }
 
 bool Reducer::static_graph_first_iteration() {
-  return static_graph_ && num_iterations_ == 1;
+  return static_graph_ && num_bwd_calls_ == 1;
 }
 
 bool Reducer::static_graph_after_first_iteration() {
-  return static_graph_ && num_iterations_ > 1;
+  return static_graph_ && num_bwd_calls_ > 1;
 }
 
 bool Reducer::ddp_graph_static() {
@@ -310,11 +300,16 @@ void Reducer::initialize_local_used_map() {
 void Reducer::check_grad_layout(
     const at::Tensor& grad,
     const at::Tensor& bucket_view) {
-  // Ensure that the gradient type matches the bucket type.
+  // Ensure that the gradient type matches the bucket type, or mixed precision
+  // type if we are training with mixed precision.
+  auto type = mixed_precision_param_dtype_
+      ? *mixed_precision_param_dtype_
+      : bucket_view.options().dtype().toScalarType();
   REDUCER_CHECK(
-      grad.options().type_equal(bucket_view.options()),
+      grad.options().dtype().toScalarType() == type,
       logger_,
-      c10::str("Expected ", bucket_view.toString(), ", got ", grad.toString()));
+      c10::str(
+          "Expected ", type, ", got ", grad.options().dtype().toScalarType()));
 
   TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
   TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view.numel());
@@ -371,6 +366,9 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
           if (!grad.requires_grad()) {
             // Divides while copying into the bucket view to save one scan over
             // all the input parameters.
+            RECORD_FUNCTION(
+                "torch::distributed::reducer::mul_out",
+                std::vector<c10::IValue>({bucket_view}))
             at::mul_out(bucket_view, grad, wrapped);
           } else {
             // If DDP is running with create_graph=True, gradients require_grad
@@ -385,9 +383,15 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
                 << " DDP to work with higher-order gradients for your use case, "
                 << " please ping https://github.com/pytorch/pytorch/issues/63929";
             auto div_result = at::mul(grad, wrapped);
+            RECORD_FUNCTION(
+                "torch::distributed::reducer::copy_",
+                std::vector<c10::IValue>({bucket_view}))
             bucket_view.copy_(div_result);
           }
         } else {
+          RECORD_FUNCTION(
+              "torch::distributed::reducer::copy_",
+              std::vector<c10::IValue>({bucket_view}))
           bucket_view.copy_(grad);
         }
 
@@ -436,6 +440,25 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
         logger_,
         "Expected variable to have sparse gradient.");
 
+    // Copy the indices of sparse metadata
+    if (sparse_metadata_) {
+      grad = grad.coalesce();
+      REDUCER_CHECK(
+          param_names_.size() != 0, logger_, "No parameter names were found");
+      std::string& param_name = param_names_[variable_index];
+      auto iter = sparse_metadata_->find(param_name);
+      REDUCER_CHECK(
+          iter != sparse_metadata_->end(),
+          logger_,
+          "param: " + param_name + " not found in sparse metadata");
+      bucket.sparse_tensor_indices =
+          iter->second.to(at::kLong).unsqueeze(0).to(grad.device());
+      auto indices = at::searchsorted(
+          bucket.sparse_tensor_indices.value(), grad.indices(), false, false);
+      // For indices we are using the ones set by sparse_metadata
+      grad = at::sparse_coo_tensor(indices, grad.values(), grad.sizes());
+    }
+
     // Sparse tensors cannot be grouped together with other sparse tensors in a
     // single reduction operation like we can for dense tensors. Therefore, the
     // `offsets` and `lengths` vectors in the bucket struct are empty, and
@@ -468,13 +491,14 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
         bucket.offsets,
         bucket.lengths,
         bucket.sizes_vec,
-        variables_for_bucket);
+        variables_for_bucket,
+        c10::nullopt);
   }
   return gradBuckets;
 }
 
 void Reducer::set_forward_pass_work_handle(
-    c10::intrusive_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
+    c10::intrusive_ptr<c10d::Work> forwardPassWorkHandle,
     bool useStaticWorldSize) {
   std::lock_guard<std::mutex> lock(mutex_);
   forwardPassWorkHandle_.workHandle = std::move(forwardPassWorkHandle);
@@ -515,10 +539,19 @@ void Reducer::set_divide_factor() {
       auto results = extractTensors(workHandle->getFuture()->value());
 
       // Guard against the results being empty
-      TORCH_INTERNAL_ASSERT(results.size() > 0);
+      TORCH_INTERNAL_ASSERT(!results.empty());
       at::Tensor& res = results.front();
       div_factor_ = res.item().to<int>();
     }
+  }
+}
+
+// This is called before training and converts the gradients to the dtype they
+// should be reduced in.
+void Reducer::set_mixed_precision_param_dtype(c10::ScalarType dtype) {
+  mixed_precision_param_dtype_ = dtype;
+  for (auto& bucket : buckets_) {
+    bucket.gradients = bucket.gradients.to(dtype);
   }
 }
 
@@ -539,18 +572,49 @@ void Reducer::delay_all_reduce() {
   // unused_parameters_ will not change after 1st iteration.
   unused_parameters_.clear();
 
+  require_finalize_ = true;
   // copy all gradients to buckets
   for (const auto variable_index : c10::irange(params_.size())) {
     // set unused_parameters_
     if (numGradHooksTriggeredMap_[variable_index] == 0) {
       unused_parameters_.push_back(variable_index);
     }
-    require_finalize_ = true;
     set_divide_factor();
     if (expect_sparse_gradients_[variable_index]) {
       mark_variable_ready_sparse(variable_index);
     } else {
       mark_variable_ready_dense(variable_index);
+    }
+  }
+
+  // To avoid confusion around why static graph is picking up
+  // some parameters as unused on a rank vs not, we log
+  // unused parameter names for each rank for better
+  // debugability when TORCH_DISTRIBUTED_DEBUG is set to
+  // INFO or DETAIL
+  if (ddp_debug_level_ != c10d::DebugLevel::Off) {
+    // construct one string to output
+    std::ostringstream unused_params_stream;
+
+    for (const auto& unused_index : unused_parameters_) {
+      auto param_name = param_names_.find(unused_index);
+      TORCH_INTERNAL_ASSERT(
+          param_name != param_names_.end(),
+          "Expected to find parameter name from unused parameters map in debug mode.");
+      // Add the param_name
+      unused_params_stream << "{" << param_name->second << "," << unused_index
+                           << "}";
+    }
+
+    // Each rank prints out all the unused parameters detected
+    if (!unused_parameters_.empty()) {
+      LOG(INFO) << "[Rank " << process_group_->getRank() << "]: "
+                << "Parameter(s) (in the format of {param_name, index}): "
+                << unused_params_stream.str()
+                << " is(are) unused during first iteration. Since"
+                << " static_graph=True is enabled for DDP, we expect"
+                << " this set of unused parameters to remain consistent"
+                << " on this rank throughout the training.";
     }
   }
 
@@ -571,6 +635,10 @@ void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
 // This function is only to be called from the autograd thread.
 void Reducer::autograd_hook(size_t index) {
   std::lock_guard<std::mutex> lock(this->mutex_);
+  if (!first_autograd_hook_called_) {
+    first_autograd_hook_called_ = true;
+    num_bwd_calls_++;
+  }
   // Ignore if we don't expect to be called.
   // This may be the case if the user wants to accumulate gradients
   // for number of iterations before reducing them.
@@ -697,8 +765,7 @@ void Reducer::all_reduce_local_used_map() {
     local_used_map_dev_.copy_(local_used_map_, true);
   }
   std::vector<at::Tensor> temp_local_used_map_dev_vec_ = {local_used_map_dev_};
-  local_used_work_ =
-      ops::allreduce(process_group_, temp_local_used_map_dev_vec_);
+  local_used_work_ = process_group_->allreduce(temp_local_used_map_dev_vec_);
 }
 
 at::Tensor& Reducer::get_param_from_index(size_t index) {
@@ -846,11 +913,16 @@ void Reducer::mark_variable_ready(size_t variable_index) {
 c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_comm_hook(
     GradBucket& grad_bucket) {
   if (comm_hook_ == nullptr) {
-    _AllReduceBySumCommHook allreduce_hook(process_group_);
-    return allreduce_hook.runHook(grad_bucket);
+    return run_allreduce_hook(grad_bucket);
   } else {
     return comm_hook_->runHook(grad_bucket);
   }
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_allreduce_hook(
+    GradBucket& grad_bucket) {
+  _AllReduceBySumCommHook allreduce_hook(process_group_);
+  return allreduce_hook.runHook(grad_bucket);
 }
 
 void Reducer::all_reduce_bucket(Bucket& bucket) {
@@ -872,7 +944,8 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       bucket.offsets,
       bucket.lengths,
       bucket.sizes_vec,
-      variables_for_bucket);
+      variables_for_bucket,
+      bucket.sparse_tensor_indices);
   bucket.future_work = run_comm_hook(grad_bucket);
 }
 
@@ -980,7 +1053,7 @@ void Reducer::initialize_buckets(
     // TODO(@pietern): Validate indices.
     // Must be non-empty, unique, and unique across buckets.
     REDUCER_CHECK(
-        bucket_indices[bucket_index].size() > 0,
+        !bucket_indices[bucket_index].empty(),
         logger_,
         "Empty bucket specified.");
 
@@ -1048,6 +1121,12 @@ void Reducer::initialize_buckets(
       }
 
       // Allocate the bucket's flattened `gradients` tensor.
+      // Make gradient type in the reduced precision if mixed precision is
+      // enabled. This ensures that the type is correct when e.g. rebuilding
+      // buckets.
+      if (mixed_precision_param_dtype_) {
+        options = options.dtype(*mixed_precision_param_dtype_);
+      }
       bucket.gradients = at::empty({static_cast<long>(offset)}, options);
 
       // Note:  "Gradient Layout Contract"
@@ -1145,7 +1224,7 @@ void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
         if (grad.defined() && !grad.is_alias_of(bucket_view)) {
           bucket_view.copy_(grad);
           grad = bucket_view;
-          // The grad is modefied and needs to be written back.
+          // The grad is modified and needs to be written back.
           return true;
         }
         // The grad is not modified and does not need to be written back.
@@ -1412,10 +1491,16 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
     }
 
     if (!gradient_as_bucket_view_) {
-      RECORD_FUNCTION(
-          "torch.distributed.ddp.reducer::copy_bucket_to_grad",
-          std::vector<c10::IValue>({variable}));
-      copy_bucket_to_grad(variable, bucket, intra_bucket_index, global_unused);
+      if (optim_in_backward_) {
+        // Return early if optimizer has already run.
+        runGradCallbackForVariable(variable, [&](auto& grad) { return true; });
+      } else {
+        RECORD_FUNCTION(
+            "torch.distributed.ddp.reducer::copy_bucket_to_grad",
+            std::vector<c10::IValue>({variable}));
+        copy_bucket_to_grad(
+            variable, bucket, intra_bucket_index, global_unused);
+      }
     } else {
       const auto& bucket_view_out = bucket.bucket_views_out[intra_bucket_index];
       auto& bucket_view_in = bucket.bucket_views_in[intra_bucket_index];
@@ -1426,6 +1511,10 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         bucket_view_in.copy_(bucket_view_out);
       }
       runGradCallbackForVariable(variable, [&](auto& grad) {
+        if (optim_in_backward_) {
+          // Return early if optimizer has already run.
+          return true;
+        }
         // If a parameter is globally unused, we keep its grad untouched.
         if (!global_unused) {
           // If grad is globally used but locally unused, let grad point to
@@ -1458,6 +1547,8 @@ void Reducer::finalize_backward() {
   // No longer expect autograd hooks to fire after this function returns.
   TORCH_INTERNAL_ASSERT(expect_autograd_hooks_);
   expect_autograd_hooks_ = false;
+  // reset for the next iteration
+  first_autograd_hook_called_ = false;
 
   // No longer require call to finalize after this function returns.
   TORCH_INTERNAL_ASSERT(require_finalize_);
@@ -1476,7 +1567,21 @@ void Reducer::finalize_backward() {
         ? detail::parseCppCommHookResult(bucket.future_work->value())
         : comm_hook_->parseHookResult(bucket.future_work->value());
     if (bucket.expect_sparse_gradient) {
-      bucket.gradients.copy_(future_result);
+      // sparse metadata is set so the bucket should have sparse_tensor_indices
+      if (sparse_metadata_) {
+        REDUCER_CHECK(
+            bucket.sparse_tensor_indices.value().numel() ==
+                bucket.gradients.sizes()[0],
+            logger_,
+            "Sparse metadata and gradient size mismatch");
+        auto sparse_result = at::sparse_coo_tensor(
+            bucket.sparse_tensor_indices.value(),
+            future_result,
+            bucket.gradients.sizes());
+        bucket.gradients.copy_(sparse_result);
+      } else {
+        bucket.gradients.copy_(future_result);
+      }
     } else {
       // Reinitialize only `bucket_views_out` with the future_result by
       // following the same logic in `initialize_buckets`.
@@ -1523,6 +1628,8 @@ void Reducer::finalize_backward() {
   if (should_collect_runtime_stats()) {
     record_backward_comm_end_time();
   }
+
+  sparse_metadata_.reset();
 }
 
 void Reducer::runGradCallbackForVariable(
@@ -1589,7 +1696,7 @@ void Reducer::sync_bucket_indices(
   auto indices_tensor_device = at::empty({total_size + 1}, options);
   indices_tensor_device.copy_(indices_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> indices_tensor_list = {indices_tensor_device};
-  ops::broadcast(process_group_, indices_tensor_list)->wait();
+  process_group_->broadcast(indices_tensor_list)->wait();
   indices_tensor.copy_(indices_tensor_list.front(), /*non_blocking=*/false);
 
   // Update num_buckets after receiving it from rank 0
@@ -1608,7 +1715,7 @@ void Reducer::sync_bucket_indices(
   bucket_sizes_tensor_device.copy_(bucket_sizes_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> bucket_sizes_tensor_list = {
       bucket_sizes_tensor_device};
-  ops::broadcast(process_group_, bucket_sizes_tensor_list)->wait();
+  process_group_->broadcast(bucket_sizes_tensor_list)->wait();
   bucket_sizes_tensor.copy_(
       bucket_sizes_tensor_list.front(), /*non_blocking=*/false);
 
@@ -1661,7 +1768,7 @@ bool Reducer::rebuild_buckets() {
   bucket_size_limits.push_back(bucket_bytes_cap_);
   std::vector<size_t> per_bucket_size_limits;
   auto ddp_set_last_bucket_as_small =
-      (parse_env("DDP_SET_LAST_BUCKET_CAP").compare("1") == 0);
+      (parse_env("DDP_SET_LAST_BUCKET_CAP") == "1");
 
   if (ddp_set_last_bucket_as_small) {
     // Reverse so that first_bucket_bytes_cap_ (smaller bucket) becomes the last
@@ -1709,6 +1816,11 @@ bool Reducer::rebuild_buckets() {
   return true;
 }
 
+void Reducer::setSparseMetadata(std::map<std::string, at::Tensor>& metadata) {
+  sparse_metadata_ =
+      std::make_unique<std::map<std::string, at::Tensor>>(metadata);
+}
+
 // See Note [DDP Communication Hook]
 void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
   REDUCER_CHECK(
@@ -1752,9 +1864,7 @@ void Reducer::ensure_prior_reduction_finished() {
     auto unmarked_param_indices = getUnmarkedParamIndicesForIteration();
     // We should have some unmarked parameter indices, otherwise we would not
     // have run into this error branch.
-    TORCH_INTERNAL_ASSERT(unmarked_param_indices.size() > 0);
-    const std::string unmarkedParamIndices =
-        c10::Join(", ", unmarked_param_indices);
+    TORCH_INTERNAL_ASSERT(!unmarked_param_indices.empty());
 
     std::string kBaseErrorMsg =
         "Expected to have finished reduction in the prior iteration before "
@@ -1820,7 +1930,7 @@ void Reducer::ensure_prior_reduction_finished() {
     } else {
       // Retrieve set of parameter names that did not receive gradient.
       auto unmarkedParams = getUnmarkedParamsForIteration();
-      TORCH_INTERNAL_ASSERT(unmarkedParams.size() > 0);
+      TORCH_INTERNAL_ASSERT(!unmarkedParams.empty());
       for (const auto& s : unmarkedParams) {
         LOG(INFO) << "[Rank " << process_group_->getRank() << "] "
                   << "Parameter: " << s
@@ -1936,7 +2046,7 @@ compute_bucket_assignment_by_size(
   TORCH_INTERNAL_ASSERT(
       expect_sparse_gradient.empty() ||
       (tensors.size() == expect_sparse_gradient.size()));
-  TORCH_INTERNAL_ASSERT(tensors.size() > 0);
+  TORCH_INTERNAL_ASSERT(!tensors.empty());
   // Store bucket indices and their sizes together, because we later sort the
   // resulting indices by minimum tensor index and want to keep sizes
   // consistent.
@@ -2070,21 +2180,20 @@ void verify_params_across_processes(
 
   // Allgather and verify parameter size.
   std::vector<std::vector<at::Tensor>> param_size_output_tensors;
-  param_size_output_tensors.emplace_back(std::vector<at::Tensor>{});
+  param_size_output_tensors.emplace_back();
   auto world_size = process_group->getSize();
-  for (size_t i = 0; i < world_size; ++i) {
+  for (C10_UNUSED const auto i : c10::irange(world_size)) {
     param_size_output_tensors.front().emplace_back(
         at::empty_like(param_size_tensor));
   }
 
   std::vector<at::Tensor> param_size_vec{param_size_tensor};
-  ops::allgather(process_group, param_size_output_tensors, param_size_vec)
-      ->wait();
+  process_group->allgather(param_size_output_tensors, param_size_vec)->wait();
   auto result_size_tensors = param_size_output_tensors.front();
-  for (size_t i = 0; i < world_size; ++i) {
+  for (const auto i : c10::irange(world_size)) {
     auto param_size_for_rank = result_size_tensors[i][0].item<int>();
     TORCH_CHECK(
-        param_size_for_rank == params.size(),
+        static_cast<size_t>(param_size_for_rank) == params.size(),
         c10::str(
             "DDP expects same model across all ranks, but Rank ",
             process_group->getRank(),
@@ -2121,7 +2230,7 @@ void verify_params_across_processes(
 
   auto metadata_dev = metadata.clone().to(params[0].device());
   std::vector<at::Tensor> vec{metadata_dev};
-  ops::broadcast(process_group, vec)->wait();
+  process_group->broadcast(vec)->wait();
 
   // Technically, process 0 doesn't need to double-check metadata, because it
   // was the source.  But no harm keeping work aligned.
@@ -2162,6 +2271,27 @@ void verify_params_across_processes(
       }
     }
   }
+}
+
+void Reducer::remove_autograd_hooks() {
+  // Remove all hooks on variables registered by this Reducer. This is necessary
+  // to make DDP failure recoverable. Otherwise, multiple Reducer instances
+  // (from recoveries) will add their hooks to the original model, and those
+  // hooks will try to invoke methods on a deleted Reducer objects.
+  for (auto& hook : hooks_) {
+    auto& key = hook.first;
+    auto& grad_accumulator = hook.second;
+
+    TORCH_INTERNAL_ASSERT(
+        grad_accumulator->del_post_hook(key),
+        "Reducer attempts to delete a non-existing hook.");
+  }
+  hooks_.clear();
+}
+
+void Reducer::check_finalized() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  ensure_prior_reduction_finished();
 }
 
 } // namespace c10d

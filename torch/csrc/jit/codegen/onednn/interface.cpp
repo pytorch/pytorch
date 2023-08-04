@@ -1,4 +1,5 @@
 #include <oneapi/dnnl/dnnl_graph.hpp>
+#include <torch/csrc/jit/codegen/onednn/decompose_silu.h>
 #include <torch/csrc/jit/codegen/onednn/defer_size_check.h>
 #include <torch/csrc/jit/codegen/onednn/graph_fuser.h>
 #include <torch/csrc/jit/codegen/onednn/guard_shape.h>
@@ -56,11 +57,19 @@ void fuseGraph(std::shared_ptr<Graph>& g) {
           aten::hardtanh_,
           aten::abs_,
           aten::square_,
-      };
+          aten::pow_,
+          aten::leaky_relu_,
+          aten::round_,
+          aten::exp_,
+          aten::abs_,
+          aten::hardswish_,
+          aten::silu_};
       return supportedOps.count(nodeToFunctionalize->kind()) != 0;
     });
     RemoveListMutation(g);
-    GRAPH_DUMP("After mutation removal. Before PrepareBinaryForLLGA", g);
+    GRAPH_DUMP("After mutation removal. Before DecomposeSiluForLlga", g);
+    DecomposeSiluForLLGA(g);
+    GRAPH_DUMP("After DecomposeSiluForLlga. Before PrepareBinaryForLLGA", g);
     PrepareBinaryForLLGA(g);
     GRAPH_DUMP("After PrepareBinaryForLLGA. Before DeferSizeCheck", g);
     DeferSizeCheck(g);
@@ -88,11 +97,11 @@ void fuseGraph(std::shared_ptr<Graph>& g) {
 } // namespace onednn
 } // namespace fuser
 
-Operation createLlgaKernel(const Node* node) {
+static Operation createLlgaKernel(const Node* node) {
   auto kernel = std::make_shared<fuser::onednn::LlgaKernel>(node);
-  return [kernel](Stack* stack) {
+  return [kernel](Stack& stack) {
     RECORD_FUNCTION(kernel->debugName(), std::vector<c10::IValue>());
-    kernel->run(*stack);
+    kernel->run(stack);
     return 0;
   };
 }
@@ -108,8 +117,8 @@ RegisterOperators oneDNNFusionGroupOp({
 // binary ops to a 1D tensor. Other scalar inputs are prim::Constant nodes.
 // But if we have any scalar inputs to guard in the future, some logic here
 // would have to be changed.
-Operation createLlgaGuardKernel(const Node* node) {
-  return [node](Stack* stack) {
+static Operation createLlgaGuardKernel(const Node* node) {
+  return [node](Stack& stack) {
 #ifdef GRAPH_DEBUG_ENABLED
     GRAPH_DEBUG("Guarding node: ", node->kind().toQualString());
 #endif

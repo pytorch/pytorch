@@ -70,7 +70,7 @@ class FbFCPackedOperator final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         axis_(this->template GetSingleArgument<int32_t>("axis", 1)),
         axis_w_(this->template GetSingleArgument<int32_t>("axis_w", 1)) {}
-  ~FbFCPackedOperator() {}
+  ~FbFCPackedOperator() override {}
 
   // template on X, B, and Y.
   template <typename T_X, typename T_B, typename T_Y>
@@ -129,7 +129,7 @@ class FbFCPackedOperator final : public Operator<Context> {
     CAFFE_ENFORCE(N == W->numCols(), dimErrorString());
     Y_shape_cache_ = X.sizes().vec();
     // This is an invariant of canonical_axis, so we can DCHECK.
-    DCHECK_LE(canonical_axis + 1, Y_shape_cache_.size());
+    TORCH_DCHECK_LE(canonical_axis + 1, Y_shape_cache_.size());
     Y_shape_cache_.resize(canonical_axis + 1);
     Y_shape_cache_[canonical_axis] = N;
     auto* Y = Output(0, Y_shape_cache_, at::dtype<T_Y>());

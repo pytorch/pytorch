@@ -2,6 +2,7 @@
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/GPUTrace.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
@@ -19,7 +20,7 @@ namespace impl {
 struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
 
-  CUDAGuardImpl() {}
+  CUDAGuardImpl() = default;
   explicit CUDAGuardImpl(DeviceType t) {
     TORCH_INTERNAL_ASSERT(t == DeviceType::CUDA);
   }
@@ -28,20 +29,17 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   Device exchangeDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_cuda());
-    Device old_device = getDevice();
-    if (old_device.index() != d.index()) {
-      C10_CUDA_CHECK(cudaSetDevice(d.index()));
-    }
-    return old_device;
+    int old_device_index = c10::cuda::ExchangeDevice(d.index());
+    return Device(DeviceType::CUDA, old_device_index);
   }
   Device getDevice() const override {
     int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     return Device(DeviceType::CUDA, device);
   }
   c10::optional<Device> uncheckedGetDevice() const noexcept {
     int device;
-    const auto err = C10_CUDA_ERROR_HANDLED(cudaGetDevice(&device));
+    const auto err = C10_CUDA_ERROR_HANDLED(c10::cuda::GetDevice(&device));
     C10_CUDA_CHECK_WARN(err);
     if (err != cudaSuccess) {
       return c10::nullopt;
@@ -50,16 +48,10 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   void setDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_cuda());
-    Device current_device = getDevice();
-    if (current_device != d) {
-      C10_CUDA_CHECK(cudaSetDevice(d.index()));
-    }
+    C10_CUDA_CHECK(c10::cuda::SetDevice(d.index()));
   }
   void uncheckedSetDevice(Device d) const noexcept override {
-    auto current_device = uncheckedGetDevice();
-    if (!current_device.has_value() || current_device.value() != d) {
-      C10_CUDA_CHECK_WARN(cudaSetDevice(d.index()));
-    }
+    C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(d.index()));
   }
   Stream getStream(Device d) const noexcept override {
     return getCurrentCUDAStream(d.index()).unwrap();
@@ -100,6 +92,11 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     }
 
     C10_CUDA_CHECK(cudaEventCreateWithFlags(cuda_event, cuda_flag));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_creation(
+          reinterpret_cast<uintptr_t>(cuda_event));
+    }
   }
 
   void destroyEvent(void* event, const DeviceIndex device_index)
@@ -108,10 +105,15 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       return;
     auto cuda_event = static_cast<cudaEvent_t>(event);
     int orig_device;
-    C10_CUDA_CHECK_WARN(cudaGetDevice(&orig_device));
-    C10_CUDA_CHECK_WARN(cudaSetDevice(device_index));
+    C10_CUDA_CHECK_WARN(c10::cuda::GetDevice(&orig_device));
+    C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(device_index));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_deletion(
+          reinterpret_cast<uintptr_t>(cuda_event));
+    }
     C10_CUDA_CHECK_WARN(cudaEventDestroy(cuda_event));
-    C10_CUDA_CHECK_WARN(cudaSetDevice(orig_device));
+    C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(orig_device));
   }
 
   void record(
@@ -140,6 +142,12 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     C10_CUDA_CHECK(cudaEventRecord(cuda_event, cuda_stream));
     // Makes the void* point to the (possibly just allocated) CUDA event
     *event = cuda_event;
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_record(
+          reinterpret_cast<uintptr_t>(cuda_event),
+          reinterpret_cast<uintptr_t>(cuda_stream.stream()));
+    }
 
     // Resets device
     setDevice(orig_device);
@@ -156,6 +164,12 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         cuda_stream,
         cuda_event,
         /*flags (must be zero)=*/0));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_wait(
+          reinterpret_cast<uintptr_t>(cuda_event),
+          reinterpret_cast<uintptr_t>(cuda_stream.stream()));
+    }
     setDevice(orig_device);
   }
 

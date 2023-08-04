@@ -14,6 +14,7 @@ from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Event
 from typing import Dict, List, TextIO
 
+__all__ = ["tail_logfile", "TailLog"]
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ def tail_logfile(
             return
         time.sleep(interval_sec)
 
-    with open(file, "r") as fp:
+    with open(file) as fp:
         while True:
             line = fp.readline()
 
@@ -131,8 +132,9 @@ class TailLog:
                 f.result()
             except Exception as e:
                 log.error(
-                    f"error in log tailor for {self._name}{local_rank}."
-                    f" {e.__class__.__qualname__}: {e}",
+                    "error in log tailor for %s%s. %s: %s",
+                    self._name, local_rank,
+                    e.__class__.__qualname__, e,
                 )
 
         if self._threadpool:

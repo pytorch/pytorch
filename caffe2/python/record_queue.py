@@ -17,7 +17,7 @@ from caffe2.python.schema import (
 class _QueueReader(Reader):
     def __init__(self, blobs_queue, schema, name=None):
         """Don't call this directly. Instead, use dataset.reader()"""
-        super(_QueueReader, self).__init__(schema)
+        super().__init__(schema)
         self.blobs_queue = blobs_queue
         self.name = name
 
@@ -45,7 +45,7 @@ class _QueueWriter(Writer):
         return status
 
 
-class RecordQueue(object):
+class RecordQueue:
     """ The class is used to feed data with some process from a reader into a
         queue and provider a reader interface for data fetching from the queue.
     """

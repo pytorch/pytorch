@@ -11,7 +11,7 @@ class MEM_FORMAT_ENCODING(Enum):
     TORCH_PRESERVE_FORMAT = 2
 
 @dataclass
-class TensorProperties(object):
+class TensorProperties:
     """ Properties used to create :class:`Tensor` """
 
     # Regular tensor fields
@@ -58,8 +58,17 @@ class TensorProperties(object):
 
         self.memory_format = memory_format
 
+    @staticmethod
+    def create_from_tensor(tensor: torch.Tensor) -> "TensorProperties":
+        return TensorProperties(
+            dtype=tensor.dtype,
+            layout=tensor.layout,
+            requires_grad=tensor.requires_grad,
+            memory_format=torch.contiguous_format,
+            pin_memory=tensor.is_pinned()
+        )
 @dataclass
-class ShardedTensorMetadata(object):
+class ShardedTensorMetadata:
     """
     Represents metadata for :class:`ShardedTensor`
     """
@@ -70,4 +79,4 @@ class ShardedTensorMetadata(object):
     # Size of each dim of the overall Tensor.
     size: torch.Size = field(default=torch.Size([]))
 
-    tensor_properties: TensorProperties = field(default=TensorProperties())
+    tensor_properties: TensorProperties = field(default_factory=TensorProperties)

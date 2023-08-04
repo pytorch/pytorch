@@ -1,7 +1,18 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/Repeat.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/repeat_interleave.h>
+#include <ATen/ops/repeat_interleave_native.h>
+#endif
 
 template <typename index_t>
 static void compute_cpu(
@@ -64,11 +75,11 @@ Tensor repeat_interleave(
   }
 
   Tensor repeats_ = repeats;
-  if (repeats.dim() == 0 || (repeats.dim() == 1 && repeats.size(0) == 1)) {
-    repeats_ = repeats.reshape({1}).expand({input.size(dim.value())});
+  if (repeats.dim() == 0 || (repeats.dim() == 1 && repeats.sym_size(0) == 1)) {
+    repeats_ = repeats.reshape({1}).expand_symint({input.sym_size(dim.value())});
   } else if (repeats.dim() == 1) {
     TORCH_CHECK(
-        repeats.size(0) == input.size(dim.value()),
+        repeats.sym_size(0) == input.sym_size(dim.value()),
         "repeats must have the same size as input along dim")
   } else {
     AT_ERROR("repeats must be 0-dim or 1-dim tensor");
@@ -86,14 +97,29 @@ Tensor repeat_interleave(
   return ret;
 }
 
-Tensor repeat_interleave(
+Tensor repeat_interleave_symint(
     const Tensor& self,
-    int64_t repeats,
-    c10::optional<int64_t> dim,
+    c10::SymInt repeats,
+    c10::optional<int64_t> dim_opt,
     c10::optional<int64_t> output_size) {
-  at::Tensor repeats_ =
-      at::empty(1, self.options().dtype(at::kLong)).fill_(repeats);
-  return at::native::repeat_interleave(self, repeats_, dim, output_size);
+  Tensor input = dim_opt ? self : self.flatten();
+  int64_t dim = c10::maybe_wrap_dim(dim_opt.value_or(0), self.dim());
+  TORCH_CHECK(repeats >= 0, "Repeats must be non-negative");
+
+  input = input.unsqueeze(dim + 1);
+  auto expand_shape = input.sym_sizes().vec();
+  expand_shape[dim + 1] = repeats;
+  input = input.expand_symint(expand_shape);
+
+  // This argument doesn't really make sense for the scalar overload, but exists
+  // for consistency with the tensor overload
+  if (output_size) {
+    auto calculated_size = (repeats * expand_shape[dim]).guard_int(__FILE__, __LINE__);
+    TORCH_CHECK(calculated_size == *output_size, "repeat_interleave: Invalid output_size, expected ",
+                calculated_size, " but got ", *output_size);
+  }
+
+  return input.clone(at::MemoryFormat::Contiguous).flatten(dim, dim + 1);
 }
 
 } // namespace native

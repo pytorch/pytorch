@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -58,7 +59,7 @@ class AccessInfo {
       std::vector<ExprPtr> i,
       size_t accessOrder)
       : hash_(h),
-        buf_(b),
+        buf_(std::move(b)),
         indices_(std::move(i)),
         store_cost_(alloc<IntImm>(0)),
         load_cost_(alloc<IntImm>(0)),
@@ -223,7 +224,9 @@ class Scope {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Scope(BlockPtr b, std::shared_ptr<Scope> parent, size_t conditionId = 0)
-      : block_(b), parent_(std::move(parent)), conditionId_(conditionId) {}
+      : block_(std::move(b)),
+        parent_(std::move(parent)),
+        conditionId_(conditionId) {}
 
   AccessHashMap& getAccessMapByBuf(BufPtr b);
 
@@ -311,7 +314,7 @@ class Scope {
  *
  * - IfThenElse: Same situation as Cond, except since IfThenElse is an Expr
  * rather than a Stmt we cannot insert the scalar definition or finalizer
- * within the conditional scope. Acccesses inside an IfThenElse can be safely
+ * within the conditional scope. Accesses inside an IfThenElse can be safely
  * combined with external accesses but cannot exist completely within.
  *
  * - Let: Accesses dependent on local variables via Let Stmts, or loop vars,

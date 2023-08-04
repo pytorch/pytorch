@@ -1,14 +1,61 @@
-#include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/core/Reduction.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/PointwiseOps.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/Exception.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/binary_cross_entropy_backward_native.h>
+#include <ATen/ops/binary_cross_entropy_native.h>
+#include <ATen/ops/binary_cross_entropy_with_logits_native.h>
+#include <ATen/ops/clamp_min.h>
+#include <ATen/ops/cosine_embedding_loss_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/exp.h>
+#include <ATen/ops/hinge_embedding_loss_native.h>
+#include <ATen/ops/huber_loss_backward.h>
+#include <ATen/ops/huber_loss_backward_native.h>
+#include <ATen/ops/huber_loss_native.h>
+#include <ATen/ops/kl_div_native.h>
+#include <ATen/ops/l1_loss_native.h>
+#include <ATen/ops/log.h>
+#include <ATen/ops/margin_ranking_loss_native.h>
+#include <ATen/ops/mean.h>
+#include <ATen/ops/min.h>
+#include <ATen/ops/mse_loss_backward.h>
+#include <ATen/ops/mse_loss_backward_native.h>
+#include <ATen/ops/mse_loss_meta.h>
+#include <ATen/ops/mse_loss_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/neg.h>
+#include <ATen/ops/pairwise_distance.h>
+#include <ATen/ops/poisson_nll_loss_native.h>
+#include <ATen/ops/smooth_l1_loss_backward.h>
+#include <ATen/ops/smooth_l1_loss_backward_native.h>
+#include <ATen/ops/smooth_l1_loss_meta.h>
+#include <ATen/ops/smooth_l1_loss_native.h>
+#include <ATen/ops/soft_margin_loss.h>
+#include <ATen/ops/soft_margin_loss_backward.h>
+#include <ATen/ops/soft_margin_loss_backward_native.h>
+#include <ATen/ops/soft_margin_loss_native.h>
+#include <ATen/ops/squeeze.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/triplet_margin_loss_native.h>
+#include <ATen/ops/where.h>
+#include <ATen/ops/xlogy.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 constexpr float EPSILON = 1e-12;
 
@@ -157,15 +204,17 @@ Tensor triplet_margin_loss(const Tensor& anchor, const Tensor& positive, const T
   auto n_dim = negative.dim();
   TORCH_CHECK(
       a_dim == p_dim && p_dim == n_dim,
-      "All inputs should have same dimension but got ",
-      a_dim,
-      "D, ",
-      p_dim,
-      "D and ",
-      n_dim,
-      "D inputs.")
+      "The anchor, positive, and negative tensors are expected to have "
+      "the same number of dimensions, but got: anchor ", a_dim, "D, "
+      "positive ", p_dim, "D, and negative ", n_dim, "D inputs")
+
   auto dist_pos = at::pairwise_distance(anchor, positive, p, eps);
   auto dist_neg = at::pairwise_distance(anchor, negative, p, eps);
+  // The distance swap is described in the paper "Learning shallow
+  // convolutional feature descriptors with triplet losses" by V. Balntas, E.
+  // Riba et al.  If True, and if the positive example is closer to the
+  // negative example than the anchor is, swaps the positive example and the
+  // anchor in the loss computation.
   if (swap) {
     auto dist_swap = at::pairwise_distance(positive, negative, p, eps);
     dist_neg = at::min(dist_neg, dist_swap);
@@ -187,46 +236,19 @@ Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Ten
   return apply_loss_reduction(output, reduction);
 }
 
-Tensor _kl_div_log_target(const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto output = at::exp(target) * (target - input);
-  return apply_loss_reduction(output, reduction);
-}
-
-Tensor _kl_div_non_log_target(const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto output_pos = target * (at::log(target) - input);
-  auto zeros = at::zeros_like(output_pos, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto output = at::where(target > 0, output_pos, zeros);
-  return apply_loss_reduction(output, reduction);
-}
-
 Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
-  return log_target ? _kl_div_log_target(input, target, reduction)
-                    : _kl_div_non_log_target(input, target, reduction);
-}
-
-Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
-  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto grad_expand = grad.expand_as(input);
-  if (!log_target) {
-    auto iter = TensorIteratorConfig()
-      .add_output(grad_input)
-      .add_input(target)
-      .add_input(grad_expand)
-      .build();
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "kl_div_backward_cpu", [&]() {
-      cpu_serial_kernel(iter, [](scalar_t target_val, scalar_t grad_val) -> scalar_t{
-        return target_val > 0 ? -target_val * grad_val : 0;
-      });
-    });
+  TORCH_CHECK(!input.is_complex() && !target.is_complex(),
+              "kl_div: Complex inputs not supported.");
+  TORCH_CHECK(!at::isIntegralType(input.scalar_type(), /*include_bool*/true) &&
+              !at::isIntegralType(target.scalar_type(), /*include_bool*/true),
+              "kl_div: Integral inputs not supported.");
+  Tensor output;
+  if (log_target) {
+    output = at::exp(target) * (target - input);
+  } else {
+    output = at::xlogy(target, target) - target * input;
   }
-  else {
-    grad_input = -at::exp(target) * grad_expand;
-  }
-
-  if (reduction == at::Reduction::Mean) {
-    return grad_input / input.numel();
-  }
-  return grad_input;
+  return apply_loss_reduction(output, reduction);
 }
 
 Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
@@ -260,11 +282,15 @@ Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, 
                     (input_val >= 0) && (input_val <= 1),
                     "all elements of input should be between 0 and 1"
                 );
+                TORCH_CHECK(
+                    (target_val >= 0) && (target_val <= 1),
+                    "all elements of target should be between 0 and 1"
+                );
 
                 // Binary cross entropy tensor is defined by the equation:
                 // L = -w (y ln(x) + (1-y) ln(1-x))
                 return (target_val - scalar_t(1))
-                    * std::max(scalar_t(std::log(scalar_t(1) - input_val)), scalar_t(-100))
+                    * std::max(scalar_t(std::log1p(-input_val)), scalar_t(-100))
                     - target_val * std::max(scalar_t(std::log(input_val)), scalar_t(-100));
             }
         );
@@ -388,8 +414,8 @@ Tensor& soft_margin_loss_out(const Tensor& input,
     const Tensor& target,
     int64_t reduction,
     Tensor& output) {
-  // compute inplace variant of: output = at::log(1. + at::exp(-input * target));
-  at::neg_out(output, input).mul_(target).exp_().add_(1.).log_();
+  // compute inplace variant of: output = at::log1p(at::exp(-input * target));
+  at::neg_out(output, input).mul_(target).exp_().log1p_();
   if (reduction != Reduction::None) {
     auto tmp = apply_loss_reduction(output, reduction);
     output.resize_({});

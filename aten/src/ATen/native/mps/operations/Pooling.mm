@@ -1,884 +1,529 @@
 //  Copyright © 2022 Apple Inc.
-
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/mps/MPSStream.h>
-#include <ATen/native/mps/OperationUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Pool.h>
-#include <torch/library.h>
+#include <ATen/native/mps/OperationUtils.h>
 
-namespace at {
-namespace native {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/avg_pool2d.h>
+#include <ATen/ops/avg_pool2d_backward.h>
+#include <ATen/ops/avg_pool2d_backward_native.h>
+#include <ATen/ops/avg_pool2d_native.h>
+#include <ATen/ops/max_pool2d_with_indices_backward_native.h>
+#include <ATen/ops/max_pool2d_with_indices_native.h>
+#endif
 
-// Create pooling descriptor
-void fill_pool_desc(MPSGraphPooling2DOpDescriptor* desc,
-                    NSUInteger kW, NSUInteger kH,
-                    NSUInteger dW, NSUInteger dH,
-                    NSUInteger dilationW, NSUInteger dilationH,
-                    NSUInteger padW, NSUInteger padH,
-                    bool ceil_mode, c10::MemoryFormat memory_format) {
-  desc.kernelWidth = kW;
-  desc.kernelHeight = kH;
-  desc.strideInX = dW;
-  desc.strideInY = dH;
-  desc.dilationRateInX = dilationW;
-  desc.dilationRateInY = dilationH;
-  desc.paddingLeft = padW;
-  desc.paddingRight = padW;
-  desc.paddingTop = padH;
-  desc.paddingBottom = padH;
-  desc.ceilMode = ceil_mode;
-  desc.paddingStyle = MPSGraphPaddingStyleExplicit;
-  switch(memory_format) {
-    case at::MemoryFormat::Contiguous:
-      desc.dataLayout = MPSGraphTensorNamedDataLayoutNCHW;
-      break;
-    case at::MemoryFormat::ChannelsLast:
-      desc.dataLayout = MPSGraphTensorNamedDataLayoutNHWC;
-      break;
-    default:
-      assert(0 && "Check should have been done earlier\n");
+namespace at::native {
+namespace mps {
+
+struct PoolingCachedGraph : public MPSCachedGraph {
+  PoolingCachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+  MPSGraphTensor* inputTensor = nil;
+  MPSGraphTensor* outputTensor = nil;
+  MPSGraphTensor* indicesTensor = nil;
+  MPSGraphTensor* gradOutputTensor = nil;
+  MPSGraphTensor* divisorTensor = nil;
+};
+
+typedef MPSGraphTensor* (^PoolingOpBlock)(PoolingCachedGraph&, MPSGraphPooling2DOpDescriptor*);
+#define PoolingOpFn(graph, desc) MPSGraphTensor*(mps::PoolingCachedGraph & graph, MPSGraphPooling2DOpDescriptor * desc)
+
+// Pooling ops (1D/2D forward and backward Max and Average pooling)
+static void pool2d_template(const Tensor& input,
+                            const Tensor& output,
+                            const c10::optional<Tensor>& indices_opt,
+                            const c10::optional<Tensor>& grad_output_opt,
+                            IntArrayRef kernel_size,
+                            IntArrayRef stride,
+                            IntArrayRef padding,
+                            IntArrayRef dilation,
+                            bool ceil_mode,
+                            bool count_include_pad,
+                            const c10::optional<int64_t> divisor_override,
+                            PoolingOpBlock poolingBlock,
+                            const c10::string& op_name) {
+  if (!is_macos_13_or_newer()) {
+    TORCH_CHECK(input.scalar_type() != ScalarType::Long,
+                "MPS: ",
+                op_name,
+                " op with int64 input is supported natively starting from macOS 13.0.");
   }
-}
+  const int64_t ndims = input.ndimension();
+  const Tensor& grad_output = *(at::borrow_from_optional_tensor(grad_output_opt));
+  const Tensor& indices = *(at::borrow_from_optional_tensor(indices_opt));
+  const bool is_backward_pass = grad_output.defined();
+  const bool has_indices = indices.defined();
+  const bool has_divisor = divisor_override.has_value() && divisor_override.value() != 0;
+  const auto suggested_memory_format = input.suggest_memory_format();
+  // for max_pool2d_with_indices() we cannot pass ChannelsLast (i.e., NHWC) to 'desc.dataLayout' in MPSGraph.
+  // Because the returned indices will be selected based on NHWC memory layout which will
+  // be incompatible with the PyTorch's global NCHW layout.
+  const auto memory_format = has_indices ? MemoryFormat::Contiguous : suggested_memory_format;
 
-Tensor _mps_max_pool2d(
-    const Tensor& input_t,
-    IntArrayRef kernel_size,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef dilation,
-    bool ceil_mode) {
-
-  // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
-    "max_pool2d: kernel_size must either be a single int, or a tuple of two ints")
+              op_name,
+              ": kernel_size must either be a single int, or a tuple of two ints")
+  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
+              op_name,
+              ": stride must either be omitted, a single int, or a tuple of two ints")
+  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
+              op_name,
+              ": padding must either be a single int, or a tuple of two ints");
+  TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
+              op_name,
+              ": dilation must be either a single int, or a tuple of two ints");
+
+  if (suggested_memory_format == at::MemoryFormat::ChannelsLast) {
+    TORCH_CHECK(ndims == 4, "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
+  } else if (suggested_memory_format == at::MemoryFormat::Contiguous) {
+    TORCH_CHECK((ndims == 3 || ndims == 4), "non-empty 3D or 4D (batch mode) tensor expected for input");
+  } else {
+    AT_ERROR("Unsupported memory format. Supports only ChannelsLast, Contiguous");
+  }
+
+  int padH = safe_downcast<int, int64_t>(padding[0]);
+  int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
-
-  // NB: stride default is not expressible as an integer constant, so we accept
-  // empty stride for this case
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
-    "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
-
-  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
-    "max_pool2d: padding must be either be a single int, or a tuple of two ints");
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
-
-  TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
-    "max_pool2d: dilation must be either a single int, or a tuple of two ints");
+  const int dW = stride.empty() ? kW : stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
-
-  const auto memory_format = input_t.suggest_memory_format();
-  if (memory_format == at::MemoryFormat::ChannelsLast) {
-    TORCH_CHECK(input_t.ndimension() == 4,
-      "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
-  } else if (memory_format == at::MemoryFormat::Contiguous) {
-    TORCH_CHECK((input_t.ndimension() == 3 || input_t.ndimension() == 4),
-      "non-empty 3D or 4D (batch mode) tensor expected for input");
-  } else {
-    TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
-  }
-
-  /* sizes */
-  const int64_t nbatch = input_t.ndimension() == 4 ? input_t.size(-4) : 1;
-  const int64_t nInputPlane = input_t.size(-3);
-  const int64_t inputHeight = input_t.size(-2);
-  const int64_t inputWidth = input_t.size(-1);
-
+  const int64_t nbatch = ndims == 4 ? input.size(-4) : 1;
+  const int64_t nInputPlane = input.size(-3);
+  const int64_t inputHeight = input.size(-2);
+  const int64_t inputWidth = input.size(-1);
   const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
-  pool2d_shape_check(
-    input_t,
-    kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-    nInputPlane,
-    inputHeight, inputWidth,
-    outputHeight, outputWidth, memory_format);
+  pool2d_shape_check(input,
+                     kH,
+                     kW,
+                     dH,
+                     dW,
+                     padH,
+                     padW,
+                     dilationH,
+                     dilationW,
+                     nInputPlane,
+                     inputHeight,
+                     inputWidth,
+                     outputHeight,
+                     outputWidth,
+                     memory_format);
 
-  namespace native_mps = at::native::mps;
-  using CachedGraph = native_mps::MPSUnaryCachedGraph;
-  CheckedFrom c = "mps_max_pool2d";
-
-  native_mps::MPSGraphCache* cache_ = native_mps::MPSGraphCache::getInstance();
-
-  Tensor output_t;
-
-  if (input_t.ndimension() == 3) {
-    output_t = at::native::empty_mps(
-                  {nInputPlane, outputHeight, outputWidth},
-                  input_t.scalar_type(),
-                  c10::nullopt,
-                  kMPS,
-                  c10::nullopt,
-                  memory_format);
-  } else {
-    output_t = at::native::empty_mps(
-                  {nbatch, nInputPlane, outputHeight, outputWidth},
-                  input_t.scalar_type(),
-                  c10::nullopt,
-                  kMPS,
-                  c10::nullopt,
-                  memory_format);
+  if (input.numel() == 0) {
+    return;
   }
 
-  if (output_t.numel() == 0) {
-    return output_t;
+  auto output_memory_format = output.suggest_memory_format();
+  // the output and indices are 'empty', so we could avoid unnecessary gatherView on empty tensors
+  // by simply restriding them (instead of calling the costly Contiguous()).
+  if (indices.suggest_memory_format() == MemoryFormat::ChannelsLast) {
+    indices.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::Contiguous);
+  }
+  if (output.numel() == 0) {
+    std::vector<int64_t> outputSizes{nInputPlane, outputHeight, outputWidth};
+    if (ndims == 4) {
+      outputSizes.insert(outputSizes.begin(), nbatch);
+    }
+    output.resize_(outputSizes);
+  } else if (output_memory_format == MemoryFormat::ChannelsLast) {
+    output.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::Contiguous);
+    output_memory_format = MemoryFormat::Contiguous;
   }
 
-  auto stream = at::mps::getCurrentMPSStream();
-
+  if (output.numel() == 0 || (is_backward_pass && grad_output.numel() == 0)) {
+    return;
+  }
+  // workaround for issue #103039644: mismatching MPS vs. CPU results
+  // when both ceil_mode and count_include_pad are True
+  if (count_include_pad && ceil_mode) {
+    padH = padW = 0;
+  }
   @autoreleasepool {
+    string key = op_name + getTensorsStringKey({input, indices, grad_output}) + ":K[" + getArrayRefString(kernel_size) +
+        "]:S[" + getArrayRefString(stride) + "]:P[" + getArrayRefString(padding) + "]:D[" +
+        getArrayRefString(dilation) + "]" + (ceil_mode ? ":ceil" : "") + (count_include_pad ? ":include_pad" : "") +
+        (has_divisor ? ":divisor" : "") + ":" +
+        (suggested_memory_format == MemoryFormat::ChannelsLast ? "NHWC" : "NCHW");
 
-    string mem_format_key;
-    switch(memory_format) {
-      case at::MemoryFormat::Contiguous:
-        mem_format_key = "Contiguous";
-        break;
-      case at::MemoryFormat::ChannelsLast:
-        mem_format_key = "ChannelsLast";
-        break;
-      default:
-        assert(0 && "Check should have been done earlier\n");
+    MPSShape* inputShape = getMPSShape(input, memory_format);
+    MPSShape* gradOutputShape = is_backward_pass ? getMPSShape(grad_output, memory_format) : nullptr;
+
+    auto cachedGraph = LookUpOrCreateCachedGraph<PoolingCachedGraph>(key, [&](auto* mpsGraph, auto* newCachedGraph) {
+      MPSGraphPooling2DOpDescriptor* desc = [MPSGraphPooling2DOpDescriptor
+          descriptorWithKernelWidth:kW
+                       kernelHeight:kH
+                          strideInX:dW
+                          strideInY:dH
+                    dilationRateInX:dilationW
+                    dilationRateInY:dilationH
+                        paddingLeft:padW
+                       paddingRight:ceil_mode ? padW * dW : padW
+                         paddingTop:padH
+                      paddingBottom:ceil_mode ? padH * dH : padH
+                       paddingStyle:MPSGraphPaddingStyleExplicit
+                         dataLayout:memory_format == MemoryFormat::ChannelsLast ? MPSGraphTensorNamedDataLayoutNHWC
+                                                                                : MPSGraphTensorNamedDataLayoutNCHW];
+      desc.ceilMode = (padW == 0 && padH == 0) ? ceil_mode : false;
+      if (has_indices) {
+        desc.returnIndicesMode = MPSGraphPoolingReturnIndicesGlobalFlatten2D;
+        desc.returnIndicesDataType = MPSDataTypeInt32;
+      }
+      newCachedGraph->inputTensor =
+          mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(input.scalar_type()), inputShape);
+      if (is_backward_pass) {
+        newCachedGraph->gradOutputTensor =
+            mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(grad_output.scalar_type()), gradOutputShape);
+      }
+      if (has_divisor) {
+        newCachedGraph->divisorTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeFloat32, @[ @1 ]);
+      }
+      MPSGraphTensor* outputTensor = poolingBlock(*newCachedGraph, desc);
+      // with desc.dataLayout = NHWC (i.e., ChannelsLast), the results need to be converted back to NCHW
+      newCachedGraph->outputTensor =
+          memory_format == MemoryFormat::ChannelsLast ? convertNHWCtoNCHW(mpsGraph, outputTensor) : outputTensor;
+    });
+
+    MPSStream* mpsStream = getCurrentMPSStream();
+    // in case of ChannelsLast we don't perform gather() in placeholder to avoid implicit conversion to NCHW
+    Placeholder inputPlaceholder =
+        Placeholder(cachedGraph->inputTensor, input, inputShape, memory_format != MemoryFormat::ChannelsLast);
+    Placeholder gradOutputPlaceholder = !is_backward_pass
+        ? Placeholder()
+        : Placeholder(
+              cachedGraph->gradOutputTensor, grad_output, gradOutputShape, memory_format != MemoryFormat::ChannelsLast);
+    Placeholder indicesPlaceholder = has_indices ? Placeholder(cachedGraph->indicesTensor, indices) : Placeholder();
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
+    NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
+    NSMutableDictionary* results = [[NSMutableDictionary new] autorelease];
+
+    feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
+    results[outputPlaceholder.getMPSGraphTensor()] = outputPlaceholder.getMPSGraphTensorData();
+
+    if (cachedGraph->gradOutputTensor) {
+      feeds[gradOutputPlaceholder.getMPSGraphTensor()] = gradOutputPlaceholder.getMPSGraphTensorData();
+    }
+    if (cachedGraph->indicesTensor) {
+      if (is_backward_pass) {
+        feeds[indicesPlaceholder.getMPSGraphTensor()] = indicesPlaceholder.getMPSGraphTensorData();
+      } else {
+        results[indicesPlaceholder.getMPSGraphTensor()] = indicesPlaceholder.getMPSGraphTensorData();
+      }
+    }
+    MPSScalar divisor_scalar;
+    if (cachedGraph->divisorTensor) {
+      const float divisor = float(kH * kW) / (float)divisor_override.value();
+      divisor_scalar = getMPSScalar(divisor, ScalarType::Float);
+      feeds[cachedGraph->divisorTensor] = getMPSGraphTensorFromScalar(mpsStream, divisor_scalar);
     }
 
-    string key = "mps_max_pool2d:" + to_string(kW) + ":" + to_string(kH) + ":" +
-                                     to_string(dW) + ":" + to_string(dH) + ":" +
-                                     to_string(dilationW) + ":" + to_string(dilationH) + ":" +
-                                     to_string(padW) + ":" + to_string(padH) + ":" +
-                                     to_string(ceil_mode) + ":" + mem_format_key +
-                                     mps::getTensorsStringKey({input_t});
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
 
-    if(!cachedGraph) {
-      native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
-        CachedGraph *newCachedGraph = nil;
-
-        @autoreleasepool {
-          MPSGraph* mpsGraph = native_mps::make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          MPSGraphPooling2DOpDescriptor* desc = [[MPSGraphPooling2DOpDescriptor new] autorelease];
-          fill_pool_desc(desc, kW, kH, dW, dH, dilationW, dilationH, padW, padH, ceil_mode, memory_format);
-
-          MPSGraphTensor* inputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-          MPSGraphTensor* outputTensor = [mpsGraph maxPooling2DWithSourceTensor:inputTensor
-                                                                     descriptor:desc
-                                                                           name:nil];
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+    if (output_memory_format != suggested_memory_format) {
+      const_cast<Tensor&>(output) = output.to(suggested_memory_format);
     }
-
-    auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input_t);
-    auto outputPlaceholder = native_mps::Placeholder(cachedGraph->outputTensor_, output_t);
-
-    NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
-    };
-
-    native_mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
-
-  return output_t;
 }
 
-Tensor mps_max_pool2d_backward(
-    const Tensor& grad_output,
-    const Tensor& input_t,
-    IntArrayRef kernel_size,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef dilation,
-    bool ceil_mode) {
+static void avg_pool2d_template(const Tensor& input,
+                                const Tensor& output,
+                                const c10::optional<Tensor>& grad_output_opt,
+                                IntArrayRef kernel_size,
+                                IntArrayRef stride,
+                                IntArrayRef padding,
+                                IntArrayRef dilation,
+                                bool ceil_mode,
+                                bool count_include_pad,
+                                const c10::optional<int64_t> divisor_override,
+                                const c10::string& op_name) {
+  const Tensor& grad_output = *(at::borrow_from_optional_tensor(grad_output_opt));
+  const bool is_backward_pass = grad_output.defined();
+  const bool use_divisor = divisor_override.has_value() && divisor_override.value() != 0;
 
-  // #20866, #22032: Guarantee this for the official C++ API?
-  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
-    "max_pool2d: kernel_size must either be a single int, or a tuple of two ints")
-  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
-
-  // NB: stride default is not expressible as an integer constant, so we accept
-  // empty stride for this case
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
-    "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
-
-  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
-    "max_pool2d: padding must be either be a single int, or a tuple of two ints");
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
-
-  TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
-    "max_pool2d: dilation must be either a single int, or a tuple of two ints");
-  const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
-  const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
-
-  const auto memory_format = input_t.suggest_memory_format();
-  if (memory_format == at::MemoryFormat::ChannelsLast) {
-    TORCH_CHECK(input_t.ndimension() == 4,
-      "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
-  } else if (memory_format == at::MemoryFormat::Contiguous) {
-    TORCH_CHECK((input_t.ndimension() == 3 || input_t.ndimension() == 4),
-      "non-empty 3D or 4D (batch mode) tensor expected for input");
-  } else {
-    TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+  // custom divisor isn't supported natively in avgPooling2DWithSourceTensor().
+  // For Float input type, we work around it by multiplying divisor after avgPooling2D.
+  // However, for Long type, the accumulated error when multiplying the divisor
+  // would produce results that mismatch CPU results.
+  if (use_divisor && input.scalar_type() == ScalarType::Long) {
+    TORCH_WARN_ONCE("MPS: passing divisor to Average Pooling op with int64 input is ",
+                    "not supported on MPS backend. ",
+                    "Falling back on CPU. This may have performance implications.");
+    if (!is_backward_pass) {
+      output.copy_(at::avg_pool2d(
+          input.to("cpu"), kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override));
+    } else {
+      output.copy_(at::avg_pool2d_backward(grad_output.to("cpu"),
+                                           input.to("cpu"),
+                                           kernel_size,
+                                           stride,
+                                           padding,
+                                           ceil_mode,
+                                           count_include_pad,
+                                           divisor_override));
+    }
+    return;
   }
 
-  namespace native_mps = at::native::mps;
-  CheckedFrom c = "mps_max_pool2d_backward";
+  mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
+    MPSGraph* mpsGraph = cachedGraph.graph();
+    const int64_t ndims = input.ndimension();
+    MPSShape* paddingShape = nil;
+    MPSGraphTensor* paddedTensor = cachedGraph.inputTensor;
 
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public native_mps::MPSCachedGraph
-  {
-    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor *inputTensor_ = nil;
-    MPSGraphTensor *gradOutputTensor_ = nil;
-    MPSGraphTensor *gradInputTensor_ = nil;
+    // workaround for issue #103039644: mismatching MPS vs. CPU results
+    // when both ceilMode and includeZeroPadToAverage are True
+    const bool explicit_padding = count_include_pad && ceil_mode;
+    if (explicit_padding) {
+      std::vector<NSNumber*> padVec(ndims, @(0));
+      padVec[ndims - 1] = @(padding.size() == 1 ? padding[0] : padding[1]);
+      padVec[ndims - 2] = @(ndims > 3 ? padding[0] : 0);
+      paddingShape = [NSArray arrayWithObjects:padVec.data() count:ndims];
+      paddedTensor = [mpsGraph padTensor:cachedGraph.inputTensor
+                         withPaddingMode:MPSGraphPaddingModeZero
+                             leftPadding:paddingShape
+                            rightPadding:paddingShape
+                           constantValue:0.0
+                                    name:nil];
+      paddedTensor = [mpsGraph identityWithTensor:paddedTensor name:nil];
+    } else {
+      desc.includeZeroPadToAverage = count_include_pad;
+    }
+    if (use_divisor) {
+      desc.includeZeroPadToAverage = YES;
+    }
+
+    if (!is_backward_pass) {
+      MPSGraphTensor* avgPoolTensor = [mpsGraph avgPooling2DWithSourceTensor:paddedTensor descriptor:desc name:nil];
+      if (cachedGraph.divisorTensor) {
+        // workaround: custom divisor isn't supported by MPS backend, so we scale manually
+        return [mpsGraph multiplicationWithPrimaryTensor:avgPoolTensor
+                                         secondaryTensor:cachedGraph.divisorTensor
+                                                    name:nil];
+      } else {
+        return avgPoolTensor;
+      }
+    } else { // backward pass
+      MPSGraphTensor* scaledGradTensor = cachedGraph.gradOutputTensor;
+      if (cachedGraph.divisorTensor) {
+        scaledGradTensor = [mpsGraph multiplicationWithPrimaryTensor:cachedGraph.gradOutputTensor
+                                                     secondaryTensor:cachedGraph.divisorTensor
+                                                                name:nil];
+      }
+      MPSGraphTensor* avgPoolTensor = [mpsGraph avgPooling2DGradientWithGradientTensor:scaledGradTensor
+                                                                          sourceTensor:paddedTensor
+                                                                            descriptor:desc
+                                                                                  name:nil];
+      if (explicit_padding) {
+        return [mpsGraph padGradientWithIncomingGradientTensor:avgPoolTensor
+                                                  sourceTensor:cachedGraph.inputTensor
+                                                   paddingMode:MPSGraphPaddingModeZero
+                                                   leftPadding:paddingShape
+                                                  rightPadding:paddingShape
+                                                          name:nil];
+
+      } else {
+        return avgPoolTensor;
+      }
+    }
   };
 
-  native_mps::MPSGraphCache* cache_ = native_mps::MPSGraphCache::getInstance();
+  pool2d_template(input,
+                  output,
+                  c10::nullopt,
+                  grad_output_opt,
+                  kernel_size,
+                  stride,
+                  padding,
+                  {1, 1},
+                  ceil_mode,
+                  count_include_pad,
+                  divisor_override,
+                  pooling_op_block,
+                  op_name);
+}
 
-  Tensor grad_input;
-  grad_input = at::native::empty_mps(
-                input_t.sizes(),
-                input_t.scalar_type(),
-                c10::nullopt,
-                kMPS,
-                c10::nullopt,
-                memory_format);
+} // namespace mps
 
-  if (grad_input.numel() == 0) {
-    return grad_input;
-  }
+Tensor mps_max_pool2d(const Tensor& input,
+                      IntArrayRef kernel_size,
+                      IntArrayRef stride,
+                      IntArrayRef padding,
+                      IntArrayRef dilation,
+                      bool ceil_mode) {
+  Tensor output = at::empty({0}, input.options(), MemoryFormat::Contiguous);
+  mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
+    MPSGraph* mpsGraph = cachedGraph.graph();
+    return [mpsGraph maxPooling2DWithSourceTensor:cachedGraph.inputTensor descriptor:desc name:nil];
+  };
+  mps::pool2d_template(input,
+                       output,
+                       c10::nullopt,
+                       c10::nullopt,
+                       kernel_size,
+                       stride,
+                       padding,
+                       dilation,
+                       ceil_mode,
+                       false,
+                       c10::nullopt,
+                       pooling_op_block,
+                       "max_pool2d");
 
-  auto stream = at::mps::getCurrentMPSStream();
+  return output;
+}
 
-  @autoreleasepool {
-
-    string mem_format_key;
-    switch(memory_format) {
-      case at::MemoryFormat::Contiguous:
-        mem_format_key = "Contiguous";
-        break;
-      case at::MemoryFormat::ChannelsLast:
-        mem_format_key = "ChannelsLast";
-        break;
-      default:
-        assert(0 && "Check should have been done earlier\n");
-    }
-
-    string key = "mps_max_pool2d_backward:" + to_string(kW) + ":" + to_string(kH) + ":" +
-                                              to_string(dW) + ":" + to_string(dH) + ":" +
-                                              to_string(dilationW) + ":" + to_string(dilationH) + ":" +
-                                              to_string(padW) + ":" + to_string(padH) + ":" +
-                                              to_string(ceil_mode) + ":" + mem_format_key +
-                                              mps::getTensorsStringKey({input_t, grad_output});
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
-
-    if(!cachedGraph) {
-      native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
-
-        CachedGraph *newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = native_mps::make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          MPSGraphPooling2DOpDescriptor* desc = [[MPSGraphPooling2DOpDescriptor new] autorelease];
-          fill_pool_desc(desc, kW, kH, dW, dH, dilationW, dilationH, padW, padH, ceil_mode, memory_format);
-
-          MPSGraphTensor* inputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-          MPSGraphTensor* gradOutputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
-          MPSGraphTensor* gradInputTensor = [mpsGraph maxPooling2DGradientWithGradientTensor:gradOutputTensor
-                                                                                sourceTensor:inputTensor
-                                                                                  descriptor:desc
-                                                                                        name:nil];
-
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->gradOutputTensor_ = gradOutputTensor;
-          newCachedGraph->gradInputTensor_ = gradInputTensor;
-        }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
-    }
-
-    auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input_t);
-    auto gradOutputPlaceholder = native_mps::Placeholder(cachedGraph->gradOutputTensor_, grad_output);
-    auto gradInputPlaceholder = native_mps::Placeholder(cachedGraph->gradInputTensor_, grad_input);
-
-    NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData()
-    };
-
-    NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *results = @{
-      gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData()
-    };
-
-    native_mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-  }
+Tensor mps_max_pool2d_backward(const Tensor& grad_output,
+                               const Tensor& input,
+                               IntArrayRef kernel_size,
+                               IntArrayRef stride,
+                               IntArrayRef padding,
+                               IntArrayRef dilation,
+                               bool ceil_mode) {
+  Tensor grad_input = at::empty(input.sizes(), input.options(), MemoryFormat::Contiguous);
+  mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
+    MPSGraph* mpsGraph = cachedGraph.graph();
+    return [mpsGraph maxPooling2DGradientWithGradientTensor:cachedGraph.gradOutputTensor
+                                               sourceTensor:cachedGraph.inputTensor
+                                                 descriptor:desc
+                                                       name:nil];
+  };
+  mps::pool2d_template(input,
+                       grad_input,
+                       c10::nullopt,
+                       grad_output,
+                       kernel_size,
+                       stride,
+                       padding,
+                       dilation,
+                       ceil_mode,
+                       false,
+                       c10::nullopt,
+                       pooling_op_block,
+                       "max_pool2d_backward");
 
   return grad_input;
 }
 
-TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)(
-    const Tensor& input_t,
-    IntArrayRef kernel_size,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef dilation,
-    bool ceil_mode,
-    const Tensor& output_t,
-    const Tensor& indices) {
+TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)
+(const Tensor& input,
+ IntArrayRef kernel_size,
+ IntArrayRef stride,
+ IntArrayRef padding,
+ IntArrayRef dilation,
+ bool ceil_mode,
+ const Tensor& output,
+ const Tensor& indices) {
+  auto indices_memory_format = indices.suggest_memory_format();
 
-  // #20866, #22032: Guarantee this for the official C++ API?
-  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
-    "max_pool2d: kernel_size must either be a single int, or a tuple of two ints")
-  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
-
-  // NB: stride default is not expressible as an integer constant, so we accept
-  // empty stride for this case
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
-    "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
-
-  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
-    "max_pool2d: padding must be either be a single int, or a tuple of two ints");
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
-
-  TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
-    "max_pool2d: dilation must be either a single int, or a tuple of two ints");
-  const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
-  const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
-
-  const auto memory_format = input_t.suggest_memory_format();
-  if (memory_format == at::MemoryFormat::ChannelsLast) {
-    TORCH_CHECK(input_t.ndimension() == 4,
-      "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
-  } else if (memory_format == at::MemoryFormat::Contiguous) {
-    TORCH_CHECK((input_t.ndimension() == 3 || input_t.ndimension() == 4),
-      "non-empty 3D or 4D (batch mode) tensor expected for input");
-  } else {
-    TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
-  }
-
-  /* sizes */
-  const int64_t nbatch = input_t.ndimension() == 4 ? input_t.size(-4) : 1;
-  const int64_t nInputPlane = input_t.size(-3);
-  const int64_t inputHeight = input_t.size(-2);
-  const int64_t inputWidth = input_t.size(-1);
-
-  const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
-  const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
-
-  pool2d_shape_check(
-    input_t,
-    kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-    nInputPlane,
-    inputHeight, inputWidth,
-    outputHeight, outputWidth, memory_format);
-
-  namespace native_mps = at::native::mps;
-  CheckedFrom c = "max_pool2d_with_indices_out_mps";
-
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public native_mps::MPSCachedGraph
-  {
-    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-    MPSGraphTensor* indicesTensor_ = nil;
+  mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
+    MPSGraph* mpsGraph = cachedGraph.graph();
+    NSArray<MPSGraphTensor*>* poolOutputs = [mpsGraph maxPooling2DReturnIndicesWithSourceTensor:cachedGraph.inputTensor
+                                                                                     descriptor:desc
+                                                                                           name:nil];
+    cachedGraph.indicesTensor = mps::castMPSTensor(mpsGraph, poolOutputs[1], ScalarType::Long);
+    return poolOutputs[0];
   };
+  mps::pool2d_template(input,
+                       output,
+                       indices,
+                       c10::nullopt,
+                       kernel_size,
+                       stride,
+                       padding,
+                       dilation,
+                       ceil_mode,
+                       false,
+                       c10::nullopt,
+                       pooling_op_block,
+                       "max_pool2d_indices");
 
-  native_mps::MPSGraphCache* cache_ = native_mps::MPSGraphCache::getInstance();
-
-  if (output_t.numel() == 0) {
-    return;
+  if (indices_memory_format == MemoryFormat::ChannelsLast) {
+    const_cast<Tensor&>(indices) = indices.to(MemoryFormat::ChannelsLast);
   }
-
-  auto stream = at::mps::getCurrentMPSStream();
-
-  @autoreleasepool {
-
-    string mem_format_key;
-    switch(memory_format) {
-      case at::MemoryFormat::Contiguous:
-        mem_format_key = "Contiguous";
-        break;
-      case at::MemoryFormat::ChannelsLast:
-        mem_format_key = "ChannelsLast";
-        break;
-      default:
-        assert(0 && "Check should have been done earlier\n");
-    }
-
-    string key = "max_pool2d_with_indices_out_mps:" + to_string(kW) + ":" + to_string(kH) + ":" +
-                                                      to_string(dW) + ":" + to_string(dH) + ":" +
-                                                      to_string(dilationW) + ":" + to_string(dilationH) + ":" +
-                                                      to_string(padW) + ":" + to_string(padH) + ":" +
-                                                      to_string(ceil_mode) + ":" + mem_format_key +
-                                                      mps::getTensorsStringKey({input_t}) + ":" +
-                                                      native_mps::getMPSTypeString(indices.scalar_type());
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
-
-    if(!cachedGraph) {
-      native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
-
-        CachedGraph *newCachedGraph = nil;
-
-        @autoreleasepool {
-          MPSGraph* mpsGraph = native_mps::make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          MPSGraphPooling2DOpDescriptor* desc = [[MPSGraphPooling2DOpDescriptor new] autorelease];
-          fill_pool_desc(desc, kW, kH, dW, dH, dilationW, dilationH, padW, padH, ceil_mode, memory_format);
-          desc.returnIndicesMode = MPSGraphPoolingReturnIndicesGlobalFlatten2D;
-          desc.returnIndicesDataType = MPSDataTypeInt32;
-
-          MPSGraphTensor* inputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-          NSArray<MPSGraphTensor*>* poolOutputs = [mpsGraph maxPooling2DReturnIndicesWithSourceTensor:inputTensor
-                                                                                           descriptor:desc
-                                                                                                 name:nil];
-
-            MPSGraphTensor* indicesTensor = poolOutputs[1];
-            if(mps::getMPSDataType(indices.scalar_type()) == MPSDataTypeInt64) {
-                indicesTensor = [mpsGraph castTensor:indicesTensor
-                                               toType:MPSDataTypeInt64
-                                                 name:@"castToI64"];
-            }
-
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = poolOutputs[0];
-          newCachedGraph->indicesTensor_ = indicesTensor;
-        }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
-    }
-
-    auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input_t);
-    auto outputPlaceholder = native_mps::Placeholder(cachedGraph->outputTensor_, output_t);
-    auto indicesPlaceholder = native_mps::Placeholder(cachedGraph->indicesTensor_, indices);
-
-    NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
-      indicesPlaceholder.getMPSGraphTensor() : indicesPlaceholder.getMPSGraphTensorData()
-    };
-
-    native_mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-  }
-
 }
 
 TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_mps)
 (const Tensor& grad_output,
-const Tensor& input_t,
-IntArrayRef kernel_size,
-IntArrayRef stride,
-IntArrayRef padding,
-IntArrayRef dilation,
-bool ceil_mode,
-const Tensor& indices,
-const Tensor& grad_input) {
-
-  // #20866, #22032: Guarantee this for the official C++ API?
-  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
-    "max_pool2d: kernel_size must either be a single int, or a tuple of two ints")
-  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
-
-  // NB: stride default is not expressible as an integer constant, so we accept
-  // empty stride for this case
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
-    "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
-
-  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
-    "max_pool2d: padding must be either be a single int, or a tuple of two ints");
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
-
-  TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
-    "max_pool2d: dilation must be either a single int, or a tuple of two ints");
-  const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
-  const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
-
-  const auto memory_format = input_t.suggest_memory_format();
-  if (memory_format == at::MemoryFormat::ChannelsLast) {
-    TORCH_CHECK(input_t.ndimension() == 4,
-      "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
-  } else if (memory_format == at::MemoryFormat::Contiguous) {
-    TORCH_CHECK((input_t.ndimension() == 3 || input_t.ndimension() == 4),
-      "non-empty 3D or 4D (batch mode) tensor expected for input");
-  } else {
-    TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
-  }
-
-  namespace native_mps = at::native::mps;
-  CheckedFrom c = "max_pool2d_with_indices_backward_out_mps";
-
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public native_mps::MPSCachedGraph
-  {
-    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor *inputTensor_ = nil;
-    MPSGraphTensor *gradOutputTensor_ = nil;
-    MPSGraphTensor *gradInputTensor_ = nil;
+ const Tensor& input,
+ IntArrayRef kernel_size,
+ IntArrayRef stride,
+ IntArrayRef padding,
+ IntArrayRef dilation,
+ bool ceil_mode,
+ const Tensor& indices,
+ const Tensor& grad_input) {
+  mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
+    MPSGraph* mpsGraph = cachedGraph.graph();
+    return [mpsGraph maxPooling2DGradientWithGradientTensor:cachedGraph.gradOutputTensor
+                                               sourceTensor:cachedGraph.inputTensor
+                                                 descriptor:desc
+                                                       name:nil];
   };
-
-  native_mps::MPSGraphCache* cache_ = native_mps::MPSGraphCache::getInstance();
-
-  if (grad_input.numel() == 0) {
-    return;
-  }
-
-  auto stream = at::mps::getCurrentMPSStream();
-
-  @autoreleasepool {
-
-    string mem_format_key;
-    switch(memory_format) {
-      case at::MemoryFormat::Contiguous:
-        mem_format_key = "Contiguous";
-        break;
-      case at::MemoryFormat::ChannelsLast:
-        mem_format_key = "ChannelsLast";
-        break;
-      default:
-        assert(0 && "Check should have been done earlier\n");
-    }
-
-    string key = "max_pool2d_with_indices_backward_out_mps:" + to_string(kW) + ":" + to_string(kH) + ":" +
-                                               to_string(dW) + ":" + to_string(dH) + ":" +
-                                               to_string(dilationW) + ":" + to_string(dilationH) + ":" +
-                                               to_string(padW) + ":" + to_string(padH) + ":" +
-                                               to_string(ceil_mode) + ":" + mem_format_key +
-                                               mps::getTensorsStringKey({input_t, grad_output});
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
-
-    if(!cachedGraph) {
-      native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
-
-        CachedGraph *newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = native_mps::make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          MPSGraphPooling2DOpDescriptor* desc = [[MPSGraphPooling2DOpDescriptor new] autorelease];
-          fill_pool_desc(desc, kW, kH, dW, dH, dilationW, dilationH, padW, padH, ceil_mode, memory_format);
-
-          MPSGraphTensor* inputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-          MPSGraphTensor* gradOutputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
-          MPSGraphTensor* gradInputTensor = [mpsGraph maxPooling2DGradientWithGradientTensor:gradOutputTensor
-                                                                                sourceTensor:inputTensor
-                                                                                  descriptor:desc
-                                                                                        name:nil];
-
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->gradOutputTensor_ = gradOutputTensor;
-          newCachedGraph->gradInputTensor_ = gradInputTensor;
-        }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
-    }
-
-    auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input_t);
-    auto gradOutputPlaceholder = native_mps::Placeholder(cachedGraph->gradOutputTensor_, grad_output);
-    auto gradInputPlaceholder = native_mps::Placeholder(cachedGraph->gradInputTensor_, grad_input);
-
-    NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData()
-    };
-
-    NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *results = @{
-      gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData()
-    };
-
-    native_mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-  }
+  mps::pool2d_template(input,
+                       grad_input,
+                       indices,
+                       grad_output,
+                       kernel_size,
+                       stride,
+                       padding,
+                       dilation,
+                       ceil_mode,
+                       false,
+                       c10::nullopt,
+                       pooling_op_block,
+                       "max_pool2d_indices_backward");
 }
 
-TORCH_IMPL_FUNC(avg_pool2d_out_mps) (
-   const Tensor& input_,
-   int64_t kH_,
-   int64_t kW_,
-   int64_t dH_,
-   int64_t dW_,
-   int64_t padH_,
-   int64_t padW_,
-   bool ceil_mode,
-   bool count_include_pad,
-   c10::optional<int64_t> divisor_override,
-   const Tensor& output) {
-  namespace native_mps = at::native::mps;
-
-  TensorArg output_arg{ output, "output", 1 };
-  TensorArg input_arg{ input_, "input_", 2 };
-
-  checkAllSameGPU("avg_pool2d_out_cuda", {output_arg, input_arg});
-
-  const int kH = safe_downcast<int, int64_t>(kH_);
-  const int kW = safe_downcast<int, int64_t>(kW_);
-
-  const int dH = safe_downcast<int, int64_t>(dH_);
-  const int dW = safe_downcast<int, int64_t>(dW_);
-
-  const int padH = safe_downcast<int, int64_t>(padH_);
-  const int padW = safe_downcast<int, int64_t>(padW_);
-
-  /* sizes */
-  const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
-  const int64_t nInputPlane = input_.size(-3);
-  const int64_t inputHeight = input_.size(-2);
-  const int64_t inputWidth = input_.size(-1);
-
-  int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
-  int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
-  const auto memory_format = input_.suggest_memory_format();
-
-  Tensor input = input_.contiguous(memory_format);
-
-  const int32_t count = safe_downcast<int32_t, int64_t>(output.numel());
-
-  bool use_divisor = divisor_override.has_value();
-  const auto divisor_override_value = use_divisor ? divisor_override.value() : 0;
-
-  if (count != 0) {
-    // Derive from MPSCachedGraph
-    struct CachedGraph : public native_mps::MPSCachedGraph
-    {
-      CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-      MPSGraphTensor* inputTensor_ = nil;
-      MPSGraphTensor* outputTensor_ = nil;
-      MPSGraphTensor* indicesTensor_ = nil;
-    };
-
-    native_mps::MPSGraphCache* cache_ = native_mps::MPSGraphCache::getInstance();
-
-    auto stream = at::mps::getCurrentMPSStream();
-
-    @autoreleasepool {
-      string mem_format_key;
-      switch(memory_format) {
-        case at::MemoryFormat::Contiguous:
-          mem_format_key = "Contiguous";
-          break;
-        case at::MemoryFormat::ChannelsLast:
-          mem_format_key = "ChannelsLast";
-          break;
-        default:
-          assert(0 && "Check should have been done earlier\n");
-      }
-
-      string key = "mps_avg_pool2d:" + to_string(kW) + ":" + to_string(kH) + ":" +
-                                       to_string(dW) + ":" + to_string(dH) + ":" +
-                                       to_string(padW) + ":" + to_string(padH) + ":" +
-                                       to_string(ceil_mode) + ":" + mem_format_key + ":" +
-                                       to_string(divisor_override_value) +
-                                       mps::getTensorsStringKey({input});
-      CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
-
-      if(!cachedGraph) {
-        native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
-          CachedGraph *newCachedGraph = nil;
-
-          @autoreleasepool {
-            MPSGraph* mpsGraph = native_mps::make_mps_graph();
-            newCachedGraph = new CachedGraph(mpsGraph);
-
-            MPSGraphPooling2DOpDescriptor* desc = [[MPSGraphPooling2DOpDescriptor new] autorelease];
-            fill_pool_desc(desc, kW, kH, dW, dH, 1, 1, padW, padH, ceil_mode, memory_format);
-
-            MPSGraphTensor* inputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, input);
-            MPSGraphTensor* outputTensor = [mpsGraph avgPooling2DWithSourceTensor:inputTensor
-                                                                       descriptor:desc
-                                                                             name:nil];
-            newCachedGraph->inputTensor_ = inputTensor;
-            newCachedGraph->outputTensor_ = outputTensor;
-          }
-          return newCachedGraph;
-        });
-        cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
-      }
-
-      auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input);
-      auto outputPlaceholder = native_mps::Placeholder(cachedGraph->outputTensor_, output);
-
-      NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *feeds = @{
-        inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-      };
-
-      NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *results = @{
-        outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
-      };
-
-      native_mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-    }
-  }
+TORCH_IMPL_FUNC(avg_pool2d_out_mps)
+(const Tensor& input,
+ int64_t kH,
+ int64_t kW,
+ int64_t dH,
+ int64_t dW,
+ int64_t padH,
+ int64_t padW,
+ bool ceil_mode,
+ bool count_include_pad,
+ c10::optional<int64_t> divisor_override,
+ const Tensor& output) {
+  mps::avg_pool2d_template(input,
+                           output,
+                           c10::nullopt,
+                           {kH, kW},
+                           {dH, dW},
+                           {padH, padW},
+                           {1, 1},
+                           ceil_mode,
+                           count_include_pad,
+                           divisor_override,
+                           "avg_pool2d");
 }
 
-TORCH_IMPL_FUNC(avg_pool2d_backward_out_mps) (
-  const Tensor& gradOutput_,
-  const Tensor& input_,
-  IntArrayRef kernel_size,
-  IntArrayRef stride,
-  IntArrayRef padding,
-  bool ceil_mode,
-  bool count_include_pad,
-  c10::optional<int64_t> divisor_override,
-  const Tensor& gradInput
-) {
-  TensorArg gradInput_arg{ gradInput, "gradInput", 1 };
-  TensorArg gradOutput_arg{ gradOutput_, "gradOutput_", 2 };
-  TensorArg input_arg{ input_, "input_", 3 };
-
-  checkAllSameGPU("avg_pool2d_backward_out_cuda",
-                  {gradInput_arg, gradOutput_arg, input_arg});
-  namespace native_mps = at::native::mps;
-
-  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
-
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
-
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
-
-  const auto memory_format = input_.suggest_memory_format();
-  const Tensor input = input_.contiguous(memory_format);
-  const Tensor gradOutput = gradOutput_.contiguous(memory_format);
-
-  const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
-  const int64_t nInputPlane = input.size(-3);
-  const int64_t inputHeight = input.size(-2);
-  const int64_t inputWidth = input.size(-1);
-
-  const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
-  const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
-
-
-  const int32_t count = safe_downcast<int32_t, int64_t>(input.numel());
-  if (count == 0) {
-    return;
-  }
-  bool use_divisor = divisor_override.has_value();
-  const auto divisor_override_value = use_divisor ? divisor_override.value() : 0;
-
-  namespace native_mps = at::native::mps;
-  CheckedFrom c = "avg_pool2d_backward_out_mps";
-
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public native_mps::MPSCachedGraph
-  {
-    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor *inputTensor_ = nil;
-    MPSGraphTensor *gradOutputTensor_ = nil;
-    MPSGraphTensor *gradInputTensor_ = nil;
-  };
-
-  native_mps::MPSGraphCache* cache_ = native_mps::MPSGraphCache::getInstance();
-
-  if (gradInput.numel() == 0) {
-    return;
-  }
-
-  auto stream = at::mps::getCurrentMPSStream();
-
-  @autoreleasepool {
-
-    string mem_format_key;
-    switch(memory_format) {
-      case at::MemoryFormat::Contiguous:
-        mem_format_key = "Contiguous";
-        break;
-      case at::MemoryFormat::ChannelsLast:
-        mem_format_key = "ChannelsLast";
-        break;
-      default:
-        assert(0 && "Check should have been done earlier\n");
-    }
-
-    string key = "avg_pool2d_backward_out_mps:" + to_string(kW) + ":" + to_string(kH) + ":" +
-                                               to_string(dW) + ":" + to_string(dH) + ":" +
-                                               to_string(outputWidth) + ":" + to_string(outputHeight) + ":" +
-                                               to_string(padW) + ":" + to_string(padH) + ":" +
-                                               to_string(ceil_mode) + ":" + mem_format_key +
-                                               mps::getTensorsStringKey({input, gradOutput});
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
-
-    if(!cachedGraph) {
-      native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
-
-        CachedGraph *newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = native_mps::make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          MPSGraphPooling2DOpDescriptor* desc = [[MPSGraphPooling2DOpDescriptor new] autorelease];
-          fill_pool_desc(desc, kW, kH, dW, dH, 1, 1, padW, padH, ceil_mode, memory_format);
-
-          MPSGraphTensor* inputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, input);
-          MPSGraphTensor* gradOutputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, gradOutput);
-          MPSGraphTensor *gradInputTensor = [mpsGraph avgPooling2DGradientWithGradientTensor:gradOutputTensor
-                                                                               sourceTensor:inputTensor
-                                                                                descriptor : desc
-                                                                                       name:nil];
-
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->gradOutputTensor_ = gradOutputTensor;
-          newCachedGraph->gradInputTensor_ = gradInputTensor;
-        }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
-    }
-
-    auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input);
-    auto gradOutputPlaceholder = native_mps::Placeholder(cachedGraph->gradOutputTensor_, gradOutput);
-    auto gradInputPlaceholder = native_mps::Placeholder(cachedGraph->gradInputTensor_, gradInput);
-
-    NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData()
-    };
-
-    NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *results = @{
-      gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData()
-    };
-
-    native_mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-  }
+TORCH_IMPL_FUNC(avg_pool2d_backward_out_mps)
+(const Tensor& gradOutput,
+ const Tensor& input,
+ IntArrayRef kernel_size,
+ IntArrayRef stride,
+ IntArrayRef padding,
+ bool ceil_mode,
+ bool count_include_pad,
+ c10::optional<int64_t> divisor_override,
+ const Tensor& gradInput) {
+  mps::avg_pool2d_template(input,
+                           gradInput,
+                           gradOutput,
+                           kernel_size,
+                           stride,
+                           padding,
+                           {1, 1},
+                           ceil_mode,
+                           count_include_pad,
+                           divisor_override,
+                           "avg_pool2d_backward");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

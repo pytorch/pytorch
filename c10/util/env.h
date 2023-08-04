@@ -14,7 +14,14 @@ namespace utils {
 // NB:
 // Issues a warning if the value of the environment variable is not 0 or 1.
 inline optional<bool> check_env(const char* name) {
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
   auto envar = std::getenv(name);
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
   if (envar) {
     if (strcmp(envar, "0") == 0) {
       return false;

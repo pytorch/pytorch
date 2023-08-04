@@ -10,10 +10,10 @@ class NSSingleResultValuesType(str, enum.Enum):
     NODE_OUTPUT = 'node_output'
     NODE_INPUT = 'node_input'
 
-NSSubgraph = NamedTuple(
-    'NSSubgraph',
-    [('start_node', Node), ('end_node', Node), ('base_op_node', Node)]
-)
+class NSSubgraph(NamedTuple):
+    start_node: Node
+    end_node: Node
+    base_op_node: Node
 
 # TODO(future PR): see if we can use typing_extensions's TypedDict instead
 # to properly type the various keys
@@ -35,6 +35,12 @@ NSSubgraph = NamedTuple(
 #   # index of this node within the args of the input/output node
 #   # for example, in add(x1, x2), x2 would have index_of_arg == 1
 #   'index_of_arg': 0,
+#   # precomputed comparisons of logger values to reference values
+#   'comparisons': [torch.tensor(...), ...]
+#   # name of function used for precomputed comparisons
+#   'comparison_fn_name': 'sqnr',
+#   # string representation of qconfig responsible for creating this logger
+#   'qconfig_str': 'QConfig(...)',
 # }
 NSSingleResultType = Dict[str, Any]
 

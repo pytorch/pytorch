@@ -1,3 +1,4 @@
+#include <utility>
 #include <vector>
 
 #include <ATen/ATen.h>
@@ -15,7 +16,7 @@ nnapi_wrapper* nnapi;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 nnapi_wrapper* check_nnapi;
 
-void load_platform_library() {
+static void load_platform_library() {
   static int run_once = [](){
     nnapi_wrapper_load(&nnapi, &check_nnapi);
     CAFFE_ENFORCE(nnapi);
@@ -37,7 +38,7 @@ void NnapiCompilation::init(
     std::vector<at::Tensor> parameter_buffers
 ) {
   init2(
-    serialized_model_tensor,
+    std::move(serialized_model_tensor),
     std::move(parameter_buffers),
     ANEURALNETWORKS_PREFER_SUSTAINED_SPEED,
     false);
@@ -45,7 +46,7 @@ void NnapiCompilation::init(
 
 void NnapiCompilation::init2(
     at::Tensor serialized_model_tensor,
-    std::vector<at::Tensor> parameter_buffers,
+    const std::vector<at::Tensor>& parameter_buffers,
     int64_t compilation_preference,
     bool relax_f32_to_f16
   ) {
@@ -54,7 +55,9 @@ void NnapiCompilation::init2(
   load_platform_library();
 
   std::vector<const void*> buffers;
+  buffers.reserve(parameter_buffers.size());
   std::vector<int32_t> buffer_sizes;
+  buffer_sizes.reserve(parameter_buffers.size());
   for (auto& t : parameter_buffers) {
     TORCH_CHECK(t.is_contiguous());
     buffers.push_back(t.data_ptr());
@@ -72,10 +75,9 @@ void NnapiCompilation::init2(
     ser_model_ptr,
     serialized_model_tensor.nbytes()
   };
-  TORCH_CHECK(ser_model.size() > 0);
+  TORCH_CHECK(!ser_model.empty());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  ANeuralNetworksModel* model;
+  ANeuralNetworksModel* model{};
   check_nnapi->Model_create(&model);
   CAFFE_ENFORCE(model);
   model_.reset(model);
@@ -101,8 +103,7 @@ void NnapiCompilation::init2(
   }
   check_nnapi->Model_finish(model_.get());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  ANeuralNetworksCompilation* compilation;
+  ANeuralNetworksCompilation* compilation{};
   check_nnapi->Compilation_create(model_.get(), &compilation);
   // TODO: Make this configurable.
   check_nnapi->Compilation_setPreference(compilation, static_cast<int32_t>(compilation_preference));

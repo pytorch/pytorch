@@ -1,3 +1,4 @@
+load("//tools/build_defs:fb_native_wrapper.bzl", "fb_native")
 load("//tools/build_defs:expect.bzl", "expect")
 load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
@@ -19,6 +20,7 @@ def pt_operator_library(
         train = False,
         model = None,
         include_all_operators = False,
+        include_base_operators = True,
         **kwargs):
     (model_name, model_versions, model_assets, model_traced_backends) = validate_and_extract_model_information(
         name,
@@ -28,12 +30,47 @@ def pt_operator_library(
     ops = [op.strip() for op in ops]
 
     # If ops are specified, then we are in static selective build mode, so we append
-    # base ops to this list to avoid additional special case logic in subsequent code.
-    if len(ops) > 0:
+    # base ops to this list to avoid additional special case logic in subsequent code,
+    # unless include_base_operators is explicitly set to False (the default is True)
+    if len(ops) > 0 and include_base_operators:
         ops.extend(PT_BASE_OPS)
 
     labels = kwargs.pop("labels", [])
     visibility = kwargs.pop("visibility", ["PUBLIC"])
+
+    # Sanity check the model name and versions.  While the input to both is an array, the
+    # codegen script only ever outputs a single item in the array so we can just assume that
+    # here. If you ever need to depends on more than one assets, just break it up into a separate
+    # BUCK targets.
+    if model_assets or model_versions:
+        if len(model_assets) != 1:
+            fail("Model assets must be of size 1")
+        if len(model_versions) != 1:
+            fail("Model versions must be of size 1")
+
+    # Is this a traced operator therefore has a YAML file with ops?
+    yaml_option = ""
+    if model_assets and len(model_assets) > 0:
+        # We know these lists are only of length 1 via earlier assert.
+        model_asset = model_assets[0]
+        model_version = model_versions[0]
+
+        # Pass the YAML file from this asset to the genrule below.
+        yaml_dep = "{}_v{}_yaml".format(model_asset, model_version)
+        fb_native.filegroup(
+            name = yaml_dep,
+            srcs = [
+                model_asset + ".yaml",
+            ],
+            # The visibility is not set to PUBLIC as this an internal detail.  If you see this error
+            # in your buck build flow, you are trying to use a hand-crafted "pt_operator_library" that
+            # with parameters not supported outside of codegen targets!
+        )
+
+        # Since all selective traced ops are created by automation, we can assume they
+        # have a YAML file at this very location.  If it doesn't exist, it means the targets
+        # was hand-crafted which is not a support workflow for traced ops.
+        yaml_option = "--models_yaml_path $(location fbsource//xplat/pytorch_models/build/{}/v{}:{})/{}.yaml".format(model_name, model_version, yaml_dep, model_asset)
 
     fb_xplat_genrule(
         name = name,
@@ -46,17 +83,17 @@ def pt_operator_library(
             "--output_path \"${{OUT}}\" " +
             "--model_name {model_name} " +
             "--dep_graph_yaml_path {dep_graph_yaml} " +
-            "--models_yaml_path {models_yaml} " +
+            "{optionally_model_yamls} " +
             "{optionally_model_versions} " +
             "{optionally_model_assets} " +
             "{optionally_model_traced_backends} " +
             "{optionally_include_all_operators}"
         ).format(
-            exe = "//tools:gen_operators_yaml" if IS_OSS else "//xplat/caffe2/tools:gen_operators_yaml",
+            exe = "//tools:gen_operators_yaml" if IS_OSS else "fbsource//xplat/caffe2/tools:gen_operators_yaml",
             rule_name = name,
             model_name = model_name,
-            dep_graph_yaml = "none" if IS_OSS else "$(location //xplat/caffe2:pytorch_op_deps)/fb/pytorch_op_deps.yaml ",
-            models_yaml = "none" if IS_OSS else "$(location //xplat/pytorch_models:all_mobile_model_configs)/build/all_mobile_model_configs.yaml ",
+            dep_graph_yaml = "none" if IS_OSS else "$(location fbsource//xplat/caffe2:pytorch_op_deps)/fb/pytorch_op_deps.yaml ",
+            optionally_model_yamls = "" if (IS_OSS or yaml_option == None) else yaml_option,
             optionally_root_ops = "--root_ops " + (",".join(ops)) if len(ops) > 0 else "",
             optionally_training_root_ops = "--training_root_ops " + (",".join(ops)) if len(ops) > 0 and train else "",
             optionally_model_versions = "--model_versions " + (",".join(model_versions)) if model_versions != None else "",
@@ -295,9 +332,11 @@ PT_OPS_PRIM = [
     "aten::copy_.float",
     "aten::backward",
     "aten::index.Tensor_hacked_twin",
+    "aten::_unsafe_index.Tensor_hacked_twin",
     "aten::_index_put_impl_.hacked_twin",
     "aten::index_put_.hacked_twin",
     "aten::index_put.hacked_twin",
+    "aten::_unsafe_index_put.hacked_twin",
     "aten::to.prim_Device",
     "aten::to.prim_dtype",
     "prim::is_cuda",

@@ -2,6 +2,7 @@
 
 #include <pybind11/pybind11.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace torch {
 namespace throughput_benchmark {
@@ -38,7 +39,7 @@ py::object ThroughputBenchmark::runOnce(py::args&& args, py::kwargs&& kwargs) {
   }
 }
 
-ThroughputBenchmark::ThroughputBenchmark(jit::Module script_module)
+ThroughputBenchmark::ThroughputBenchmark(const jit::Module& script_module)
     : script_module_(script_module) {}
 
 ThroughputBenchmark::ThroughputBenchmark(py::object module)

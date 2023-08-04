@@ -5,6 +5,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/native/mkldnn/OpContext.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/BinaryOps.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
@@ -22,11 +23,9 @@
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 #include <utility>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
-c10::MemoryFormat deduce_memory_format(
+static c10::MemoryFormat deduce_memory_format(
     c10::IntArrayRef strides,
     c10::IntArrayRef dims) {
   if (strides.size() == 4 && strides[3] == dims[1] && strides[1] == 1l) {
@@ -35,14 +34,14 @@ c10::MemoryFormat deduce_memory_format(
   return c10::MemoryFormat::Contiguous;
 }
 
-c10::MemoryFormat deduce_memory_format(
+static c10::MemoryFormat deduce_memory_format(
     const std::vector<int64_t>& strides,
     const std::vector<int64_t>& dims) {
   return deduce_memory_format(
       c10::IntArrayRef(strides), c10::IntArrayRef(dims));
 }
 
-at::Tensor from_blob_quantized(
+static at::Tensor from_blob_quantized(
     void* data,
     at::IntArrayRef sizes,
     at::IntArrayRef strides,
@@ -165,7 +164,7 @@ std::vector<at::Tensor> constructTensors(
   return tensors;
 }
 
-std::vector<at::Tensor> constructTensors(
+static std::vector<at::Tensor> constructTensors(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -275,7 +274,7 @@ std::vector<at::Tensor> constructTensors2(
   return tensors;
 }
 
-std::vector<at::Tensor> constructTensors2(
+static std::vector<at::Tensor> constructTensors2(
     int64_t bufs_in_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -297,7 +296,7 @@ std::vector<at::Tensor> constructTensors2(
 }
 
 #ifndef _WIN32
-at::Tensor quantized_add(
+static at::Tensor quantized_add(
     const at::Tensor& x1,
     const at::Tensor& x2,
     double scale,
@@ -309,7 +308,7 @@ at::Tensor quantized_add(
   return qadd_op.call(x1, x2, scale, zero);
 }
 
-at::Tensor quantized_mul(
+static at::Tensor quantized_mul(
     const at::Tensor& x1,
     const at::Tensor& x2,
     double scale,
@@ -321,7 +320,7 @@ at::Tensor quantized_mul(
   return op.call(x1, x2, scale, zero);
 }
 
-at::Tensor quantized_mul_scalar(const at::Tensor& x, double scalar) {
+static at::Tensor quantized_mul_scalar(const at::Tensor& x, double scalar) {
   const auto op = c10::Dispatcher::singleton()
                       .findSchemaOrThrow("quantized::mul", "Scalar")
                       .typed<at::Tensor(at::Tensor, c10::Scalar const&)>();
@@ -329,14 +328,7 @@ at::Tensor quantized_mul_scalar(const at::Tensor& x, double scalar) {
   return op.call(x, s);
 }
 
-at::Tensor quantized_sigmoid(const at::Tensor& x, double scale, int64_t zero) {
-  const auto op = c10::Dispatcher::singleton()
-                      .findSchemaOrThrow("quantized::sigmoid", "")
-                      .typed<at::Tensor(at::Tensor, double, int64_t)>();
-  return op.call(x, scale, zero);
-}
-
-at::Tensor quantized_cat(
+static at::Tensor quantized_cat(
     const c10::List<at::Tensor>& qxs,
     int64_t dim,
     c10::optional<double> scale,
@@ -356,12 +348,6 @@ at::Tensor quantized_cat(
       zero);
 }
 
-at::Tensor quantized_relu(const at::Tensor& qx) {
-  const auto op = c10::Dispatcher::singleton()
-                      .findSchemaOrThrow("quantized::relu", "")
-                      .typed<at::Tensor(at::Tensor)>();
-  return op.call(qx);
-}
 #endif // _WIN32
 
 #ifdef C10_MOBILE
@@ -416,7 +402,7 @@ void nnc_aten_conv2d(
   }
 
   // TODO: can i haz an out version of the conv2d?
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_quantized_conv1d(
@@ -447,7 +433,7 @@ void nnc_aten_quantized_conv1d(
   auto qx = tensors[1].unsqueeze(quant_utils::kConv1dSqueezeDim + 2);
   auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
   r = r.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_quantized_conv1d_out(
@@ -511,7 +497,7 @@ void nnc_aten_quantized_conv2d(
   const int64_t out_qzero = extra_args[4];
   // NOLINTNEXTLINE
   auto r = convPackedParams->apply(tensors[1], out_qscale, out_qzero);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_quantized_conv2d_out(
@@ -573,7 +559,7 @@ void nnc_aten_quantized_conv2d_relu(
   const int64_t out_qzero = extra_args[4];
   // NOLINTNEXTLINE
   auto r = convPackedParams->apply_relu(tensors[1], out_qscale, out_qzero);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_quantized_conv2d_relu_out(
@@ -635,7 +621,7 @@ void nnc_aten_quantized_linear(
   const int64_t out_qzero = extra_args[4];
   // NOLINTNEXTLINE
   auto r = linearPackedParams->apply(tensors[1], out_qscale, out_qzero);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_quantized_linear_out(
@@ -697,7 +683,7 @@ void nnc_aten_quantized_linear_relu(
   const int64_t out_qzero = extra_args[4];
   // NOLINTNEXTLINE
   auto r = linearPackedParams->apply_relu(tensors[1], out_qscale, out_qzero);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 #ifndef _WIN32
@@ -732,7 +718,7 @@ void nnc_aten_quantized_add(
   const int64_t out_qzero = extra_args[7];
   // NOLINTNEXTLINE
   auto r = quantized_add(tensors[1], tensors[2], out_qscale, out_qzero);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_quantized_mul(
@@ -763,7 +749,7 @@ void nnc_aten_quantized_mul(
   const int64_t out_qzero = extra_args[7];
   // NOLINTNEXTLINE
   auto r = quantized_mul(tensors[1], tensors[2], out_qscale, out_qzero);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_quantized_mul_out(
@@ -824,7 +810,7 @@ void nnc_aten_quantized_mul_scalar(
   const double scalar = ((double*)extra_args)[3];
   // NOLINTNEXTLINE
   auto r = quantized_mul_scalar(tensors[1], scalar);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_quantized_mul_scalar_out(
@@ -879,7 +865,7 @@ void nnc_aten_quantized_relu(
       {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}});
   // NOLINTNEXTLINE
   auto r = at::relu(tensors[1]);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_quantized_sigmoid(
@@ -905,7 +891,7 @@ void nnc_aten_quantized_sigmoid(
 
   // NOLINTNEXTLINE
   auto r = at::sigmoid(tensors[1]);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_quantized_sigmoid_out(
@@ -968,7 +954,7 @@ void nnc_aten_quantized_cat(
   auto qxs = c10::List<at::Tensor>(
       std::vector<at::Tensor>(tensors.begin() + 1, tensors.end()));
   auto r = quantized_cat(qxs, dim, out_qscale, out_qzero);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 #endif // _WIN32
 
@@ -1011,7 +997,7 @@ void nnc_aten_upsample_nearest2d(
       (scale_factor_h != -1.f) ? c10::optional<at::ArrayRef<double>>(
                                      {scale_factor_h, scale_factor_w})
                                : c10::nullopt);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_upsample_nearest2d_out(
@@ -1083,7 +1069,7 @@ void nnc_aten_quantize_per_tensor(
   const int64_t qzero = extra_args[1];
   const c10::ScalarType qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   auto r = at::quantize_per_tensor(x, qscale, qzero, qdtype);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_quantize_per_tensor_out(
@@ -1139,7 +1125,7 @@ void nnc_aten_dequantize(
         {qscale, qzero, toQIntType(static_cast<c10::ScalarType>(qdtype))}}});
   // NOLINTNEXTLINE
   auto r = at::dequantize(tensors[1]);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_dequantize_out(
@@ -1208,7 +1194,7 @@ void nnc_aten_conv1d(
     }
   }
 
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_conv1d_out(
@@ -1284,7 +1270,7 @@ void nnc_aten_adaptive_avg_pool2d(
     r = at::adaptive_avg_pool2d(x, {H, W});
   } catch (...) {
   }
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_mean(
@@ -1332,7 +1318,7 @@ void nnc_aten_max_red(
     r = std::get<0>(at::max(x, max_dim, keep_dim));
   } catch (...) {
   }
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_max_red_out(
@@ -1411,6 +1397,30 @@ void nnc_aten_triangular_solve(
   }
 }
 
+#if AT_MKLDNN_ENABLED()
+
+void nnc_mkldnn_prepacked_conv_run(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  using namespace at::native::mkldnn;
+
+  auto tensors = constructTensors(
+      bufs_num - 1, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+
+  const at::Tensor& x = tensors[1];
+  auto context = reinterpret_cast<ConvOpContext*>(buf_data[2]);
+
+  context->run(x, buf_data[0]);
+}
+
+#endif // AT_MKLDNN_ENABLED()
+
 #ifdef USE_XNNPACK
 
 void nnc_prepacked_linear_clamp_run(
@@ -1431,7 +1441,9 @@ void nnc_prepacked_linear_clamp_run(
   auto context = reinterpret_cast<LinearOpContext*>(buf_data[2]);
   at::Tensor output = context->run(x);
   memcpy(
-      buf_data[0], output.data_ptr(), output.element_size() * output.numel());
+      buf_data[0],
+      output.const_data_ptr(),
+      output.element_size() * output.numel());
 }
 
 void nnc_prepacked_conv2d_clamp_run(
@@ -1452,7 +1464,9 @@ void nnc_prepacked_conv2d_clamp_run(
   auto context = reinterpret_cast<Conv2dOpContext*>(buf_data[2]);
   at::Tensor output = context->run(x);
   memcpy(
-      buf_data[0], output.data_ptr(), output.element_size() * output.numel());
+      buf_data[0],
+      output.const_data_ptr(),
+      output.element_size() * output.numel());
 }
 
 #endif // USE_XNNPACK
@@ -1478,7 +1492,7 @@ void nnc_aten_embedding(
   }
   // TODO: have to copy output because at::embedding doesnt have an out
   // variant and NNC's external calls don't support allocations
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
 #ifndef C10_MOBILE
@@ -1589,6 +1603,12 @@ const static RegisterNNCExternalFunction nnc_embedding(
     "nnc_aten_embedding",
     nnc_aten_embedding);
 
+#if AT_MKLDNN_ENABLED()
+const static RegisterNNCExternalFunction reg_nnc_mkldnn_prepacked_conv_run(
+    "nnc_mkldnn_prepacked_conv_run",
+    nnc_mkldnn_prepacked_conv_run);
+#endif // AT_MKLDNN_ENABLED()
+
 #ifdef USE_XNNPACK
 const static RegisterNNCExternalFunction reg_nnc_prepacked_linear_clamp_run(
     "nnc_prepacked_linear_clamp_run",
@@ -1604,6 +1624,4 @@ const static RegisterNNCExternalFunction reg_nnc_prepacked_conv2d_clamp_run(
 } // extern "C"
 #endif
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

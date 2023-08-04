@@ -17,11 +17,13 @@ load(
     "aten_cpu_source_list",
     "aten_native_source_list",
     "core_sources_common",
-    "core_sources_full_mobile_no_backend_interface",
+    "core_sources_full_mobile_no_backend_interface_xplat",
     "core_trainer_sources",
     "jit_core_headers",
     "jit_core_sources",
     "libtorch_profiler_sources",
+    "torch_cpp_srcs",
+    "torch_mobile_tracer_sources",
 )
 load(
     ":pt_ops.bzl",
@@ -96,6 +98,9 @@ def get_strip_error_messages():
         return True  # always strip in OSS CI to expose potential issues
     return read_bool("pt", "strip_error_messages", not _is_build_mode_dev())
 
+def get_disable_warn():
+    return read_bool("pt", "disable_warn", False)
+
 def get_enable_eager_symbolication():
     return read_bool("pt", "enable_eager_symbolication", default = False, required = False)
 
@@ -104,6 +109,35 @@ def get_static_dispatch_backend():
     if static_dispatch_backend == None:
         return []
     return static_dispatch_backend.split(";")
+
+def get_glsl_paths():
+    paths = [
+        "//xplat/caffe2:aten_vulkan_glsl_src_path",
+        "aten/src/ATen/native/vulkan/glsl",
+    ] + [
+        p
+        for p in read_config("gen_vulkan_spv", "additional_glsl_paths", "").split(" ")
+        if p
+    ]
+
+    if len(paths) % 2 != 0:
+        fail(
+            "gen_vulkan_spv.additional_glsl_paths must contain an even number of elements"
+        )
+
+    return " ".join(
+        [
+            "$(location {})/{}".format(
+                paths[i],
+                paths[i + 1],
+            )
+            for i in range(
+                0,
+                len(paths),
+                2,
+            )
+        ]
+    )
 
 # @lint-ignore BUCKRESTRICTEDSYNTAX
 IS_OSS = read_config("pt", "is_oss", "0") == "1"  # True for OSS BUCK build, and False for internal BUCK build
@@ -125,14 +159,16 @@ THIRD_PARTY_LIBS = {
     "XNNPACK": ["//xplat/third-party/XNNPACK:XNNPACK", "//third_party:XNNPACK"],
     "clog": ["//xplat/third-party/clog:clog", "//third_party:clog"],
     "cpuinfo": ["//third-party/cpuinfo:cpuinfo", "//third_party:cpuinfo"],
-    "flatbuffers-api": ["//third-party/flatbuffers:flatbuffers-api", "//third_party:flatbuffers-api"],
-    "flatc": ["//third-party/flatbuffers:flatc", "//third_party:flatc"],
+    "flatbuffers-api": ["//third-party/flatbuffers/fbsource_namespace:flatbuffers-api", "//third_party:flatbuffers-api"],
+    "flatc": ["//third-party/flatbuffers/fbsource_namespace:flatc", "//third_party:flatc"],
     "fmt": ["//third-party/fmt:fmt", "//third_party:fmt"],
     "glog": ["//third-party/glog:glog", "//third_party:glog"],
     "gmock": ["//xplat/third-party/gmock:gtest", "//third_party:gmock"],
     "gtest": ["//xplat/third-party/gmock:gmock", "//third_party:gtest"],
     "kineto": ["//xplat/kineto/libkineto:libkineto", "//third_party:libkineto"],
+    "libkineto_headers": ["//xplat/kineto/libkineto:libkineto_headers", "//third_party:libkineto_headers"],
     "omp": ["//xplat/third-party/linker_lib:omp", "//third_party:no-op"],
+    "pocketfft": ["//third-party/pocket_fft:pocketfft", "//third_party:pocketfft_header"],
     "psimd": ["//xplat/third-party/psimd:psimd", "//third_party:psimd"],
     "pthreadpool": ["//xplat/third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
     "pthreadpool_header": ["//xplat/third-party/pthreadpool:pthreadpool_header", "//third_party:pthreadpool_header"],
@@ -140,22 +176,24 @@ THIRD_PARTY_LIBS = {
     "rt": ["//xplat/third-party/linker_lib:rt", "//third_party:rt"],
     "ruy": ["//third-party/ruy:ruy_xplat_lib", "//third_party:ruy_lib"],
     "typing-extensions": ["//third-party/typing-extensions:typing-extensions", "//third_party:typing-extensions"],
+    "sleef_arm": ["//third-party/sleef:sleef_arm", "//third_party:sleef_arm"],
 }
 
 def third_party(name):
     if name not in THIRD_PARTY_LIBS:
-        fail("Cannot find thrid party library " + name + ", please register it in THIRD_PARTY_LIBS first!")
+        fail("Cannot find third party library " + name + ", please register it in THIRD_PARTY_LIBS first!")
     return THIRD_PARTY_LIBS[name][1] if IS_OSS else THIRD_PARTY_LIBS[name][0]
 
 def get_pt_compiler_flags():
     return select({
         "DEFAULT": _PT_COMPILER_FLAGS + [
-            "-std=gnu++17",  #to accomodate for eigen
+            "-std=gnu++17",  #to accommodate for eigen
         ],
         "ovr_config//compiler:cl": windows_convert_gcc_clang_flags(_PT_COMPILER_FLAGS),
     })
 
 _PT_COMPILER_FLAGS = [
+    "-fexceptions",
     "-frtti",
     "-Os",
     "-Wno-unknown-pragmas",
@@ -195,6 +233,8 @@ _COMMON_PREPROCESSOR_FLAGS = [
     ["-DC10_MOBILE_TRIM_DISPATCH_KEYS"] if get_enable_mobile_dispatch_keys_trimming() else []
 ) + (
     ["-DSTRIP_ERROR_MESSAGES"] if get_strip_error_messages() else []
+) + (
+    ["-DDISABLE_WARN"] if get_disable_warn() else []
 )
 
 def get_aten_preprocessor_flags():
@@ -205,6 +245,7 @@ def get_aten_preprocessor_flags():
         "-DCAFFE2_USE_LITE_PROTO",
         "-DATEN_CUDNN_ENABLED_FBXPLAT=0",
         "-DATEN_MKLDNN_ENABLED_FBXPLAT=0",
+        "-DATEN_MKLDNN_ACL_ENABLED_FBXPLAT=0",
         "-DATEN_NNPACK_ENABLED_FBXPLAT=0",
         "-DATEN_MKL_ENABLED_FBXPLAT=0",
         "-DATEN_MKL_SEQUENTIAL_FBXPLAT=0",
@@ -246,6 +287,7 @@ PT_BACKEND_HEADERS = [
     "CompositeExplicitAutograd",
     "CompositeExplicitAutogradNonFunctional",
     "CompositeImplicitAutograd",
+    "CompositeImplicitAutogradNestedTensor",
     "Meta",
 ]
 
@@ -304,6 +346,7 @@ def get_aten_generated_files(enabled_backends):
     src_files = [
         "RegisterBackendSelect.cpp",
         "RegisterCompositeImplicitAutograd.cpp",
+        "RegisterCompositeImplicitAutogradNestedTensor.cpp",
         "RegisterCompositeExplicitAutograd.cpp",
         "RegisterCompositeExplicitAutogradNonFunctional.cpp",
         "CompositeViewCopyKernels.cpp",
@@ -324,10 +367,13 @@ def get_aten_generated_files(enabled_backends):
         "Operators_4.cpp",
         "CompositeImplicitAutogradFunctions.h",
         "CompositeImplicitAutogradFunctions_inl.h",
+        "CompositeImplicitAutogradNestedTensorFunctions.h",
+        "CompositeImplicitAutogradNestedTensorFunctions_inl.h",
         "CompositeExplicitAutogradFunctions.h",
         "CompositeExplicitAutogradFunctions_inl.h",
         "CompositeExplicitAutogradNonFunctionalFunctions.h",
         "CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
+        "VmapGeneratedPlumbing.h",
         "core/ATenOpList.cpp",
         "core/TensorBody.h",
         "core/TensorMethods.cpp",
@@ -361,7 +407,7 @@ def get_aten_derived_type_src_rules(aten_rule_name, enabled_backends):
 def get_aten_selective_cpp_rules(aten_rule_name, enabled_backends):
     return [
         ":{}[{}]".format(aten_rule_name, f)
-        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
+        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeImplicitAutogradNestedTensor.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
     ] + get_aten_derived_type_src_rules(aten_rule_name, enabled_backends)
 
 def get_aten_derived_type_srcs(enabled_backends):
@@ -499,6 +545,16 @@ def copy_template_registration_files(name, apple_sdks = None):
         default_outs = ["."],
         apple_sdks = apple_sdks,
     )
+
+def get_feature_tracer_source_list():
+    """
+    Return just the Feature specific handlers used in the model tracer.
+    """
+    sources = []
+    for s in torch_mobile_tracer_sources:
+        if s.endswith("Tracer.cpp"):
+            sources.append(s)
+    return sources
 
 def pt_operator_query_codegen(
         name,
@@ -729,14 +785,13 @@ def get_pt_operator_registry_dict(
             "pt_operator_registry",
         ],
         deps = [
-                   # need absolute path here
-                   ROOT + ":torch_mobile_core",
-                   ROOT + ":aten_cpu",
-                   ROOT + ":aten_metal_prepack_header",
-                   third_party("glog"),
-                   C10,
-               ] + ([ROOT + ":torch_mobile_train"] if train else []) +
-               ([ROOT + ":torch_flatbuffer_all"] if enable_flatbuffer else []),
+            # need absolute path here
+            ROOT + ":torch_mobile_core",
+            ROOT + ":aten_cpu",
+            ROOT + ":aten_metal_prepack_header",
+            third_party("glog"),
+            C10,
+        ] + ([ROOT + ":torch_mobile_train"] if train else []),
         **kwargs
     )
 
@@ -768,28 +823,6 @@ def define_buck_targets(
     )
 
     fb_xplat_cxx_library(
-        name = "th_header",
-        header_namespace = "",
-        exported_headers = subdir_glob([
-            # TH
-            ("aten/src", "TH/*.h"),
-            ("aten/src", "TH/*.hpp"),
-            ("aten/src", "TH/generic/*.h"),
-            ("aten/src", "TH/generic/*.hpp"),
-            ("aten/src", "TH/generic/simd/*.h"),
-            ("aten/src", "TH/vector/*.h"),
-            ("aten/src", "TH/generic/*.c"),
-            ("aten/src", "TH/generic/*.cpp"),
-            ("aten/src/TH", "*.h"),  # for #include <THGenerateFloatTypes.h>
-            # THNN
-            ("aten/src", "THNN/*.h"),
-            ("aten/src", "THNN/generic/*.h"),
-            ("aten/src", "THNN/generic/*.c"),
-        ]),
-        labels = labels,
-    )
-
-    fb_xplat_cxx_library(
         name = "aten_header",
         header_namespace = "",
         exported_headers = subdir_glob([
@@ -800,6 +833,7 @@ def define_buck_targets(
             ("aten/src", "ATen/*.h"),
             ("aten/src", "ATen/cpu/**/*.h"),
             ("aten/src", "ATen/detail/*.h"),
+            ("aten/src", "ATen/functorch/**/*.h"),
             ("aten/src", "ATen/quantized/*.h"),
             ("aten/src", "ATen/vulkan/*.h"),
             ("aten/src", "ATen/metal/*.h"),
@@ -833,7 +867,6 @@ def define_buck_targets(
         header_namespace = "",
         exported_headers = subdir_glob([
             ("aten/src", "ATen/native/vulkan/*.h"),
-            ("aten/src", "ATen/native/vulkan/api/*.h"),
             ("aten/src", "ATen/native/vulkan/ops/*.h"),
             ("aten/src", "ATen/vulkan/*.h"),
         ]),
@@ -855,13 +888,13 @@ def define_buck_targets(
             [
                 ("torch/csrc/api/include", "torch/**/*.h"),
                 ("", "torch/csrc/**/*.h"),
-                ("", "torch/csrc/generic/*.cpp"),
                 ("", "torch/script.h"),
                 ("", "torch/library.h"),
                 ("", "torch/custom_class.h"),
                 ("", "torch/custom_class_detail.h"),
                 # Add again due to namespace difference from aten_header.
                 ("", "aten/src/ATen/*.h"),
+                ("", "aten/src/ATen/functorch/**/*.h"),
                 ("", "aten/src/ATen/quantized/*.h"),
             ],
             exclude = [
@@ -1010,6 +1043,9 @@ def define_buck_targets(
             "@AT_MKLDNN_ENABLED@",
             "ATEN_MKLDNN_ENABLED_FBXPLAT",
             "--replace",
+            "@AT_MKLDNN_ACL_ENABLED@",
+            "ATEN_MKLDNN_ACL_ENABLED_FBXPLAT",
+            "--replace",
             "@AT_MKL_ENABLED@",
             "ATEN_MKL_ENABLED_FBXPLAT",
             "--replace",
@@ -1020,7 +1056,7 @@ def define_buck_targets(
             "0",
             "--replace",
             "@AT_POCKETFFT_ENABLED@",
-            "0",
+            "1",
             "--replace",
             "@AT_NNPACK_ENABLED@",
             "ATEN_NNPACK_ENABLED_FBXPLAT",
@@ -1080,6 +1116,8 @@ def define_buck_targets(
             "CompositeExplicitAutogradNonFunctionalFunctions_inl.h": ":gen_aten[CompositeExplicitAutogradNonFunctionalFunctions_inl.h]",
             "CompositeImplicitAutogradFunctions.h": ":gen_aten[CompositeImplicitAutogradFunctions.h]",
             "CompositeImplicitAutogradFunctions_inl.h": ":gen_aten[CompositeImplicitAutogradFunctions_inl.h]",
+            "CompositeImplicitAutogradNestedTensorFunctions.h": ":gen_aten[CompositeImplicitAutogradNestedTensorFunctions.h]",
+            "CompositeImplicitAutogradNestedTensorFunctions_inl.h": ":gen_aten[CompositeImplicitAutogradNestedTensorFunctions_inl.h]",
             "FunctionalInverses.h": ":gen_aten[FunctionalInverses.h]",
             "Functions.h": ":gen_aten[Functions.h]",
             "MethodOperators.h": ":gen_aten[MethodOperators.h]",
@@ -1099,6 +1137,7 @@ def define_buck_targets(
         srcs = [
             "torch/csrc/jit/mobile/observer.cpp",
         ] + ([] if IS_OSS else ["torch/fb/observers/MobileObserverUtil.cpp"]),
+        compiler_flags = ["-fexceptions"],
         header_namespace = "",
         exported_headers = subdir_glob(
             [
@@ -1132,6 +1171,7 @@ def define_buck_targets(
             ":generated-autograd-headers",
             ":torch_headers",
             C10,
+            third_party("libkineto_headers"),
         ],
     )
 
@@ -1187,7 +1227,7 @@ def define_buck_targets(
         exported_headers = [
         ],
         compiler_flags = get_pt_compiler_flags(),
-        exported_preprocessor_flags = get_pt_preprocessor_flags(),
+        exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
         extra_flags = {
             "fbandroid_compiler_flags": ["-frtti"],
         },
@@ -1241,12 +1281,8 @@ def define_buck_targets(
     pt_xplat_cxx_library(
         name = "torch_model_tracer",
         srcs = [
-            "torch/csrc/jit/mobile/model_tracer/BuildFeatureTracer.cpp",
-            "torch/csrc/jit/mobile/model_tracer/CustomClassTracer.cpp",
-            "torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.cpp",
-            "torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.cpp",
             "torch/csrc/jit/mobile/model_tracer/TracerRunner.cpp",
-        ],
+        ] + get_feature_tracer_source_list(),
         header_namespace = "",
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
@@ -1275,12 +1311,14 @@ def define_buck_targets(
         name = "torch_mobile_deserialize",
         srcs = [
             "torch/csrc/jit/mobile/import.cpp",
+            "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
         ],
         compiler_flags = get_pt_compiler_flags(),
-        exported_preprocessor_flags = get_pt_preprocessor_flags(),
+        exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DFB_XPLAT_BUILD"] if not IS_OSS else []),
         header_namespace = "",
         exported_headers = [
             "torch/csrc/jit/mobile/import.h",
+            "torch/csrc/jit/mobile/flatbuffer_loader.h",
         ],
         # torch_mobile_deserialize brings in sources neccessary to read a module
         # which depends on mobile module definition
@@ -1303,6 +1341,7 @@ def define_buck_targets(
             ":torch_mobile_module",
             ":torch_mobile_observer",
             ":torch_mobile_deserialize_common",
+            ":mobile_bytecode",
             C10,
         ],
     )
@@ -1342,18 +1381,27 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags(),
         visibility = ["PUBLIC"],
         exported_deps = [
-            ":torch_flatbuffer_all",
+            ":flatbuffers_mobile",
             ":torch_mobile_core",
         ],
     )
 
     pt_xplat_cxx_library(
-        name = "torch_core",
-        srcs = core_sources_full_mobile_no_backend_interface + [
-            "torch/csrc/api/src/jit.cpp",
-            "torch/csrc/jit/serialization/export_bytecode.cpp",
-            "torch/csrc/jit/serialization/export_module.cpp",
+        name = "torch_cpp_cpu",
+        srcs = torch_cpp_srcs,
+        headers = native.glob(["torch/csrc/api/include/**/*.h"]) + ["torch/script.h"],
+        compiler_flags = get_pt_compiler_flags(),
+        exported_preprocessor_flags = get_pt_preprocessor_flags(),
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            ":torch",
+            ":torch_mobile_deserialize_common",  # for torch/csrc/api/src/serialize/input-archive.cpp
         ],
+    )
+
+    pt_xplat_cxx_library(
+        name = "torch_core",
+        srcs = core_sources_full_mobile_no_backend_interface_xplat,
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags(),
         visibility = [
@@ -1402,6 +1450,7 @@ def define_buck_targets(
             ":torch_core",
             ":torch_mobile_deserialize",
             ":torch_mobile_train",
+            ":jit_module_saving",
             C10,
         ],
     )
@@ -1412,11 +1461,13 @@ def define_buck_targets(
             "torch/csrc/autograd/VariableTypeManual.cpp",
             "torch/csrc/autograd/FunctionsManual.cpp",
             "torch/csrc/api/src/data/datasets/mnist.cpp",
+            "torch/csrc/jit/mobile/quantization.cpp",
             "torch/csrc/jit/mobile/train/export_data.cpp",
             "torch/csrc/jit/mobile/train/optim/sgd.cpp",
             "torch/csrc/jit/mobile/train/random.cpp",
             "torch/csrc/jit/mobile/train/sequential.cpp",
             ":gen_aten_libtorch[autograd/generated/Functions.cpp]",
+            "torch/csrc/quantized/quantized_backward.cpp",
         ],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + ["-DUSE_MOBILE_CLASSTYPE"],
@@ -1432,6 +1483,7 @@ def define_buck_targets(
             ":generated-autograd-headers",
             ":torch_headers",
             ":torch_mobile_deserialize",
+            ":flatbuffers_serializer_mobile",
             C10,
         ],
     )
@@ -1492,8 +1544,6 @@ def define_buck_targets(
             # "torch/csrc/jit/mobile/compatibility/runtime_compatibility.cpp",
             # "torch/csrc/jit/serialization/unpickler.cpp",
             "torch/csrc/jit/mobile/compatibility/model_compatibility.cpp",
-            "torch/csrc/jit/serialization/pickle.cpp",
-            "torch/csrc/jit/serialization/pickler.cpp",
         ],
         header_namespace = "",
         exported_headers = [
@@ -1523,15 +1573,16 @@ def define_buck_targets(
             "torch/csrc/jit/serialization/export_module.cpp",
         ],
         compiler_flags = get_pt_compiler_flags(),
-        exported_preprocessor_flags = get_pt_preprocessor_flags(),
+        exported_preprocessor_flags = get_pt_preprocessor_flags() +
+                                      (["-DFB_XPLAT_BUILD"] if not IS_OSS else []),
         exported_headers = [
             "torch/csrc/jit/serialization/export.h",
-            "torch/csrc/jit/serialization/flatbuffer_serializer_jit.h",
         ],
         visibility = ["PUBLIC"],
         deps = [
             ":torch",
             ":torch_mobile_core",
+            ":flatbuffers_serializer_mobile",
         ],
     )
 
@@ -1578,6 +1629,7 @@ def define_buck_targets(
         ]),
     )
 
+    #TODO(qihan) delete
     pt_xplat_cxx_library(
         name = "torch_mobile_core_flatbuffer",
         srcs = [],
@@ -1599,9 +1651,7 @@ def define_buck_targets(
         exported_deps = [
             ":aten_cpu",
             ":torch_common",
-        ] + ([] if IS_OSS else [
-            "//xplat/caffe2/fb/runtime:torch_mobile_deserialize_flatbuffer",
-        ]),
+        ],
     )
 
     fb_xplat_cxx_library(
@@ -1630,7 +1680,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DUSE_KINETO_UPDATED",
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
@@ -1657,7 +1706,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DUSE_KINETO_UPDATED",
             "-DEDGE_PROFILER_USE_KINETO",
         ],
         # @lint-ignore BUCKLINT link_whole
@@ -1679,26 +1727,37 @@ def define_buck_targets(
             "torch/csrc/jit/serialization/mobile_bytecode.fbs",
         ],
         outs = {
-            "mobile_bytecode_generated.h": ["mobile_bytecode_generated.h"],
+            "mobile_bytecode_generated_fbsource.h": ["mobile_bytecode_generated.h"],
         },
         cmd = "$(exe {})".format(third_party("flatc")) +
               " --cpp --gen-mutable --scoped-enums -o ${OUT} ${SRCS}",
         default_outs = ["."],
+        visibility = [
+            "{}:mobile_bytecode".format(ROOT),
+        ],
     )
 
+    # Users of this target will need to add third_party("flatbuffers-api") as a
+    # dep.
     fb_xplat_cxx_library(
         name = "mobile_bytecode",
         header_namespace = "",
         exported_headers = {
-            "torch/csrc/jit/serialization/mobile_bytecode_generated.h": ":mobile_bytecode_header[mobile_bytecode_generated.h]",
+            ("torch/csrc/jit/serialization/mobile_bytecode_generated.h" if IS_OSS else "torch/csrc/jit/serialization/mobile_bytecode_generated_fbsource.h"): ":mobile_bytecode_header[mobile_bytecode_generated_fbsource.h]",
         },
+        # Avoid leaking implementation details by only exposing this header to
+        # the internals of the loader/serializer layer.
+        visibility = [
+            "{}:flatbuffer_loader".format(ROOT),
+            "{}:flatbuffers_serializer_mobile".format(ROOT),
+        ],
         exported_deps = [
             third_party("flatbuffers-api"),
         ],
     )
 
     fb_xplat_cxx_library(
-        name = "flatbuffer_serializer",
+        name = "flatbuffers_serializer_mobile",
         srcs = ["torch/csrc/jit/serialization/flatbuffer_serializer.cpp"],
         exported_headers = [
             "torch/csrc/jit/serialization/flatbuffer_serializer.h",
@@ -1709,24 +1768,23 @@ def define_buck_targets(
             "-fexceptions",
             "-frtti",
             "-Wno-deprecated-declarations",
-        ],
+        ] + (["-DFB_XPLAT_BUILD"] if not IS_OSS else []),
         visibility = ["PUBLIC"],
         deps = [
+            ":mobile_bytecode",
             ":torch_mobile_module",
             C10,
         ],
         exported_deps = [
-            ":flatbuffer_loader",
+            ":torch_mobile_deserialize",
             ":mobile_bytecode",
-            ":torch_mobile_train",
-            third_party("flatbuffers-api"),
         ],
     )
 
+    # TODO (qihan) delete
     pt_xplat_cxx_library(
         name = "flatbuffer_loader",
         srcs = [
-            "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
         ],
         exported_headers = [
             "torch/csrc/jit/mobile/flatbuffer_loader.h",
@@ -1734,11 +1792,10 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DUSE_KINETO_UPDATED",
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
-        ],
+        ] + (["-DFB_XPLAT_BUILD"] if not IS_OSS else []),
         extra_flags = {
             "fbandroid_compiler_flags": ["-frtti"],
         },
@@ -1753,20 +1810,17 @@ def define_buck_targets(
             "-Wl,--no-as-needed",
         ],
         visibility = ["PUBLIC"],
-        exported_deps = [
+        deps = [
             ":mobile_bytecode",
-            ":torch_mobile_deserialize",
-            third_party("flatbuffers-api"),
+        ],
+        exported_deps = [
             C10,
         ],
     )
 
+    # TODO(qihan) delete
     fb_xplat_cxx_library(
-        name = "flatbuffer_serializer_jit",
-        srcs = ["torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp"],
-        exported_headers = [
-            "torch/csrc/jit/serialization/flatbuffer_serializer_jit.h",
-        ],
+        name = "flatbuffers_serializer_jit",
         compiler_flags = [
             "-g0",
             "-O3",
@@ -1774,28 +1828,42 @@ def define_buck_targets(
             "-frtti",
             "-Wno-deprecated-declarations",
         ],
+        headers = [
+            "torch/csrc/jit/serialization/flatbuffer_serializer_jit.h",
+        ],
+        srcs = [
+            "torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp",
+        ],
         linker_flags = [
             "-Wl,--no-as-needed",
         ],
         visibility = ["PUBLIC"],
         deps = [
             ":flatbuffer_loader",
-            ":flatbuffer_serializer",
-            ":mobile_bytecode",
+            ":flatbuffers_serializer_mobile",
             ":torch_core",
             ":torch_mobile_module",
-            third_party("flatbuffers-api"),
             C10,
         ],
     )
 
     fb_xplat_cxx_library(
-        name = "torch_flatbuffer_all",
+        name = "flatbuffers_jit",
         visibility = ["PUBLIC"],
         exported_deps = [
             ":flatbuffer_loader",
-            ":flatbuffer_serializer",
-            ":flatbuffer_serializer_jit",
+            ":flatbuffers_serializer_mobile",
+            ":flatbuffers_serializer_jit",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "flatbuffers_mobile",
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            ":flatbuffer_loader",
+            ":flatbuffers_serializer_mobile",
+            ":torch_mobile_train",
         ],
     )
 
@@ -1833,6 +1901,7 @@ def define_buck_targets(
             "torch/csrc/jit/runtime/static/passes.cpp",
             "torch/csrc/jit/runtime/static/te_wrapper.cpp",
         ],
+        compiler_flags = ["-fexceptions"],
         labels = labels,
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
@@ -1875,7 +1944,13 @@ def define_buck_targets(
                 third_party("cpuinfo"),
                 third_party("glog"),
                 third_party("XNNPACK"),
-            ],
+                third_party("pocketfft"),
+            ] + select({
+                "DEFAULT": [],
+                "ovr_config//runtime:fbcode-arm64": [
+                  third_party("sleef_arm"),
+                ],
+            }),
             compiler_flags = get_aten_compiler_flags(),
             exported_preprocessor_flags = get_aten_preprocessor_flags(),
             exported_deps = [
@@ -1923,6 +1998,7 @@ def define_buck_targets(
                 ("", "torch/csrc/jit/python/*.h"),
                 ("", "torch/csrc/jit/frontend/*.h"),
                 ("", "torch/csrc/jit/serialization/*.h"),
+                ("", "torch/csrc/profiler/**/*.h"),
                 ("", "torch/csrc/utils/*.h"),
                 ("", "aten/src/ATen/quantized/*.h"),
             ] + ([
@@ -1966,6 +2042,7 @@ def define_buck_targets(
             "aten/src/ATen/EmptyTensor.cpp",
             "aten/src/ATen/Utils.cpp",
             "aten/src/ATen/detail/CUDAHooksInterface.cpp",
+            "aten/src/ATen/detail/PrivateUse1HooksInterface.cpp",
             ":gen_aten[Operators_0.cpp]",
             ":gen_aten[Operators_1.cpp]",
             ":gen_aten[Operators_2.cpp]",
@@ -2018,6 +2095,7 @@ def define_buck_targets(
             "aten/src/ATen/core/interned_strings.cpp",
             "aten/src/ATen/core/library.cpp",
             "aten/src/ATen/core/op_registration/infer_schema.cpp",
+            "aten/src/ATen/core/function_schema.cpp",
             "aten/src/ATen/core/operator_name.cpp",
             "aten/src/ATen/core/register_symbols.cpp",
             "aten/src/ATen/core/tensor_type.cpp",

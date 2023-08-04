@@ -8,7 +8,7 @@
 #include <ATen/ops/sspaddmm_native.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 // sparse, sparse, sparse, dense, real, real -> sparse
 Tensor& _sspaddmm_out_only_sparse_cuda(const Tensor& self,
     const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Tensor& result) {
@@ -18,4 +18,4 @@ Tensor& _sspaddmm_out_cuda(const Tensor& self,
     const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Tensor& result) {
   AT_ERROR("NYI: CUDA sspaddmm is not implemented");
 }
-}} // namespace at::native
+} // namespace at::native

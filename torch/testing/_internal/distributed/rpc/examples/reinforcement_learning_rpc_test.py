@@ -43,7 +43,7 @@ class Policy(nn.Module):
     See https://github.com/pytorch/examples/tree/master/reinforcement_learning
     """
     def __init__(self):
-        super(Policy, self).__init__()
+        super().__init__()
         self.affine1 = nn.Linear(4, 128)
         self.dropout = nn.Dropout(p=0.6)
         self.affine2 = nn.Linear(128, 2)
@@ -176,7 +176,7 @@ class Agent:
                 )
             )
 
-        # wait until all obervers have finished this episode
+        # wait until all observers have finished this episode
         for fut in futs:
             fut.wait()
 
@@ -225,7 +225,7 @@ def run_agent(agent, n_steps):
         last_reward = agent.finish_episode()
 
         if agent.running_reward > agent.reward_threshold:
-            print("Solved! Running reward is now {}!".format(agent.running_reward))
+            print(f"Solved! Running reward is now {agent.running_reward}!")
             break
 
 

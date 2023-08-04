@@ -7,12 +7,12 @@ from tensorboard.compat.proto.graph_pb2 import GraphDef
 from tensorboard.compat.proto.node_def_pb2 import NodeDef
 from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 
-from builtins import bytes
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 
 from typing import Set, Dict, Tuple, List
 
+log = logging.getLogger(__name__)
 
 def _make_unique_name(seen: Set[str], name: str, min_version: int = 0):
     """
@@ -21,12 +21,12 @@ def _make_unique_name(seen: Set[str], name: str, min_version: int = 0):
     Args:
         seen (set): Set of names that have already been used (with respect to
             some context).
-        name (string): The name to make unique
+        name (str): The name to make unique
         min_version (number): Starting index. Is incremented continually until
             it can make the resulting name unique relative to 'seen'.
 
     Returns:
-        x (string): A version of name that is not in seen.
+        x (str): A version of name that is not in seen.
     """
     assert name is not None
     i = min_version
@@ -156,7 +156,7 @@ def _remap_keys(old_dict, rename_fn):
     Args:
         old_dict: Dictionary (i.e. containing blob_name -> blob_name
             relationships.)
-        remap_fn: Function string -> string for renaming.
+        rename_fn: Function string -> string for renaming.
 
     Returns:
         None. Modifies old_dict in-place.
@@ -232,7 +232,7 @@ def _add_gradient_scope(shapes, blob_name_tracker, ops):
 
     def f(name):
         if "_grad" in name:
-            return "GRADIENTS/{}".format(name)
+            return f"GRADIENTS/{name}"
         else:
             return name
 
@@ -317,7 +317,7 @@ def _tf_device(device_option):
     ):
         return "/cpu:*"
     if device_option.device_type == caffe2_pb2.CUDA:
-        return "/gpu:{}".format(device_option.device_id)
+        return f"/gpu:{device_option.device_id}"
     raise Exception("Unhandled device", device_option)
 
 
@@ -754,7 +754,7 @@ def _try_get_shapes(nets):
         shapes, _ = workspace.InferShapesAndTypes(nets)
         return shapes
     except Exception as e:
-        logging.warning("Failed to compute shapes: %s", e)
+        log.warning("Failed to compute shapes: %s", e)
         return {}
 
 

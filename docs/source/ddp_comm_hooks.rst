@@ -20,7 +20,7 @@ the hook before the training loop as below.
 What Does a Communication Hook Operate On?
 ------------------------------------------
 
-Communication hook provides a flexible way to allreduce gradients.
+A communication hook provides a flexible way to allreduce gradients.
 Therefore, it mainly operates on the gradients on each replica before allreduce,
 which are bucketized to increase the overlap between communication and computation.
 Particularly, :class:`torch.distributed.GradBucket` represents a bucket of gradient tensors to be allreduced.
@@ -46,7 +46,7 @@ The input ``bucket`` is a :class:`torch.distributed.GradBucket` object.
 .. autofunction:: fp16_compress_hook
 .. autofunction:: bf16_compress_hook
 
-Additionally, a communication hook wraper is provided to support :meth:`~fp16_compress_hook` or :meth:`~bf16_compress_hook` as a wrapper,
+Additionally, a communication hook wrapper is provided to support :meth:`~fp16_compress_hook` or :meth:`~bf16_compress_hook` as a wrapper,
 which can be combined with other communication hooks.
 
 .. autofunction:: fp16_compress_wrapper
@@ -129,12 +129,14 @@ Here is a simple, end-to-end example of saving and reloading PowerSGD state and 
     import torch.distributed as dist
     import torch.nn as nn
     import torch.optim as optim
+    import torch.multiprocessing as mp
 
+    from torch.nn.parallel import DistributedDataParallel
     from torch.distributed.algorithms.ddp_comm_hooks import powerSGD_hook as powerSGD
 
     class SimpleModel(nn.Module):
         def __init__(self):
-            super(SimpleModel, self).__init__()
+            super().__init__()
             self.fc1 = nn.Linear(24,24)
             self.relu = nn.ReLU()
             self.fc2 = nn.Linear(24,12)
@@ -175,8 +177,8 @@ Here is a simple, end-to-end example of saving and reloading PowerSGD state and 
 
         state = {
             'state_dict': ddp_model.state_dict(),
-            'comm_hook': hook,
-            'comm_hook_state': hook_state}
+            'comm_hook': powersgd_hook,
+            'comm_hook_state': powersgd_state}
 
         if rank == 0:
             torch.save(state, CHECKPOINT)
@@ -185,11 +187,12 @@ Here is a simple, end-to-end example of saving and reloading PowerSGD state and 
         map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
         checkpoint = torch.load(CHECKPOINT, map_location=map_location)
 
-        ddp_model.load_state_dict(checkpoint['state_dict'])
+        new_ddp_model = DistributedDataParallel(SimpleModel().to(rank), device_ids=[rank])
+        new_ddp_model.load_state_dict(checkpoint['state_dict'])
         powersgd_hook = checkpoint['comm_hook']
         powersgd_state = checkpoint['comm_hook_state']
 
-        ddp_model.register_comm_hook(powersgd_state, powersgd_hook)
+        new_ddp_model.register_comm_hook(powersgd_state, powersgd_hook)
 
         if rank == 0:
             os.remove(CHECKPOINT)

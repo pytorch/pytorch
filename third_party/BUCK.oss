@@ -76,6 +76,16 @@ cxx_library(
 )
 
 cxx_library(
+    name = "pocketfft_header",
+    header_namespace = "",
+    exported_headers = {
+        "pocketfft_hdronly.h": "pocketfft/pocketfft_hdronly.h",
+    },
+    reexport_all_header_dependencies = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
     name = "FXdiv",
     header_namespace = "",
     exported_headers = {
@@ -292,8 +302,12 @@ cxx_binary(
         "flatbuffers/grpc/src/compiler/python_generator.cc",
         "flatbuffers/grpc/src/compiler/swift_generator.cc",
         "flatbuffers/grpc/src/compiler/ts_generator.cc",
+        "flatbuffers/src/annotated_binary_text_gen.cpp",
+        "flatbuffers/src/binary_annotator.cpp",
         "flatbuffers/src/bfbs_gen_lua.cpp",
+        "flatbuffers/src/bfbs_gen_nim.cpp",
         "flatbuffers/src/flatc_main.cpp",
+        "flatbuffers/src/idl_gen_binary.cpp",
         "flatbuffers/src/idl_gen_cpp.cpp",
         "flatbuffers/src/idl_gen_csharp.cpp",
         "flatbuffers/src/idl_gen_dart.cpp",
@@ -317,12 +331,10 @@ cxx_binary(
         "flatbuffers/include",
     ],
     raw_headers = [
-        "flatbuffers/grpc/src/compiler/config.h",
         "flatbuffers/grpc/src/compiler/cpp_generator.h",
         "flatbuffers/grpc/src/compiler/go_generator.h",
         "flatbuffers/grpc/src/compiler/java_generator.h",
         "flatbuffers/grpc/src/compiler/python_generator.h",
-        # "flatbuffers/grpc/src/compiler/python_private_generator.h",
         "flatbuffers/grpc/src/compiler/schema_interface.h",
         "flatbuffers/grpc/src/compiler/swift_generator.h",
         "flatbuffers/grpc/src/compiler/ts_generator.h",

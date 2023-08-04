@@ -146,6 +146,11 @@ TEST(IntrusivePtrTest, givenInvalidPtr_whenCallingGet_thenReturnsNullptr) {
   EXPECT_EQ(nullptr, obj.get());
 }
 
+TEST(IntrusivePtrTest, givenNullptr_whenCallingGet_thenReturnsNullptr) {
+  intrusive_ptr<SomeClass1Parameter> obj(nullptr);
+  EXPECT_EQ(nullptr, obj.get());
+}
+
 TEST(IntrusivePtrTest, givenValidPtr_whenDereferencing_thenReturnsObject) {
   intrusive_ptr<SomeClass1Parameter> obj =
       make_intrusive<SomeClass1Parameter>(5);

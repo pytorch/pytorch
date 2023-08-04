@@ -9,7 +9,7 @@ namespace at {
 namespace cuda {
 namespace sparse {
 
-#if AT_USE_CUSPARSE_GENERIC_API()
+#if AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 namespace {
 
@@ -26,7 +26,7 @@ void check_supported_cuda_type(cudaDataType cuda_type) {
         prop->minor,
         ")");
   }
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM)
   if (cuda_type == CUDA_R_16BF) {
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     TORCH_CHECK(
@@ -53,6 +53,7 @@ cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type) {
   }
 }
 
+#if AT_USE_HIPSPARSE_GENERIC_52_API() || AT_USE_CUSPARSE_GENERIC_API()
 CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input, int64_t batch_offset) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.layout() == kStrided);
   IntArrayRef input_strides = input.strides();
@@ -72,7 +73,7 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input, int64_t ba
   auto leading_dimension =
       is_row_major ? input_strides[ndim - 2] : input_strides[ndim - 1];
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM)
   auto order = is_row_major ? CUSPARSE_ORDER_ROW : CUSPARSE_ORDER_COL;
 #else
   TORCH_INTERNAL_ASSERT(is_column_major, "Expected column major input.");
@@ -105,6 +106,7 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input, int64_t ba
 
   descriptor_.reset(raw_descriptor);
 }
+#endif // AT_USE_HIPSPARSE_GENERIC_52_API() || AT_USE_CUSPARSE_GENERIC_API()
 
 CuSparseDnVecDescriptor::CuSparseDnVecDescriptor(const Tensor& input) {
   // cuSPARSE doesn't support batched vectors
@@ -175,7 +177,7 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
       value_type // data type of values
       ));
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if AT_USE_HIPSPARSE_GENERIC_52_API() || !defined(USE_ROCM)
   if (ndim == 3 && batch_offset == -1) {
     int batch_count =
         at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
@@ -204,7 +206,7 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
   descriptor_.reset(raw_descriptor);
 }
 
-#endif // AT_USE_CUSPARSE_GENERIC_API()
+#endif // AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 } // namespace sparse
 } // namespace cuda

@@ -4,6 +4,7 @@ import copy
 import itertools
 import functools
 import unittest
+from contextlib import nullcontext
 
 try:
     import torchvision
@@ -19,29 +20,18 @@ import torch.jit
 import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, \
-    run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS
+    run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS, \
+    skipIfTorchDynamo
 
 # batched grad doesn't support mkldnn
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 gradgradcheck = functools.partial(gradgradcheck, check_batched_grad=False)
 
 
-# For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
-# avx512vl, and avx512dq at least. So we will skip the test case if one processor
-# is not meet the requirement.
-@functools.lru_cache(maxsize=None)
-def has_bf16_support():
-    import sys
-    if sys.platform != 'linux':
-        return False
-    with open("/proc/cpuinfo", encoding="ascii") as f:
-        lines = f.read()
-    return all(word in lines for word in ["avx512bw", "avx512vl", "avx512dq"])
-
 types = [torch.float, torch.bfloat16]
 
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
-@unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+@unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
 class TestMkldnn(TestCase):
     def test_conversion(self):
         for cpu_tensor in [torch.randn((1, 2, 3, 4),
@@ -99,6 +89,38 @@ class TestMkldnn(TestCase):
                                        "Cannot access data pointer of Tensor that doesn't have storage",
                                        lambda: mkldnn_tensor.data_ptr() != 0)
 
+    def test_conversion_byte_char(self):
+        int8_types = [torch.int8, torch.uint8]
+        for int8_type in int8_types:
+            low = -100 if int8_type is torch.int8 else 0
+            high = 100
+            for cpu_tensor in [torch.randint(
+                               low=low,
+                               high=high,
+                               size=(1, 2, 3, 4),
+                               dtype=torch.int64,
+                               device=torch.device('cpu')),
+                               torch.randint(
+                               low=low,
+                               high=high,
+                               size=(1, 2, 3, 4, 5),
+                               dtype=torch.int64,
+                               device=torch.device('cpu'))[:, :, :, :, :]]:
+
+                cpu_tensor = cpu_tensor.to(dtype=int8_type)
+                mkldnn_tensor = cpu_tensor.to_mkldnn(int8_type)
+                self.assertEqual(mkldnn_tensor.dtype, int8_type)
+                cpu_tensor_1 = mkldnn_tensor.to_dense()
+                self.assertEqual(mkldnn_tensor.dtype, cpu_tensor_1.dtype)
+                self.assertEqual(cpu_tensor, cpu_tensor_1)
+                self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
+                self.assertEqual(mkldnn_tensor.size(), cpu_tensor.size())
+                self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
+                self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size())
+                self.assertRaisesRegex(RuntimeError,
+                                       "Cannot access data pointer of Tensor that doesn't have storage",
+                                       lambda: mkldnn_tensor.data_ptr() != 0)
+
     def test_copy(self):
         x = torch.randn(4, 5, dtype=torch.float32)
         mkldnn_x = x.to_mkldnn()
@@ -135,6 +157,22 @@ class TestMkldnn(TestCase):
         for creator in [torch.ones, torch.randn, torch.rand]:
             with self.assertRaises(RuntimeError) as context:
                 creator(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu'), layout=torch._mkldnn)
+
+    def test_mkldnn_conv_shapecheck(self):
+        input = torch.full((1, 1, 1, 24,), 1, dtype=torch.float32)
+        w1 = torch.full((1, 1, 1, 24,), 1, dtype=torch.float32)
+        b1 = torch.full((1,), 1, dtype=torch.float32)
+        w2 = torch.full((1, 1, 2, 24,), 1, dtype=torch.float32)
+        b2 = torch.full((2,), 1, dtype=torch.float32)
+        options = zip([-1, 0, 0, 0, 0, 0, 0],  # padding
+                      [1, 0, 1, 1, 1, 1, 1],  # stride
+                      [1, 1, 0, 1, 1, 1, 1],  # dilation
+                      [1, 1, 1, 0, 2, 1, 1],  # groups
+                      [w1, w1, w1, w1, w1, w1, w2],  # weight
+                      [b1, b1, b1, b1, b1, b2, b1])  # bias
+        for pad, st, dil, gr, w, b in options:
+            with self.assertRaises(RuntimeError) as _:
+                torch.mkldnn_convolution(input, w, b, [pad] * 2, [st] * 2, [dil] * 2, gr)
 
     def test_autograd_to_mkldnn(self):
         # MKLDNN only supports float32
@@ -262,7 +300,7 @@ class TestMkldnn(TestCase):
                                     bias=bias,
                                     groups=groups).float()
             x_bf16 = x.bfloat16()
-            if has_bf16_support():
+            if torch.ops.mkldnn._is_mkldnn_bf16_supported():
                 mkldnn_conv = mkldnn_utils.to_mkldnn(copy.deepcopy(conv))
                 mkldnn_conv_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), torch.bfloat16)
                 y = mkldnn_conv(x.to_mkldnn()).to_dense()
@@ -283,9 +321,8 @@ class TestMkldnn(TestCase):
     def test_conv3d_bf16(self):
         self._test_conv_bf16_base(dim=3)
 
-    def _test_conv2d_nhwc_base(self, dtype):
-        conv_module = torch.nn.Conv2d
-        input_shapes = (224, 224)
+    def _test_conv2d_nhwc_base(self, conv_module, weight_memory_format, dtype):
+        input_shapes = (55, 55)
         options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
         for train, bias, dilation, groups in options:
             N = torch.randint(3, 10, (1,)).item()
@@ -293,8 +330,13 @@ class TestMkldnn(TestCase):
             C = torch.randint(1, 3, (1,)).item() * groups
             x_shape = (N, C) + input_shapes
             x = torch.randn(x_shape, dtype=dtype)
-            # conv1: mkldnn conv2d in contiguous memory format (nchw)
-            # conv2: mkldnn conv2d in channels last memory format (nhwc)
+
+            # TODO: remove this when group depthwise is supported:
+            if conv_module is torch.nn.ConvTranspose2d and groups > 1 and C == groups:
+                continue
+
+            # conv1: mkldnn conv in contiguous memory format (nchw)
+            # conv2: mkldnn conv in channels last memory format (nhwc)
             conv1 = conv_module(in_channels=C,
                                 out_channels=M,
                                 kernel_size=3,
@@ -303,7 +345,7 @@ class TestMkldnn(TestCase):
                                 dilation=dilation,
                                 bias=bias,
                                 groups=groups).to(dtype=dtype)
-            conv2 = copy.deepcopy(conv1).to(memory_format=torch.channels_last)
+            conv2 = copy.deepcopy(conv1).to(memory_format=weight_memory_format)
             x1 = x.clone()
             x2 = x.clone().to(memory_format=torch.channels_last)
             if train:
@@ -325,13 +367,85 @@ class TestMkldnn(TestCase):
                 self.assertEqual(x1.grad, x2.grad)
 
     def test_conv2d_nhwc(self):
-        self._test_conv2d_nhwc_base(dtype=torch.float32)
+        self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.float32)
+        self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.float32)
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_conv2d_nhwc_bf16(self):
-        # when has_bf16_support() returns false, bf16 CPU conv will fall back to thnn impl
-        if has_bf16_support():
-            self._test_conv2d_nhwc_base(dtype=torch.bfloat16)
+        # when torch.ops.mkldnn._is_mkldnn_bf16_supported() returns false, bf16 CPU conv will fall back to thnn impl
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.bfloat16)
+            self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.bfloat16)
+
+    def test_conv_transpose2d_nhwc(self):
+        self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.float32)
+        self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.float32)
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_conv_transpose2d_nhwc_bf16(self):
+        # when torch.ops.mkldnn._is_mkldnn_bf16_supported() returns false, bf16 CPU conv will fall back to thnn impl
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.bfloat16)
+            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.bfloat16)
+
+    def _test_conv_transpose_base(self, dim):
+        conv_module = {
+            1: torch.nn.ConvTranspose1d,
+            2: torch.nn.ConvTranspose2d,
+            3: torch.nn.ConvTranspose3d
+        }
+        input_shapes = {1: (55,), 2: (28, 28), 3: (14, 14, 14)}
+        options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
+        for train, bias, dilation, groups in options:
+            N = torch.randint(3, 10, (1,)).item()
+            M = torch.randint(1, 3, (1,)).item() * groups
+            C = torch.randint(1, 3, (1,)).item() * groups
+            x_shape = (N, C) + input_shapes[dim]
+            data = torch.randn(x_shape, dtype=torch.float32)
+            # conv: mkldnn tranpose conv fp32
+            # conv_ref: thnn transpose conv fp32
+            conv = conv_module[dim](in_channels=C,
+                                    out_channels=M,
+                                    kernel_size=3,
+                                    stride=1,
+                                    padding=1,
+                                    dilation=dilation,
+                                    bias=bias,
+                                    groups=groups).to(dtype=torch.float32)
+            x = data.clone()
+            x_ref = x.clone()
+            if train:
+                x.requires_grad_()
+                x_ref.requires_grad_()
+
+            conv_ref = copy.deepcopy(conv)
+            with torch.backends.mkldnn.flags(enabled=False):
+                y_ref = conv_ref(x_ref)
+                if train:
+                    y_ref.sum().backward()
+
+            y = conv(x)
+            if train:
+                y.sum().backward()
+
+            self.assertEqual(y, y_ref)
+            if train:
+                self.assertEqual(x.grad, x_ref.grad)
+                self.assertEqual(conv.weight.grad,
+                                 conv_ref.weight.grad,
+                                 atol=1e-3,
+                                 rtol=1e-3)
+                if bias:
+                    self.assertEqual(conv.bias.grad, conv_ref.bias.grad)
+
+    def test_conv_transpose1d(self):
+        self._test_conv_transpose_base(dim=1)
+
+    def test_conv_transpose2d(self):
+        self._test_conv_transpose_base(dim=2)
+
+    def test_conv_transpose3d(self):
+        self._test_conv_transpose_base(dim=3)
 
     def test_conv2d_legacy_jit_model(self):
         """
@@ -399,7 +513,7 @@ class TestMkldnn(TestCase):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
         x_bf16 = x.bfloat16()
         fn = getattr(torch, name)
-        if has_bf16_support():
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             y = fn(x.to_mkldnn()).to_dense()
             y_bf16 = fn(x_bf16.to_mkldnn()).to_dense(torch.float32)
             self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
@@ -435,7 +549,7 @@ class TestMkldnn(TestCase):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
         x1 = x.clone().to_mkldnn().requires_grad_()
         x2 = x.clone().to_mkldnn(torch.bfloat16).requires_grad_()
-        if has_bf16_support():
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             y1 = m(x1).to_dense()
             y2 = m(x2).to_dense()
             loss1 = y1.sum()
@@ -485,7 +599,7 @@ class TestMkldnn(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def _test_prelu_bf16_base(self, size, num_channels):
-        if has_bf16_support():
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             x = torch.randn(size, dtype=torch.float32)
             x_fp32 = x.clone().to_mkldnn().requires_grad_()
             x_bf16 = x.clone().to_mkldnn(torch.bfloat16).requires_grad_()
@@ -566,7 +680,7 @@ class TestMkldnn(TestCase):
                     padding=1,
                     ceil_mode=ceil_mode)
 
-                if has_bf16_support():
+                if torch.ops.mkldnn._is_mkldnn_bf16_supported():
                     y = max_pool(input.to_mkldnn()).to_dense()
                     y_bf16 = max_pool(x_bf16.to_mkldnn()).to_dense(torch.float32)
                     self.assertEqual(y, y_bf16, atol=0.1, rtol=1e-3)
@@ -682,7 +796,7 @@ class TestMkldnn(TestCase):
                 stride=2,
                 padding=1,
                 count_include_pad=count_include_pad)
-            if has_bf16_support():
+            if torch.ops.mkldnn._is_mkldnn_bf16_supported():
                 y = avg_pool(input.to_mkldnn()).to_dense()
                 y_bf16 = avg_pool(x_bf16.to_mkldnn()).to_dense(torch.float)
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
@@ -753,7 +867,7 @@ class TestMkldnn(TestCase):
         x_bf16 = x.bfloat16()
         adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d(7)
 
-        if has_bf16_support():
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             y = adaptive_avg_pool2d(x.to_mkldnn()).to_dense()
             y_bf16 = adaptive_avg_pool2d(x.to_mkldnn()).to_dense(torch.float32)
             self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
@@ -821,7 +935,7 @@ class TestMkldnn(TestCase):
         for train in [False]:
             bn = bn_module[dim](channels).float().train(train)
             mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))
-            if has_bf16_support():
+            if torch.ops.mkldnn._is_mkldnn_bf16_supported():
                 y = bn(input.to_mkldnn().to_dense())
                 y_bf16 = bn(input.to_mkldnn().to_dense(torch.float))
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
@@ -1042,6 +1156,11 @@ class TestMkldnn(TestCase):
                     x.to_mkldnn().transpose(dim1, dim2).to_dense(),
                 )
 
+    def test_transpose_invalid_dime(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32).to_mkldnn()
+        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+            torch._mkldnn_transpose(x, 0, 12)
+
     def test_linear_non_contiguous_weight(self):
         in_features = torch.randint(3, 10, (1,)).item()
         out_features = torch.randint(3, 100, (1,)).item()
@@ -1106,7 +1225,7 @@ class TestMkldnn(TestCase):
             linear = torch.nn.Linear(in_features, out_features, bias=bias).float()
             mkldnn_linear = mkldnn_utils.to_mkldnn(copy.deepcopy(linear))
             mkldnn_linear_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(linear), torch.bfloat16)
-            if has_bf16_support():
+            if torch.ops.mkldnn._is_mkldnn_bf16_supported():
                 y = mkldnn_linear(x.to_mkldnn()).to_dense()
                 y_bf16 = mkldnn_linear_bf16(x_bf16.to_mkldnn()).to_dense(torch.float32)
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
@@ -1190,6 +1309,7 @@ class TestMkldnn(TestCase):
         self.assertTrue(x.to_mkldnn().is_mkldnn)
 
     # legacy constructor/new doesn't support mkldnn tensors
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1992")
     def test_legacy_new_failure(self):
         x = torch.randn(1, dtype=torch.float32)
         x_mkldnn = x.to_mkldnn()
@@ -1232,6 +1352,117 @@ class TestMkldnn(TestCase):
         model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
         self._test_imagenet_model(model)
 
+    def _lstm_params_list(self):
+        params_dict = {
+            "input_size": [1, 5],
+            "hidden_size": [5, 16],
+            "num_layers": [1, 3],
+            "bidirectional": [False, True],
+            "bias": [False, True],
+            "batch_first": [False, True],
+            "dropout": [0, 0.4, 0.7, 1],
+            "batch_size": [1, 2],
+            "seq_len": [1, 3],
+            "training": [False, True]
+        }
+
+        params_list = []
+        for value in params_dict.values():
+            params_list.append(value)
+        return params_list
+
+    def _cast_dtype(self, input, bf16):
+        if bf16:
+            input = input.to(torch.bfloat16)
+        return input
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_lstm(self):
+        seed = 2023
+        torch.manual_seed(seed)
+
+        params_list = self._lstm_params_list()
+        for dtype in types:
+            bf16 = True if dtype == torch.bfloat16 and torch.ops.mkldnn._is_mkldnn_bf16_supported() else False
+            rtol = 1.3e-6
+            atol = 1e-5
+            if bf16:
+                rtol = 0.02
+                atol = 0.02
+            for input_size, hidden_size, num_layers, bidirectional, bias, batch_first, dropout, batch_size, seq_len, training \
+                    in itertools.product(*params_list):
+                num_directions = 2 if bidirectional else 1
+                if batch_first:
+                    input = torch.randn(batch_size, seq_len, input_size, dtype=torch.float32)
+                else:
+                    input = torch.randn(seq_len, batch_size, input_size, dtype=torch.float32)
+                h = torch.randn(num_layers * num_directions, batch_size, hidden_size, dtype=torch.float32)
+                c = torch.randn(num_layers * num_directions, batch_size, hidden_size, dtype=torch.float32)
+
+                model = torch.nn.LSTM(input_size, hidden_size, num_layers, bidirectional=bidirectional,
+                                      bias=bias, dropout=dropout, batch_first=batch_first).float()
+                model.train() if training else model.eval()
+                input1 = input.clone().requires_grad_(training)
+                input2 = input.clone().requires_grad_(training)
+
+                h1 = h.clone().requires_grad_(training)
+                h2 = h.clone().requires_grad_(training)
+                c1 = c.clone().requires_grad_(training)
+                c2 = c.clone().requires_grad_(training)
+
+                model1 = copy.deepcopy(model)
+                model2 = copy.deepcopy(model)
+                with torch.cpu.amp.autocast(enabled=bf16, dtype=torch.bfloat16), torch.no_grad() if not training else nullcontext():
+                    with torch.backends.mkldnn.flags(enabled=False):
+                        torch.manual_seed(seed)
+                        output1, (hn1, cn1) = self._cast_dtype(model1, bf16)(self._cast_dtype(input1, bf16),
+                                                                             (self._cast_dtype(h1, bf16),
+                                                                             self._cast_dtype(c1, bf16)))
+
+                    torch.manual_seed(seed)
+                    output2, (hn2, cn2) = model2(input2, (h2, c2))
+                    self.assertEqual(output1, output2, rtol=rtol, atol=atol)
+                    self.assertEqual(hn1, hn2, rtol=rtol, atol=atol)
+                    self.assertEqual(cn1, cn2, rtol=rtol, atol=atol)
+
+                    if training:
+                        with torch.backends.mkldnn.flags(enabled=False):
+                            torch.manual_seed(seed)
+                            output1.sum().backward(retain_graph=True)
+
+                        torch.manual_seed(seed)
+                        output2.sum().backward(retain_graph=True)
+
+                        self.assertEqual(input1.grad, input2.grad, rtol=rtol, atol=atol)
+                        for name, para in model1.named_parameters():
+                            self.assertEqual(para, self._cast_dtype(getattr(model2, name), bf16))
+                            self.assertEqual(para.grad, self._cast_dtype(getattr(model2, name).grad, bf16), rtol=rtol, atol=atol)
+
+                        with torch.backends.mkldnn.flags(enabled=False):
+                            torch.manual_seed(seed)
+                            hn1.sum().backward(retain_graph=True)
+                        torch.manual_seed(seed)
+                        hn2.sum().backward(retain_graph=True)
+                        self.assertEqual(h1.grad, h2.grad, rtol=rtol, atol=atol)
+
+                        with torch.backends.mkldnn.flags(enabled=False):
+                            torch.manual_seed(seed)
+                            cn1.sum().backward(retain_graph=True)
+                        torch.manual_seed(seed)
+                        cn2.sum().backward(retain_graph=True)
+                        self.assertEqual(c1.grad, c2.grad, rtol=rtol, atol=atol)
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_matmul_bf16(self):
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            a1 = torch.randn([64, 1, 33], dtype=torch.bfloat16)
+            # a2 is contiguous tensor but it's strides is not default contiguous strides.
+            a2 = torch.as_strided(a1.clone(), [64, 1, 33], [33, 3, 1])
+            self.assertTrue(a2.is_contiguous())
+            b = torch.randn(64, 33, 256).to(dtype=torch.bfloat16)
+            y1 = torch.ops.aten.bmm(a1, b)
+            y2 = torch.bmm(a2, b)
+            self.assertEqual(y1, y2)
 
 if __name__ == '__main__':
     run_tests()

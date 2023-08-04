@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 from enum import Enum
-from typing import Any, List, NamedTuple, Optional, BinaryIO
+from typing import Any, BinaryIO, List, NamedTuple, Optional
 
 
 IS_WINDOWS: bool = os.name == "nt"
@@ -52,8 +52,7 @@ def _run_command(
         return subprocess.run(
             args,
             stdin=stdin,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             shell=IS_WINDOWS,  # So batch scripts are found.
             timeout=timeout,
             check=True,

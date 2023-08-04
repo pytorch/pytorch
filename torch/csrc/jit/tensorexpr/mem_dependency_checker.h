@@ -1,6 +1,7 @@
 #pragma once
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/Export.h>
+#include <utility>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/bounds_overlap.h>
@@ -32,7 +33,7 @@ using DependencySet = std::unordered_set<std::shared_ptr<AccessInfo>>;
 /* AccessInfo
  *
  * Represents a single bounded memory access to a buffer, for instance a Load or
- * a Store. Holds infomation relating to the specific access and links to
+ * a Store. Holds information relating to the specific access and links to
  * connected accesses in the dependency graph.
  */
 class TORCH_API AccessInfo {
@@ -45,9 +46,9 @@ class TORCH_API AccessInfo {
       IndexBounds bounds)
       : id_(id),
         type_(type),
-        stmt_(stmt),
+        stmt_(std::move(stmt)),
         expr_(nullptr),
-        var_(var),
+        var_(std::move(var)),
         bounds_(std::move(bounds)) {}
 
   AccessInfo(
@@ -59,12 +60,13 @@ class TORCH_API AccessInfo {
       IndexBounds bounds)
       : id_(id),
         type_(type),
-        stmt_(stmt),
-        expr_(expr),
-        var_(var),
+        stmt_(std::move(stmt)),
+        expr_(std::move(expr)),
+        var_(std::move(var)),
         bounds_(std::move(bounds)) {}
 
-  // Id is a unique int representing the order this access occured in the graph.
+  // Id is a unique int representing the order this access occurred in the
+  // graph.
   size_t id() const {
     return id_;
   }
@@ -165,7 +167,7 @@ class TORCH_API AccessInfo {
 
 using VarBoundMap = std::unordered_map<VarPtr, Bound>;
 
-/* MemDepedencyChecker analyses a IR fragment and builds a dependency graph of
+/* MemDependencyChecker analyses a IR fragment and builds a dependency graph of
  * accesses contained within.
  *
  * It's possible to retrieve the entire graph in node-object form, or can be
@@ -275,7 +277,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   // An internal struct holding the accesses found within a scope Block.
   struct Scope {
     Scope(BlockPtr b, std::shared_ptr<Scope> p)
-        : block(b), parent(std::move(p)) {}
+        : block(std::move(b)), parent(std::move(p)) {}
 
     BlockPtr block;
     std::shared_ptr<Scope> parent;
@@ -303,7 +305,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   DependencySet getAllReadsWithin(StmtOrExprPtr v) {
     DependencySet reads;
     auto insertAllReads = [&](const auto& nodes) {
-      for (auto l : nodes) {
+      for (const auto& l : nodes) {
         auto bound = exprToAccess_.equal_range(l);
         for (auto it = bound.first; it != bound.second; ++it) {
           if (it->second->isRead()) {
@@ -327,8 +329,8 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
     DependencySet writes;
 
     // writes just Store currently.
-    auto stores = NodeFinder<Store>::find(v);
-    for (auto s : stores) {
+    auto stores = NodeFinder<Store>::find(std::move(v));
+    for (const auto& s : stores) {
       auto bound = stmtToAccess_.equal_range(s);
       for (auto it = bound.first; it != bound.second; ++it) {
         if (it->second->isWrite()) {

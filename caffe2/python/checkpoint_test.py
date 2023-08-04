@@ -78,8 +78,8 @@ class TestCheckpoint(TestCase):
             session, checkpoint = builder()
             job.compile(LocalSession)
             num_epochs = JobRunner(job, checkpoint).train(session)
-            self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
-            self.assertEquals(fetch_total(session), EXPECTED_TOTALS[-1])
+            self.assertEqual(num_epochs, len(EXPECTED_TOTALS))
+            self.assertEqual(fetch_total(session), EXPECTED_TOTALS[-1])
 
             for initial_epoch in range(1, num_epochs + 1):
                 session, checkpoint = builder()
@@ -87,11 +87,11 @@ class TestCheckpoint(TestCase):
                     job,
                     checkpoint, resume_from_epoch=initial_epoch
                 ).train(session)
-                self.assertEquals(fetch_total(session), EXPECTED_TOTALS[-1])
+                self.assertEqual(fetch_total(session), EXPECTED_TOTALS[-1])
 
             for epoch in range(1, num_epochs + 1):
                 session.run(checkpoint.load(epoch))
-                self.assertEquals(fetch_total(session),
+                self.assertEqual(fetch_total(session),
                                   EXPECTED_TOTALS[epoch - 1])
 
     def test_single_checkpoint(self):
@@ -141,7 +141,7 @@ class TestCheckpoint(TestCase):
                     epoch = 5
                     node_name = 'trainer_%d' % node_id
                     expected_db_name = tmpdir + '/' + node_name + '.5'
-                    self.assertEquals(
+                    self.assertEqual(
                         checkpoint.get_ckpt_db_name(node_name, epoch),
                         expected_db_name)
             shutil.rmtree(tmpdir)
@@ -159,15 +159,15 @@ class TestCheckpoint(TestCase):
                     job.compile(LocalSession)
                     job_runner = JobRunner(job, checkpoint)
                     num_epochs = job_runner.train(session)
-                self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
+                self.assertEqual(num_epochs, len(EXPECTED_TOTALS))
 
                 # There are 17 global blobs after finishing up the job runner.
                 # (only blobs on init_group are checkpointed)
-                self.assertEquals(len(ws.blobs), 17)
+                self.assertEqual(len(ws.blobs), 17)
 
             ws = workspace.C.Workspace()
             session = LocalSession(ws)
-            self.assertEquals(len(ws.blobs), 0)
+            self.assertEqual(len(ws.blobs), 0)
             model_blob_names = ['trainer_1/task_2/GivenTensorInt64Fill:0',
                                 'trainer_2/task_2/GivenTensorInt64Fill:0']
             checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
@@ -190,7 +190,7 @@ class TestCheckpoint(TestCase):
                     # Check that all the model blobs are loaded.
                     for blob_name in model_blob_names:
                         self.assertTrue(ws.has_blob(blob_name))
-                        self.assertEquals(
+                        self.assertEqual(
                             ws.fetch_blob(blob_name),
                             np.array([EXPECTED_TOTALS[epoch - 1]]))
                 self.assertFalse(
@@ -227,7 +227,7 @@ class TestCheckpoint(TestCase):
                         job, checkpoint,
                         upload_task_group_builder=local_upload_builder)
                     num_epochs = job_runner.train(session)
-                    self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
+                    self.assertEqual(num_epochs, len(EXPECTED_TOTALS))
 
             # The uploaded files should exist now.
             for node_id in range(num_nodes):
@@ -260,7 +260,7 @@ class TestCheckpoint(TestCase):
                 num_epochs = job_runner.train(session)
             # make sure all epochs are executed even though saving the checkpoint failed
             # Saving checkpoint failure should not cause job failure
-            self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
+            self.assertEqual(num_epochs, len(EXPECTED_TOTALS))
 
     def test_download_group_simple(self):
         """
@@ -332,7 +332,7 @@ class TestCheckpoint(TestCase):
                     checkpoint,
                     resume_from_epoch=initial_epoch
                 ).train(session)
-                self.assertEquals(fetch_total(session), EXPECTED_TOTALS[-1])
+                self.assertEqual(fetch_total(session), EXPECTED_TOTALS[-1])
 
         finally:
             shutil.rmtree(tmpdir)

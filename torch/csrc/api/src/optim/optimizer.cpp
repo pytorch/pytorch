@@ -64,13 +64,13 @@ void OptimizerParamState::serialize(
 double OptimizerOptions::get_lr() const {
   TORCH_CHECK(
       false,
-      "double get_lr() has not been overidden and implemented in subclass of torch::optim::OptimizerOptions, you must override it in your subclass.");
+      "double get_lr() has not been overridden and implemented in subclass of torch::optim::OptimizerOptions, you must override it in your subclass.");
 }
 
 void OptimizerOptions::set_lr(const double lr) {
   TORCH_CHECK(
       false,
-      "double set_lr() has not been overidden and implemented in subclass of torch::optim::OptimizerOptions, you must override it in your subclass.");
+      "double set_lr() has not been overridden and implemented in subclass of torch::optim::OptimizerOptions, you must override it in your subclass.");
 }
 
 std::unique_ptr<OptimizerOptions> OptimizerOptions::clone() const {
@@ -121,12 +121,15 @@ void Optimizer::add_parameters(const std::vector<Tensor>& parameters) {
   parameters_.insert(parameters_.end(), parameters.begin(), parameters.end());
 }
 
-void Optimizer::zero_grad() {
+void Optimizer::zero_grad(bool set_to_none) {
   for (auto& group : param_groups_) {
     for (auto& p : group.params()) {
-      if (p.grad().defined()) {
-        p.grad().detach_();
-        p.grad().zero_();
+      if (p.mutable_grad().defined()) {
+        p.mutable_grad().detach_();
+        if (set_to_none)
+          p.mutable_grad().reset();
+        else
+          p.mutable_grad().zero_();
       }
     }
   }

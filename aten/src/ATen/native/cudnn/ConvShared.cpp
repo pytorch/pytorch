@@ -1,11 +1,29 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+#include <ATen/Context.h>
 #include <ATen/cuda/EmptyTensor.h>
+#include <ATen/TensorGeometry.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/ConvUtils.h>
 
 #if AT_CUDNN_ENABLED()
 
 #include <ATen/native/cudnn/ConvShared.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cudnn_convolution_add_relu_native.h>
+#include <ATen/ops/cudnn_convolution_native.h>
+#include <ATen/ops/cudnn_convolution_relu_native.h>
+#include <ATen/ops/cudnn_convolution_transpose_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 // NOTE [cuDNN API version]
 //
@@ -63,6 +81,7 @@ namespace at { namespace native {
 
 std::ostream& operator<<(std::ostream & out, const ConvolutionParams& params) {
   out << "ConvolutionParams \n"
+    << "    memory_format = " << params.memory_format << "\n"
     << "    data_type = " << cudnnTypeToString(params.dataType) << "\n"
     << "    padding = " << ArrayRef<int>{params.padding} << "\n"
     << "    stride = " << ArrayRef<int>{params.stride} << "\n"
@@ -83,7 +102,7 @@ void setConvolutionParams(
     ConvolutionParams* params,
     const at::Tensor& input, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool deterministic, bool allow_tf32) {
+    int64_t groups, bool deterministic, bool allow_tf32, at::MemoryFormat memory_format) {
 
   cudnnDataType_t dataType = getCudnnDataType(input);
   memset(params, 0, sizeof(ConvolutionParams));
@@ -91,7 +110,7 @@ void setConvolutionParams(
   params->dataType = dataType;
   // ASSERT(weight.dim() == input.dim())
   params->input_dim = input.dim();
-  params->memory_format = input.suggest_memory_format();
+  params->memory_format = memory_format;
   for (int i = 0; i != params->input_dim; ++i) {
     params->input_size[i] = (int) input.sizes()[i];
     params->weight_size[i] = (int) weight.sizes()[i];
@@ -356,7 +375,7 @@ std::tuple<at::Tensor,at::Tensor> cudnn_convolution_backward(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32, std::array<bool,2> output_mask) {
 
-  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
+  Tensor grad_output = grad_output_t.to(input.suggest_memory_format());
 
   Tensor grad_input, grad_weight;
   if (input.numel() == 0) {
@@ -435,7 +454,7 @@ Tensor cudnn_convolution_relu(
   bool allow_tf32 = ctx.allowTF32CuDNN();
   auto _bias = bias_t.has_value()
           ? bias_t.value()
-          : at::native::zeros(
+          : at::zeros(
                 {output_t.size(1)},
                 optTypeMetaToScalarType(output_t.options().dtype_opt()),
                 output_t.options().layout_opt(),
@@ -513,7 +532,7 @@ Tensor cudnn_convolution_add_relu(
   auto _alpha = alpha.has_value() ? alpha.value().to<float>() : 1.0;
   auto _bias = bias_t.has_value()
           ? bias_t.value()
-          : at::native::zeros(
+          : at::zeros(
                 {output_t.size(1)},
                 optTypeMetaToScalarType(output_t.options().dtype_opt()),
                 output_t.options().layout_opt(),

@@ -19,7 +19,7 @@
 #include <ATen/ops/_thnn_fused_gru_cell_backward_native.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -56,7 +56,7 @@ bool allContiguous(at::TensorList tensors) {
 
 void getLaunchConfig(dim3* block, dim3* grid, int64_t numel) {
   int curDevice = -1;
-  cudaGetDevice(&curDevice);
+  c10::cuda::GetDevice(&curDevice);
   *block = cuda::getApplyBlock();
   TORCH_INTERNAL_ASSERT(cuda::getApplyGrid(numel, *grid, curDevice),
                         "Could not get grid size for pointwise apply.");
@@ -646,4 +646,4 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_gru_cell_backward
   return std::make_tuple(grad_input_gates, grad_hidden_gates, grad_hx, grad_input_bias, grad_hidden_bias);
 }
 
-}} // namespace at::native
+} // namespace at::native

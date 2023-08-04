@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import hashlib
 import torch
@@ -57,8 +56,7 @@ if HAS_PYDOT:
         Visualize a torch.fx.Graph with graphviz
         Basic usage:
             g = FxGraphDrawer(symbolic_traced, "resnet18")
-            with open("a.svg", "w") as f:
-                f.write(g.get_dot_graph().create_svg())
+            g.get_dot_graph().write_svg("a.svg")
         """
 
         def __init__(
@@ -94,6 +92,28 @@ if HAS_PYDOT:
                 )
 
         def get_dot_graph(self, submod_name=None) -> pydot.Dot:
+            """
+            Visualize a torch.fx.Graph with graphviz
+            Example:
+                >>> # xdoctest: +REQUIRES(module:pydot)
+                >>> # define module
+                >>> class MyModule(torch.nn.Module):
+                >>>     def __init__(self):
+                >>>         super().__init__()
+                >>>         self.linear = torch.nn.Linear(4, 5)
+                >>>     def forward(self, x):
+                >>>         return self.linear(x).clamp(min=0.0, max=1.0)
+                >>> module = MyModule()
+                >>> # trace the module
+                >>> symbolic_traced = torch.fx.symbolic_trace(module)
+                >>> # setup output file
+                >>> import ubelt as ub
+                >>> dpath = ub.Path.appdir('torch/tests/FxGraphDrawer').ensuredir()
+                >>> fpath = dpath / 'linear.svg'
+                >>> # draw the graph
+                >>> g = FxGraphDrawer(symbolic_traced, "linear")
+                >>> g.get_dot_graph().write_svg(fpath)
+            """
             if submod_name is None:
                 return self.get_main_dot_graph()
             else:
@@ -140,12 +160,16 @@ if HAS_PYDOT:
 
         def _typename(self, target: Any) -> str:
             if isinstance(target, torch.nn.Module):
-                return torch.typename(target)
+                ret = torch.typename(target)
+            elif isinstance(target, str):
+                ret = target
+            else:
+                ret = _get_qualified_name(target)
 
-            if isinstance(target, str):
-                return target
-
-            return _get_qualified_name(target)
+            # Escape "{" and "}" to prevent dot files like:
+            # https://gist.github.com/SungMinCho/1a017aab662c75d805c5954d62c5aabc
+            # which triggers `Error: bad label format (...)` from dot
+            return ret.replace("{", r"\{").replace("}", r"\}")
 
         def _get_node_label(
             self,
@@ -211,7 +235,7 @@ if HAS_PYDOT:
                 return result
             elif isinstance(tm, dict):
                 result = ""
-                for k, v in tm.items():
+                for v in tm.values():
                     result += self._tensor_meta_to_label(v)
                 return result
             elif isinstance(tm, tuple):

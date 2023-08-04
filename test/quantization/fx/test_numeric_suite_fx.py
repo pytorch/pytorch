@@ -8,12 +8,16 @@ import unittest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.ao.quantization import default_dynamic_qconfig
-import torch.nn.quantized as nnq
+from torch.ao.quantization import (
+    default_dynamic_qconfig,
+    QConfigMapping,
+    get_default_qconfig_mapping,
+)
+import torch.ao.nn.quantized as nnq
 toq = torch.ops.quantized
 from torch.ao.quantization.quantize_fx import (
     convert_fx,
-    convert_to_reference,
+    convert_to_reference_fx,
     prepare_fx,
     prepare_qat_fx,
 )
@@ -23,11 +27,14 @@ from torch.testing._internal.common_quantization import (
     ConvModel,
     QuantizationTestCase,
     skipIfNoFBGEMM,
+    skipIfNoQNNPACK,
+    withQNNPACKBackend,
     SingleLayerLinearDynamicModel,
     SingleLayerLinearModel,
     LSTMwithHiddenDynamicModel,
     SparseNNModel,
     skip_if_no_torchvision,
+    TwoLayerLinearModel
 )
 from torch.ao.quantization.quantization_mappings import (
     get_default_static_quant_module_mappings,
@@ -37,7 +44,7 @@ from torch.ao.quantization.quantization_mappings import (
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.ao.quantization.fx.pattern_utils import get_default_quant_patterns
-import torch.ao.quantization.fx.quantization_patterns as qp
+import torch.ao.quantization.fx.quantize_handler as qh
 from torch.ao.ns.fx.pattern_utils import (
     get_type_a_related_to_b,
 )
@@ -71,9 +78,19 @@ from torch.ao.ns._numeric_suite_fx import (
     extract_logger_info,
     extract_shadow_logger_info,
     extend_logger_results_with_comparison,
+    prepare_n_shadows_model,
+    convert_n_shadows_model,
+    extract_results_n_shadows_model,
+    OutputComparisonLogger,
+    print_comparisons_n_shadows_model,
+    loggers_set_enabled,
+    loggers_set_save_activations,
+    _prepare_n_shadows_add_loggers_model,
+    _n_shadows_compare_weights,
 )
-from torch.ao.quantization.backend_config import get_native_backend_config_dict
-from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
+from torch.ao.ns.fx.qconfig_multi_mapping import QConfigMultiMapping
+from torch.ao.quantization.backend_config import get_native_backend_config
+from torch.ao.quantization.fx.quantize_handler import _get_pattern_to_quantize_handlers
 
 
 # Note: these models are not for use outside of this file. While it's good
@@ -287,7 +304,7 @@ def get_all_quant_patterns():
     all_quant_patterns = get_default_quant_patterns()
     # some of the patterns are moved to (native) backend_config_dict so we need to
     # add them back here
-    for pattern, quantize_handler in get_pattern_to_quantize_handlers(get_native_backend_config_dict()).items():
+    for pattern, quantize_handler in _get_pattern_to_quantize_handlers(get_native_backend_config()).items():
         all_quant_patterns[pattern] = quantize_handler
     return all_quant_patterns
 
@@ -373,9 +390,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_simple_tensor_ops(self):
         class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 z = x + y
                 return z
@@ -416,9 +430,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
     def test_nodes_before_cat(self):
         # verify that nodes before cat get matched
         class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x0):
                 x1 = torch.add(x0, 1.0)
                 y1 = torch.add(x0, 1.0)
@@ -451,9 +462,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
     def test_dict_return_type(self):
         # verify that we can traverse up nodes which return dictionaries
         class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x0):
                 x1 = torch.add(x0, 1.0)
                 y1 = torch.add(x0, 1.0)
@@ -629,7 +637,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         # 4. go through the ops mapped to each QuantizeHandler type, and verify
         # correctness.
         def _op_in_base_sets_of_related_ops(op):
-            for name, ops in base_name_to_sets_of_related_ops.items():
+            for ops in base_name_to_sets_of_related_ops.values():
                 if op in ops:
                     return True
             return False
@@ -657,21 +665,21 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 base_op = pattern
 
             qhandler_cls_all_ops_quantizeable = [
-                qp.CatQuantizeHandler,
-                qp.ConvReluQuantizeHandler,
-                qp.LinearReLUQuantizeHandler,
-                qp.BatchNormQuantizeHandler,
-                qp.EmbeddingQuantizeHandler,
-                qp.RNNDynamicQuantizeHandler,
+                qh.CatQuantizeHandler,
+                qh.ConvReluQuantizeHandler,
+                qh.LinearReLUQuantizeHandler,
+                qh.BatchNormQuantizeHandler,
+                qh.EmbeddingQuantizeHandler,
+                qh.RNNDynamicQuantizeHandler,
             ]
 
             qhandler_cls_quant_op_same_signature = [
-                qp.FixedQParamsOpQuantizeHandler,
-                qp.CopyNodeQuantizeHandler,
-                qp.GeneralTensorShapeOpQuantizeHandler,
+                qh.FixedQParamsOpQuantizeHandler,
+                qh.CopyNodeQuantizeHandler,
+                qh.GeneralTensorShapeOpQuantizeHandler,
             ]
 
-            if qhandler_cls == qp.BinaryOpQuantizeHandler:
+            if qhandler_cls == qh.BinaryOpQuantizeHandler:
                 # these ops do not have quantized equivalents
                 ops_to_skip = [
                     torch.bmm,
@@ -685,11 +693,11 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 self.assertTrue(
                     _op_in_base_sets_of_related_ops(base_op),
                     f"{base_op} not in sets of related ops")
-            elif qhandler_cls == qp.RNNDynamicQuantizeHandler:
+            elif qhandler_cls == qh.RNNDynamicQuantizeHandler:
                 # TODO(future PR): add support for all classes in
                 # RNNDynamicQuantizeHandler
                 pass
-            elif qhandler_cls == qp.DefaultNodeQuantizeHandler:
+            elif qhandler_cls == qh.DefaultNodeQuantizeHandler:
                 self.assertTrue(
                     _op_in_base_sets_of_related_ops(base_op),
                     f"{base_op} not in sets of related ops")
@@ -922,10 +930,13 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
             m.eval()
         else:
             m.train()
+        print("qconfig_dict:", qconfig_dict)
         mp = prepare_fn(copy.deepcopy(m), qconfig_dict, example_inputs=data)
+        print("prepared:", mp)
         mp(*data)
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
+        print("quantized:", mq)
 
         if compare_fp32_vs_fp32_prepared:
             m_shadows_mp = add_shadow_loggers(
@@ -1594,23 +1605,23 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
             if (
                 qhandler_cls in (
-                    qp.BinaryOpQuantizeHandler,
-                    qp.RNNDynamicQuantizeHandler,
+                    qh.BinaryOpQuantizeHandler,
+                    qh.RNNDynamicQuantizeHandler,
                 )
             ):
                 # TODO(future PR): implement shadowing for binary ops
                 # TODO(future PR): implement shadowing for RNN ops
                 continue
-            elif qhandler_cls == qp.CatQuantizeHandler:
+            elif qhandler_cls == qh.CatQuantizeHandler:
                 self.assertTrue(
                     base_op in FUNS_IO_TYPE_FP32_OR_INT8,
                     f"missing IO type handling for {base_op}")
             elif (
                 qhandler_cls in (
-                    qp.ConvReluQuantizeHandler,
-                    qp.LinearReLUQuantizeHandler,
-                    qp.BatchNormQuantizeHandler,
-                    qp.DefaultNodeQuantizeHandler,
+                    qh.ConvReluQuantizeHandler,
+                    qh.LinearReLUQuantizeHandler,
+                    qh.BatchNormQuantizeHandler,
+                    qh.DefaultNodeQuantizeHandler,
                 )
             ):
                 self.assertTrue(
@@ -1618,9 +1629,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                     f"missing IO type handling for {base_op}")
             elif (
                 qhandler_cls in (
-                    qp.FixedQParamsOpQuantizeHandler,
-                    qp.CopyNodeQuantizeHandler,
-                    qp.GeneralTensorShapeOpQuantizeHandler,
+                    qh.FixedQParamsOpQuantizeHandler,
+                    qh.CopyNodeQuantizeHandler,
+                    qh.GeneralTensorShapeOpQuantizeHandler,
                 )
             ):
                 if (
@@ -1638,7 +1649,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                     # version, so it does not fit into the cases above.
                     (base_op is torch.nn.Softmax),
                     f"missing IO type handling for {base_op}")
-            elif qhandler_cls == qp.EmbeddingQuantizeHandler:
+            elif qhandler_cls == qh.EmbeddingQuantizeHandler:
                 # embedding shadowing is not implemented, for now
                 continue
             else:
@@ -1765,9 +1776,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             nn.Conv2d(1, 1, 1),
             nn.Sigmoid(),
         ).eval()
-        qconfig_dict = {'': torch.ao.quantization.default_qconfig}
+        qconfig_mapping = torch.ao.quantization.get_default_qconfig_mapping("fbgemm")
         example_inputs = (torch.randn(1, 1, 1, 1),)
-        mp = torch.ao.quantization.quantize_fx.prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
+        mp = torch.ao.quantization.quantize_fx.prepare_fx(m, qconfig_mapping, example_inputs=example_inputs)
         mq = torch.ao.quantization.quantize_fx.convert_fx(copy.deepcopy(mp))
 
         # extract weights
@@ -1818,7 +1829,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             results, 'fp32', 'int8', compute_cosine_similarity,
             'cosine_similarity_int8_vs_fp32')
 
-        for layer_name, layer_results in results.items():
+        for layer_results in results.values():
             assert 'sqnr_int8_vs_fp32' in \
                 layer_results['weight']['int8'][0].keys()
             assert 'l2_error_int8_vs_fp32' in \
@@ -1984,7 +1995,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         example_inputs = (torch.randn(1, 4),)
         qconfig_dict = {"": torch.ao.quantization.float16_static_qconfig}
         mp = prepare_fx(copy.deepcopy(m), qconfig_dict, example_inputs=example_inputs)
-        mq = convert_to_reference(mp)
+        mq = convert_to_reference_fx(mp)
         mq_shadows_m = add_shadow_loggers('a', mq, 'b', m, OutputLogger)
 
     def test_mul_add_cat_stack_skips_shadowing(self):
@@ -2059,6 +2070,681 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         act_compare_dict = extract_shadow_logger_info(
             mt_shadows_mt_copy, OutputLogger, 'b')
         self.assertTrue(len(act_compare_dict) == 1)
+
+@skipIfNoQNNPACK
+class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
+    """
+    Tests the "n shadows" workflow.
+    """
+
+    def _test_impl(self, m, example_input, qconfig_mappings):
+        backend_config = get_native_backend_config()
+
+        # test that input is valid
+        _ = m(*example_input)
+
+        msp = prepare_n_shadows_model(
+            m, example_input, qconfig_mappings, backend_config)
+        # print('msp', msp)
+
+        for _ in range(2):
+            msp(*example_input)
+
+        msq = convert_n_shadows_model(msp)
+
+        loggers_set_enabled(msq, True)
+        msq(*example_input)
+
+        results = extract_results_n_shadows_model(msq)
+        print_comparisons_n_shadows_model(results)
+        return msq
+
+    @withQNNPACKBackend
+    def test_linear_mod(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(2, 2)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                return x
+
+        m = M().eval()
+        example_input = (torch.randn(2, 2),)
+
+        qconfig_mappings = \
+            QConfigMultiMapping().set_global([torch.ao.quantization.default_qconfig])
+        self._test_impl(m, example_input, qconfig_mappings)
+
+    @withQNNPACKBackend
+    def test_linear_relu_mod(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(2, 2)
+                self.fc2 = nn.Linear(2, 2)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
+                x = self.relu(x)
+                return x
+
+        m = M().eval()
+        example_input = (torch.randn(2, 2),)
+
+        qconfig_mappings = (
+            QConfigMultiMapping().set_global([
+                torch.ao.quantization.default_qconfig,
+                torch.ao.quantization.default_dynamic_qconfig
+            ])
+        )
+        self._test_impl(m, example_input, qconfig_mappings)
+
+    @withQNNPACKBackend
+    def test_conv_bn_relu_mod(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+                self.bn = nn.BatchNorm2d(1)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                return x
+
+        m = M().eval()
+        example_input = (torch.randn(32, 1, 16, 16),)
+
+        qconfig_mappings = QConfigMultiMapping() \
+            .set_global([
+                torch.ao.quantization.default_qconfig,
+                torch.ao.quantization.default_per_channel_qconfig
+            ])
+        self._test_impl(m, example_input, qconfig_mappings)
+
+    @withQNNPACKBackend
+    def test_functions(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w1 = nn.Parameter(torch.randn(2, 2))
+                self.b1 = nn.Parameter(torch.zeros(2))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+
+            def forward(self, x):
+                x = F.sigmoid(x)
+                x = F.linear(x, self.w1, self.b1)
+                x = F.linear(x, self.w1[:], self.b1)
+                x = F.relu(x)
+                x = x + x
+                x = torch.cat([x])
+                x = torch.cat((x,))
+                x = torch.cat(tensors=[x])
+                # TODO(future PR): enable layernorm
+                # blocked on FX graph mode quant not inserting observer for
+                # second arg, if the second arg is a module input
+                # x = F.layer_norm(x, x.shape)
+                # x = F.layer_norm(x, x.shape[1:])
+                # x = x.reshape(1, -1) * 2
+                # x = F.layer_norm(x.reshape(1, -1), x.shape[1:])
+                x = torch.matmul(x, x.reshape(2, 2))
+                x = torch.matmul(x.reshape(2, 2), x.reshape(2, 2))
+                # TODO(future PR): enable below after FX graph mode quantization handles
+                # it, currently this is not supported
+                # x = F.linear(input=x, weight=self.w1, bias=self.b1)
+                return x
+
+        m = M().eval()
+        example_input = (torch.randn(2, 2),)
+
+        qconfig_mappings = QConfigMultiMapping() \
+            .set_global([torch.ao.quantization.default_qconfig])
+        self._test_impl(m, example_input, qconfig_mappings)
+
+    @withQNNPACKBackend
+    def test_partial_qconfig_mapping(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(2, 2)
+                self.w1 = nn.Parameter(torch.randn(2, 2))
+                self.b1 = nn.Parameter(torch.randn(2))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+
+            def forward(self, x):
+                x = self.fc(x)
+                x = F.linear(x, self.w1, self.b1)
+                x = F.relu(x)
+                x = x + x
+                return x
+
+        m = M().eval()
+        example_input = (torch.randn(2, 2),)
+        qconfig = torch.ao.quantization.default_qconfig
+
+        qconfig_mappings = QConfigMultiMapping() \
+            .set_object_type(F.linear, [qconfig]) \
+            .set_object_type(F.relu, [qconfig])
+        self._test_impl(m, example_input, qconfig_mappings)
+
+    @withQNNPACKBackend
+    def test_logger_enabled_and_save_activations_flags(self):
+        m = nn.Sequential(nn.Linear(1, 1)).eval()
+        example_input = (torch.randn(1, 1),)
+
+        qconfig_mappings = QConfigMultiMapping() \
+            .set_global([torch.ao.quantization.default_qconfig])
+        backend_config = get_native_backend_config()
+
+        msp = prepare_n_shadows_model(
+            m, example_input, qconfig_mappings, backend_config)
+
+        for _ in range(2):
+            msp(*example_input)
+
+        def _check_logger_count(model, exp_count_stats, exp_count_comparisons):
+            for name, mod in model.named_modules():
+                if isinstance(mod, OutputLogger):
+                    self.assertTrue(
+                        len(mod.stats) == exp_count_stats,
+                        f'stats: expected {len(mod.stats)} to equal {exp_count_stats}')
+                    if isinstance(mod, OutputComparisonLogger):
+                        self.assertTrue(
+                            len(mod.comparisons) == exp_count_comparisons,
+                            f'comparisons: expected {len(mod.comparisons)} to equal {exp_count_comparisons}')
+
+        # check behavior with save_activations enabled
+        msq = convert_n_shadows_model(copy.deepcopy(msp))
+        loggers_set_enabled(msq, True)
+        loggers_set_save_activations(msq, True)
+        # after prepare calibration but before convert calibration, loggers
+        # should not have anything saved
+        _check_logger_count(msq, 0, 0)
+        msq(*example_input)
+        # loggers should save each item after calibration
+        _check_logger_count(msq, 1, 1)
+
+        # check behavior with save_activations disabled
+        msq = convert_n_shadows_model(copy.deepcopy(msp))
+        loggers_set_enabled(msq, True)
+        loggers_set_save_activations(msq, False)
+        # after prepare calibration but before convert calibration, loggers
+        # should not have anything saved
+        _check_logger_count(msq, 0, 0)
+        msq(*example_input)
+        # stats should be empty, but comparisons should be there
+        _check_logger_count(msq, 0, 1)
+
+    @skip_if_no_torchvision
+    @withQNNPACKBackend
+    def test_mobilenet_v2(self):
+        import torchvision
+        m = torchvision.models.quantization.mobilenet_v2(
+            pretrained=False, quantize=False).eval()
+        example_input = (torch.randn(1, 3, 224, 224),)
+
+        qconfig_mappings = QConfigMultiMapping() \
+            .set_global([torch.ao.quantization.default_qconfig, torch.ao.quantization.default_dynamic_qconfig])
+
+        self._test_impl(m, example_input, qconfig_mappings)
+
+    @withQNNPACKBackend
+    def test_qconfig_multi_mapping_deduplication(self):
+        # check that insertion deduplicates qconfigs
+        qconfig_multi_mapping = QConfigMultiMapping().set_global(
+            [torch.ao.quantization.default_qconfig, torch.ao.quantization.default_qconfig]
+        )
+        self.assertEqual(len(qconfig_multi_mapping.qconfig_mappings_list), 1)
+
+    @withQNNPACKBackend
+    def test_qconfig_multi_mapping_insert_padding(self):
+        # test that inserting a higher priority qconfig style with fewer elements than a lower priority qconfig will
+        # result in adding None to the extra QConfigMappings at that same style+key
+        qconfig_multi_mapping = (
+            QConfigMultiMapping()
+            .set_global(
+                [
+                    torch.ao.quantization.default_qconfig,
+                    torch.ao.quantization.default_dynamic_qconfig,
+                ]
+            )
+            .set_object_type(torch.nn.Linear, [torch.ao.quantization.default_qconfig])
+            .set_module_name_regex("fc", [torch.ao.quantization.default_qconfig])
+            .set_module_name("fc2", [torch.ao.quantization.default_qconfig])
+            .set_module_name_object_type_order(
+                "", nn.Linear, 0, [torch.ao.quantization.default_qconfig]
+            )
+        )
+
+        self.assertEqual(
+            qconfig_multi_mapping.qconfig_mappings_list[1].object_type_qconfigs[
+                torch.nn.Linear
+            ],
+            None,
+        )
+        self.assertEqual(
+            qconfig_multi_mapping.qconfig_mappings_list[1].module_name_regex_qconfigs[
+                "fc"
+            ],
+            None,
+        )
+        self.assertEqual(
+            qconfig_multi_mapping.qconfig_mappings_list[1].module_name_qconfigs["fc2"],
+            None,
+        )
+        self.assertEqual(
+            qconfig_multi_mapping.qconfig_mappings_list[
+                1
+            ].module_name_object_type_order_qconfigs[("", nn.Linear, 0)],
+            None,
+        )
+
+    @withQNNPACKBackend
+    def test_qconfig_multi_mapping_retroactive_padding(self):
+        # test that inserting a lower priority qconfig style with more elements thhan lower priority qconfig styles
+        # will result in the new QConfigMapping having None at all previously existing styles+keys
+        qconfig_multi_mapping = (
+            QConfigMultiMapping()
+            .set_object_type(torch.nn.Linear, [torch.ao.quantization.default_qconfig])
+            .set_module_name_regex("fc", [torch.ao.quantization.default_qconfig])
+            .set_module_name("fc2", [torch.ao.quantization.default_qconfig])
+            .set_module_name_object_type_order(
+                "", nn.Linear, 0, [torch.ao.quantization.default_qconfig]
+            )
+            .set_global(
+                [
+                    torch.ao.quantization.default_qconfig,
+                    torch.ao.quantization.default_dynamic_qconfig,
+                ]
+            )
+        )
+
+        self.assertEqual(
+            qconfig_multi_mapping.qconfig_mappings_list[1].object_type_qconfigs[
+                torch.nn.Linear
+            ],
+            None,
+        )
+        self.assertEqual(
+            qconfig_multi_mapping.qconfig_mappings_list[1].module_name_regex_qconfigs[
+                "fc"
+            ],
+            None,
+        )
+        self.assertEqual(
+            qconfig_multi_mapping.qconfig_mappings_list[1].module_name_qconfigs["fc2"],
+            None,
+        )
+        self.assertEqual(
+            qconfig_multi_mapping.qconfig_mappings_list[
+                1
+            ].module_name_object_type_order_qconfigs[("", nn.Linear, 0)],
+            None,
+        )
+
+    @withQNNPACKBackend
+    def test_qconfig_multi_mapping_end_to_end(self):
+        # test that the prepare/convert_n_shadows_model works as expected
+        # with qconfig_multi_mapping and avoids unwanted matches
+
+        m = TwoLayerLinearModel().eval()
+        example_input = m.get_example_inputs()
+
+        qconfig_multi_mapping = (
+            QConfigMultiMapping()
+            .set_global(
+                [
+                    torch.ao.quantization.default_qconfig,
+                    torch.ao.quantization.default_dynamic_qconfig,
+                ]
+            )
+            .set_module_name("fc2", [None, torch.ao.quantization.default_qconfig])
+        )
+        self.assertEqual(
+            qconfig_multi_mapping.qconfig_mappings_list[1].module_name_qconfigs["fc2"],
+            None,
+        )
+        msq = self._test_impl(m, example_input, qconfig_multi_mapping)
+
+        self.checkQuantizedLinear(msq.shadow_wrapper_0_1.mod_0)
+        self.checkDynamicQuantizedLinear(msq.shadow_wrapper_0_2.mod_0, torch.qint8)
+        self.checkQuantizedLinear(msq.shadow_wrapper_1_1.mod_0)
+        self.assertRaisesRegex(AttributeError, ".*", lambda: msq.shadow_wrapper_1_2)
+
+    @withQNNPACKBackend
+    def test_qconfig_multi_mapping_from_list(self):
+        # test QConfigMultiMapping.from_list_qconfig_mapping works as expected
+
+        m = TwoLayerLinearModel().eval()
+        example_input = m.get_example_inputs()
+
+        qconfig_mappings_list = [
+            QConfigMapping().set_global(torch.ao.quantization.default_qconfig),
+            QConfigMapping()
+            .set_global(torch.ao.quantization.default_dynamic_qconfig)
+            .set_module_name("fc2", torch.ao.quantization.default_qconfig),
+        ]
+
+        qconfig_multi_mapping = QConfigMultiMapping().from_list_qconfig_mapping(
+            qconfig_mappings_list
+        )
+        self.assertEqual(
+            qconfig_multi_mapping.qconfig_mappings_list[1].module_name_qconfigs["fc2"],
+            None,
+        )
+
+        msq = self._test_impl(m, example_input, qconfig_multi_mapping)
+
+        self.checkQuantizedLinear(msq.shadow_wrapper_0_1.mod_0)
+        self.checkDynamicQuantizedLinear(msq.shadow_wrapper_0_2.mod_0, torch.qint8)
+        self.checkQuantizedLinear(msq.shadow_wrapper_1_1.mod_0)
+        self.assertRaisesRegex(AttributeError, ".*", lambda: msq.shadow_wrapper_1_2)
+
+    @withQNNPACKBackend
+    def test_qconfig_multi_mapping_ordering(self):
+        # test that the module ordering ignores None
+
+        m = TwoLayerLinearModel().eval()
+        example_input = m.get_example_inputs()
+        qconfig_multi_mapping = (
+            QConfigMultiMapping()
+            .set_global(
+                [
+                    torch.ao.quantization.default_qconfig,
+                    torch.ao.quantization.default_dynamic_qconfig,
+                ]
+            )
+            .set_module_name(
+                "fc2",
+                [
+                    None,
+                    torch.ao.quantization.default_dynamic_qconfig,
+                    torch.ao.quantization.default_qat_qconfig_v2,
+                ],
+            )
+        )
+        self.assertEqual(len(qconfig_multi_mapping.qconfig_mappings_list), 2)
+        msq = self._test_impl(m, example_input, qconfig_multi_mapping)
+
+        self.checkQuantizedLinear(msq.shadow_wrapper_0_1.mod_0)
+        self.checkDynamicQuantizedLinear(msq.shadow_wrapper_0_2.mod_0, torch.qint8)
+        self.checkDynamicQuantizedLinear(msq.shadow_wrapper_1_1.mod_0, torch.qint8)
+        self.checkQuantizedLinear(msq.shadow_wrapper_1_2.mod_0)
+
+    @withQNNPACKBackend
+    def test_qconfig_multi_mapping_repr(self):
+        qconfig_multi_mapping = (
+            QConfigMultiMapping()
+            .set_global(
+                [
+                    torch.ao.quantization.default_qconfig,
+                    torch.ao.quantization.default_dynamic_qconfig,
+                ]
+            )
+            .set_module_name(
+                "fc2",
+                [
+                    None,
+                    torch.ao.quantization.default_dynamic_qconfig,
+                    torch.ao.quantization.default_qat_qconfig_v2,
+                ],
+            )
+        )
+        self.assertTrue(isinstance(qconfig_multi_mapping.__repr__(), str))
+
+    @withQNNPACKBackend
+    def test_custom_functions_and_tracer(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(2, 2)
+                self.fc2 = nn.Linear(2, 2)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
+                return x
+
+        m = M().eval()
+        example_inputs = (torch.randn(2, 2),)
+
+        qconfig_mappings = QConfigMultiMapping().set_global(
+            [torch.ao.quantization.default_qat_qconfig]
+        )
+
+        custom_tracer = torch.ao.quantization.quantize_fx.QuantizationTracer(
+            ["fc2"], []
+        )
+
+        custom_prepare_fn = torch.ao.quantization.quantize_fx.prepare_qat_fx
+
+        def custom_convert_fn(module, to_print):
+            print(to_print)
+            mod = torch.ao.quantization.quantize_fx.convert_fx(module)
+            return mod
+
+        backend_config = get_native_backend_config()
+
+        # test that input is valid
+        _ = m(*example_inputs)
+
+        kwargs = {"to_print": "working"}
+
+        msp = prepare_n_shadows_model(
+            m,
+            example_inputs,
+            qconfig_mappings,
+            backend_config,
+            custom_prepare_fn=custom_prepare_fn,
+            custom_prepare_kwargs=None,
+            custom_tracer=custom_tracer,
+        )
+
+        for _ in range(2):
+            msp(*example_inputs)
+
+        msq = convert_n_shadows_model(
+            msp, custom_convert_fn=custom_convert_fn, custom_convert_kwargs=kwargs
+        )
+        print(msq)
+        loggers_set_enabled(msq, True)
+        msq(*example_inputs)
+
+        results = extract_results_n_shadows_model(msq)
+        print_comparisons_n_shadows_model(results)
+
+    def _test_extract_weights_impl(self, m, example_input, qconfig_mapping):
+        backend_config = get_native_backend_config()
+        results = _n_shadows_compare_weights(
+            m, example_input, qconfig_mapping, backend_config)
+        print_comparisons_n_shadows_model(results)
+
+    @withQNNPACKBackend
+    def test_extract_weights_linear(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w1 = nn.Parameter(torch.randn(2, 2))
+                self.b1 = nn.Parameter(torch.randn(2))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+                self.w2 = nn.Parameter(torch.randn(2, 2))
+                self.b2 = nn.Parameter(torch.randn(2))
+                torch.nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
+                self.w3 = nn.Parameter(torch.randn(2, 2))
+                self.b3 = nn.Parameter(torch.randn(2))
+                torch.nn.init.kaiming_uniform_(self.w3, a=math.sqrt(5))
+                self.w4 = nn.Parameter(torch.randn(2, 2))
+                self.b4 = nn.Parameter(torch.randn(2))
+                torch.nn.init.kaiming_uniform_(self.w4, a=math.sqrt(5))
+
+            def forward(self, x):
+                x = F.linear(x, self.w1, self.b1)
+                x = F.linear(x, self.w2, self.b2)
+                x = F.relu(x)
+                x = F.linear(x, self.w3, self.b3)
+                x = F.linear(x, self.w4, self.b4)
+                return x
+
+        per_tensor_qconfig = torch.ao.quantization.default_qconfig
+
+        m = M().eval()
+        example_input = (torch.randn(2, 2),)
+        qconfig_mapping = get_default_qconfig_mapping()
+        # test unquantized
+        qconfig_mapping.set_module_name_object_type_order(
+            '', F.linear, 2, None)
+        # test per-tensor
+        qconfig_mapping.set_module_name_object_type_order(
+            '', F.linear, 3, per_tensor_qconfig)
+        self._test_extract_weights_impl(m, example_input, qconfig_mapping)
+
+
+    def _test_add_loggers_impl(self, m, example_input, qconfig_mapping):
+        backend_config = get_native_backend_config()
+        m_copy = copy.deepcopy(m)
+
+        # test that input is valid
+        _ = m(*example_input)
+
+        msp = _prepare_n_shadows_add_loggers_model(
+            m, example_input, qconfig_mapping, backend_config)
+        # print('msp', msp)
+
+        msp(*example_input)
+
+        msq = convert_n_shadows_model(msp)
+        # print('msq', msq)
+
+        loggers_set_enabled(msq, True)
+        output_fp32 = msq(*example_input)
+
+        results = extract_results_n_shadows_model(msq)
+        # print(results)
+        # print_comparisons_n_shadows_model(results)
+
+        # get the last quantized output from results
+        inner_results = results['model']['node_output']
+        last_subgraph = list(inner_results.keys())[-1]
+        output_shadow = inner_results[last_subgraph][0]['values'][-1]
+
+        # verify that both fp32 and quantized output matches reference
+        output_fp32_ref = m_copy(*example_input)
+        mp_ref = prepare_fx(m_copy, qconfig_mapping, example_input)
+        for _ in range(2):
+            mp_ref(*example_input)
+        mq_ref = convert_fx(mp_ref)
+        output_shadow_ref = mq_ref(*example_input)
+        self.assertTrue(
+            torch.allclose(output_fp32, output_fp32_ref),
+            f"fp32 comparison: {output_fp32} not close to {output_fp32_ref}")
+
+        # print('shadow', output_shadow.shape, output_shadow)
+        # print('shadow_ref', output_shadow_ref.shape, output_shadow_ref)
+
+        self.assertTrue(
+            torch.allclose(output_shadow, output_shadow_ref),
+            f"shadow comparison: {output_shadow} not close to {output_shadow_ref}")
+
+        return msq
+
+    @withQNNPACKBackend
+    def test_add_loggers_linear_mod_quant_quant(self):
+        m = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
+        example_input = (torch.randn(2, 2),)
+        qconfig_mapping = get_default_qconfig_mapping()
+        self._test_add_loggers_impl(m, example_input, qconfig_mapping)
+
+    @withQNNPACKBackend
+    def test_add_loggers_linear_mod_fp32_quant(self):
+        m = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
+        example_input = (torch.randn(2, 2),)
+        qconfig_mapping = get_default_qconfig_mapping()
+        qconfig_mapping.set_module_name('0', None)
+        self._test_add_loggers_impl(m, example_input, qconfig_mapping)
+
+    @withQNNPACKBackend
+    def test_add_loggers_linear_mod_quant_fp32(self):
+        m = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
+        example_input = (torch.randn(2, 2),)
+        qconfig_mapping = get_default_qconfig_mapping()
+        qconfig_mapping.set_module_name('1', None)
+        self._test_add_loggers_impl(m, example_input, qconfig_mapping)
+
+    @withQNNPACKBackend
+    def test_add_loggers_linear_mod_fp32_fp32(self):
+        m = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
+        example_input = (torch.randn(2, 2),)
+        qconfig_mapping = get_default_qconfig_mapping()
+        qconfig_mapping.set_module_name('0', None)
+        qconfig_mapping.set_module_name('1', None)
+        self._test_add_loggers_impl(m, example_input, qconfig_mapping)
+
+    @withQNNPACKBackend
+    def test_add_loggers_conv_bn_relu_fusion_quant(self):
+        m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.BatchNorm2d(1), nn.ReLU())
+        m.eval()
+        example_input = (torch.randn(16, 1, 4, 4),)
+        qconfig_mapping = get_default_qconfig_mapping()
+        self._test_add_loggers_impl(m, example_input, qconfig_mapping)
+
+    @withQNNPACKBackend
+    def test_add_loggers_conv_bn_relu_fusion_fp32(self):
+        m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.BatchNorm2d(1), nn.ReLU())
+        m.eval()
+        example_input = (torch.randn(16, 1, 4, 4),)
+        qconfig_mapping = get_default_qconfig_mapping()
+        qconfig_mapping.set_module_name('0', None)
+        qconfig_mapping.set_module_name('1', None)
+        qconfig_mapping.set_module_name('2', None)
+        self._test_add_loggers_impl(m, example_input, qconfig_mapping)
+
+    @withQNNPACKBackend
+    def test_add_loggers_functions(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w1 = nn.Parameter(torch.randn(2, 2))
+                self.b1 = nn.Parameter(torch.randn(2))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+
+            def forward(self, x):
+                x = F.linear(x, self.w1, self.b1)
+                x = F.relu(x)
+                x = x + x
+                x = x + 1
+                # TODO(future PR): support first arg being a scalar
+                # x = 1 + x
+                x = torch.cat([x, x])
+                x = torch.cat([x, x])
+                x = torch.cat(tensors=[x, x])
+                # function not matchable by quantization
+                x = torch.nn.functional.rrelu(x)
+                x = F.linear(x, self.w1, self.b1)
+                return x
+
+        m = M().eval()
+        example_input = (torch.randn(16, 2),)
+        for qconfig_mapping in (
+            get_default_qconfig_mapping(),
+            QConfigMapping(),
+        ):
+            self._test_add_loggers_impl(m, example_input, qconfig_mapping)
+
+    @skip_if_no_torchvision
+    @withQNNPACKBackend
+    def test_add_loggers_mobilenet_v2(self):
+        import torchvision
+        m = torchvision.models.quantization.mobilenet_v2(
+            pretrained=False, quantize=False).eval()
+        example_input = (torch.randn(8, 3, 224, 224),)
+        qconfig_mapping = get_default_qconfig_mapping()
+        self._test_add_loggers_impl(m, example_input, qconfig_mapping)
 
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):

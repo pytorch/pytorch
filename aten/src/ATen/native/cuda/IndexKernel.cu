@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/cuda/IndexKernel.h>
 #include <ATen/native/IndexKernel.h>
+#include <c10/cuda/CUDADeviceAssertion.h>
 
 #include <type_traits>
 #include <ATen/core/TensorBase.h>
@@ -12,10 +13,11 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
+#include <ATen/native/quantized/IndexKernel.h>
 
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 static constexpr int launch_bound2 = 4;
 
@@ -52,7 +54,7 @@ static void launch_kernel(int64_t N, const func_t& f) {
 template <typename func_t>
 void gpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride, const func_t& f) {
   int num_indices = index_size.size();
-  AT_ASSERT(num_indices == index_stride.size());
+  AT_ASSERT(static_cast<size_t>(num_indices) == index_stride.size());
   AT_ASSERT(num_indices == iter.ntensors() - 2);
 
   if (iter.numel() == 0) {
@@ -204,8 +206,8 @@ static void index_fill_kernel(
   int64_t self_dim_size,
   int64_t self_dim_stride,
   const Scalar& source) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, kComplexHalf,
     iter.dtype(), "index_fill_cuda", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     auto fill_val = source.to<scalar_t>();
@@ -222,8 +224,8 @@ static void index_copy_kernel(
   // See note [Writing Nondeterministic Operations]
   // Nondeterministic when index contains duplicate entries
   // this kernel will not be called when torch.use_deterministic_algorithms(True)
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, kComplexHalf,
     iter.dtype(), "index_copy_cuda", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     index_copy_kernel_impl<dtype>(iter, dim, self_dim_size, self_dim_stride);
@@ -236,6 +238,21 @@ static void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntAr
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16, iter.dtype(), "index_put", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     index_put_kernel_impl<dtype>(iter, index_size, index_stride);
+  });
+}
+
+void index_put_kernel_quantized_cuda(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate, double scale, int zero_point) {
+  TORCH_CHECK(!accumulate, "index_put does not support accumulate=true");
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "index_put", [&] {
+    constexpr int64_t qmin = std::numeric_limits<typename scalar_t::underlying>::min();
+    constexpr int64_t qmax = std::numeric_limits<typename scalar_t::underlying>::max();
+    float inv_scale = 1.0f / static_cast<float>(scale);
+
+    gpu_index_kernel(iter, index_size, index_stride, [inv_scale, zero_point, qmin, qmax]C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
+      int64_t qvalue = static_cast<int64_t>(zero_point + nearbyintf(*(float*)in_data * inv_scale));
+      qvalue = min(max(qvalue, qmin), qmax);
+      *(scalar_t*)(out_data + offset) = static_cast<scalar_t>(qvalue);
+    });
   });
 }
 
@@ -328,15 +345,19 @@ void take_kernel(
 
 namespace {
 
-template <typename mask_t>
-__global__ void masked_scatter_size_check(int64_t *mask_exclusive_sum, mask_t *mask, int64_t srcSize) {
+__global__ void masked_scatter_size_check(
+  const int64_t *mask_exclusive_sum,
+  const bool *mask,
+  const int64_t srcSize,
+  TORCH_DSA_KERNEL_ARGS) {
   // Convert exclusive sum to inclusive sum
   auto totalElements = *mask_exclusive_sum + *mask;
-  CUDA_KERNEL_ASSERT(totalElements <= srcSize);
+  CUDA_KERNEL_ASSERT2(totalElements <= srcSize);
 }
 
-template <typename mask_t>
-void masked_scatter_cuda_impl(
+} // anonymous namespace
+
+void launch_masked_scatter_kernel(
     const TensorBase &self, const TensorBase &mask,
     const TensorBase &maskPrefixSum, const TensorBase &source) {
   auto srcSize = source.numel();
@@ -344,17 +365,23 @@ void masked_scatter_cuda_impl(
   auto mask_numel = mask.numel();
 
   // Use a prefix sum to determine the output locations of the masked elements
-  auto maskPrefixSum_data = maskPrefixSum.data_ptr<int64_t>();
-  auto mask_data = mask_cont.data_ptr<mask_t>();
+  auto maskPrefixSum_data = maskPrefixSum.mutable_data_ptr<int64_t>();
+  auto mask_data = mask_cont.const_data_ptr<bool>();
 
   at::cuda::cub::mask_exclusive_sum(
       mask_data, maskPrefixSum_data, mask_numel);
 
   // Asynchronously check that the number of `1` elements present in the mask
   // must be <= the number of elements available in `src`.
-  masked_scatter_size_check<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-      &maskPrefixSum_data[mask_numel - 1], &mask_data[mask_numel - 1], srcSize);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  TORCH_DSA_KERNEL_LAUNCH(
+      masked_scatter_size_check,
+      1,
+      1,
+      0,
+      at::cuda::getCurrentCUDAStream(),
+      &maskPrefixSum_data[mask_numel - 1],
+      &mask_data[mask_numel - 1],
+      srcSize);
 
   // We are getting elements from `src` based on an offset from
   // `maskPrefixSum`, so that should be made contiguous too
@@ -377,28 +404,16 @@ void masked_scatter_cuda_impl(
       self.scalar_type(),
       "masked_scatter_",
       [&]() {
-        auto source_ptr = source_contig.data_ptr<scalar_t>();
+        auto source_ptr = source_contig.const_data_ptr<scalar_t>();
         gpu_kernel(
-            iter, [=] GPU_LAMBDA(scalar_t a, mask_t mask, int64_t maskPrefixSum) -> scalar_t {
+            iter, [=] GPU_LAMBDA(scalar_t a, bool mask, int64_t maskPrefixSum) -> scalar_t {
               if (mask) {
                 return source_ptr[maskPrefixSum];
               }
               return a;
             });
-        cudaGetLastError();
+        AT_CUDA_CHECK(cudaGetLastError());
       });
-}
-
-} // anonymous namespace
-
-void launch_masked_scatter_kernel(
-    const TensorBase &self, const TensorBase &mask,
-    const TensorBase &maskPrefixSum, const TensorBase &source) {
-  if (mask.scalar_type() == kBool) {
-    masked_scatter_cuda_impl<bool>(self, mask, maskPrefixSum, source);
-  } else {
-    masked_scatter_cuda_impl<uint8_t>(self, mask, maskPrefixSum, source);
-  }
 }
 
 template <typename scalar_t>
@@ -451,4 +466,6 @@ REGISTER_DISPATCH(put_stub, &put_kernel);
 REGISTER_DISPATCH(take_stub, &take_kernel);
 REGISTER_DISPATCH(flip_stub, &flip_kernel);
 
-}} // namespace at::native
+REGISTER_CUDA_DISPATCH(index_put_kernel_quantized_stub, &index_put_kernel_quantized_cuda);
+
+} // namespace at::native

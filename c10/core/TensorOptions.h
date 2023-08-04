@@ -3,17 +3,14 @@
 #include <c10/core/Backend.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/core/Device.h>
-#include <c10/core/DispatchKeySet.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 
 #include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Optional.h>
 
-#include <cstddef>
 #include <iosfwd>
 #include <utility>
 
@@ -105,7 +102,7 @@ inline bool pinned_memory_or_default(c10::optional<bool> pinned_memory) {
 /// `torch.device` object (e.g., "cuda:1" can be passed to everywhere a
 /// `torch.device("cuda:1")` is accepted). To support the syntax
 /// `at::empty({10}, {kCUDA, 1})` and `tensor.to(kCUDA)`, we need to make sure
-/// that `TensorOptions` is implicitly constructible with any argments that a
+/// that `TensorOptions` is implicitly constructible with any arguments that a
 /// `Device` can constructed from. So we have,
 ///
 ///    /* implicit */ TensorOptions(T&& device) : TensorOptions() {
@@ -120,7 +117,7 @@ inline bool pinned_memory_or_default(c10::optional<bool> pinned_memory) {
 ///
 ///
 /// But this will be problematic. Consider this: `TensorOptions({kCUDA, 1})`.
-/// Compiler will compain about ambiguity between the copy constructor and the
+/// Compiler will complain about ambiguity between the copy constructor and the
 /// `Device` constructor because `{kCUDA, 1}` can be converted to both a
 /// `TensorOption` and a `Device`.
 ///
@@ -582,7 +579,7 @@ inline TensorOptions layout(Layout layout) {
 /// Convenience function that returns a `TensorOptions` object with the `device`
 /// set to the given one.
 inline TensorOptions device(Device device) {
-  return TensorOptions().device(std::move(device));
+  return TensorOptions().device(device);
 }
 
 /// Convenience function that returns a `TensorOptions` object with the
@@ -613,7 +610,7 @@ inline TensorOptions dtype() {
   return dtype(caffe2::TypeMeta::Make<T>());
 }
 
-inline std::string toString(const TensorOptions options) {
+inline std::string toString(const TensorOptions& options) {
   std::ostringstream stream;
   stream << options;
   return stream.str();
@@ -631,61 +628,32 @@ inline DispatchKey computeDispatchKey(
     case Layout::Strided: {
       const auto dtype_ = dtype_or_default(dtype);
       switch (device_.type()) {
-        case DeviceType::CPU: {
-          if (isQIntType(dtype_)) {
-            return DispatchKey::QuantizedCPU;
-          }
-          return DispatchKey::CPU;
-        }
-        case DeviceType::CUDA: {
-          if (isQIntType(dtype_)) {
-            return DispatchKey::QuantizedCUDA;
-          }
-          return DispatchKey::CUDA;
-        }
-        case DeviceType::IPU: {
-          return DispatchKey::IPU;
-        }
-        case DeviceType::XPU: {
-          if (isQIntType(dtype_)) {
-            return DispatchKey::QuantizedXPU;
-          }
-          return DispatchKey::XPU;
-        }
-        case DeviceType::MKLDNN:
-        case DeviceType::OPENGL:
-        case DeviceType::OPENCL:
-        case DeviceType::IDEEP:
+#define DO_CASE(device, _)                   \
+  case c10::DeviceType::device: {            \
+    if (isQIntType(dtype_)) {                \
+      return DispatchKey::Quantized##device; \
+    }                                        \
+    return DispatchKey::device;              \
+  }
+        C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
+#undef DO_CASE
+        case c10::DeviceType::FPGA:
+          return DispatchKey::FPGA;
+        case c10::DeviceType::ORT:
+          return DispatchKey::ORT;
+        case c10::DeviceType::Vulkan:
+          return DispatchKey::Vulkan;
+        case c10::DeviceType::Metal:
+          return DispatchKey::Metal;
+        case c10::DeviceType::MKLDNN:
+        case c10::DeviceType::OPENGL:
+        case c10::DeviceType::OPENCL:
+        case c10::DeviceType::IDEEP:
           TORCH_INTERNAL_ASSERT(
               0,
               "This is a grandfathered Caffe2 device type ",
               device_.type(),
               ", it shouldn't ever convert to a DispatchKey.  File a bug describing what you were doing if you think this is in error.");
-        case DeviceType::HIP:
-          return DispatchKey::HIP;
-        case DeviceType::VE:
-          return DispatchKey::VE;
-        case DeviceType::FPGA:
-          return DispatchKey::FPGA;
-        case DeviceType::ORT:
-          return DispatchKey::ORT;
-        case DeviceType::XLA:
-          return DispatchKey::XLA;
-        case DeviceType::Lazy:
-          return DispatchKey::Lazy;
-        case DeviceType::MPS:
-          return DispatchKey::MPS;
-        case DeviceType::Vulkan:
-          return DispatchKey::Vulkan;
-        case DeviceType::Metal:
-          return DispatchKey::Metal;
-        case DeviceType::Meta:
-          return DispatchKey::Meta;
-        case DeviceType::HPU:
-          return DispatchKey::HPU;
-        case DeviceType::PrivateUse1: {
-          return DispatchKey::PrivateUse1;
-        }
         default:
           TORCH_CHECK_NOT_IMPLEMENTED(
               false,
@@ -695,16 +663,12 @@ inline DispatchKey computeDispatchKey(
     }
     case Layout::Sparse:
       switch (device_.type()) {
-        case DeviceType::CPU:
-          return DispatchKey::SparseCPU;
-        case DeviceType::CUDA:
-          return DispatchKey::SparseCUDA;
-        case DeviceType::HIP:
-          return DispatchKey::SparseHIP;
-        case DeviceType::VE:
-          return DispatchKey::SparseVE;
-        case DeviceType::XPU:
-          return DispatchKey::SparseXPU;
+#define DO_CASE(device, _)              \
+  case c10::DeviceType::device: {       \
+    return DispatchKey::Sparse##device; \
+  }
+        C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
+#undef DO_CASE
         default:
           TORCH_CHECK_NOT_IMPLEMENTED(
               false,
@@ -713,7 +677,7 @@ inline DispatchKey computeDispatchKey(
       }
     case Layout::Mkldnn:
       switch (device_.type()) {
-        case DeviceType::CPU:
+        case c10::DeviceType::CPU:
           return DispatchKey::MkldnnCPU;
         default:
           TORCH_CHECK_NOT_IMPLEMENTED(
@@ -726,9 +690,9 @@ inline DispatchKey computeDispatchKey(
     case Layout::SparseBsr:
     case Layout::SparseBsc:
       switch (device_.type()) {
-        case DeviceType::CPU:
+        case c10::DeviceType::CPU:
           return DispatchKey::SparseCsrCPU;
-        case DeviceType::CUDA:
+        case c10::DeviceType::CUDA:
           return DispatchKey::SparseCsrCUDA;
         default:
           AT_ERROR(
@@ -744,12 +708,10 @@ inline DispatchKey computeDispatchKey(
 
 inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
   switch (dispatch_key) {
-    case DispatchKey::SparseCPU:
-    case DispatchKey::SparseCUDA:
-    case DispatchKey::SparseHIP:
-    case DispatchKey::SparseVE:
-    case DispatchKey::SparseXPU:
-      return Layout::Sparse;
+#define DO_CASE(bc, _) case DispatchKey::Sparse##bc:
+    C10_FORALL_BACKEND_COMPONENTS(DO_CASE, unused)
+#undef DO_CASE
+    return Layout::Sparse;
     case DispatchKey::SparseCsrCPU:
     case DispatchKey::SparseCsrCUDA:
       TORCH_CHECK(
@@ -764,56 +726,24 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
   }
 }
 
-inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
+inline c10::DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
   switch (dispatch_key) {
     // stuff that's real
-    case DispatchKey::CPU:
-    case DispatchKey::SparseCPU:
-    case DispatchKey::MkldnnCPU:
-    case DispatchKey::QuantizedCPU:
-    case DispatchKey::AutogradCPU:
-      return DeviceType::CPU;
-    case DispatchKey::CUDA:
-    case DispatchKey::SparseCUDA:
-    case DispatchKey::QuantizedCUDA:
-    case DispatchKey::AutogradCUDA:
-      return DeviceType::CUDA;
-    case DispatchKey::HIP:
-    case DispatchKey::SparseHIP:
-      return DeviceType::HIP;
-    case DispatchKey::VE:
-    case DispatchKey::SparseVE:
-      return DeviceType::VE;
-    case DispatchKey::XLA:
-    case DispatchKey::AutogradXLA:
-      return DeviceType::XLA;
-    case DispatchKey::Lazy:
-    case DispatchKey::AutogradLazy:
-      return DeviceType::Lazy;
-    case DispatchKey::Vulkan:
-      return DeviceType::Vulkan;
-    case DispatchKey::Meta:
-      return DeviceType::Meta;
+#define DO_CASE(suffix, prefix)     \
+  case DispatchKey::prefix##suffix: \
+    return c10::DeviceType::suffix;
+#define DO_CASES(_, prefix) C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, prefix)
+    C10_FORALL_FUNCTIONALITY_KEYS(DO_CASES)
+#undef DO_CASES
+#undef DO_CASE
 
-    // stuff that people are actively developing
-    case DispatchKey::IPU:
-    case DispatchKey::AutogradIPU:
-      return DeviceType::IPU;
-    case DispatchKey::XPU:
-    case DispatchKey::SparseXPU:
-    case DispatchKey::QuantizedXPU:
-    case DispatchKey::AutogradXPU:
-      return DeviceType::XPU;
-    case DispatchKey::MPS:
-    case DispatchKey::AutogradMPS:
-      return DeviceType::MPS;
-    case DispatchKey::HPU:
-    case DispatchKey::AutogradHPU:
-      return DeviceType::HPU;
+    case DispatchKey::MkldnnCPU:
+      return c10::DeviceType::CPU;
+    case DispatchKey::Vulkan:
+      return c10::DeviceType::Vulkan;
+
     case DispatchKey::ORT:
-      return DeviceType::ORT;
-    case DispatchKey::PrivateUse1:
-      return DeviceType::PrivateUse1;
+      return c10::DeviceType::ORT;
     default:
       TORCH_CHECK(
           false,
@@ -830,7 +760,7 @@ inline TensorOptions dispatchKeyToTensorOptions(DispatchKey dispatch_key) {
 }
 
 namespace detail {
-inline bool backend_supports_empty_operator(const TensorOptions options) {
+inline bool backend_supports_empty_operator(const TensorOptions& options) {
   // Quantized backends don't support at::empty().
   // They have separate operators like at::empty_quantized() that take in
   // extra information about how to quantize the tensor.
