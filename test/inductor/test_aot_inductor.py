@@ -38,31 +38,34 @@ class AOTInductorModelRunner:
                 model,
                 example_inputs,
             )
-            print(so_path)
-        constants_file_path = f"{os.path.splitext(so_path)[0]}_constants.pkl"
+        constants_file_path = f"{os.path.splitext(so_path)[0]}_constants.pt"
 
         # Use a utility function for easier testing
-        source = f"""
+        source = (
+            """
         #include <torch/csrc/inductor/aot_inductor_model.h>
         #include <torch/torch.h>
+        #include <torch/script.h>
 
         torch::aot_inductor::AOTInductorModel model;
 
         void run(
                 const std::vector<at::Tensor>& inputTensors,
-                std::vector<at::Tensor>& outputTensors){{
+                std::vector<at::Tensor>& outputTensors){
 
             // Load the list of constant tensors from the constants file
             std::vector<at::Tensor> constantTensors;
-            std::cout << __FILE__ << std::endl;
-            std::cout << "{constants_file_path}" << std::endl;
-            try {{
-                torch::load(constantTensors, "{constants_file_path}");
-            }} catch (const std::exception& ex) {{
+            try {
+                auto module = torch::jit::load("%s");
+                if (module.hasattr("tensor_list")) {
+                    for (const auto& t : module.attr("tensor_list").toListRef()) {
+                        constantTensors.push_back(t.toTensor());
+                    }
+                }
+            } catch (const std::exception& ex) {
                 std::cerr << "Error loading constant tensors: " << ex.what() << std::endl;
                 return;
-            }}
-            /**
+            }
 
             std::vector<at::Tensor> allInputs;
 
@@ -71,9 +74,10 @@ class AOTInductorModelRunner:
             allInputs.insert(allInputs.end(), constantTensors.begin(), constantTensors.end());
 
             model.run(allInputs, outputTensors, at::cuda::getCurrentCUDAStream());
-            **/
-        }}
+        }
         """
+            % constants_file_path
+        )
         optimized = torch.utils.cpp_extension.load_inline(
             name="aot_inductor",
             cpp_sources=[source],

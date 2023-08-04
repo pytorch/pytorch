@@ -887,11 +887,11 @@ class AotCodeCache:
             specified_dir=config.aot_inductor_output_path,
         )
 
-        # Write constants to file
-        torch.save(
-            list(graph.constants.values()),
-            f"{os.path.splitext(input_path)[0]}_constants.pkl",
-        )
+        # Write list of constants to file
+        path = f"{os.path.splitext(input_path)[0]}_constants.pt"
+        m = torch.nn.Module()
+        m.tensor_list = list(graph.constants.values())
+        torch.jit.save(torch.jit.script(m), path)
 
         if key not in cls.cache:
             from filelock import FileLock

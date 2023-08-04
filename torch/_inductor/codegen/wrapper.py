@@ -1033,7 +1033,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         outputs_info_[0].shape.emplace_back(10, 10, nullptr);
         }
         """
-        num_inputs = len(V.graph.graph_inputs)
+        num_inputs = len(V.graph.graph_inputs) + len(V.graph.constants)
         num_outputs = len(V.graph.graph_outputs)
         self.prefix.splice(
             f"""
@@ -1057,6 +1057,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     self.prefix.writeline(
                         f"inputs_info_[{idx}].shape.emplace_back({size}, {size}, nullptr);"
                     )
+
+            # Append constants as inputs to the graph
+            inputs_len = len(V.graph.graph_inputs.keys())
+            for idx, name in enumerate(V.graph.constants.keys()):
+                constants_idx = inputs_len + idx
+                self.prefix.writeline(
+                    f"""inputs_info_[{constants_idx}].name = "{name}";"""
+                )
 
             for idx, output in enumerate(V.graph.graph_outputs):
                 # TODO: handle symbolic expressions later.
