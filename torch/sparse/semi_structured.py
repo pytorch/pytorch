@@ -81,6 +81,18 @@ class SparseSemiStructuredTensor(torch.Tensor):
             ValueError: If both original_tensor and compressed_tensor are None.
 
         """
+        if not cls._WARNING_SHOWN:
+            warnings.warn(
+                (
+                    "The PyTorch API of SparseSemiStructuredTensor is in prototype stage "
+                    "and will change in the near future. Please open a Github issue "
+                    "for features requests and see our documentation on the torch.sparse "
+                    "module for further information about the project."
+                ),
+                UserWarning,
+            )
+            cls._WARNING_SHOWN = True
+
         if original_tensor is not None:
             previous_tensor = original_tensor
             original_shape = original_tensor.shape
@@ -128,18 +140,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
         Raises:
             RuntimeError: If original_tensor is not a supported dtype, dim, shape, or device.
         """
-        if not self._WARNING_SHOWN:
-            warnings.warn(
-                (
-                    "The PyTorch API of SparseSemiStructuredTensor is in prototype stage "
-                    "and will change in the near future. Please open a Github issue "
-                    "for features requests and see our documentation on the torch.sparse "
-                    "module for further information about the project."
-                ),
-                UserWarning,
-            )
-            self._WARNING_SHOWN = True
-
         # if original tensor is passed in, we need to compress it and store the compressed representation.
         if original_tensor is not None:
             # TODO right now we have unified checks and constraints for cuSPARSELt and CUTLASS, these are not actually the same.
@@ -430,4 +430,4 @@ def to_sparse_semi_structured(
                 [-4370, -4370, -4370,  ..., -4370, -4370, -4370]], device='cuda:0',
        dtype=torch.int16))
     """
-    return SparseSemiStructuredTensor(original_tensor, transposed=transposed)
+    return SparseSemiStructuredTensor(original_tensor, original_shape=original_tensor.shape, transposed=transposed)
