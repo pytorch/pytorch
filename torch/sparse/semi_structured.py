@@ -16,6 +16,7 @@ _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG = {
     torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(10, 32, 128),
     torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 32, 64),
     torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 32, 64),
+    torch.float32: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 32, 32)
 }
 
 
@@ -33,15 +34,20 @@ class SparseSemiStructuredTensor(torch.Tensor):
     These two are stored next to each other in one contiguous tensor.
 
     We choose to store the specified elements and the metadata in a single tensor for compatibilty with cuSPARSELt,
-    which expects the datat to be stored in this format.
+    which expects the data to be stored in this format.
 
     compressed tensor = [ specified elements of original tensor | metadata ]
 
     For an original tensor of size (m, k) we expect the first m * k // 2 elements to be the kept elements
     The rest of the tensor is metadata.
 
-    This subclass also overrides __torch_dispatch__ to use _sparse_semi_structured_linear for faster matrix multiplications
-    via sparse CUTLASS kernels. It will also use _cslt_sparse_mm for cuSPARSELt.
+    The subclass supports two backend, either CUTLASS or cuSPASRELt. 
+
+    When _FORCE_CUTLASS is set, or when cuSPARSELt is not available, this subclass calls into _sparse_semi_structured_linear
+    and sparse_semi_structured_from_dense for conversion to the compressed format. 
+
+    When PyTorch is compiled with cuSPARSELt support, this subclass will call into _cslt_sparse_mm for sparse mm and
+    _cslt_compress to convert into the compressed format.
     """
 
     _FUSE_TRANSPOSE = False
@@ -136,6 +142,9 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
         # if original tensor is passed in, we need to compress it and store the compressed representation.
         if original_tensor is not None:
+            # TODO right now we have unified checks and constraints for cuSPARSELt and CUTLASS, these are not actually the same.
+            # We should consolidate similar checks here and leave backend specific checks like shape in the op implementation. 
+
             # check device
             if not original_tensor.is_cuda:
                 raise RuntimeError(
