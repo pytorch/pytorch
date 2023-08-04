@@ -358,38 +358,41 @@ class NullContextVariable(ContextWrappingVariable):
         return "nullcontext"
 
 
-class CUDAStreamContextVariable(ContextWrappingVariable):
+class StreamContextVariable(ContextWrappingVariable):
     @staticmethod
-    def create(tx, target_value, **kwargs):
+    def create(tx, target_value, device, **kwargs):
         from .builder import wrap_fx_proxy_cls
 
         current_stream = wrap_fx_proxy_cls(
-            CUDAStreamVariable,
+            StreamVariable,
             tx,
             tx.output.create_proxy(
                 "call_function",
-                torch.cuda.current_stream,
+                getattr(getattr(torch, device), 'current_stream'),
                 (None,),
                 {},
             ),
         )
-        return CUDAStreamContextVariable(
+        return StreamContextVariable(
             target_values=[target_value],
             initial_values=[current_stream],
+            device=device,
             **kwargs,
         )
 
-    def __init__(self, target_values, initial_values=None, **kwargs):
+    def __init__(self, target_values, device, initial_values=None, **kwargs):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
+        self.device = device
+        self.set_stream_func = getattr(getattr(torch, self.device), 'set_stream')
 
     def enter(self, tx):
         # CUDA stream generated inside of traced function
         if self.target_values[0].as_proxy() is not None:
             tx.output.create_proxy(
                 "call_function",
-                torch.cuda.set_stream,
+                self.set_stream_func,
                 (self.target_values[0].as_proxy(),),
                 {},
             )
@@ -398,35 +401,36 @@ class CUDAStreamContextVariable(ContextWrappingVariable):
             stream = self.target_values[0].value
             tx.output.create_proxy(
                 "call_function",
-                torch._C._cuda_setStream,
+                getattr(torch._C, '_' + str(self.device) + '_setStream'),
                 (stream.stream_id, stream.device_index, stream.device_type),
                 {},
             )
-        torch.cuda.set_stream(self.target_values[0].value)
+        self.set_stream_func(self.target_values[0].value)
 
     def exit(self, tx, *args):
         tx.output.create_proxy(
             "call_function",
-            torch.cuda.set_stream,
+            self.set_stream_func,
             (self.initial_values[0].as_proxy(),),
             {},
         )
-        torch.cuda.set_stream(self.initial_values[0].value)
+        self.set_stream_func(self.initial_values[0].value)
 
     def module_name(self):
-        return "torch.cuda"
+        return "torch." + str(self.device)
 
     def fn_name(self):
         return "stream"
 
 
-class CUDAStreamVariable(VariableTracker):
-    def __init__(self, proxy, value, **kwargs):
+class StreamVariable(VariableTracker):
+    def __init__(self, proxy, value, device, **kwargs):
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
+        self.device = device
 
     def call_method(
         self,
@@ -435,7 +439,7 @@ class CUDAStreamVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        unimplemented("cuda stream")
+        unimplemented(self.device + "stream")
 
     def as_proxy(self):
         return self.proxy

@@ -3,8 +3,8 @@ from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     ContextWrappingVariable,
-    CUDAStreamContextVariable,
-    CUDAStreamVariable,
+    StreamContextVariable,
+    StreamVariable,
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     GradModeVariable,
