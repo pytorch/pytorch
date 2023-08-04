@@ -1072,9 +1072,10 @@ class FakeTensor(torch.Tensor):
         cur_stack = _get_current_dispatch_mode_stack()
         # NB: This must test for ANY fake tensor mode, because we want the
         # fake tensor mode to take precedence
-        if any(isinstance(m, FakeTensorMode) for m in cur_stack):
+        fake_modes_on_stack = [m for m in cur_stack if isinstance(m, FakeTensorMode)]
+        if fake_modes_on_stack:
             not_implemented_log.debug(
-                "FakeTensor mode already active: %s in %s", fake_mode, cur_stack
+                "FakeTensor mode already active: %s in %s", fake_modes_on_stack, cur_stack
             )
             return NotImplemented
 
@@ -1301,9 +1302,12 @@ class FakeTensorMode(TorchDispatchMode):
                 (args, kwargs),
             )
             out = func(*const_args, **const_kwargs)
-            if isinstance(out, torch.Tensor) and self.may_turn_const(out):
+            if type(out) is torch.Tensor and self.may_turn_const(out):
                 # NB: not in_kernel_invocation_manager because we're doing real
                 # compute here
+                # NB: no_dispatch() here is VERY DANGEROUS (like, segfault
+                # dangerous) if this is actually a wrapper subclass tensor,
+                # therefore the exact type test above
                 with no_dispatch():
                     out = out.clone()
                 return converter(self, out, make_constant=True)
