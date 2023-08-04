@@ -10,7 +10,6 @@ from torch.nn.utils.fusion import fuse_conv_bn_weights
 import copy
 import operator
 from typing import Any, Callable, Dict, Optional, Tuple
-from torch.fx.node import map_arg
 from torch.utils._pytree import LeafSpec
 
 __all__ = [
@@ -265,7 +264,7 @@ def _replace_literals_with_new_placeholders(gm, merge_dup=False, exclude_literal
     """
     last_ph = None
     cnt = 0
-    literal_to_ph = {}
+    literal_to_ph: Dict[Any, Node] = {}
     if exclude_literals is None:
         exclude_literals = []
 
@@ -277,7 +276,7 @@ def _replace_literals_with_new_placeholders(gm, merge_dup=False, exclude_literal
         with gm.graph.inserting_after(last_ph):
             new_args = []
             for arg in node.args:
-                if _is_literal(arg) and not arg in exclude_literals:
+                if _is_literal(arg) and arg not in exclude_literals:
                     if merge_dup and arg in literal_to_ph:
                         new_args.append(literal_to_ph[arg])
                     else:
@@ -323,7 +322,7 @@ def _replace_literals_with_existing_placeholders(gm, exclude_literals, literal_t
             continue
         new_args = []
         for arg in node.args:
-            if _is_literal(arg) and not arg in exclude_literals and arg in literal_to_ph_idx:
+            if _is_literal(arg) and arg not in exclude_literals and arg in literal_to_ph_idx:
                 ph_idx = literal_to_ph_idx[arg]
                 ph_node = phs[ph_idx]
                 new_args.append(ph_node)
