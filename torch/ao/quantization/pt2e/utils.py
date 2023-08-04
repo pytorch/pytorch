@@ -247,20 +247,57 @@ def _is_literal(arg):
         return all(map(_is_literal, arg))
     return False
 
-def _replace_literals_with_new_placeholders(gm, merge_dup=False, exclude_literals=None):
-    """Replace the literals in the graph with placeholder nodes, so that the literal arguments
-    in the graph can be matched and replaced
+def _replace_literals_with_new_placeholders(
+    gm: torch.fx.GraphModule,
+    merge_dup: bool = False,
+    exclude_literals: Optional[List[Any]] = None
+):
+    """Replace the literals in the graph with placeholder nodes that's created on the fly while we
+    traverse the graph, so that the literal arguments in the graph can be matched and replaced
 
     To use this, the pattern and replacement graph should have the exact same number of literal args
-    and they should be used in the exact same order.
+    and they should be used in the exact same order in the pattern and replacement graph.
 
-    For example:
-    def forward(self, x):
+    If the literal arguments are not used in the same order in pattern and replacement graph, please
+    use `_replace_literals_with_existing_placeholders` instead
+
+    Args:
+        `gm`: input GraphModule that we'll transform
+        `merge_dup`: boolean flag to indicate that if the same literal appears multiple times in
+         the graph, whether they should correspond to the same placeholder or not
+        `exclude_literals`: a list of literals that will not be replaced with placeholders
+
+    Example:
+
+    # 1. Original Graph
+    def pattern(self, x):
         return x + 3
 
-    after calling _replace_literals_with_new_placeholders(gm), we'll have
-    def forward(self, x, new_ph):
+    def replacement(self, x):
+        return x - 3
+
+    example_inputs = (torch.randn(1, 3, 3, 3),)
+    pattern_gm = get_aten_graph_module(pattern, example_inputs)
+    replacement_gm = get_aten_graph_module(pattern, example_inptus)
+
+    # 2. Before calling replace literals we'll see the following graph:
+    def pattern(self, x):
+        return x + 3
+
+    def replacement(self, x):
+        return x - 3
+
+    pattern_gm = _replace_literals_with_new_placeholders(pattern_gm)
+    replacement_gm = _replace_literals_with_new_placeholders(replacement_gm)
+
+    # 3. After replacing literals with new placeholder nodes
+
+    def pattern(self, x, new_ph):
         return x + new_ph
+
+    def pattern(self, x, new_ph):
+        return x - new_ph
+
     """
     last_ph = None
     cnt = 0
@@ -294,23 +331,62 @@ def _replace_literals_with_new_placeholders(gm, merge_dup=False, exclude_literal
     return gm
 
 
-def _replace_literals_with_existing_placeholders(gm, exclude_literals, literal_to_ph_idx):
+def _replace_literals_with_existing_placeholders(
+    gm: torch.fx.GraphModule,
+    exclude_literals: Optioinal[List[Any]] = None,
+    literal_to_ph_idx: Optional[List[Any, int]] = None
+):
     """Replace the literals in the graph with **existing** placeholder nodes, so that the literal arguments
     in the graph can be matched and replaced
 
     To use this, all literal args in the graph should be unique and each of them should correspond
     to exactly one placeholder node
 
-    For example:
-    def forward(self, x, constant):
-        # constant = 3, it is burnt in due to dynamo tracing
-        return x + 3
+    # 1. Original Graph
+    def pattern(self, x_i8, scale, zero_point, quant_min, quant_max):
+        return torch.dequantize_per_tensor(x_i8, scale, zero_point, quant_min, quant_max)
 
-    call: _replace_literals_with_existing_placeholders(pattern, exclude_literals=[], literal_to_ph_idx={3: 1}
-    after this pass, we'll have:
-    def forward(self, x, scalar):
-        return x + scalar
+    def replacement(x_i8, scale, zero_point, quant_min, quant_max):
+        x_i8 = torch.clamp(x_i8, quant_min, quant_max)
+        return ((x_i8.to(torch.float32) - zero_point) * scale).to(dtype=torch.float32)
 
+    example_inputs = (
+        torch.randn(1, 3, 3, 3),
+        1.0,
+        0,
+        -128,
+        127,
+    )
+    pattern_gm = get_aten_graph_module(pattern, example_inputs)
+    replacement_gm = get_aten_graph_module(pattern, example_inptus)
+
+    # 2. Before calling replace literals we'll see the following graph:
+    def pattern(self, x_i8, scale, zero_point, quant_min, quant_max):
+        # scale/zero_point/quant_min/quant_max are burnt in since they are scalar values
+        return torch.dequantize_per_tensor(x_i8, 1.0, 0, -128, 127)
+
+    def replacement(x_i8, scale, zero_point, quant_min, quant_max):
+        # scale/zero_point/quant_min/quant_max are burnt in since they are scalar values
+        x_i8 = torch.clamp(x_i8, -128, 127)
+        return ((x_i8.to(torch.float32) - 0) * 1.0).to(dtype=torch.float32)
+
+    # Note that literal args appear in different order in pattern and replacement graph, so
+    # we can't use _replace_literals_with_new_placeholders
+
+    literal_to_ph_idx = {1.0: 1, 0: 2, -128: 3, 127: 4}
+    pattern_gm = _replace_literals_with_existing_placeholders(pattern_gm, literal_to_ph_idx)
+    replacement_gm = _replace_literals_with_existing_placeholders(replacement_gm, literal_to_ph_idx)
+
+    # 3. After replacing literals with existing placeholder nodes
+
+    def pattern(self, x_i8, scale, zero_point, quant_min, quant_max):
+        # scale/zero_point/quant_min/quant_max are burnt in since they are scalar values
+        return torch.dequantize_per_tensor(x_i8, scale, zero_point, quant_min, quant_max)
+
+    def replacement(x_i8, scale, zero_point, quant_min, quant_max):
+        # scale/zero_point/quant_min/quant_max are burnt in since they are scalar values
+        x_i8 = torch.clamp(x_i8, quant_min, quant_max)
+        return ((x_i8.to(torch.float32) - zero_point) * scale).to(dtype=torch.float32)
     """
     if exclude_literals is None:
         exclude_literals = []
