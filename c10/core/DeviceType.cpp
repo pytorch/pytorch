@@ -52,13 +52,7 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
     case DeviceType::PrivateUse1:
       return get_privateuse1_backend(/*lower_case=*/lower_case);
     default:
-      TORCH_CHECK(
-          false,
-          "Unknown device: ",
-          static_cast<int16_t>(d),
-          ". If you have recently updated the caffe2.proto file to add a new "
-          "device type, did you forget to update the DeviceTypeName() "
-          "function to reflect such recent changes?");
+      TORCH_CHECK(false, "Unknown device type: ", static_cast<int16_t>(d), ".");
       // The below code won't run but is needed to suppress some compiler
       // warnings.
       return "";
