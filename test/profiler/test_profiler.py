@@ -979,7 +979,7 @@ class TestProfiler(TestCase):
             self.payload(use_cuda=True)
 
         def check_trace(fname):
-            with open(fname, 'r') as f:
+            with open(fname) as f:
                 trace = json.load(f)
                 self.assertTrue("traceEvents" in trace)
                 events = trace["traceEvents"]
@@ -990,7 +990,7 @@ class TestProfiler(TestCase):
                         found_cupti_profiler_events = True
                 # PyTorch OSS CI runs in docker containers where the Range Profiler
                 # does not have sufficient privilege level (CUPTI_ERROR_INSUFFICIENT_PRIVILEGES).
-                # We can check that the profiler does not crash the job and the trace is not 
+                # We can check that the profiler does not crash the job and the trace is not
                 # malformed, however do not check the actual presence of data.
                 self.assertTrue(1 or found_cupti_profiler_events)
 
