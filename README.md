@@ -1,3 +1,8 @@
+# This repo seeks to implement Keras Core ops to allow native-esque PyTorch style loss functions rather than the class based Keras_Core loss functions
+
+-----------------------------------------------------------------------------
+
+
 ![PyTorch Logo](https://github.com/pytorch/pytorch/blob/main/docs/source/_static/img/pytorch-logo-dark.png)
 
 --------------------------------------------------------------------------------
