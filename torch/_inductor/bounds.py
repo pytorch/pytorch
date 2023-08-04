@@ -22,22 +22,19 @@ class BoundVars:
 
     def __init__(self, loop_body: LoopBody):
         self.loop_body = loop_body
-        # Variable substitutions for any constrained ranges:
-        subs = []
-        tracing_context = torch._guards.TracingContext.get()
-        if tracing_context:
-            subs = [
-                (k, v.upper)
-                for k, v in tracing_context.fake_mode.shape_env.var_to_range.items()
-            ]
+
+        # For the replacement vals, include constrained ranges from the tracing context
         self.replacement_vals = {}
+        context = torch._guards.TracingContext.get()
+        ranges = context.fake_mode.shape_env.var_to_range if context else {}
         for k, v in loop_body.var_ranges.items():
-            s = v.subs(subs)
-            self.replacement_vals[k] = (
-                ValueRanges(0, s - 1)
-                if not free_symbols(s)
-                else ValueRanges(2, math.inf)
-            )
+            if not free_symbols(v):
+                self.replacement_vals[k] = ValueRanges(0, v - 1)
+            elif all(s in ranges for s in free_symbols(v)):
+                self.replacement_vals[k] = bound_sympy(v, ranges)
+            else:
+                self.replacement_vals[k] = ValueRanges(2, math.inf)
+
         # avoid computing these values, pessimistically assume that they are unbounded
         self.unbounded_vars = dominated_nodes(
             node
