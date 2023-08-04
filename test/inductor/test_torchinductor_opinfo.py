@@ -325,7 +325,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "asin": {f16},
     "atanh": {f16, f32},
     "cumprod": {f16},
-    "linalg.vector_norm": {f64, f64},
     "kron": {f16},
     "nanquantile": {f32, f64},
     "nn.functional.avg_pool2d": {f16, f32, f64},
@@ -337,7 +336,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "nn.functional.softsign": {f16},
     "nn.functional.local_response_norm": {f16},
     "outer": {f16},
-    "quantile": {f32, f64},
 }
 
 if not TEST_WITH_ROCM:
