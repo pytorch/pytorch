@@ -59,4 +59,10 @@ if [ -n "${CONDA_CMAKE}" ]; then
   # needs NumPy 1.20 or less.
   conda_reinstall cmake="${CMAKE_VERSION}"
   conda_reinstall numpy="${NUMPY_VERSION}"
+  # SWDEV-412900: Python3.9 build leaves numpy in an odd state with a LICENSES_bundled.txt file inside
+  # Deleting it manually here so that numpy upgrades cleanly later
+  if [ $ANACONDA_PYTHON_VERSION = "3.9" ]; then
+    numpy_install_location=$(as_jenkins conda run -n py_3.9 pip show numpy | grep -oP "(?<=Location: ).+")
+    rm -f $numpy_install_location/numpy-${NUMPY_VERSION}.dist-info/LICENSES_bundled.txt
+  fi
 fi
