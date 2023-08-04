@@ -963,8 +963,6 @@ aten::native_norm
 aten::native_norm.ScalarOpt_dim_dtype
 aten::native_norm.ScalarOpt_dim_dtype_out
 aten::native_norm.out
-aten::nll_loss2d_forward
-aten::nll_loss2d_forward.output
 aten::nonzero
 aten::nonzero.out
 aten::nonzero_static

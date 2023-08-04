@@ -2984,10 +2984,9 @@ def error_inputs_bucketize(opinfo, device, **kwargs):
                      error_regex="boundaries tensor must be 1 dimension")
 
 def sample_inputs_searchsorted(op_info, device, dtype, requires_grad, **kwargs):
-
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    # (unsorted tensor size, (input sizes,), is_scalar))
+    # (unsorted tensor size, (input sizes,), is_scalar)
     sizes = (
         ((0,), ((0,),), False),
         ((M,), ((), (M,), (M, M)), False),
@@ -7595,6 +7594,10 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
 
     for input, target, kwargs in gen_shape_kwargs():
         yield SampleInput(input, args=(target,), kwargs=kwargs)
+
+    target = torch.tensor([-1, 2], device=device, dtype=torch.long)
+    yield SampleInput(make_input(shape), args=(target,), kwargs={'ignore_index': -1})
+
 
 def sample_inputs_binary_cross_entropy_with_logits(
     op_info, device, dtype, requires_grad, **kwargs

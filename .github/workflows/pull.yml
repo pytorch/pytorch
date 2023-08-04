@@ -224,12 +224,12 @@ jobs:
       docker-image: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-build.outputs.test-matrix }}
 
-  linux-focal-py3-clang7-mobile-build:
-    name: linux-focal-py3-clang7-mobile-build
+  linux-jammy-py3-clang12-mobile-build:
+    name: linux-jammy-py3-clang12-mobile-build
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-py3-clang7-mobile-build
-      docker-image-name: pytorch-linux-focal-py3-clang7-asan
+      build-environment: linux-jammy-py3-clang12-mobile-build
+      docker-image-name: pytorch-linux-jammy-py3-clang12-asan
       build-generates-artifacts: false
       test-matrix: |
         { include: [
