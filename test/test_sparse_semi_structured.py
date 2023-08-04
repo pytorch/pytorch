@@ -303,7 +303,6 @@ class TestSparseSemiStructured(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Error original_tensor.dim"):
             A_sparse = to_sparse_semi_structured(A)
 
-    @unittest.skip("broken")
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_linear_cutlass(self, device, dtype):
@@ -347,7 +346,6 @@ class TestSparseSemiStructured(TestCase):
             k = 2 ** k * 128
             run_test(batch_shape, m, n, k, device, dtype, dtype_out[dtype], add_bias, activation, rtol, atol)
 
-    @unittest.skip("broken")
     @unittest.skipIf(not has_triton(), "Test needs triton and recent GPU arch")
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_conversions(self, device, dtype):
@@ -374,7 +372,6 @@ class TestSparseSemiStructured(TestCase):
         for r, c in shapes:
             run_test(r, c, device, dtype)
 
-    @unittest.skip("broken")
     @unittest.skipIf(not has_triton(), "Test needs triton and recent GPU arch")
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_conversions_all_patterns(self, device, dtype):
