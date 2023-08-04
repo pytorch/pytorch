@@ -1045,14 +1045,14 @@ static void destroy_cache_entry_wrapper(PyObject* code) {
       }
     }
   }
-  set_frame_state((PyCodeObject*)code, NULL);
+  set_cache_entry_on_code((PyCodeObject*)code, NULL);
 }
 
 
 static void destroy_frame_state(PyObject* code) {
   PyObject* frame_state = get_frame_state((PyCodeObject*)code);
   Py_XDECREF(frame_state);
-  set_cache_entry_on_code((PyCodeObject*)code, NULL);
+  set_frame_state((PyCodeObject*)code, NULL);
 }
 
 static PyObject* reset_code(PyObject* dummy, PyObject* code) {
