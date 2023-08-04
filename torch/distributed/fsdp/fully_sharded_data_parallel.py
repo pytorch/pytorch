@@ -400,7 +400,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         device_id: Optional[Union[int, torch.device]] = None,
         sync_module_states: bool = False,
         forward_prefetch: bool = False,
-        limit_all_gathers: bool = True,
+        limit_all_gathers: Union[bool, int] = True,
         use_orig_params: bool = False,
         ignored_states: Union[
             Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]

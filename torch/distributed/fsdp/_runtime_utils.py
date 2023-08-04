@@ -21,6 +21,7 @@ from torch.distributed.fsdp._common_utils import (
     _get_sharding_strategy,
     _is_composable,
     TrainingState,
+    AllGatherLimitStrategy,
 )
 from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
 from torch.distributed.fsdp._utils import _no_dispatch_record_stream
@@ -46,6 +47,7 @@ log = logging.getLogger(__name__)
 HOMOGENEOUS_ATTR_NAMES = (
     "_use_orig_params",
     "limit_all_gathers",
+    "_allgather_limit_strategy",
     "_use_full_prec_in_eval",
 )
 
@@ -183,11 +185,12 @@ def _create_ping_pong_buffers(
     )
     max_unsharded_numel = _find_max_unsharded_numel(root_state)
     root_state._ping_pong_buffers = []
-    # Use ping-pong buffer when there are more than 1 FSDP instanceß
-    root_state._num_ping_pong_buffers = 2 if len(root_state._all_handles) > 1 else 1
+    # Clamp number of ping-pong buffers to number of FSDP instances
+    if root_state.limit_all_gathers > len(root_state._all_handles):
+        root_state.limit_all_gathers = len(root_state._all_handles)
     unshard_dtype = root_state._all_handles[0]._unsharded_param_dtype
     assert unshard_dtype is not None
-    for _ in range(root_state._num_ping_pong_buffers):
+    for _ in range(root_state.limit_all_gathers):
         root_state._ping_pong_buffers.append(
             torch.empty(
                 max_unsharded_numel,
@@ -195,15 +198,12 @@ def _create_ping_pong_buffers(
                 dtype=unshard_dtype,
             )
         )
-    print(f"KW: created {root_state._num_ping_pong_buffers} buffers of size {max_unsharded_numel}, dtype {unshard_dtype}")
+    print(f"KW: created {root_state.limit_all_gathers} buffers of size {max_unsharded_numel}, dtype {unshard_dtype}")
 
     # Attach ping pong buffers to FSDP handles
     for i, handle in enumerate(root_state._all_handles):
-        buf = root_state._ping_pong_buffers[i % root_state._num_ping_pong_buffers]
-        # A view into the ping pong buffer based on instance's actual size
-        handle.flat_param._full_param_padded = buf[0 : handle._padded_unsharded_numel]
-        handle.flat_param._padded_unsharded_size = handle.flat_param._full_param_padded.size()
-
+        buf = root_state._ping_pong_buffers[i % root_state.limit_all_gathers]
+        handle.attach_flat_param_buffer(buf)
 
 @no_type_check
 def _lazy_init(
@@ -411,16 +411,18 @@ def _unshard(
         ran_pre_unshard = handle.pre_unshard()
     if ran_pre_unshard:
         unshard_stream.wait_stream(pre_unshard_stream)
-    if state.limit_all_gathers:
+    if state.limit_all_gathers > 0:
         event = state._free_event_queue.dequeue_if_needed()
         if event:
-            """
-            with torch.profiler.record_function(
-                "FullyShardedDataParallel.rate_limiter"
-            ):
-                event.synchronize()
-            """
-            unshard_stream.wait_event(event)
+            if state._allgather_limit_strategy == AllGatherLimitStrategy.STREAM_WAIT:
+                unshard_stream.wait_event(event)
+            elif state._allgather_limit_strategy == AllGatherLimitStrategy.CPU_SYNC:
+                with torch.profiler.record_function(
+                    "FullyShardedDataParallel.rate_limiter"
+                ):
+                    event.synchronize()
+            else:
+                raise AssertionError("AllGather limit strategy must be CPU_SYNC or STREAM_WAIT")
     with state._device_handle.stream(unshard_stream):
         handle.unshard()
         handle.post_unshard()

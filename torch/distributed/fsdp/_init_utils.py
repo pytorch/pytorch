@@ -34,6 +34,7 @@ from torch.distributed.fsdp._common_utils import (
     _named_parameters_with_duplicates,
     clean_tensor_name,
     TrainingState,
+    AllGatherLimitStrategy,
 )
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
 from torch.distributed.fsdp.api import (
@@ -372,7 +373,7 @@ def _init_core_state(
     sharding_strategy: Optional[ShardingStrategy],
     mixed_precision: Optional[MixedPrecision],
     cpu_offload: Optional[CPUOffload],
-    limit_all_gathers: bool,
+    limit_all_gathers: Union[bool, int],
     use_orig_params: bool,
     backward_prefetch_limit: int,
     forward_prefetch_limit: int,
@@ -398,7 +399,16 @@ def _init_core_state(
         os.environ.get(_FSDP_USE_FULL_PREC_IN_EVAL, "") == "1"
     )
     state.cpu_offload = cpu_offload or CPUOffload()
-    state.limit_all_gathers = limit_all_gathers
+    if isinstance(limit_all_gathers, int):
+        # If user specifies an int, we use `limit_all_gathers` number of
+        # ping-pong buffers and the stream-wait based strategy
+        state._allgather_limit_strategy = AllGatherLimitStrategy.STREAM_WAIT
+        state.limit_all_gathers = limit_all_gathers
+    elif limit_all_gathers == True:
+        # If user specifies a boolean, we use the legacy strategy: CPU sync and
+        # a max of 2 outstanding all-gathers
+        state._allgather_limit_strategy = AllGatherLimitStrategy.CPU_SYNC
+        state.limit_all_gathers = 2
     state._use_orig_params = use_orig_params
     state.training_state = TrainingState.IDLE
     state._is_root = None

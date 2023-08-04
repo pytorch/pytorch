@@ -1139,7 +1139,6 @@ class FlatParamHandle:
                 else flat_param.dtype
             )  # use low precision if parameter mixed precision is enabled
             self._padded_unsharded_numel = flat_param.numel() * self.world_size
-            """
             flat_param._full_param_padded = torch.zeros(
                 self._padded_unsharded_numel,
                 device=self.device,
@@ -1147,7 +1146,6 @@ class FlatParamHandle:
             )
             flat_param._padded_unsharded_size = flat_param._full_param_padded.size()
             _free_storage(flat_param._full_param_padded)
-            """
 
             if self._uses_param_mixed_precision:
                 # For parameter mixed precision, we maintain a full precision
@@ -1158,6 +1156,19 @@ class FlatParamHandle:
                     dtype=flat_param.dtype,  # full precision
                 )
                 _free_storage(flat_param._full_prec_full_param_padded)
+
+    @no_type_check
+    @torch.no_grad()
+    def attach_flat_param_buffer(
+        self,
+        buffer_from_root: Tensor,
+    ) -> None:
+        """
+        Attach to ping-pong all-gather buffers in root.
+        """
+        # A view into the ping pong buffer based on instance's actual size
+        self.flat_param._full_param_padded = buffer_from_root[0 : self._padded_unsharded_numel]
+        self.flat_param._padded_unsharded_size = self.flat_param._full_param_padded.size()
 
     ###################
     # UNSHARD/RESHARD #
@@ -1261,8 +1272,11 @@ class FlatParamHandle:
         self._check_sharded_strategy()
         flat_param = self.flat_param
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
-        #self._check_storage_freed(unsharded_flat_param)
-        #_alloc_storage(unsharded_flat_param, flat_param._padded_unsharded_size)  # type: ignore[attr-defined]
+        # In case of CPU-sync rate limiting, we free the unsharded buffer after each use;
+        # In case of stream based rate limiting, we use persistent ping-pong
+        # buffers, hence no need to re-alloc.
+        if self._is_storage_freed(unsharded_flat_param):
+            _alloc_storage(unsharded_flat_param, flat_param._padded_unsharded_size)  # type: ignore[attr-defined]
         return unsharded_flat_param
 
     def _get_padded_unsharded_flat_param(self) -> torch.Tensor:
@@ -2441,6 +2455,14 @@ class FlatParamHandle:
             storage_size == 0,
             f"Expects storage to be freed but got storage with size {storage_size}",
         )
+
+    @staticmethod
+    def _is_storage_freed(tensor: Tensor):
+        storage_size: int = tensor._typed_storage()._size()
+        if storage_size == 0:
+            return True
+        else:
+            return False
 
     @staticmethod
     def _check_storage_allocated(tensor: Tensor):

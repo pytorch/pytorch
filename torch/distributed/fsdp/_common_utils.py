@@ -57,6 +57,11 @@ FSDP_FLATTENED = "_fsdp_flattened"
 _MODULE_TO_INP_DTYPE: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
+class AllGatherLimitStrategy(Enum):
+    CPU_SYNC = 1
+    STREAM_WAIT = 2
+
+
 class _FSDPDeviceHandle:
     """
     This is a simple abstraction for FSDP computing devices,
@@ -136,9 +141,10 @@ class _FSDPState(_State):
         self._all_handles: List[flat_param_file.FlatParamHandle] = []
         self._device_mesh: Optional[DeviceMesh] = None
 
-        # Used by stream-based rate limiter
+        # Used by rate limiter
+        self.limit_all_gathers: int = 0
+        self._allgather_limit_strategy: Optional[AllGatherLimitStrategy] = None
         self._ping_pong_buffers: List[Tensor] = []
-        self._num_ping_pong_buffers: int = 2
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
