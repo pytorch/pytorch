@@ -288,6 +288,7 @@ class TestSparseSemiStructured(TestCase):
     @dtypes(*all_types_and_complex())
     @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
     def test_unsupported_dtype(self, dtype, device, backend):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype, device=device)
 
         if dtype not in SEMI_STRUCTURED_SUPPORTED_DTYPES:
@@ -298,14 +299,18 @@ class TestSparseSemiStructured(TestCase):
 
     @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
     def test_unsupported_dim(self, device, backend):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         A = torch.rand(128, 128, 128, device=device, dtype=torch.float16)
 
         with self.assertRaisesRegex(RuntimeError, "Error original_tensor.dim"):
             A_sparse = to_sparse_semi_structured(A)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_linear_cutlass(self, device, dtype):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
+
         def run_test(batch_shape, m, n, k, device, dtype, dtype_out, add_bias, activation, rtol, atol):
             weight = rand_dense_2by4(m, k, dtype, device)
             input = make_tensor((*batch_shape, n, k), dtype=dtype, device=device)
@@ -347,8 +352,11 @@ class TestSparseSemiStructured(TestCase):
             run_test(batch_shape, m, n, k, device, dtype, dtype_out[dtype], add_bias, activation, rtol, atol)
 
     @unittest.skipIf(not has_triton(), "Test needs triton and recent GPU arch")
+    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_conversions(self, device, dtype):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
+
         def run_test(r, c, device, dtype):
             dense_ref = rand_dense_2by4(r, c, dtype, device)
 
@@ -373,8 +381,10 @@ class TestSparseSemiStructured(TestCase):
             run_test(r, c, device, dtype)
 
     @unittest.skipIf(not has_triton(), "Test needs triton and recent GPU arch")
+    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_conversions_all_patterns(self, device, dtype):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         r, c = 32, 128
 
         dense_inv, dense_val = rand_dense_2by4_all_patterns(r, c, dtype, device)
