@@ -256,22 +256,12 @@ def _replace_literals_with_new_placeholders(gm, merge_dup=False, exclude_literal
     and they should be used in the exact same order.
 
     For example:
-    pattern:
     def forward(self, x):
         return x + 3
 
-    replacement:
-    def forward(self, x):
-        return x - 3
-
-    after this pass, we'll have:
-    pattern:
-    def forward(self, x, scalar):
-        return x + scalar
-
-    replacement:
-    def forward(self, x, scalar):
-        return x - scalar
+    after calling _replace_literals_with_new_placeholders(gm), we'll have
+    def forward(self, x, new_ph):
+        return x + new_ph
     """
     last_ph = None
     cnt = 0
