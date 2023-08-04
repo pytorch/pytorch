@@ -3244,7 +3244,7 @@
   dispatch:
     CUDA: _cslt_sparse_mm 
 
- - func: _sparse_semi_structured_linear(Tensor input, Tensor weight, Tensor meta, *, Tensor?bias=None, str? activation=None) -> Tensor
+- func: _sparse_semi_structured_linear(Tensor input, Tensor weight, Tensor meta, *, Tensor?bias=None, str? activation=None) -> Tensor
   dispatch:
     CUDA: _sparse_semi_structured_linear
 
