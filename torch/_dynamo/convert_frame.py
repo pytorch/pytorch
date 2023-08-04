@@ -417,11 +417,12 @@ def _compile(
             with tracing(tracer.output.tracing_context):
                 tracer.run()
         except:
-            fakes = tracer.output.tracked_fakes
-            tracer.output.shape_env.produce_guards(
-                [a.fake for a in fakes],
-                [a.source for a in fakes],
-            )
+            if config.translation_validation:
+                fakes = tracer.output.tracked_fakes
+                tracer.output.shape_env.produce_guards(
+                    [a.fake for a in fakes],
+                    [a.source for a in fakes],
+                )
             raise
 
         output = tracer.output
