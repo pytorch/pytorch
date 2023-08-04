@@ -8515,8 +8515,7 @@ class foreach_clamp_sample_func(foreach_inputs_sample_func):
             args = np.random.uniform(size=(2,)).tolist()
             kwargs = {
                 "zero_size": True,
-                # "disable_fastpath": dtype in integral_types_and(torch.bool),
-                "disable_fastpath": False,
+                "disable_fastpath": dtype in integral_types_and(torch.bool),
             }
             yield SampleInput(input, *args, **kwargs)
 
@@ -8535,8 +8534,7 @@ class foreach_clamp_sample_func(foreach_inputs_sample_func):
             args = np.random.uniform(size=(2,)).tolist()
             kwargs = {
                 "zero_size": False,
-                # "disable_fastpath": dtype in integral_types_and(torch.bool)
-                "disable_fastpath": False,
+                "disable_fastpath": dtype in integral_types_and(torch.bool),
             }
             yield SampleInput(input, *args, **kwargs)
 

@@ -319,7 +319,7 @@ std::vector<at::Tensor> foreach_tensor_clamp_scalar_kernel_cuda(
     const optional<Scalar>& min,
     const optional<Scalar>& max) {
   check_foreach_api_restrictions(self);
-  if (!can_use_fast_route({self})) {
+  if (!can_use_fast_route({self}, {}, true)) {
     return foreach_tensor_clamp_scalar_kernel_slow(self, min, max);
   }
   TORCH_CHECK(
@@ -358,7 +358,7 @@ void foreach_tensor_clamp_scalar_kernel_cuda_(
     const optional<Scalar>& min,
     const optional<Scalar>& max) {
   check_foreach_api_restrictions(self);
-  if (!can_use_fast_route({self})) {
+  if (!can_use_fast_route({self}, {}, true)) {
     return foreach_tensor_clamp_scalar_kernel_slow_(self, min, max);
   }
   TORCH_CHECK(
