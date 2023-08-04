@@ -4,7 +4,7 @@ from typing import List, Any, Dict
 from ._compatibility import compatibility
 
 __all__ = ['preserve_node_meta', 'has_preserved_node_meta',
-           'set_stack_trace', 'format_stack',
+           'set_stack_trace', 'set_seq_nr', 'format_stack',
            'set_current_meta', 'get_current_meta']
 
 current_meta: Dict[str, Any] = {}
@@ -30,6 +30,18 @@ def set_stack_trace(stack : List[str]):
 
     if should_preserve_node_meta and stack:
         current_meta["stack_trace"] = "".join(stack)
+
+
+@compatibility(is_backward_compatible=False)
+def set_seq_nr(seq_nr, bwd=False):
+    global current_meta
+
+    if should_preserve_node_meta:
+        # The seq_nr is captured by eager mode
+        # in the autograd::Node data structure
+        # while the network is being traced.
+        current_meta["seq_nr"] = seq_nr
+        current_meta["in_bwd"] = bwd
 
 
 @compatibility(is_backward_compatible=False)
