@@ -66,7 +66,7 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
-from .ctx_manager import StreamVariable, NullContextVariable, StreamContextVariable
+from .ctx_manager import StreamVariable, NullContextVariable
 from .dicts import (
     ConstDictVariable,
     DataClassVariable,
