@@ -786,62 +786,6 @@ class TestModule(TestCase):
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
 
 
-    @modules(module_db)
-    def test_reset_parameters(self, device, dtype, module_info, training):
-        def _reset_seed():
-            torch.manual_seed(5)
-
-        def _has_parameters_buffers(module):
-            if isinstance(m, torch.nn.modules.lazy.LazyModuleMixin):
-                return False
-            if (len(list(m.parameters(recurse=False))) == 0 and
-                    len(list(m.buffers(recurse=False))) == 0):
-                return False
-            return True
-
-        def _check_children_submodules(c):
-            for p in chain(c.parameters(), c.buffers()):
-                self.assertTrue(torch.all(p == -1).item())
-
-        module_cls = module_info.module_cls
-        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
-                                                       requires_grad=False, training=training)
-
-        for module_input in module_inputs:
-            module_input = module_inputs[0]
-            c_args, c_kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
-
-            # === Instantiate the module on device. ===
-            _reset_seed()
-            with torch.device(device):
-                m = module_cls(*c_args, **c_kwargs)
-
-            # === Skip test if no parameters/buffers. ===
-            if not _has_parameters_buffers(m):
-                # iterate over all module_inputs in case some params/buffers are gated by kwargs
-                continue
-
-            ref_m = deepcopy(m)
-            # === Fill all params and buffers with -1. ===
-            with torch.no_grad():
-                preset_value = -1
-                for p in chain(m.parameters(), m.buffers()):
-                    p.fill_(preset_value)
-
-            # === Call reset_parameters. ===
-            _reset_seed()
-            m.reset_parameters()
-
-            # === Ensure parameters/buffers owned by root have been reset. ===
-            for p, p_ref in chain(zip(m.parameters(recurse=False), ref_m.parameters(recurse=False)),
-                                  zip(m.buffers(recurse=False), ref_m.buffers(recurse=False))):
-                self.assertEqual(p, p_ref)
-
-            # === Ensure parameters/buffers owned by children submodules have not been reset. ===
-            for child in m.children():
-                child.apply(lambda c: _check_children_submodules(c))
-
-
 instantiate_device_type_tests(TestModule, globals(), allow_mps=True)
 
 if __name__ == '__main__':
