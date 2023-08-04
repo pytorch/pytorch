@@ -591,7 +591,7 @@ class TestInductorOpInfo(TestCase):
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 if device_type == "cuda":
                     # opinfo test case have already place the input on the correct device
-                    # so we don"t need do additional copy by setting copy_to_cuda=False
+                    # so we don't need do additional copy by setting copy_to_cuda=False
 
                     no_python = do_nopython(fn, args, kwargs)
                     adjusted_kwargs = {
