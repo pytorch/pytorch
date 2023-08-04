@@ -364,7 +364,7 @@ class ResolvedExportOptions(ExportOptions):
             #   - Try local import and raise.
             # Similar procedure needs to be done for diagnostics in `torch.onnx.export`.
             self.diagnostic_context = infra.DiagnosticContext(
-                "torch.onnx.dynamo_export", torch.__version__, logger=self.logger
+                "torch.onnx.dynamo_export", torch.__version__
             )
 
             self.onnx_registry = resolve(options.onnx_registry, OnnxRegistry())
