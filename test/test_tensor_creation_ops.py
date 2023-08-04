@@ -543,11 +543,11 @@ class TestTensorCreation(TestCase):
         expected_d_grad = torch.ones((5, 2), device=device)
         # All the new tensors should be contiguous here. Let us make sure
         # to explicitly set them contiguous to enforce fast cat
-        dim0_cat = torch.cat([a.contiguous(), b.contiguous()], dim = 0)
+        dim0_cat = torch.cat([a.contiguous(), b.contiguous()], dim=0)
         dim0_cat.sum().backward()
         self.assertEqual(a.grad, expected_a_grad)
         self.assertEqual(b.grad, expected_b_grad)
-        dim1_cat = torch.cat([c.contiguous(), d.contiguous()], dim = 1)
+        dim1_cat = torch.cat([c.contiguous(), d.contiguous()], dim=1)
         dim1_cat.sum().backward()
         self.assertEqual(c.grad, expected_c_grad)
         self.assertEqual(d.grad, expected_d_grad)
