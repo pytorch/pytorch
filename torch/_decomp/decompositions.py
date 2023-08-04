@@ -1635,12 +1635,11 @@ def wrap_output_with_input_device_(x, common_device):
         and not isinstance(x, FakeTensor)
         and converter is not None
         ):
-        # To Do
-        # Below API call result into AssertionError
-
-        return converter.from_meta_and_device(
-            fake_mode, x, common_device
-            )
+            # To Do
+            # Below API call result into AssertionError
+            return converter.from_meta_and_device(
+                fake_mode, x, common_device
+                )
 	return x
 
 
