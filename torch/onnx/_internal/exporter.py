@@ -120,7 +120,7 @@ class OnnxRegistry:
     @property
     def opset_version(self) -> int:
         """The ONNX opset version the exporter should target. Defaults to the latest
-        supported ONNX opset version. The default version will increment over time as
+        supported ONNX opset version: 18. The default version will increment over time as
         ONNX continues to evolve."""
 
         return self._opset_version
@@ -276,7 +276,7 @@ class ExportOptions:
 
     onnx_registry: Optional[OnnxRegistry] = None
     """The ONNX registry used to register ATen operators to ONNX functions. Defaults to
-    torchlib supported by PyTorch-ONNX converter team."""
+    opset18."""
 
     @_beartype.beartype
     def __init__(
