@@ -399,7 +399,7 @@ def _init_core_state(
         os.environ.get(_FSDP_USE_FULL_PREC_IN_EVAL, "") == "1"
     )
     state.cpu_offload = cpu_offload or CPUOffload()
-    if isinstance(limit_all_gathers, int):
+    if type(limit_all_gathers) is int:
         # If user specifies an int, we use `limit_all_gathers` number of
         # ping-pong buffers and the stream-wait based strategy
         state._allgather_limit_strategy = AllGatherLimitStrategy.STREAM_WAIT
@@ -409,6 +409,7 @@ def _init_core_state(
         # a max of 2 outstanding all-gathers
         state._allgather_limit_strategy = AllGatherLimitStrategy.CPU_SYNC
         state.limit_all_gathers = 2
+    print(f"KW: limit_all_gathers: {state.limit_all_gathers}, strategy: {state._allgather_limit_strategy}")
     state._use_orig_params = use_orig_params
     state.training_state = TrainingState.IDLE
     state._is_root = None

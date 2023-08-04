@@ -164,10 +164,8 @@ def _find_max_unsharded_numel(
     )
     max_unsharded_numel = 0
     for handle in root_state._all_handles:
-        print(f"KW: instance unsharded size: {handle._padded_unsharded_numel}")
         if handle._padded_unsharded_numel > max_unsharded_numel:
             max_unsharded_numel = handle._padded_unsharded_numel
-    print(f"KW: max unsharded size: {max_unsharded_numel}")
     return max_unsharded_numel
 
 
@@ -237,8 +235,9 @@ def _lazy_init(
     state._exec_order_data.init(state, root_module, state.process_group)
     _share_state_and_init_handle_attrs(state, root_module)
     # After this point all instance handles are initialized
-    # Create ping-pong all-gather output buffers under the root
-    _create_ping_pong_buffers(state)
+    if state._allgather_limit_strategy == AllGatherLimitStrategy.STREAM_WAIT:
+        # Create ping-pong all-gather output buffers under the root
+        _create_ping_pong_buffers(state)
     return state
 
 
@@ -439,7 +438,7 @@ def _reshard(
     free the handle's padded unsharded flat parameter.
     """
     handle.reshard(free_unsharded_flat_param)
-    if state.limit_all_gathers and free_unsharded_flat_param:
+    if state.limit_all_gathers > 0 and free_unsharded_flat_param:
         free_event = state._device_handle.Event()
         free_event.record()
         state._free_event_queue.enqueue(free_event)
