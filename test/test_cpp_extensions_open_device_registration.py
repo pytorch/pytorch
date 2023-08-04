@@ -164,13 +164,13 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             with self.assertRaisesRegex(RuntimeError,
                                         "Please register a generator to the PrivateUse1 dispatch key"):
                 gen_ = torch.Generator(device=device)
-            self.module.register_generator()
+            self.module.register_generator_first()
             gen = torch.Generator(device=device)
             self.assertTrue(gen.device == device)
             # generator can be registered only once
             with self.assertRaisesRegex(RuntimeError,
                                         "Only can register a generator to the PrivateUse1 dispatch key once"):
-                self.module.register_generator()
+                self.module.register_generator_second()
             self.module.register_hook()
             default_gen = self.module.default_generator(0)
             self.assertTrue(default_gen.device.type == torch._C._get_privateuse1_backend_name())

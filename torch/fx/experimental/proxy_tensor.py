@@ -241,7 +241,7 @@ def fetch_sym_proxy(tracer):
 def fetch_tensor_proxy(tracer):
     return lambda t: get_proxy_slot(t, tracer, t)
 
-HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, torch.nn.Buffer)
+HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, torch.nn.Buffer, torch._subclasses.FakeTensor)
 
 def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     unrecognized_types = []
@@ -715,7 +715,21 @@ def wrapper_and_args_for_make_fx(func, args, kwargs):
     # and then unflatten the args before calling func
     flat_args, spec = pytree.tree_flatten((args, kwargs))
 
+    # Note [Using get_isolated_subgraph inside of __torch_dispatch__]
+    # Additionally... if a PT2-traceable torch_dispatch subclass
+    # wants to use get_isolated_subclass *inside* their torch_dispatch,
+    # they'll run into a problem where the arguments they've been handed are of type
+    #   FunctionalTensor(FakeTensor).
+    # In order to get out a proper graph, we need to make sure that we fix up the
+    # wrapper function that we trace to operate directly on the FakeTensor inputs.
+    from torch._subclasses.functional_tensor import FunctionalTensor
+    if any(isinstance(x, FunctionalTensor) for x in flat_args):
+        flat_args = [x if not isinstance(x, FunctionalTensor) else torch._from_functional_tensor(x.elem) for x in flat_args]
+
     def wrapped(flat_args):
+        # If functionalization was turned on, we manually turn it off here.
+        # If we see a mutation inside of get_isolated_subgraph(),
+        # it probably should not affect the state of our functionalization tracing logic
         fn_args, fn_kwargs = pytree.tree_unflatten(flat_args, spec)
         return func(*fn_args, **fn_kwargs)
     return wrapped, flat_args
@@ -869,6 +883,8 @@ def get_isolated_graphmodule(func, args, kwargs, tracing_mode="real"):
     """
     wrapped, all_args = wrapper_and_args_for_make_fx(func, args, kwargs)
 
-    with disable_proxy_modes_tracing():
+    # See Note [Using get_isolated_subgraph inside of __torch_dispatch__]
+    from torch._subclasses.functional_tensor import maybe_disable_functional_mode
+    with disable_proxy_modes_tracing(), maybe_disable_functional_mode():
         gm = make_fx(wrapped, tracing_mode=tracing_mode)(all_args)
     return gm
