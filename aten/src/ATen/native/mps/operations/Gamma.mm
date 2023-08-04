@@ -53,6 +53,9 @@ constant float HALF_LOG_TWO_PI = 0.91893853320467274178032973640562;
 
 constant float LOG_PI = 1.14472988584940017414342735135305;
 
+// More accurate than metal's M_PI_F and tanpi()
+constant float PI = 3.14159265358979323846264338327;
+
 
 // numerator coefficients for gamma approximation over the interval (1,2)
 constant float GAMMA_NUMERATOR_COEF[8] =
@@ -271,9 +274,8 @@ kernel void digamma (device {0} *input [[buffer(0)]],
             // accurate than tan(pi * x). While these operations are mathematically equivalent
             // since both x and r are in radians and tan() has a periodicity of pi, in practice
             // the computation of pi * x is a source of error (when |x| > 1).
-            float q, r;
-            r = modf(x, q);
-            output[id] = calc_digamma_positive_domain(1 - x) - M_PI_F / tanpi(r);
+            float r = fract(x);
+            output[id] = calc_digamma_positive_domain(1 - x) - PI / tan(PI * r);
         }}
     }}
     else if (x == 0) {{
