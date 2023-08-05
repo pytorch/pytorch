@@ -129,7 +129,7 @@ class PyCodegen:
             self.load_graph_output(graph_outputs[graph_outputs_key].index)
 
             if isinstance(value, NumpyNdarrayVariable):
-                output.extend(create_call_function(1, False))
+                output.extend(create_call_function(1, True))
             elif isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
                 output.extend(
                     [self.create_load_attr("item")] + create_call_function(0, True)

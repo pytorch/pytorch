@@ -12,7 +12,7 @@ import sympy
 import torch
 import torch.fx
 from torch.fx.experimental.symbolic_shapes import SymInt
-from torch._export.pass_base import ExportPassBase, ProxyValue, PassResult
+from torch._export.pass_base import _ExportPassBase, ProxyValue, PassResult
 from torch._subclasses.fake_tensor import FakeTensor
 
 
@@ -50,7 +50,7 @@ def _convert_range_to_int(range: RangeConstraint):
     return min_val, max_val
 
 
-class _AddRuntimeAssertionsForInlineConstraintsPass(ExportPassBase):
+class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
     def __init__(
         self,
         range_constraints: Dict[sympy.Symbol, RangeConstraint],
@@ -164,7 +164,8 @@ class _AddRuntimeAssertionsForConstraintsPass(_AddRuntimeAssertionsForInlineCons
             if node.op != "placeholder":
                 continue
             insert_loc = node
-        assert insert_loc is not None
+        if insert_loc is None:
+            return super().call(graph_module)
 
         # Add runtime asserts for input shape constraints. We do this after all
         # placeholder nodes so that we can handle both (unary) predicates and

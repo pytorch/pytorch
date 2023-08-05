@@ -71,9 +71,7 @@ from torch.ao.quantization import (
     default_dynamic_qconfig,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import (
-    TemporaryFileName,
-)
+from torch._higher_order_ops.out_dtype import out_dtype
 
 # TODO: Move to common utils or use existing quant utils to fetch model instances
 class TestHelperModules:
@@ -224,16 +222,8 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         expected_node_list=None,
         check_against_fx_quant=False,
         fx_qconfig_mapping=None,
-        fx_node_occurrence=None,
         export_with_dynamic_shape=False,
-        check_save_load=False,
-        example_inputs_for_load=None,
     ):
-        """
-        example_inputs_for_load: is example_inputs used for loading model, it should be
-        different from example_inputs so that we can actually test the save/load functionality,
-        we also generate this from example_inputs if example_inputs is a single element tuple.
-        """
         m_eager = model.eval()
 
         # program capture
@@ -278,44 +268,13 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
                     aten_graph=True,
                     tracing_mode="symbolic" if export_with_dynamic_shape else "real",
                 )
-            if fx_node_occurrence is None:
-                fx_node_occurrence = {}
-                for k, v in PT2EQuantizationTestCase._MAP_TO_FX_TRACED_OPS.items():
-                    if k in expected_node_occurrence:
-                        fx_node_occurrence[ns.call_function(v)] = expected_node_occurrence[k]
-            else:
-                fx_node_occurrence = {
-                    ns.call_function(k): v for k, v in fx_node_occurrence.items()
-                }
-            self.checkGraphModuleNodes(m_fx, expected_node_occurrence=fx_node_occurrence)
+            node_occurrence = {}
+            for k, v in PT2EQuantizationTestCase._MAP_TO_FX_TRACED_OPS.items():
+                if k in expected_node_occurrence:
+                    node_occurrence[ns.call_function(v)] = expected_node_occurrence[k]
+            self.checkGraphModuleNodes(m_fx, expected_node_occurrence=node_occurrence)
             fx_quant_output = m_fx(*example_inputs)
             self.assertEqual(fx_quant_output, pt2_quant_output)
-
-        if check_save_load:
-            if example_inputs_for_load is None:
-                assert isinstance(example_inputs, tuple) and \
-                    len(example_inputs) == 1 and \
-                    isinstance(example_inputs[0], torch.Tensor)
-                example_inputs_for_load = (example_inputs[0] * 2,)
-
-            with TemporaryFileName() as fname, torchdynamo.config.patch(dynamic_shapes=export_with_dynamic_shape):
-                torch.save(m.state_dict(), fname)
-                ref_result = m(*example_inputs)
-
-                m_loaded = copy.deepcopy(m_eager)
-                m_loaded, guards = torchdynamo.export(
-                    m_loaded,
-                    *copy.deepcopy(example_inputs_for_load),
-                    aten_graph=True,
-                    tracing_mode="symbolic" if export_with_dynamic_shape else "real",
-                )
-
-                m_loaded = prepare_pt2e(m_loaded, quantizer)
-                m_loaded(*example_inputs_for_load)
-                m_loaded = convert_pt2e(m_loaded)
-                m_loaded.load_state_dict(torch.load(fname))
-                loaded_result = m_loaded(*example_inputs)
-                self.assertTrue(torch.equal(ref_result, loaded_result))
 
     def _verify_symmetric_qnnpack_qat_numerics(
         self,
@@ -530,12 +489,12 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         torchdynamo issue is resolved
         """
         # program capture
-        # model_copy = copy.deepcopy(model)
         model, guards = torchdynamo.export(
             model,
             *copy.deepcopy(example_inputs),
             aten_graph=True,
         )
+        # model_copy = copy.deepcopy(model)
 
         model = prepare_pt2e(model, quantizer)
         # Calibrate
@@ -556,7 +515,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
 
         # output_scale = None
         # idx = 0
-        # for n in m_copy.graph.nodes:
+        # for n in model_copy.graph.nodes:
         #     if n.target == torch.ops.quantized_decomposed.quantize_per_tensor.default:
         #         idx += 1
         #         if idx == 3:
@@ -565,7 +524,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
 
         # # make sure the result is off by one at most in the quantized integer representation
         # self.assertTrue(
-        #     torch.max(torch.abs(pt2_quant_output_copy - pt2_quant_output)) <= (2 * output_scale + 1e-5)
+        #     torch.max(torch.abs(pt2e_quant_output_copy - pt2e_quant_output)) <= (2 * output_scale + 1e-5)
         # )
 
 @skipIfNoQNNPACK
@@ -625,14 +584,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         example_inputs = (torch.randn(1, 3, 5, 5),)
         node_occurrence = {
             # two for input of the first conv, one for output for the first conv
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 3,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 3,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
         }
         node_list = [
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.convolution.default,
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
         ]
         self._test_quantizer(
             TestHelperModules.ConvWithBNRelu(relu=False, bn=False),
@@ -640,7 +599,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             BackendAQuantizer(),
             node_occurrence,
             node_list,
-            check_save_load=True,
         )
 
     def test_wo_annotate_conv_output_quantizer(self):
@@ -709,12 +667,12 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         # Ensure the conv has no observer inserted at output
         node_occurrence = {
             # two for input of conv
-            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.tensor): 2,
-            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor): 2,
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 2,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 2,
         }
         node_list = [
-            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
-            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default),
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default),
             ns.call_function(torch.ops.aten.convolution.default),
         ]
         self.checkGraphModuleNodes(
@@ -813,15 +771,15 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             # two for input of conv
             # one for input of maxpool
             # one for output of maxpool
-            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.tensor): 4,
-            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor): 4,
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 4,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 4,
         }
         node_list = [
-            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
-            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default),
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default),
             ns.call_function(torch.ops.aten.convolution.default),
-            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.tensor),
-            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default),
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default),
             ns.call_function(torch.ops.aten.max_pool2d_with_indices.default),
         ]
         self.checkGraphModuleNodes(
@@ -916,25 +874,25 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         node_occurrence = {
             # input, weight, bias, output for the conv
             ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_tensor.tensor
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
             ): 4,
             ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ): 4,
         }
         node_list = [
             ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ),
             ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ),
             ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ),
             ns.call_function(torch.ops.aten.convolution.default),
             ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_tensor.tensor
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
             ),
         ]
         self.checkGraphModuleNodes(
@@ -992,26 +950,40 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = convert_pt2e(m)
         fixed_scale = 1.0 / 256.0
         fixed_zero_point = 0
-        self.assertEqual(m._scale_0, fixed_scale)
-        self.assertEqual(m._zero_point_0, fixed_zero_point)
-        self.assertEqual(m._scale_1, fixed_scale)
-        self.assertEqual(m._zero_point_1, fixed_zero_point)
+        for n in m.graph.nodes:
+            if n.op == "call_function":
+                if (
+                    n.target
+                    == torch.ops.quantized_decomposed.quantize_per_tensor.default
+                ):
+                    scale_0 = n.args[1]
+                    zero_point_0 = n.args[2]
+                if (
+                    n.target
+                    == torch.ops.quantized_decomposed.dequantize_per_tensor.default
+                ):
+                    scale_1 = n.args[1]
+                    zero_point_1 = n.args[2]
+        self.assertEqual(scale_0, fixed_scale)
+        self.assertEqual(zero_point_0, fixed_zero_point)
+        self.assertEqual(scale_1, fixed_scale)
+        self.assertEqual(zero_point_1, fixed_zero_point)
         node_occurrence = {
             # two for input of the first conv, one for output for the first conv
             ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_tensor.tensor
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
             ): 2,
             ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ): 2,
         }
         node_list = [
             ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ),
             ns.call_function(torch.ops.aten.sigmoid.default),
             ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_tensor.tensor
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
             ),
         ]
         self.checkGraphModuleNodes(
@@ -1020,21 +992,21 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_xnnpack_quantizer_conv(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         example_inputs = (torch.randn(1, 3, 5, 5),)
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 2,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 2,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
             torch.ops.quantized_decomposed.quantize_per_channel.default: 1,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
         }
         node_list = [
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.aten.convolution.default,
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
         ]
         self._test_quantizer(
             TestHelperModules.ConvWithBNRelu(relu=False, bn=False),
@@ -1042,13 +1014,12 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             quantizer,
             node_occurrence,
             node_list,
-            check_save_load=True,
         )
 
     def test_xnnpack_quantizer_linear(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         m_eager = TestHelperModules.TwoLinearModule().eval()
 
         # Test with 2d inputs
@@ -1057,8 +1028,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         example_inputs_4d = (torch.randn(9, 10, 11, 8),)
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 3,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 3,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
             torch.ops.quantized_decomposed.quantize_per_channel.default: 2,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
         }
@@ -1073,17 +1044,16 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 [],
                 True,
                 qconfig_mapping,
-                check_save_load=True,
             )
 
     def test_xnnpack_quantizer_conv_linear_no_permute(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 5,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 5,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 5,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 5,
             torch.ops.quantized_decomposed.quantize_per_channel.default: 3,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
         }
@@ -1099,19 +1069,18 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             [],
             True,
             qconfig_mapping,
-            check_save_load=True,
         )
 
     def test_xnnpack_quantizer_conv_linear(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
 
         # Test with 2d inputs
         example_inputs = (torch.randn(2, 3, 4, 4),)
         node_occurrence = {
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 5,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 5,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 5,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 5,
             torch.ops.quantized_decomposed.quantize_per_channel.default: 3,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
         }
@@ -1125,21 +1094,20 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             [],
             True,
             qconfig_mapping,
-            check_save_load=True,
         )
 
     def test_xnnpack_quantizer_linear_with_dynamic_shape(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         m_eager = TestHelperModules.TwoLinearModule().eval()
 
         # Test with 2d inputs
         example_inputs_3d = (torch.randn(9, 10, 8),)
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 3,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 3,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
             torch.ops.quantized_decomposed.quantize_per_channel.default: 2,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
         }
@@ -1154,44 +1122,129 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             True,
             qconfig_mapping,
             export_with_dynamic_shape=True,
-            check_save_load=True,
         )
 
     def test_xnnpack_quantizer_obs_sharing_ops(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         m = TestHelperModules.Conv2dWithObsSharingOps().eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 5,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 5,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 5,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 5,
             torch.ops.quantized_decomposed.quantize_per_channel.default: 1,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
         }
         node_list = [
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.aten.convolution.default,
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.mean.dim,
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.hardtanh.default,
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.mean.default,
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
         ]
-        self._test_quantizer(m, example_inputs, quantizer, node_occurrence, node_list, check_save_load=True,)
+        self._test_quantizer(m, example_inputs, quantizer, node_occurrence, node_list)
+
+    def test_xnnpack_quantizer_set_module_name(self):
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.sub = Sub()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.sub(x)
+                return x
+
+        m = M().eval()
+        example_inputs = (torch.randn(3, 5),)
+        quantizer = XNNPACKQuantizer()
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_module_name("sub", quantization_config)
+        node_occurrence = {
+            torch.ops.aten.addmm.default: 2,
+            # input and output for the second linear
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+        }
+        node_list = [
+            # first linear is not quantized
+            torch.ops.aten.addmm.default,
+            # second linear is quantized
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.addmm.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        ]
+        self._test_quantizer(m, example_inputs, quantizer, node_occurrence, node_list)
+
+    def test_xnnpack_quantizer_set_module_type(self):
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.sub = Sub()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.sub(x)
+                return x
+
+        m = M().eval()
+        example_inputs = (torch.randn(3, 5),)
+        quantizer = XNNPACKQuantizer()
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_module_type(Sub, quantization_config)
+        node_occurrence = {
+            torch.ops.aten.addmm.default: 2,
+            # input and output for the second linear
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+        }
+        node_list = [
+            # first linear is not quantized
+            torch.ops.aten.addmm.default,
+            # second linear is quantized
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.addmm.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        ]
+        self._test_quantizer(m, example_inputs, quantizer, node_occurrence, node_list)
 
     def test_propagate_annotation(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         m = TestHelperModules.Conv2dPropAnnotaton().eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
@@ -1214,10 +1267,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
             ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_tensor.tensor
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
             ): 5,
             ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ): 5,
             ns.call_function(
                 torch.ops.quantized_decomposed.quantize_per_channel.default
@@ -1230,10 +1283,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_xnnpack_quantizer_dynamic_linear(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(
+        quantization_config = get_symmetric_quantization_config(
             is_per_channel=True, is_dynamic=True
         )
-        quantizer.set_global(operator_config)
+        quantizer.set_global(quantization_config)
         m_eager = TestHelperModules.TwoLinearModule().eval()
 
         node_occurrence = {
@@ -1269,25 +1322,18 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 [],
                 True,
                 qconfig_mapping,
-                check_save_load=True,
             )
 
     def test_xnnpack_quantizer_dynamic_linear_with_conv(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(
+        quantization_config = get_symmetric_quantization_config(
             is_per_channel=False, is_dynamic=True
         )
-        quantizer.set_global(operator_config)
+        quantizer.set_global(quantization_config)
         m_eager = TestHelperModules.ConvLinearWPermute().eval()
 
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 2,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 2,
-        }
-        # the weight q/dq is traced from reference quantized linear module as constant, so
-        # we see quantize_per_tensor.default instead of quantize_per_tensor.tensor for weight
-        fx_node_occurrence = {
             torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
@@ -1316,19 +1362,17 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             [],
             True,
             qconfig_mapping,
-            fx_node_occurrence=fx_node_occurrence,
-            check_save_load=True,
         )
 
     def test_composable_quantizer_linear_conv(self):
         dynamic_quantizer = XNNPACKQuantizer()
-        operator_config_dynamic = get_symmetric_quantization_config(
+        quantization_config_dynamic = get_symmetric_quantization_config(
             is_per_channel=False, is_dynamic=True
         )
-        dynamic_quantizer.set_global(operator_config_dynamic)
+        dynamic_quantizer.set_global(quantization_config_dynamic)
         static_quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        static_quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        static_quantizer.set_global(quantization_config)
         # Note that dynamic quantization must be applied first here.
         # this is because static quantizer also quantizes linear with static qspec
         # and if we apply static_quantizer first then dynamic_quantizer cannot be applied
@@ -1338,10 +1382,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m_eager = TestHelperModules.ConvLinearWPermute().eval()
 
         node_occurrence = {
-            # torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
-            # torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 5,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 5,
+            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
             torch.ops.quantized_decomposed.quantize_per_channel.default: 1,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
         }
@@ -1374,7 +1418,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             [],
             False,
             qconfig_mapping,
-            check_save_load=True,
         )
 
     def test_composable_quantizer_throw(self):
@@ -1391,8 +1434,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 pass
 
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         bad_quantizer = BadQuantizer()
         composable_quantizer = ComposableQuantizer([quantizer, bad_quantizer])
         m_eager = TestHelperModules.ConvLinearWPermute().eval()
@@ -1470,8 +1513,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             node_list,
             True,
             qconfig_mapping,
-            check_save_load=True,
-            example_inputs_for_load=(torch.zeros_like(indices),)
         )
 
     def test_embedding_conv_linear_quantization(self):
@@ -1517,13 +1558,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         embedding_quantizer = EmbeddingQuantizer()
         dynamic_quantizer = XNNPACKQuantizer()
-        operator_config_dynamic = get_symmetric_quantization_config(
+        quantization_config_dynamic = get_symmetric_quantization_config(
             is_per_channel=True, is_dynamic=True
         )
-        dynamic_quantizer.set_global(operator_config_dynamic)
+        dynamic_quantizer.set_global(quantization_config_dynamic)
         static_quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        static_quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        static_quantizer.set_global(quantization_config)
         composed_quantizer = ComposableQuantizer(
             [embedding_quantizer, dynamic_quantizer, static_quantizer]
         )
@@ -1548,15 +1589,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         )
 
         node_occurrence = {
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 5,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 5,
-            torch.ops.quantized_decomposed.quantize_per_channel.default: 3,
-            torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
-        }
-        # permute is not handled the same way in fx, so it will have 6 q/dqs
-        fx_node_occurrence = {
-            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 6,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 6,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
+            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
             torch.ops.quantized_decomposed.quantize_per_channel.default: 3,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
         }
@@ -1568,9 +1604,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             [],
             True,
             qconfig_mapping,
-            fx_node_occurrence=fx_node_occurrence,
-            check_save_load=True,
-            example_inputs_for_load=(torch.zeros_like(indices),)
         )
 
     def test_prepare_qat_conv_bn_fusion(self):
@@ -1827,8 +1860,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 return x + y
 
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         m_eager = M().eval()
 
         example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
@@ -1841,6 +1874,34 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             non_ref_node_occurrence={}
         )
 
+    def test_representation_add_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                out = x + y
+                out = torch.nn.functional.relu(out)
+                return out
+
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(operator_config)
+        m_eager = M().eval()
+
+        example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
+        ref_node_occurrence = {
+            ns.call_function(out_dtype): 2,
+        }
+
+        self._test_representation(
+            M().eval(),
+            example_inputs,
+            quantizer,
+            ref_node_occurrence=ref_node_occurrence,
+            non_ref_node_occurrence={}
+        )
+
     def test_representation_quantize_dequantize(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1850,8 +1911,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 return x + y
 
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
         m_eager = M().eval()
 
         example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
@@ -1865,10 +1926,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         }
         non_ref_node_occurrence = {
             ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_tensor.tensor
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
             ): 3,
             ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ): 3,
         }
         self._test_representation(
@@ -1929,10 +1990,10 @@ class TestQuantizePT2EOps(QuantizationTestCase):
                 tracing_mode="real",
             )
             quantizer = XNNPACKQuantizer()
-            operator_config = get_symmetric_quantization_config(
+            quantization_config = get_symmetric_quantization_config(
                 is_per_channel=False, is_dynamic=False
             )
-            quantizer.set_global(operator_config)
+            quantizer.set_global(quantization_config)
             model_graph = prepare_pt2e(model_graph, quantizer)
             model_graph(*example_inputs)
             model_graph = convert_pt2e(model_graph)
@@ -1993,10 +2054,10 @@ class TestQuantizePT2EOps(QuantizationTestCase):
                 tracing_mode="real",
             )
             quantizer = XNNPACKQuantizer()
-            operator_config = get_symmetric_quantization_config(
+            quantization_config = get_symmetric_quantization_config(
                 is_per_channel=False, is_dynamic=False
             )
-            quantizer.set_global(operator_config)
+            quantizer.set_global(quantization_config)
             model_graph = prepare_pt2e(model_graph, quantizer)
             model_graph(*example_inputs)
             model_graph = convert_pt2e(model_graph)
@@ -2021,8 +2082,8 @@ class TestQuantizePT2EModels(PT2EQuantizationTestCase):
             )
 
             quantizer = XNNPACKQuantizer()
-            operator_config = get_symmetric_quantization_config(is_per_channel=True)
-            quantizer.set_global(operator_config)
+            quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+            quantizer.set_global(quantization_config)
             m = prepare_pt2e(m, quantizer)
             # checking that we inserted observers correctly for maxpool operator (input and
             # output share observer instance)
