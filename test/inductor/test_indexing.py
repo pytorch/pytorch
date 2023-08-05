@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import sympy
 
+import torch
 from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
@@ -251,6 +252,27 @@ class ExprPrinterTests(TorchTestCase):
             expr = f(x, 2 * x, 3 * x)
             self.assertEqual(texpr(expr), f"tl.math.{s}(x, tl.math.{s}(2*x, 3*x))")
             self.assertEqual(cexpr(expr), f"std::{s}({{x, 2L*x, 3L*x}})")
+
+    def test_inductor_negative_indices(self):
+        def get_min_value_top_k(top_k_value: torch.Tensor) -> torch.Tensor:
+            return top_k_value[None, None, [-1]]
+
+        backends = ["inductor", "aot_eager", "eager"]
+
+        x = torch.randn([4, 4, 4], device="cuda")
+        results = {}
+
+        for backend in backends:
+            compiled_func = torch.compile(backend=backend)(get_min_value_top_k)
+            result = compiled_func(x)
+            results[backend] = result
+            torch._dynamo.reset()
+
+        results["uncompiled"] = get_min_value_top_k(x)
+        reference = next(iter(results.values()))
+
+        for backend, tensor in results.items():
+            self.assertEqual(reference, tensor)
 
 
 if __name__ == "__main__":

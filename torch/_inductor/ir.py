@@ -1845,6 +1845,8 @@ class FixedLayout(Layout):
             result = self.offset
             for idx, stride, sz in zip(index, self.stride, self.size):
                 if sz != 1:
+                    if idx < 0:
+                        idx = sz + idx
                     result = result + idx * stride
             return result
 
