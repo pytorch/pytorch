@@ -1,12 +1,21 @@
 #!/bin/bash
 
+ver() {
+  printf "%3d%03d%03d%03d" $(echo "$1" | tr '.' ' ');
+}
+
 set -ex
 
 # "install" hipMAGMA into /opt/rocm/magma by copying after build
-git clone https://bitbucket.org/icl/magma.git
-pushd magma
-# Fixes memory leaks of magma found while executing linalg UTs
-git checkout 28592a7170e4b3707ed92644bf4a689ed600c27f
+if [[ $(ver $ROCM_VERSION) -ge $(ver 6.0) ]]; then
+  git clone https://bitbucket.org/mpruthvi1/magma.git -b rocm_60
+  pushd magma
+else
+  git clone https://bitbucket.org/icl/magma.git
+  pushd magma
+  git checkout 28592a7170e4b3707ed92644bf4a689ed600c27f
+fi
+
 cp make.inc-examples/make.inc.hip-gcc-mkl make.inc
 echo 'LIBDIR += -L$(MKLROOT)/lib' >> make.inc
 echo 'LIB += -Wl,--enable-new-dtags -Wl,--rpath,/opt/rocm/lib -Wl,--rpath,$(MKLROOT)/lib -Wl,--rpath,/opt/rocm/magma/lib' >> make.inc
