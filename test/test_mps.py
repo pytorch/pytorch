@@ -85,6 +85,8 @@ def mps_ops_grad_modifier(ops):
         'exponential': [torch.float16, torch.float32],
 
         # CPU errors
+        # derivative for aten::renorm is not implemented
+        'renorm': [torch.float16, torch.float32],
         # derivative for aten::floor_divide is not implemented on CPU
         'floor_divide': [torch.float16, torch.float32],
         # derivative for aten::narrow_copy is not implemented on CPU
@@ -511,7 +513,6 @@ def mps_ops_modifier(ops):
         'polygammapolygamma_n_4': None,
         'qr': None,
         'quantile': None,
-        'renorm': None,
         'rsub': None,
         'scatter_reduceamax': None,
         'scatter_reduceamin': None,
