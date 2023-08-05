@@ -1101,7 +1101,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(out2, out3))
         self.assertTrue(torch._dynamo.testing.same(out2, out4))
         # total frame count is 6 because 3 per module
-        self.assertEqual(cnt.frame_count, 6)
+        self.assertEqual(cnt.frame_count, 3)
 
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_generation_tag(self):
