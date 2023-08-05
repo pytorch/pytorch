@@ -49,15 +49,15 @@ try:
         torch.bool: np.bool_,
     }
     _ONNX_ELEMENT_TYPE_TO_TORCH_DTYPE = {
-        onnx.TensorProto.FLOAT: torch.float32,
-        onnx.TensorProto.FLOAT16: torch.float16,
-        onnx.TensorProto.DOUBLE: torch.float64,
-        onnx.TensorProto.BOOL: torch.bool,
-        onnx.TensorProto.UINT8: torch.uint8,
-        onnx.TensorProto.INT8: torch.int8,
-        onnx.TensorProto.INT16: torch.int16,
-        onnx.TensorProto.INT32: torch.int32,
-        onnx.TensorProto.INT64: torch.int64,
+        onnx.TensorProto.FLOAT: torch.float32,  # type: ignore[attr-defined]
+        onnx.TensorProto.FLOAT16: torch.float16,  # type: ignore[attr-defined]
+        onnx.TensorProto.DOUBLE: torch.float64,  # type: ignore[attr-defined]
+        onnx.TensorProto.BOOL: torch.bool,  # type: ignore[attr-defined]
+        onnx.TensorProto.UINT8: torch.uint8,  # type: ignore[attr-defined]
+        onnx.TensorProto.INT8: torch.int8,  # type: ignore[attr-defined]
+        onnx.TensorProto.INT16: torch.int16,  # type: ignore[attr-defined]
+        onnx.TensorProto.INT32: torch.int32,  # type: ignore[attr-defined]
+        onnx.TensorProto.INT64: torch.int64,  # type: ignore[attr-defined]
     }
     _TORCH_DTYPE_TO_ONNX_ELEMENT_TYPE = {
         value: key for key, value in _ONNX_ELEMENT_TYPE_TO_TORCH_DTYPE.items()
@@ -229,10 +229,6 @@ def _replace_to_copy_with_to(fx_module: torch.fx.GraphModule) -> None:
                          args={[arg.meta for arg in node.args]}, kwargs={node.kwargs}"
                 )
     fx_module.recompile()
-
-
-def _create_onnx_model(onnx_proto):
-    return onnx.ModelProto.FromString(onnx_proto)
 
 
 def _create_onnx_session(onnx_proto, eps: Tuple[str, ...], session_options):
@@ -429,9 +425,9 @@ class OrtExecutionInfoPerSession:
         self,
         session: onnxruntime.InferenceSession,
         input_names: Tuple[str, ...],
-        input_value_infos: Tuple[onnx.ValueInfoProto, ...],
+        input_value_infos: Tuple[onnx.ValueInfoProto, ...],  # type: ignore[name-defined]
         output_names: Tuple[str, ...],
-        output_value_infos: Tuple[onnx.ValueInfoProto, ...],
+        output_value_infos: Tuple[onnx.ValueInfoProto, ...],  # type: ignore[name-defined]
         input_devices: Tuple[ORTC.OrtDevice, ...],
         output_devices: Tuple[ORTC.OrtDevice, ...],
         example_outputs: Union[Tuple[torch.Tensor, ...], torch.Tensor],
@@ -442,11 +438,11 @@ class OrtExecutionInfoPerSession:
         # name of the i-th positional input.
         self.input_names: Tuple[str, ...] = input_names
         # self.input_name[i]'s type information is stored in self.input_value_infos[i].
-        self.input_value_infos: Tuple[onnx.ValueInfoProto, ...] = input_value_infos
+        self.input_value_infos: Tuple[onnx.ValueInfoProto, ...] = input_value_infos  # type: ignore[name-defined]
         # Similar to self.input_names, but for outputs.
         self.output_names: Tuple[str, ...] = output_names
         # Similar to self.input_value_infos but for outputs.
-        self.output_value_infos: Tuple[onnx.ValueInfoProto, ...] = output_value_infos
+        self.output_value_infos: Tuple[onnx.ValueInfoProto, ...] = output_value_infos  # type: ignore[name-defined]
         # For the ONNX model stored in self.session, self.input_devices[i] is the
         # i-th positional input's device.
         self.input_devices: Tuple[ORTC.OrtDevice, ...] = input_devices
@@ -677,9 +673,9 @@ class OrtBackend:
                 op_level_debug=self.resolved_onnx_exporter_options.op_level_debug,
             )
             # Convert the exported result to ONNX ModelProto.
-            onnx_proto = exported.to_model_proto(
+            onnx_model = exported.to_model_proto(
                 opset_version=self.resolved_onnx_exporter_options.onnx_registry.opset_version,
-            ).SerializeToString()
+            )
 
             # Initialize a ORT session to execute this ONNX model.
             # Note that TorchDynamo assumes all inputs/outputs are on the
@@ -704,11 +700,10 @@ class OrtBackend:
                 selected_eps = (self.ep,)
 
             onnx_session = _create_onnx_session(
-                onnx_proto, selected_eps, self.session_options
+                onnx_model.SerializeToString(), selected_eps, self.session_options
             )
             # Cache ORT session. It's reused for the same "graph_module".
             # Generate ONNX model and extract its input and output names.
-            onnx_model = _create_onnx_model(onnx_proto)
             # TODO(wechi): ORT session should provide a API to extract
             # input and output names from the underlying model.
             input_names = tuple(input.name for input in onnx_model.graph.input)
