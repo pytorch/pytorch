@@ -1,4 +1,5 @@
 import math
+from enum import Enum
 from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
@@ -4160,6 +4161,70 @@ def meta_max_pool3d_with_indices_backward(
     return grad_input
 
 
+def check_grid_sampler_common(input: Tensor, grid: Tensor):
+    torch._check(
+        input.device == grid.device,
+        lambda: (
+            f"grid_sampler(): expected input and grid to be on same device, but input "
+            f"is on {input.device} and grid is on {grid.device}"
+        ),
+    )
+    torch._check(
+        input.layout == torch.strided and grid.layout == torch.strided,
+        lambda: (
+            f"grid_sampler(): expected input and grid to have torch.strided layout, but "
+            f"input has {input.layout} and grid has {grid.layout}"
+        ),
+    )
+    torch._check(
+        input.shape[0] == grid.shape[0],
+        lambda: (
+            f"grid_sampler(): expected grid and input to have same batch size, but got "
+            f"input with sizes {input.shape} and grid with sizes {grid.shape}"
+        ),
+    )
+    torch._check(
+        grid.shape[-1] == input.ndim - 2,
+        lambda: (
+            f"grid_sampler(): expected grid to have size {input.ndim - 2} in last "
+            f"dimension, but got grid with sizes {grid.shape}"
+        ),
+    )
+
+    for i in range(2, input.ndim):
+        torch._check(
+            input.shape[i] > 0,
+            lambda: (
+                f"grid_sampler(): expected input to have non-empty spatial dimensions, "
+                f"but input has sizes {input.shape} with dimension {i} being empty"
+            ),
+        )
+
+
+class GridSamplerInterpolation(Enum):
+    BILINEAR = 0
+    NEAREST = 1
+    BICUBIC = 2
+
+
+def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
+    torch._check(
+        input.ndim == 5 and input.ndim == grid.ndim,
+        lambda: (
+            f"grid_sampler(): expected 5D input and grid with same number of "
+            f"dimensions, but got input with sizes {input.shape}"
+            f" and grid with sizes {grid.shape}"
+        ),
+    )
+    torch._check(
+        not (
+            input.ndim == 5
+            and interpolation_mode == GridSamplerInterpolation.BICUBIC.value
+        ),
+        lambda: "grid_sampler(): bicubic interpolation only supports 4D input",
+    )
+
+
 @register_meta(aten.grid_sampler_2d_backward.default)
 def grid_sampler_2d_backward_meta(
     grad_output,
@@ -4177,6 +4242,49 @@ def grid_sampler_2d_backward_meta(
         grad_input = None
     grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)
     return (grad_input, grad_grid)
+
+
+@register_meta(aten.grid_sampler_3d)
+@out_wrapper()
+def grid_sampler_3d(
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+):
+    check_grid_sampler_common(input, grid)
+    check_grid_sampler_3d(input, grid, interpolation_mode)
+    N = input.shape[0]
+    C = input.shape[1]
+    out_D = grid.shape[1]
+    out_H = grid.shape[2]
+    out_W = grid.shape[3]
+    return input.new_empty((N, C, out_D, out_H, out_W))
+
+
+@register_meta(aten.grid_sampler_3d_backward)
+@out_wrapper("grad_input", "grad_grid")
+def grid_sampler_3d_backward(
+    grad_output,
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+    output_mask,
+):
+    check_grid_sampler_common(input, grid)
+    check_grid_sampler_3d(input, grid, interpolation_mode)
+    input_requires_grad = output_mask[0]
+    if input_requires_grad:
+        grad_input = torch.zeros_like(
+            input, memory_format=torch.legacy_contiguous_format
+        )
+    else:
+        grad_input = None
+    grad_grid = torch.empty_like(grid, memory_format=torch.legacy_contiguous_format)
+    return grad_input, grad_grid
 
 
 @register_meta([aten.full.default])
