@@ -380,7 +380,11 @@ at::Generator make_generator_privateuse1(c10::DeviceIndex device_index) {
   return at::make_generator<PrivateGeneratorImpl>(device_index);
 }
 
-void register_generator() {
+void register_generator_first() {
+  REGISTER_GENERATOR_PRIVATEUSE1(make_generator_privateuse1)
+}
+
+void register_generator_second() {
   REGISTER_GENERATOR_PRIVATEUSE1(make_generator_privateuse1)
 }
 
@@ -462,7 +466,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_add_called", &custom_add_called, "check if our custom add function was called");
     m.def("custom_abs_called", &custom_abs_called, "check if our custom abs function was called");
-    m.def("register_generator", &register_generator, "register generator for custom device");
+    m.def("register_generator_first", &register_generator_first, "register generator for custom device firstly");
+    m.def("register_generator_second", &register_generator_second, "register generator for custom device secondly");
     m.def("set_custom_device_index", &set_custom_device_index, "set custom device index");
     m.def("custom_storage_registry", &custom_storage_registry, "set custom storageImpl creat method");
     m.def("custom_storageImpl_called", &custom_storageImpl_called, "check if our custom abs function was called");
