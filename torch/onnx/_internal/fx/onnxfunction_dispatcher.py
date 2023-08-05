@@ -29,6 +29,8 @@ from torch.onnx._internal.fx import (
 if TYPE_CHECKING:
     import onnxscript  # type: ignore[import]
 
+    from torch.onnx import OnnxRegistry
+
 # For beartype
 from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
     graph_building as onnxscript_graph_building,
@@ -40,7 +42,7 @@ def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
     fn: Callable,
     self,
     node: torch.fx.Node,
-    default_and_custom_functions: List[registration.SymbolicFunction],
+    default_and_custom_functions: List[registration.ONNXFunction],
     *args,
     **kwargs,
 ) -> str:
@@ -88,7 +90,7 @@ class OnnxFunctionDispatcher:
 
     def __init__(
         self,
-        onnx_registry: registration.OnnxRegistry,
+        onnx_registry: "OnnxRegistry",
         diagnostic_context: diagnostics.DiagnosticContext,
     ):
         """Initialize the ONNX Function dispatcher.
@@ -141,9 +143,9 @@ class OnnxFunctionDispatcher:
     def _filter_or_keep_complex(
         self,
         node,
-        default_and_custom_functions: List[registration.SymbolicFunction],
+        default_and_custom_functions: List[registration.ONNXFunction],
         diagnostic_context: diagnostics.DiagnosticContext,
-    ) -> List[registration.SymbolicFunction]:
+    ) -> List[registration.ONNXFunction]:
         if any(
             torch.is_complex(arg.meta["val"])
             for arg in node.args
@@ -196,7 +198,7 @@ class OnnxFunctionDispatcher:
     def _find_the_perfect_or_nearest_match_onnxfunction(
         self,
         node: torch.fx.Node,  # this is used in diagnostic_message_formatter
-        default_and_custom_functions: List[registration.SymbolicFunction],
+        default_and_custom_functions: List[registration.ONNXFunction],
         onnx_args: Sequence[
             Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
         ],
@@ -218,7 +220,7 @@ class OnnxFunctionDispatcher:
                 RuntimeError: If there are no overloaded functions available for the given FX node.
         """
         # TODO(justinchuby): Cache the OnnxSchemaChecker  so we don't need to run the init logic everytime
-        overload_match_ranking: Dict[registration.SymbolicFunction, int] = {}
+        overload_match_ranking: Dict[registration.ONNXFunction, int] = {}
         diagnostic = diagnostic_context.inflight_diagnostic()
 
         # Iterate the overloaded functions in reverse order to prioritize the custom ones
@@ -243,13 +245,14 @@ class OnnxFunctionDispatcher:
         diagnostic.level = diagnostics.levels.WARNING
 
         # NOTE: Tie breaker: if there are multiple nearest matches, we will choose the one
-        # that is custom first
-        symbolic_function_list: List[registration.SymbolicFunction] = sorted(
+        # that is custom first. If there are multiple custom ones, we will choose the one
+        # that is added lastly in the list.
+        symbolic_function_list: List[registration.ONNXFunction] = sorted(
             overload_match_ranking,
             key=lambda k: (
                 overload_match_ranking[k],
                 k.is_custom,
-                k.onnx_function.name,
+                default_and_custom_functions.index(k),
             ),
             reverse=True,
         )
@@ -336,7 +339,7 @@ class OnnxFunctionDispatcher:
         self,
         node: torch.fx.Node,
         diagnostic_context: diagnostics.DiagnosticContext,
-    ) -> List[registration.SymbolicFunction]:
+    ) -> List[registration.ONNXFunction]:
         """Get the function overloads from the registry.
 
         Args:
@@ -344,7 +347,7 @@ class OnnxFunctionDispatcher:
             diagnostic_context: The diagnostic context to use for reporting errors.
 
         Returns:
-            The list contains SymbolicFunctions, starting with the default ones and
+            The list contains ONNXFunctions, starting with the default ones and
             followed by any custom ones.
         """
 
@@ -354,9 +357,9 @@ class OnnxFunctionDispatcher:
 
         # NOTE: If the ATen/Custom operators are not registered, the group will be None.
         # And non-registerd ATen/Custom operators will trigger error in the next step.
-        function_group: Optional[List[registration.SymbolicFunction]] = None
+        function_group: Optional[List[registration.ONNXFunction]] = None
 
-        function_group = self.onnx_registry.get_functions(
+        function_group = self.onnx_registry.get_op_functions(
             namespace=internal_opname.namespace,
             op_name=internal_opname.op_name,
             overload=internal_opname.overload,
@@ -365,7 +368,7 @@ class OnnxFunctionDispatcher:
         # NOTE: Fall back to default overload if the ONNX registry doesn't have the overload.
         # TODO: Should we have a better fallback mechanism?
         if function_group is None:
-            function_group = self.onnx_registry.get_functions(
+            function_group = self.onnx_registry.get_op_functions(
                 namespace=internal_opname.namespace,
                 op_name=internal_opname.op_name,
                 overload=None,
