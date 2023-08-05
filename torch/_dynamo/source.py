@@ -478,13 +478,13 @@ class ConstantSource(Source):
 @dataclasses.dataclass(frozen=True)
 class NumpyTensorSource(ChainedSource):
     def name(self) -> str:
-        return f"__numpy_to_tensor({self.base.name()})"
+        return f"__as_tensor({self.base.name()})"
 
     def guard_source(self):
         return self.base.guard_source()
 
     def reconstruct(self, codegen):
-        codegen.load_import_from("torch._dynamo.utils", "numpy_to_tensor")
+        codegen.load_import_from("torch", "as_tensor")
         return self.base.reconstruct(codegen) + create_call_function(1, True)
 
 

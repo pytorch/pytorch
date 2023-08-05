@@ -85,7 +85,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("__load_module", lambda name: importlib.import_module(name)),
         ("utils_device", torch.utils._device),
         ("device", torch.device),
-        ("__numpy_to_tensor", torch._dynamo.utils.numpy_to_tensor),
+        ("__as_tensor", torch.as_tensor),
     ]
 )
 

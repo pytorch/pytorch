@@ -876,14 +876,6 @@ class NumpyNdarrayVariable(TensorVariable):
             **options,
         )
 
-    def __init__(
-        self,
-        proxy,
-        **kwargs,
-    ):
-        super().__init__(proxy, **kwargs)
-        self.proxy = proxy
-
     def var_getattr(self, tx, name):
         # NB: This INTENTIONALLY does not call super(), because there is
         # no intrinsic reason ndarray properties are related to Tensor

@@ -1646,7 +1646,7 @@ def to_numpy_helper(value):
 def numpy_to_tensor(value):
     """Convert tnp.ndarray to tensor, leave other types intact. If a list/tuple, loop through it to convert."""
     if isinstance(value, np.ndarray):
-        return numpy_to_tensor(tnp.array(value, dtype=str(value.dtype)))
+        return torch.as_tensor(value)
     if isinstance(value, tnp.ndarray):
         return value.tensor
     elif isinstance(value, (tuple, list)):

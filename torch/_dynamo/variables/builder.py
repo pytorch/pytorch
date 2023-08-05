@@ -164,10 +164,6 @@ class GraphArg:
 
     def __post_init__(self):
         if isinstance(self._example, torch.Tensor):
-            # A hack for intermediary variables, see example_strong_ref
-            if hasattr(self._example, "__dynamo_retain"):
-                self.example_strong_ref = self._example
-
             self._example = TensorWeakRef(self._example)
             assert is_fake(self.fake_tensor)
 
