@@ -5739,8 +5739,6 @@
 
 - func: tensordot.out(Tensor self, Tensor other, int[] dims_self, int[] dims_other, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
-  dispatch:
-    CPU, CUDA: tensordot_out
 
 # TODO: namespace threshold in 'nn'
 - func: threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor
