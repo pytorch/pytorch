@@ -250,11 +250,11 @@ class DiagnosticContext:
 
     def __enter__(self):
         self._previous_log_level = self.logger.level
-        self.logger.level = self.options.verbosity_level
+        self.logger.setLevel(self.options.verbosity_level)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.logger.level = self._previous_log_level
+        self.logger.setLevel(self._previous_log_level)
         return None
 
     def sarif(self) -> sarif.Run:
