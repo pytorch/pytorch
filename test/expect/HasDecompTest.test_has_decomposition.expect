@@ -1257,7 +1257,6 @@ aten::t_copy
 aten::t_copy.out
 aten::take
 aten::take.out
-aten::tensordot.out
 aten::to_mkldnn
 aten::to_mkldnn.out
 aten::to_padded_tensor
