@@ -312,7 +312,8 @@ def _convert_torch_args_to_onnxfunction_args(
 ) -> Tuple[List[Any], Dict[str, Any],]:
     """Convert Python args and kwargs to OnnxFunction acceptable with matching ONNX ParamSchema.
 
-    This is different from the para
+    NOTE: This is different from the param_schema separating in dispatcher, since at this point
+    we are already sure that the args and kwargs are in order and matched.
 
     Args:
         param_schemas: The parameter schemas of an Op or a OnnxFunction.

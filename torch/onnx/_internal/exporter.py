@@ -8,6 +8,9 @@ import dataclasses
 import io
 import logging
 import os
+
+import warnings
+from collections import defaultdict
 from typing import (
     Any,
     Callable,
@@ -19,6 +22,7 @@ from typing import (
     Protocol,
     runtime_checkable,
     Sequence,
+    Set,
     Tuple,
     TYPE_CHECKING,
     TypeVar,
@@ -45,7 +49,10 @@ from torch.onnx._internal.fx import (
 # 'import onnx' inside of dynamo_export (by way of _assert_dependencies).
 if TYPE_CHECKING:
     import onnx
-
+    import onnxscript  # type: ignore[import]
+    from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
+        registration as torchlib_registry,
+    )
 
 _DEFAULT_OPSET_VERSION: Final[int] = 18
 """The default ONNX opset version the exporter will use if one is not specified explicitly
@@ -75,13 +82,178 @@ class ONNXFakeContext:
     """List of paths of files that contain the model `state_dict`"""
 
 
+class OnnxRegistry:
+    """Registry for ONNX functions.
+
+    The registry maintains a mapping from qualified names to symbolic functions under a
+    fixed opset version. It supports registering custom onnx-script functions and for
+    dispatcher to dispatch calls to the appropriate function.
+
+    """
+
+    def __init__(self) -> None:
+        """Initializes the registry"""
+
+        # NOTE: _registry is the registry maps OpNameto a list of ONNXFunctions. It is important
+        # not to directly modify this variable. Instead, access to it should be done through
+        # the public methods: register_custom_op, get_ops, and is_registered_op.
+        self._registry: Dict[
+            registration.OpName, List[registration.ONNXFunction]
+        ] = defaultdict(list)
+        # FIXME: Avoid importing onnxscript into torch
+        from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
+            ops,  # TODO(titaiwang): get rid of this import
+            registration,
+        )
+
+        # opset_version is unused for now, since torchlib only supports opset18.
+        # TODO: get opset version from torchlib
+        self._opset_version = _DEFAULT_OPSET_VERSION
+        warnings.warn(
+            f"Torchlib only supports opset version {self._opset_version} for now. If you need to use a \
+            different opset version, please register them with register_custom_op."
+        )
+
+        # Initialize registry from torchlib
+        self._initiate_registry_from_torchlib(registration.default_registry)
+
+    @property
+    def opset_version(self) -> int:
+        """The ONNX opset version the exporter should target. Defaults to the latest
+        supported ONNX opset version: 18. The default version will increment over time as
+        ONNX continues to evolve."""
+
+        return self._opset_version
+
+    # TODO(titaiwang): subject to change if multiple opset_version is supported in torchlib
+    def _initiate_registry_from_torchlib(
+        self, torchlib_registry: torchlib_registry.Registry
+    ):
+        """Populates the registry with ATen functions from torchlib.
+
+        Args:
+            torchlib_registry: The torchlib registry to use for populating the registry.
+        """
+        for aten_name, aten_overloads_func in torchlib_registry.items():
+            internal_name_instance = registration.OpName.from_qualified_name(aten_name)
+            for overload_func in aten_overloads_func.overloads:
+                symbolic_function = registration.ONNXFunction(
+                    onnx_function=overload_func,
+                    op_full_name=internal_name_instance.qualified_name(),
+                    is_custom=False,
+                    is_complex=False,
+                )
+                self._register(internal_name_instance, symbolic_function)
+
+            for complex_func in aten_overloads_func.complex:
+                symbolic_function = registration.ONNXFunction(
+                    onnx_function=complex_func,
+                    op_full_name=internal_name_instance.qualified_name(),
+                    is_custom=False,
+                    is_complex=True,
+                )
+                self._register(internal_name_instance, symbolic_function)
+
+    @_beartype.beartype
+    def _register(
+        self,
+        internal_qualified_name: registration.OpName,
+        symbolic_function: registration.ONNXFunction,
+    ) -> None:
+        """Registers a ONNXFunction to an operator.
+
+        Args:
+            internal_qualified_name: The qualified name of the operator to register: OpName.
+            symbolic_function: The ONNXFunction to register.
+        """
+        self._registry[internal_qualified_name].append(symbolic_function)
+
+    @_beartype.beartype
+    def register_op(
+        self,
+        function: Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"],
+        namespace: str,
+        op_name: str,
+        overload: Optional[str] = None,
+        is_complex: bool = False,
+    ) -> None:
+        """Registers a custom operator: torch.ops.<namespace>.<op_name>.<overload>.
+
+        Args:
+            function: The onnx-sctip function to register.
+            namespace: The namespace of the operator to register.
+            op_name: The name of the operator to register.
+            overload: The overload of the operator to register. If it's default overload,
+                leave it to None.
+            is_complex: Whether the function is a function that handles complex valued inputs.
+
+        Raises:
+            ValueError: If the name is not in the form of 'namespace::op'.
+        """
+        internal_name_instance = registration.OpName.from_name_parts(
+            namespace=namespace, op_name=op_name, overload=overload
+        )
+        symbolic_function = registration.ONNXFunction(
+            onnx_function=function,
+            op_full_name=internal_name_instance.qualified_name(),
+            is_custom=True,
+            is_complex=is_complex,
+        )
+        self._register(internal_name_instance, symbolic_function)
+
+    @_beartype.beartype
+    def get_op_functions(
+        self, namespace: str, op_name: str, overload: Optional[str] = None
+    ) -> Optional[List[registration.ONNXFunction]]:
+        """Returns a list of ONNXFunctions for the given op: torch.ops.<namespace>.<op_name>.<overload>.
+
+        The list is ordered by the time of registration. The custom operators should be
+        in the second half of the list.
+
+        Args:
+            namespace: The namespace of the operator to get.
+            op_name: The name of the operator to get.
+            overload: The overload of the operator to get. If it's default overload,
+                leave it to None.
+        Returns:
+            A list of ONNXFunctions corresponding to the given name, or None if
+            the name is not in the registry.
+        """
+        internal_name_instance = registration.OpName.from_name_parts(
+            namespace=namespace, op_name=op_name, overload=overload
+        )
+        return self._registry.get(internal_name_instance)
+
+    @_beartype.beartype
+    def is_registered_op(
+        self, namespace: str, op_name: str, overload: Optional[str] = None
+    ) -> bool:
+        """Returns whether the given op is registered: torch.ops.<namespace>.<op_name>.<overload>.
+
+        Args:
+            namespace: The namespace of the operator to check.
+            op_name: The name of the operator to check.
+            overload: The overload of the operator to check. If it's default overload,
+                leave it to None.
+
+        Returns:
+            True if the given op is registered, otherwise False.
+        """
+        functions = self.get_op_functions(
+            namespace=namespace, op_name=op_name, overload=overload
+        )
+        return functions is not None
+
+    @_beartype.beartype
+    def _all_registered_ops(self) -> Set[str]:
+        """Returns the set of all registered function names."""
+        return {
+            op_name_class.qualified_name() for op_name_class in self._registry.keys()
+        }
+
+
 class ExportOptions:
     """Options to influence the TorchDynamo ONNX exporter."""
-
-    opset_version: Optional[int] = None
-    """The ONNX opset version the exporter should target. Defaults to the latest
-    supported ONNX opset version. The default version will increment over time as
-    ONNX continues to evolve."""
 
     dynamic_shapes: Optional[bool] = None
     """Shape information hint for input/output tensors.
@@ -102,21 +274,25 @@ class ExportOptions:
     fake_context: Optional[ONNXFakeContext] = None
     """The fake context used for symbolic tracing."""
 
+    onnx_registry: Optional[OnnxRegistry] = None
+    """The ONNX registry used to register ATen operators to ONNX functions. Defaults to
+    opset18."""
+
     @_beartype.beartype
     def __init__(
         self,
         *,
-        opset_version: Optional[int] = None,
         dynamic_shapes: Optional[bool] = None,
         op_level_debug: Optional[bool] = None,
         logger: Optional[logging.Logger] = None,
         fake_context: Optional[ONNXFakeContext] = None,
+        onnx_registry: Optional[OnnxRegistry] = None,
     ):
-        self.opset_version = opset_version
         self.dynamic_shapes = dynamic_shapes
         self.op_level_debug = op_level_debug
         self.logger = logger
         self.fake_context = fake_context
+        self.onnx_registry = onnx_registry
 
 
 class ResolvedExportOptions(ExportOptions):
@@ -126,18 +302,15 @@ class ResolvedExportOptions(ExportOptions):
     """
 
     # Public attributes MUST be redefined below without ``Optional[]`` from ``ExportOptions``
-    opset_version: int
     dynamic_shapes: bool
     op_level_debug: bool
     logger: logging.Logger
     fake_context: ONNXFakeContext
+    onnx_registry: OnnxRegistry
 
     # Private only attributes
     decomposition_table: Dict[torch._ops.OpOverload, Callable]
     """A dictionary that maps operators to their decomposition functions."""
-
-    onnx_registry: registration.OnnxRegistry
-    """The ONNX registry used to register ATen operators to ONNX functions."""
 
     onnxfunction_dispatcher: torch.onnx._internal.fx.onnxfunction_dispatcher.OnnxFunctionDispatcher
     """The ONNX dispatcher used to dispatch ATen operators to ONNX functions."""
@@ -156,7 +329,6 @@ class ResolvedExportOptions(ExportOptions):
         if options is None:
             options = ExportOptions()
         if isinstance(options, ResolvedExportOptions):
-            self.opset_version = options.opset_version
             self.dynamic_shapes = options.dynamic_shapes
             self.op_level_debug = options.op_level_debug
             self.logger = options.logger
@@ -177,7 +349,6 @@ class ResolvedExportOptions(ExportOptions):
                     return fallback()
                 return fallback
 
-            self.opset_version = resolve(options.opset_version, _DEFAULT_OPSET_VERSION)
             self.dynamic_shapes = resolve(options.dynamic_shapes, False)
             import torch.onnx._internal.fx.dynamo_graph_extractor as dynamo_graph_extractor  # TODO: Prevent circular dep
 
@@ -196,9 +367,7 @@ class ResolvedExportOptions(ExportOptions):
                 "torch.onnx.dynamo_export", torch.__version__, logger=self.logger
             )
 
-            # TODO(titaiwang): When OnnxRegistry is exposed, users should only control
-            # the opset_version with registry, instead of ExportOptions.
-            self.onnx_registry = registration.OnnxRegistry(self.opset_version)
+            self.onnx_registry = resolve(options.onnx_registry, OnnxRegistry())
             self.decomposition_table = (
                 decomposition_table.create_onnx_friendly_decomposition_table(
                     self.onnx_registry
@@ -666,7 +835,7 @@ class Exporter:
 
         # Export TorchScript graph to ONNX ModelProto.
         onnx_model = onnxscript_graph.to_model_proto(
-            self.options.opset_version,
+            self.options.onnx_registry.opset_version,
             include_initializers=self.options.fake_context is None,
         )
 
@@ -746,7 +915,7 @@ class OnnxExporterError(RuntimeError):
 @_beartype.beartype
 def _assert_dependencies(export_options: ResolvedExportOptions):
     logger = export_options.logger
-    opset_version = export_options.opset_version
+    opset_version = export_options.onnx_registry.opset_version
 
     def missing_package(package_name: str, exc_info: logging._ExcInfoType):
         message = (
@@ -815,7 +984,7 @@ def dynamo_export(
             torch.randn(2, 2, 2), # positional input 2
             my_nn_module_attribute="hello", # keyword input
             export_options=ExportOptions(
-                opset_version=17,
+                dynamic_shapes=True,
             )
         ).save("my_model.onnx")
     """
@@ -935,4 +1104,5 @@ __all__ = [
     "dynamo_export",
     "OnnxExporterError",
     "enable_fake_mode",
+    "OnnxRegistry",
 ]
