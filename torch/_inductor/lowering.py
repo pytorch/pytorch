@@ -4428,8 +4428,8 @@ logical_xor = register_pointwise(
 )
 maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
-register_lowering(aten.clamp_min)(maximum)
-register_lowering(aten.clamp_max)(minimum)
+clamp_min = register_lowering(aten.clamp_min)(maximum)
+clamp_max = register_lowering(aten.clamp_max)(minimum)
 neg = register_pointwise(aten.neg)
 reciprocal = register_pointwise_numeric(aten.reciprocal)
 register_pointwise(aten.remainder)
@@ -4476,7 +4476,17 @@ register_foreach_pointwise(aten._foreach_maximum.List, maximum)
 register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
-register_foreach_pointwise(aten._foreach_clamp, aten.clamp)
+
+
+def _clamp_impl(v, min=None, max=None):
+    if min is not None:
+        v = clamp_min(v, min)
+    if max is not None:
+        v = clamp_max(v, max)
+    return v
+
+
+register_foreach_pointwise(aten._foreach_clamp, _clamp_impl)
 
 
 def register_inplace(aten_op, outplace_op):
