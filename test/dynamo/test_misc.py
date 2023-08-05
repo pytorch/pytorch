@@ -1241,7 +1241,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertEqual(ref, res)
-        self.assertEqual(cnts.frame_count, ifdynstaticdefault(2, 1))
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_numpy_ndarray_graph_break_with_multiple_outputs(self):
         def fn(x, y):
