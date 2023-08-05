@@ -416,7 +416,7 @@ def _compile(
         try:
             with tracing(tracer.output.tracing_context):
                 tracer.run()
-        except:
+        except Exception:
             if config.translation_validation:
                 fakes = tracer.output.tracked_fakes
                 tracer.output.shape_env.produce_guards(
