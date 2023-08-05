@@ -23,7 +23,7 @@ using namespace metal;
 template<typename T>
 kernel void lerp(constant T* self       [[buffer(0)]],
                  constant T* end        [[buffer(1)]],
-                 constant T* weight     [[buffer(2)]],
+                 constant float* weight     [[buffer(2)]],
                  device T* output       [[buffer(3)]],
                  uint index [[thread_position_in_grid]]) {
     output[index] = self[index] + weight[index] * (end[index] - self[index]);
@@ -41,7 +41,7 @@ template
 [[host_name("lerp_half")]]
 kernel void lerp<half>(constant half* self [[buffer(0)]],
                        constant half* end  [[buffer(1)]],
-                       constant half* weight [[buffer(2)]],
+                       constant float* weight [[buffer(2)]],
                        device half* output [[buffer(3)]],
                        uint index [[thread_position_in_grid]]);
 )LERP_TENSOR_MTL";
