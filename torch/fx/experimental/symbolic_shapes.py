@@ -2012,39 +2012,8 @@ class ShapeEnv:
             self.validator.add_assertion(expr)
 
     def _check_translation_validate(self) -> None:
-        if not _translation_validation_enabled():
-            return
-
-        result = self.validator.validate()
-
-        if result.success:
-            return
-
-        if result.model is None:
-            reason = "no answer"
-            source_exprs = self.validator._source_exprs
-            failed = ""
-        else:
-            assert result.failed_source_expr is not None
-            reason = "model: %s" % {sym: result.model[sym] for sym in result.model}
-            source_exprs = result.failed_source_expr
-            failed = "Failed "
-
-        def exprs_to_str(exprs):
-            return "\n".join(f"==> {e}" for e in exprs)
-
-        assertions = self.validator._assertions
-        target_exprs = self.validator._target_exprs
-
-        raise RuntimeError(f"""translation validation failed with {reason}.
-Assertions:
-{exprs_to_str(assertions)}
-
-Target Guards:
-{exprs_to_str(target_exprs)}
-
-{failed}Source Guards:
-{exprs_to_str(source_exprs)}""")
+        if _translation_validation_enabled():
+            self.validator.validate()
 
     def create_fx_call_function(
             self,

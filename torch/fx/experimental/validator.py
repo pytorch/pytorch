@@ -5,9 +5,10 @@ import operator
 import sympy
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, Iterable, List, Set, Tuple, Type, Union
 
 import torch
+from torch._dynamo.exc import TorchDynamoException
 import torch.fx
 import torch.fx.traceback as fx_traceback
 
@@ -41,6 +42,101 @@ try:
     # and the FX nodes (see [Note: PopulateValidator]) that go through
     # 'ShapeEnv.evaluate_expr' function. Finally, we run the validation.
     # (see [Note: TranslationValidator])
+
+    # Better Z3 to string implementation (for a small fraction of Z3).
+    #
+    # Here are the things we clean before showing the Z3 expression:
+    #   - Rename a few ops (e.g. "Distinct" ==> "!=")
+    #
+    #   - Ignore ToInt and ToReal operations:
+    #     usually they don't really matter
+    #
+    #   - Transform (ToInt (/ ...)) into (idiv ...):
+    #     this is the pattern for floor division
+    #
+    #   - Collect a chain of the same operations into one
+    def z3str(e: z3.ExprRef) -> str:
+        assert z3.is_expr(e), f"unsupported expression type: {e}"
+
+        def get_args_str(e: z3.ExprRef) -> List[str]:
+            return [z3str(e.arg(i)) for i in range(e.num_args())]
+
+        # First, we simplify the given expression.
+        # This is done using rewriting rules, so shouldn't take long.
+        e = z3.simplify(e)
+
+
+        # Only support function applications.
+        # Even Z3 "variables" are, in fact, function applications.
+        if not z3.is_app(e):
+            raise ValueError(f"can't print Z3 expression: {e}")
+
+        if z3.is_int_value(e) or z3.is_rational_value(e):
+            return e.as_string()  # type: ignore[attr-defined]
+
+        decl = e.decl()
+        kind = decl.kind()
+        op = str(decl)
+        args = get_args_str(e)
+
+        if kind == z3.Z3_OP_POWER:
+            op = "pow"
+
+        elif kind in (z3.Z3_OP_ADD, z3.Z3_OP_MUL):
+            # Collect the arguments of chains of ADD and MUL.
+            # This is safe, since they are associative.
+
+            def collect_str_args(e):
+                if not (z3.is_app(e) and e.decl().kind() == kind):
+                    return [z3str(e)]
+                else:
+                    return [
+                        x
+                        for i in range(e.num_args())
+                        for x in collect_str_args(e.arg(i))
+                    ]
+
+            args = collect_str_args(e)
+
+        elif kind == z3.Z3_OP_NOT:
+            # Revert some conversions that z3.simplify applies:
+            #   - a != b ==> (Not (== a b)) ==> (!= a b)
+            #   - a < b ==> (Not (<= b a)) ==> (> b a)
+            #   - a > b ==> (Not (<= a b)) ==> (> a b)
+
+            assert e.num_args() == 1
+            arg = e.arg(0)
+
+            assert z3.is_app(arg)
+            argkind = arg.decl().kind()
+
+            logic_inverse = {
+                z3.Z3_OP_EQ: "!=",
+                z3.Z3_OP_LE: ">",
+                z3.Z3_OP_GE: "<",
+            }
+
+            if argkind in logic_inverse:
+                op = logic_inverse[argkind]
+                args = get_args_str(arg)
+
+        elif kind in (z3.Z3_OP_TO_INT, z3.Z3_OP_TO_REAL):
+            assert e.num_args() == 1
+            argstr = z3str(e.arg(0))
+
+            # Check if it's the floor division pattern.
+            if argstr.startswith("(/"):
+                return "(idiv" + argstr[2:]
+
+            # Otherwise, just ignore it.
+            return argstr
+
+        elif kind == z3.Z3_OP_UNINTERPRETED:
+            assert e.num_args() == 0
+            return str(decl)
+
+        string = op + " " + " ".join(args)
+        return f"({string.rstrip()})"
 
     # Implementation of Python semantics as Z3 expressions.
     #
@@ -363,24 +459,13 @@ try:
             assert isinstance(ref, z3.BoolRef)
             self._assertions.add(ref)
 
-        # The result of a validation run.
-        @dataclass
-        class Result:
-            success: bool
-
-            # Mapping of the name of each free variable to the value assigned to it.
-            model: Optional[z3.ModelRef] = None
-
-            # List of the source expressions that failed due to the assignment.
-            failed_source_expr: Optional[List[z3.BoolRef]] = None
-
-        def validate(self) -> "TranslationValidator.Result":
+        def validate(self) -> None:
             from torch._dynamo.utils import dynamo_timed
 
             if len(self._source_exprs) == 0 or len(self._target_exprs) == 0:
                 # If there are no source/target expressions, there's nothing we really
                 # wish to prove. So, we just return.
-                return self.Result(success=True)
+                return None
 
             # Here, we use "QF_NRA" logic for the solver:
             #   "Quantifier-free Non-linear Real Arithmetic".
@@ -411,10 +496,11 @@ try:
                 # Target expressions are unsound.
                 # Log the found model and the source expressions that failed.
                 model = solver.model()
-                return self.Result(
-                    success=False,
-                    model=model,
-                    failed_source_expr=[inp for inp in self._source_exprs if not model.evaluate(inp)],
+                raise ValidationException(
+                    model, self._assertions, self._target_exprs,
+                    failed_source_exprs=[
+                        inp for inp in self._source_exprs if not model.evaluate(inp)
+                    ]
                 )
             else:
                 if r == z3.unknown:
@@ -426,7 +512,32 @@ try:
                     # Target expressions are sound.
                     assert r == z3.unsat
                     log.debug("translation validation: success")
-                return self.Result(success=True)
+
+
+    class ValidationException(TorchDynamoException):
+        def __init__(
+            self,
+            model,
+            assertions: Iterable[z3.ExprRef],
+            target_exprs: Iterable[z3.ExprRef],
+            failed_source_exprs: Iterable[z3.ExprRef]
+        ) -> None:
+            model_str = self._joinlines(model, lambda sym: f"{sym}: {model[sym]}")
+            assertions_str = self._joinlines(assertions, z3str)
+            target_exprs_str = self._joinlines(target_exprs, z3str)
+            failed_source_exprs_str = self._joinlines(failed_source_exprs, z3str)
+
+            super().__init__(
+                "translation validation failed.\n\n"
+                "Model:\n" + model_str + "\n\n"
+                "Assertions:\n" + assertions_str + "\n\n"
+                "Target Expressions:\n" + target_exprs_str + "\n\n"
+                "Failed Source Expressions:\n" + failed_source_exprs_str + "\n\n"
+            )
+
+        def _joinlines(self, xs: Iterable[Any], f: Callable[[Any], str] = lambda x: x) -> str:
+            return "\n".join(f"  ==> {f(x)}" for x in xs)
+
 except ImportError:
     _HAS_Z3 = False
 else:
