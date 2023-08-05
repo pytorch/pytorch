@@ -813,6 +813,10 @@ class TestOptim(TestCase):
                 # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
                 # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
                 nintermediates = 3
+                if optimizer_constructor.__name__ == "NAdam":
+                    # with capturable in NAdam, we have 3 extra intermediates for the
+                    # bias_correction, mus, and mu_nexts
+                    nintermediates = 5
             elif optimizer_constructor.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
                 # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
                 # Adagrad uses std and grads at the same time
@@ -840,10 +844,17 @@ class TestOptim(TestCase):
             (optim.NAdam, dict(weight_decay=1.0, momentum_decay=6e-3)),
             (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3)),
             (optim.NAdam, dict(weight_decay=0.01, momentum_decay=4e-3)),
+            (optim.NAdam, dict(weight_decay=0.0, momentum_decay=6e-3, capturable=True)),
+            (optim.NAdam, dict(weight_decay=0.01, momentum_decay=4e-3, capturable=True)),
             (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3, decoupled_weight_decay=True)),
             (
                 optim.NAdam,
                 dict(weight_decay=0.01, momentum_decay=4e-3, decoupled_weight_decay=True),
+            ),
+            (
+                optim.NAdam,
+                dict(weight_decay=0.01, momentum_decay=4e-3,
+                     decoupled_weight_decay=True, capturable=True),
             ),
             (
                 optim.SGD,
