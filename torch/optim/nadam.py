@@ -85,6 +85,8 @@ class NAdam(Optimizer):
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+        self._cuda_graph_capture_health_check()
+
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -254,8 +256,6 @@ def _single_tensor_nadam(params: List[Tensor],
                          capturable: bool,
                          differentiable: bool):
 
-    # TODO, add capturable here
-
     for i, param in enumerate(params):
         grad = grads[i]
         exp_avg = exp_avgs[i]
@@ -270,7 +270,11 @@ def _single_tensor_nadam(params: List[Tensor],
 
         # update step
         step_t += 1
-        step = _get_value(step_t)
+
+        if capturable:
+            step = step_t
+        else:
+            step = _get_value(step_t)
 
         bias_correction2 = 1 - beta2 ** step
 
@@ -292,14 +296,14 @@ def _single_tensor_nadam(params: List[Tensor],
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
         denom = exp_avg_sq.div(bias_correction2).sqrt()
 
-        if differentiable:
+        if differentiable or capturable:
             denom = denom.add(eps)
             # Make autograd track the operations
             # by updating the grad and exp_avg directly and not using the
             # scalar "value" argument of addcdiv.
             mu_product_next = mu_product * mu_next
             grad = grad * (-lr * (1. - mu) / (1. - mu_product))
-            exp_avg = grad * (-lr * (1. - mu_next) / (1. - mu_product_next))
+            exp_avg = exp_avg * (-lr * mu_next / (1. - mu_product_next))
             param.addcdiv_(grad, denom)
             param.addcdiv_(exp_avg, denom)
         else:
@@ -333,7 +337,7 @@ def _multi_tensor_nadam(params: List[Tensor],
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
-        assert all(p.is_cuda and mp.is_cuda and step.is_cuda 
+        assert all(p.is_cuda and mp.is_cuda and step.is_cuda
                    for p, mp, step in zip(params, mu_products, state_steps)), \
             "If capturable=True, params, mu_products, and state_steps must be CUDA tensors."
 
@@ -344,39 +348,6 @@ def _multi_tensor_nadam(params: List[Tensor],
 
         # update steps
         torch._foreach_add_(grouped_state_steps, 1)
-
-        capturable=True
-
-        if capturable:
-            # mus will be beta1 * (1 - 0.5 * 0.96 ** (step * momentum_decay))
-            exponent = torch._foreach_mul(grouped_state_steps, momentum_decay)
-            mus = torch._foreach_pow(0.96, exponent)
-            torch._foreach_mul_(mus, -0.5)
-            torch._foreach_add_(mus, 1)
-            torch._foreach_mul_(mus, beta1)
-
-            # mu_nexts will be beta1 * (1 - 0.5 * 0.96 ** ((step + 1) * momentum_decay))
-            torch.foreach_add_(exponent, momentum_decay)
-            mu_nexts = torch._foreach_pow(0.96, exponent)
-            torch._foreach_mul_(mu_nexts, -0.5)
-            torch._foreach_add_(mu_nexts, 1)
-            torch._foreach_mul_(mu_nexts, beta1)
-
-            # save peak memory as we don't need exponent anymore
-            del exponent
-
-            bias_correction2 = torch._foreach_pow(beta2, grouped_state_steps)
-            # foreach_sub doesn't allow a scalar as the first arg
-            torch._foreach_sub_(bias_correction2, 1)
-            torch._foreach_neg_(bias_correction2)
-        else:
-            bias_correction2 = [1 - beta2 ** _get_value(step) for step in grouped_state_steps]
-            mus = [beta1 * (1. - 0.5 * (0.96 ** (_get_value(step) * momentum_decay))) for step in grouped_state_steps]
-            mu_nexts = [beta1 * (1. - 0.5 * (0.96 ** ((_get_value(step) + 1) * momentum_decay)))
-                        for step in grouped_state_steps]
-
-        # update mu_products
-        torch._foreach_mul_(grouped_mu_products, mus)
 
         if weight_decay != 0 and not decoupled_weight_decay:
             grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
@@ -393,50 +364,78 @@ def _multi_tensor_nadam(params: List[Tensor],
         exp_avg_sq_sqrt = torch._foreach_sqrt(grouped_exp_avg_sqs)
 
         if capturable:
-            torch._foreach_sqrt_(bias_correction2)
-            bias_correction_sqrt = bias_correction2
+            # mus will be beta1 * (1 - 0.5 * 0.96 ** (step * momentum_decay))
+            exponent = torch._foreach_mul(grouped_state_steps, momentum_decay)
+            mus = torch._foreach_pow(0.96, exponent)
+            torch._foreach_mul_(mus, -0.5)
+            torch._foreach_add_(mus, 1.0)
+            torch._foreach_mul_(mus, beta1)
+
+            # mu_nexts will be beta1 * (1 - 0.5 * 0.96 ** ((step + 1) * momentum_decay))
+            torch._foreach_add_(exponent, momentum_decay)
+            mu_nexts = torch._foreach_pow(0.96, exponent)
+            torch._foreach_mul_(mu_nexts, -0.5)
+            torch._foreach_add_(mu_nexts, 1.0)
+            torch._foreach_mul_(mu_nexts, beta1)
+
+            # save peak memory as we don't need exponent anymore
+            del exponent
+
+            bias_correction_sqrt = torch._foreach_pow(beta2, grouped_state_steps)
+            # foreach_sub doesn't allow a scalar as the first arg
+            torch._foreach_sub_(bias_correction_sqrt, 1.0)
+            torch._foreach_neg_(bias_correction_sqrt)
+            torch._foreach_sqrt_(bias_correction_sqrt)
         else:
-            bias_correction_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
+            bias_correction_sqrt = [_dispatch_sqrt(1 - beta2 ** _get_value(step)) for step in grouped_state_steps]
+            mus = [beta1 * (1. - 0.5 * (0.96 ** (_get_value(step) * momentum_decay))) for step in grouped_state_steps]
+            mu_nexts = [beta1 * (1. - 0.5 * (0.96 ** ((_get_value(step) + 1) * momentum_decay)))
+                        for step in grouped_state_steps]
+
+        # update mu_products
+        torch._foreach_mul_(grouped_mu_products, mus)
 
         torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
         torch._foreach_add_(exp_avg_sq_sqrt, eps)
 
         # explicitly delete bias_correction refs to save memory
-        del bias_correction2, bias_correction_sqrt
+        del bias_correction_sqrt
 
         if capturable:
             # Build up the step_size multiplier for grad, reusing mus' memory
-            torch._foreach_sub(mus, 1.0)
+            torch._foreach_sub_(mus, 1.0)
             torch._foreach_mul_(mus, lr)
             # foreach_sub doesn't allow a scalar as the first arg
-            denom = torch._foreach_sub(mu_products, 1)
+            denom = torch._foreach_sub(grouped_mu_products, 1.0)
             torch._foreach_neg_(denom)
             torch._foreach_div_(mus, denom)
+            # - lr * (1 - mu) / (1 - mu_product)
+            step_size_grads = mus
             # explicitly delete denom to save memory
             del denom
-
-            step_size_grads = mus
-            torch._foreach_mul_(step_size_grads, grouped_grads)
-            numerator = step_size_grads
 
             # Build up the step_size multiplier for exp_avg, reusing mu_nexts' memory
+            denom = torch._foreach_mul(grouped_mu_products, mu_nexts)
             torch._foreach_mul_(mu_nexts, lr)
-            denom = torch._foreach_mul(mu_products, mu_nexts)
             # foreach_sub doesn't allow a scalar as the first arg, but it's okay because
             # we need a negative here anyway
-            torch._foreach_sub(denom, 1.0)
+            torch._foreach_sub_(denom, 1.0)
             torch._foreach_div_(mu_nexts, denom)
+            # - lr * mu_next / (1 - mu_product * mu_next)
+            step_size_expavg = mu_nexts
             # explicitly delete denom to save memory
             del denom
 
-            step_size_expavg = mu_nexts
+            # we cannot inplace into step_size_grads cuz it is a list of ScalarTensors
+            # and mul'ing with grouped_grads will result in a list of bigger Tensors
+            numerator = torch._foreach_mul(step_size_grads, grouped_grads)
             torch._foreach_addcmul_(numerator, step_size_expavg, grouped_exp_avgs)
-            
+
             # finally, update params
             torch._foreach_addcdiv_(grouped_params, numerator, exp_avg_sq_sqrt)
         else:
             step_size_grads = _stack_if_compiling([(lr * (1. - mu) / (1. - _get_value(mu_product))) * -1
-                                                for mu_product, mu in zip(grouped_mu_products, mus)])
+                                                   for mu_product, mu in zip(grouped_mu_products, mus)])
             step_size_expavg = _stack_if_compiling([(lr * mu_next / (1. - _get_value(mu_product) * mu_next)) * -1
                                                     for mu_product, mu_next in zip(grouped_mu_products, mu_nexts)])
 
