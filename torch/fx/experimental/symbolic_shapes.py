@@ -2974,8 +2974,8 @@ class ShapeEnv:
                 base, divisor = atom.args
                 if isinstance(divisor, FloorDiv):
                     base1, divisor1 = divisor.args
-                    if self.replace(base % divisor) in self.divisible and \
-                            base == base1 and self.replace(base1 % divisor1) in self.divisible:
+                    if self.replace(Mod(base, divisor)) in self.divisible and \
+                            base == base1 and self.replace(Mod(base1, divisor1)) in self.divisible:
                         div_replacements[atom] = divisor1
             expr = expr.xreplace(div_replacements)
             expr = safe_expand(expr)
@@ -2985,7 +2985,7 @@ class ShapeEnv:
             rationals = expr.atoms(sympy.Rational).difference(expr.atoms(sympy.Integer))
             for fd in expr.atoms(FloorDiv):
                 base, divisor = fd.args
-                if self.replace(base % divisor) in self.divisible:
+                if self.replace(Mod(base, divisor)) in self.divisible:
                     div_replacements[fd] = base / divisor
             new_expr = expr.xreplace(div_replacements)
             new_expr = safe_expand(new_expr)

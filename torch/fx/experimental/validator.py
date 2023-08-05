@@ -329,11 +329,11 @@ try:
 
         def constant(self, value: Any, dtype: torch.dtype) -> z3.ExprRef:
             if dtype is torch.int64:
-                return z3.IntVal(value)
+                return z3.IntVal(int(value))
             if dtype is torch.double:
-                return z3.RealVal(value)
+                return z3.RealVal(float(value))
             if dtype is torch.bool:
-                return z3.BoolVal(value)
+                return z3.BoolVal(bool(value))
             raise ValueError(f"unsupported dtype (SympyToZ3): {dtype}")
 
         def truediv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
@@ -385,6 +385,8 @@ try:
     # happens: target is TRUE, but source is FALSE.
     class TranslationValidator:
         def __init__(self) -> None:
+            log.debug("new instance")
+
             # Mapping of SymPy symbols to Z3 variables.
             self.symbols: Dict[sympy.Symbol, z3.ExprRef] = {}
 
@@ -411,6 +413,8 @@ try:
         def add_var(self, symbol: sympy.Symbol, type: Type) -> z3.ExprRef:
             if symbol in self.symbols:
                 return self.symbols[symbol]
+
+            log.debug("new variable: %s (%s)", symbol.name, type.__name__)
 
             if type is int:
                 var = z3.Int(symbol.name)
@@ -444,11 +448,16 @@ try:
             return z3expr
 
         def add_source_expr(self, e: z3.BoolRef) -> None:
+            if e not in self._source_exprs:
+                log.debug("add source guard: %s", z3str(e))
             self._source_exprs.add(e)
 
         def add_target_expr(self, e: sympy.Expr) -> None:
             self._check_freesymbols(e)
-            self._target_exprs.add(self.to_z3_boolean_expr(e))
+            z3expr = self.to_z3_boolean_expr(e)
+            if e not in self._target_exprs:
+                log.debug("add target guard: %s", z3str(z3expr))
+            self._target_exprs.add(z3expr)
 
         def add_assertion(self, e: Union[z3.BoolRef, sympy.Basic]) -> None:
             if isinstance(e, sympy.Basic):
@@ -457,6 +466,8 @@ try:
             else:
                 ref = e
             assert isinstance(ref, z3.BoolRef)
+            if ref not in self._assertions:
+                log.debug("add assertion: %s", z3str(ref))
             self._assertions.add(ref)
 
         def validate(self) -> None:
