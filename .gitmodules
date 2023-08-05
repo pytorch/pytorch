@@ -34,7 +34,7 @@
     ignore = dirty
     path = third_party/gloo
     url = https://github.com/ROCmSoftwarePlatform/gloo
-    branch = rocm5.6_internal_testing
+    branch = rocm6.0_internal_testing
 [submodule "third_party/NNPACK_deps/pthreadpool"]
     ignore = dirty
     path = third_party/pthreadpool
