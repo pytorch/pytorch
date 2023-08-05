@@ -223,7 +223,7 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        assert len(args) <= 2
+        assert len(args) <= 3
         out = decomp_fn(*args, **kwargs)
         validate_ir(out)
         return out
@@ -4476,7 +4476,7 @@ register_foreach_pointwise(aten._foreach_maximum.List, maximum)
 register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
-register_foreach_pointwise(aten._foreach_clamp, lambda v, min, max: ops.maximum(min, ops.minimum(max, v)))
+register_foreach_pointwise(aten._foreach_clamp, aten.clamp)
 
 
 def register_inplace(aten_op, outplace_op):
