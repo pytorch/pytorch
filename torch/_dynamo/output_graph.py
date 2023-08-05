@@ -628,7 +628,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 and source.local_name in self.code_options["co_varnames"]
             ):
                 # We are looking for methods whose self is a guarded nn module variable
-                self.guarded_nn_module_var_index = self.code_options["co_varnames"].index(source.local_name)
+                self.guarded_nn_module_var_index = self.code_options[
+                    "co_varnames"
+                ].index(source.local_name)
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
