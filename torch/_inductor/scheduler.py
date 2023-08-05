@@ -886,6 +886,8 @@ class Scheduler:
         # for debug attribution
         self.origin_to_index = {}
 
+        log.info("Number of scheduler nodes after fusion %d", len(self.nodes))
+
     def debug_draw_graph(self):
         """Generate an image of the graph for debugging"""
         if os.environ.get("INDUCTOR_WRITE_SCHEDULER_GRAPH", None) == "1":
