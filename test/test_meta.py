@@ -687,9 +687,6 @@ meta_function_skips = {
     torch.linalg.cond : {c128, c64, f32, f64},
     torch.linalg.vecdot : {bf16, f64, f32, f16},
     torch.empty : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
-    # This fails for arguments dispatched to grid_sampler_3d, but succeeds
-    # for grid_sampler_2d, so we can't just xfail it
-    torch.nn.functional.grid_sample : {f64, f32},
     torch.Tensor.addbmm_: {bf16, c128, c64, f32, f64, i16, i32, i64, i8, u8},
 }
 
@@ -732,9 +729,6 @@ meta_function_device_skips['cuda'] = {
     torch.nn.functional.interpolate: {f16},
     torch.nn.functional.nll_loss: {f16},
     torch.svd: {f32, f64},
-    # This fails for arguments dispatched to grid_sampler_3d, but succeeds
-    # for grid_sampler_2d, so we can't just xfail it
-    torch.nn.functional.grid_sample : {f16},
 }
 
 # This is a __torch_function__ mode that, when enabled, interposes every
@@ -818,7 +812,6 @@ meta_dispatch_expected_failures = {
     aten.bincount.default : {i64, i8, i32, i16, u8},
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.frexp.Tensor : {bf16, f32, f16, f64},
-    aten.grid_sampler_3d.default : {f32, f64},
     aten.histc.default : {bf16, f32, f64},
     aten.histc.out : {bf16, f32, f64},
     aten.histogram.bin_ct : {f32, f64},
@@ -870,7 +863,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten._use_cudnn_ctc_loss.Tensor: {f32, f64},  # aten::_use_cudnn_ctc_loss.Tensor
     aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
     aten.geqrf.default: {f32, f64},  # aten::geqrf
-    aten.grid_sampler_3d.default: {f16},  # aten::grid_sampler_3d
     aten.histc.default: {i16, i32, i64, i8},  # aten::histc
     aten.histc.out: {i16, i32, i64, i8},  # aten::histc.out
     aten.kthvalue.default: {f16},  # aten::kthvalue.values
