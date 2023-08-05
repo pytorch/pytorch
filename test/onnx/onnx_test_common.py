@@ -82,6 +82,36 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
     return verification.verify(*args, options=options, **kwargs)
 
 
+def assert_dynamic_shapes(export_output: torch.onnx.ExportOutput, dynamic_shapes: bool):
+    """Assert whether the exported model has dynamic shapes or not.
+
+    Args:
+        export_output (torch.onnx.ExportOutput): The output of torch.onnx.dynamo_export.
+        dynamic_shapes (bool): Whether the exported model has dynamic shapes or not.
+            When True, raises if graph inputs don't have at least one dynamic dimension
+            When False, raises if graph inputs have at least one dynamic dimension.
+
+    Raises:
+        AssertionError: If the exported model has dynamic shapes and dynamic_shapes is False and vice-versa.
+    """
+
+    if dynamic_shapes is None:
+        return
+
+    model_proto = export_output.model_proto
+    # Process graph inputs
+    dynamic_inputs = []
+    for inp in model_proto.graph.input:
+        dynamic_inputs += [
+            dim
+            for dim in inp.type.tensor_type.shape.dim
+            if dim.dim_value == 0 and dim.dim_param != ""
+        ]
+    assert dynamic_shapes == (
+        len(dynamic_inputs) > 0
+    ), "Dynamic shape check failed for graph inputs"
+
+
 def parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
     """Combine class name with the parameterized arguments.
 
@@ -176,6 +206,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         self,
         model: _ModelType,
         input_args: Sequence[_InputArgsType],
+        *,
         input_kwargs: Optional[Mapping[str, _InputArgsType]] = None,
         rtol: Optional[float] = 1e-3,
         atol: Optional[float] = 1e-7,
@@ -189,6 +220,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 ]
             ]
         ] = None,
+        skip_dynamic_shapes_check: bool = False,
     ):
         """Compare the results of PyTorch model with exported ONNX model
 
@@ -210,6 +242,9 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 even if the following element is not provided.
                 For example,
                 additional_test_inputs = [((args1, args2), {"kwargs":1}), ((args1,),), ((), {"kwargs":1})]
+            skip_dynamic_shapes_check: Whether to skip dynamic shape check. Defaults to False.
+                Must be used when tests do not produce dynamic shapes even when dynamic shape feature is enabled.
+                This is needed because Torch Dynamo uses the dynamic_shapes flag as a hint, only.
 
         """
 
@@ -239,6 +274,9 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 dynamic_shapes=self.dynamic_shapes,
             ),
         )
+
+        if not skip_dynamic_shapes_check:
+            assert_dynamic_shapes(export_output, self.dynamic_shapes)
 
         if verbose:
             export_output.diagnostic_context.dump(
