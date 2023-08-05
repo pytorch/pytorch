@@ -1383,6 +1383,34 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         #     tensor = torch.tensor(ndarray, dtype=torch.long)
         self.assertEqual(cnts.frame_count, 2)
 
+    @torch._dynamo.config.patch(numpy_ndarray_as_tensor=True)
+    @requires_numpy_pytorch_interop
+    def test_numpy_with_builtin_type(self):
+        x = np.random.rand(5)
+
+        def fn(x):
+            return (x * 5).astype(bool).astype(float).astype(int) + 8
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+        r = opt_fn(x)
+        self.assertEqual(r.dtype, int)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_with_builtin_type(self):
+        x = torch.randn(5)
+
+        def fn(x):
+            return (x * 5).to(bool).to(float).to(int) + 8
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+        r = opt_fn(x)
+        self.assertEqual(r.dtype, torch.int64)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_inplace_view_on_graph_input(self):
         # graph break when calling methods with inplace_view tag on graph input
         func_args_map = {
@@ -4610,6 +4638,43 @@ def fn():
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
 
+    def test_patched_builtin_functions(self):
+        import builtins
+
+        # Cache the original builtin function ids
+        torch._dynamo.allowed_functions._builtin_function_ids()
+
+        class MyClass:
+            pass
+
+        builtin_isinstance = builtins.isinstance
+
+        def patched_isinstance(obj, classinfo) -> bool:
+            if builtin_isinstance(obj, MyClass):
+                return False
+            else:
+                return builtin_isinstance(obj, classinfo)
+
+        def fn(x, y):
+            if isinstance(y, MyClass):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.ones(2, 3)
+        y = MyClass()
+
+        try:
+            ref = fn(x, y)
+            # Monkey patch builtin function
+            builtins.isinstance = patched_isinstance
+            opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+            res = opt_fn(x, y)
+            self.assertTrue(same(ref, x + 1))
+            self.assertTrue(same(res, x - 1))
+        finally:
+            builtins.isinstance = builtin_isinstance
+
     # specifically test for tensor.attribute -> torch.something()
     def test_real_imag_tensor_attribute(self):
         def fn(x, y):
@@ -5543,7 +5608,8 @@ def fn():
 
         @contextlib.contextmanager
         def global_context_capture_fn(frame_summary):
-            seen_frames.append(frame_summary)
+            if frame_summary is not None:
+                seen_frames.append(frame_summary)
             yield
 
         with mock.patch(
@@ -5578,7 +5644,8 @@ def fn():
 
         @contextlib.contextmanager
         def global_context_capture_fn(frame_summary):
-            seen_frames.append(frame_summary)
+            if frame_summary is not None:
+                seen_frames.append(frame_summary)
             yield
 
         with mock.patch(
@@ -6531,6 +6598,29 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         # Nothing to compile here
         self.assertEqual(counter.frame_count, 0)
+
+    def test_inline_closure_not_loaded_by_parent(self):
+        def outer(a):
+            return a + 1
+
+        def indirect(x):
+            return direct(x)
+
+        def direct(x):
+            def deep2(c):
+                return outer(c)
+
+            def deep(c):
+                return deep2(c)
+
+            return deep(x)
+
+        x = torch.randn(3)
+        eager = indirect(x)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(indirect)(x)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
 
 
 class TestTracer(JitTestCase):

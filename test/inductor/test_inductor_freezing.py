@@ -32,6 +32,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
+    skipIfRocm,
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
 )
@@ -297,6 +298,12 @@ class OptimizeForInferenceTemplate(TestCase):
             code[0],
         )
 
+        # we unfuse the conv bias, but it should only have one constant in the kernel
+        if self.device == "cuda":
+            FileCheck().check(".run(").check_same("constant").check_not(
+                "constant"
+            ).check_next("return").run(code[0])
+
         self.assertEqual(out_optimized_for_infernece, out_eager)
 
     def test_param_deallocated(self):
@@ -371,6 +378,22 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod = Model(groups).to(self.device).eval()
                 mod_eager = mod(x)
                 self.assertEqual(foo(mod, x), mod_eager)
+
+    @skipIfRocm
+    def test_cpp_wrapper(self):
+        mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
+
+        x = torch.rand(3, 3, 32, 32).to(self.device)
+
+        @torch.compile(options={"cpp_wrapper": True})
+        def foo(mod, x):
+            return mod(x)
+
+        out_eager = mod(x)
+
+        with torch.no_grad():
+            self.assertEqual(foo(mod, x), out_eager)
+            self.assertEqual(foo(mod, x), out_eager)
 
     def test_conv_layout_convert_with_view(self):
         class Model(torch.nn.Module):
