@@ -332,4 +332,5 @@ if __name__ == '__main__':
         top_env['implementations'].append(IMPLEMENTATION_TEMPLATE.substitute(env))
         top_env['cases'].append(CASE_TEMPLATE.substitute(env))
         key += 1
+
     write(os.path.join(args.install_dir, args.output_prefix + "aten_op.h"), OP_TEMPLATE.substitute(top_env))

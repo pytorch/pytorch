@@ -4476,6 +4476,7 @@ register_foreach_pointwise(aten._foreach_maximum.List, maximum)
 register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
+register_foreach_pointwise(aten._foreach_clamp, lambda v, min, max: ops.maximum(min, ops.minimum(max, v)))
 
 
 def register_inplace(aten_op, outplace_op):
