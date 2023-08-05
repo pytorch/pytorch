@@ -308,7 +308,7 @@ class TestSparseSemiStructured(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
-    def test_linear_cutlass(self, device, dtype):
+    def test_linear_cutlass(self, device, dtype, backend):
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
 
         def run_test(batch_shape, m, n, k, device, dtype, dtype_out, add_bias, activation, rtol, atol):
@@ -354,7 +354,7 @@ class TestSparseSemiStructured(TestCase):
     @unittest.skipIf(not has_triton(), "Test needs triton and recent GPU arch")
     @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
-    def test_conversions(self, device, dtype):
+    def test_conversions(self, device, dtype, backend):
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
 
         def run_test(r, c, device, dtype):
@@ -383,7 +383,7 @@ class TestSparseSemiStructured(TestCase):
     @unittest.skipIf(not has_triton(), "Test needs triton and recent GPU arch")
     @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
-    def test_conversions_all_patterns(self, device, dtype):
+    def test_conversions_all_patterns(self, device, dtype, backend):
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         r, c = 32, 128
 
