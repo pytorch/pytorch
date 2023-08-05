@@ -313,7 +313,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
         self.torch_function_enabled = torch._C._is_torch_function_enabled()
-        self.guarded_nn_module_var_name = None
+        self.guarded_nn_module_var_index = None
 
         # We save the global torch state here to be restored in case of graph
         # breaks. The relevant issue is seen here
@@ -628,7 +628,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 and source.local_name in self.code_options["co_varnames"]
             ):
                 # We are looking for methods whose self is a guarded nn module variable
-                self.guarded_nn_module_var_name = source.local_name
+                self.guarded_nn_module_var_index = self.code_options["co_varnames"].index(source.local_name)
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):

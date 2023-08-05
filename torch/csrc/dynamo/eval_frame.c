@@ -187,7 +187,7 @@ static size_t dynamic_frame_state_extra_index = -2;
 // This stores the arg keyword name that corresponds to the nn module with
 // NN_MODULE guard. We could save it in the cache_entry_extra_indes, but we
 // separate it out to have readable code.
-static size_t guarded_nn_module_var_name_extra_index = -3;
+static size_t guarded_nn_module_var_index_extra_index = -3;
 static void destroy_frame_state(PyObject* code);
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
@@ -309,18 +309,18 @@ inline static const char* name(THP_EVAL_API_FRAME_OBJECT* frame) {
   return PyUnicode_AsUTF8(frame->f_code->co_name);
 }
 
-inline static PyObject* get_guarded_nn_module_var_name(PyCodeObject* code) {
-  PyObject* var_name = NULL;
-  _PyCode_GetExtra((PyObject*)code, guarded_nn_module_var_name_extra_index, (void*)&var_name);
-  return var_name;
+inline static PyObject* get_guarded_nn_module_var_index(PyCodeObject* code) {
+  PyObject* var_index = NULL;
+  _PyCode_GetExtra((PyObject*)code, guarded_nn_module_var_index_extra_index, (void*)&var_index);
+  return var_index;
 }
 
-inline static void set_guarded_nn_module_var_name(PyCodeObject* code, PyObject* nn_module_var_name) {
-  PyObject* var_name = nn_module_var_name;
-  if (nn_module_var_name == Py_None) {
-    var_name = NULL;
+inline static void set_guarded_nn_module_var_index(PyCodeObject* code, PyObject* nn_module_var_index) {
+  PyObject* var_index = nn_module_var_index;
+  if (nn_module_var_index == Py_None) {
+    var_index = NULL;
   }
-  _PyCode_SetExtra((PyObject*)code, guarded_nn_module_var_name_extra_index, var_name);
+  _PyCode_SetExtra((PyObject*)code, guarded_nn_module_var_index_extra_index, var_index);
 }
 
 inline static bool is_nn_module_instance(PyObject* obj) {
@@ -340,60 +340,11 @@ inline static bool is_nn_module_instance(PyObject* obj) {
 }
 
 
-inline static bool is_dunder_method(THP_EVAL_API_FRAME_OBJECT* frame) {
-  const char* frame_name = name(frame);
-  return sizeof(frame_name) >= 2 && frame_name[0] == '_' && frame_name[1] == '_';
-}
+inline static PyObject* get_nn_module_if_frame_is_method_of_nn_module(THP_EVAL_API_FRAME_OBJECT* frame, PyObject* var_index) {
+  // Equivalent of isinstance(f_locals[var_index], nn.Module).
 
-inline static PyObject* get_nn_module_if_frame_is_method_of_nn_module(THP_EVAL_API_FRAME_OBJECT* frame, PyObject* var_name) {
-  // Essentially returns isinstance(f_locals["self"], nn.Module).
-  // There are some caveats here
-  // 1) We rely on name self. It is possible that a method does not use self keyword.
-  // 2) It is possible that a function is incorrectly detected here as nn module
-  // method because the function has a self keyword which happens to be a nn
-  // module instance.
-  // For both of these cases, we will still be functionally correct. Our cache
-  // will still work, just that it might have more collisions than necessary for
-  // the above cases.
-
-  // TODO - Remove this check once we send the var name from the convert_frame.
-  if (is_dunder_method(frame)) {
-    // Skip for dunder methods like __init__ and __getattribute__. The self
-    // object might not be in the full initialized state to do isinstance(self,
-    // nn.Module).
-    return NULL;
-  }
-
-  Py_ssize_t nlocals = frame->f_code->co_nlocals;
-  PyObject* co_varnames = PyCode_GetVarnames(frame->f_code);
-  if (nlocals == 0 || PyTuple_Size(co_varnames) == 0) {
-    return NULL;
-  }
-
-  // Find the index of the first local variable named "self". Because of
-  // continuation on graph breaks, we may have self at non-zero location on the
-  // resumed frames.
-
-  // TODO - Maybe return the index directly instead of guarded_nn_module_var_name and directly jump there.
-  Py_ssize_t self_index = 0;
-  bool found = false;
-  for (Py_ssize_t i = 0; i < nlocals; i++) {
-    PyObject* cur_var = PyTuple_GET_ITEM(co_varnames, i);
-    DEBUG_CACHE(" cur_var %s", PyUnicode_AsUTF8(cur_var));
-    if (cur_var != NULL) {
-      if (PyUnicode_Compare(cur_var, var_name) == 0) {
-        self_index = i;
-        DEBUG_CACHE("Found cur_var %s", PyUnicode_AsUTF8(cur_var));
-        found = true;
-        break;
-      }
-    }
-  }
-
-  if (!found) {
-    return NULL;
-  }
-
+  // TODO - raise assertions.
+  size_t index = PyLong_AsSize_t(var_index);
 
   #if IS_PYTHON_3_11_PLUS
   PyObject** fastlocals = frame->localsplus;
@@ -401,7 +352,7 @@ inline static PyObject* get_nn_module_if_frame_is_method_of_nn_module(THP_EVAL_A
   PyObject** fastlocals = frame->f_localsplus;
   #endif
 
-  PyObject* self_object = fastlocals[self_index];
+  PyObject* self_object = fastlocals[index];
   DEBUG_CACHE("self object %p", self_object);
   if (self_object == NULL) {
     return NULL;
@@ -655,15 +606,15 @@ inline static void set_frame_state(PyCodeObject* code, PyObject* extra, PyObject
 inline static void set_extra_entries(THP_EVAL_API_FRAME_OBJECT* frame, PyObject* callback_result, CacheEntry* cache_entry, PyObject* frame_state) {
   // Set name for arg corresponding to the nn module.
   PyCodeObject* code = frame->f_code;
-  PyObject* nn_module_var_name = PyObject_GetAttrString(callback_result, "guarded_nn_module_var_name");
-  NULL_CHECK(nn_module_var_name);
-  set_guarded_nn_module_var_name(code, nn_module_var_name);
+  PyObject* nn_module_var_index = PyObject_GetAttrString(callback_result, "guarded_nn_module_var_index");
+  NULL_CHECK(nn_module_var_index);
+  set_guarded_nn_module_var_index(code, nn_module_var_index);
 
   PyObject* maybe_nn_module = NULL;
-  if (nn_module_var_name != Py_None && nn_module_var_name != NULL) {
-    maybe_nn_module = get_nn_module_if_frame_is_method_of_nn_module(frame, nn_module_var_name);
+  if (nn_module_var_index != Py_None && nn_module_var_index != NULL) {
+    maybe_nn_module = get_nn_module_if_frame_is_method_of_nn_module(frame, nn_module_var_index);
     if (maybe_nn_module == NULL) {
-      DEBUG_CACHE("Found a null module at var name %s", PyUnicode_AsUTF8(nn_module_var_name));
+      DEBUG_CACHE("Found a null module at var index %s", PyLong_AsSize_t(nn_module_var_index));
     }
   }
   set_cache_entry(code, cache_entry, maybe_nn_module);
@@ -973,10 +924,10 @@ static PyObject* _custom_eval_frame(
   // This will be used by get/set_cache_entry and get/set_frame_state.
   eval_frame_callback_set(Py_None);
   DEBUG_CHECK(PyDict_CheckExact(frame->f_locals));
-  PyObject* nn_module_var_name = get_guarded_nn_module_var_name(frame->f_code);
+  PyObject* nn_module_var_index = get_guarded_nn_module_var_index(frame->f_code);
   PyObject* maybe_nn_module = NULL;
-  if (nn_module_var_name != NULL) {
-    maybe_nn_module = get_nn_module_if_frame_is_method_of_nn_module(frame, nn_module_var_name);
+  if (nn_module_var_index != NULL) {
+    maybe_nn_module = get_nn_module_if_frame_is_method_of_nn_module(frame, nn_module_var_index);
   }
 
   CacheEntry* extra = get_cache_entry(frame->f_code, maybe_nn_module);
@@ -1261,8 +1212,8 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
     return NULL;
   }
 
-  guarded_nn_module_var_name_extra_index = _PyEval_RequestCodeExtraIndex(ignored);
-  if (guarded_nn_module_var_name_extra_index < 0) {
+  guarded_nn_module_var_index_extra_index = _PyEval_RequestCodeExtraIndex(ignored);
+  if (guarded_nn_module_var_index_extra_index < 0) {
     PyErr_SetString(PyExc_RuntimeError,
                     "dynamo: unable to register dynamic_frame_state extra index");
     return NULL;

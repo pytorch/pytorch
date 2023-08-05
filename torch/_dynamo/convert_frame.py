@@ -500,7 +500,7 @@ def _compile(
         )
 
         guarded_code = GuardedCode(
-            out_code, check_fn.check_fn, output.guarded_nn_module_var_name
+            out_code, check_fn.check_fn, output.guarded_nn_module_var_index
         )
 
         if guards_log.isEnabledFor(logging.DEBUG):
