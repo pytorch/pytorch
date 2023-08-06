@@ -166,6 +166,8 @@ void initJITBindings(PyObject* module) {
   auto jit = m.def_submodule("_jit");
 
   // This is a static object, so we must leak the Python object
+  // "release()" is used here to preserve 1 refcount on the
+  // object, preventing it from ever being de-allocated by CPython.
   static py::handle exc =
       py::exception<JITException>(m, "JITException").release();
 
