@@ -1180,7 +1180,7 @@ def triangular_solve_meta(
         solution = torch.empty_like(self)
         cloned_coefficient = self.new_empty([0])
     else:
-        torch._check(False, "triangular_solve: Got an unexpected layout.")
+        torch._check(False, lambda: "triangular_solve: Got an unexpected layout.")
     return solution, cloned_coefficient
 
 
