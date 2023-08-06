@@ -5,28 +5,9 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
 
-// #include <ATen/native/UnaryOps.h>
-// #include <ATen/native/mps/UnaryConstants.h>
-// #ifndef AT_PER_OPERATOR_HEADERS
-// #include <ATen/Functions.h>
-// #include <ATen/NativeFunctions.h>
-// #else
 #include <ATen/ops/lgamma_native.h>
 #include <ATen/ops/digamma_native.h>
-// #endif
-
-
-// namespace at::meta {
-//   /* macro expands to: upsample_nearest1d::upsample_nearest1d( */
-//   TORCH_META_FUNC(lgamma_out) (const Tensor& self) {
-//     auto outputSize = self.sizes();
-
-//     auto options = self.options().dtype(at::kFloat);
-
-//     set_output(outputSize, options);
-//   }
-// }
-
+#include <ATen/ops/polygamma_native.h>
 
 namespace at::native {
 namespace mps {
@@ -288,6 +269,120 @@ kernel void digamma (device {0} *input [[buffer(0)]],
     }}
 }}
 
+constant float PI_SQUARED = 9.86960440108935861883449099987615;
+
+constant float MACHEP = 1.11022302462515654042E-16;
+
+constant float A[] = {{
+      12.0,
+      -720.0,
+      30240.0,
+      -1209600.0,
+      47900160.0,
+      -1.8924375803183791606e9, /*1.307674368e12/691*/
+      7.47242496e10,
+      -2.950130727918164224e12, /*1.067062284288e16/3617*/
+      1.1646782814350067249e14, /*5.109094217170944e18/43867*/
+      -4.5979787224074726105e15, /*8.028576626982912e20/174611*/
+      1.8152105401943546773e17, /*1.5511210043330985984e23/854513*/
+      -7.1661652561756670113e18 /*1.6938241367317436694528e27/236364091*/
+  }};
+
+
+float calc_zeta(float x, float q) {{
+
+  if (x == 1) {{
+    return INFINITY;
+  }}
+
+  if (x < 1) {{
+    return NAN;
+  }}
+
+  if (q <= 0) {{
+    if (q == trunc(q)) {{
+      return INFINITY;
+    }}
+    if (x != trunc(x)) {{
+      return NAN;
+    }}
+  }}
+
+  float s = pow(q, -x);
+  float a = q;
+  int i = 0;
+  float b = 0.0;
+  while ((i < 9) || (a <= 9.0)) {{
+    i += 1;
+    a += 1;
+    b = pow(a, -x);
+    s += b;
+    if ((-MACHEP * s < b) && (b < MACHEP * s)) {{
+      return s;
+    }}
+  }};
+
+  float w = a;
+  s += b * w / (x - 1.0);
+  s -= 0.5 * b;
+  a = 1.0;
+  float t;
+  float k = 0.0;
+  for (int i = 0; i < 12; i++) {{
+    a *= x + k;
+    b /= w;
+    t = a * b / A[i];
+    s += t;
+    t = fabs(t / s);
+    if (t < MACHEP) {{
+      return s;
+    }}
+    k += 1.0;
+    a *= x + k;
+    b /= w;
+    k += 1.0;
+  }}
+  return s;
+}}
+
+constant float one_third = 0.033333333333333333333333333333333333333;
+constant float one_fortysecond = 0.023809523809523809523809523809523809523809;
+constant float one_sixth = 0.1666666666666666666666666666666666666666666667;
+float calc_trigamma(float x) {{
+  float sign = +1;
+  float result = 0;
+  if (x < 0.5) {{
+    sign = -1;
+    float sin_pi_x = sin(PI * x);
+    result -= (PI_SQUARED) / (sin_pi_x * sin_pi_x);
+    x = 1 - x;
+  }}
+  for (int i = 0; i < 6; ++i) {{
+    result += 1 / (x * x);
+    x += 1;
+  }}
+  const float ixx = 1 / (x * x);
+  result += (1 + 1 / (2 * x) + ixx * (one_sixth - ixx * (one_third - ixx * one_fortysecond))) / x;
+  return sign * result;
+}}
+
+kernel void trigamma(device {0} *input [[buffer(0)]],
+                     device {1} *output [[buffer(1)]],
+                     uint id [[thread_position_in_grid]])
+{{
+    output[id] = calc_trigamma(static_cast<float>(input[id]));
+}}
+
+kernel void polygamma(device {0} *input [[buffer(0)]],
+                     device {1} *output [[buffer(1)]],
+                     constant int64_t& n [[buffer(2)]],
+                     uint id [[thread_position_in_grid]]) {{
+  // already blocked if n <= 1
+  float one = 1;
+  output[id] = ((n % 2) ? one : -one) *
+                exp(LogGamma(static_cast<float>(n) + one)) *
+                calc_zeta(static_cast<float>(n + 1), static_cast<float>(input[id]));
+}}
 
 
 )METAL";
@@ -435,6 +530,74 @@ TORCH_IMPL_FUNC(digamma_out_mps)(const Tensor& self, const Tensor& output_) {
       [computeEncoder setBuffer:selfBuf offset:self.storage_offset() * self.element_size() atIndex:0];
       [computeEncoder setBuffer:outBuf offset:output.storage_offset() * output.element_size() atIndex:1];
 
+
+      mps::dispatch1DJob(computeEncoder, cplState, static_cast<uint32_t>(length));
+
+      getMPSProfiler().endProfileKernel(cplState);
+    });
+  }
+  if (needs_output_copy) {
+    output_.copy_(output);
+  }
+}
+
+TORCH_IMPL_FUNC(polygamma_out_mps)(const int64_t order, const Tensor& self, const Tensor& output_) {
+
+  TORCH_CHECK(self.scalar_type() != ScalarType::Double, "MPS does not support polygamma_out op with scalar type: Double");
+  TORCH_CHECK(order >= 0, "Polygamma is implemented only for nonnegative real numbers");
+
+  Tensor output = output_;
+  bool needs_output_copy = false;
+  uint32_t length = output.numel();
+  if (length == 0) {
+    return;
+  }
+
+  if (!self.is_contiguous()) {
+      output = output.contiguous();
+      needs_output_copy = true;
+    }
+
+  using namespace mps;
+
+  std::string input_type = scalarToMetalTypeString(self.scalar_type());
+  std::string output_type = scalarToMetalTypeString(output.scalar_type());
+  std::string func_name;
+
+  if (order == 0){
+    func_name = "digamma";
+  }
+  else if (order == 1){
+    func_name = "trigamma";
+  }
+  else {
+    func_name = "polygamma";
+  }
+
+  @autoreleasepool {
+
+    id<MTLDevice> device = MPSDevice::getInstance()->device();
+
+    id<MTLComputePipelineState> cplState = getCPLState(device,
+                                                        input_type,
+                                                        output_type,
+                                                        func_name);
+
+    MPSStream* mpsStream = getCurrentMPSStream();
+    dispatch_sync(mpsStream->queue(), ^() {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      id<MTLBuffer> outBuf = getMTLBufferStorage(output);
+      id<MTLBuffer> selfBuf = getMTLBufferStorage(self);
+
+      getMPSProfiler().beginProfileKernel(cplState, func_name, {self});
+
+      [computeEncoder setComputePipelineState:cplState];
+      [computeEncoder setBuffer:selfBuf offset:self.storage_offset() * self.element_size() atIndex:0];
+      [computeEncoder setBuffer:outBuf offset:output.storage_offset() * output.element_size() atIndex:1];
+
+      if (func_name == "polygamma") {
+        [computeEncoder setBytes:&order length:sizeof(order) atIndex:2];
+      }
 
       mps::dispatch1DJob(computeEncoder, cplState, static_cast<uint32_t>(length));
 

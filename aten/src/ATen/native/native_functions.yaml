@@ -9151,6 +9151,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: polygamma_out
+    MPS: polygamma_out_mps
   tags: pointwise
 
 - func: polygamma(int n, Tensor self) -> Tensor
