@@ -10944,7 +10944,11 @@
   dispatch:
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
-  autogen: searchsorted.Scalar_out
+
+- func: searchsorted.Scalar_out(Tensor sorted_sequence, Scalar self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: searchsorted_out_cpu
+    CUDA: searchsorted_out_cuda
 
 - func: _convert_indices_from_coo_to_csr(Tensor self, int size, *, bool out_int32=False) -> Tensor
   structured_delegate: _convert_indices_from_coo_to_csr.out
