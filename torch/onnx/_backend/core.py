@@ -232,8 +232,7 @@ def _replace_to_copy_with_to(fx_module: torch.fx.GraphModule) -> None:
 
 
 def _create_onnx_session(onnx_proto, eps: Tuple[str, ...], session_options):
-    # TODO(wechi): Add more EPs per PyTorch device types.
-    # TODO(wechi): enable external allocators.
+    # TODO(wschin): enable external allocators.
     return onnxruntime.InferenceSession(
         onnx_proto, providers=eps, sess_options=session_options
     )
@@ -548,7 +547,7 @@ class OrtBackend:
             torch.onnx._internal.exporter.ResolvedExportOptions(onnx_exporter_options)
         )
 
-        # TODO(wechi): This line must generate result identical to the call of
+        # TODO(wschin): This line must generate result identical to the call of
         # _create_onnx_supports_op_overload_table(...) inside
         # create_onnx_friendly_decomposition_table(...) in
         # torch/onnx/_internal/fx/decomposition_table.py.
@@ -563,7 +562,7 @@ class OrtBackend:
         }
 
         self._supported_ops = OrtOperatorSupport(support_dict, extra_support_dict)
-        # TODO: this is a naive implementation of cache without proper guard
+        # TODO(wschin): this is a naive implementation of cache without proper guard
         self._partitioner_cache: Dict[torch.fx.GraphModule, torch.fx.GraphModule] = {}
         # Conceptually, this filed is a 2-layer dictionary
         #   GraphModule 0
@@ -614,7 +613,7 @@ class OrtBackend:
             # It's first time seeing such as graph. Let's make a new session
             # (type: onnxruntime.InferenceSession) for it.
 
-            # TODO(wechi): this is a workaround for pytorch/pytorch#84311.
+            # TODO(wschin): this is a workaround for pytorch/pytorch#84311.
             _move_placeholder_to_front(graph_module)
             # Generate reference outputs. They are used to indicate output
             # tensors' types and devices when calling ORT.
@@ -704,7 +703,7 @@ class OrtBackend:
             )
             # Cache ORT session. It's reused for the same "graph_module".
             # Generate ONNX model and extract its input and output names.
-            # TODO(wechi): ORT session should provide a API to extract
+            # TODO(wschin): ORT session should provide a API to extract
             # input and output names from the underlying model.
             input_names = tuple(input.name for input in onnx_model.graph.input)
             output_names = tuple(output.name for output in onnx_model.graph.output)
@@ -794,7 +793,7 @@ class OrtBackend:
             partitioned_prim_graph_module = self._partitioner_cache[graph_module]
         else:
             prim_graph_module = graph_module
-            # TODO(wechi): this is required for removing aten::_to_copy in _replace_to_copy_with_to.
+            # TODO(wschin): this is required for removing aten::_to_copy in _replace_to_copy_with_to.
             _replace_to_copy_with_to(prim_graph_module)
             partitioner = CapabilityBasedPartitioner(
                 prim_graph_module,
@@ -809,7 +808,7 @@ class OrtBackend:
             # and override their _wrappped_call function with _ort_accelerated_call.
             # Inside _ort_accelerated_call, the partition's graph is exported into ONNX and executed by ORT.
             for node in partitioned_prim_graph_module.graph.nodes:
-                # TODO: use a better way to identify fused submodule
+                # TODO(wschin): use a better way to identify fused submodule
                 if node.op == "call_module" and "fused_" in node.name:
                     fused_module = getattr(partitioned_prim_graph_module, node.name)
                     # self.ort_acclerated_call is responsible for exporting graph to ONNX,
