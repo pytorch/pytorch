@@ -185,9 +185,17 @@
   dispatch:
     CompositeExplicitAutograd: sym_constrain_range
 
+- func: sym_constrain_range_for_size(Scalar size) -> ()
+  dispatch:
+    CompositeExplicitAutograd: sym_constrain_range_for_size
+
 - func: _functional_sym_constrain_range(Scalar size, int? min, int? max, Tensor dep_token) -> Tensor
   dispatch:
     CompositeExplicitAutograd: _functional_sym_constrain_range
+
+- func: _functional_sym_constrain_range_for_size(Scalar size, Tensor dep_token) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: _functional_sym_constrain_range_for_size
 
 - func: _make_dep_token(*, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:

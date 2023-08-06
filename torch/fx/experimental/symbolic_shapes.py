@@ -314,7 +314,19 @@ def _constrain_symbol_range(shape_env, s: sympy.Symbol, min: int, max: int):
 
     shape_env.runtime_var_to_range[s] = shape_env.var_to_range[s]
 
-def _constrain_symbol_range_for_size(shape_env, s: sympy.Symbol):
+def _constrain_unbacked_symint_for_size(a):
+    if isinstance(a, int):
+        return
+
+    if isinstance(a, (SymFloat, SymBool)):
+        raise ValueError("Constraining SymFloat/SymBool is nyi")
+
+    assert isinstance(a, SymInt)
+    assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+
+    shape_env = a.node.shape_env
+    s = a.node.expr
+
     if r := shape_env.var_to_range.get(s, None):
         shape_env.var_to_range[s] = ValueRanges(
             builtins.max(r.lower, 2), builtins.min(r.upper, sys.maxsize)
@@ -367,12 +379,10 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
         values at runtime (we assume that a graph that is valid for N=2 will
         also be valid for N=1).
     """
-
-    if (min is None) and (max is None):
-        return _constrain_symbol_range_for_size(a.node.shape_env, a.node.expr)
-
-    # They either need to be None or have concrete value
-    assert (min is not None) and (max is not None)
+    if min is None:
+        min = -sympy.oo
+    if max is None:
+        max = sympy.oo
 
     if isinstance(a, int):
         if not (min <= a <= max):

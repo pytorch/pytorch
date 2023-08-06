@@ -532,9 +532,11 @@ class TestExport(TestCase):
 
         # Since we are using constrain_as_value, we expect to raise error when user
         # passes in invalid tracing input
-        with self.assertRaisesRegex(RuntimeError, "Constraining value 1 is smaller than the minimum value 2"):
+        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 1 between \[2, 10\]."):
             _ = export(fn, (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3))))
 
+        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 1 between \[2, 10\]."):
+            _ = fn(torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
 
         ep = export(fn, (torch.randint(3, 4, (2, 2)), torch.randint(3, 5, (2, 3))))
         with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint"):

@@ -2347,7 +2347,7 @@ def forward(self, x):
             return torch.empty((a, 4))
 
         with self.assertRaisesRegex(
-            ValueError, r"Invalid value 20 for range \[4:7\]"
+            RuntimeError, r"Invalid value range for 20 between \[4, 7\]."
         ) as cm:
             torch._export.export(f, (torch.tensor([20]),))
 

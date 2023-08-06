@@ -29,4 +29,4 @@ def constrain_as_size(symbol):
     """
     # NOTE: If min, max value are not passed, we will assume it means this is only used for compiler hint.
     # Runtime will assume min value will be 0 and max value will be INT_MAX
-    torch.sym_constrain_range(symbol, min=None, max=None)
+    torch.sym_constrain_range_for_size(symbol)
