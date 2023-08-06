@@ -2678,6 +2678,7 @@ class ForeachFuncInfo(OpInfo):
         supports_autograd=False,
         supports_scalar_self_arg=False,
         supports_forward_ad=False,
+        backward_requires_result=False,
         **kwargs,
     ):
         (
@@ -2711,6 +2712,7 @@ class ForeachFuncInfo(OpInfo):
 
         self.ref_inplace = torch_ref_inplace
         self.supports_alpha_param = supports_alpha_param
+        self.backward_requires_result = backward_requires_result
 
         if name == "norm":
             self.ref = torch.linalg.vector_norm

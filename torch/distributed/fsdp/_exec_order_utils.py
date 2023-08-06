@@ -140,17 +140,15 @@ class _ExecOrderData:
         iteration with the expectation that the recorded order is reset in
         :meth:`next_iter`.
         """
-        # This append is always safe, because we want to track a None handle for get_handle_to_backward_prefetch
-        # Alternatively, we could tighten up get_handle_to_backward_prefetch to index check, but that feels like a
-        # buggier / looser check.
-        self.handles_post_forward_order.append(handle)
         if not handle:
             return
         # Only record the first usage of a handles key
         if handle._post_forward_index:
+            self.handles_post_forward_order.append(handle)
             return
         index = len(self.handles_post_forward_order)
         handle._post_forward_index = index
+        self.handles_post_forward_order.append(handle)
 
     def record_pre_forward(
         self, handle: Optional[FlatParamHandle], is_training: bool

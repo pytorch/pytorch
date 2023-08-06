@@ -8,8 +8,8 @@ __all__ = ['NAdam', 'nadam']
 
 class NAdam(Optimizer):
     def __init__(self, params, lr=2e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, momentum_decay=4e-3, *, foreach: Optional[bool] = None,
-                 differentiable: bool = False):
+                 weight_decay=0, momentum_decay=4e-3, decoupled_weight_decay: bool = False,
+                 *, foreach: Optional[bool] = None, differentiable: bool = False):
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -24,6 +24,7 @@ class NAdam(Optimizer):
             raise ValueError(f"Invalid momentum_decay value: {momentum_decay}")
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, momentum_decay=momentum_decay,
+                        decoupled_weight_decay=decoupled_weight_decay,
                         foreach=foreach, differentiable=differentiable)
         super().__init__(params, defaults)
 
@@ -101,6 +102,7 @@ class NAdam(Optimizer):
                   weight_decay=group['weight_decay'],
                   momentum_decay=group['momentum_decay'],
                   eps=group['eps'],
+                  decoupled_weight_decay=group['decoupled_weight_decay'],
                   foreach=group['foreach'],
                   differentiable=group['differentiable'])
 
@@ -114,13 +116,16 @@ NAdam.__doc__ = r"""Implements NAdam algorithm.
             &\textbf{input}      : \gamma_t \text{ (lr)}, \: \beta_1,\beta_2 \text{ (betas)},
                 \: \theta_0 \text{ (params)}, \: f(\theta) \text{ (objective)}                   \\
             &\hspace{13mm} \: \lambda \text{ (weight decay)}, \:\psi \text{ (momentum decay)}    \\
+            &\hspace{13mm} \: \textit{decoupled\_weight\_decay}                                  \\
             &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
                 v_0 \leftarrow 0 \text{ ( second moment)}                                 \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
             &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
-            &\hspace{5mm}if \: \lambda \neq 0                                                    \\
+            &\hspace{5mm}\textbf{if} \: \lambda \neq 0 \text{ and not } \textit{decoupled\_weight\_decay} \\
             &\hspace{10mm} g_t \leftarrow g_t + \lambda \theta_{t-1}                             \\
+            &\hspace{5mm}\textbf{else}                                                           \\
+            &\hspace{10mm} \theta_t \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}        \\
             &\hspace{5mm} \mu_t \leftarrow \beta_1 \big(1 - \frac{1}{2}  0.96^{t \psi} \big)     \\
             &\hspace{5mm} \mu_{t+1} \leftarrow \beta_1 \big(1 - \frac{1}{2} 0.96^{(t+1)\psi}\big)\\
             &\hspace{5mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
@@ -147,11 +152,15 @@ NAdam.__doc__ = r"""Implements NAdam algorithm.
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         momentum_decay (float, optional): momentum momentum_decay (default: 4e-3)
+        decoupled_weight_decay (bool, optional): whether to use decoupled weight
+            decay as in AdamW to obtain NAdamW (default: False)
         {_foreach_doc}
         {_differentiable_doc}
 
     .. _Incorporating Nesterov Momentum into Adam:
         https://openreview.net/forum?id=OM0jvwB8jIp57ZJjtNEZ
+    .. _Decoupled Weight Decay Regularization:
+        https://arxiv.org/abs/1711.05101
 
     """
 
@@ -164,6 +173,7 @@ def nadam(params: List[Tensor],
           state_steps: List[Tensor],
           # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
           # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+          decoupled_weight_decay: bool = False,
           foreach: Optional[bool] = None,
           differentiable: bool = False,
           *,
@@ -207,6 +217,7 @@ def nadam(params: List[Tensor],
          lr=lr,
          weight_decay=weight_decay,
          momentum_decay=momentum_decay,
+         decoupled_weight_decay=decoupled_weight_decay,
          eps=eps,
          differentiable=differentiable)
 
@@ -224,6 +235,7 @@ def _single_tensor_nadam(params: List[Tensor],
                          weight_decay: float,
                          momentum_decay: float,
                          eps: float,
+                         decoupled_weight_decay: bool,
                          differentiable: bool):
 
     for i, param in enumerate(params):
@@ -238,8 +250,11 @@ def _single_tensor_nadam(params: List[Tensor],
 
         bias_correction2 = 1 - beta2 ** step
 
-        if weight_decay != 0:
+        if weight_decay != 0 and not decoupled_weight_decay:
             grad = grad.add(param, alpha=weight_decay)
+        else:
+            # Perform stepweight decay
+            param.mul_(1 - lr * weight_decay)
 
         # calculate the momentum cache \mu^{t} and \mu^{t+1}
         mu = beta1 * (1. - 0.5 * (0.96 ** (step * momentum_decay)))
@@ -283,6 +298,7 @@ def _multi_tensor_nadam(params: List[Tensor],
                         weight_decay: float,
                         momentum_decay: float,
                         eps: float,
+                        decoupled_weight_decay: bool,
                         differentiable: bool):
 
     if len(params) == 0:
@@ -305,8 +321,11 @@ def _multi_tensor_nadam(params: List[Tensor],
         # update mu_products
         torch._foreach_mul_(grouped_mu_products, mus)
 
-        if weight_decay != 0:
+        if weight_decay != 0 and not decoupled_weight_decay:
             grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+        else:
+            # Perform stepweight decay
+            torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
 
         # Decay the first and second moment running average coefficient
         torch._foreach_lerp_(grouped_exp_avgs, grouped_grads, 1 - beta1)
