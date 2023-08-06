@@ -321,11 +321,14 @@ inline static CacheEntry* get_cache_entry(PyCodeObject* code) {
 }
 
 PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
-  PyObject* my_object;
-  if (!PyArg_ParseTuple(args, "O", &my_object)) {
+  PyObject* object;
+  if (!PyArg_ParseTuple(args, "O", &object)) {
     return NULL;
   }
-  PyCodeObject* code = (PyCodeObject*)my_object;
+  if (!PyCode_Check(object)) {
+    PyErr_SetString(PyExc_TypeError, "expected a code object!");
+  }
+  PyCodeObject* code = (PyCodeObject*)object;
 
   CacheEntry* current_node = get_cache_entry(code);
 
