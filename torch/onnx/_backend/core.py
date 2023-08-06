@@ -2,6 +2,8 @@ import dataclasses
 import importlib
 import logging
 
+from functorch.compile import min_cut_rematerialization_partition
+
 import torch
 import torch._C
 import torch._ops
@@ -13,8 +15,6 @@ import torch.onnx._internal.diagnostics
 import torch.onnx._internal.exporter
 import torch.onnx._internal.fx.decomposition_table
 import torch.onnx._internal.fx.passes
-
-from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
