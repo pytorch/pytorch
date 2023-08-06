@@ -85,6 +85,11 @@ static id<MTLComputePipelineState> lerpTensorPipelineState(id<MTLDevice> device,
 }
 
 void lerp_tensor_mps(const Tensor& self, const Tensor& end, const Tensor& weight, const Tensor& out) {
+  TORCH_CHECK(self.dtype() != at::kDouble, "float64 is not supported on MPS");
+  TORCH_CHECK(end.dtype() != at::kDouble, "float64 is not supported on MPS");
+  TORCH_CHECK(weight.dtype() != at::kDouble, "float64 is not supported on MPS");
+  TORCH_CHECK(out.is_mps(), "Output tensor is not MPS");
+
   id<MTLBuffer> selfBuffer = getMTLBufferStorage(self);
   id<MTLBuffer> endBuffer = getMTLBufferStorage(end);
   id<MTLBuffer> weightBuffer = getMTLBufferStorage(weight);
