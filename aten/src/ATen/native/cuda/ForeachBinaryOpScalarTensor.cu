@@ -49,7 +49,7 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, const Tensor& other) {
           /* r_args_depth */ 1,
           /* res_arg_index */ 1>(),
       Op<opmath_t>(),
-      other.data_ptr<opmath_t>());
+      other.data_ptr<T>());
   return tensor_lists[1];
 }
 
@@ -80,31 +80,35 @@ void foreach_binary_op_(TensorList tensors, const Tensor& other) {
           /* r_args_depth */ 1,
           /* res_arg_index */ 0>(),
       Op<opmath_t>(),
-      other.data_ptr<opmath_t>());
+      other.data_ptr<T>());
   increment_version(tensors);
 }
 
-#define FOREACH_BINARY_OP_SCALAR_TENSOR(FUNCTION, NAME, OP, DIVISION_OP)       \
-  void foreach_tensor_##NAME##_tensor_kernel_cuda_(                            \
-      TensorList tensors, const Tensor& scalar) {                              \
-    check_foreach_api_restrictions(tensors);                                   \
-    if (!can_use_fast_route(ArrayRef<TensorList>{tensors}, {}, DIVISION_OP)) { \
-      return at::native::foreach_tensor_##NAME##_tensor_kernel_slow_(          \
-          tensors, scalar);                                                    \
-    }                                                                          \
-                                                                               \
-    FUNCTION##_<OP>(tensors, scalar);                                          \
-  }                                                                            \
-                                                                               \
-  std::vector<Tensor> foreach_tensor_##NAME##_tensor_kernel_cuda(              \
-      TensorList tensors, const Tensor& scalar) {                              \
-    check_foreach_api_restrictions(tensors);                                   \
-    if (!can_use_fast_route(ArrayRef<TensorList>{tensors}, {}, DIVISION_OP)) { \
-      return at::native::foreach_tensor_##NAME##_tensor_kernel_slow(           \
-          tensors, scalar);                                                    \
-    }                                                                          \
-                                                                               \
-    return FUNCTION<OP>(tensors, scalar);                                      \
+#define FOREACH_BINARY_OP_SCALAR_TENSOR(FUNCTION, NAME, OP, DIVISION_OP) \
+  void foreach_tensor_##NAME##_tensor_kernel_cuda_(                      \
+      TensorList tensors, const Tensor& scalar) {                        \
+    check_foreach_api_restrictions(tensors);                             \
+    if (!(can_use_fast_route(                                            \
+              ArrayRef<TensorList>{tensors}, {}, DIVISION_OP) &&         \
+          tensors[0].scalar_type() == scalar.scalar_type())) {           \
+      return at::native::foreach_tensor_##NAME##_tensor_kernel_slow_(    \
+          tensors, scalar);                                              \
+    }                                                                    \
+                                                                         \
+    FUNCTION##_<OP>(tensors, scalar);                                    \
+  }                                                                      \
+                                                                         \
+  std::vector<Tensor> foreach_tensor_##NAME##_tensor_kernel_cuda(        \
+      TensorList tensors, const Tensor& scalar) {                        \
+    check_foreach_api_restrictions(tensors);                             \
+    if (!(can_use_fast_route(                                            \
+              ArrayRef<TensorList>{tensors}, {}, DIVISION_OP) &&         \
+          tensors[0].scalar_type() == scalar.scalar_type())) {           \
+      return at::native::foreach_tensor_##NAME##_tensor_kernel_slow(     \
+          tensors, scalar);                                              \
+    }                                                                    \
+                                                                         \
+    return FUNCTION<OP>(tensors, scalar);                                \
   }
 
 template <template <class> class Op>

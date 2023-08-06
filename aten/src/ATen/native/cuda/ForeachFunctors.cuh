@@ -152,15 +152,16 @@ __device__ __forceinline__ void binary_op_scalar(
   }
 }
 
-template <int res_arg_index, typename Op, typename T, typename opmath_t>
+template <int res_arg_index, typename Op, typename T, typename scalar_t = T>
 __device__ __forceinline__ void binary_op_scalar_tensor(
     T r_args[][kILP],
     T** args,
-    opmath_t* scalar,
+    scalar_t* scalar,
     const int64_t n,
-    const int64_t chunk_size,
+    const int chunk_size,
     const bool all_aligned,
     Op op) {
+  using opmath_t = at::opmath_type<T>;
   // to make things simple, we put aligned case in a different code path
   if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
     for (int64_t i_start = threadIdx.x;
@@ -353,7 +354,7 @@ struct BinaryOpScalarTensorFunctor {
       int chunk_size,
       TensorListMetadata<depth>& tl,
       Op op,
-      opmath_t* scalar) {
+      T* scalar) {
     const int tensor_loc = tl.block_to_tensor[blockIdx.x];
     const int chunk_idx = tl.block_to_chunk[blockIdx.x];
     auto n = tl.numel_for_tensor[tensor_loc];
