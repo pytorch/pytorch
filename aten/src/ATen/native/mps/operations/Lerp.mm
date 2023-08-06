@@ -26,7 +26,9 @@ kernel void lerp(constant T* self       [[buffer(0)]],
                  constant float* weight     [[buffer(2)]],
                  device T* output       [[buffer(3)]],
                  uint index [[thread_position_in_grid]]) {
-    output[index] = self[index] + weight[index] * (end[index] - self[index]);
+    output[index] = abs(weight[index]) < 0.5 ?
+        self[index] + weight[index] * (end[index] - self[index]) :
+        end[index] - (end[index] - self[index]) * (1 - weight[index]);
 }
 
 template
