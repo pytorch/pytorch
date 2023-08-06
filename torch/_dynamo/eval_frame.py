@@ -106,7 +106,7 @@ CacheEntry = namedtuple("CacheEntry", "check_fn, code")
 
 def _debug_get_cache_entry_list(code):
     cache_list = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
-    return map(CacheEntry._make, cache_list)
+    return list(map(CacheEntry._make, cache_list))
 
 
 class OptimizedModule(torch.nn.Module):
