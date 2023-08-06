@@ -99,6 +99,16 @@ DONT_WRAP_FILES = {
 }
 
 
+from collections import namedtuple
+
+CacheEntry = namedtuple("CacheEntry", "check_fn, code")
+
+
+def _debug_get_cache_entry_list(code):
+    cache_list = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
+    return map(CacheEntry._make, cache_list)
+
+
 class OptimizedModule(torch.nn.Module):
     """
     Wraps the original nn.Module object and later patches its

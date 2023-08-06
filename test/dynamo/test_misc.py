@@ -39,7 +39,7 @@ from torch._dynamo.testing import (
 )
 
 from torch._dynamo.utils import CompileProfiler, ifdynstaticdefault
-from torch._dynamo.utils import _debug_get_cache_entry_list
+from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig

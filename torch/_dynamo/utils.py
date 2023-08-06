@@ -2046,15 +2046,3 @@ def is_guard_failure_reporting_enabled():
         config.report_guard_failures
         or torch._logging._internal.log_state.is_artifact_enabled("recompiles")
     )
-
-
-from collections import namedtuple
-
-CacheEntry = namedtuple("CacheEntry", "check_fn, code")
-
-
-def _debug_get_cache_entry_list(code):
-    from torch._C._dynamo.eval_frame import _debug_get_cache_entry_list
-
-    cache_list = _debug_get_cache_entry_list(code)
-    return map(CacheEntry._make, cache_list)
