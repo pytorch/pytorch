@@ -14,6 +14,7 @@ import traceback
 import types
 import warnings
 import weakref
+from collections import namedtuple
 from enum import Enum
 from os.path import dirname, join
 from typing import (
@@ -29,7 +30,6 @@ from typing import (
     Union,
 )
 from unittest.mock import patch
-from collections import namedtuple
 
 import torch
 import torch.fx
@@ -98,7 +98,6 @@ DONT_WRAP_FILES = {
     inspect.getsourcefile(GraphModule),
     join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"),
 }
-
 
 
 CacheEntry = namedtuple("CacheEntry", "check_fn, code")
