@@ -29,6 +29,7 @@ from typing import (
     Union,
 )
 from unittest.mock import patch
+from collections import namedtuple
 
 import torch
 import torch.fx
@@ -99,7 +100,6 @@ DONT_WRAP_FILES = {
 }
 
 
-from collections import namedtuple
 
 CacheEntry = namedtuple("CacheEntry", "check_fn, code")
 
