@@ -327,6 +327,7 @@ PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
   }
   if (!PyCode_Check(object)) {
     PyErr_SetString(PyExc_TypeError, "expected a code object!");
+    return NULL;
   }
   PyCodeObject* code = (PyCodeObject*)object;
 

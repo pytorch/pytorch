@@ -101,6 +101,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         entries = _debug_get_cache_entry_list(g.__code__)
         self.assertTrue(len(entries) == 0)
 
+        try:
+            _debug_get_cache_entry_list(1)
+        except TypeError as e:
+            self.assertIn("expected a code object!", str(e))
+
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
             if flag:
