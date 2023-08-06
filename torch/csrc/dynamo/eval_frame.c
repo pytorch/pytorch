@@ -320,6 +320,58 @@ inline static CacheEntry* get_cache_entry(PyCodeObject* code) {
   return extra;
 }
 
+PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
+  PyObject* my_object;
+  if (!PyArg_ParseTuple(args, "O", &my_object)) {
+    return NULL;
+  }
+  PyCodeObject* code = (PyCodeObject*)my_object;
+
+  CacheEntry* current_node = get_cache_entry(code);
+
+  if(current_node == NULL)
+  {
+  return NULL;
+  }
+
+  PyObject* outer_list = PyList_New(0);
+  if (!outer_list) {
+    return NULL;  // Return NULL if failed to create list
+  }
+  while (current_node != NULL) {
+    // Creating a new Python list for the check_fn and code of current CacheEntry
+    PyObject* inner_list = PyList_New(0);
+    if (!inner_list) {
+      Py_DECREF(outer_list);  // Clean up if failed to create list
+      return NULL;
+    }
+
+    // Add the check_fn and code to the inner list
+    if (PyList_Append(inner_list, current_node->check_fn) < 0) {
+      Py_DECREF(outer_list);
+      Py_DECREF(inner_list);  // Clean up if failed to append
+      return NULL;
+    }
+    if (PyList_Append(inner_list, (PyObject*)current_node->code) < 0) {
+      Py_DECREF(outer_list);
+      Py_DECREF(inner_list);  // Clean up if failed to append
+      return NULL;
+    }
+
+    // Add the inner list to the outer list
+    if (PyList_Append(outer_list, inner_list) < 0) {
+      Py_DECREF(outer_list);
+      Py_DECREF(inner_list);  // Clean up if failed to append
+      return NULL;
+    }
+
+    // Move to the next node in the linked list
+    current_node = current_node->next;
+  }
+  // Return the outer list
+  return outer_list;
+}
+
 inline static void set_cache_entry(PyCodeObject* code, CacheEntry* extra) {
   // TODO(jansel): would it be faster to bypass this?
   _PyCode_SetExtra((PyObject*)code, cache_entry_extra_index, extra);
@@ -867,6 +919,7 @@ static PyMethodDef _methods[] = {
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
     {"set_profiler_hooks", set_profiler_hooks, METH_VARARGS, NULL},
     {"clear_profiler_hooks", clear_profiler_hooks, METH_NOARGS, NULL},
+    {"_debug_get_cache_entry_list", _debug_get_cache_entry_list, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
