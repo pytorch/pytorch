@@ -84,6 +84,8 @@ void foreach_binary_op_(TensorList tensors, const Tensor& other) {
   increment_version(tensors);
 }
 
+// TODO(crcrpar): Nest dispatch by looking up `scalar.scalar_type` for better
+// coverage?
 #define FOREACH_BINARY_OP_SCALAR_TENSOR(FUNCTION, NAME, OP, DIVISION_OP) \
   void foreach_tensor_##NAME##_tensor_kernel_cuda_(                      \
       TensorList tensors, const Tensor& scalar) {                        \
