@@ -514,6 +514,8 @@ class FlatParamHandle:
         # before `_init_flat_param()`, which performs the actual validation
         self._orig_param_dtype = params[0].dtype
         self._unsharded_param_dtype: Optional[torch.dtype] = None
+        # Initial value is based on strategy
+        self._sharded = self.uses_sharded_strategy
         self._init_param_reduce_dtypes(mp_param_dtype, mp_reduce_dtype)
         assert self._fwd_bwd_param_dtype is not None  # mypy
         self._aligned_numel = (
@@ -1250,17 +1252,23 @@ class FlatParamHandle:
         unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
         padded_unsharded_flat_param = self._all_gather_flat_param(unsharded_flat_param)
         self._use_unsharded_flat_param(padded_unsharded_flat_param)
+        self._sharded = False
 
     def needs_unshard(self) -> bool:
         """Returns if the handle's flat parameter needs to be unsharded."""
         if not self.uses_sharded_strategy:
             return False
+        """
+        # TODO (kwen2501): why do we use size check to determine whether
+        # parameter has been unsharded?
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
         already_unsharded = (
             unsharded_flat_param._typed_storage()._size()
             == unsharded_flat_param.numel()
         )
         return not already_unsharded
+        """
+        return self._sharded
 
     def _alloc_padded_unsharded_flat_param(self):
         """
@@ -1632,6 +1640,7 @@ class FlatParamHandle:
         self._use_sharded_flat_param()
         if free_unsharded_flat_param:
             self._free_unsharded_flat_param()
+        self._sharded = True
 
     def post_reshard(self):
         """
