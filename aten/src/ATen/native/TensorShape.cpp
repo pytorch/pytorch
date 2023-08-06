@@ -618,12 +618,12 @@ TORCH_IMPL_FUNC(cat_out_cpu)
 
   bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
   ScalarType dtype = materialized[valid].get().scalar_type();
-  bool serial_dtype = at::isFloatingType(dtype);
-
+  bool serial_dtype_float = at::isFloatingType(dtype);
+  bool serial_dtype_int = at::isIntegralType(dtype, /*includeBool=*/true);
   // fast path for single thread when both inputs and result are contiguous and
   // not empty, and concat dim is 0 or 1
-  if (all_contiguous && all_same_dtype && (MemoryFormat::Contiguous == memory_format) &&
-      serial_dtype) {
+  if (use_serial_kernel && all_contiguous && all_same_dtype &&
+      (MemoryFormat::Contiguous == memory_format) && (serial_dtype_int || serial_dtype_float)) {
     if (dim == 0) {
       fastCatOutDim0(result, materialized);
       return;
@@ -634,7 +634,7 @@ TORCH_IMPL_FUNC(cat_out_cpu)
   }
 
   // fast path for single thread when both inputs and result are contiguous and not empty
-  if (use_serial_kernel && all_contiguous && all_same_dtype && serial_dtype) {
+  if (use_serial_kernel && all_contiguous && all_same_dtype && serial_dtype_float) {
     cat_serial_stub(kCPU, result, materialized, dim);
     return;
   }

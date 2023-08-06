@@ -509,6 +509,43 @@ class TestTensorCreation(TestCase):
         x = torch.zeros((0), device=device)
         y = torch.randn((4, 6), device=device)
 
+        w = y.view(-1).clone()
+        a = torch.cat([w[:2], w[4:6]])
+        b = torch.cat([w[:2], w[4:6]], out=w[6:10])
+        self.assertEqual(a, b)
+        self.assertEqual(a, w[6:10])
+        self.assertEqual(w[:6], y.view(-1)[:6])
+
+        # Case:
+        # Reference: https://github.com/pytorch/pytorch/issues/49878
+        for dim in [0, 1]:
+            x = torch.zeros((10, 5, 2), device=device)
+
+            random_length = random.randint(1, 4)
+            y = x.narrow(dim, 0, x.shape[dim] - random_length)
+            val = torch.full_like(y[0], 3., device=device)
+
+            if dim == 0:
+                self.assertTrue(y.is_contiguous())
+            else:
+                self.assertFalse(y.is_contiguous())
+
+            torch.cat((val[None],) * y.shape[0], dim=0, out=y)
+
+            expected_y = torch.cat((val[None],) * y.shape[0], dim=0)
+            expected_x = torch.zeros((10, 5, 2), device=device)
+            if dim == 0:
+                expected_x[:x.shape[dim] - random_length, :, :] = expected_y
+            elif dim == 1:
+                expected_x[:, :x.shape[dim] - random_length, :] = expected_y
+
+            self.assertEqual(y, expected_y)
+            self.assertEqual(x, expected_x)
+
+    def test_cat_out_fast_path_dim0_dim1(self, device):
+        x = torch.zeros((0), device=device)
+        y = torch.randn((4, 6), device=device)
+
         # Test concat on dimension 0
         w = y.view(-1).clone()
         a = torch.cat([w[:2], w[4:6]])
@@ -551,32 +588,6 @@ class TestTensorCreation(TestCase):
         dim1_cat.sum().backward()
         self.assertEqual(c.grad, expected_c_grad)
         self.assertEqual(d.grad, expected_d_grad)
-
-        # Case:
-        # Reference: https://github.com/pytorch/pytorch/issues/49878
-        for dim in [0, 1]:
-            x = torch.zeros((10, 5, 2), device=device)
-
-            random_length = random.randint(1, 4)
-            y = x.narrow(dim, 0, x.shape[dim] - random_length)
-            val = torch.full_like(y[0], 3., device=device)
-
-            if dim == 0:
-                self.assertTrue(y.is_contiguous())
-            else:
-                self.assertFalse(y.is_contiguous())
-
-            torch.cat((val[None],) * y.shape[0], dim=0, out=y)
-
-            expected_y = torch.cat((val[None],) * y.shape[0], dim=0)
-            expected_x = torch.zeros((10, 5, 2), device=device)
-            if dim == 0:
-                expected_x[:x.shape[dim] - random_length, :, :] = expected_y
-            elif dim == 1:
-                expected_x[:, :x.shape[dim] - random_length, :] = expected_y
-
-            self.assertEqual(y, expected_y)
-            self.assertEqual(x, expected_x)
 
     def test_cat_out_channels_last(self, device):
         x = torch.randn((4, 3, 8, 8))
