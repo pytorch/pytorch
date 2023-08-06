@@ -19,14 +19,14 @@ template <typename T, template <class> class Op>
 std::vector<Tensor> foreach_binary_op(TensorList tensors, const Tensor& other) {
   TORCH_CHECK(
       other.dim() == 0 && other.numel() == 1,
-      "other expected to be 0 dim but ",
+      "scalar expected to be 0 dim but ",
       other.dim(),
       " and has ",
       other.numel(),
       " elements.");
   TORCH_CHECK(
       tensors[0].device() == other.device(),
-      "other expected to be on ",
+      "scalar expected to be on ",
       tensors[0].device(),
       " but ",
       other.device());
@@ -84,27 +84,27 @@ void foreach_binary_op_(TensorList tensors, const Tensor& other) {
   increment_version(tensors);
 }
 
-#define FOREACH_BINARY_OP_SCALAR_TENSOR(FUNCTION, NAME, OP, DIVISION_OP) \
-  void foreach_tensor_##NAME##_tensor_kernel_cuda_(                      \
-      TensorList tensors, const Tensor& scalar) {                        \
-    check_foreach_api_restrictions(tensors);                             \
-    if (!can_use_fast_route(tensors, scalar, DIVISION_OP)) {             \
-      return at::native::foreach_tensor_##NAME##_tensor_kernel_slow_(    \
-          tensors, scalar);                                              \
-    }                                                                    \
-                                                                         \
-    FUNCTION##_<OP>(tensors, scalar);                                    \
-  }                                                                      \
-                                                                         \
-  std::vector<Tensor> foreach_tensor_##NAME##_tensor_kernel_cuda(        \
-      TensorList tensors, const Tensor& scalar) {                        \
-    check_foreach_api_restrictions(tensors);                             \
-    if (!can_use_fast_route(tensors, scalar, DIVISION_OP)) {             \
-      return at::native::foreach_tensor_##NAME##_tensor_kernel_slow(     \
-          tensors, scalar);                                              \
-    }                                                                    \
-                                                                         \
-    return FUNCTION<OP>(tensors, scalar);                                \
+#define FOREACH_BINARY_OP_SCALAR_TENSOR(FUNCTION, NAME, OP, DIVISION_OP)       \
+  void foreach_tensor_##NAME##_tensor_kernel_cuda_(                            \
+      TensorList tensors, const Tensor& scalar) {                              \
+    check_foreach_api_restrictions(tensors);                                   \
+    if (!can_use_fast_route(ArrayRef<TensorList>{tensors}, {}, DIVISION_OP)) { \
+      return at::native::foreach_tensor_##NAME##_tensor_kernel_slow_(          \
+          tensors, scalar);                                                    \
+    }                                                                          \
+                                                                               \
+    FUNCTION##_<OP>(tensors, scalar);                                          \
+  }                                                                            \
+                                                                               \
+  std::vector<Tensor> foreach_tensor_##NAME##_tensor_kernel_cuda(              \
+      TensorList tensors, const Tensor& scalar) {                              \
+    check_foreach_api_restrictions(tensors);                                   \
+    if (!can_use_fast_route(ArrayRef<TensorList>{tensors}, {}, DIVISION_OP)) { \
+      return at::native::foreach_tensor_##NAME##_tensor_kernel_slow(           \
+          tensors, scalar);                                                    \
+    }                                                                          \
+                                                                               \
+    return FUNCTION<OP>(tensors, scalar);                                      \
   }
 
 template <template <class> class Op>

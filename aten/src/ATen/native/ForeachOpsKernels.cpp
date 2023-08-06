@@ -64,7 +64,13 @@ namespace at::native {
 #define FOREACH_BINARY_OP_TENSOR(OP)                            \
   void foreach_tensor_##OP##_tensor_kernel_slow_(               \
       TensorList tensors, const Tensor& scalar) {               \
-    TORCH_CHECK(scalar.numel() == 1);                           \
+    TORCH_CHECK(                                                \
+        scalar.dim() == 0 && scalar.numel() == 1,               \
+        "scalar expected to be 0 dim but ",                     \
+        scalar.dim(),                                           \
+        " and has ",                                            \
+        scalar.numel(),                                         \
+        " elements.");                                          \
     check_foreach_api_restrictions(tensors);                    \
                                                                 \
     for (auto& t : tensors) {                                   \
@@ -74,7 +80,13 @@ namespace at::native {
                                                                 \
   std::vector<Tensor> foreach_tensor_##OP##_tensor_kernel_slow( \
       TensorList tensors, const Tensor& scalar) {               \
-    TORCH_CHECK(scalar.numel() == 1);                           \
+    TORCH_CHECK(                                                \
+        scalar.dim() == 0 && scalar.numel() == 1,               \
+        "scalar expected to be 0 dim but ",                     \
+        scalar.dim(),                                           \
+        " and has ",                                            \
+        scalar.numel(),                                         \
+        " elements.");                                          \
     check_foreach_api_restrictions(tensors);                    \
                                                                 \
     std::vector<Tensor> result;                                 \
