@@ -339,10 +339,10 @@ PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
   while (current_node != NULL && current_node != SKIP_CODE) {
     // Creating a new Python tuple for the check_fn and code of current CacheEntry
     PyObject* inner_list = PyTuple_Pack(2, current_node->check_fn, current_node->code);
-    // Add the inner list to the outer list
-    if (PyList_Append(outer_list, inner_list) < 0) {
-      Py_DECREF(outer_list);
-      Py_DECREF(inner_list);  // Clean up if failed to append
+    int flag = PyList_Append(outer_list, inner_list);  // Add the inner list to the outer list
+    Py_DECREF(inner_list);  // Decrement our own reference
+    if (flag < 0) {
+      Py_DECREF(outer_list);  // Clean up if failed to append
       return NULL;
     }
 
