@@ -336,7 +336,7 @@ PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
   if (!outer_list) {
     return NULL;  // Return NULL if failed to create list
   }
-  while (current_node != NULL) {
+  while (current_node != NULL && current_node != SKIP_CODE) {
     // Creating a new Python tuple for the check_fn and code of current CacheEntry
     PyObject* inner_list = PyTuple_Pack(2, current_node->check_fn, current_node->code);
     // Add the inner list to the outer list
