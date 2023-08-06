@@ -329,11 +329,6 @@ PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
 
   CacheEntry* current_node = get_cache_entry(code);
 
-  if(current_node == NULL)
-  {
-  return NULL;
-  }
-
   PyObject* outer_list = PyList_New(0);
   if (!outer_list) {
     return NULL;  // Return NULL if failed to create list
