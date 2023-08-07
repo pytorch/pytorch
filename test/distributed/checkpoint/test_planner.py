@@ -38,6 +38,7 @@ from torch.distributed.checkpoint.default_planner import (
 )
 
 from torch.distributed.checkpoint.planner_helpers import create_read_items_for_chunk_list
+from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -132,6 +133,7 @@ class TestSavePlan(TestCase):
                 return create_default_local_save_plan(state_dict, rank == 0)
 
         all_plans = [create_data(0), create_data(1), create_data(2), create_data(3)]
+        all_plans = dedup_tensors(all_plans)
         final_plans, metadata = create_default_global_save_plan(all_plans=all_plans)
 
         # The default global plan updates all indexes to include hints
