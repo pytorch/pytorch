@@ -400,6 +400,7 @@ class CustomOp:
 
         def inner(f):
             frame = inspect.stack()[1]
+            self._check_doesnt_have_library_meta_impl()
             self._register_impl("abstract", f, stacklevel=_stacklevel)
             location = self._get_impl("abstract").location
 
@@ -427,6 +428,42 @@ class CustomOp:
             return f
 
         return inner
+
+    def _check_doesnt_have_library_meta_impl(self):
+        if self._has_impl("abstract"):
+            return
+
+        # If the user's operator is CompositeExplicitAutograd,
+        # allow them to impl_abstract. This is being pragmatic
+        # (existing custom ops may have CompositeExplicitAutograd
+        # registration that don't work with Meta kernels, so this
+        # gives them an escape hatch).
+        if (
+            _C._dispatch_has_kernel_for_dispatch_key(self._qualname, "CompositeExplicitAutograd")
+            and not _C._dispatch_has_kernel_for_dispatch_key(self._qualname, "Meta")
+        ):
+            return
+
+        # Otherwise, if the user's already has a Meta kernel or their
+        # op is CompositeImplicitAutograd or some other alias dispatch key,
+        # raise.
+
+        # Special case for CompositeImplicitAutograd
+        if _C._dispatch_has_kernel_for_dispatch_key(self._qualname, "CompositeImplicitAutograd"):
+            raise RuntimeError(
+                f"impl_abstract(...): the operator {self._qualname} "
+                f"already has an implementation for this device type via a "
+                f"pre-existing registration to DispatchKey::CompositeImplicitAutograd."
+                f"CompositeImplicitAutograd operators do not need an abstract impl; "
+                f"instead, the operator will decompose into its constituents and those "
+                f"can have abstract impls defined on them.")
+
+        if _C._dispatch_has_computed_kernel_for_dispatch_key(self._qualname, "Meta"):
+            raise RuntimeError(
+                f"impl_abstract(...): the operator {self._qualname} "
+                f"already has an DispatchKey::Meta implementation via a "
+                f"pre-existing torch.library or TORCH_LIBRARY registration. "
+                f"Please either remove that registration or don't call impl_abstract.")
 
     # NOTE ["backward", "save_for_backward", and "autograd"]
     # As a part of the explicit autograd API, a user must provide us
