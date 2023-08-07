@@ -36,6 +36,7 @@ try:
     import torch.onnx._internal.fx.decomposition_table
     import torch.onnx._internal.fx.passes
     from torch.onnx._internal.exporter import ExportOptions
+    from torch.onnx._internal.fx import fx_onnx_interpreter
     from torch.onnx._internal.fx.type_utils import (
         _TORCH_DTYPE_TO_NUMPY_DTYPE,
         _TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE,
@@ -512,7 +513,6 @@ class OrtBackend:
         # create_onnx_friendly_decomposition_table(...) in
         # torch/onnx/_internal/fx/decomposition_table.py.
         support_dict = torch.onnx._internal.fx.decomposition_table._create_onnx_supports_op_overload_table(
-            # This is identical to self.resolved_onnx_exporter_options.onnxfunction_dispatcher.onnx_registry.
             self.resolved_onnx_exporter_options.onnx_registry
         )
 
@@ -614,8 +614,6 @@ class OrtBackend:
 
                     # rethrow FakeTensorProb failure because it is not yet currently handled.
                     raise
-
-            from torch.onnx._internal.fx import fx_onnx_interpreter
 
             # Create the object to iterate through the nodes in graph one-by-one
             # and calls the corresponding ONNX exporter for each node.
