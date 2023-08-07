@@ -345,9 +345,6 @@ float calc_zeta(float x, float q) {{
   return s;
 }}
 
-constant float one_third = 0.033333333333333333333333333333333333333;
-constant float one_fortysecond = 0.023809523809523809523809523809523809523809;
-constant float one_sixth = 0.1666666666666666666666666666666666666666666667;
 float calc_trigamma(float x) {{
   float sign = +1;
   float result = 0;
@@ -362,7 +359,7 @@ float calc_trigamma(float x) {{
     x += 1;
   }}
   const float ixx = 1 / (x * x);
-  result += (1 + 1 / (2 * x) + ixx * (one_sixth - ixx * (one_third - ixx * one_fortysecond))) / x;
+  result += (1 + 1 / (2 * x) + ixx * ( (1 / 6) - ixx * ( (1 / 3) - ixx * (1 / 42)))) / x;
   return sign * result;
 }}
 
@@ -370,18 +367,19 @@ kernel void trigamma(device {0} *input [[buffer(0)]],
                      device {1} *output [[buffer(1)]],
                      uint id [[thread_position_in_grid]])
 {{
-    output[id] = calc_trigamma(static_cast<float>(input[id]));
+    float x = input[id];
+    output[id] = calc_trigamma(x);
 }}
 
 kernel void polygamma(device {0} *input [[buffer(0)]],
                      device {1} *output [[buffer(1)]],
-                     constant int64_t& n [[buffer(2)]],
+                     constant int64_t& order [[buffer(2)]],
                      uint id [[thread_position_in_grid]]) {{
   // already blocked if n <= 1
-  float one = 1;
-  output[id] = ((n % 2) ? one : -one) *
-                exp(LogGamma(static_cast<float>(n) + one)) *
-                calc_zeta(static_cast<float>(n + 1), static_cast<float>(input[id]));
+  float x = input[id];
+  float n = order;
+  float sgn = ((order % 2) ? 1 : -1);
+  output[id] = sgn * Gamma(n + 1) * calc_zeta(n + 1, x);
 }}
 
 
