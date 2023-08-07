@@ -15,12 +15,17 @@ from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import decorator, formatter, utils
 
-from torch.onnx._internal.fx import type_utils as fx_type_utils
+from torch.onnx._internal.fx import registration, type_utils as fx_type_utils
 
 # NOTE: Symbolic shapes could be a calculation of values, such as
 # Tensor(i64[s0, 64, (s1//2) - 2, (s1//2) - 2]) where s0 and s1 are symbolic
 # so we need to relax the length limit.
 _LENGTH_LIMIT: int = 120
+# NOTE: The following limits are for the number of items to display in diagnostics for
+# a list, tuple or dict. The limit is picked such that common useful scenarios such as
+# operator arguments are covered, while preventing excessive processing loads on considerably
+# large containers such as the dictionary mapping from fx to onnx nodes.
+_CONTAINER_ITEM_LIMIT: int = 10
 
 # NOTE(bowbao): This is a shim over `torch.onnx._internal.diagnostics`, which is
 # used in `torch.onnx`, and loaded with `torch`. Hence anything related to `onnxscript`
@@ -105,11 +110,36 @@ def _torch_tensor(obj: torch.Tensor) -> str:
 
 
 @_format_argument.register
+def _int(obj: int) -> str:
+    return str(obj)
+
+
+@_format_argument.register
+def _float(obj: float) -> str:
+    return str(obj)
+
+
+@_format_argument.register
+def _bool(obj: bool) -> str:
+    return str(obj)
+
+
+@_format_argument.register
+def _registration_onnx_function(obj: registration.ONNXFunction) -> str:
+    # TODO: Compact display of `param_schema`.
+    return f"registration.ONNXFunction({obj.op_full_name}, is_custom={obj.is_custom}, is_complex={obj.is_complex})"
+
+
+@_format_argument.register
 def _list(obj: list) -> str:
     list_string = f"List[length={len(obj)}](\n"
     if not obj:
         return list_string + "None)"
-    for item in obj:
+    for i, item in enumerate(obj):
+        if i >= _CONTAINER_ITEM_LIMIT:
+            # NOTE: Print only first _CONTAINER_ITEM_LIMIT items.
+            list_string += "...,\n"
+            break
         list_string += f"{format_argument(item)},\n"
     return list_string + ")"
 
@@ -119,7 +149,11 @@ def _tuple(obj: tuple) -> str:
     tuple_string = f"Tuple[length={len(obj)}](\n"
     if not obj:
         return tuple_string + "None)"
-    for item in obj:
+    for i, item in enumerate(obj):
+        if i >= _CONTAINER_ITEM_LIMIT:
+            # NOTE: Print only first _CONTAINER_ITEM_LIMIT items.
+            tuple_string += "...,\n"
+            break
         tuple_string += f"{format_argument(item)},\n"
     return tuple_string + ")"
 
@@ -129,7 +163,11 @@ def _dict(obj: dict) -> str:
     dict_string = f"Dict[length={len(obj)}](\n"
     if not obj:
         return dict_string + "None)"
-    for key, value in obj.items():
+    for i, (key, value) in enumerate(obj.items()):
+        if i >= _CONTAINER_ITEM_LIMIT:
+            # NOTE: Print only first _CONTAINER_ITEM_LIMIT items.
+            dict_string += "...\n"
+            break
         dict_string += f"{key}: {format_argument(value)},\n"
     return dict_string + ")"
 
