@@ -791,17 +791,10 @@ class TestModule(TestCase):
         def _reset_seed():
             torch.manual_seed(5)
 
-        def _has_parameters_buffers(module):
-            if isinstance(m, torch.nn.modules.lazy.LazyModuleMixin):
-                return False
-            if (len(list(m.parameters(recurse=False))) == 0 and
-                    len(list(m.buffers(recurse=False))) == 0):
-                return False
-            return True
-
         def _check_children_submodules(c):
             for p in chain(c.parameters(), c.buffers()):
-                self.assertTrue(torch.all(p == -1).item())
+                if not (torch.nn.parameter.is_lazy(p)):
+                    self.assertTrue(torch.all(p == -1).item())
 
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
@@ -816,17 +809,13 @@ class TestModule(TestCase):
             with torch.device(device):
                 m = module_cls(*c_args, **c_kwargs)
 
-            # === Skip test if no parameters/buffers. ===
-            if not _has_parameters_buffers(m):
-                # iterate over all module_inputs in case some params/buffers are gated by kwargs
-                continue
-
             ref_m = deepcopy(m)
             # === Fill all params and buffers with -1. ===
             with torch.no_grad():
                 preset_value = -1
                 for p in chain(m.parameters(), m.buffers()):
-                    p.fill_(preset_value)
+                    if not (torch.nn.parameter.is_lazy(p)):
+                        p.fill_(preset_value)
 
             # === Call reset_parameters. ===
             _reset_seed()
@@ -835,7 +824,8 @@ class TestModule(TestCase):
             # === Ensure parameters/buffers owned by root have been reset. ===
             for p, p_ref in chain(zip(m.parameters(recurse=False), ref_m.parameters(recurse=False)),
                                   zip(m.buffers(recurse=False), ref_m.buffers(recurse=False))):
-                self.assertEqual(p, p_ref)
+                if not (torch.nn.parameter.is_lazy(p)):
+                    self.assertEqual(p, p_ref)
 
             # === Ensure parameters/buffers owned by children submodules have not been reset. ===
             for child in m.children():
