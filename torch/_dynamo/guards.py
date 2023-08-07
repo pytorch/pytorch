@@ -39,7 +39,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SYMPY_INTERP,
 )
 
-from torch.utils.weak import WeakIdRef
+from torch.utils.weak import TensorWeakRef, WeakIdRef
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -85,6 +85,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("__load_module", lambda name: importlib.import_module(name)),
         ("utils_device", torch.utils._device),
         ("device", torch.device),
+        ("__as_tensor", torch.as_tensor),
     ]
 )
 
@@ -569,12 +570,16 @@ class GuardBuilder(GuardBuilderBase):
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
-    def TENSOR_MATCH(self, guard: Guard):
+    def TENSOR_MATCH(self, guard: Guard, value=None):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
         else:
-            value = self.get(guard.name)
+            if isinstance(value, TensorWeakRef):
+                value = value()
+
+            value = value if value is not None else self.get(guard.name)
             assert isinstance(value, torch.Tensor)
+
             tensor_name = self.arg_ref(guard)
             # [Note - On Export Tensor Guards]
             #

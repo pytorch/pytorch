@@ -477,23 +477,17 @@ class TensorVariable(VariableTracker):
                 )
             return constant_result
         elif name == "numpy":
-            from .builder import wrap_fx_proxy_cls
-
             assert not args, "Tensor.numpy() doesn't take args."
             # TODO: support force
             if kwargs and "force" in kwargs:
                 unimplemented(f"Tensor.numpy(force={kwargs['force']})")
-            return wrap_fx_proxy_cls(
-                target_cls=NumpyNdarrayVariable,
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    torch.detach,
-                    *proxy_args_kwargs([self], {}),
-                ),
-                example_value=None,
-                **options,
+            proxy = tx.output.create_proxy(
+                "call_function",
+                torch.detach,
+                *proxy_args_kwargs([self], {}),
             )
+            return NumpyNdarrayVariable.create(tx, proxy, **options)
+
         elif name == "tolist":
             from .builder import SourcelessBuilder
 
@@ -869,12 +863,16 @@ class NumpyNdarrayVariable(TensorVariable):
     Use this for Tensor.numpy() call.
     """
 
-    def __init__(
-        self,
-        proxy: torch.fx.Proxy,
-        **kwargs,
-    ):
-        super().__init__(proxy, **kwargs)
+    @staticmethod
+    def create(tx, proxy, **options):
+        from .builder import wrap_fx_proxy_cls
+
+        return wrap_fx_proxy_cls(
+            target_cls=NumpyNdarrayVariable,
+            tx=tx,
+            proxy=proxy,
+            **options,
+        )
 
     def var_getattr(self, tx, name):
         # NB: This INTENTIONALLY does not call super(), because there is
@@ -882,12 +880,12 @@ class NumpyNdarrayVariable(TensorVariable):
         # properties.  The inheritance here is for implementation sharing.
 
         from ..utils import numpy_attr_wrapper
-        from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
+        from .builder import wrap_fx_proxy
 
         result = None
         options = VariableTracker.propagate(self)
 
-        example_value = self.proxy.node.meta["example_value"]
+        example_value = self.as_proxy().node.meta["example_value"]
         example_ndarray = tnp.ndarray(example_value)
 
         def insert_into_graph():
@@ -900,17 +898,14 @@ class NumpyNdarrayVariable(TensorVariable):
             )
 
         if name in ["T", "real", "imag"]:
-            result = wrap_fx_proxy_cls(
-                target_cls=NumpyNdarrayVariable,
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    numpy_attr_wrapper,
-                    (self.as_proxy(), name),
-                    {},
-                ),
-                **options,
+            proxy = tx.output.create_proxy(
+                "call_function",
+                numpy_attr_wrapper,
+                (self.as_proxy(), name),
+                {},
             )
+            result = NumpyNdarrayVariable.create(tx, proxy, **options)
+
         # These are awkward to implement.  The standard playbook for torch._numpy
         # interop is to trace a call into the torch._numpy wrapper which works for
         # Tensor operations.  However, we don't want to do this for calls
@@ -948,25 +943,17 @@ class NumpyNdarrayVariable(TensorVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
-        from torch._dynamo.variables.builder import wrap_fx_proxy_cls
         from ..utils import numpy_method_wrapper
 
         if name in ["__len__", "size"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
-        result = wrap_fx_proxy_cls(
-            target_cls=NumpyNdarrayVariable,
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                numpy_method_wrapper(name),
-                *proxy_args_kwargs([self] + list(args), kwargs),
-            ),
-            example_value=None,
-            **options,
+        proxy = tx.output.create_proxy(
+            "call_function",
+            numpy_method_wrapper(name),
+            *proxy_args_kwargs([self] + list(args), kwargs),
         )
-
-        return result
+        return NumpyNdarrayVariable.create(tx, proxy, **options)
 
 
 class UnspecializedPythonVariable(TensorVariable):

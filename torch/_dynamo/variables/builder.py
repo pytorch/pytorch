@@ -40,6 +40,7 @@ from ..source import (
     GlobalWeakRefSource,
     is_constant_source,
     LocalSource,
+    NumpyTensorSource,
     RandomValueSource,
     Source,
     TupleIteratorGetItemSource,
@@ -941,7 +942,14 @@ class VariableBuilder:
             tx=self.tx,
             proxy=tensor_proxy,
             example_value=value,
-            guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
+            guards=self.make_guards(
+                functools.partial(
+                    GuardBuilder.TENSOR_MATCH,
+                    value=value
+                    if isinstance(source, NumpyTensorSource)
+                    else TensorWeakRef(value),
+                )
+            ),
             should_specialize=self.tensor_should_specialize(),
             ignore_subclass=ignore_subclass,
             source=source,
@@ -978,13 +986,17 @@ class VariableBuilder:
     def wrap_numpy_ndarray(self, value):
         assert isinstance(value, np.ndarray)
 
-        source = self.get_source()
+        source = NumpyTensorSource(self.get_source())
         tensor_value = torch.as_tensor(value)
-
+        # We do this because we want the full behavior of guarding the numpy ndarray as if it were
+        # a tensor. It's a little annoying to make a VT to throw out, but there's so many side effects here
+        # that there's not another great way to do this atm.
+        # This creates the right graphargs, as well as registration for guards in tensor names and shape env.
+        tensor_vt = VariableBuilder(self.tx, source)(tensor_value)
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(tensor_value), source=source
         )
-        options = {"source": source}
+        options = {"source": source, "guards": tensor_vt.guards}
         numpy_ndarray_variable = wrap_fx_proxy_cls(
             target_cls=NumpyNdarrayVariable,
             tx=self.tx,

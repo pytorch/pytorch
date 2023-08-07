@@ -31,6 +31,7 @@ from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
+    CompileCounterWithBackend,
     expectedFailureDynamic,
     same,
     skipIfNotPy311,
@@ -1255,7 +1256,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             y = torch.randn([1, 3])
             ref = fn(x, y)
             res = opt_fn(x, y)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
     def test_tensor_interacts_with_numpy_ndarray(self):
@@ -1274,7 +1275,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             y = torch.randn([1, 3])
             ref = fn(x, y)
             res = opt_fn(x, y)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
     def test_numpy_ndarray_works_with_builtin_function(self):
@@ -1288,8 +1289,33 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             x = np.random.randn(2, 3)
             ref = fn(x)
             res = opt_fn(x)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
+
+    def test_numpy_no_raise(self):
+        def _inf_nan_preprocess(t, t_np):
+            t_np = np.nan_to_num(t_np)
+            return t, t_np
+
+        def fn():
+            # shape, dims format
+            test_cases = (
+                (3, 3),
+                (4, 4),
+                (5, 5),
+            )
+
+            for shape in test_cases:
+                t = torch.randn(shape, dtype=torch.complex64)
+                t_np = np.random.randn(*shape).astype(np.complex64)
+
+                _, t_np = _inf_nan_preprocess(t, t_np)
+                print(t, t_np)  # Just a side effect so that compilation kicks in
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn = torch._dynamo.optimize(cnt)(fn)
+        fn()
+        self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
 
     def test_mandelbrot_numpy(self):
         def mandelbrot_numpy(max_iter):
