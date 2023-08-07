@@ -250,7 +250,7 @@ def impl_abstract(qualname, *, func=None):
     """
 
     def inner(func):
-        custom_op = _find_custom_op(qualname)
+        custom_op = _find_custom_op(qualname, also_check_torch_library=True)
         custom_op.impl_abstract(_stacklevel=3)(func)
         return func
 
