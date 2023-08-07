@@ -11,7 +11,6 @@ from typing import List, Tuple, Dict, Any, Union, cast
 import torch
 
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor
 
 
