@@ -5,8 +5,9 @@ import os
 import re
 import sys
 import time
+from collections import defaultdict
 from contextlib import contextmanager
-from typing import Dict, List, Optional, Set, Tuple
+from typing import DefaultDict, Dict, List, Optional, Set, Tuple
 
 import sympy
 
@@ -189,8 +190,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.num_static_inputs = num_static_inputs
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
+        self.mutated_input_idxs: List[int] = []
         self.unaligned_buffers: Set[str] = set()
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
+        self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
         self.creation_time = time.time()
         self.name = "GraphLowering"
         self.cpp_wrapper = cpp_wrapper
@@ -228,6 +231,18 @@ class GraphLowering(torch.fx.Interpreter):
 
         if nconv == 0:
             return False
+
+        # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
+        if (
+            all(
+                n.args[idx].meta["val"].device == torch.device("cpu")
+                for n in conv_nodes
+                for idx in [0, 1]
+            )
+            and torch.backends.mkldnn.enabled
+            and torch.backends.mkldnn.is_available()
+        ):
+            return True
 
         # Followering models are skipped due to this:
         # jx_nest_base
@@ -280,7 +295,7 @@ class GraphLowering(torch.fx.Interpreter):
             for n in conv_nodes
         ):
             log.debug(
-                "Skip layout optimization because some convoluttions have smaller out_channel"
+                "Skip layout optimization because some convolutions have smaller out_channel"
             )
             return False
 
@@ -436,6 +451,24 @@ class GraphLowering(torch.fx.Interpreter):
         self.lists[name] = buffer_names
         return name
 
+    def register_users_of(self, node_output):
+        def register(value):
+            if isinstance(value, (list, tuple)):
+                for x in value:
+                    register(x)
+            if isinstance(value, ir.IRNode):
+                if (
+                    not hasattr(value, "data")
+                    or not isinstance(value.data, ir.IRNode)
+                    or not isinstance(value.data.data, ir.IRNode)
+                ):
+                    return
+
+                for read_name in value.get_read_names():
+                    self.name_to_users[read_name].append(value)
+
+        register(node_output)
+
     def mark_buffer_mutated(self, name: str):
         """
         When a buffer is mutated we need to make sure all the reads to
@@ -444,19 +477,11 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(name, str)
         self.mutated_buffers.add(name)
 
-        def visit(value):
-            if isinstance(value, (list, tuple)):
-                return [visit(x) for x in value]
-            if isinstance(value, ir.IRNode):
-                if value.is_user_of(name):
-                    value.realize()
-            return value
+        if name not in self.name_to_users:
+            return
 
-        for value in self.env.values():
-            try:
-                visit(value)
-            except Exception:
-                log.warning("error in mark_buffer_mutated", exc_info=True)
+        for user in self.name_to_users[name]:
+            user.realize()
 
     def add_tensor_constant(self, data):
         def allocate():
@@ -742,6 +767,7 @@ class GraphLowering(torch.fx.Interpreter):
                                 torch.ops.mkldnn._convolution_transpose_pointwise.default,
                                 torch.ops.mkldnn._linear_pointwise.default,
                                 torch.ops.mkldnn._linear_pointwise.binary,
+                                torch.ops.aten.mkldnn_rnn_layer.default,
                             ]
                             if torch._C.has_mkl:
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
@@ -787,6 +813,8 @@ class GraphLowering(torch.fx.Interpreter):
                 ):
                     if isinstance(result.data.data.inputs[0], ir.Buffer):
                         result.data.data.inputs[0].origin_node = n
+
+        self.register_users_of(result)
 
         return result
 
@@ -926,6 +954,7 @@ class GraphLowering(torch.fx.Interpreter):
             code, linemap = self.codegen()
             output_code_log.debug("Output code: \n%s", code)
 
+            # Directly return the file path with the compiled code
             return AotCodeCache.compile(self, code, cuda=self.cuda)
         else:
             return self.compile_to_module().call
