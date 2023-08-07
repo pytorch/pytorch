@@ -1695,8 +1695,9 @@ def main():
         if IS_CI and HAVE_TEST_SELECTION_TOOLS:
             emit_metric("cats_td_experiment_1", metrics_dict)
 
-    if len(failures) != 0:
-        for _, err in failures:
+    all_failures = prioritized_failures + general_failures
+    if len() != 0:
+        for _, err in all_failures:
             print_to_stderr(err)
 
         # A disabled test is expected to fail, so there is no need to report a failure here
