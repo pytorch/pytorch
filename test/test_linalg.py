@@ -2350,7 +2350,6 @@ class TestLinalg(TestCase):
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
     @skipCUDAIfNoCusolver
-    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_svd_lowrank(self, device, dtype):
@@ -3972,7 +3971,7 @@ class TestLinalg(TestCase):
 
     def _gen_shape_inputs_linalg_triangular_solve(self, shape, dtype, device, well_conditioned=False):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
-        make_randn = partial(torch.randn, dtype=dtype, device=device)
+        make_fullrank = partial(make_fullrank_matrices_with_distinct_singular_values, dtype=dtype, device=device)
         b, n, k = shape
         for left, uni, expand_a, tr_a, conj_a, expand_b, tr_b, conj_b in product((True, False), repeat=8):
             # expand means that we generate a batch of matrices with a stride of zero in the batch dimension
@@ -3992,7 +3991,7 @@ class TestLinalg(TestCase):
                 size_b = size_b[1:]
 
             if well_conditioned:
-                PLU = torch.linalg.lu(make_randn(*size_a))
+                PLU = torch.linalg.lu(make_fullrank(*size_a))
                 if uni:
                     # A = L from PLU
                     A = PLU[1].transpose(-2, -1).contiguous()
@@ -4038,12 +4037,13 @@ class TestLinalg(TestCase):
         torch.linalg.solve_triangular(A, B, upper=upper, left=left, unitriangular=uni, out=out)
         self.assertEqual(X, out)
 
+    # Tolerances dictated by widest acceptable range on CPU before failure
     @dtypes(*floating_and_complex_types())
-    @precisionOverride({torch.float32: 1e-1, torch.complex64: 1e-1,
-                        torch.float64: 1e-8, torch.complex128: 1e-8})
+    @precisionOverride({torch.float32: 1e-3 if TEST_WITH_ROCM else 1e-1,
+                        torch.float64: 1e-8,
+                        torch.complex64: 1e-1,
+                        torch.complex128: 1e-8})
     def test_linalg_solve_triangular(self, device, dtype):
-        if TEST_WITH_ROCM and dtype is torch.float32:
-            raise unittest.SkipTest("Skipping for ROCm for Magma backend; unskip when hipSolver backend is enabled")
         # This exercises the API + BLAS CPU + batched cuBLAS
         ks = (3, 1, 0)
         ns = (5, 0)
@@ -4051,7 +4051,7 @@ class TestLinalg(TestCase):
 
         gen_inputs = self._gen_shape_inputs_linalg_triangular_solve
         for b, n, k in product(bs, ns, ks):
-            for A, B, left, upper, uni in gen_inputs((b, n, k), dtype, device):
+            for A, B, left, upper, uni in gen_inputs((b, n, k), dtype, device, well_conditioned=True):
                 self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
@@ -7209,7 +7209,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         run_test((1, 1), (1, 1, 1025))
 
     @skipCUDAIfNoCusolver
-    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     def test_pca_lowrank(self, device):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
