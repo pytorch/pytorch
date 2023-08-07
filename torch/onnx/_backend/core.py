@@ -9,19 +9,12 @@ import torch._C
 import torch._ops
 import torch._prims.executor
 import torch.fx
-import torch.onnx
-import torch.onnx._internal
-import torch.onnx._internal.diagnostics
-import torch.onnx._internal.exporter
-import torch.onnx._internal.fx.decomposition_table
-import torch.onnx._internal.fx.passes
 from torch._dynamo.backends.common import aot_autograd
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
-from torch.onnx._internal.exporter import ExportOptions
 from torch.utils import _pytree
 
 try:
@@ -32,6 +25,14 @@ try:
     import onnx
     import onnxruntime  # type: ignore[import]
     from onnxruntime.capi import _pybind_state as ORTC  # type: ignore[import]
+
+    import torch.onnx
+    import torch.onnx._internal
+    import torch.onnx._internal.diagnostics
+    import torch.onnx._internal.exporter
+    import torch.onnx._internal.fx.decomposition_table
+    import torch.onnx._internal.fx.passes
+    from torch.onnx._internal.exporter import ExportOptions
 
     # This is not use directly in DORT but needed by underlying exporter,
     # so we still need to check if it exists.
@@ -64,7 +65,7 @@ try:
     }
 
     _SUPPORT_ONNXRT = True
-except (ImportError, ModuleNotFoundError):
+except ImportError:
     _NP_DTYPE = {}
     _ONNX_ELEMENT_TYPE_TO_TORCH_DTYPE = {}
     _TORCH_DTYPE_TO_ONNX_ELEMENT_TYPE = {}
