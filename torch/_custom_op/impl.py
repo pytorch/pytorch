@@ -117,7 +117,7 @@ def custom_op(
                 f"function, got: {type(func)}"
             )
 
-        ns, name = parse_namespace(qualname)
+        ns, name = parse_qualname(qualname)
         validate_namespace(ns)
         if func.__name__ != name:
             raise ValueError(
@@ -562,10 +562,16 @@ def validate_schema(schema: FunctionSchema) -> None:
         )
 
 
-def parse_namespace(namespaced_entity: str) -> typing.Tuple[str, str]:
-    names = namespaced_entity.split("::", 1)
+def parse_qualname(qualname: str) -> typing.Tuple[str, str]:
+    names = qualname.split("::", 1)
     if len(names) != 2:
-        raise ValueError(f"Expected there to be a namespace in {namespaced_entity}.")
+        raise ValueError(f"Expected there to be a namespace in {qualname}, i.e. The "
+                         f"operator name should look something like ns::foo")
+    if '.' in names[1]:
+        raise ValueError(f"The torch.custom_ops APIs do not handle overloads, "
+                         f"i.e. operator names with '.' in them. "
+                         f"Please name your operator something like ns::foo. "
+                         f"Got: {qualname}")
     return names[0], names[1]
 
 

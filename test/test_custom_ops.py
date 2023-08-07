@@ -487,6 +487,10 @@ class TestCustomOp(TestCase):
         with self.assertRaisesRegex(AssertionError, "Invalid function schema: foo"):
             custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo", "(")
 
+    def test_invalid_qualname(self):
+        with self.assertRaisesRegex(ValueError, "overload"):
+            custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo.Tensor", "() -> ()")
+
     def test_name_must_match(self):
         with self.assertRaisesRegex(ValueError, "to have name"):
 
