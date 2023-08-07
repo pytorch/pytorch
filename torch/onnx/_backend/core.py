@@ -21,10 +21,13 @@ try:
     # Use try-except to initialize package-dependent global variables.
     from typing import Any, Dict, List, Mapping, Optional, Set, Tuple, Union
 
-    import numpy as np
     import onnx
     import onnxruntime  # type: ignore[import]
     from onnxruntime.capi import _pybind_state as ORTC  # type: ignore[import]
+
+    # This is not use directly in DORT but needed by underlying exporter,
+    # so we still need to check if it exists.
+    importlib.import_module("onnxscript")
 
     import torch.onnx
     import torch.onnx._internal
@@ -33,42 +36,15 @@ try:
     import torch.onnx._internal.fx.decomposition_table
     import torch.onnx._internal.fx.passes
     from torch.onnx._internal.exporter import ExportOptions
-
-    # This is not use directly in DORT but needed by underlying exporter,
-    # so we still need to check if it exists.
-    importlib.import_module("onnxscript")
-
-    _NP_DTYPE = {
-        torch.float16: np.float16,
-        torch.float32: np.float32,
-        torch.float64: np.float64,
-        torch.uint8: np.uint8,
-        torch.int8: np.int8,
-        torch.int16: np.int16,
-        torch.int32: np.int32,
-        torch.int64: np.longlong,
-        torch.bool: np.bool_,
-    }
-    _ONNX_ELEMENT_TYPE_TO_TORCH_DTYPE = {
-        onnx.TensorProto.FLOAT: torch.float32,  # type: ignore[attr-defined]
-        onnx.TensorProto.FLOAT16: torch.float16,  # type: ignore[attr-defined]
-        onnx.TensorProto.DOUBLE: torch.float64,  # type: ignore[attr-defined]
-        onnx.TensorProto.BOOL: torch.bool,  # type: ignore[attr-defined]
-        onnx.TensorProto.UINT8: torch.uint8,  # type: ignore[attr-defined]
-        onnx.TensorProto.INT8: torch.int8,  # type: ignore[attr-defined]
-        onnx.TensorProto.INT16: torch.int16,  # type: ignore[attr-defined]
-        onnx.TensorProto.INT32: torch.int32,  # type: ignore[attr-defined]
-        onnx.TensorProto.INT64: torch.int64,  # type: ignore[attr-defined]
-    }
-    _TORCH_DTYPE_TO_ONNX_ELEMENT_TYPE = {
-        value: key for key, value in _ONNX_ELEMENT_TYPE_TO_TORCH_DTYPE.items()
-    }
+    from torch.onnx._internal.fx.type_utils import (
+        _TORCH_DTYPE_TO_NUMPY_DTYPE,
+        _TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE,
+    )
 
     _SUPPORT_ONNXRT = True
 except ImportError:
-    _NP_DTYPE = {}
-    _ONNX_ELEMENT_TYPE_TO_TORCH_DTYPE = {}
-    _TORCH_DTYPE_TO_ONNX_ELEMENT_TYPE = {}
+    _TORCH_DTYPE_TO_NUMPY_DTYPE = {}
+    _TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE = {}
     _SUPPORT_ONNXRT = False
 
 
@@ -107,16 +83,16 @@ def _get_ort_device_type(device_type: str):
 
 logger = logging.getLogger(__name__)
 # Uncomment the following lines to print out development info.
-# logging.basicConfig(level=logging.INFO)
-# logger.setLevel(logging.INFO)
+# logging.basicConfig(level=logging.WARNING)
+# logger.setLevel(logging.WARNING)
 
 
 class OrtOperatorSupport(OperatorSupport):
-    """
-    Operator support for ONNXRuntime backend. It has two-level of support decision.
-    One is via support_dict and the other one is via extra_support_dict. The logic
-    of using support_dict is implemented in OrtOperatorSupport and extra_support_dict
-    is used by OperatorSupport.is_node_supported.
+    """Operator support for ONNXRuntime backend.
+
+    It has two-level of support decision. One is via support_dict and the other one
+    is via extra_support_dict. The logic of using support_dict is implemented in
+    OrtOperatorSupport and extra_support_dict is used by OperatorSupport.is_node_supported.
     """
 
     def __init__(self, support_dict: Set[Any], extra_support_dict: Dict[str, Any]):
@@ -137,13 +113,13 @@ class OrtOperatorSupport(OperatorSupport):
             return False
         # This is the and the only place to decide if aten op is supported.
         if node.op == "call_function" and node.target in self._onnx_support_dict:
-            logger.info(
+            logger.warning(
                 "support_dict supports node.target: %s (type: %s)",
                 node.target,
                 type(node.target),
             )
             return True
-        logger.info(
+        logger.warning(
             "support_dict doesn't support node.target: %s (type: %s)",
             node.target,
             type(node.target),
@@ -152,13 +128,13 @@ class OrtOperatorSupport(OperatorSupport):
         # can convert it to ONNX equivalence. Let's use base mechanism to do this.
         # See extra_support_dict  for supported ops.
         if super().is_node_supported(submodules, node):
-            logger.info(
+            logger.warning(
                 "extra_support_dict supports node.target: %s (type: %s)",
                 node.target,
                 type(node.target),
             )
             return True
-        logger.info(
+        logger.warning(
             "extra_support_dict doesn't supports node.target: %s (type: %s)",
             node.target,
             type(node.target),
@@ -335,7 +311,7 @@ def _get_ortvalues_from_torch_tensors(
     data_ptrs = []
 
     for tensor in tensors:
-        dtypes.append(_NP_DTYPE[tensor.dtype])
+        dtypes.append(_TORCH_DTYPE_TO_NUMPY_DTYPE[tensor.dtype])
         shapes.append(tensor.size())
         data_ptrs.append(tensor.data_ptr())
     ortvalues.push_back_batch(tensors, data_ptrs, dtypes, shapes, devices)
@@ -398,26 +374,6 @@ def _run_onnx_session_with_ortvaluevector(
         return pth_outputs
 
 
-def _assert_allclose_with_detailed_error_message(
-    actual: torch.Tensor,
-    expected: torch.Tensor,
-    rtol: float = 1e-03,
-    atol: float = 1e-04,
-):
-    diff = actual - expected
-    real_atol = torch.max(torch.abs(diff))
-    max_value = torch.max(torch.abs(actual), torch.abs(expected))
-    max_value[max_value == 0.0] = 1.0
-    real_rtol = torch.max(diff / max_value)
-    allclose = bool(real_atol <= atol or real_rtol <= rtol)
-    if not allclose:
-        raise RuntimeError(
-            "ONNX output doesn't match baseline output with "
-            f"actual rtol={real_rtol} and actual atol={real_atol} "
-            f"but expected rtol={rtol} and expected atol={atol}."
-        )
-
-
 class OrtExecutionInfoPerSession:
     """Information required to execute torch.fx.GraphModule using onnxruntime.InferenceSession"""
 
@@ -462,7 +418,7 @@ class OrtExecutionInfoPerSession:
         for arg, value_info in zip(args, self.input_value_infos):
             if not isinstance(arg, torch.Tensor):
                 return False
-            onnx_dtype = _TORCH_DTYPE_TO_ONNX_ELEMENT_TYPE[arg.dtype]
+            onnx_dtype = _TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE[arg.dtype]
             if onnx_dtype != value_info.type.tensor_type.elem_type:
                 return False
             for dim, onnx_dim in zip(arg.shape, value_info.type.tensor_type.shape.dim):
@@ -644,7 +600,7 @@ class OrtBackend:
                         *args, **kwargs
                     )
                 except Exception:
-                    logger.info("FakeTensorProb failed for %s", graph_module)
+                    logger.warning("FakeTensorProb failed for %s", graph_module)
                     # When FakeTensorProp fails, it is not possible to preallocate output buffers
                     # because the output shapes are not inferred.
                     self.preallocate_output = False
@@ -757,9 +713,7 @@ class OrtBackend:
                 )
                 # Ensure every output tensor is close to the corresponding baseline.
                 for onnx_output, baseline_output in zip(onnx_outputs, baseline_outputs):
-                    _assert_allclose_with_detailed_error_message(
-                        onnx_output, baseline_output
-                    )
+                    torch.testing.assert_close(onnx_output, baseline_output)
             return onnx_outputs
         else:
             assert isinstance(prim_outputs, torch.Tensor)
@@ -783,9 +737,7 @@ class OrtBackend:
                     graph_module, *args, executor="aten"
                 )
                 # Ensure output tensor is close to the corresponding baseline.
-                _assert_allclose_with_detailed_error_message(
-                    onnx_outputs[0], baseline_outputs
-                )
+                torch.testing.assert_close(onnx_outputs[0], baseline_outputs)
             return onnx_outputs[0]
 
     def compile(self, graph_module: torch.fx.GraphModule, args) -> torch.fx.GraphModule:
