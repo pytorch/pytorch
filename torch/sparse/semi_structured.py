@@ -16,7 +16,8 @@ _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG = {
     torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(10, 32, 128),
     torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 32, 64),
     torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 32, 64),
-    torch.float32: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 32, 32)
+    # TODO enable float32 support when adding cuSPARSELt as a backend
+    # torch.float32: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 32, 32)
 }
 
 
