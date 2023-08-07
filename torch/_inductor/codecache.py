@@ -691,6 +691,10 @@ def get_include_and_linking_paths(
 ):
     from torch.utils import cpp_extension
 
+    if aot_mode and config.is_fbcode():
+        # Hack.  The AOT inductor libs reference CUDA, so let's just include it for now.
+        cuda = True
+
     macros = ""
     if sys.platform == "linux" and (
         include_pytorch
@@ -715,6 +719,8 @@ def get_include_and_linking_paths(
         else:
             # internal remote execution is able to find omp, but not gomp
             libs += ["omp"]
+            if aot_mode:
+                ipaths += [os.path.dirname(cpp_prefix_path())]
         macros = vec_isa.build_macro()
         if macros:
             if config.is_fbcode() and vec_isa != invalid_vec_isa:
