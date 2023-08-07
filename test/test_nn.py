@@ -2723,6 +2723,44 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertWarnsRegex(UserWarning, "for weight: copying from a non-meta parameter in the checkpoint to a meta"):
             m.load_state_dict(state_dict)
 
+    def test_reset_parameters_raises_params_buffers(self):
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(3))
+
+        class WrapperModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.empty(3))
+                self.fc1 = torch.nn.Linear(3, 3)
+                self.layer = CustomModule()
+                self.reset_parameters()
+
+            def reset_parameters(self):
+                nn.init.constant_(self.weight, 0.5)
+
+        m = WrapperModule()
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "Module CustomModule directly owns parameters or buffers but does not implement reset_parameters."
+        ):
+            m.apply(lambda mod: mod.reset_parameters())
+
+    def test_reset_parameters_lazy_no_error(self):
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.empty(3))
+                self.fc1 = torch.nn.LazyLinear(5)
+                self.reset_parameters()
+
+            def reset_parameters(self):
+                nn.init.constant_(self.weight, 0.5)
+
+        m = CustomModule()
+        m.reset_parameters()
+
     def test_extra_state_missing_set_extra_state(self):
 
         class MyModule(torch.nn.Module):
