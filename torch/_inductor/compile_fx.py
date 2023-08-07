@@ -265,7 +265,7 @@ def fake_tensor_prop(
         ctx = (
             contextlib.nullcontext()
             if not force_allow_non_fake_inputs
-            else unittest.mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
+            else unittest.mock.patch.object(fake_mode, "allow_non_fake_inputs", True)  # type: ignore[attr-defined]
         )
         with ctx:  # type: ignore[attr-defined]
             FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
@@ -526,13 +526,16 @@ def fx_codegen_and_compile(
             if context is not None and context.output_strides is not None:
                 # Return the output strides to the caller via TracingContext
                 assert len(context.output_strides) == 0
-                if graph.graph_outputs is not None:
-                    context.output_strides += [
-                        [V.graph.sizevars.size_hint(s) for s in out.layout.stride]
-                        if hasattr(out, "layout")
-                        else None
-                        for out in graph.graph_outputs
-                    ]
+                assert graph.graph_outputs is not None
+                for out in graph.graph_outputs:
+                    if hasattr(out, "layout"):
+                        context.output_strides.append(
+                            tuple(
+                                V.graph.sizevars.size_hint(s) for s in out.layout.stride
+                            )
+                        )
+                    else:
+                        context.output_strides.append(None)
             compiled_fn = graph.compile_to_fn()
 
             if _in_aot_compilation:
@@ -834,7 +837,7 @@ def compile_fx_aot(
             "aot_inductor_output_path": code_hash(model_.code),
         }
 
-    with unittest.mock.patch.object(_in_aot_compilation, "value", True):
+    with unittest.mock.patch.object(_in_aot_compilation, "value", True):  # type: ignore[attr-defined]
         return compile_fx(
             model_,
             example_inputs_,
@@ -891,7 +894,7 @@ def fw_compiler_freezing(
         if i not in preserved_arg_indices:
             params_flat[i] = None
 
-    with unittest.mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
+    with unittest.mock.patch.object(fake_mode, "allow_non_fake_inputs", True):  # type: ignore[attr-defined]
         optimized_function = inner_compile(
             opt_model,
             aot_example_inputs,
