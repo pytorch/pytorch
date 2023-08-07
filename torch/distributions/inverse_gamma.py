@@ -1,11 +1,11 @@
 import torch
 from torch.distributions import constraints
-from torch.distributions.transforms import PowerTransform
 from torch.distributions.gamma import Gamma
 from torch.distributions.transformed_distribution import TransformedDistribution
+from torch.distributions.transforms import PowerTransform
 
 
-__all__ = ['InverseGamma']
+__all__ = ["InverseGamma"]
 
 
 class InverseGamma(TransformedDistribution):
@@ -29,7 +29,10 @@ class InverseGamma(TransformedDistribution):
         rate (float or Tensor): rate = 1 / scale of the distribution
             (often referred to as beta)
     """
-    arg_constraints = {'concentration': constraints.positive, 'rate': constraints.positive}
+    arg_constraints = {
+        "concentration": constraints.positive,
+        "rate": constraints.positive,
+    }
     support = constraints.positive
     has_rsample = True
 
@@ -60,9 +63,15 @@ class InverseGamma(TransformedDistribution):
 
     @property
     def variance(self):
-        result = self.rate.square() / ((self.concentration - 1).square() * (self.concentration - 2))
+        result = self.rate.square() / (
+            (self.concentration - 1).square() * (self.concentration - 2)
+        )
         return torch.where(self.concentration > 2, result, torch.inf)
 
     def entropy(self):
-        return self.concentration + self.rate.log() + self.concentration.lgamma() \
+        return (
+            self.concentration
+            + self.rate.log()
+            + self.concentration.lgamma()
             - (1 + self.concentration) * self.concentration.digamma()
+        )
