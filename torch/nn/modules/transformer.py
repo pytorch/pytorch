@@ -241,7 +241,8 @@ class TransformerEncoder(Module):
         elif encoder_layer.norm_first :
             why_not_sparsity_fast_path = f"{enc_layer}.norm_first was True"
         elif not encoder_layer.self_attn.batch_first:
-            why_not_sparsity_fast_path = f"{enc_layer}.self_attn.batch_first was not True (use batch_first for better performance)"
+            why_not_sparsity_fast_path = (f"{enc_layer}.self_attn.batch_first was not True" +
+                                          "(use batch_first for better inference performance)")
         elif not encoder_layer.self_attn._qkv_same_embed_dim:
             why_not_sparsity_fast_path = f"{enc_layer}.self_attn._qkv_same_embed_dim was not True"
         elif not encoder_layer.activation_relu_or_gelu:
