@@ -5,6 +5,7 @@ import sys
 import multiprocessing
 import torch
 import unittest
+from torch.testing._internal.common_utils import TEST_CUDA
 from unittest.mock import patch
 
 # NOTE: Each of the tests in this module need to be run in a brand new process to ensure CUDA is uninitialized
@@ -19,7 +20,6 @@ with patch.dict(os.environ, {"PYTORCH_NVML_BASED_CUDA_CHECK": "1"}):
     # to bypass that method here which should be irrelevant to the parameterized tests in this module.
     torch.testing._internal.common_utils.remove_device_and_dtype_suffixes = lambda x: x
 
-    TEST_CUDA = torch.cuda.is_available()
     if not TEST_CUDA:
         print('CUDA not available, skipping tests', file=sys.stderr)
         TestCase = NoTest  # type: ignore[misc, assignment] # noqa: F811
