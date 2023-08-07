@@ -4573,6 +4573,16 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
     stride = utils.compute_elementwise_output_strides(*_maybe_broadcast(*inputs))
     if output.stride() != stride:
         return prims.copy_strided(output, stride)
+
+    device = None
+    for t in inputs:
+        if hasattr(t, 'fake_device'):
+            device = t.fake_device
+            break
+
+    if is_noncontiguous_supported(device) is False:
+        output = output.new_empty(output.shape)
+
     return output
 
 

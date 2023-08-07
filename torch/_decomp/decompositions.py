@@ -1626,20 +1626,21 @@ def device_hint(tensor):
         return None
 
 
-def wrap_output_with_input_device_(x, common_device):
-	from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-	fake_mode = FakeTensorMode()
-	converter = fake_mode.fake_tensor_converter
-	if (
-        isinstance(x, torch.Tensor)
-        and not isinstance(x, FakeTensor)
+def wrap_output_with_input_device_(x,common_device):
+    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+    fake_mode = FakeTensorMode()
+    fake_mode.in_kernel_invocation = True
+    converter = fake_mode.fake_tensor_converter
+
+    # wrap meta tensor
+    if (
+        common_device is not None
+        and x.device.type == "meta"
         and converter is not None
-        ):
-            # To Do
-            # Below API call result into AssertionError
-            return converter.from_meta_and_device(
-                fake_mode, x, common_device
-                )
+    ):
+        return converter.from_meta_and_device(
+            fake_mode, x, common_device
+            )
 	return x
 
 
@@ -1668,13 +1669,15 @@ def _to_copy(
         x = torch._prims.device_put(x, device)
     if dtype is not None and not dtype_converted:
         x = torch._prims.convert_element_type(x, dtype)
-    if memory_format is not None:  # no ref/prim for memory format
-        return torch.clone(x, memory_format=memory_format)
-
+        dtype_converted = True
     # In case of dtype promotion, faketensor converted into tensor.
     # Need to convert into faketensor if input was a faketensor.
-    res = wrap_output_with_input_device_(x,common_device)
-    return res
+    if dtype_converted:
+        x = wrap_output_with_input_device_(x,common_device)
+    if memory_format is not None:  # no ref/prim for memory format
+        x = torch.clone(x, memory_format=memory_format)
+
+    return x
 
 
 # Questionable decompositions
