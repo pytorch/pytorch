@@ -689,17 +689,3 @@ def detect_fake_mode(inputs: Any = None):
         return fake_mode
     else:
         return None
-
-
-EXPORT_FAKE_MODE = None
-
-
-@contextlib.contextmanager
-def export_fake_mode(fake_mode):
-    global EXPORT_FAKE_MODE
-    assert EXPORT_FAKE_MODE is None
-    EXPORT_FAKE_MODE = fake_mode
-    try:
-        yield
-    finally:
-        EXPORT_FAKE_MODE = None

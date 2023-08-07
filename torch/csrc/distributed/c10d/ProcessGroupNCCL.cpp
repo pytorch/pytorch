@@ -672,18 +672,17 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   const char* torch_distributed_debug =
       parseEnvVarString("TORCH_DISTRIBUTED_DEBUG", OFF.c_str());
   const char* nccl_debug = parseEnvVarString("NCCL_DEBUG", OFF.c_str());
-  LOG(INFO) << "[Rank " << rank_
-            << "] ProcessGroupNCCL initialized with following options:"
-            << "\nNCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << "\nNCCL_DESYNC_DEBUG: " << desyncDebug_
-            << "\nNCCL_BLOCKING_WAIT: " << blockingWait_
-            << "\nTIMEOUT(ms): " << options_->timeout.count()
-            << "\nUSE_HIGH_PRIORITY_STREAM: "
+  LOG(INFO) << "[Rank " << rank_ << "] ProcessGroupNCCL initialization options:"
+            << "NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+            << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
+            << ", NCCL_BLOCKING_WAIT: " << blockingWait_
+            << ", TIMEOUT(ms): " << options_->timeout.count()
+            << ", USE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
-            << "\nTORCH_DISTRIBUTED_DEBUG: "
+            << ", TORCH_DISTRIBUTED_DEBUG: "
             << std::string(torch_distributed_debug)
-            << "\nNCCL_DEBUG: " << std::string(nccl_debug)
-            << "\nID=" << this->getID();
+            << ", NCCL_DEBUG: " << std::string(nccl_debug)
+            << ", ID=" << this->getID();
 
   RECORD_PARAM_COMMS(
       0, // seq
@@ -835,10 +834,10 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
-    LOG(INFO) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
+    VLOG(2) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
     workCleanupLoop();
-    LOG(INFO) << "[Rank " << rank_
-              << "] NCCL watchdog thread terminated normally";
+    VLOG(2) << "[Rank " << rank_
+            << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
     // Append error message reported from workCleanupLoop
     const auto exitMsg = c10::str(
