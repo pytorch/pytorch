@@ -64,7 +64,7 @@ try:
     }
 
     _SUPPORT_ONNXRT = True
-except ImportError:
+except (ImportError, ModuleNotFoundError):
     _NP_DTYPE = {}
     _ONNX_ELEMENT_TYPE_TO_TORCH_DTYPE = {}
     _TORCH_DTYPE_TO_ONNX_ELEMENT_TYPE = {}
