@@ -427,6 +427,8 @@ def mirror_files_into_torchgen():
         ),
         ("torchgen/packaged/ATen/native/tags.yaml", "aten/src/ATen/native/tags.yaml"),
         ("torchgen/packaged/ATen/templates", "aten/src/ATen/templates"),
+        ("torchgen/packaged/autograd", "tools/autograd"),
+        ("torchgen/packaged/autograd/templates", "tools/autograd/templates"),
     ]
     for new_path, orig_path in paths:
         # Create the dirs involved in new_path if they don't exist
@@ -1363,6 +1365,8 @@ def main():
         "packaged/ATen/*",
         "packaged/ATen/native/*",
         "packaged/ATen/templates/*",
+        "packaged/autograd/*",
+        "packaged/autograd/templates/*",
     ]
     setup(
         name=package_name,

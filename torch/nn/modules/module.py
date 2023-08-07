@@ -2543,3 +2543,77 @@ class Module:
         See :func:`torch.compile` for details on the arguments for this function.
         """
         self._compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)
+
+
+    def reset_parameters(self) -> None:
+        """
+        Resets the parameters and buffers of the module in-place.
+
+        This method only resets the parameters and buffers owned by the root of the module
+        but not those of recursive submodules. For modules that do not own any parameters
+        or buffers, this is a no-op.
+
+        Modules that subclass ``nn.Module`` should implement this method if the root owns
+        any parameters or buffers.
+
+        .. note::
+           This method does not call `:meth:reset_parameters()` on descendants of the module.
+           If you want to reset parameters of submodules as well, you can use :meth:`apply`
+           with `reset_parameters`, see the example below.
+
+        .. note::
+           When implementing a custom module, a good practice is to initialize parameters
+           with :func:`torch.empty()` and call :meth:`self.reset_parameters()` at the end of
+           `Module.__init__()`. This will ensure that for a given random seed `apply()` will
+           reset the parameters and buffers to the exact values given by instantiating the module
+           with that seed.
+
+        Example::
+
+            >>> import copy
+            >>> from itertools import chain
+            >>>
+            >>> class CustomModule(torch.nn.Module):
+            >>>     def __init__(self):
+            >>>         super().__init__()
+            >>>         self.weight = torch.nn.Parameter(torch.empty(3, 3))
+            >>>         self.fc1 = torch.nn.Linear(3, 2)
+            >>>         self.buf = torch.nn.Buffer(torch.empty(3))
+            >>>         self.reset_parameters()
+            >>>
+            >>>     def reset_parameters(self):
+            >>>         torch.nn.init.kaiming_normal_(self.weight)
+            >>>         torch.nn.init.constant_(self.buf, 0.0)
+            >>>
+            >>>     def forward(self, x):
+            >>>         return self.fc1(self.weight * x)
+            >>>
+            >>> seed = 0
+            >>> torch.manual_seed(seed)
+            >>> m = CustomModule()
+            >>> torch.manual_seed(seed)
+            >>> m_ref = CustomModule()
+            >>>
+            >>> for p in chain(m.parameters(), m.buffers()):
+            >>>     torch.nn.init.ones_(p)
+            >>>
+            >>> # reset parameters of modules and submodules
+            >>> torch.manual_seed(seed)
+            >>> m.apply(lambda m: m.reset_parameters())
+            >>>
+            >>> # parameters and buffers exactly match the ref
+            >>> for p, p_ref in zip(m.parameters(), m_ref.parameters()):
+            >>>     assert torch.equal(p, p_ref)
+            >>>
+            >>> for b, b_ref in zip(m.buffers(), m_ref.buffers()):
+            >>>     assert torch.equal(b, b_ref)
+        """
+
+        if isinstance(self, torch.nn.modules.lazy.LazyModuleMixin):
+            if self.has_uninitialized_params():
+                return
+        if (len(list(self.parameters(recurse=False))) == 0 and
+                len(list(self.buffers(recurse=False))) == 0):
+            return
+        raise NotImplementedError(f"Module {self._get_name()} directly owns parameters or buffers "
+                                  "but does not implement reset_parameters.")

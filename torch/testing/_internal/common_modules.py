@@ -2952,7 +2952,13 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # No channels_last support for MultiheadAttention currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # MultiheadAttention has a private `_reset_parameters`.
+                   # However, promoting this to public API is insufficient!
+                   # Due to the ordering of the layer `out_proj`, which is initialized before everything
+                   # initialized by `_reset_params`, reseting `torch.manual_seed` and calling
+                   # _reset_parameters yields
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_reset_parameters'))
                ),
     ModuleInfo(torch.nn.Embedding,
                module_inputs_func=module_inputs_torch_nn_Embedding,
