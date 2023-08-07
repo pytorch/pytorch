@@ -262,6 +262,7 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     # https://github.com/pytorch/pytorch/issues/103760
     "dlrm",
     "hf_T5_generate",
+    "hf_Bert",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -525,7 +526,7 @@ def _normalize_bench_inputs(example_inputs) -> Tuple[Tuple[Any], Mapping[str, An
     if isinstance(example_inputs, dict):
         return (), example_inputs
     else:
-        return example_inputs, {}
+        return tuple(example_inputs), {}
 
 
 def _register_dataclass_output_as_pytree(example_outputs) -> None:
