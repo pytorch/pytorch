@@ -284,7 +284,7 @@ def _replace_ph_qdq_per_channel_replacement(gm: torch.fx.GraphModule):
     )
 
 @dataclass
-class RewriteInfo:
+class _RewriteInfo:
     """Data needed for rewrite, this includes example inputs, pattern and replacement functions
     and post transformation functions for the exported pattern and replacement GraphModule
     """
@@ -298,47 +298,47 @@ class RewriteInfo:
     replacement_post_trans: Optional[Callable[[GraphModule], GraphModule]] = None
 
 _REWRITE_INFO_LIST = [
-    RewriteInfo(
+    _RewriteInfo(
         _QUANTIZED_ADD_OR_ADD_RELU_EXAMPLE_INPUTS,
         _qdq_quantized_add_relu,
         _reference_quantized_add_relu
     ),
-    RewriteInfo(
+    _RewriteInfo(
         _QUANTIZED_ADD_OR_ADD_RELU_EXAMPLE_INPUTS,
         _qdq_quantized_add,
         _reference_quantized_add
     ),
-    RewriteInfo(
+    _RewriteInfo(
         _QUANTIZED_MAX_POOL2D_EXAMPLE_INPUTS,
         _qdq_quantized_max_pool2d,
         _reference_quantized_max_pool2d,
         _replace_literals_with_new_placeholders,
         _replace_literals_with_new_placeholders
     ),
-    RewriteInfo(
+    _RewriteInfo(
         _QUANTIZED_ADAPTIVE_AVG_POOL2D_EXAMPLE_INPUTS,
         _qdq_quantized_adaptive_avg_pool2d,
         _reference_quantized_adaptive_avg_pool2d,
         _replace_literals_with_new_placeholders,
         _replace_literals_with_new_placeholders
     ),
-    RewriteInfo(
+    _RewriteInfo(
         _QUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS,
         _quantize_per_tensor_int8,
         _reference_quantize_per_tensor_int8),
-    RewriteInfo(
+    _RewriteInfo(
         _DEQUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS,
         _dequantize_per_tensor_int8,
         _reference_dequantize_per_tensor_int8
     ),
-    RewriteInfo(
+    _RewriteInfo(
         _QUANTIZE_PER_CHANNEL_INT8_EXAMPLE_INPUTS,
         _quantize_per_channel_int8,
         _reference_quantize_per_channel_int8,
         _replace_ph_qdq_per_channel_replacement,
         _replace_ph_qdq_per_channel_replacement
     ),
-    RewriteInfo(
+    _RewriteInfo(
         _DEQUANTIZE_PER_CHANNEL_INT8_EXAMPLE_INPUTS,
         _dequantize_per_channel_int8,
         _reference_dequantize_per_channel_int8,
