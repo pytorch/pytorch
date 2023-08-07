@@ -172,7 +172,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 9)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_context_manager1(self):
+    def test_cuda_stream_context_manager2(self):
         def fn(x, s):
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
