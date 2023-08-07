@@ -2214,7 +2214,7 @@ Target Guards:
             dynamic_dim=dynamic_strides_offset,
             constraint_dim=None,
         ), hint=ex.storage_offset(), source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
-        return sym_sizes, sym_stride, sym_storage_offset
+        return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
 
     # If you know what the current hint value of the SymInt to be created
     # is, pass it into hint.  Otherwise, pass None and we will make our best

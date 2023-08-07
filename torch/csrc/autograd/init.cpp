@@ -890,6 +890,72 @@ static PyObject* len_torch_function_stack(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* set_fake_tensor_mode(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (arg != Py_None) {
+    Py_INCREF(arg);
+    c10::impl::TorchDispatchModeTLS::set_fake_mode(
+        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* set_proxy_tensor_mode(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (arg != Py_None) {
+    Py_INCREF(arg);
+    c10::impl::TorchDispatchModeTLS::set_proxy_mode(
+        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* unset_fake_tensor_mode(PyObject* _unused, PyObject* _unused2) {
+  HANDLE_TH_ERRORS
+  const auto& mode = c10::impl::TorchDispatchModeTLS::unset_fake_mode();
+  auto* r = mode->ptr(getPyInterpreter());
+  Py_INCREF(r);
+  return r;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* unset_proxy_tensor_mode(
+    PyObject* _unused,
+    PyObject* _unused2) {
+  HANDLE_TH_ERRORS
+  const auto& mode = c10::impl::TorchDispatchModeTLS::unset_proxy_mode();
+  auto* r = mode->ptr(getPyInterpreter());
+  Py_INCREF(r);
+  return r;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* get_fake_tensor_mode(PyObject* _unused, PyObject* _unused2) {
+  HANDLE_TH_ERRORS
+  const auto& mode = c10::impl::TorchDispatchModeTLS::get_fake_mode();
+  if (mode != c10::nullopt) {
+    auto* r = (*mode)->ptr(getPyInterpreter());
+    Py_INCREF(r);
+    return r;
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* get_proxy_tensor_mode(PyObject* _unused, PyObject* _unused2) {
+  HANDLE_TH_ERRORS
+  const auto& mode = c10::impl::TorchDispatchModeTLS::get_proxy_mode();
+  if (mode != c10::nullopt) {
+    auto* r = (*mode)->ptr(getPyInterpreter());
+    Py_INCREF(r);
+    return r;
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* push_on_torch_dispatch_stack(
     PyObject* _unused,
     PyObject* arg) {
@@ -932,9 +998,7 @@ static PyObject* get_dispatch_stack_at(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* len_torch_dispatch_stack(
-    PyObject* _unused,
-    PyObject* _unused2) {
+static PyObject* len_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   const auto len = c10::impl::TorchDispatchModeTLS::stack_len();
   return utils::wrap(static_cast<int64_t>(len));
@@ -1029,6 +1093,12 @@ static PyMethodDef methods[] = { // NOLINT
      len_torch_function_stack,
      METH_NOARGS,
      nullptr},
+    {"_set_proxy_tensor_mode", set_proxy_tensor_mode, METH_O, nullptr},
+    {"_unset_proxy_tensor_mode", unset_proxy_tensor_mode, METH_NOARGS, nullptr},
+    {"_get_proxy_tensor_mode", get_proxy_tensor_mode, METH_NOARGS, nullptr},
+    {"_set_fake_tensor_mode", set_fake_tensor_mode, METH_O, nullptr},
+    {"_unset_fake_tensor_mode", unset_fake_tensor_mode, METH_NOARGS, nullptr},
+    {"_get_fake_tensor_mode", get_fake_tensor_mode, METH_NOARGS, nullptr},
     {"_push_on_torch_dispatch_stack",
      push_on_torch_dispatch_stack,
      METH_O,

@@ -67,7 +67,11 @@ struct type_caster<at::Storage> {
       const at::Storage& src,
       return_value_policy /* policy */,
       handle /* parent */) {
-    return handle(torch::createPyObject(src));
+    // See Note [Python Storages for Tensor Subclasses]
+    // Unfortunately, we don't know at this point whether or not our storage
+    // came from a traceable python subclass, so we'll (dangerously)
+    // return a python storage here.
+    return handle(torch::createPyObject(src, /*always_create_storage=*/true));
   }
 };
 

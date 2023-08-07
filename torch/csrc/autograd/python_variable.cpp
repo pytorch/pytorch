@@ -630,7 +630,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
       "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
-      "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef strides, "
+      "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef? strides=None, "
       "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
@@ -683,6 +683,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
                      options.device()) // TODO: this shouldn't be necessary if
                                        // it came from options
                  .options(options)
+                 .resizeable_storage()
                  .make_tensor();
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
@@ -694,20 +695,35 @@ static PyObject* THPVariable_make_wrapper_subclass(
     AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
     tracer::impl::NoTracerDispatchMode tracer_guard{};
 
-    // We shouldn't need storage
-    Storage storage{Storage::use_byte_size_t{}, 0, at::DataPtr{}};
+    // We use storages **only** to track aliasing of subclasses during tracing.
+    // The actual data pointers are not valid.
+    Storage storage{
+        Storage::use_byte_size_t{},
+        0,
+        at::DataPtr{},
+        /*allocator=*/c10::GetAllocator(c10::kMeta),
+        /*resizeable=*/true};
 
     tensor = at::detail::make_tensor<TensorImpl>(
         std::move(storage), options.computeDispatchKey(), options.dtype());
 
     auto sym_sizes = r.symintlist(1);
-    auto sym_strides = r.symintlist(2);
+    auto sym_strides = r.symintlistOptional(2);
     auto sym_storage_offset = r.toSymIntOptional(3);
 
     TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
 
-    tensor_impl->set_sizes_and_strides(
-        sym_sizes, sym_strides, sym_storage_offset.value_or(0));
+    if (sym_strides.list.has_value()) {
+      tensor_impl->set_sizes_and_strides(
+          sym_sizes, sym_strides.list.value(), sym_storage_offset.value_or(0));
+    } else {
+      tensor_impl->generic_set_sizes_contiguous(sym_sizes);
+      if (sym_storage_offset.has_value()) {
+        // Replicating what TensorImpl does with storage_offset:
+        // https://github.com/pytorch/pytorch/blob/main/c10/core/TensorImpl.cpp#L1144
+        tensor_impl->set_storage_offset(sym_storage_offset->as_int_unchecked());
+      }
+    }
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {

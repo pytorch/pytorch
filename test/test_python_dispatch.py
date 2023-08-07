@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_
 from torch.utils._mode_utils import no_dispatch, all_same_mode
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
+from torch.testing._internal.double_tensor import DoubleTensor
 from torch.utils._pytree import tree_map, tree_map_only
 from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
 from torch._custom_op.impl import custom_op, CustomOp
@@ -1464,7 +1465,6 @@ def forward(self, x_1):
 
         self.assertEqual(len(counters['graph_break']), 0)
 
-
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
         with capture_logs() as logs:
@@ -1794,6 +1794,36 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
 
         self.assertEqual(type(torch.full_like(MyTensor(2), 1.)), MyTensor)
         self.assertEqual(type(torch.randint_like(MyTensor(2), high=3)), MyTensor)
+
+    def test_make_fx_with_subclass(self) -> None:
+        def f(x, y):
+            # Returns (DoubleTensor, Tensor)
+            return x * y, y + y
+        x_a = torch.zeros(4)
+        x_b = torch.zeros(4)
+        y = torch.ones(4)
+
+        # make_fx() is not responsible for unwrapping tensor subclass inputs,
+        # so we do it manually here.
+        # Why? In general, make_fx(f)(*args) promises that the graph returned has the same calling
+        # convention as f(*args). Unwrapping tensor subclass inputs can potentially change
+        # the number of input args to the graph, breaking that assumption
+        def f_to_trace(x_a, x_b, y):
+            x = DoubleTensor(x_a, x_b)
+            out1, out2 = f(x, y)
+            out1_unwrapped, _ = out1.__tensor_flatten__()
+            return (*out1_unwrapped, out2)
+        fx_g = make_fx(f_to_trace, tracing_mode='fake')(x_a, x_b, y)
+        self.assertExpectedInline(fx_g.code, """\
+
+
+
+def forward(self, x_a_1, x_b_1, y_1):
+    mul = torch.ops.aten.mul.Tensor(x_a_1, y_1);  x_a_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(x_b_1, y_1);  x_b_1 = None
+    add = torch.ops.aten.add.Tensor(y_1, y_1);  y_1 = None
+    return (mul, mul_1, add)
+    """)
 
     def test_make_wrapper_subclass_propagates_metadata(self) -> None:
         class WrapperTensor(torch.Tensor):
