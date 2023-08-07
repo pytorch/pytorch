@@ -710,6 +710,7 @@ def register_replacement(
         pass_dict: dict of passes to register to
         extra_check: additional check to run on match(using real shapes)
     """
+
     def check_fn(match: Match):
         """
         Often shapes get burned into the pattern, so our initial match ran with
