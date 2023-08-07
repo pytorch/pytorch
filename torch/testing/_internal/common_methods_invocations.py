@@ -8290,9 +8290,10 @@ def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_g
 NUM_SIZE0_TENSORS = 10000
 foreach_num_tensors = [20, 23] if not TEST_WITH_SLOW else [23, 30, 300]
 class ForeachRightmostArgType(enum.Enum):
-    TensorList = 1
-    ScalarList = 2
-    Scalar = 3
+    TensorList = enum.auto()
+    ScalarList = enum.auto()
+    Scalar = enum.auto()
+    Tensor = enum.auto()
 _foreach_inputs_default_kwargs = {"noncontiguous": False, "same_size": False, "low": None, "high": None}
 class foreach_inputs_sample_func:
     def __init__(
@@ -8300,14 +8301,18 @@ class foreach_inputs_sample_func:
         arity: int,
         rightmost_supports_scalar: bool,
         rightmost_supports_scalarlist: bool,
+        rightmost_supports_tensor: bool = False,
     ) -> None:
         self.arity = arity
-        self._set_rightmost_arg_types(rightmost_supports_scalar, rightmost_supports_scalarlist)
+        self._set_rightmost_arg_types(
+            rightmost_supports_scalar, rightmost_supports_scalarlist, rightmost_supports_tensor,
+        )
 
     def _set_rightmost_arg_types(
         self,
         rightmost_supports_scalar: bool,
         rightmost_supports_scalarlist: bool,
+        rightmost_supports_tensor: bool,
     ) -> None:
         self._rightmost_arg_types = [ForeachRightmostArgType.TensorList]
         if self.arity > 1:
@@ -8315,10 +8320,18 @@ class foreach_inputs_sample_func:
                 self._rightmost_arg_types.append(ForeachRightmostArgType.Scalar)
             if rightmost_supports_scalarlist:
                 self._rightmost_arg_types.append(ForeachRightmostArgType.ScalarList)
+            if rightmost_supports_tensor:
+                self._rightmost_arg_types.append(ForeachRightmostArgType.Tensor)
 
     def _sample_rightmost_arg(self, opinfo, rightmost_arg_type, device, dtype, num_tensors, **_foreach_inputs_kwargs):
         if rightmost_arg_type == ForeachRightmostArgType.TensorList:
             return [sample_inputs_foreach(None, device, dtype, num_tensors, **_foreach_inputs_kwargs)]
+        if rightmost_arg_type == ForeachRightmostArgType.Tensor:
+            return [make_tensor(
+                (), device=device, dtype=dtype,
+                noncontiguous=_foreach_inputs_kwargs["noncontiguous"],
+                requires_grad=_foreach_inputs_kwargs.get("requires_grad", False),
+            )]
         should_use_simpler_scalars = opinfo.name == "_foreach_pow" and dtype in (torch.float16, torch.bfloat16)
 
         def sample_float():
@@ -8348,7 +8361,7 @@ class foreach_inputs_sample_func:
         raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
 
     def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):
-        if self.arity < 2:
+        if self.arity < 2 or rightmost_arg_type == ForeachRightmostArgType.Tensor:
             return None
         if "foreach_pow" in opinfo.name and dtype in integral_types():
             return True
@@ -8499,7 +8512,6 @@ class foreach_lerp_sample_func(foreach_inputs_sample_func):
         if rightmost_arg_type == ForeachRightmostArgType.Scalar:
             return [random.random()]
         raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
-
 
 
 class foreach_pointwise_sample_func(foreach_inputs_sample_func):
@@ -8823,7 +8835,7 @@ foreach_binary_op_db: List[OpInfo] = [
         "mul",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True, True),
         supports_autograd=True,
         supports_forward_ad=True,
     ),

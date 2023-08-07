@@ -37,7 +37,7 @@ class RegularFuncWrapper:
             if isinstance(values, Number):
                 values = [values for _ in range(len(inputs[0]))]
             return [self.func(*i, value=values[idx], **kwargs) for idx, i in enumerate(zip(*inputs))]
-        if len(inputs) == 2 and isinstance(inputs[1], Number):
+        if len(inputs) == 2 and isinstance(inputs[1], (Number, torch.Tensor)):
             # binary op with tensorlist and scalar.
             inputs[1] = [inputs[1] for _ in range(len(inputs[0]))]
         return [self.func(*i, **kwargs) for i in zip(*inputs)]
@@ -86,6 +86,8 @@ class InplaceForeachVersionBumpCheck:
 def get_transform_func(num_tensors, dtype, device, is_fastpath):
     def transform(t):
         if not torch.is_tensor(t):
+            return t
+        if torch.is_tensor(t) and t.ndim == 0:
             return t
         return make_tensor(
             (num_tensors, num_tensors), dtype=dtype, device=device,
