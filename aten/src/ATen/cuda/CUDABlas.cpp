@@ -633,6 +633,10 @@ class CuBlasLtMatmulDescriptor : public CuBlasLtDescriptor<
         cublasLtMatmulDescCreate(&raw_descriptor, compute_type, scale_type));
     descriptor_.reset(raw_descriptor);
   }
+  template <typename T>
+  inline void setAttribute(cublasLtMatmulDescAttributes_t attr, const T value) {
+    TORCH_CUDABLAS_CHECK(::cublasLtMatmulDescSetAttribute(descriptor(), attr, &value, sizeof(T)));
+  }
 };
 
 class CuBlasLtMatrixLayout : public CuBlasLtDescriptor<
@@ -659,6 +663,10 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
     cublasLtMatmulPreference_t raw_descriptor = nullptr;
     TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceCreate(&raw_descriptor));
     descriptor_.reset(raw_descriptor);
+  }
+  template <typename T>
+  inline void setAttribute(cublasLtMatmulPreferenceAttributes_t attr, const T value) {
+    TORCH_CUDABLAS_CHECK(::cublasLtMatmulPreferenceSetAttribute(descriptor(), attr, &value, sizeof(T)));
   }
 };
 } // namespace
@@ -702,17 +710,9 @@ void gemm_and_bias(
 
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   cublasOperation_t transa = transpose_mat1 ? CUBLAS_OP_T : CUBLAS_OP_N;
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
-      computeDesc.descriptor(),
-      CUBLASLT_MATMUL_DESC_TRANSA,
-      &transa,
-      sizeof(transa)));
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, transa);
   cublasOperation_t transb = transpose_mat2 ? CUBLAS_OP_T : CUBLAS_OP_N;
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
-      computeDesc.descriptor(),
-      CUBLASLT_MATMUL_DESC_TRANSB,
-      &transb,
-      sizeof(transb)));
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, transb);
   cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_BIAS;
   if (activation == GEMMAndBiasActivationEpilogue::RELU) {
     epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
@@ -721,16 +721,8 @@ void gemm_and_bias(
     epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
 #endif
   }
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
-      computeDesc.descriptor(),
-      CUBLASLT_MATMUL_DESC_EPILOGUE,
-      &epilogue,
-      sizeof(epilogue)));
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
-      computeDesc.descriptor(),
-      CUBLASLT_MATMUL_DESC_BIAS_POINTER,
-      &bias,
-      sizeof(Dtype*)));
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
 
   CuBlasLtMatrixLayout Adesc(
       abcType, transpose_mat1 ? k : m, transpose_mat1 ? m : k, mat1_ld);
@@ -742,32 +734,16 @@ void gemm_and_bias(
   // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
   // setting this to 1M.
   size_t workspaceSize = _getWorkspaceSize();
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
-      preference.descriptor(),
-      CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-      &workspaceSize,
-      sizeof(workspaceSize)));
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
 
   uint32_t a_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat1_ptr));
   uint32_t b_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat2_ptr));
   uint32_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
   uint32_t d_alignment = _getAlignment(reinterpret_cast<uintptr_t>(bias));
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
-      preference.descriptor(),
-      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES,
-      &a_alignment, sizeof(a_alignment)));
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
-      preference.descriptor(),
-      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES,
-      &b_alignment, sizeof(b_alignment)));
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
-      preference.descriptor(),
-      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES,
-      &c_alignment, sizeof(c_alignment)));
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
-      preference.descriptor(),
-      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES,
-      &d_alignment, sizeof(d_alignment)));
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES, a_alignment);
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES, b_alignment);
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES, d_alignment);
 
   auto workspace = at::empty(
       {static_cast<int64_t>(workspaceSize)},
@@ -922,17 +898,9 @@ void int8_gemm(
 
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   cublasOperation_t transa = transpose_mat1 ? CUBLAS_OP_T : CUBLAS_OP_N;
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
-      computeDesc.descriptor(),
-      CUBLASLT_MATMUL_DESC_TRANSA,
-      &transa,
-      sizeof(transa)));
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, transa);
   cublasOperation_t transb = transpose_mat2 ? CUBLAS_OP_T : CUBLAS_OP_N;
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
-      computeDesc.descriptor(),
-      CUBLASLT_MATMUL_DESC_TRANSB,
-      &transb,
-      sizeof(transb)));
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, transb);
 
 
   CuBlasLtMatrixLayout Adesc(
