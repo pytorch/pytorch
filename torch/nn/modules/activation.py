@@ -884,21 +884,15 @@ class Softshrink(Module):
 
 
 def _check_arg_device(x: Optional[torch.Tensor]) -> bool:
-    if x is None:
-        return True
-    else:
+    if x is not None:
         return x.device.type in ["cpu", "cuda", torch.utils.backend_registration._privateuse1_backend_name]
-
-    return False
+    return True
 
 
 def _arg_requires_grad(x: Optional[torch.Tensor]) -> bool:
-    if x is None:
-        return False
-    else:
+    if x is not None:
         return x.requires_grad
-
-    return True
+    return False
 
 
 class MultiheadAttention(Module):
@@ -970,6 +964,11 @@ class MultiheadAttention(Module):
 
     def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False,
                  kdim=None, vdim=None, batch_first=False, device=None, dtype=None) -> None:
+        if embed_dim <= 0 or num_heads <= 0:
+            raise ValueError(
+                f"embed_dim and num_heads must be greater than 0,"
+                f" got embed_dim={embed_dim} and num_heads={num_heads} instead"
+            )
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
         self.embed_dim = embed_dim
@@ -1340,7 +1339,12 @@ class PReLU(Module):
         factory_kwargs = {'device': device, 'dtype': dtype}
         self.num_parameters = num_parameters
         super().__init__()
-        self.weight = Parameter(torch.empty(num_parameters, **factory_kwargs).fill_(init))
+        self.init = init
+        self.weight = Parameter(torch.empty(num_parameters, **factory_kwargs))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        torch.nn.init.constant_(self.weight, self.init)
 
     def forward(self, input: Tensor) -> Tensor:
         return F.prelu(input, self.weight)

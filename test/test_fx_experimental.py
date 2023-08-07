@@ -785,6 +785,38 @@ terrible spacing
 
         self.assertEqual(orig_out, submodules_out)
 
+    def test_split_module_dead_code(self):
+        class ModWithDeadCode(torch.nn.Module):
+            def forward(self, x):
+                output = x * 2  # we want this
+                dead_line = x + 2  # this is dead
+                return output
+
+        mod = ModWithDeadCode()
+        traced = torch.fx.symbolic_trace(mod)
+
+        # split into before (0), target (1), and after(2)
+        saw_mul = False
+
+        def split_callback(n):
+            nonlocal saw_mul
+            if n.target == operator.mul:
+                saw_mul = True
+                return 1
+
+            if not saw_mul:
+                return 0
+            if saw_mul:
+                return 2
+
+        split = split_module(traced, mod, split_callback)
+
+        x = torch.randn((5,))
+        torch.testing.assert_close(
+            split(x), traced(x)
+        )
+
+
     def test_split_module_kwargs_expansion(self):
         class ModuleWithKwargsExpansion(torch.nn.Module):
             def forward(self, x, **kwargs):
@@ -1215,8 +1247,8 @@ class {test_classname}(torch.nn.Module):
                 self.seq = torch.nn.Sequential(torch.nn.BatchNorm1d(2, 2))
                 self.linear = torch.nn.Linear(2, 2)
                 self.attr = torch.randn(2)
-                self.register_buffer("attr2", torch.randn(2))
-                self.register_buffer("attr3", torch.ones(2, dtype=torch.int32))
+                self.attr2 = torch.nn.Buffer(torch.randn(2))
+                self.attr3 = torch.nn.Buffer(torch.ones(2, dtype=torch.int32))
 
             def forward(self, x):
                 return self.linear(self.seq(self.W + self.attr + self.attr2 + self.attr3 + x))
