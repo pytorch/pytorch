@@ -283,7 +283,7 @@ def _sort_eps(eps: Tuple[str, ...]) -> Tuple[str, ...]:
     return tuple(sorted(unique_eps, key=get_execution_provider_priority, reverse=True))
 
 
-def _get_onnx_devices(values: Tuple[torch.Tensor, ...]) -> Tuple[ORTC.OrtDevice, ...]:
+def _get_onnx_devices(values: Tuple[torch.Tensor, ...]) -> Tuple["ORTC.OrtDevice", ...]:
     assert all(
         value.device == values[0].device for value in values
     ), "All values must be on the same device."
@@ -291,7 +291,7 @@ def _get_onnx_devices(values: Tuple[torch.Tensor, ...]) -> Tuple[ORTC.OrtDevice,
     def _device_id_or_zero(device_id: int) -> int:
         return device_id or 0
 
-    devices: Tuple[ORTC.OrtDevice, ...] = tuple(
+    devices: Tuple["ORTC.OrtDevice", ...] = tuple(
         ORTC.OrtDevice(
             _get_ort_device_type(value.device.type),
             ORTC.OrtDevice.default_memory(),
@@ -303,7 +303,7 @@ def _get_onnx_devices(values: Tuple[torch.Tensor, ...]) -> Tuple[ORTC.OrtDevice,
 
 
 def _get_ortvalues_from_torch_tensors(
-    tensors: Tuple[torch.Tensor, ...], devices: Tuple[ORTC.OrtDevice, ...]
+    tensors: Tuple[torch.Tensor, ...], devices: Tuple["ORTC.OrtDevice", ...]
 ) -> Tuple[torch.Tensor, ...]:
     ortvalues = ORTC.OrtValueVector()
     ortvalues.reserve(len(tensors))
@@ -327,13 +327,13 @@ def _to_real_tensor(tensor: FakeTensor) -> torch.Tensor:
 
 
 def _run_onnx_session_with_ortvaluevector(
-    sess: onnxruntime.InferenceSession,
+    sess: "onnxruntime.InferenceSession",
     input_names: Tuple[str, ...],
     inputs: Tuple[torch.Tensor, ...],
-    input_devices: Tuple[ORTC.OrtDevice, ...],
+    input_devices: Tuple["ORTC.OrtDevice", ...],
     output_names: Tuple[str, ...],
     outputs: Tuple[torch.Tensor, ...],
-    output_devices: Tuple[ORTC.OrtDevice, ...],
+    output_devices: Tuple["ORTC.OrtDevice", ...],
     preallocate_output: bool,
 ) -> Tuple[torch.Tensor, ...]:
     _nvtx_range_push("contiguous")
@@ -380,13 +380,13 @@ class OrtExecutionInfoPerSession:
 
     def __init__(
         self,
-        session: onnxruntime.InferenceSession,
+        session: "onnxruntime.InferenceSession",
         input_names: Tuple[str, ...],
-        input_value_infos: Tuple[onnx.ValueInfoProto, ...],  # type: ignore[name-defined]
+        input_value_infos: Tuple["onnx.ValueInfoProto", ...],  # type: ignore[name-defined]
         output_names: Tuple[str, ...],
-        output_value_infos: Tuple[onnx.ValueInfoProto, ...],  # type: ignore[name-defined]
-        input_devices: Tuple[ORTC.OrtDevice, ...],
-        output_devices: Tuple[ORTC.OrtDevice, ...],
+        output_value_infos: Tuple["onnx.ValueInfoProto", ...],  # type: ignore[name-defined]
+        input_devices: Tuple["ORTC.OrtDevice", ...],
+        output_devices: Tuple["ORTC.OrtDevice", ...],
         example_outputs: Union[Tuple[torch.Tensor, ...], torch.Tensor],
     ):
         # Carrier of ONNX model and its executor.
@@ -402,9 +402,9 @@ class OrtExecutionInfoPerSession:
         self.output_value_infos: Tuple[onnx.ValueInfoProto, ...] = output_value_infos  # type: ignore[name-defined]
         # For the ONNX model stored in self.session, self.input_devices[i] is the
         # i-th positional input's device.
-        self.input_devices: Tuple[ORTC.OrtDevice, ...] = input_devices
+        self.input_devices: Tuple["ORTC.OrtDevice", ...] = input_devices
         # Similar to self.input_devices, but for outputs.
-        self.output_devices: Tuple[ORTC.OrtDevice, ...] = output_devices
+        self.output_devices: Tuple["ORTC.OrtDevice", ...] = output_devices
         # This is the outputs of executing the original torch.fx.GraphModule with example inputs
         # (i.e., args passed into OrtBackend._ort_acclerated_call).
         self.example_outputs: Union[
@@ -561,6 +561,12 @@ class OrtBackend:
         self.preallocate_output = preallocate_output
 
     def _ort_acclerated_call(self, graph_module: torch.fx.GraphModule, *args, **kwargs):
+        """This function replaces GraphModule._wrapped_call in compiled model.
+
+        The _wrapped_call is the underlying implementation of forward method. Replacing
+        it means we delegate the computation to _ort_acclerated_call and therefore
+        onnxruntime.InferenceSession.
+        """
         cached_execution_info_per_session = (
             self._all_ort_execution_info.search_reusable_session_execution_info(
                 graph_module, *args
@@ -799,6 +805,12 @@ class OrtBackend:
     def __call__(
         self, graph_module: torch.fx.GraphModule, args
     ) -> torch.fx.GraphModule:
+        """Interface for dynamo to compile a graph module.
+
+        All backends/compilers are passed into dynamo as
+        callables following this signature (mapping from
+        (torch.fx.GraphModule, args) to torch.fx.GraphModule).
+        """
         return self.compile(graph_module, args)
 
 
@@ -810,7 +822,7 @@ def make_aot_ort(dynamic: bool = True):
          >>> import copy
          >>> import torch
          >>> from torch.onnx._backend.core import make_aot_ort
-         >>> class MyModel(torch.nn.Module):  # Dummy model
+         >>> class MyModel(torch.nn.Module):
          ... def __init__(self) -> None:
          ...     super().__init__()
          ...     self.linear = torch.nn.Linear(2, 2)
