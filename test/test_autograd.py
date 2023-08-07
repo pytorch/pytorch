@@ -3786,7 +3786,7 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
             return out
 
         x = torch.ones(2, 2, requires_grad=True)
-       
+
         # Test as a context manager
         with torch.autograd._force_original_view_tracking(False):
             out = f(x)
