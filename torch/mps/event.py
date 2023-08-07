@@ -1,5 +1,6 @@
 import torch
 
+
 class Event:
     r"""Wrapper around an MPS event.
 
@@ -16,7 +17,7 @@ class Event:
 
     def __del__(self):
         # checks if torch._C is already destroyed
-        if hasattr(torch._C, '_mps_releaseEvent') and self.__eventId > 0:
+        if hasattr(torch._C, "_mps_releaseEvent") and self.__eventId > 0:
             torch._C._mps_releaseEvent(self.__eventId)
 
     def record(self):
