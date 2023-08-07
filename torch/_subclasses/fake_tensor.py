@@ -561,6 +561,8 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
     with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
 
+    if out is new_kwargs["input"]:
+        return out  # copy_
     return FakeTensor(fake_mode, out, out_device)
 
 
@@ -596,6 +598,7 @@ def embedding_bag(fake_mode, func, *args, **kwargs):
 @register_op_impl(aten.index_put.default)
 @register_op_impl(aten._unsafe_index_put.default)
 @register_op_impl(aten.copy.default)
+@register_op_impl(aten.copy_.default)
 @register_op_impl(aten.slice_scatter.default)
 def multi_device_op_default(fake_mode, func, *args, **kwargs):
     return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
@@ -1067,9 +1070,14 @@ class FakeTensor(torch.Tensor):
         # NotImplemented lets us keep chaining until we find the actual
         # subclass
         cur_stack = _get_current_dispatch_mode_stack()
-        if fake_mode in cur_stack:
+        # NB: This must test for ANY fake tensor mode, because we want the
+        # fake tensor mode to take precedence
+        fake_modes_on_stack = [m for m in cur_stack if isinstance(m, FakeTensorMode)]
+        if fake_modes_on_stack:
             not_implemented_log.debug(
-                "FakeTensor mode already active: %s in %s", fake_mode, cur_stack
+                "FakeTensor mode already active: %s in %s",
+                fake_modes_on_stack,
+                cur_stack,
             )
             return NotImplemented
 
@@ -1192,6 +1200,21 @@ class FakeTensorMode(TorchDispatchMode):
 
         self.stack = "".join(traceback.format_stack())
 
+    # Typically, there is only one fake tensor mode and you test for it by
+    # doing an isinstance test.  However, in some situations, there might be
+    # TWO fake tensor modes.  The canonical example of this is exporting
+    # a fake model: there is an outer fake mode created by the user, and
+    # an inner fake mode created by Dynamo.  The two phase process is required
+    # because the outer fake mode typically won't have a ShapeEnv, even if
+    # the user is interested in exporting with dynamic shapes (so the inner
+    # fake mode will actually have a ShapeEnv and swap in symbolic sizes.)
+    #
+    # In this case, it's insufficient to test only one FakeTensor: you need
+    # to distinguish between our fake tensor and other fake tensors.  That's
+    # what this function does.
+    def is_our_fake(self, t):
+        return isinstance(t, FakeTensor) and t.fake_mode is self
+
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         assert self not in _get_current_dispatch_mode_stack(), func
@@ -1220,6 +1243,12 @@ class FakeTensorMode(TorchDispatchMode):
         kwargs = kwargs if kwargs else {}
 
         if func == torch.ops.prim.device.default:
+            # NB: Don't use is_our_fake, just serve the fake information
+            # as is.  Notice we don't use 'self'; we use args[0].fake_mode
+            # because they may not be the same.  It would also be possible
+            # to return NotImplemented here, in which case the FakeTensor
+            # handler on args[0] would handle it, but we're being nice and
+            # short-circuiting quickly.
             assert len(args) == 1 and isinstance(args[0], FakeTensor)
             if args[0].fake_mode.in_kernel_invocation:
                 return torch.device("meta")
@@ -1243,7 +1272,11 @@ class FakeTensorMode(TorchDispatchMode):
             with in_kernel_invocation_manager(self):
                 return func(*args, **kwargs)
 
-        flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
+        flat_arg_fake_tensors = [
+            t
+            for t in tree_flatten_only(FakeTensor, (args, kwargs))
+            if self.is_our_fake(t)
+        ]
         flat_symints = tree_flatten_only(torch.SymInt, (args, kwargs))
         has_symbolic_sizes = (
             any(i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors)
@@ -1266,12 +1299,17 @@ class FakeTensorMode(TorchDispatchMode):
                 t.constant is not None for t in flat_arg_fake_tensors
             ), "f{func} should not have fake inputs without constants"
             const_args, const_kwargs = pytree.tree_map_only(
-                FakeTensor, lambda t: t.constant, (args, kwargs)
+                FakeTensor,
+                lambda t: t.constant if self.is_our_fake(t) else t,
+                (args, kwargs),
             )
             out = func(*const_args, **const_kwargs)
-            if isinstance(out, torch.Tensor) and self.may_turn_const(out):
+            if type(out) is torch.Tensor and self.may_turn_const(out):
                 # NB: not in_kernel_invocation_manager because we're doing real
                 # compute here
+                # NB: no_dispatch() here is VERY DANGEROUS (like, segfault
+                # dangerous) if this is actually a wrapper subclass tensor,
+                # therefore the exact type test above
                 with no_dispatch():
                     out = out.clone()
                 return converter(self, out, make_constant=True)
@@ -1328,7 +1366,9 @@ class FakeTensorMode(TorchDispatchMode):
             and not has_symbolic_sizes
         ):
             const_args, const_kwargs = pytree.tree_map_only(
-                FakeTensor, lambda t: t.constant, (args, kwargs)
+                FakeTensor,
+                lambda t: t.constant if self.is_our_fake(t) else t,
+                (args, kwargs),
             )
 
             # NB: not in_kernel_invocation_manager(self) as we want to do REAL
@@ -1420,13 +1460,19 @@ class FakeTensorMode(TorchDispatchMode):
                 if op_impl_out != NotImplemented:
                     return op_impl_out
 
-        def can_fallback(func: OpOverload):
+        def can_run_unsafe_fallback(func: OpOverload):
             if not self.allow_fallback_kernels:
                 return False
             # It's OK to try the fallback for built-in ops (e.g. aten, prims)
             # because we control and test these but the fallback leads to unexpected behavior
             # in user-defined custom ops
-            return func.namespace in {
+            #
+            # WARNING: DO NOT add any additional namespaces/operators here if they refer to operators
+            # outside of the pytorch/pytorch library! Any pre-existing things here
+            # are either in the pytorch/pytorch library or have been grandfathered in.
+            # The fallback does not always work and MAY CRASH and emit unreadable error messages
+            # so it should not be allowed by default.
+            allowed_namespaces = {
                 "debugprims",
                 "prims",
                 "aten",
@@ -1434,19 +1480,38 @@ class FakeTensorMode(TorchDispatchMode):
                 "vision",
                 "torchtext",
                 "torchaudio",
-                "fbgemm",
             }
+            grandfathered_ops_FIXME = {
+                "fbgemm::gmm",
+            }
+            return (
+                func.namespace in allowed_namespaces
+                or func.name() in grandfathered_ops_FIXME
+            )
+
+        def maybe_run_unsafe_fallback(error=None):
+            # no meta kernel registered, fallback to kernel for the device
+            if has_symbolic_sizes or not can_run_unsafe_fallback(func):
+                raise UnsupportedOperatorException(func)
+            if error is None:
+                error = UnsupportedOperatorException(func)
+            return run_fallback_kernel(self, func, args, kwargs, error)
+
+        # Optimization: If there is no Meta kernel, it takes a surprisingly long
+        # amount of time to catch the NotImplementedError, so we check it here.
+        if not torch._C._dispatch_has_computed_kernel_for_dispatch_key(
+            func.name(), "Meta"
+        ):
+            return maybe_run_unsafe_fallback()
 
         # run kernel registered to meta for func, which include
         # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
+        # It's possible that the kernel will return NotImplementedError
         try:
             with in_kernel_invocation_manager(self):
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
-            # no meta kernel registered, fallback to kernel for the device
-            if has_symbolic_sizes or not can_fallback(func):
-                raise UnsupportedOperatorException(func)
-            return run_fallback_kernel(self, func, args, kwargs, not_implemented_error)
+            return maybe_run_unsafe_fallback(not_implemented_error)
 
         return self.wrap_meta_outputs_with_default_device_logic(r, func, args, kwargs)
 
@@ -1466,6 +1531,7 @@ class FakeTensorMode(TorchDispatchMode):
                 not isinstance(x, FakeTensor)
                 and type(x) is not torch.Tensor
                 and type(x) is not torch.nn.Parameter
+                and type(x) is not torch.nn.Buffer
             )
 
         return [
@@ -1482,20 +1548,20 @@ class FakeTensorMode(TorchDispatchMode):
 
         def validate(x):
             nonlocal flat_arg_fake_tensors
-            if not isinstance(x, FakeTensor):
+            if not self.is_our_fake(x):
                 if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
                     raise Exception(
                         f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"
                     )
                 if not self.allow_non_fake_inputs:
+                    if isinstance(x, FakeTensor) and x.fake_mode is not self:
+                        raise AssertionError("Mixing fake modes NYI")
                     raise Exception(
                         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
                         f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
                     )
 
                 x = converter(self, x)
-            else:
-                assert x.fake_mode is self, "Mixing fake modes NYI"
 
             flat_arg_fake_tensors.append(x)
             return x
@@ -1533,7 +1599,7 @@ class FakeTensorMode(TorchDispatchMode):
                     has_scalar_only_inputs,
                 ) = FakeTensor._find_common_device(func, args, kwargs)
 
-            if isinstance(e, FakeTensor):
+            if self.is_our_fake(e):
                 torch._check(
                     e.device == common_device,
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
@@ -1541,7 +1607,7 @@ class FakeTensorMode(TorchDispatchMode):
 
             if (
                 isinstance(e, torch.Tensor)
-                and not isinstance(e, FakeTensor)
+                and not self.is_our_fake(e)
                 and converter is not None
             ):
                 if has_scalar_only_inputs:
@@ -1583,7 +1649,7 @@ class FakeTensorMode(TorchDispatchMode):
         return (
             t.numel() <= CONSTANT_NUMEL_LIMIT
             and not t.is_sparse
-            and not isinstance(t, FakeTensor)
+            and not self.is_our_fake(t)
             and not t.device.type == "meta"
         )
 
@@ -1599,7 +1665,7 @@ class FakeTensorMode(TorchDispatchMode):
             for k, v in new_kwargs.items():
                 k = k if (k != "input" or schema_info.has_argument(k)) else "self"
                 if (
-                    isinstance(v, FakeTensor)
+                    self.is_our_fake(v)
                     and schema_info.is_mutable(k)
                     and v.constant is not None
                 ):
@@ -1651,7 +1717,7 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
     with no_dispatch():
 
         def to_real_tensor(e):
-            if isinstance(e, FakeTensor):
+            if fake_mode.is_our_fake(e):
                 out = torch.zeros_like(e, device=e.fake_device)
                 if e.is_sparse:
                     out._coalesced_(e.is_coalesced())

@@ -11,6 +11,7 @@ import typing
 import torch._custom_ops as custom_ops
 
 import torch.testing._internal.custom_op_db
+import torch.testing._internal.optests as optests
 from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp
@@ -53,6 +54,42 @@ class CustomOpTestCaseBase(TestCase):
 
 @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
 class TestCustomOpTesting(CustomOpTestCaseBase):
+    @parametrize("check_gradients", (False, "auto"))
+    @parametrize("dynamic", (True, False))
+    def test_aot_autograd_check_degenerate_cases(
+        self, device, dynamic, check_gradients
+    ):
+        def simple(x):
+            return x.clone()
+
+        # Should not raise
+        x = torch.randn(3, device=device)
+        optests.aot_autograd_check(
+            simple, (x,), {}, dynamic=dynamic, check_gradients=check_gradients
+        )
+
+        def outputs_dont_require_grad(x):
+            return x.detach()
+
+        # Should not raise
+        y = torch.randn(3, device=device, requires_grad=True)
+        optests.aot_autograd_check(
+            simple, (y,), {}, dynamic=dynamic, check_gradients=check_gradients
+        )
+
+        def no_outputs(x):
+            return x.detach()
+
+        # Should not raise
+        x = torch.randn(3, device=device, requires_grad=True)
+        y = torch.randn(3, device=device, requires_grad=False)
+        optests.aot_autograd_check(
+            no_outputs, (x,), {}, dynamic=dynamic, check_gradients=check_gradients
+        )
+        optests.aot_autograd_check(
+            no_outputs, (y,), {}, dynamic=dynamic, check_gradients=check_gradients
+        )
+
     def test_incorrect_schema_mutation(self, device):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
@@ -336,6 +373,81 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             operator_compile_check(
                 lambda x: self.get_op(f"{self.test_ns}::foo")(x), (x,), {}
             )
+
+    def test_autograd_registration_check_autograd_kernel(self, device):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        op = self.ns().foo.default
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                with torch._C._AutoDispatchBelowAutograd():
+                    return op(x)
+
+            @staticmethod
+            def backward(ctx, gx):
+                return gx
+
+        def foo_impl(x):
+            return x.sin()
+
+        lib.impl("foo", Foo.apply, "Autograd")
+        lib.impl("foo", foo_impl, "CPU")
+        lib.impl("foo", foo_impl, "CUDA")
+
+        x = torch.randn(3, requires_grad=True, device=device)
+        # Should not raise
+        optests.autograd_registration_check(op, (x,), {})
+
+    def test_autograd_registration_check_compositeimplicitautograd(self, device):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        op = self.ns().foo.default
+
+        def foo_impl(x):
+            return x.sin().cos()
+
+        lib.impl("foo", foo_impl, "CompositeImplicitAutograd")
+
+        x = torch.randn(3, requires_grad=True, device=device)
+        # Should not raise
+        optests.autograd_registration_check(op, (x,), {})
+
+    def test_autograd_registration_check_incorrect_composite(self, device):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        op = self.ns().foo.default
+
+        def foo_impl(x):
+            return x.sin().cos()
+
+        lib.impl("foo", foo_impl, "CompositeExplicitAutograd")
+
+        x = torch.randn(3, requires_grad=True, device=device)
+        with self.assertRaisesRegex(AssertionError, "incorrectly registered"):
+            optests.autograd_registration_check(op, (x,), {})
+
+    def test_autograd_registration_check_incorrect(self, device):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        op = self.ns().foo.default
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return torch.sin(x)
+
+            @staticmethod
+            def backward(ctx, gx):
+                return gx
+
+        lib.impl("foo", Foo.apply, "CPU")
+        lib.impl("foo", Foo.apply, "CUDA")
+
+        x = torch.randn(3, requires_grad=True, device=device)
+        with self.assertRaisesRegex(AssertionError, "incorrectly registered"):
+            optests.autograd_registration_check(op, (x,), {})
 
     def test_assert_raises_regex(self, device):
         from torch.testing._internal.optests.aot_autograd import assert_raises_regex

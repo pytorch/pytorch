@@ -1,7 +1,7 @@
-from typing import List
+from typing import List, Optional
 
 import torch
-from torch.ao.quantization.pt2e.quantizer.quantizer import (
+from torch.ao.quantization.quantizer.quantizer import (
     QuantizationAnnotation,
     QuantizationConfig,
     QuantizationSpec,
@@ -15,7 +15,8 @@ __all__ = [
     "get_bias_qspec",
 ]
 
-def get_input_act_qspec(quantization_config: QuantizationConfig):
+
+def get_input_act_qspec(quantization_config: Optional[QuantizationConfig]):
     if quantization_config is None:
         return None
     if quantization_config.input_activation is None:
@@ -28,7 +29,7 @@ def get_input_act_qspec(quantization_config: QuantizationConfig):
     return quantization_spec
 
 
-def get_output_act_qspec(quantization_config: QuantizationConfig):
+def get_output_act_qspec(quantization_config: Optional[QuantizationConfig]):
     if quantization_config is None:
         return None
     if quantization_config.output_activation is None:
@@ -41,7 +42,7 @@ def get_output_act_qspec(quantization_config: QuantizationConfig):
     return quantization_spec
 
 
-def get_weight_qspec(quantization_config: QuantizationConfig):
+def get_weight_qspec(quantization_config: Optional[QuantizationConfig]):
     if quantization_config is None:
         return None
     assert quantization_config is not None
@@ -58,7 +59,7 @@ def get_weight_qspec(quantization_config: QuantizationConfig):
     return quantization_spec
 
 
-def get_bias_qspec(quantization_config: QuantizationConfig):
+def get_bias_qspec(quantization_config: Optional[QuantizationConfig]):
     if quantization_config is None:
         return None
     assert quantization_config is not None
@@ -91,11 +92,11 @@ def _annotate_output_qspec(node: Node, qspec):
 
 def _is_sym_size_node(node: Node):
     return (
-        node.op == "call_function" and
-        node.target == torch.ops.aten.sym_size.default or
-        node.target == torch.ops.aten.sym_numel.default or
-        node.target == torch.ops.aten.sym_numel or
-        node.target == torch.ops.aten.sym_size
+        node.op == "call_function"
+        and node.target == torch.ops.aten.sym_size.default
+        or node.target == torch.ops.aten.sym_numel.default
+        or node.target == torch.ops.aten.sym_numel
+        or node.target == torch.ops.aten.sym_size
     )
 
 
