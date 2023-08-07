@@ -236,12 +236,11 @@ class Optimizer:
     _optimizer_load_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     _optimizer_load_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
 
-    """
-    The following hook is automatically registered to load_state_dict as a pre-hook. This processing
-    used to live within load_state_dict, but, since the introduction of state_dict hooks, we've moved
-    this to be its own hook to allow users flexibility to trigger pre-hook before OR after casting
-    state to match the params' dtype and device.
-    """
+
+    # The following hook is automatically registered to load_state_dict as a pre-hook. This processing
+    # used to live within load_state_dict, but, since the introduction of state_dict hooks, we've moved
+    # this to be its own hook to allow users flexibility to trigger pre-hook before OR after casting
+    # state to match the params' dtype and device.
     @staticmethod
     def _cast_state_to_match_params_hook(optimizer, state_dict) -> None:
         # Validate the state_dict
@@ -697,11 +696,12 @@ class Optimizer:
         calling ``load_state_dict`` on ``self``. The registered hook can be used to
         perform pre-processing before the ``load_state_dict`` call is made.
 
-        Note:
+        .. note::
+        
             There is an automatically registered load_state_dict pre-hook which
             casts the state to match the params in dtype and device. Set ``prepend``
             to True in order to insert the your defined hook before this pre-processing,
-            otherwise, leaving ``prepend``=False will have your registered hook run
+            otherwise, leaving ``prepend`` as False will have your registered hook run
             after the casting has taken place.
 
         Args:
