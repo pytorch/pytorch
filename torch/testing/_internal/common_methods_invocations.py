@@ -20779,6 +20779,31 @@ python_ref_db = [
         torch_opinfo_name="allclose",
         supports_nvfuser=False,
     ),
+    #
+    # Misc functions
+    #
+    PythonRefInfo(
+        "_refs.stft",
+        torch_opinfo_name="stft",
+        supports_nvfuser=False,
+        skips=[
+            # RuntimeError: no _refs support for aten.pad
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref'
+            ),
+        ],
+    ),
+    PythonRefInfo(
+        "_refs.istft",
+        torch_opinfo_name="istft",
+        supports_nvfuser=False,
+        skips=[
+            # RuntimeError: no _refs support for aten.unfold_backward
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref'
+            ),
+        ],
+    ),
 ]
 python_ref_db += opinfo.definitions.python_ref_db
 
