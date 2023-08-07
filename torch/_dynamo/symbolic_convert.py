@@ -1440,7 +1440,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def UNPACK_SEQUENCE(self, inst):
         seq = self.pop()
-        if isinstance(seq, BaseListVariable):
+        if isinstance(seq, (BaseListVariable, SetVariable)):
             self.output.guards.update(seq.guards)
             val = seq.unpack_var_sequence(self)
         elif seq.is_python_constant() and isinstance(seq, ConstantVariable):

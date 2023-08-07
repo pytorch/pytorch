@@ -676,10 +676,32 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         self.assertEqual(opt_fn({"a": v1, "b": v2})[0], -200)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_tensor_dict3(self):
+        def fn(inputs_a, inputs_b):
+            total = torch.zeros(1)
+            input_keys = inputs_a.keys() | inputs_b.keys()
+            for k in input_keys:
+                if k in inputs_a:
+                    total += inputs_a[k]
+                if k in inputs_b:
+                    total += inputs_b[k]
+            return total
+
+        v1 = torch.Tensor([100])
+        v2 = torch.Tensor([200])
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        self.assertEqual(
+            opt_fn({"a": v1, "b": v2}, {"b": v1, "c": v2}),
+            fn({"a": v1, "b": v2}, {"b": v1, "c": v2}),
+        )
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 5)
 
     def test_tensor_dict2(self):
         def fn1(inputs):
@@ -703,9 +725,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn1 = torch._dynamo.optimize(cnts)(fn1)
-        opt_fn2 = torch._dynamo.optimize(cnts)(fn2)
-        opt_fn3 = torch._dynamo.optimize(cnts)(fn3)
+        opt_fn1 = torch._dynamo.optimize(cnts, nopython=True)(fn1)
+        opt_fn2 = torch._dynamo.optimize(cnts, nopython=True)(fn2)
+        opt_fn3 = torch._dynamo.optimize(cnts, nopython=True)(fn3)
         self.assertEqual(opt_fn1({"a": v1, "b": v2})[0], 300)
         self.assertEqual(opt_fn2({"a": v1, "b": v2})[0], 300)
         self.assertEqual(opt_fn3({"a": v1, "b": v2})[0], 300)

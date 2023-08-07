@@ -894,3 +894,9 @@ class SetVariable(VariableTracker):
 
     def getitem_const(self, arg: VariableTracker):
         raise RuntimeError("Illegal to getitem on a set")
+
+    def as_python_constant(self):
+        return self.python_type()([x.as_python_constant() for x in self.items])
+
+    def unpack_var_sequence(self, tx):
+        return [x.add_options(self) for x in self.items]
