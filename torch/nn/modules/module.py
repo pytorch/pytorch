@@ -5,7 +5,7 @@ import functools
 import weakref
 
 import torch
-from ..parameter import Parameter
+from ..parameter import Parameter, Buffer
 import torch.utils.hooks as hooks
 
 from torch import Tensor, device, dtype
@@ -1740,16 +1740,16 @@ class Module:
                 modules[name] = value
             else:
                 buffers = self.__dict__.get('_buffers')
-                if buffers is not None and name in buffers:
+                if isinstance(value, Buffer) or buffers is not None and name in buffers:
                     if value is not None and not isinstance(value, torch.Tensor):
                         raise TypeError("cannot assign '{}' as buffer '{}' "
-                                        "(torch.Tensor or None expected)"
+                                        "(torch.nn.Buffer, torch.Tensor or None expected)"
                                         .format(torch.typename(value), name))
-                    for hook in _global_buffer_registration_hooks.values():
-                        output = hook(self, name, value)
-                        if output is not None:
-                            value = output
-                    buffers[name] = value
+                    if isinstance(value, Buffer):
+                        persistent = value.persistent
+                    else:
+                        persistent = name not in self._non_persistent_buffers_set
+                    self.register_buffer(name, value, persistent)
                 else:
                     super().__setattr__(name, value)
 
@@ -2020,6 +2020,13 @@ class Module:
                                       'the shape in current model is {}.'
                                       .format(key, input_param.shape, param.shape))
                     continue
+
+                if param.is_meta and not input_param.is_meta and not assign_to_params_buffers:
+                    warnings.warn(f'for {key}: copying from a non-meta parameter in the checkpoint to a meta '
+                                  'parameter in the current model, which is a no-op. (Did you mean to '
+                                  'pass `assign=True` to assign items in the state dictionary to their '
+                                  'corresponding key in the module instead of copying them in place?)')
+
                 try:
                     with torch.no_grad():
                         if assign_to_params_buffers:
