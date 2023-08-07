@@ -1,7 +1,8 @@
 import sys
 import types
-import torch
 from contextlib import contextmanager
+
+import torch
 
 # The idea for this parameter is that we forbid bare assignment
 # to torch.backends.<cudnn|mkldnn>.enabled and friends when running our
@@ -69,6 +70,7 @@ from torch.backends import (
     quantized as quantized,
 )
 
+
 def _register_backend_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
     supported by torch.
@@ -80,8 +82,10 @@ def _register_backend_module(device_type, module):
     device_type = torch.device(device_type).type
     m = sys.modules[__name__]
     if hasattr(m, device_type):
-        raise RuntimeError("The runtime module of '{}' has already "
-                           "been registered with '{}'".format(device_type, getattr(m, device_type)))
+        raise RuntimeError(
+            "The runtime module of '{}' has already "
+            "been registered with '{}'".format(device_type, getattr(m, device_type))
+        )
     setattr(m, device_type, module)
-    torch_module_name = '.'.join([__name__, device_type])
+    torch_module_name = ".".join([__name__, device_type])
     sys.modules[torch_module_name] = module

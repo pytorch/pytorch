@@ -50,7 +50,7 @@ class DummyModule:
     def current_device():
         return 0
 
-class DummyBackendModule():
+class DummyBackendModule:
 
     @staticmethod
     def is_built():
