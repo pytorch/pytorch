@@ -67,7 +67,7 @@ const char *cusparseGetErrorString(cusparseStatus_t status);
 // cusolver related headers are only supported on cuda now
 #ifdef CUDART_VERSION
 
-namespace at::cuda::solve {
+namespace at::cuda::solver {
 C10_EXPORT const char* cusolverGetErrorMessage(cusolverStatus_t status);
 } // namespace at::cuda::solver
 
