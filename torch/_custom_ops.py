@@ -169,7 +169,7 @@ def impl(qualname, *, device_types=("cpu", "cuda"), func=None):
     """
 
     def inner(func):
-        custom_op = _find_custom_op(qualname)
+        custom_op = _find_custom_op(qualname, also_check_torch_library=True)
         custom_op.impl(device_types, _stacklevel=3)(func)
         return func
 
