@@ -52,28 +52,6 @@ struct DisableFuncTorch {
   c10::impl::ExcludeDispatchKeyGuard back_guard_;
 };
 
-struct MultithreadingEnabled {
-  MultithreadingEnabled(bool enabled)
-      : old_(c10::AutogradState::get_tls_state().get_multithreading_enabled()) {
-    c10::AutogradState::get_tls_state().set_multithreading_enabled(enabled);
-  }
-  ~MultithreadingEnabled() {
-    c10::AutogradState::get_tls_state().set_multithreading_enabled(old_);
-  }
-  bool old_;
-};
-
-struct ViewReplayEnabled {
-  ViewReplayEnabled(bool enabled)
-      : old_(c10::AutogradState::get_tls_state().get_view_replay_enabled()) {
-    c10::AutogradState::get_tls_state().set_view_replay_enabled(enabled);
-  }
-  ~ViewReplayEnabled() {
-    c10::AutogradState::get_tls_state().set_view_replay_enabled(old_);
-  }
-  bool old_;
-};
-
 struct DisableAutocast {
   c10::impl::ExcludeDispatchKeyGuard guard_{c10::autocast_dispatch_keyset};
 };
@@ -460,10 +438,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       _C_m, "_DisablePythonDispatcher");
   py_context_manager<EnablePreDispatch>(_C_m, "_EnablePreDispatch");
   py_context_manager_DEPRECATED<DisableFuncTorch>(_C_m, "_DisableFuncTorch");
-  py_context_manager_DEPRECATED<MultithreadingEnabled, bool>(
-      _C_m, "_MultithreadingEnabled");
   py_context_manager<DisableAutocast>(_C_m, "_DisableAutocast");
-  py_context_manager<ViewReplayEnabled, bool>(_C_m, "_ViewReplayEnabled");
   py::class_<torch::autograd::SavedVariable>(std::move(m), "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
         TORCH_CHECK(
