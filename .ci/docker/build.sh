@@ -174,15 +174,6 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-py3-clang7-asan)
-    ANACONDA_PYTHON_VERSION=3.9
-    CLANG_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
   pytorch-linux-focal-py3-clang10-onnx)
     ANACONDA_PYTHON_VERSION=3.8
     CLANG_VERSION=10
@@ -286,6 +277,15 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    TRITON=yes
+    ;;
+  pytorch-linux-jammy-py3-clang12-asan)
+    ANACONDA_PYTHON_VERSION=3.9
+    CLANG_VERSION=12
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-focal-linter)
