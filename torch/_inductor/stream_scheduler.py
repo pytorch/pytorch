@@ -3,7 +3,9 @@ from .virtualized import V
 import logging
 from collections import deque
 log = logging.getLogger(__name__)
-
+import torch
+import os
+import json
 
 def temporary_log_path(temp_log_path):
     # Store original configuration
@@ -86,6 +88,113 @@ class SSNode:
     def get_name(self):
         return self.name
 
+class CheckPoints:
+    def __init__(self, debug_path, ssgraph):
+        if not os.path.exists(debug_path):
+            os.makedirs(debug_path)
+        self.debug_path = debug_path
+        self.checkpoints_file = os.path.join(debug_path, "checkpoints.json")
+        self.checkpoints = self.load_checkpoints()
+        self.ss_graph = ssgraph
+        self.graph_name = ssgraph.graph_name
+        self.done_nodes = list(self.checkpoints[self.graph_name]["done_nodes"])
+        self.cur_node_pre_suc_done = []
+        # The node is being assigned this time. It is the direct predecessor and successor of a critical node.
+        self.this_time_node = None
+        self.stream_pool_pop = ssgraph.stream_pool_pop
+        
+    def load(self):
+        if not os.path.exists(self.checkpoints_file):
+            open(self.checkpoints_file, "w").close()
+            return {}
+        with open(self.checkpoints_file, "r") as f:
+            checkpoints = json.load(f)
+        return checkpoints
+    
+    def save(self):
+        self.checkpoints[self.graph_name]["done_nodes"] = list(set(self.done_nodes))
+        with open(self.checkpoints_file, "w") as f:
+            json.dump(self.checkpoints, f)
+
+    def stream_assign(self):
+        this_time = None
+        for node in self.ss_graph.critical_path:
+            if node.name in self.done_nodes:
+                self.dig_node(node)
+            elif this_time is None:
+                self.dig_node(node, 0, False, True)
+                this_time = node.name
+                all_pre_suc = []
+                all_pre_suc.extend(node.predecessors.values())
+                all_pre_suc.extend(node.successors.values())
+                for tmp_node in all_pre_suc:
+                    if tmp_node.name not in self.done_nodes:
+                        break
+                else:
+                    # all predecessors and successors are done for current node
+                    self.done_nodes.add(node.name)
+            else:
+                self.dig_node(node, 0, False)
+
+    
+    def dig_node(self, cur_node: SSNode, level=0, assign_all=True, target_node = False):
+        """
+        For each critical node, we use this function to assign a stream id to all its predecessors and successors.
+        target_node: if True, we need special process for all its predecessors and successors.
+        """
+        # find which node is being assigned this time. The first node after done nodes is the one.
+        if level == 0 and target_node:
+            self.this_time_node = None
+            for tmp_node in cur_node.predecessors.values():
+                if tmp_node.name in self.done_nodes:
+                    self.cur_node_pre_suc_done.append(tmp_node)
+                else:
+                    self.this_time_node = tmp_node
+            for tmp_node in cur_node.successors.values():
+                if tmp_node.name in self.done_nodes:
+                    self.cur_node_pre_suc_done.append(tmp_node)
+                elif not self.this_time_node:
+                    self.this_time_node = tmp_node
+            assert self.this_time_node is not None
+            self.done_nodes.append(self.this_time_node.name)
+
+        for predecessor in cur_node.predecessors.values():
+            if predecessor.stream_id == -1:
+                if level == 1 and target_node:
+                    if predecessor in self.cur_node_pre_suc_done or predecessor.name == self.this_time_node.name:
+                        self.dig_node(predecessor, level + 1, True, True)
+                    else:
+                        self.dig_node(predecessor, level + 1, False, True)
+                else:
+                    self.dig_node(predecessor, level + 1, assign_all, target_node)
+        if cur_node.stream_id == -1:
+            if cur_node in self.critical_path:
+                cur_node.stream_id = 0
+            # if the node has only one predecessor and the predecessor has only one successor, then we can assign the same stream_id to the node
+            elif len(cur_node.predecessors) == 1:
+                predecessor = list(cur_node.predecessors.values())[0]
+                if len(predecessor.successors) == 1:
+                    cur_node.stream_id = self.stream_pool_pop(predecessor)
+                else:
+                    if assign_all:
+                        cur_node.stream_id = self.stream_pool_pop()
+                    else:
+                        cur_node.stream_id = 0
+            else:
+                if assign_all:
+                    cur_node.stream_id = self.stream_pool_pop()
+                else:
+                    cur_node.stream_id = 0
+        for successor in cur_node.successors.values():
+            if successor.stream_id == -1:
+                if level == 1 and target_node:
+                    if successor in self.cur_node_pre_suc_done or successor.name == self.this_time_node.name:
+                        self.dig_node(successor, level + 1, True, True)
+                    else:
+                        self.dig_node(successor, level + 1, False, True)
+                else:
+                    self.dig_node(successor, level + 1, assign_all, target_node)
+
 
 class SSGraph:
     """
@@ -116,7 +225,6 @@ class SSGraph:
         self.final_order = []
         self.max_stream_id = 0
         self.build_graph(nodes)
-        self.stream_scheduling()
 
     def build_graph(self, nodes):
         output_node = SSNode(None)
@@ -138,7 +246,6 @@ class SSGraph:
                         user for user in snode.original_user_names if user in self.name_mapping]
                     break
         self.ssnodes.append(output_node)
-        # breakpoint()
 
         def update_successor_predecessor(ssnode, user_names):
             for user in user_names:
@@ -249,11 +356,10 @@ class SSGraph:
                             ssnode.cuda_event = True
                             break
 
-    def stream_scheduling(self):
-        # Yueming TODO: do we need keep this fake 0?
+    def stream_assign(self):
+        # The stream 0 is reserved when do the stream pool pop
         self.stream_pool[0] = len(self.ssnodes) + 2
         self.dig_node(self.ssnodes[0])
-        self.event_assign()
 
     def dfs_search(self, cur_node: SSNode):
         # sort the predecessors by their stream_id and sort from large to small
@@ -312,23 +418,6 @@ class SSGraph:
     For current global order, the nodes off the critical path are usually the adjacent nodes before the next common successor. It will block the critical path if we don't reorder them.
     """
     def reorder(self, original_nodes):
-        # self.dfs_search(self.ssnodes[0])
-        # self.final_order.remove(self.name_mapping["OUTPUT"])
-        # self.final_order = self.ssnodes.copy()
-        # visited = set()
-        # for index, ssnode in enumerate(self.ssnodes):
-        #     if index < 2:
-        #         continue
-        #     if len(ssnode.predecessors) > 1:
-        #         index_1_node = self.final_order[index-1]
-        #         index_2_node = self.final_order[index-2]
-        #         if index_1_node in ssnode.predecessors.values() and index_2_node in ssnode.predecessors.values() and index_1_node not in visited and index_2_node not in visited and index_1_node.stream_id != ssnode.stream_id and index_2_node.stream_id == ssnode.stream_id:
-        #             self.final_order[index-1], self.final_order[index-2] = self.final_order[index-2], self.final_order[index-1]
-        #             visited.add(index_1_node)
-        #             visited.add(index_2_node)
-        #             visited.add(ssnode)
-        # self.final_order.remove(self.name_mapping["OUTPUT"])
-        # if env STREAMSCHEDULER_REORDER is set to 1, then we'll reorder the nodes
         if environ.get("STREAMSCHEDULER_REORDER", "0") == "0":
             return original_nodes
         from .scheduler import SchedulerNode, FusedSchedulerNode
@@ -378,10 +467,10 @@ class SSGraph:
         if len(self.final_order) != len(self.ssnodes):
             raise RuntimeError(f"Error when processing the queue. The queue is not empty after the loop.\nlen(self.final_order):{len(self.final_order)}\nlen(self.ssnodes):{len(self.ssnodes)}")
         self.final_order.remove(self.name_mapping["OUTPUT"])
-        log.info("=====findhao debug final order=====")
+        log.info("=====TorchInductor Stream Scheduler final order=====")
         for node in self.final_order:
             log.info(node.get_name())
-        log.info("=====findhao debug final order=====")
+        log.info("=====TorchInductor Stream Scheduler final order=====")
         new_node_list = []
         for ssnode in self.final_order:
             new_node_list.append(ssnode.original_node)
@@ -392,9 +481,9 @@ class SSGraph:
     def print_graph(self):
         import datetime
         current_time = datetime.datetime.now().strftime("%Y%m%d%H%M")
-        reset_log_path = temporary_log_path(f'/tmp/yhao/stream_assignment_{current_time}.log')
+        reset_log_path = temporary_log_path(f'{V.debug._path}/stream_assignment_{current_time}.log')
 
-        log.info("=====findhao debug=====")
+        log.info("=====TorchInductor Stream Scheduler Tree=====")
         for node in self.ssnodes:
             log.info(node.get_name())
             log.info("\tsuccessors:")
@@ -408,8 +497,8 @@ class SSGraph:
                 for predecessor in node.predecessors.values():
                     tmp_str += predecessor.get_name() + ', '
                 log.info(tmp_str)
-        log.info("=====findhao debug end=====")
-        log.info("=====findhao debug reverse level=====")
+        log.info("=====TorchInductor Stream Scheduler Tree end=====")
+        log.info("=====TorchInductor Stream Scheduler Tree reverse level=====")
 
         for node in self.reverse_level.keys():
             log.info(f"{node.get_name()} {self.reverse_level[node]}")
@@ -417,18 +506,18 @@ class SSGraph:
             if node.get_name() != "OUTPUT":
                 log.info(f"\tpredecessor:{self.reverse_level_predecessors[node].get_name()}")
         if len(self.reverse_level.keys()) != len(self.ssnodes):
-            log.error("findhao debug reverse level error")
+            log.error("TorchInductor Stream Scheduler Tree reverse level error")
             log.error(f"len(self.reverse_level.keys()):{len(self.reverse_level.keys())}")
             log.error(f"len(self.ssnodes):{len(self.ssnodes)}")
             missing = self.reverse_level.keys() - self.ssnodes
             for node in missing:
                 log.error(f"missing node:{node.get_name()}")
-        log.info("=====findhao debug reverse level end=====")
-        log.info("=====findhao debug critical path=====")
+        log.info("=====TorchInductor Stream Scheduler Tree reverse level end=====")
+        log.info("=====TorchInductor Stream Scheduler Tree critical path=====")
         for node in self.critical_path:
             log.info(f"{node.get_name()}")
-        log.info("=====findhao debug critical path end=====")
-        log.info("=====findhao debug stream allocation=====")
+        log.info("=====TorchInductor Stream Scheduler Tree critical path end=====")
+        log.info("=====TorchInductor Stream Scheduler Tree stream allocation=====")
         for node in self.ssnodes:
             assert node.stream_id != -1
             if node.cuda_event:
@@ -436,15 +525,29 @@ class SSGraph:
             else:
                 event_str = ""
             log.info(f"{node.get_name()} {node.stream_id} {event_str}")
-        log.info("=====findhao debug stream allocation end=====")
+        log.info("=====TorchInductor Stream Scheduler Tree stream allocation end=====")
 
         reset_log_path()
 
 
 def stream_schedule(snodes):
     ssgraph = SSGraph(snodes)
-    import os
-    if os.getenv("TORCHINDUCTOR_STREAM_PRINT_GRAPH", "0") == "1":
+    accuracy_fix = os.getenv("TORCHINDUCTOR_STREAM_ACCURACY_FIX", "0") == "1"
+    if accuracy_fix and not V.debug:
+        raise RuntimeError("TORCHINDUCTOR_STREAM_ACCURACY_FIX is set to 1 but debug is not enabled")
+    if accuracy_fix:
+        ssgraph.graph_name = V.debug._path.split(os.sep)[:-1]
+        osenv_debug_folder = os.getenv("DEBUG_FOLDER")
+        debug_path = f"{torch._dynamo.config.debug_dir_root}/{osenv_debug_folder}"
+        checkpoints = CheckPoints(debug_path, ssgraph)
+        checkpoints.load()
+        checkpoints.stream_assign()
+        ssgraph.event_assign()
+        CheckPoints.save()
+    else:
+        ssgraph.stream_assign()
+        ssgraph.event_assign()
+    if os.getenv("TORCHINDUCTOR_STREAM_PRINT_GRAPH", "0") == "1" and V.debug:
         ssgraph.print_graph()
     V.graph.stream_graph = ssgraph
     return ssgraph
