@@ -16,20 +16,22 @@
 namespace at::native {
 
 template <typename T, template <class> class Op>
-std::vector<Tensor> foreach_binary_op(TensorList tensors, const Tensor& other) {
+std::vector<Tensor> foreach_binary_op(
+    TensorList tensors,
+    const Tensor& scalar) {
   TORCH_CHECK(
-      other.dim() == 0 && other.numel() == 1,
+      scalar.dim() == 0 && scalar.numel() == 1,
       "scalar tensor expected to be 0 dim but it has ",
-      other.dim(),
+      scalar.dim(),
       " dimensions and ",
-      other.numel(),
+      scalar.numel(),
       " elements.");
   TORCH_CHECK(
-      tensors[0].device() == other.device(),
+      tensors[0].device() == scalar.device(),
       "scalar tensor expected to be on ",
       tensors[0].device(),
       " but is on ",
-      other.device());
+      scalar.device());
   std::vector<std::vector<at::Tensor>> tensor_lists;
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(tensors.size());
@@ -49,25 +51,25 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, const Tensor& other) {
           /* r_args_depth */ 1,
           /* res_arg_index */ 1>(),
       Op<opmath_t>(),
-      other.data_ptr<T>());
+      scalar.data_ptr<T>());
   return tensor_lists[1];
 }
 
 template <typename T, template <class> class Op>
-void foreach_binary_op_(TensorList tensors, const Tensor& other) {
+void foreach_binary_op_(TensorList tensors, const Tensor& scalar) {
   TORCH_CHECK(
-      other.dim() == 0 && other.numel() == 1,
+      scalar.dim() == 0 && scalar.numel() == 1,
       "scalar tensor expected to be 0 dim but has ",
-      other.dim(),
+      scalar.dim(),
       " dimensions and ",
-      other.numel(),
+      scalar.numel(),
       " elements.");
   TORCH_CHECK(
-      tensors[0].device() == other.device(),
+      tensors[0].device() == scalar.device(),
       "scalar tensor is expected to be on ",
       tensors[0].device(),
       " but is on ",
-      other.device());
+      scalar.device());
   std::vector<std::vector<at::Tensor>> tensor_lists;
   tensor_lists.emplace_back(tensors.vec());
 
@@ -80,7 +82,7 @@ void foreach_binary_op_(TensorList tensors, const Tensor& other) {
           /* r_args_depth */ 1,
           /* res_arg_index */ 0>(),
       Op<opmath_t>(),
-      other.data_ptr<T>());
+      scalar.data_ptr<T>());
   increment_version(tensors);
 }
 

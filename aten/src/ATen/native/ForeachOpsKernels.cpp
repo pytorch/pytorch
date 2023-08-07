@@ -66,7 +66,7 @@ namespace at::native {
       TensorList tensors, const Tensor& scalar) {               \
     TORCH_CHECK(                                                \
         scalar.dim() == 0 && scalar.numel() == 1,               \
-        "scalar expected to be 0 dim but it has ",              \
+        "scalar tensor expected to be 0 dim but it has ",       \
         scalar.dim(),                                           \
         " dimensions and ",                                     \
         scalar.numel(),                                         \
@@ -82,7 +82,7 @@ namespace at::native {
       TensorList tensors, const Tensor& scalar) {               \
     TORCH_CHECK(                                                \
         scalar.dim() == 0 && scalar.numel() == 1,               \
-        "scalar expected to be 0 dim but it has ",              \
+        "scalar tensor expected to be 0 dim but it has ",       \
         scalar.dim(),                                           \
         " dimensions and ",                                     \
         scalar.numel(),                                         \
