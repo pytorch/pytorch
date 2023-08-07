@@ -397,12 +397,12 @@ def make_dep_token(
 
 
 @register_meta(aten.sym_constrain_range.default)
-def sym_constrain_range(size, min, max):
+def sym_constrain_range(size, min=None, max=None):
     constrain_range(size, min=min, max=max)
 
 
 @register_meta(aten._functional_sym_constrain_range.default)
-def functional_sym_constrain_range(size, min, max, dep_token):
+def functional_sym_constrain_range(size, min=None, max=None, dep_token=None):
     aten.sym_constrain_range(size, min=min, max=max)
     return dep_token
 
