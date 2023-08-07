@@ -333,7 +333,9 @@ def _single_tensor_adam(params: List[Tensor],
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch._utils.is_compiling() and capturable:
-            assert param.is_cuda and step_t.is_cuda, "If capturable=True, params and state_steps must be CUDA tensors."
+            assert (
+                (param.is_cuda and step_t.is_cuda) or (param.is_xla and step_t.is_xla)
+            ), "If capturable=True, params and state_steps must be CUDA or XLA tensors."
 
         # update step
         step_t += 1
