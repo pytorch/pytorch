@@ -276,12 +276,13 @@ Tensor q_maxpool_2d(
     qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
     return qy;
   } else {
-    Tensor qy = at::_empty_affine_quantized(
-        oSizes,
-        qx.options().dtype(toQIntType(qx.scalar_type())),
-        qx.q_scale(),
-        qx.q_zero_point());
+    Tensor qy;
     if constexpr(!std::is_same_v<Q, uint8_t>) {
+      qy = at::_empty_affine_quantized(
+              oSizes,
+              qx.options().dtype(toQIntType(qx.scalar_type())),
+              qx.q_scale(),
+              qx.q_zero_point());
       auto qx_contig = qx.contiguous();
       auto qxd = qx_contig.data_ptr<Q>();
       auto qyd = qy.data_ptr<Q>();
@@ -329,7 +330,17 @@ Tensor q_maxpool_2d(
         });
       }
     } else {
-      TORCH_CHECK(false, "q_maxpool_2d only support uint8 data type with channel_last format.");
+      // If qx is uint8 and contiguous memory format,
+      // Use the channels_last implementation and convert qy back to contiguous.
+      qy = at::empty(
+        oSizes,
+        qx.options()
+          .device(c10::kCPU)
+          .dtype(qx.scalar_type())
+          .memory_format(c10::MemoryFormat::ChannelsLast));
+      auto qx_nhwc = qx.contiguous(c10::MemoryFormat::ChannelsLast);
+      qmaxpool_2d_nhwc_stub(qx_nhwc.device().type(), qx_nhwc, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
+      qy = qy.contiguous();
     }
     return qy;
   }
