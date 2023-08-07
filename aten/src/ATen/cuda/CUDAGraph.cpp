@@ -96,7 +96,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
   capture_gen_ = gen;
   capture_dev_ = c10::cuda::current_device();
 
-  auto id = capture_sequence_id();
+  id_ = capture_sequence_id();
 
   if (pool.first != 0 || pool.second != 0) {
     // Either value being nonzero means the user supplied a pool to share.
@@ -108,24 +108,12 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
   } else {
     // User did not ask us to share a mempool. Use our own id_ as our mempool_id_.
     // Sets just the first value, to distinguish it from MempoolId_ts created by graph_pool_handle().
-    mempool_id_ = {id, 0};
+    mempool_id_ = {id_, 0};
   }
 
-  // When CUDACachingAllocator allocates while a capture is underway, it calls cudaStreamGetCaptureInfo
-  // to get the current stream's capture id, if any. Here we tell CUDACachingAllocator: if the stream
-  // has a capture id matching this graph's id_, use the private pool mempool_id_ identifies.
-  //
-  // There's a small chance of a bad allocation here if another thread launches a kernel on
-  // capture_stream_ between the call to cudaStreamBeginCapture above and the call to
-  // notifyCaptureBegin below.
-  // But I don't think we need to worry about it because that use case makes no sense:
-  // The user has no business launching kernels on capture_stream_ from another thread
-  // while calling capture_begin. They'll have no idea if their side thread's
-  // kernel will end up as part of the capture or not.
-  // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture which should
-  // prevent the above from occurring. This is mainly to address e.g., an autograd thread's free() call
-  // triggering an invalid cudaEventRecord in the caching allocator due to the capture status being
-  // updated _after_ a capture had already started.
+  // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture to prevent an
+  // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
+  // due to the capture status being updated _after_ a capture had already started.
   c10::cuda::CUDACachingAllocator::beginAllocateStreamToPool(capture_dev_, capture_stream_, mempool_id_);
 
   // cudaStreamCaptureModeGlobal is the most conservative option to
@@ -138,7 +126,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, nullptr));
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
 
-  id_ = id;
   TORCH_INTERNAL_ASSERT(id_ > 0);
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 or ROCM >= 5.3")
