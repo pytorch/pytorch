@@ -12,7 +12,7 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._composable import fully_shard
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, ShardingStrategy
 from torch.distributed.fsdp._common_utils import _FSDPState
 from torch.distributed.fsdp.flat_param import FlatParamHandle
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
@@ -46,12 +46,13 @@ class TestRuntime(FSDPTest):
 
     @property
     def world_size(self) -> int:
-        return 2
+        return torch.cuda.device_count()
 
     def _init_models_and_optims(
         self,
         device: torch.device,
         fsdp_wrap_mode: FSDPWrapMode,
+        sharding_strategy: ShardingStrategy,
     ) -> Tuple[nn.Module, torch.optim.Optimizer, nn.Module, torch.optim.Optimizer]:
         local_model = CompositeParamModel(device=device)
 
@@ -61,17 +62,27 @@ class TestRuntime(FSDPTest):
                 copy.deepcopy(local_model),
                 auto_wrap_policy=ModuleWrapPolicy({UnitModule}),
                 use_orig_params=True,
+                sharding_strategy=sharding_strategy,
             )
             fully_shard(
                 composable_module,
                 policy=ModuleWrapPolicy({UnitModule}),
+                strategy=sharding_strategy,
             )
         elif fsdp_wrap_mode == FSDPWrapMode.MANUAL_WRAP:
             fsdp_wrapped_model = copy.deepcopy(local_model)
-            fsdp_wrapped_model.u2 = FSDP(fsdp_wrapped_model.u2, use_orig_params=True)
-            fsdp_wrapped_model = FSDP(fsdp_wrapped_model, use_orig_params=True)
-            fully_shard(composable_module.u2)
-            fully_shard(composable_module)
+            fsdp_wrapped_model.u2 = FSDP(
+                fsdp_wrapped_model.u2,
+                use_orig_params=True,
+                sharding_strategy=sharding_strategy,
+            )
+            fsdp_wrapped_model = FSDP(
+                fsdp_wrapped_model,
+                use_orig_params=True,
+                sharding_strategy=sharding_strategy,
+            )
+            fully_shard(composable_module.u2, strategy=sharding_strategy)
+            fully_shard(composable_module, strategy=sharding_strategy)
         else:
             raise ValueError(f"Unknown `fsdp_wrap_mode`: {fsdp_wrap_mode}")
         LR = 1e-2
@@ -92,19 +103,34 @@ class TestRuntime(FSDPTest):
                 "fsdp_wrap_mode": [
                     FSDPWrapMode.AUTO_WRAP,
                     FSDPWrapMode.MANUAL_WRAP,
-                ]
+                ],
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.NO_SHARD,
+                    ShardingStrategy.HYBRID_SHARD,
+                ],
             },
             self._test_training,
         )
 
-    def _test_training(self, fsdp_wrap_mode: FSDPWrapMode):
+    def _test_training(
+        self, fsdp_wrap_mode: FSDPWrapMode, sharding_strategy: ShardingStrategy
+    ):
+        if (
+            sharding_strategy
+            in [ShardingStrategy.HYBRID_SHARD, ShardingStrategy._HYBRID_SHARD_ZERO2]
+            and fsdp_wrap_mode == FSDPWrapMode.MANUAL_WRAP
+        ):
+            return  # TODO: manual wrap + HSDP requires explicit specification of pg
+
         device = torch.device("cuda")
         (
             composable_module,
             composable_optim,
             fsdp_wrapped_model,
             fsdp_wrapped_optim,
-        ) = self._init_models_and_optims(device, fsdp_wrap_mode)
+        ) = self._init_models_and_optims(device, fsdp_wrap_mode, sharding_strategy)
         torch.manual_seed(self.rank + 1)
         for _ in range(5):
             inp = torch.randn(2, 100, device="cuda")
@@ -142,7 +168,9 @@ class TestRuntime(FSDPTest):
             composable_optim,
             fsdp_wrapped_model,
             fsdp_wrapped_optim,
-        ) = self._init_models_and_optims(device, fsdp_wrap_mode)
+        ) = self._init_models_and_optims(
+            device, fsdp_wrap_mode, ShardingStrategy.FULL_SHARD
+        )
         # Before checking the unshard/reshard order, sanity check that the
         # assumption about wrapper FQN being a suffix of composable FQN holds
         all_composable_handles = traversal_utils._get_fsdp_handles(composable_module)
