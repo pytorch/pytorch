@@ -1472,6 +1472,67 @@ def forward(self, x_1):
         with self.assertRaisesRegex(RuntimeError, "already has an implementation"):
             custom_ops.impl(qualname, func=foo_impl)
 
+    def test_abstract_impl_on_existing_op(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        @torch._custom_ops.impl_abstract(qualname)
+        def foo_impl(x):
+            return x.sin()
+
+        op = self.get_op(qualname)
+        with torch._subclasses.FakeTensorMode():
+            x = torch.randn(3)
+            result = op(x)
+            self.assertEqual(result.shape, x.shape)
+            self.assertEqual(result.stride(), x.stride())
+
+    def test_abstract_impl_on_existing_op_with_meta(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        def foo_impl(x):
+            return x.sin()
+
+        lib.impl("foo", foo_impl, "Meta")
+        op = self.get_op(qualname)
+
+        with self.assertRaisesRegex(RuntimeError, r"already has .*Meta implementation"):
+            custom_ops.impl_abstract(qualname, func=foo_impl)
+
+    def test_abstract_impl_on_existing_op_with_CompositeImplicitAutograd(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        def foo_impl(x):
+            return x.sin()
+
+        lib.impl("foo", foo_impl, "CompositeImplicitAutograd")
+        op = self.get_op(qualname)
+
+        with self.assertRaisesRegex(RuntimeError, "CompositeImplicitAutograd"):
+            custom_ops.impl_abstract(qualname, func=foo_impl)
+
+    def test_abstract_impl_on_existing_op_with_CompositeExplicitAutograd(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        def foo_impl(x):
+            return x.sin()
+
+        lib.impl("foo", foo_impl, "CompositeExplicitAutograd")
+        op = self.get_op(qualname)
+
+        custom_ops.impl_abstract(qualname, func=lambda x: x.sum())
+        with torch._subclasses.FakeTensorMode():
+            x = torch.randn(10)
+            result = op(x)
+            self.assertEqual(result.shape, ())
+
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestCustomOpTesting, globals(), only_for=only_for)
