@@ -92,7 +92,7 @@ Tensor new_with_storage(
 std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
   bool is_storage = isStorage(seq);
   std::vector<int64_t> sizes;
-  THPObjectPtr handle;
+  THPObjectPtr obj;
   while (PySequence_Check(seq)) {
     auto length = PySequence_Length(seq);
     if (length < 0)
@@ -106,13 +106,13 @@ std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
     }
     if (length == 0)
       break;
-    handle = THPObjectPtr(PySequence_GetItem(seq, 0));
-    if (!handle) {
+    obj = THPObjectPtr(PySequence_GetItem(seq, 0));
+    if (!obj) {
       throw ValueError(
           "could not determine the shape of object type '%s'",
           Py_TYPE(seq)->tp_name);
     }
-    seq = handle.get();
+    seq = obj.get();
   }
 
   return sizes;
