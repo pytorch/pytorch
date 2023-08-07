@@ -13,10 +13,10 @@ static bool _cuda_graphs_debug = false;
 MempoolId_t graph_pool_handle() {
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   // uuid count starts at 1. 0 is reserved to mean "wasn't set by graph_pool_handle".
-  static std::atomic<CaptureId_t> uuid{1};
+  static std::atomic<CaptureId_t> uid{1};
   // Sets just the second value, to distinguish it from MempoolId_ts created from
   // cudaStreamGetCaptureInfo id_s in capture_begin.
-  return {0, uuid++};
+  return {0, uid++};
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 or ROCM >= 5.3")
   return {0, 0};
