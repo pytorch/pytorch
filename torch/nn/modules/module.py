@@ -2557,14 +2557,14 @@ class Module:
         any parameters or buffers.
 
         .. note::
-           This method does not call `:meth:reset_parameters()` on descendants of the module.
+           This method does not call :meth:`reset_parameters()` on descendants of the module.
            If you want to reset parameters of submodules as well, you can use :meth:`apply`
-           with `reset_parameters`, see the example below.
+           with ``reset_parameters``, see the example below.
 
         .. note::
            When implementing a custom module, a good practice is to initialize parameters
-           with :func:`torch.empty()` and call :meth:`self.reset_parameters()` at the end of
-           `Module.__init__()`. This will ensure that for a given random seed `apply()` will
+           with :func:`torch.empty()` and call ``self.reset_parameters()`` at the end of
+           ``Module.__init__()``. This will ensure that for a given random seed ``apply()`` will
            reset the parameters and buffers to the exact values given by instantiating the module
            with that seed.
 
