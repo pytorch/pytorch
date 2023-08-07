@@ -2805,14 +2805,14 @@ aot_autograd_failures = {
     decorate('svd_lowrank', decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)})),
     decorate('linalg.householder_product', decorator=unittest.skipIf(IS_MACOS and IS_X86, 'flaky')),
     decorate('linalg.pinv', 'singular', decorator=toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-05)})),
+    # conv2d sometimes nondeterministic in this config?
+    decorate('nn.functional.conv2d', decorator=unittest.skipIf(IS_ARM64, "flaky")),
 }
 
 symbolic_aot_autograd_failures = {
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('cdist', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('combinations', ''),  # aten.masked_select.default
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
-    xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
@@ -2844,18 +2844,12 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
     xfail('nn.functional.rrelu', ''),  # aten.rrelu_with_noise.default - couldn't find symbolic meta function...
     xfail('normal', 'number_mean'),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('polygamma', 'polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
-    xfail('polygamma', 'polygamma_n_1'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
-    xfail('polygamma', 'polygamma_n_2'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
-    xfail('polygamma', 'polygamma_n_3'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
-    xfail('polygamma', 'polygamma_n_4'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
     xfail('prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
     xfail('_segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
-    xfail('special.polygamma', 'special_polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic ...
     xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2868,6 +2862,16 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
     if not op.supports_autograd:
         self.skipTest("Op does not support autograd")
 
+    # aot_autograd_check is able to check data specialization by
+    # randomizing the inputs. Here's a list of ops that really do not
+    # like random inputs for which we want to disable that.
+    cant_check_data_specialization = set({
+        'nn.functional.max_unpool1d',
+        'nn.functional.max_unpool2d',
+        'nn.functional.max_unpool3d',
+    })
+    try_check_data_specialization = op.name not in cant_check_data_specialization
+
     sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=True)
     for sample_input in sample_inputs_itr:
         t_args = [sample_input.input] + list(sample_input.args)
@@ -2876,7 +2880,8 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
             aot_autograd_check(
                 op.op, t_args, t_kwargs, dynamic,
                 self.assertRaisesRegex, self.assertEqual,
-                try_check_data_specialization=True)
+                check_gradients=True,
+                try_check_data_specialization=try_check_data_specialization)
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
         except GuardOnDataDependentSymNode:
