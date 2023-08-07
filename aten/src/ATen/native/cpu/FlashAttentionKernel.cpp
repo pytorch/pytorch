@@ -10,7 +10,6 @@
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <c10/util/irange.h>
-#include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -68,7 +67,6 @@ void cpu_flash_attention(
     bool is_causal,
     bool return_debug_mask,
     c10::optional<double> scale) {
-  std::cout << "[liaoxuan] enter cpu_flash_attention" << std::endl;
   // Query (Batch x Num_heads  x Q_seq_len  x Dim_per_head)
   //    -> (Batch x Q_seq_len  x Num_heads  x Dim_per_head)
   // Key   (Batch x Num_heads  x KV_seq_len x Dim_per_head)
@@ -283,7 +281,6 @@ void cpu_flash_attention_backward(
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
     c10::optional<double> scale) {
-  std::cout << "[liaoxuan] enter cpu_flash_attention_backward" << std::endl;
   constexpr bool is_reduced_type = is_reduced_floating_point_v<scalar_t>;
   using accum_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<accum_t>;
@@ -537,12 +534,25 @@ void flash_attention_kernel_impl(
     bool is_causal,
     bool return_debug_mask,
     c10::optional<double> scale) {
+  auto q_seq_len = query.size(2);
 
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, query.scalar_type(), "flash_attention", [&] {
-    cpu_flash_attention<scalar_t, 128, 256>(
+    if (q_seq_len >= 768) {
+      cpu_flash_attention<scalar_t, 256, 512>(
         output, logsumexp, cum_seq_q, cum_seq_k,
         max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
         query, key, value, dropout_p, is_causal, return_debug_mask, scale);
+    } else if (q_seq_len >= 192) {
+      cpu_flash_attention<scalar_t, 64, 512>(
+        output, logsumexp, cum_seq_q, cum_seq_k,
+        max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
+        query, key, value, dropout_p, is_causal, return_debug_mask, scale);
+    } else {
+      cpu_flash_attention<scalar_t, 32, 512>(
+        output, logsumexp, cum_seq_q, cum_seq_k,
+        max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
+        query, key, value, dropout_p, is_causal, return_debug_mask, scale);
+    }
   });
 }
 
@@ -569,13 +579,27 @@ void flash_attention_backward_kernel_impl(
   // since we are going to call gemm next
   // zero stride in leading dimension would lead to slow impl for gemm
   auto grad_out_contig = grad_out.contiguous();
+  auto q_seq_len = query.size(1);
 
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, query.scalar_type(), "flash_attention_backward", [&] {
-    cpu_flash_attention_backward<scalar_t, 128, 256>(
+    if (q_seq_len >= 768) {
+      cpu_flash_attention_backward<scalar_t, 256, 512>(
         grad_q, grad_k, grad_v, grad_out_contig,
         query, key, value, out, logsumexp,
         cum_seq_q, cum_seq_k, max_q, max_k, dropout_p,
         is_causal, philox_seed, philox_offset, scale);
+    } else if (q_seq_len >= 192) {
+      cpu_flash_attention_backward<scalar_t, 64, 512>(grad_q, grad_k, grad_v, grad_out_contig,
+        query, key, value, out, logsumexp,
+        cum_seq_q, cum_seq_k, max_q, max_k, dropout_p,
+        is_causal, philox_seed, philox_offset, scale);
+    } else {
+      cpu_flash_attention_backward<scalar_t, 32, 512>(
+        grad_q, grad_k, grad_v, grad_out_contig,
+        query, key, value, out, logsumexp,
+        cum_seq_q, cum_seq_k, max_q, max_k, dropout_p,
+        is_causal, philox_seed, philox_offset, scale);
+    }
   });
 }
 

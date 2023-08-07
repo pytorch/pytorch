@@ -25,7 +25,6 @@ def _sfdp_pattern_1(query, key, value, inv_scale):
 
 
 def _sfdp_replacement_1(query, key, value, inv_scale):
-    print("match _sfdp_replacement_1")
     counters["inductor"]["fuse_attention"] += 1
     return aten.scaled_dot_product_attention(
         query.contiguous(),
@@ -48,7 +47,6 @@ def _sfdp_pattern_2(query, key, value, scale_factor):
 
 
 def _sfdp_replacement_2(query, key, value, scale_factor):
-    print("match _sfdp_replacement_2")
     counters["inductor"]["fuse_attention"] += 1
     return aten.scaled_dot_product_attention(
         query.contiguous(),
@@ -71,7 +69,6 @@ def _sfdp_pattern_3(query, key, value, inv_scale_factor, dropout_p):
 
 
 def _sfdp_replacement_3(query, key, value, inv_scale_factor, dropout_p):
-    print("match _sfdp_replacement_3")
     counters["inductor"]["fuse_attention"] += 1
     return aten.scaled_dot_product_attention(
         query.contiguous(),
@@ -92,7 +89,6 @@ def _sfdp_pattern_4(query, key, value, scale_factor, dropout_p):
 
 
 def _sfdp_replacement_4(query, key, value, scale_factor, dropout_p):
-    print("match _sfdp_replacement_4")
     counters["inductor"]["fuse_attention"] += 1
     return aten.scaled_dot_product_attention(
         query.contiguous(),
@@ -114,7 +110,6 @@ def _sfdp_pattern_5(query, key, value, attn_mask):
 
 
 def _sfdp_replacement_5(query, key, value, attn_mask):
-    print("match _sfdp_replacement_5")
     counters["inductor"]["fuse_attention"] += 1
     return aten.scaled_dot_product_attention(
         query.contiguous(),
@@ -135,7 +130,6 @@ def _sfdp_pattern_6(query, key, value, attn_mask, dropout_p):
 
 
 def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
-    print("match _sfdp_replacement_6")
     counters["inductor"]["fuse_attention"] += 1
     return aten.scaled_dot_product_attention(
         query.contiguous(),
@@ -163,7 +157,6 @@ def _sfdp_pattern_7(query, key, value, dropout_p):
 
 
 def _sfdp_replacement_7(query, key, value, dropout_p):
-    print("match _sfdp_replacement_7")
     # sdpa prefers inputs in permuted format
     # it makes a copy to put them in this format
     # if they aren't already
@@ -196,7 +189,6 @@ def _sfdp_pattern_8(query, key, value):
 
 
 def _sfdp_replacement_8(query, key, value):
-    print("match _sfdp_replacement_8")
     counters["inductor"]["fuse_attention"] += 1
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
@@ -225,7 +217,6 @@ def _sfdp_pattern_9(query, key, value, dropout_p):
 
 
 def _sfdp_replacement_9(query, key, value, dropout_p):
-    print("match _sfdp_replacement_9")
     counters["inductor"]["fuse_attention"] += 1
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
@@ -254,7 +245,6 @@ def _sfdp_pattern_10(query, key, value):
 
 
 def _sfdp_replacement_10(query, key, value):
-    print("match _sfdp_replacement_10")
     counters["inductor"]["fuse_attention"] += 1
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
@@ -318,9 +308,8 @@ def _sfdp_init():
         device = "cuda"
     else:
         device = "cpu"
-        print("device == cpu, return")
+        # TODO: enable CPU fuse attetion rewriting once flash attention is ready
         return
-    print("enter _sfdp_init")
 
     # sizes/values don't actually matter for initial trace
     # once we get a possible match we re-trace with the actual values and verify the match still holds

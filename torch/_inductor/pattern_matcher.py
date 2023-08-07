@@ -710,7 +710,6 @@ def register_replacement(
         pass_dict: dict of passes to register to
         extra_check: additional check to run on match(using real shapes)
     """
-    print(search_fn, replace_fn, "register_replacement")
     def check_fn(match: Match):
         """
         Often shapes get burned into the pattern, so our initial match ran with
@@ -726,7 +725,6 @@ def register_replacement(
         for i, grad in enumerate(requires_grad):
             if isinstance(args[i], torch.Tensor):
                 if grad and is_integer_dtype(args[i].dtype):
-                    print(search_fn, replace_fn, "return false")
                     return False
 
                 with torch._dynamo.utils.detect_fake_mode(args):
@@ -745,9 +743,7 @@ def register_replacement(
         if specific_pattern_match and extra_check(specific_pattern_match):
             # trace the pattern using the shapes form the user program
             match.replacement_graph = trace_fn(replace_fn, args)
-            print(search_fn, replace_fn, "return true")
             return True
-        print(search_fn, replace_fn, "return false")
         return False
 
     def normalize_args(**kwargs):

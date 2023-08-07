@@ -348,6 +348,64 @@ bool check_head_dim_size_mem_efficient_cpp(sdp_params params, bool debug) {
   return true;
 }
 
+bool check_nonzero_sequence_lengths_cpp(sdp_params params, bool debug) {
+  if (has_for_nested_inputs_cpp(params)){
+    // Currently we do not support any masking with NestedTensors
+    // This is checked in validate_sdpa_input so this filter func
+    // Should have no actually bearing on the kernel selection
+    return true;
+  }
+  // In some cases people will pass in 0 sized tensors, this will
+  // cause the fused path to error with unaligned mask
+  bool zero_seq_len_q = params.query.sym_size(-2) == 0;
+  bool zero_seq_len_k = params.key.sym_size(-2) == 0;
+  if (zero_seq_len_q || zero_seq_len_k) {
+    if (debug) {
+      TORCH_WARN(
+          "Both fused kernels do not support zero seq_len_q or seq_len_kv.");
+    }
+    return false;
+  }
+  return true;
+}
+
+bool check_last_dim_stride_equals_1_cpp(sdp_params params, bool debug) {
+  if (has_for_nested_inputs_cpp(params)){
+    // The stride checking for NestedTensors is done within the kernel
+    // And .contiguous will be called if needed
+    return true;
+  }
+  // This function checks that the last dimension of the inputs to
+  // fused_attention have stride 1
+  bool qkv_strides_equal_1 = params.query.sym_stride(-1) == 1 &&
+      params.key.sym_stride(-1) == 1 && params.value.sym_stride(-1) == 1;
+  bool mask_stride_equal_1 = params.attn_mask.has_value()
+      ? params.attn_mask.value().sym_stride(-1) == 1
+      : true;
+  if (!(qkv_strides_equal_1 && mask_stride_equal_1)) {
+    if (debug) {
+      std::ostringstream epilogue_message;
+      if (params.attn_mask.has_value()) {
+        epilogue_message << ", Attn_mask.stride(-1): "
+                         << params.attn_mask.value().sym_stride(-1);
+      }
+      epilogue_message << " instead.";
+      TORCH_WARN(
+          "Both fused kernels require the last dimension of the input to have stride 1. ",
+          "Got Query.stride(-1): ",
+          params.query.sym_stride(-1),
+          ", Key.stride(-1): ",
+          params.key.sym_stride(-1),
+          ", Value.stride(-1): ",
+          params.value.sym_stride(-1),
+          epilogue_message.str());
+    }
+
+    return false;
+  }
+  return true;
+}
+
 bool check_runtime_disabled_flash_cpp(sdp_params params, bool debug) {
   // We check the global context to see if user has explicitly turned of flash
   // sdp kernels
@@ -384,7 +442,9 @@ bool use_flash_attention_cpp(sdp_params params, bool debug) {
       check_tensor_shapes_cpp,
       check_batch_size_and_num_heads_cpp,
       check_for_attn_mask_cpp,
-      check_head_dim_size_cpp);
+      check_head_dim_size_cpp,
+      check_nonzero_sequence_lengths_cpp,
+      check_last_dim_stride_equals_1_cpp);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -406,7 +466,9 @@ bool use_mem_efficient_attention_cpp(sdp_params params, bool debug) {
       check_tensor_shapes_cpp,
       check_batch_size_and_num_heads_cpp,
       check_for_attn_mask_cpp,
-      check_head_dim_size_mem_efficient_cpp);
+      check_head_dim_size_mem_efficient_cpp,
+      check_nonzero_sequence_lengths_cpp,
+      check_last_dim_stride_equals_1_cpp);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
