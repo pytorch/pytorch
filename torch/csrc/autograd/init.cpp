@@ -794,6 +794,44 @@ static PyObject* is_multithreading_enabled(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* set_view_replay_enabled(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+      "set_view_replay_enabled(bool enabled)",
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (at::impl::torch_function_mode_enabled()) {
+    auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+    return handle_torch_function(
+        r,
+        args,
+        kwargs,
+        torch_C_module,
+        "torch._C",
+        "_set_view_replay_enabled");
+  }
+  auto view_replay_enabled = r.toBool(0);
+  c10::AutogradState::get_tls_state().set_view_replay_enabled(
+      view_replay_enabled);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_view_replay_enabled(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  if (c10::AutogradState::get_tls_state().get_view_replay_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* is_inference_mode_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (c10::InferenceMode::is_enabled()) {
@@ -1050,6 +1088,11 @@ static PyMethodDef methods[] = { // NOLINT
      nullptr},
     {"_set_multithreading_enabled",
      castPyCFunctionWithKeywords(set_multithreading_enabled),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_is_view_replay_enabled", is_view_replay_enabled, METH_NOARGS, nullptr},
+    {"_set_view_replay_enabled",
+     castPyCFunctionWithKeywords(set_view_replay_enabled),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},

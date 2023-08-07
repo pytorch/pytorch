@@ -3779,23 +3779,25 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
             t.backward()
 
     def test_view_replay_enabled(self):
-        def f(x):
-            out = x.clone().view(-1)
-            # mutate the view, triggering autograd view-replay logic
-            out.add_(1)
-            return out
+        # Test as a context manager
+        with torch.autograd._force_original_view_tracking(False):
+            self.assertFalse(torch.autograd.is_view_replay_enabled())
+        self.assertFalse(torch.autograd.is_view_replay_enabled())
 
-        x = torch.ones(2, 2, requires_grad=True)
         with torch.autograd._force_original_view_tracking(True):
-            out = f(x)
+            self.assertTrue(torch.autograd.is_view_replay_enabled())
+        self.assertFalse(torch.autograd.is_view_replay_enabled())
 
-        # view-replay was enabled, so we should see ViewBackward in the graph
-        # instead of AsStridedBackward.
-        self.assertTrue("ViewBackward" in str(out.grad_fn))
+        with torch.autograd._force_original_view_tracking(False):
+            torch.autograd._force_original_view_tracking(True)
+            self.assertTrue(torch.autograd.is_view_replay_enabled())
+        self.assertFalse(torch.autograd.is_view_replay_enabled())
 
-        # Without view-replay we should as an AsStridedBackward
-        out = f(x)
-        self.assertTrue("AsStridedBackward" in str(out.grad_fn))
+        torch.autograd._force_original_view_tracking(False)
+        self.assertFalse(torch.autograd.is_view_replay_enabled())
+
+        torch.autograd._force_original_view_tracking(True)
+        self.assertTrue(torch.autograd.is_view_replay_enabled())
 
     def test_unsafe_set_version_counter(self):
         x = torch.ones(2, requires_grad=True).clone()
