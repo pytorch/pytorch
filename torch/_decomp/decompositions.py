@@ -1631,7 +1631,6 @@ def wrap_output_with_input_device_(x,common_device):
     fake_mode = FakeTensorMode()
     fake_mode.in_kernel_invocation = True
     converter = fake_mode.fake_tensor_converter
-
     # wrap meta tensor
     if (
         common_device is not None
@@ -1641,7 +1640,8 @@ def wrap_output_with_input_device_(x,common_device):
         return converter.from_meta_and_device(
             fake_mode, x, common_device
             )
-	return x
+
+    return x
 
 
 @register_decomposition(aten._to_copy)
