@@ -16,18 +16,6 @@ from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_
 class ExcTests(LoggingTestCase):
     maxDiff = None
 
-    def assertExpectedInlineMunged(
-        self, exc_type, callable, expect, *, suppress_suffix=True
-    ):
-        try:
-            callable()
-        except exc_type as e:
-            self.assertExpectedInline(
-                munge_exc(e, suppress_suffix=suppress_suffix), expect, skip=1
-            )
-            return
-        self.fail(msg="Did not raise when expected to")
-
     def test_unsupported_real_stack(self):
         # exercise Unsupported constructor and augment_exc_message
         def fn002(x):
@@ -49,8 +37,7 @@ from user code:
    File "test_exc.py", line N, in fn001
     fn002(x)
   File "test_exc.py", line N, in fn002
-    torch._dynamo.graph_break()
-""",
+    torch._dynamo.graph_break()""",
         )
 
     @torch._dynamo.config.patch(verbose=True, suppress_errors=True)
@@ -117,8 +104,7 @@ torch._dynamo.exc.InternalTorchDynamoError:
 
 from user code:
    File "test_exc.py", line N, in fn001
-    comptime(f)
-""",
+    comptime(f)""",
         )
 
     @unittest.expectedFailure
@@ -155,8 +141,7 @@ from user code:
 
 from user code:
    File "test_exc.py", line N, in fn001
-    comptime(f)
-""",
+    comptime(f)""",
         )
 
     @make_logging_test(graph_breaks=True)
@@ -201,8 +186,7 @@ Graph break: call_function graph_break in skip_files _dynamo/decorators.py from 
             ),
             """\
 backend='relu_compile_error_TESTING_ONLY' raised:
-ReluCompileError:
-""",
+ReluCompileError:""",
         )
 
 
