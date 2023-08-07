@@ -3,11 +3,13 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/ops/_copy_from_and_resize_native.h>
+#include <ATen/ops/_copy_from_native.h>
 
 namespace at::native {
 namespace mps {
 
-void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedBlockSize) {
+static void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedBlockSize) {
   uintptr_t address = (uintptr_t)ptr;
   uintptr_t alignedAddress = address & ~(PAGE_SIZE - 1);
   uintptr_t alignedEnd = ((address + size) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
@@ -22,11 +24,11 @@ void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedB
 
 // Copy sourceBuffer into destBuffer, casting sourceBuffer to dst.scalar_type().
 // The shapes and dtypes are taken from dst and src, but their storage pointers are not used.
-void copy_cast_mps(at::Tensor& dst,
-                   const at::Tensor& src,
-                   id<MTLBuffer> destBuffer,
-                   id<MTLBuffer> sourceBuffer,
-                   bool non_blocking = true) {
+static void copy_cast_mps(at::Tensor& dst,
+                          const at::Tensor& src,
+                          id<MTLBuffer> destBuffer,
+                          id<MTLBuffer> sourceBuffer,
+                          bool non_blocking = true) {
   using namespace mps;
 
   using CachedGraph = MPSUnaryCachedGraph;
