@@ -479,7 +479,10 @@ class OrtBackend:
 
     def __init__(
         self,
+        # Default execution provider when we can't find any device information
+        # from arguments or the graph module captured by dynamo.
         ep: str = "CPUExecutionProvider",
+        # Allocate memory for ORT's outputs on PyTorch side if True. Otherwise, False.
         preallocate_output: bool = False,
         session_options=None,
         onnx_exporter_options: Optional[
@@ -539,6 +542,9 @@ class OrtBackend:
 
         self._assert_allclose_to_baseline = False
 
+        # Default execution provider such as "CUDAExecutionProvider" or "CPUExecutionProvider".
+        # It's used to create a new inference session when we can't find any device information
+        # from arguments or the graph module captured by dynamo.
         self.ep = ep
         self.session_options = session_options
         self.execution_count = 0
@@ -551,6 +557,7 @@ class OrtBackend:
         # should be supported, which is currently done through dlpack. Note that dlpack might not support a custom torch device.
         # It can be avoided by allowing for preallocation for output buffers allocated by a custom aten allocator,
         # and use the preallocated output buffers for InferenceSession not holding any ownership for them.
+        # TODO(wschin): Make it to inference session level flag.
         self.preallocate_output = preallocate_output
 
     def _ort_acclerated_call(self, graph_module: torch.fx.GraphModule, *args, **kwargs):
@@ -720,6 +727,7 @@ class OrtBackend:
             # ORT always returns a tuple of outputs. If the original output is a tensor,
             # ORT output's first element must be extracted and returned. Otherwise, type
             # mismatch may happen in downstream computation.
+            _nvtx_range_push("run_onnx_session_with_ortvaluevector")
             onnx_outputs = _run_onnx_session_with_ortvaluevector(
                 onnx_session,
                 input_names,
@@ -730,6 +738,7 @@ class OrtBackend:
                 output_devices,
                 self.preallocate_output,
             )
+            _nvtx_range_pop()
             assert len(onnx_outputs) == 1
             if self._assert_allclose_to_baseline:
                 # Compute baseline.
@@ -742,6 +751,25 @@ class OrtBackend:
 
     def compile(self, graph_module: torch.fx.GraphModule, args) -> torch.fx.GraphModule:
         # FX graph based partitioning based on ONNX supported ops.
+        # Given a graph module
+        #  GraphModule0
+        #   node_0
+        #   node_1
+        #   node_2
+        #   node_3
+        #   node_4
+        # If only node_2 is not supported by ONNX, this graph module will be partitioned into
+        #  GraphModule0
+        #   GraphModule1
+        #    node_0
+        #    node_1
+        #   node_2
+        #   GraphModule2
+        #    node_3
+        #    node_4
+        # by calling CapabilityBasedPartitioner.partition_and_fuse.
+        # Then, GraphModule1's and GraphModule2's forward method (GraphModule._wrapped_call)
+        # will be replaced by OrtBackend._ort_accelerated_call to delegate computation to ORT.
         if graph_module in self._partitioner_cache:
             partitioned_prim_graph_module = self._partitioner_cache[graph_module]
         else:
@@ -780,26 +808,43 @@ def make_aot_ort(dynamic: bool = True):
     """Wrap OrtBackend as PyTorch's AOT compiler.
 
     Example usages:
-        import torch
-        from onnxruntime.training.torchdynamo.register_backend import make_aot_ort
-        use_dynamic = True
-        local_aot_ort, _ = make_aot_ort(dynamic = use_dynamic)
-
-        @torch._dynamo.optimize(local_aot_ort, dynamic=use_dynamic)
-        def foo(x: torch.Tensor):
-            return torch.sigmoid(x)
-
-        x = torch.rand(2, 2, dtype=torch.float)
-        torch.testing.assert_close(torch.sigmoid(x), foo(x))
+         # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
+         >>> import copy
+         >>> import torch
+         >>> from torch.onnx._backend.core import make_aot_ort
+         >>> class MyModel(torch.nn.Module):  # Dummy model
+         ... def __init__(self) -> None:
+         ...     super().__init__()
+         ...     self.linear = torch.nn.Linear(2, 2)
+         ... def forward(self, x):
+         ...     out = self.linear(x)
+         ...     return out
+         >>> model = MyModel()
+         >>> aot_ort, _ = make_aot_ort(dynamic = True)
+         >>> compiled_model = torch.compile(copy.deepcopy(model), backend=aot_ort, dynamic=True)
+         >>> x = torch.randn(2, 2, 2)
+         >>> y_baseline = model(x)
+         >>> y_compiled = compiled_model(x)
+         >>> torch.testing.assert_close(y_baseline, y_compiled)
     """
     ort_backend = OrtBackend(
         onnx_exporter_options=ExportOptions(dynamic_shapes=dynamic)
     )
     return (
+        # Wrap OrtBackend as dynamo backend to support training
+        # (i.e., backward graphs are also sent to OrtBackend).
+        # In this function, symbolic execution is used to capture
+        # forward pass and backward passes as a single graph.
+        # Then, a selected graph partition algorithm (here
+        # is min_cut_rematerialization_partition) is used to
+        # split the entire graph into forward sub-graph and backward
+        # sub-graph. Finally, both sub-graphs are compiled by OrtBackend.
         aot_autograd(
             fw_compiler=ort_backend,
             partition_fn=min_cut_rematerialization_partition,
             decompositions=ort_backend.resolved_onnx_exporter_options.decomposition_table,
         ),
+        # Unlike wrapping using aot_autograd, this backend is inference-only,
+        # because backward graphs are not visible.
         ort_backend,
     )
