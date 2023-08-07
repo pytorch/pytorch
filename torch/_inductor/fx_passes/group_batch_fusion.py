@@ -26,8 +26,10 @@ aten = torch.ops.aten
 log = logging.getLogger(__name__)
 
 MIN_FUSE_SET_SIZE = 5
-MAX_FUSE_SET_SIZE = 100
+MAX_FUSE_SET_SIZE = 300
 MAX_FUSE_SEARCH_DEPTH = 5
+# The maximum tensor size that can go into the fusion group
+MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR = 4096
 
 
 class GroupBatchFusionBase:
@@ -64,6 +66,8 @@ class GroupLinearFusion(GroupFusion):
             and len(input_shape) == 2
             and len(weight_shape) == 2
             and all(x % 2 == 0 for x in input_shape + weight_shape)
+            and shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
+            for shape in input_shape + weight_shape
         )
 
     def _mm_node_can_be_fused(self, node):
@@ -73,6 +77,8 @@ class GroupLinearFusion(GroupFusion):
             len(input_shape) == 2
             and len(weight_shape) == 2
             and all(x % 2 == 0 for x in input_shape + weight_shape)
+            and shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
+            for shape in input_shape + weight_shape
         )
 
     def match(self, node):
