@@ -199,9 +199,7 @@ static size_t _getWorkspaceSize() {
 
 } // anonymous namespace
 
-namespace at {
-namespace cuda {
-namespace blas {
+namespace at::cuda::blas {
 
 /* LEVEL 3 BLAS FUNCTIONS */
 
@@ -1507,6 +1505,4 @@ void gelsBatched<c10::complex<float>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::comple
       batchSize));
 }
 
-} // namespace blas
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda::blas

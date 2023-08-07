@@ -5,8 +5,7 @@
 #include <cuda.h>
 #include <library_types.h>
 
-namespace at {
-namespace cuda {
+namespace at::cuda {
 
 template <typename scalar_t>
 cudaDataType getCudaDataType() {
@@ -93,5 +92,4 @@ inline cudaDataType ScalarTypeToCudaDataType(const c10::ScalarType& scalar_type)
   }
 }
 
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda

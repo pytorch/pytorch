@@ -5,8 +5,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 
-namespace at {
-namespace cuda {
+namespace at::cuda {
 
 static bool _cuda_graphs_debug = false;
 
@@ -317,5 +316,4 @@ CUDAGraph::~CUDAGraph() {
   reset();
 }
 
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda
