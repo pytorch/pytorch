@@ -589,7 +589,8 @@ void flash_attention_backward_kernel_impl(
         cum_seq_q, cum_seq_k, max_q, max_k, dropout_p,
         is_causal, philox_seed, philox_offset, scale);
     } else if (q_seq_len >= 192) {
-      cpu_flash_attention_backward<scalar_t, 64, 512>(grad_q, grad_k, grad_v, grad_out_contig,
+      cpu_flash_attention_backward<scalar_t, 64, 512>(
+        grad_q, grad_k, grad_v, grad_out_contig,
         query, key, value, out, logsumexp,
         cum_seq_q, cum_seq_k, max_q, max_k, dropout_p,
         is_causal, philox_seed, philox_offset, scale);
