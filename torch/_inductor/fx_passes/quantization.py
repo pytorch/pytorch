@@ -3,8 +3,7 @@ import functools
 import operator
 
 import torch
-from ..lowering import lowerings as L
-from ..lowering import require_channels_last
+from ..lowering import lowerings as L, require_channels_last
 from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, Match
 from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
