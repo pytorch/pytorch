@@ -109,7 +109,7 @@ traceable_tensor_subclasses = set()
 # This is a good way to get your model to work one way or another, but you may
 # lose optimization opportunities this way.  Devs, if your benchmark model is failing
 # this way, you should figure out why instead of suppressing it.
-suppress_errors = os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", "1") == "1"
+suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
@@ -120,10 +120,6 @@ rewrite_assert_with_torch_assert = True
 
 # Show a warning for every specialization
 print_specializations = False
-
-# Simplify guards, summarizing static and dynamic constraints on dimensions.
-# NOTE: This only has an effect when dynamic_shapes=True.
-summarize_dim_constraints = False
 
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
@@ -140,6 +136,7 @@ skipfiles_inline_module_allowlist = {
     torch._decomp,
     torch.utils._contextlib,
     torch.utils._pytree,
+    torch.fx._pytree,
     torch.sparse,
 }
 
@@ -285,6 +282,10 @@ capture_autograd_function = True
 
 # enable/disable dynamo tracing for `torch.func` transforms
 capture_func_transforms = True
+
+# simulates what would happen if we didn't have support for BUILD_SET opcode,
+# used for testing
+inject_BUILD_SET_unimplemented_TESTING_ONLY = False
 
 _autograd_backward_strict_mode_banned_ops = [
     "stride",

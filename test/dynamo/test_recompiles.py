@@ -297,5 +297,4 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
-
     run_tests()
