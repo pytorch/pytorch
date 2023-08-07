@@ -86,14 +86,22 @@ class TestSavePlan(TestCase):
             "st": st
         }
         plan = create_default_local_save_plan(state_dict, False)
-        self.assertEqual(1, len(plan.items))
+        self.assertEqual(2, len(plan.items))
         wi = plan.items[0]
-        self.assertEqual(wi.index, MetadataIndex("st", [8]))
-        self.assertEqual(wi.type, WriteItemType.SHARD)
-        self.assertEqual(wi.tensor_data.size, st.size())
+        self.assertEqual(wi.index, MetadataIndex("tensor", [0]))
+        self.assertEqual(wi.type, WriteItemType.TENSOR)
+        self.assertEqual(wi.tensor_data.size, tensor.size())
         self.assertEqual(wi.tensor_data.properties, TensorProperties.create_from_tensor(torch.zeros(1)))
-        self.assertEqual(wi.tensor_data.chunk.offsets, torch.Size([8]))
-        self.assertEqual(wi.tensor_data.chunk.sizes, torch.Size([8]))
+        self.assertEqual(wi.tensor_data.chunk.offsets, torch.Size([0]))
+        self.assertEqual(wi.tensor_data.chunk.sizes, torch.Size([10]))
+
+        st_wi = plan.items[1]
+        self.assertEqual(st_wi.index, MetadataIndex("st", [8]))
+        self.assertEqual(st_wi.type, WriteItemType.SHARD)
+        self.assertEqual(st_wi.tensor_data.size, st.size())
+        self.assertEqual(st_wi.tensor_data.properties, TensorProperties.create_from_tensor(torch.zeros(1)))
+        self.assertEqual(st_wi.tensor_data.chunk.offsets, torch.Size([8]))
+        self.assertEqual(st_wi.tensor_data.chunk.sizes, torch.Size([8]))
 
         # Coordinator rank, should include replicated items as well
         plan = create_default_local_save_plan(state_dict, True)
