@@ -83,9 +83,6 @@ def lazy_init():
 
         _mkldnn_fusion_init()
 
-    from .quantization import register_quantization_lowerings
-
-    register_quantization_lowerings()
     register_addmm_activation_replacement()
 
 
