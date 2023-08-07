@@ -7,7 +7,7 @@ import operator
 import math
 import logging
 import torch
-from typing import Union, Dict
+from typing import Union, Dict, Optional
 
 from torch._prims_common import dtype_to_type
 from .interp import sympy_interp
@@ -545,7 +545,15 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
         return self.default_handler
 
 
-def bound_sympy(expr: sympy.Expr, ranges: Dict[sympy.Symbol, ValueRanges]) -> ValueRanges:
+def bound_sympy(expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRanges]] = None) -> ValueRanges:
+    ranges = ranges or {}
+
+    # If there's a tracing context, augment available constrained ranges.
+    context = torch._guards.TracingContext.get()
+    if context:
+        ranges = deepcopy(ranges)
+        ranges.update(context.fake_mode.shape_env.var_to_range)
+
     unbounded_vars = expr.free_symbols - ranges.keys()
     if unbounded_vars:
         # Give some bounds to the free variables via their SymPy assumptions
