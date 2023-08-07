@@ -433,7 +433,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             self, process_group, sharding_strategy, auto_wrap_policy
         )
         if auto_wrap_policy is not None:
-            fsdp_kwargs = {
+            root_kwargs = {
                 "process_group": process_group,
                 "sharding_strategy": sharding_strategy,
                 "cpu_offload": cpu_offload,
@@ -451,14 +451,14 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 # Share root process groups with children to maintain
                 # the invariant that all FSDP modules will have the same
                 # process groups.
-                fsdp_kwargs["process_group"] = (self.process_group, self._inter_node_pg)
+                root_kwargs["process_group"] = (self.process_group, self._inter_node_pg)
 
             _auto_wrap(
                 module,
                 auto_wrap_policy,
                 self._ignored_modules,
                 self._ignored_params,
-                fsdp_kwargs,
+                root_kwargs,
                 FullyShardedDataParallel,
             )
 
