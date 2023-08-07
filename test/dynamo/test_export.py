@@ -3079,6 +3079,71 @@ G['macademia'], accessed at:
 
         torch._dynamo.export(f)(torch.randn(3))
 
+    def test_symbolic_tracing_within_fake_mode_with_constraints(self):
+        from torch._subclasses import fake_tensor
+
+        fake_mode = fake_tensor.FakeTensorMode()
+
+        class DynamicShapeSimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b, c) -> torch.Tensor:
+                d = (torch.matmul(a, b) + c) / 2
+                d_s0 = d.shape[0]
+                d_s1 = d.shape[1]
+                d_s3 = d_s0 * d_s1
+                e = d.view(d_s3)
+                return torch.cat([e, e])
+
+        with fake_mode:
+            model = DynamicShapeSimpleModel()
+            inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
+            constraints = [
+                dynamic_dim(inputs[0], 0),
+                dynamic_dim(inputs[2], 0),
+                dynamic_dim(inputs[2], 0) == dynamic_dim(inputs[0], 0),
+            ]
+            for aten_graph in [True, False]:
+                gm = torch._dynamo.export(
+                    model,
+                    constraints=constraints,
+                    aten_graph=aten_graph,
+                )(*inputs).graph_module
+
+        # Since there are no parameters we can do this
+        inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
+        self.assertEqual(model(*inputs), gm(*inputs))
+
+    def test_symbolic_tracing_within_fake_mode_with_constraints_with_parameters(self):
+        from torch._subclasses import fake_tensor
+
+        fake_mode = fake_tensor.FakeTensorMode()
+
+        # TODO: Seems to choke if you don't make a fresh model and
+        # just try to export Linear directly...
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                out = self.linear(x)
+                return out
+
+        with fake_mode:
+            model = Model()
+            inputs = (torch.randn(10, 2, 2),)
+            constraints = [
+                dynamic_dim(inputs[0], 0),
+            ]
+            for aten_graph in [True, False]:
+                gm = torch._dynamo.export(
+                    model,
+                    constraints=constraints,
+                    aten_graph=aten_graph,
+                )(*inputs).graph_module
+
     def test_capture_symbolic_tracing_within_fake_mode(self):
         from torch._dynamo.output_graph import config
         from torch._subclasses import fake_tensor

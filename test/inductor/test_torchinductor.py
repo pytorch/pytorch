@@ -3,6 +3,7 @@ import contextlib
 import copy
 import dataclasses
 import functools
+import gc
 import importlib
 import itertools
 import math
@@ -31,7 +32,12 @@ from torch._dynamo.testing import (
     same,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
-from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
+from torch._inductor.utils import (
+    add_scheduler_init_hook,
+    run_and_get_code,
+    run_and_get_triton_code,
+)
+from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
@@ -121,6 +127,7 @@ class TestCase(TorchTestCase):
 
     def setUp(self):
         torch._dynamo.reset()
+        torch._inductor.metrics.reset()
         super().setUp()
         self._start = time.perf_counter()
 
@@ -326,7 +333,6 @@ def check_model(
         correct = tree_unflatten(correct_flat, correct_spec)
 
     if assert_equal:
-        print(actual, correct)
         self.assertEqual(
             actual,
             correct,
@@ -916,7 +922,7 @@ class CommonTemplate:
             # make sure things also work if they aren't unrolled
             self.common(fn, (torch.randn(8, 3),))
 
-    def test_multilayer_low_prec(self):
+    def test_multilayer_sum_low_prec(self):
         # fp16 nyi for cpu
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -925,6 +931,25 @@ class CommonTemplate:
             return torch.mean(a)
 
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float16),)))
+
+    def test_multilayer_cumsum(self):
+        def fn(a):
+            return torch.cumsum(a.view(-1), 0)
+
+        self.common(fn, (torch.rand(10, 3, 352, 352),))
+
+    def test_multilayer_cumsum_low_prec(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("ir.Scan nyi on CPU")
+
+        def fn(a):
+            return torch.cumsum(a.view(-1), 0)
+
+        self.common(
+            fn,
+            (torch.rand((10, 3, 352, 352), dtype=torch.float16),),
+            reference_in_float=True,
+        )
 
     def test_expanded_reduction(self):
         if self.device == "cpu":
@@ -998,9 +1023,14 @@ class CommonTemplate:
 
     def test_cumsum(self):
         def fn(x):
-            return x.cumsum(0), x.cumsum(1), x.view((-1,)).cumsum(0)
+            return x.cumsum(0), x.cumsum(1)
 
-        self.common(fn, (torch.rand(32, 32),))
+        # Persistent reductions
+        self.common(fn, (torch.rand(16, 32),))
+        self.common(fn, (torch.rand(20, 30),))
+
+        # Non-persistent reduction
+        self.common(fn, (torch.rand(100, 4000),))
 
     def test_clamp(self):
         def fn(a, b):
@@ -2414,6 +2444,7 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    @unittest.skipIf(config.is_fbcode(), "fbcode triton error, needs debugging")
     def test_adaptive_avg_pool2d_low_prec(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -6011,6 +6042,8 @@ class CommonTemplate:
                         nonlocal matmul_seen
 
                         # by matmul, inputs should be deallocated
+                        # TODO: should not be necessary, ref-cycle ?
+                        gc.collect()
                         if func is aten.mm.out:
                             matmul_seen = True
                             test_self.assertEqual(len(inps), 0)
@@ -6714,10 +6747,7 @@ class CommonTemplate:
 
     @patch.object(config.triton, "autotune_pointwise", True)
     def test_inductor_bucketize_add_autotune(self):
-        """
-        Causes a @pointwise(size_hints) where size_hints is 2D
-        """
-        torch._inductor.metrics.generated_kernel_count = 0
+        # Causes a @pointwise(size_hints) where size_hints is 2D
 
         def fn(input, offsets, add_value):
             return torch.ops.prims._inductor_bucketize(input, offsets) + add_value
@@ -6834,6 +6864,43 @@ class CommonTemplate:
         self.assertEqual(U, U_e)
         self.assertEqual(rot.grad, rot_e.grad)
         self.assertEqual(trans.grad, trans_e.grad)
+
+    def test_inner_fn_str_and_stride(self):
+        def f(x):
+            x = x + 1
+            x = test_operators.realize(x)
+            x = x * 2
+            x = test_operators.realize(x)
+            return x
+
+        x = torch.rand(3, 2, device=self.device).t()
+        ref = f(x)
+        called = False
+
+        def hook_fn(scheduler, nodes):
+            nonlocal called
+            called = True
+
+            if self.device != "cpu":
+                self.assertEqual(len(nodes), 3)
+                _, mul_buf, _ = nodes
+                self.assertTrue(
+                    all(
+                        V.graph.sizevars.size_hints(buf.get_stride()) == (1, 2)
+                        for buf in nodes
+                    )
+                )
+                # before the fix, the wrong index expression
+                # 'i1 + 3 * i0' is cached.
+                self.assertTrue(
+                    "i0 + 2 * i1" in mul_buf.data.inner_fn_str()
+                    or "i0 + i1 * s0" in mul_buf.data.inner_fn_str()
+                )
+
+        with add_scheduler_init_hook(hook_fn):
+            actual = torch.compile(f, fullgraph=True)(x)
+        self.assertEqual(ref, actual)
+        self.assertTrue(called)
 
 
 @dataclasses.dataclass

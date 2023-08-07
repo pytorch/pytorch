@@ -382,6 +382,9 @@ class Loops(IRNode):
         ]
 
     @cache_on_self
+    def inner_fn_str_len(self):
+        return len(self.inner_fn_str())
+
     def inner_fn_str(self):
         index = self._index(self.ranges)
         return V.KernelFormatterHandler.ir_to_string(self.inner_fn, index)
@@ -389,7 +392,6 @@ class Loops(IRNode):
     def is_zero_elements(self):
         return any(r == 0 for r in self.ranges)
 
-    @cache_on_self
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.get_reduction_type():
@@ -558,7 +560,6 @@ class Reduction(Loops):
     def index_length(self):
         return len(self.ranges) + len(self.reduction_ranges)
 
-    @cache_on_self
     def inner_fn_str(self):
         index = self._index(self.ranges)
         rindex = self._index(self.reduction_ranges, "r")
@@ -1085,11 +1086,16 @@ class Reduction(Loops):
 @dataclasses.dataclass
 class Scan(Loops):
     scan_ranges: List[Expr]
+    size: List[Expr]
     scan_op: str  # TODO make this a callable
     reindex: Callable[[List[Expr], List[Expr]], List[Expr]]
-    reduction_hint: ReductionHint = ReductionHint.DEFAULT  # TODO
+    reduction_hint: ReductionHint
 
     # HACK we mimick reduction
+
+    def __post_init__(self):
+        assert len(self.ranges) + len(self.scan_ranges) == len(self.size)
+        super().__post_init__()
 
     def store_reduction(self, output_name, indexer, vars, scan_vars):
         idx = self.reindex(vars, scan_vars)
@@ -1104,7 +1110,7 @@ class Scan(Loops):
         return self.scan_ranges
 
     def get_size(self):
-        return (*self.ranges, *self.scan_ranges)
+        return self.size
 
     def get_pointwise_size(self):
         return self.ranges
@@ -1127,14 +1133,19 @@ class Scan(Loops):
         device: torch.device,
         dtype: torch.dtype,
         inner_fn: Callable[[List[Expr]], Any],
-        ranges: List[Expr],
-        scan_ranges: List[Expr],
+        size: List[Expr],
+        axis: int,
         scan_op: str,
-        reindex: Callable[[List[Expr], List[Expr]], List[Expr]],
+        reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ):
         assert scan_op in {"sum", "prod", "min", "max"}
+        pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
+        scan_ranges = [size[axis]]
+
         sizevars = V.graph.sizevars
         scan_numel = sizevars.simplify(sympy_product(scan_ranges))
+
+        # Scan with a single element is just a copy
         if sizevars.is_expr_static_and_true(sympy.Le(scan_numel, 1)):
             return Pointwise.create(
                 device=device,
@@ -1143,19 +1154,205 @@ class Scan(Loops):
                 ranges=(*ranges, scan_ranges),
             )
 
+        reduction_hint, num_splits = cls.num_splits(
+            device=device,
+            dtype=dtype,
+            inner_fn=inner_fn,
+            axis=axis,
+            pointwise_ranges=pointwise_ranges,
+            scan_ranges=scan_ranges,
+            scan_op=scan_op,
+            scan_numel=scan_numel,
+        )
+        if num_splits > 1:
+            return cls.create_multilayer(
+                device=device,
+                dtype=dtype,
+                inner_fn=inner_fn,
+                size=size,
+                axis=axis,
+                scan_op=scan_op,
+                reduction_hint=reduction_hint,
+                split=num_splits,
+            )
+
+        def reindex(index, scan_index):
+            assert len(scan_ranges) == len(scan_ranges)
+            assert len(index) == len(pointwise_ranges)
+            new_index = [*index[:axis], *scan_index, *index[axis:]]
+            return new_index
+
         result = TensorBox.create(
             Scan(
                 device=device,
                 dtype=dtype,
                 inner_fn=inner_fn,
-                ranges=ranges,
+                size=size,
+                ranges=pointwise_ranges,
                 scan_ranges=scan_ranges,
                 scan_op=scan_op,
                 reindex=reindex,
+                reduction_hint=reduction_hint,
             )
         )
         result.realize()
         return result
+
+    @classmethod
+    def num_splits(
+        cls,
+        device: torch.device,
+        dtype: torch.dtype,
+        inner_fn: Callable[[List[Expr]], Any],
+        axis: int,
+        pointwise_ranges: List[Expr],
+        scan_ranges: List[Expr],
+        scan_op: str,
+        scan_numel: Expr,
+    ):
+        # TODO: custom splitting heuristic for scan
+        def wrapper_fn(idx, reduction_idx):
+            return inner_fn([*idx[:axis], *reduction_idx, *idx[axis:]])
+
+        return Reduction.num_splits(
+            device=device,
+            dst_dtype=dtype,
+            src_dtype=dtype,
+            inner_fn=wrapper_fn,
+            ranges=pointwise_ranges,
+            reduction_ranges=scan_ranges,
+            reduction_type=scan_op,
+            reduction_numel=scan_numel,
+        )
+
+    @classmethod
+    def create_multilayer(
+        cls,
+        device: torch.device,
+        dtype: torch.dtype,
+        inner_fn: Callable[..., Any],
+        size: List[Expr],
+        axis: int,
+        scan_op: str,
+        reduction_hint: ReductionHint,
+        split: int,
+    ):
+        """
+        Break a large scan into multiple smaller scans and reductions
+        """
+        assert scan_op in {"sum", "prod", "min", "max"}
+        pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
+        scan_ranges = [size[axis]]
+
+        sizevars = V.graph.sizevars
+        scan_numel = sizevars.simplify(sympy_product(scan_ranges))
+
+        split = sympy.Integer(split)
+        block_size = FloorDiv(scan_numel + (split - 1), split)
+        need_mask = not sizevars.is_expr_static_and_true(
+            sympy.Eq(scan_numel % split, 0))
+
+        reindex = View.dynamic_reshape_indexer(scan_ranges, [scan_numel])
+
+        intermediate_dtype = (
+            dtype
+            if dtype not in (torch.float16, torch.bfloat16)
+            else torch.float
+        )
+        default = Reduction.default_value(scan_op, intermediate_dtype)
+
+        def wrapper_fn(index):
+            *pw_index, block_idx, elem_idx = index
+            scan_index = block_size * block_idx + elem_idx
+            original_idx = [*pw_index[:axis], scan_index, *pw_index[axis:]]
+
+            def body():
+                value = inner_fn(original_idx)
+                if dtype == intermediate_dtype:
+                    return value
+                else:
+                    return ops.to_dtype(value, intermediate_dtype)
+
+            if need_mask:
+                mask = ops.lt(
+                    ops.index_expr(scan_index, torch.int32),
+                    ops.index_expr(scan_numel, torch.int32),
+                )
+                return ops.masked(mask, body, default)
+            else:
+                return body()
+
+
+        # Reduce each block of elements
+        def reduce_inner_fn(idx, reduction_idx):
+            return wrapper_fn([*idx, *reduction_idx])
+
+        intermediate_reduce = Reduction.create(
+            device=device,
+            dst_dtype=intermediate_dtype,
+            src_dtype=intermediate_dtype,
+            inner_fn=reduce_inner_fn,
+            ranges=[*pointwise_ranges, split],
+            reduction_ranges=[block_size],
+            reduction_type=scan_op,
+            reduction_hint=reduction_hint,
+        )
+        intermediate_reduce.realize()
+        intermediate_reduce_loader = intermediate_reduce.make_loader()
+
+        # Coarse grained exclusive scan across blocks
+        def intermediate_reduce_fn(idx):
+            scan_idx = idx[-1]
+            mask = ops.ge(
+                ops.index_expr(scan_idx - 1, torch.int32),
+                ops.constant(0, torch.int32),
+            )
+            def body():
+                offset_idx = [*idx[:-1], scan_idx - 1]
+                return intermediate_reduce_loader(offset_idx)
+
+            return ops.masked(mask, body, default)
+
+        intermediate_scan = Scan.create(
+            device,
+            intermediate_dtype,
+            intermediate_reduce_fn,
+            size=intermediate_reduce.get_size(),
+            axis=len(pointwise_ranges),
+            scan_op=scan_op,
+        )
+        intermediate_scan_loader = intermediate_scan.make_loader()
+
+        # Fine grained scan within a block
+        intra_block_scan = Scan.create(
+            device=device,
+            dtype=intermediate_dtype,
+            inner_fn=wrapper_fn,
+            size=[*pointwise_ranges, split, block_size],
+            axis=len(pointwise_ranges) + 1,
+            scan_op=scan_op,
+            reduction_hint=reduction_hint,
+        )
+        intra_block_scan_loader = intra_block_scan.make_loader()
+
+        # Final result
+        combine_fn = REDUCTION_COMBINE_FN[scan_op]
+        def final_combine_fn(idx):
+            pointwise_idx = [*idx[:axis], *idx[axis + 1:]]
+            elem_idx = idx[axis] % block_size
+            block_idx = FloorDiv(idx[axis], block_size)
+
+            a = intra_block_scan_loader([*pointwise_idx, block_idx, elem_idx])
+            b = intermediate_scan_loader([*pointwise_idx, block_idx])
+            return combine_fn(a, b)
+
+
+        return Pointwise.create(
+            device=device,
+            dtype=dtype,
+            inner_fn=final_combine_fn,
+            ranges=size,
+        )
 
 
 def is_storage_and_layout(x):
@@ -1275,7 +1472,6 @@ class BaseView(IRNode):
     def is_extern(self):
         return self.data.is_extern()
 
-    @cache_on_self
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
@@ -1290,7 +1486,7 @@ class BaseView(IRNode):
         return x
 
     def constant_to_device(self, device):
-        """Move this to a given device. Requires that all reads are to constants."""
+        """Move this to a given device. Requres that all reads are to constants."""
         loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
         return Pointwise(device, self.get_dtype(), loader, self.get_size())
@@ -2205,7 +2401,6 @@ class Buffer(IRNode):
             return [self.layout.target.get_name()]
         return ()
 
-    @cache_on_self
     def get_read_writes(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
@@ -2264,6 +2459,9 @@ class ComputedBuffer(Buffer):
     data: Loops
 
     @cache_on_self
+    def num_reads(self):
+        return len(self.get_read_writes().reads)
+
     def get_read_writes(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.data.get_reduction_type():
@@ -2283,7 +2481,7 @@ class ComputedBuffer(Buffer):
         can_inline = (
             hasattr(self.data, "make_loader")
             and self.name not in V.graph.mutated_buffers
-            and len(self.get_read_writes().reads) == 0
+            and self.num_reads() == 0
         )
         if can_inline:
             return self.data.make_loader()
@@ -2518,7 +2716,6 @@ class TemplateBuffer(Buffer):
     def get_read_writes(self):
         return self.normalized_read_writes()
 
-    @cache_on_self
     def normalized_read_writes(self):
         name = self.get_name()
         indexer = self.layout.make_indexer()
@@ -4595,7 +4792,7 @@ class StorageBox(MutableBox):
     def has_exceeded_max_reads(self):
         return isinstance(self.data, Pointwise) and (
             self.num_reads() > config.realize_acc_reads_threshold
-            or len(self.inner_fn_str()) > config.realize_bytes_threshold
+            or self.inner_fn_str_len() > config.realize_bytes_threshold
         )
 
     def mark_reuse(self, users):

@@ -3990,22 +3990,12 @@ def _make_scan_inner(x, *, axis, dtype):
     size = x.get_size()
     axis = _validate_reduction_axis(x, axis)[0]
 
-    pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
-    scan_ranges = [size[axis]]
-
-    def reindex(index, scan_index):
-        assert len(scan_ranges) == len(scan_ranges)
-        assert len(index) == len(pointwise_ranges)
-        new_index = [*index[:axis], *scan_index, *index[axis:]]
-        return new_index
-
     return dict(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=x.make_loader(),
-        ranges=pointwise_ranges,
-        scan_ranges=scan_ranges,
-        reindex=reindex,
+        size=x.get_size(),
+        axis=axis,
     )
 
 
