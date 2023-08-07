@@ -3,6 +3,7 @@ import json
 import math
 import os
 import subprocess
+from collections import defaultdict
 from pathlib import Path
 
 from typing import Callable, cast, Dict, List, NamedTuple, Optional, Set, Tuple, Union
@@ -105,20 +106,20 @@ def calculate_shards(
     tests: List[str],
     test_file_times: Dict[str, float],
     must_serial: Optional[Callable[[str], bool]] = None,
-    sort: bool = True,
+    sort_by_time: bool = True,
 ) -> List[Tuple[float, List[ShardedTest]]]:
     must_serial = must_serial or (lambda x: True)
 
     known_tests = tests
     unknown_tests = []
 
-    if sort:
+    if sort_by_time:
         known_tests = [x for x in tests if x in test_file_times]
         unknown_tests = [x for x in tests if x not in known_tests]
 
     known_tests = get_with_pytest_shard(known_tests, test_file_times)
 
-    if sort:
+    if sort_by_time:
         known_tests = sorted(known_tests, key=lambda j: j.get_time(), reverse=True)
 
     sharded_jobs: List[ShardJob] = [ShardJob() for _ in range(num_shards)]
@@ -294,11 +295,9 @@ def _get_file_rating_tests() -> List[str]:
     except Exception as e:
         warn(f"Can't query changed test files due to {e}")
         return []
-    ratings: Dict[str, float] = {}
+    ratings: Dict[str, float] = defaultdict(float)
     for file in changed_files:
         for test_file, score in test_file_ratings.get(file, {}).items():
-            if test_file not in ratings:
-                ratings[test_file] = 0
             ratings[test_file] += score
     prioritize = sorted(ratings, key=lambda x: ratings[x])
     return prioritize
