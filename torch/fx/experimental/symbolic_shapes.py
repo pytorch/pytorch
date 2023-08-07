@@ -418,6 +418,43 @@ def constrain_unify(a, b):
             new_var = shape_env._find(a.node.expr)
             shape_env.replacements[b.node.expr] = new_var
 
+# Assume that a boolean is true for the purposes of subsequent symbolic
+# reasoning.  This will keep track of corresponding runtime checks to verify
+# that the result is upheld: either as a regular guard, or as a special set
+# of asserts which are triggered when an unbacked SymInt is allocated.
+#
+# DO NOT use this function for these cases:
+#
+#  - This is inappropriate for "branching" conditions (where both
+#    true and false result in valid programs).  We will always assume
+#    the condition evaluates true, and so it will never be possible
+#    to trace the false condition when you use it.  For true branching
+#    on unbacked SymInts, you must use torch.cond.
+#
+#  - This is inappropriate for situations where you know some other system
+#    invariant guarantees that this property holds, since you don't
+#    really need to insert a runtime check in that case.  Use something
+#    like constrain_range in that case.
+#
+# This API has a hitch.  To avoid having to reimplement error reporting
+# capabilities, this function CAN return False.  The invariant is that
+# the surrounding code must raise an error when this function returns
+# False.  This is quite low level, so we recommend using other functions
+# like check() which enforce this in a more intuitive way.
+#
+# By the way, this name is a nod to the __builtin_expect likely macro,
+# which is used similarly (but unlike __builtin_expect, you MUST fail
+# in the unlikely branch.)
+def expect_true(a, skip: int = 0):
+    if isinstance(a, SymBool):
+        # TODO: check perf implications of this
+        frame = inspect.currentframe()
+        for _ in range(skip + 1):  # always run this loop at least once
+            frame = frame.f_back
+        return a.node.expect_true(frame.f_code.co_filename, frame.f_lineno)
+    assert type(a) is bool, a
+    return a
+
 def guard_bool(a):
     if isinstance(a, SymBool):
         return a.node.guard_bool("", 0)  # NB: uses Python backtrace
@@ -884,6 +921,16 @@ class SymNode:
         except Exception:
             log.warning("Failed to convert to bool: %s", r)
             raise
+
+    def expect_true(self, file, line):
+        if self.has_hint():
+            # OK to generate guards
+            return self.guard_bool(file, line)
+        # Generate a deferred runtime assert (this might actually end up doing
+        # a regular guard if we can!)
+        # TODO: file/line here is very important, because the assert has been
+        # deferred so you can't backtrace easily
+        return self.shape_env.defer_runtime_assert(self.expr, f"{file}:{line}", fx_node=self.fx_node)
 
     def bool_(self):
         return self.guard_bool("", 0)
@@ -1434,6 +1481,20 @@ def _lru_cache(fn, maxsize=None):
     return wrapper
 
 
+# This is pretty similar to ShapeGuard but it also comes with a message,
+# and is exclusively used for things that MUST be true (unlike guards,
+# which can evaluate False, in which case you just choose not to use
+# a particular specialization)
+@dataclass(frozen=True)
+class RuntimeAssert:
+    expr: sympy.Expr
+    msg: str
+    stack: str
+
+    def __repr__(self):
+        return str(self.expr)
+
+
 class ShapeGuardPrinter(StrPrinter):
     def __init__(
         self,
@@ -1952,6 +2013,36 @@ class ShapeEnv:
             self.val_to_var = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
+        # Similar to guards, but these MUST evaluate to true and can
+        # only be evaluated at runtime midway through (i.e., they always
+        # involve unbacked symints)
+        #
+        # For efficiency reasons, we index in the following way.  Suppose you have
+        # a runtime assert i0 + i1 <= s1.  We pick the most recently allocated
+        # symbol in the source expression and add the assert to the list for
+        # that symbol e.g., {i1: [i0 + i1 <= s1]}.
+        #
+        # We access the runtime asserts in two situations:
+        #
+        #   - When we are guarding on an expression, we will attempt to
+        #     statically evaluate it, in case the unbacked SymInts can
+        #     simplify away.  If we have a runtime assert, we may be able
+        #     to discharge the guard entirely.  We only need to attempt
+        #     runtime asserts that mention freevars of the expression in
+        #     question.
+        #
+        #   - When we are performing codegen (in Inductor for eager, or
+        #     when finalizing the export FX graph), we need to know what
+        #     extra runtime asserts to insert.  Whenever an unbacked
+        #     SymInt comes into scope, all runtime asserts involving it
+        #     become eligible for insertion (so long as all of their other
+        #     free unbacked symbols are also in scope).  We technically
+        #     can handle any choice of key by kicking inexpressible asserts
+        #     to the next unbacked symbol to wait on, but if we choose the
+        #     latest key, an assert will only show up at the moment when
+        #     we can actually codegen it.
+        self.deferred_runtime_asserts: Dict[sympy.Symbol, List[RuntimeAssert]] = collections.defaultdict(list)
+        self.num_deferred_runtime_asserts = 0
         self.assume_static_by_default = assume_static_by_default
         self.specialize_zero_one = specialize_zero_one
         self.duck_shape = duck_shape
@@ -2115,7 +2206,7 @@ Target Guards:
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
         """
-        return (len(self.replacements), len(self.divisible))
+        return (len(self.replacements), len(self.divisible), self.num_deferred_runtime_asserts)
 
     def _produce_dyn_sizes(self,
                            ex: torch.Tensor,
@@ -2919,11 +3010,22 @@ Target Guards:
     def _maybe_evaluate_static(self, expr: "sympy.Expr", *, unbacked_only: bool = False) -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
+
+        If unbacked_only == True, then we only do substitutions on
+        unbacked SymInts (leaving regular hinted integers alone).
         """
         expr = self.simplify(expr)
 
-        # Simplify making use of value range lower bound
         symbols = list(expr.free_symbols)
+
+        # Apply known runtime asserts
+        for s in symbols:
+            # Unbacked symints only
+            if s in self.var_to_val:
+                continue
+            expr = expr.subs({ra.expr: sympy.true for ra in self.deferred_runtime_asserts[s]})
+
+        # Simplify making use of value range lower bound
         new_shape_env = {}
         new_range_env = {}
         for idx, k in enumerate(symbols):
@@ -3175,6 +3277,56 @@ Target Guards:
             self.evaluate_expr(eq_expr)
         return self.simplify(expr)
 
+    # We're about to add a guard/runtime assert, check if the ShapeEnv is frozen
+    # and if so issue a warning
+    def _check_frozen(self, expr, concrete_val):
+        if self.frozen:
+            self.counter["ignored_backward_guard"] += 1
+            signpost_event(
+                "dynamic",
+                "evaluate_expr_frozen",
+                {
+                    **self.co_fields,
+                    "ignored_guard": f"{expr} == {concrete_val}",
+                    # no version = original state (this signpost is expected)
+                    # version 2 = dynamic backwards is eagerly compiled
+                    "version": 2,
+                },
+            )
+            log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
+
+
+    def _log_guard(self, prefix: str, g, tb):
+        if self.log.isEnabledFor(logging.INFO):
+            for frame in reversed(tb):
+                if frame.filename not in uninteresting_files():
+                    break
+
+            # NB: this stack is truncated, but it's fine because the main
+            # stack_info will give you the rest of the info you need
+            maybe_user_loc = ""
+            user_tb = TracingContext.extract_stack()
+            if user_tb:
+                maybe_user_loc = " at " + format_frame(user_tb[-1])
+
+            is_debug = self.log.isEnabledFor(logging.DEBUG)
+            maybe_extra_debug = ""
+            if is_debug and user_tb:
+                maybe_extra_debug = (
+                    '\nUser Stack (most recent call last):\n' +
+                    '  (snipped, see stack below for prefix)\n' +
+                    ''.join(traceback.format_list(user_tb))
+                )
+            self.log.info(
+                "%s %s [guard added]%s (%s)%s",
+                prefix,
+                g,
+                maybe_user_loc,
+                format_frame(frame),
+                maybe_extra_debug,
+                stack_info=is_debug,
+            )
+
     @lru_cache(256)
     def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None):
         """
@@ -3231,20 +3383,7 @@ Target Guards:
                 raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
             expr = new_expr
 
-        if self.frozen:
-            self.counter["ignored_backward_guard"] += 1
-            signpost_event(
-                "dynamic",
-                "evaluate_expr_frozen",
-                {
-                    **self.co_fields,
-                    "ignored_guard": f"{expr} == {concrete_val}",
-                    # no version = original state (this signpost is expected)
-                    # version 2 = dynamic backwards is eagerly compiled
-                    "version": 2,
-                },
-            )
-            log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
+        self._check_frozen(expr, concrete_val)
 
         if isinstance(expr, (sympy.Eq, sympy.Ne)):
             self._maybe_guard_eq(expr, bool(concrete_val))
@@ -3275,38 +3414,61 @@ Target Guards:
             guard = ShapeGuard(g, stack)
             self.guards.append(guard)
             self.refine_ranges(guard)
-            if self.log.isEnabledFor(logging.INFO):
-                for frame in reversed(tb):
-                    if frame.filename not in uninteresting_files():
-                        break
-
-                # NB: this stack is truncated, but it's fine because the main
-                # stack_info will give you the rest of the info you need
-                maybe_user_loc = ""
-                user_tb = TracingContext.extract_stack()
-                if user_tb:
-                    maybe_user_loc = " at " + format_frame(user_tb[-1])
-
-                is_debug = self.log.isEnabledFor(logging.DEBUG)
-                maybe_extra_debug = ""
-                if is_debug and user_tb:
-                    maybe_extra_debug = (
-                        '\nUser Stack (most recent call last):\n' +
-                        '  (snipped, see stack below for prefix)\n' +
-                        ''.join(traceback.format_list(user_tb))
-                    )
-                self.log.info(
-                    "eval %s [guard added]%s (%s)%s",
-                    g,
-                    maybe_user_loc,
-                    format_frame(frame),
-                    maybe_extra_debug,
-                    stack_info=is_debug,
-                )
+            self._log_guard(self, "eval", g, tb)
         else:
             self.log.debug("eval %s [guard suppressed]", g)
 
         return concrete_val
+
+    def defer_runtime_assert(self, orig_expr: "sympy.Expr", msg, fx_node=None):
+        expr = orig_expr
+
+        static_expr = self._maybe_evaluate_static(expr)
+        if static_expr is not None:
+            self.log.debug("runtime_assert %s == %s [statically known]", orig_expr, static_expr)
+            return static_expr
+
+        # Attempt to eliminate the unbacked SymInt
+        new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
+        if new_expr.free_symbols <= self.var_to_val.keys():
+            # Do a normal guard
+            return self.evaluate_expr(new_expr, fx_node=fx_node)
+        # NB: Don't use new_expr as expr; it could contain gunk like shape0
+        # which we don't want to guard on
+
+        # OK, we're definitely doing a runtime assert now
+        if (
+            _translation_validation_enabled()
+            and fx_node is not None
+            and not self._suppress_guards_tls()
+        ):
+            self.create_fx_call_function(torch._assert, (fx_node,))
+
+        self._check_frozen(expr, sympy.true)
+
+        # TODO: eliminate symbols on equality tests
+        # (_maybe_guard_eq assumes everything is hinted so it doesn't work
+        # here)
+
+        if not self._suppress_guards_tls():
+            tb = traceback.extract_stack()[:-1]
+            stack = ''.join(traceback.format_list(tb))
+            ra = RuntimeAssert(expr, msg, stack)
+            # TODO: index on the last symbol
+            s = next(iter(expr.free_symbols))
+            self.deferred_runtime_asserts[s].append(ra)
+            self.num_deferred_runtime_asserts += 1
+            # TODO: refine ranges
+            # Unfortunately, range refinement is probably going to not
+            # work most of the time, because we don't support symbols
+            # in ranges.  For example, i0 <= s0 is un-rangeable, because
+            # we can't put s0 in the range.  So this is not very high
+            # priority at the moment.
+            self._log_guard("runtime_assert", expr, tb)
+        else:
+            self.log.debug("runtime_assert %s [guard suppressed]", expr)
+
+        return True
 
     # Refines the ranges of the variables present in 'guard'.
     #

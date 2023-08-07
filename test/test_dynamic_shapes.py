@@ -19,6 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraints,
     DimDynamic,
+    expect_true,
     guard_bool,
     guard_float,
     guard_int,
@@ -416,6 +417,17 @@ class TestPySymInt(TestCase):
         shape_env = ShapeEnv()
         s0 = shape_env.create_unbacked_symint()
         self.assertRaises(GuardOnDataDependentSymNode, lambda: bool(s0 == 0))
+
+    def test_expect_true(self):
+        shape_env = ShapeEnv()
+        i0 = shape_env.create_unbacked_symint()
+        # This doesn't error
+        self.assertTrue(expect_true(i0 == 0))
+        # This generates a deferred runtime assert
+        self.assertExpectedInline(str(shape_env.deferred_runtime_asserts[i0.node.expr]), """[Eq(i0, 0)]""")
+        self.assertIn("test_dynamic_shapes.py", shape_env.deferred_runtime_asserts[i0.node.expr][0].msg)
+        # After expecting true, guards now resolve given the runtime assert
+        bool(i0 == 0)
 
     def test_non_overlapping_and_dense(self):
         shape_env = ShapeEnv()
