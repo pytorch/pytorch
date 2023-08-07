@@ -19,16 +19,16 @@ template <typename T, template <class> class Op>
 std::vector<Tensor> foreach_binary_op(TensorList tensors, const Tensor& other) {
   TORCH_CHECK(
       other.dim() == 0 && other.numel() == 1,
-      "scalar expected to be 0 dim but ",
+      "scalar tensor expected to be 0 dim but it has ",
       other.dim(),
-      " and has ",
+      " dimensions and ",
       other.numel(),
       " elements.");
   TORCH_CHECK(
       tensors[0].device() == other.device(),
-      "scalar expected to be on ",
+      "scalar tensor expected to be on ",
       tensors[0].device(),
-      " but ",
+      " but is on ",
       other.device());
   std::vector<std::vector<at::Tensor>> tensor_lists;
   std::vector<at::Tensor> vec_res;
@@ -57,16 +57,16 @@ template <typename T, template <class> class Op>
 void foreach_binary_op_(TensorList tensors, const Tensor& other) {
   TORCH_CHECK(
       other.dim() == 0 && other.numel() == 1,
-      "other expected to be 0 dim but ",
+      "scalar tensor expected to be 0 dim but has ",
       other.dim(),
-      " and has ",
+      " dimensions and ",
       other.numel(),
       " elements.");
   TORCH_CHECK(
       tensors[0].device() == other.device(),
-      "other expected to be on ",
+      "scalar tensor is expected to be on ",
       tensors[0].device(),
-      " but ",
+      " but is on ",
       other.device());
   std::vector<std::vector<at::Tensor>> tensor_lists;
   tensor_lists.emplace_back(tensors.vec());
