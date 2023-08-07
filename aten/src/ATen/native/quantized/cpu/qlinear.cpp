@@ -905,7 +905,7 @@ static at::Tensor linear_int8_with_onednn_weight(
     at::Tensor input, // int8 CPU Tensor, not QTensor
     double input_scale,
     int64_t input_zero_point,
-    at::Tensor mkldnn_weight, // int8 tensor from MkldnnCPU
+    at::Tensor onednn_weight, // int8 tensor from MkldnnCPU
     at::Tensor weight_scales,
     at::Tensor weight_zero_points,
     c10::optional<at::Tensor> bias, // plain tensor
@@ -917,13 +917,13 @@ static at::Tensor linear_int8_with_onednn_weight(
   const int64_t dim = input.dim();
   TORCH_CHECK(input.scalar_type() == c10::ScalarType::Byte,
       "qlinear with mkldnn tensor: data type of input should be uint8 (unsigned char).");
-  TORCH_CHECK(mkldnn_weight.scalar_type() == c10::ScalarType::Char,
+  TORCH_CHECK(onednn_weight.scalar_type() == c10::ScalarType::Char,
       "qlinear with mkldnn tensor: data type of weight should be int8 (char).");
   TORCH_CHECK(
       weight_scales.scalar_type() == c10::ScalarType::Float, "weight scales should be dtype c10::ScalarType::Float.");
 
   auto src = at::native::itensor_from_tensor(input);
-  auto packed_weight = at::native::itensor_from_mkldnn(mkldnn_weight);
+  auto packed_weight = at::native::itensor_from_mkldnn(onednn_weight);
   int64_t K = input.size(dim - 1), M = input.numel() / K, N = packed_weight.get_dim(1);
   c10::optional<ideep::tensor> onednn_bias{c10::nullopt};
   bool with_bias = bias.has_value();

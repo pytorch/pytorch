@@ -285,11 +285,11 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
 
 inline at::Tensor pack_weight_to_onednn_tensor(
     const at::Tensor& weight,
-    torch::List<int64_t>& input_shape) {
+    c10::optional<torch::List<int64_t>>& input_shape) {
   std::vector<int64_t> w_dims = weight.sizes().vec();
   ideep::tensor wei = ideep::tensor({w_dims, dnnl::memory::data_type::s8}, weight.data_ptr());
   wei.transpose_(0, 1); // oneDNN requires transposed weight
-  ideep::dims input_dims = input_shape.vec();
+  ideep::dims input_dims = input_shape.has_value() ? input_shape.value().vec() : ideep::dims();
   auto w_desc = ideep::matmul_forward::expected_weights_desc(
       wei.get_dims(), input_dims, dnnl::memory::data_type::s8, dnnl::memory::data_type::u8);
   ideep::tensor expected_weight(w_desc);
@@ -407,7 +407,7 @@ class QLinearPackWeightInt8Onednn final {
  public:
   static at::Tensor run(
     at::Tensor weight, // Not QTensor
-    torch::List<int64_t> input_shape) {
+    c10::optional<torch::List<int64_t>> input_shape) {
 #if AT_MKLDNN_ENABLED()
     return pack_weight_to_onednn_tensor(weight, input_shape);
 #else
