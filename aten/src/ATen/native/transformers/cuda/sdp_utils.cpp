@@ -18,6 +18,26 @@
 #include <c10/util/string_view.h>
 #include <cmath>
 #include <functional>
+#include <iostream>
+
+/**
+* Note [SDPA Runtime Dispatch]
+* SDPA relies on a runtime dispatch mechanism to select the appropriate
+* kernel. This file contains exposes this through the `select_sdp_backend`
+* The basic structure of this function is to call `priority_order` to get a
+* list of backends to try, and then iterate through them until one succeeds.
+* Each backend defines a use_<backend> function that returns true if the
+* backend can be run with the given SDP parameters. The use_<backend> function
+* will iterate over a list of "filters" that check for specific properties of
+* the SDP parameters. If all filters pass, the backend can be used and use_<backend>
+* returns true. If any filter fails, then use_<backend> returns false.
+*
+* In order to aid in debugging, each filter takes sdp_params and a debug flag.
+* If the debug flag is set, the filter will print a warning message if it fails.
+* The behavior of select_sdp_backend is to return the first backend that
+* succeeds. If no backend is viable then it will run each use_<backend> function
+* with debug=true and return SDPBackend::error.
+*/
 
 namespace sdp {
 namespace {
@@ -36,8 +56,9 @@ bool input_requires_grad(sdp_params params) {
 }
 
 bool has_for_nested_inputs(sdp_params params) {
-  return (params.query.is_nested() || params.key.is_nested() ||
-          params.value.is_nested());
+  return (
+      params.query.is_nested() || params.key.is_nested() ||
+      params.value.is_nested());
 }
 
 std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
@@ -113,17 +134,6 @@ bool check_tensor_dtype(
   return true;
 }
 
-bool check_for_non_zero_dropout(sdp_params params, bool debug) {
-  if (params.dropout != 0.0) {
-    if (debug) {
-      TORCH_WARN(
-          "Mem_efficient does not support non_zero dropout. Dropout_p: ",
-          params.dropout);
-    }
-    return false;
-  }
-  return true;
-}
 
 bool try_broadcast_param_size(
     const c10::SymInt q_size,
@@ -252,9 +262,9 @@ bool check_requires_grad_and_nested(sdp_params params, bool debug) {
 }
 
 bool check_for_attn_mask(sdp_params params, bool debug) {
-  if (params.has_attn_mask) {
+  if (params.attn_mask.has_value()) {
     if (debug) {
-      TORCH_WARN("Both fused kernels do not support non-null attn_mask.");
+      TORCH_WARN("FlashAttention does not support non-null attn_mask.");
     }
     return false;
   }
@@ -453,16 +463,41 @@ bool check_runtime_disabled_mem_efficient(sdp_params params, bool debug) {
   return true;
 }
 
+template <int Major, int Minor>
+struct SMVersion {
+  static constexpr int major = Major;
+  static constexpr int minor = Minor;
+  constexpr SMVersion() = default;
+};
+
+/**
+ * Checks if the current CUDA device architecture is inclusively within the specified range.
+ *
+ * @param lower_bound The lower bound of the CUDA device architecture range.
+ * @param upper_bound The upper bound of the CUDA device architecture range.
+ * @param params The parameters for the current operation.
+ * @return True if the current CUDA device architecture is within the specified range, false otherwise.
+ */
+template <typename lower_bound, typename upper_bound>
+bool check_sm_version(cudaDeviceProp * dprops) {
+  bool is_gte_lower_bound = dprops->major > lower_bound::major ||
+      (dprops->major == lower_bound::major &&
+       dprops->minor >= lower_bound::minor);
+  bool is_lte_upper_bound = dprops->major < upper_bound::major ||
+      (dprops->major == upper_bound::major &&
+       dprops->minor <= upper_bound::minor);
+  return is_gte_lower_bound && is_lte_upper_bound;
+}
+
 bool check_gpu_sm75_or_greater(sdp_params params, bool debug) {
   // Check that the gpu is capable of running flash attention
+  using sm75 = SMVersion<7, 5>;
+  using sm90 = SMVersion<9, 0>;
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
-  bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
-  bool is_sm90 = dprops->major == 9 && dprops->minor == 0;
-  if (!(is_sm90 || is_sm8x || is_sm75)) {
+  if (!check_sm_version<sm75, sm90>(dprops)) {
     if (debug) {
       TORCH_WARN(
-          "Flash attention only supports {sm75, sm8x, sm90} gpu architectures. Attempting to run on a sm ",
+          "Flash attention only supports gpu architectures in the range [sm75, sm90]. Attempting to run on a sm ",
           dprops->major,
           ".",
           dprops->minor,
@@ -475,13 +510,13 @@ bool check_gpu_sm75_or_greater(sdp_params params, bool debug) {
 
 bool check_mem_efficient_hardware_support(sdp_params params, bool debug) {
   // Mem Efficient attention supports hardware in the range [sm_50, sm_90]
+  using sm50 = SMVersion<5, 0>;
+  using sm90 = SMVersion<9, 0>;
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_gte_sm50 = dprops->major >= 5;
-  bool is_lte_sm90 = dprops->major <= 9;
-  if (!(is_gte_sm50 && is_lte_sm90)) {
+  if (!check_sm_version<sm50, sm90>(dprops)) {
     if (debug) {
       TORCH_WARN(
-          "Mem Efficient Attention only supported gpu architectures in the range [sm50, sm90]. Attempting to run on a sm ",
+          "Mem Efficient Attention only supports gpu architectures in the range [sm50, sm90]. Attempting to run on a sm ",
           dprops->major,
           ".",
           dprops->minor,
@@ -492,37 +527,86 @@ bool check_mem_efficient_hardware_support(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_head_dim_gt64_and_sm_ge86_lt90(sdp_params params, bool debug) {
-  // Memory Efficient Attention is throwing a cuda illegal memory error
-  // on sm86 or newer when head_dim is greater than 64.
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_sm86_or_newer = (dprops->major == 8) && (dprops->minor >= 6);
-  if (is_sm86_or_newer && (params.query.sym_size(-1) > 64)) {
-    if (debug) {
-      TORCH_WARN(
-          "Memory Efficient Attention does not currently support head_dim greater than 64 on sm86 or newer");
-    }
-    return false;
-  }
-  return true;
-}
-
 bool check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90(
     sdp_params params,
     bool debug) {
   // Flash Attention will raise an error in the backward pass if the head_dim
-  // size is greater than 64 And the device is sm86 or newer.
-  if (input_requires_grad(params) &&
-      !check_head_dim_gt64_and_sm_ge86_lt90(params, false)) {
+  // size is greater than 64 And the device is between in the range [sm86, sm89]
+  using sm86 = SMVersion<8, 6>;
+  using sm89 = SMVersion<8, 9>;
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  bool is_sm86_or_sm89 = check_sm_version<sm86, sm89>(dprops);
+  bool is_head_dim_gt64 = params.query.sym_size(-1) > 64;
+  if (input_requires_grad(params) && is_sm86_or_sm89 && is_head_dim_gt64) {
     if (debug) {
       TORCH_WARN(
-          "Flash attention currently doesn't support training with head_dim greater than 64 on sm86 or newer.");
+          "Flash attention currently doesn't support training with head_dim greater than 64 on gpu architectures in the range[sm86, sm89].",
+          "Attempting to run with head_dim: ",
+          params.query.sym_size(-1), " on a sm ", dprops->major, ".",
+          dprops->minor, " gpu.");
     }
     return false;
   }
   return true;
 }
 
+bool check_nonzero_sequence_lengths(sdp_params params, bool debug) {
+  if (has_for_nested_inputs(params)){
+    // Currently we do not support any masking with NestedTensors
+    // This is checked in validate_sdpa_input so this filter func
+    // Should have no actually bearing on the kernel selection
+    return true;
+  }
+  // In some cases people will pass in 0 sized tensors, this will
+  // cause the fused path to error with unaligned mask
+  bool zero_seq_len_q = params.query.sym_size(-2) == 0;
+  bool zero_seq_len_k = params.key.sym_size(-2) == 0;
+  if (zero_seq_len_q || zero_seq_len_k) {
+    if (debug) {
+      TORCH_WARN(
+          "Both fused kernels do not support zero seq_len_q or seq_len_kv.");
+    }
+    return false;
+  }
+  return true;
+}
+
+bool check_last_dim_stride_equals_1(sdp_params params, bool debug) {
+  if (has_for_nested_inputs(params)){
+    // The stride checking for NestedTensors is done within the kernel
+    // And .contiguous will be called if needed
+    return true;
+  }
+  // This function checks that the last dimension of the inputs to
+  // fused_attention have stride 1
+  bool qkv_strides_equal_1 = params.query.sym_stride(-1) == 1 &&
+      params.key.sym_stride(-1) == 1 && params.value.sym_stride(-1) == 1;
+  bool mask_stride_equal_1 = params.attn_mask.has_value()
+      ? params.attn_mask.value().sym_stride(-1) == 1
+      : true;
+  if (!(qkv_strides_equal_1 && mask_stride_equal_1)) {
+    if (debug) {
+      std::ostringstream epilogue_message;
+      if (params.attn_mask.has_value()) {
+        epilogue_message << ", Attn_mask.stride(-1): "
+                         << params.attn_mask.value().sym_stride(-1);
+      }
+      epilogue_message << " instead.";
+      TORCH_WARN(
+          "Both fused kernels require the last dimension of the input to have stride 1. ",
+          "Got Query.stride(-1): ",
+          params.query.sym_stride(-1),
+          ", Key.stride(-1): ",
+          params.key.sym_stride(-1),
+          ", Value.stride(-1): ",
+          params.value.sym_stride(-1),
+          epilogue_message.str());
+    }
+
+    return false;
+  }
+  return true;
+}
 
 bool use_flash_attention(sdp_params params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
@@ -540,7 +624,9 @@ bool use_flash_attention(sdp_params params, bool debug) {
       check_head_dim_size,
       check_gpu_sm75_or_greater,
       check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90,
-      check_for_seq_len_0_nested_tensor);
+      check_for_seq_len_0_nested_tensor,
+      check_nonzero_sequence_lengths,
+      check_last_dim_stride_equals_1);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -576,11 +662,10 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
       check_requires_grad_and_nested,
       check_tensor_shapes,
       check_batch_size_and_num_heads,
-      check_for_attn_mask,
       check_head_dim_size_mem_efficient,
-      check_head_dim_gt64_and_sm_ge86_lt90,
       check_for_seq_len_0_nested_tensor,
-      check_for_non_zero_dropout);
+      check_nonzero_sequence_lengths,
+      check_last_dim_stride_equals_1);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;

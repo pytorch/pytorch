@@ -57,6 +57,15 @@ runs:
         env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
         env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
 
+    - name: Kill any existing containers, clean up images
+      shell: bash
+      run: |
+        # ignore expansion of "docker ps -q" since it could be empty
+        # shellcheck disable=SC2046
+        docker stop $(docker ps -q) || true
+        # Prune all of the docker images
+        docker system prune -af
+
     - name: Manually resolve download.pytorch.org
       shell: bash
       continue-on-error: true

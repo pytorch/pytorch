@@ -519,6 +519,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           [](::c10d::Reducer& reducer) { reducer.set_optimizer_in_backward(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "_set_sparse_metadata",
+          &::c10d::Reducer::setSparseMetadata,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "_set_mixed_precision_param_dtype",
           [](::c10d::Reducer& reducer, py::object data_type_obj) {
             auto scalar_type =
@@ -1276,7 +1280,8 @@ Arguments:
     is_master (bool, optional): True when initializing the server store and False for client stores. Default is False.
     timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
     wait_for_worker (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
-
+    multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
+    master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. Useful to avoid port assignment races in some scenarios. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
 Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
@@ -1295,14 +1300,23 @@ Example::
                       bool isServer,
                       std::chrono::milliseconds timeout,
                       bool waitWorkers,
-                      bool multiTenant) {
+                      bool multiTenant,
+                      c10::optional<int> masterListenFd,
+                      bool useLibUV) {
             c10::optional<std::size_t> numWorkers = c10::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
 
             ::c10d::TCPStoreOptions opts{
-                port, isServer, numWorkers, waitWorkers, timeout, multiTenant};
+                port,
+                isServer,
+                numWorkers,
+                waitWorkers,
+                timeout,
+                multiTenant,
+                masterListenFd,
+                useLibUV};
 
             return c10::make_intrusive<::c10d::TCPStore>(host, opts);
           }),
@@ -1316,6 +1330,8 @@ Example::
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout),
           py::arg("wait_for_workers") = true,
           py::arg("multi_tenant") = false,
+          py::arg("master_listen_fd") = py::none(),
+          py::arg("use_libuv") = false,
           py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "host",
@@ -1362,6 +1378,11 @@ Arguments:
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
           .def("name", &::c10d::ProcessGroup::getBackendName)
+          .def("_id", &::c10d::ProcessGroup::getID)
+          .def(
+              "_backend_id",
+              &::c10d::ProcessGroup::getBackendID,
+              py::arg("backend_type"))
           .def_property_readonly("options", &::c10d::ProcessGroup::getOptions)
           .def(
               "broadcast",
@@ -1560,6 +1581,13 @@ Arguments:
               &::c10d::ProcessGroup::_reduce_scatter_base,
               py::arg("outputTensor"),
               py::arg("inputTensor"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "reduce_scatter_tensor_coalesced",
+              &::c10d::ProcessGroup::reduce_scatter_tensor_coalesced,
+              py::arg("outputs"),
+              py::arg("inputs"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
@@ -2159,7 +2187,15 @@ for details.
       .def_readwrite("cga_cluster_size", &ncclConfig_t::cgaClusterSize)
       .def_readwrite("min_ctas", &ncclConfig_t::minCTAs)
       .def_readwrite("max_ctas", &ncclConfig_t::maxCTAs)
-      .def_readwrite("net_name", &ncclConfig_t::netName);
+      .def_property(
+          "net_name",
+          [](const ncclConfig_t& self) { return self.netName; },
+          // Note: NCCL calls free on the netName pointer
+          // when destroying the communicator. So memory
+          // shouldn't leak because of allocation in strdup.
+          [](ncclConfig_t& self, const char* tmp) {
+            self.netName = strdup(tmp);
+          });
 #endif
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(

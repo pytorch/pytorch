@@ -102,6 +102,21 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
+  pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks)
+    CUDA_VERSION=12.1.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
   pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc9)
     CUDA_VERSION=11.8.0
     CUDNN_VERSION=8
@@ -130,12 +145,32 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-py3-clang7-asan)
-    ANACONDA_PYTHON_VERSION=3.9
-    CLANG_VERSION=7
+    pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7-inductor-benchmarks)
+    CUDA_VERSION=11.8.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9)
+    CUDA_VERSION=12.1.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
@@ -195,7 +230,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=5.3
+    ROCM_VERSION=5.4.2
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
@@ -206,7 +241,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=5.4.2
+    ROCM_VERSION=5.6
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
@@ -222,15 +257,17 @@ case "$image" in
     TRITON=yes
     DOCS=yes
     ;;
-  pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12)
+    pytorch-linux-focal-py3.8-gcc7-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.8
-    CUDA_VERSION=11.7
-    CUDNN_VERSION=8
-    CLANG_VERSION=12
+    GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    KATEX=yes
+    CONDA_CMAKE=yes
     TRITON=yes
+    DOCS=yes
+    INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-jammy-cuda11.8-cudnn8-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
@@ -240,6 +277,15 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    TRITON=yes
+    ;;
+  pytorch-linux-jammy-py3-clang12-asan)
+    ANACONDA_PYTHON_VERSION=3.9
+    CLANG_VERSION=12
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-focal-linter)
@@ -337,6 +383,7 @@ docker build \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "ONNX=${ONNX}" \
        --build-arg "DOCS=${DOCS}" \
+       --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

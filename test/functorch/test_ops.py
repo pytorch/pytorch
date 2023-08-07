@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import skipIfRocm, runOnRocm
 import torch
 from torch import Tensor
 import functools
-from torch.testing._internal.common_cuda import with_tf32_off, SM90OrLater
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import \
@@ -604,8 +604,7 @@ class TestOperators(TestCase):
         xfail('view_as_complex'),
         # RuntimeError: query: last dimension must be contiguous
         # The fused attention kernels require the last dim to be contiguous
-        decorate('nn.functional.scaled_dot_product_attention', device_type="cuda",
-                 decorator=expectedFailureIf(not SM90OrLater)),
+        xfail('nn.functional.scaled_dot_product_attention', device_type="cuda"),
         # BUG
         # AssertionError: Tensor-likes are not close!
         xfail('as_strided'),
@@ -1122,6 +1121,7 @@ class TestOperators(TestCase):
         xfail('as_strided_scatter', ''),
         xfail('masked.cumprod', ''),
         xfail("_upsample_bilinear2d_aa"),  # hit vmap fallback, which is disabled
+        xfail("renorm"),  # hit vmap fallback, which is disabled
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
@@ -1281,7 +1281,6 @@ class TestOperators(TestCase):
         xfail('masked_select'),
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         skip('nn.functional.fractional_max_pool3d'),  # generator works on cpu, fails on cuda
-        xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         skip('nn.functional.fractional_max_pool2d'),  # generator works on cpu, fails on cuda
         xfail('column_stack', ''),
         xfail('nn.functional.dropout2d', ''),
@@ -1383,7 +1382,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.hardsigmoid', ''),  # NYI: forward AD for hardsigmoid_backward
         xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
         xfail('NumpyCubeNotComposableAutogradFunction'),  # not composable
-        xfail('renorm', ''),  # NYI: forward AD for renorm
         xfail('ormqr', ''),  # NYI: forward AD for ormqr
         xfail('nn.functional.multilabel_margin_loss', ''),  # NYI: multilabel_margin_loss_forward
         xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for soft_margin_loss_backward
@@ -1543,7 +1541,6 @@ class TestOperators(TestCase):
         xfail('normal', 'number_mean'),  # calls random op
         xfail('pca_lowrank'),  # calls random op
         xfail('quantile'),  # Batching rule not implemented for aten::equal
-        xfail('renorm'),  # Forward AD not implemented and no decomposition
         xfail('scatter_reduce', 'prod'),  # Forward AD not implemented and no decomposition
         xfail('_segment_reduce', 'lengths'),  # Forward AD not implemented and no decomposition
         xfail('_segment_reduce', 'offsets'),  # Forward AD not implemented and no decomposition

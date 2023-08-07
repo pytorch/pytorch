@@ -155,8 +155,8 @@ namespace detail {
 namespace meta {
 
 #define ADDMM_META() \
-  TORCH_CHECK(self.scalar_type() == mat2.scalar_type(), "self and mat2 must have the same dtype"); \
-  TORCH_CHECK(mat1.scalar_type() == mat2.scalar_type(), "mat1 and mat2 must have the same dtype"); \
+  TORCH_CHECK(self.scalar_type() == mat2.scalar_type(), "self and mat2 must have the same dtype, but got ", self.scalar_type(), " and ", mat2.scalar_type()); \
+  TORCH_CHECK(mat1.scalar_type() == mat2.scalar_type(), "mat1 and mat2 must have the same dtype, but got ", mat1.scalar_type(), " and ", mat2.scalar_type()); \
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor"); \
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor"); \
   TORCH_CHECK( \
@@ -313,6 +313,7 @@ TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2) {
 
 TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   auto self_ = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
+  TORCH_CHECK(self.dtype() == batch1.dtype(), "Input dtypes must be the same, got: input ", self.dtype(), ", batch1: ", batch1.dtype(), ", batch2: ", batch2.dtype());
   common_checks_baddbmm_bmm(*this, batch1, batch2, beta, alpha, false, *self_);
 }
 
@@ -326,7 +327,7 @@ DEFINE_DISPATCH(addr_stub);
 
 // As P is a permutation matrix
 // det(P) = 1 if it's an even permutation and det(P) = -1 if it's an odd permutation
-Tensor lu_det_P(const Tensor& pivots) {
+static Tensor lu_det_P(const Tensor& pivots) {
   return (at::arange(1, pivots.size(-1) + 1, pivots.options()) != pivots)
     .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong)
     .fmod_(2)
@@ -1309,6 +1310,18 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
   return self.reshape_symint({self.sym_size(0), 1}) * vec2;
 }
 
+
+#if !defined(C10_MOBILE)
+#define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)    \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(      \
+            kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
+            TYPE, NAME, __VA_ARGS__)
+#else
+#define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)        \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, \
+            TYPE, NAME, __VA_ARGS__)
+#endif
+
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
@@ -1437,9 +1450,7 @@ static void addmm_impl_cpu_(
 
   if(!dispatched) {
     // Apply BLAS routine
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
-        result.scalar_type(), "addmm_impl_cpu_",
-        [&]{
+    _AT_DISPATCH_ADDMM_TYPES(result.scalar_type(), "addmm_impl_cpu_", [&]{
           using opmath_t = at::opmath_type<scalar_t>;
           at::native::cpublas::gemm(
               transpose_a ? a.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
@@ -1594,7 +1605,7 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
     });
 }
 
-void baddbmm_with_gemm_(const Tensor &result, const Tensor &mat1, const Tensor &mat2, const Scalar &beta_, const Scalar &alpha_) {
+static void baddbmm_with_gemm_(const Tensor &result, const Tensor &mat1, const Tensor &mat2, const Scalar &beta_, const Scalar &alpha_) {
   TORCH_INTERNAL_ASSERT(result.is_contiguous());
 
   const auto result_sizes = result.sizes();
@@ -1766,7 +1777,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
   return;
 }
 
-void conjugate_mutable_input_if_needed(const Tensor& self, bool conjugate) {
+static void conjugate_mutable_input_if_needed(const Tensor& self, bool conjugate) {
   if (conjugate) {
     self.conj_physical_();
   }
@@ -1823,7 +1834,7 @@ Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return result.fill_(self.vdot(other));
 }
 
-bool should_fold(const Tensor& tensor1, const Tensor& tensor2) {
+static bool should_fold(const Tensor& tensor1, const Tensor& tensor2) {
   // We check that we can fold the larger tensor into a matrix and dispatch to mm or mv rather than
   // to bmm. We want to make sure we can do so without incurring in any extra copy
   const auto tensor1_larger = tensor1.dim() >= tensor2.dim();
@@ -1893,7 +1904,7 @@ The behavior depends on the dimensionality of the Tensors as follows:
 - Otherwise, we return bmm, after broadcasting and folding the batched dimensions if
   there's more than one
 */
-Tensor _matmul_impl(
+static Tensor _matmul_impl(
     Tensor& out,
     const Tensor& tensor1,
     const Tensor& tensor2) {
@@ -2678,7 +2689,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   norm_stub(iter.device_type(), iter, ord);
 }
 
-void _linalg_matrix_norm_checks(const Tensor& A, std::vector<int64_t>& dim, optional<ScalarType> opt_dtype, bool low_precision) {
+static void _linalg_matrix_norm_checks(const Tensor& A, std::vector<int64_t>& dim, optional<ScalarType> opt_dtype, bool low_precision) {
   // A
   at::native::checkIsMatrix(A, "linalg.matrix_norm");
   at::native::checkFloatingOrComplex(A, "linalg.matrix_norm", /*low_precision*/low_precision);
@@ -2950,7 +2961,7 @@ Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tens
 
 
 // This function helps to dispatch norm computations depending on 'ord' of variant type
-Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, c10::string_view> ord_variant) {
+static Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, c10::string_view> ord_variant) {
   Tensor inverse, info;
   std::tie(inverse, info) = at::linalg_inv_ex(self);
   info.unsqueeze_(-1).unsqueeze_(-1);
@@ -2967,13 +2978,13 @@ Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, c10::string_
 }
 
 // Return zero for each matrix in the batch
-Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtype) {
+static Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtype) {
   auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
   TensorOptions options = self.options().dtype(toRealValueType(self.scalar_type()));
   return at::zeros(result_shape, options);
 }
 
-void _linalg_cond_check_ord(c10::variant<Scalar, c10::string_view> ord_variant) {
+static void _linalg_cond_check_ord(c10::variant<Scalar, c10::string_view> ord_variant) {
   if (ord_variant.index() == 0) {
     Scalar* ord = c10::get_if<Scalar>(&ord_variant);
     double abs_ord = std::abs(ord->toDouble());
@@ -3144,21 +3155,21 @@ Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, OptionalIntAr
   }
 
   // result_shape is self_.sizes[-(an-other.dim):]
-  std::vector<int64_t> result_shape = self_.sizes().slice(other.dim(), ndim - other.dim()).vec();
+  std::vector<c10::SymInt> result_shape = self_.sym_sizes().slice(other.dim(), ndim - other.dim()).vec();
 
-  int64_t result_product = c10::multiply_integers(result_shape.begin(), result_shape.end());
-  int64_t other_product = c10::multiply_integers(other.sizes().begin(), other.sizes().end());
+  c10::SymInt result_product = c10::multiply_integers(result_shape.begin(), result_shape.end());
+  c10::SymInt other_product = c10::multiply_integers(other.sym_sizes().begin(), other.sym_sizes().end());
 
   // Check whether the self tensor can be reshaped to the 2D square matrix
   TORCH_CHECK(result_product == other_product,
     "Expected self to satisfy the requirement prod(self.shape[other.ndim:]) == prod(self.shape[:other.ndim]), but got ",
     result_product, " != ", other_product);
 
-  self_ = self_.reshape({result_product, result_product});
+  self_ = self_.reshape_symint({result_product, result_product});
 
   // normally `other` would be flattened by at::linalg_solve expects 2D input
   Tensor result = at::linalg_solve(self_, other.flatten());
-  return result.reshape(result_shape);
+  return result.reshape_symint(result_shape);
 }
 
 Tensor& linalg_tensorsolve_out(const Tensor& self, const Tensor& other, OptionalIntArrayRef dims, Tensor& result) {

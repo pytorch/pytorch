@@ -118,7 +118,7 @@ class TestMultiheadAttentionNN(NNTestCase):
                                         saved_kv=False, same_embed_dim=False,
                                         average_attn_weights=average_attn_weights):
             for _ in range(100):
-                batch_sz, seq_len = [random.randint(2, 10) for r in range(2)]
+                batch_sz, seq_len = (random.randint(2, 10) for r in range(2))
                 d_head = random.randint(3, 10)
                 nheads = random.randint(2, 5) * 2
                 d_model = d_head * nheads
@@ -152,7 +152,6 @@ class TestMultiheadAttentionNN(NNTestCase):
                 attn_mask_tensor = torch.from_numpy(attn_mask).float()
                 attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, float('-inf'))
                 attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, float('0.0'))
-                attn_mask_tensor = attn_mask_tensor.double()
 
                 decoder_state_tensor = torch.from_numpy(decoder_state).to(torch.get_default_dtype())
                 source_hid_tensor = torch.from_numpy(K).to(torch.get_default_dtype()).transpose(0, 1)
@@ -592,6 +591,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         """
         if device not in ['cpu', 'cuda']:
             self.skipTest("Fastpath only runs on CPU and CUDA.")
+
         with torch.autocast(device_type=device, enabled=False):
             embed_dim = 16
             num_heads = 8
@@ -603,7 +603,9 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
             attn_mask = torch.randint(0, 2, (src_len, src_len)).bool().to(device)
             key_padding_mask = torch.randint(0, 2, (batch_size, src_len)).bool().to(device)
 
-            with mock.patch('torch._native_multi_head_attention') as fastpath_mock:
+            with mock.patch('torch._native_multi_head_attention', new=mock.MagicMock(
+                    return_value=(torch.Tensor(), torch.Tensor()))
+            ) as fastpath_mock:
                 # Compute attention on the fast path
                 mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True, device=device).eval()
                 mta_model.training = False

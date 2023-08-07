@@ -13,7 +13,7 @@ import sys
 import tempfile
 from datetime import datetime
 from distutils.version import LooseVersion
-from typing import Any, cast, Dict, List, Optional
+from typing import Any, cast, Dict, List, Optional, Union
 
 import pkg_resources
 
@@ -24,13 +24,13 @@ from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     get_report_path,
     IS_CI,
-    is_slow_gradcheck_env,
     parser as common_parser,
     retry_shell,
     set_cwd,
     shell,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
+    TEST_WITH_SLOW_GRADCHECK,
 )
 from torch.utils import cpp_extension
 
@@ -38,7 +38,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 try:
     # using tools/ to optimize test run.
-    sys.path.append(str(REPO_ROOT))
+    sys.path.insert(0, str(REPO_ROOT))
     from tools.stats.export_test_times import TEST_TIMES_FILE
     from tools.testing.test_selections import (
         calculate_shards,
@@ -51,11 +51,19 @@ try:
     )
 
     HAVE_TEST_SELECTION_TOOLS = True
-except ImportError:
+except ImportError as e:
+
+    class ShardedTest:
+        pass
+
+    NUM_PROCS = 2
     HAVE_TEST_SELECTION_TOOLS = False
     print(
-        "Unable to import test_selections from tools/testing. Running without test selection stats..."
+        f"Unable to import test_selections from tools/testing. Running without test selection stats.... Reason: {e}"
     )
+finally:
+    # Make sure to remove REPO_ROOT after import is done
+    sys.path.remove(str(REPO_ROOT))
 
 
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
@@ -171,6 +179,7 @@ TESTS = discover_tests(
         "package",  # executed by test_package.py
         "quantization",  # executed by test_quantization.py
         "autograd",  # executed by test_autograd.py
+        "_nvfuser",  # executed by test_jit_cuda_fuser.py, test_nvfuser_dynamo.py, and test_nvfuser_frontend.py
     ],
     blocklisted_tests=[
         "test_bundled_images",
@@ -181,7 +190,6 @@ TESTS = discover_tests(
         "test_jit_string",
         "test_kernel_launch_checks",
         "test_nnapi",
-        "test_segment_reductions",
         "test_static_runtime",
         "test_throughput_benchmark",
         "test_typing",
@@ -401,8 +409,8 @@ if dist.is_available():
         DISTRIBUTED_TESTS_CONFIG["ucc"] = {
             "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
-            "UCX_TLS": "tcp",
-            "UCC_TLS": "nccl,ucp",
+            "UCX_TLS": "tcp,cuda",
+            "UCC_TLS": "nccl,ucp,cuda",
             "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
             "UCC_EC_CUDA_USE_COOPERATIVE_LAUNCH": "n",  # CI nodes (M60) fail if it is on
         }
@@ -607,7 +615,7 @@ def run_test(
         and test_module.time is not None
         else None
     )
-    print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
+    print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
 
     with open(log_path, "w") as f:
         ret_code = retry_shell(
@@ -729,9 +737,7 @@ def test_distributed(test_module, test_directory, options):
                 init_str = "with {} init_method"
                 with_init = init_str.format("file" if with_init_file else "env")
                 print_to_stderr(
-                    "Running distributed tests for the {} backend {}".format(
-                        backend, with_init
-                    )
+                    f"Running distributed tests for the {backend} backend {with_init}"
                 )
             old_environ = dict(os.environ)
             os.environ["TEMP_DIR"] = tmp_dir
@@ -840,7 +846,7 @@ def run_doctests(test_module, test_directory, options):
     if enabled["qengine"] == "auto":
         try:
             # Is there a better check if quantization is enabled?
-            import torch.ao.nn.quantized as nnq  # NOQA
+            import torch.ao.nn.quantized as nnq  # NOQA: F401
 
             torch.backends.quantized.engine = "qnnpack"
             torch.backends.quantized.engine = "fbgemm"
@@ -851,9 +857,9 @@ def run_doctests(test_module, test_directory, options):
 
     if enabled["onnx"] == "auto":
         try:
-            import onnx  # NOQA
-            import onnxruntime  # NOQA
-            import onnxscript  # NOQA
+            import onnx  # NOQA: F401
+            import onnxruntime  # NOQA: F401
+            import onnxscript  # NOQA: F401
         except ImportError:
             exclude_module_list.append("torch.onnx.*")
             enabled["onnx"] = False
@@ -977,7 +983,7 @@ def get_pytest_args(
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
         pytest_args.extend(["-p", "no:xdist", "--use-pytest"])
-        if not options.continue_through_error:
+        if not options.continue_through_error and IS_CI and HAVE_TEST_SELECTION_TOOLS:
             pytest_args.append(f"--sc={stepcurrent_key}")
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
@@ -1083,14 +1089,6 @@ def parse_args():
             "Only run ONNX tests, or tests that validate PyTorch's ONNX export. "
             "If this flag is not present, we will exclude ONNX tests."
         ),
-    )
-    parser.add_argument(
-        "-pt",
-        "--pytest",
-        action="store_true",
-        help="If true, use `pytest` to execute the tests. E.g., this runs "
-        "TestTorch with pytest in verbose and coverage mode: "
-        "python run_test.py -vci torch -pt",
     )
     parser.add_argument(
         "-k",
@@ -1204,6 +1202,11 @@ def parse_args():
             "doctest to run"
         ),
     )
+    parser.add_argument(
+        "--no-translation-validation",
+        action="store_false",
+        help="Run tests without translation validation.",
+    )
 
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -1267,7 +1270,7 @@ def exclude_tests(
                 not exact_match and test.startswith(exclude_test)
             ) or test == exclude_test:
                 if exclude_message is not None:
-                    print_to_stderr("Excluding {} {}".format(test, exclude_message))
+                    print_to_stderr(f"Excluding {test} {exclude_message}")
                 selected_tests.remove(test)
     return selected_tests
 
@@ -1392,7 +1395,7 @@ def get_selected_tests(options) -> List[ShardedTest]:
             "PyTorch is built without LAPACK support.",
         )
 
-    if is_slow_gradcheck_env():
+    if TEST_WITH_SLOW_GRADCHECK:
         selected_tests = exclude_tests(
             TESTS_NOT_USING_GRADCHECK,
             selected_tests,
@@ -1419,7 +1422,7 @@ def get_selected_tests(options) -> List[ShardedTest]:
     # Download previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), TEST_TIMES_FILE)
     if os.path.exists(path):
-        with open(path, "r") as f:
+        with open(path) as f:
             test_file_times = cast(Dict[str, Any], json.load(f))
     else:
         test_file_times = {}
@@ -1431,27 +1434,28 @@ def get_selected_tests(options) -> List[ShardedTest]:
     else:
         print("Found test time stats from artifacts")
 
-    # Do sharding
-    test_file_times_config = test_file_times.get(test_config, {})
-    shards = calculate_shards(
-        num_shards,
-        selected_tests,
-        test_file_times_config,
-        must_serial=must_serial,
-        debug=TEST_WITH_ROCM,
-    )
-    _, tests_from_shard = shards[which_shard - 1]
-    selected_tests = tests_from_shard
+    if HAVE_TEST_SELECTION_TOOLS:
+        # Do sharding
+        test_file_times_config = test_file_times.get(test_config, {})
+        shards = calculate_shards(
+            num_shards, selected_tests, test_file_times_config, must_serial=must_serial
+        )
+        _, tests_from_shard = shards[which_shard - 1]
+        selected_tests = tests_from_shard
 
     return selected_tests
 
 
-def run_test_module(test: ShardedTest, test_directory: str, options) -> Optional[str]:
+def run_test_module(
+    test: Union[ShardedTest, str], test_directory: str, options
+) -> Optional[str]:
     maybe_set_hip_visible_devies()
 
     # Printing the date here can help diagnose which tests are slow
-    print_to_stderr("Running {} ... [{}]".format(str(test), datetime.now()))
-    handler = CUSTOM_HANDLERS.get(test.name, run_test)
+    print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
+    handler = CUSTOM_HANDLERS.get(
+        test.name if isinstance(test, ShardedTest) else test, run_test
+    )
     return_code = handler(test, test_directory, options)
     assert isinstance(return_code, int) and not isinstance(
         return_code, bool
@@ -1479,7 +1483,11 @@ def run_tests(
 
     # parallel = in parallel with other files
     # serial = this file on it's own.  The file might still be run in parallel with itself (ex test_ops)
-    selected_tests_parallel = [x for x in selected_tests if not must_serial(x.name)]
+    selected_tests_parallel = [
+        x
+        for x in selected_tests
+        if not must_serial(x.name if isinstance(x, ShardedTest) else x)
+    ]
     selected_tests_serial = [
         x for x in selected_tests if x not in selected_tests_parallel
     ]
@@ -1613,7 +1621,7 @@ def main():
 
     prioritized_tests = []
     remaining_tests = selected_tests
-    if IS_CI:
+    if IS_CI and HAVE_TEST_SELECTION_TOOLS:
         (prioritized_tests, remaining_tests) = get_reordered_tests(selected_tests)
         log_time_savings(
             selected_tests,
@@ -1629,6 +1637,9 @@ def main():
         os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
     elif options.inductor:
         os.environ["PYTORCH_TEST_WITH_INDUCTOR"] = "1"
+
+    if not options.no_translation_validation:
+        os.environ["PYTORCH_TEST_WITH_TV"] = "1"
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 

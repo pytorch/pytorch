@@ -93,6 +93,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return size_;
   }
 
+  // Returns an unique opaque ID of this process group object.
+  int64_t getID() const {
+    return reinterpret_cast<std::intptr_t>(this);
+  }
+
+  // Returns an unique opaque ID of a backend for the specific backend type
+  // that can correlate with this process group's collectives.
+  int64_t getBackendID(BackendType backend_type) const {
+    return reinterpret_cast<std::intptr_t>(getBackend(backend_type).get());
+  }
+
   virtual const std::string getBackendName() const {
     return options_->backend;
   };
@@ -151,12 +162,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     at::TensorList,
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     const c10::intrusive_ptr<::c10d::ReduceOp>&,
+                    const c10::optional<at::Tensor>& sparse_indices,
                     int64_t)>();
 
     return std::get<1>(op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
+        opts.sparseIndices,
         opts.timeout.count()));
   }
 
@@ -367,6 +380,31 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
         opts.timeout.count()));
+  }
+
+  // This function is a coalesced version of `reduce_scatter_tensor` (currently
+  // still named as `_reduce_scatter_base`). Each tensor in the vector corresponds to
+  // an input/output of one `reduce_scatter_tensor` operation.
+  virtual c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("c10d::reduce_scatter_tensor_coalesced_", "")
+            .typed<c10::intrusive_ptr<Work>(
+                const at::TensorList,
+                const at::TensorList,
+                const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                const c10::intrusive_ptr<::c10d::ReduceOp>&,
+                int64_t)>();
+
+    return op.call(
+        outputTensors,
+        inputTensors,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
+        opts.timeout.count());
   }
 
   virtual c10::intrusive_ptr<Work> alltoall_base(

@@ -143,9 +143,26 @@ function install_torchtext() {
 }
 
 function install_torchvision() {
+  local orig_preload
   local commit
   commit=$(get_pinned_commit vision)
+  orig_preload=${LD_PRELOAD}
+  if [ -n "${LD_PRELOAD}" ]; then
+    # Silence dlerror to work-around glibc ASAN bug, see https://sourceware.org/bugzilla/show_bug.cgi?id=27653#c9
+    echo 'char* dlerror(void) { return "";}'|gcc -fpic -shared -o "${HOME}/dlerror.so" -x c -
+    LD_PRELOAD=${orig_preload}:${HOME}/dlerror.so
+  fi
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git@${commit}"
+  if [ -n "${LD_PRELOAD}" ]; then
+    LD_PRELOAD=${orig_preload}
+  fi
+}
+
+function install_numpy_pytorch_interop() {
+  local commit
+  commit=$(get_pinned_commit numpy_pytorch_interop)
+  # TODO: --no-use-pep517 will result in failure.
+  pip_install --user "git+https://github.com/Quansight-Labs/numpy_pytorch_interop.git@${commit}"
 }
 
 function clone_pytorch_xla() {
@@ -168,7 +185,7 @@ function checkout_install_torchdeploy() {
   pushd multipy
   git checkout "${commit}"
   python multipy/runtime/example/generate_examples.py
-  pip install -e . --install-option="--cudatests"
+  BUILD_CUDA_TESTS=1 pip install -e .
   popd
   popd
 }
@@ -187,6 +204,7 @@ function install_huggingface() {
   version=$(get_pinned_commit huggingface)
   pip_install pandas
   pip_install scipy
+  pip_install z3-solver
   pip_install "transformers==${version}"
 }
 
@@ -195,6 +213,7 @@ function install_timm() {
   commit=$(get_pinned_commit timm)
   pip_install pandas
   pip_install scipy
+  pip_install z3-solver
   pip_install "git+https://github.com/rwightman/pytorch-image-models@${commit}"
 }
 

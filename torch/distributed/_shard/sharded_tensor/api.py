@@ -49,7 +49,7 @@ from torch.utils._pytree import tree_map
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
 _sharded_tensor_current_id = 0
-_sharded_tensor_map: Dict[int, 'weakref.ReferenceType[ShardedTensor]'] = {}
+_sharded_tensor_map: Dict[int, weakref.ReferenceType[ShardedTensor]] = {}
 
 # Default sharded ops
 _SHARDED_OPS: Dict[Callable, Callable] = {}
@@ -136,7 +136,7 @@ class ShardedTensorBase(torch.Tensor):
         local_shards: List[Shard],
         sharded_tensor_metadata: ShardedTensorMetadata,
         sharding_spec=None,
-    ) -> "ShardedTensorBase":
+    ) -> ShardedTensorBase:
         """
         Initialize a ShardedTensorBase with local shards and a global
         ShardedTensorMetadata built on each rank.
@@ -234,7 +234,7 @@ class ShardedTensor(ShardedTensorBase):
 
     """
     def __new__(cls, sharding_spec: shard_spec.ShardingSpec, *size, **kwargs):
-        self = super(ShardedTensor, cls).__new__(cls, sharding_spec, *size, **kwargs)
+        self = super().__new__(cls, sharding_spec, *size, **kwargs)
         return self
 
     def __init__(
@@ -371,6 +371,7 @@ class ShardedTensor(ShardedTensorBase):
         self,
         dst: int = 0,
         out: Optional[torch.Tensor] = None,
+        enforce_dtype: Optional[bool] = False,
     ) -> None:
         """
         Creates a full :class:`Tensor` on rank ``dst`` by gathering all shards of the
@@ -386,6 +387,7 @@ class ShardedTensor(ShardedTensorBase):
             out (:class `torch.Tensor`, optional): The output full tensor.
                 Must to be provided ONLY on ``dst`` rank.
                 Default: ``None``
+            enforce_dtype: force the imterediate tensor with the same type as input and output
         """
         def shard_size(shard_md):
             return reduce((lambda x, y: x * y), shard_md.shard_sizes)  # type: ignore[attr-defined]
@@ -411,12 +413,18 @@ class ShardedTensor(ShardedTensorBase):
         gather_list: Optional[List[torch.Tensor]]
         if rank == dst:
             assert out is not None
-            gather_list = [torch.empty((max_rank_size,), device=out.device) for _ in range(world_size)]
+            # TODO make it as a view of out tensor
+            gather_list = [torch.empty((max_rank_size,), device=out.device, dtype=out.dtype
+                           if enforce_dtype else torch.float32) for _ in range(world_size)]
         else:
             gather_list = None
 
         with torch.no_grad():
-            data = torch.empty(max_rank_size, device=self._get_preferred_device())
+            if enforce_dtype and len(local_shards) > 0:
+                dtype = local_shards[0].tensor.dtype
+            else:
+                dtype = torch.float32
+            data = torch.empty(max_rank_size, device=self._get_preferred_device(), dtype=dtype)
 
             for shard in local_shards:
                 src = shard.tensor.flatten()
@@ -724,9 +732,9 @@ class ShardedTensor(ShardedTensorBase):
         local_tensor: torch.Tensor,
         sharding_spec: shard_spec.ShardingSpec,
         *global_size: Sequence[int],
-        process_group: dist.ProcessGroup = None,
+        process_group: Optional[dist.ProcessGroup] = None,
         init_rrefs=False,
-    ) -> "ShardedTensor":
+    ) -> ShardedTensor:
         """
         Initialize a ShardedTensor given only one local tensor, global sharded tensor
         size and sharding spec on each rank.
@@ -831,7 +839,7 @@ class ShardedTensor(ShardedTensorBase):
         process_group=None,
         init_rrefs=False,
         sharding_spec=None,
-    ) -> "ShardedTensor":
+    ) -> ShardedTensor:
         """
         Initialize a ShardedTensor with local shards and a global
         ShardedTensorMetadata built on each rank.

@@ -64,6 +64,11 @@ bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
              _fastEqualsForContainer);
 }
 
+std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
+  out << v.qualifiedClassName() << "." << v.name();
+  return out;
+}
+
 bool operator==(const ivalue::EnumHolder& lhs, const ivalue::EnumHolder& rhs) {
   return lhs.name() == rhs.name() && *rhs.type() == *lhs.type();
 }
@@ -245,7 +250,7 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
     case Tag::Capsule:
       TORCH_CHECK_TYPE(
           false, "Cannot inspect value of type ", this->tagKind());
-      // Fall through
+      [[fallthrough]];
     default:
       // don't record scalars.
       break;
@@ -483,9 +488,9 @@ template <class T>
 std::ostream& printList(
     std::ostream& out,
     const T& list,
-    const std::string start,
-    const std::string finish,
-    IValueFormatter formatter) {
+    const std::string& start,
+    const std::string& finish,
+    const IValueFormatter& formatter) {
   out << start;
   for (const auto i : c10::irange(list.size())) {
     if (i > 0) {
@@ -501,16 +506,16 @@ std::ostream& printList(
 std::ostream& printMaybeAnnotatedList(
     std::ostream& out,
     const IValue& the_list,
-    IValueFormatter formatter) {
+    const IValueFormatter& formatter) {
   auto list_elem_type = the_list.type()->containedType(0);
   if (the_list.toListRef().empty() ||
       !elementTypeCanBeInferredFromMembers(list_elem_type)) {
     out << "annotate(" << the_list.type<c10::Type>()->annotation_str() << ", ";
-    printList(out, the_list.toListRef(), "[", "]", std::move(formatter));
+    printList(out, the_list.toListRef(), "[", "]", formatter);
     out << ")";
     return out;
   } else {
-    return printList(out, the_list.toListRef(), "[", "]", std::move(formatter));
+    return printList(out, the_list.toListRef(), "[", "]", formatter);
   }
 }
 
@@ -518,7 +523,7 @@ template <typename Dict>
 std::ostream& printDict(
     std::ostream& out,
     const Dict& v,
-    IValueFormatter formatter) {
+    const IValueFormatter& formatter) {
   out << "{";
 
   bool first = true;
@@ -542,14 +547,14 @@ std::ostream& printDict(
 static std::ostream& printMaybeAnnotatedDict(
     std::ostream& out,
     const IValue& the_dict,
-    IValueFormatter formatter) {
+    const IValueFormatter& formatter) {
   auto value_type = the_dict.type()->castRaw<DictType>()->getValueType();
   if (the_dict.toGenericDict().empty() ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
     out << "annotate(" << the_dict.type<c10::Type>()->annotation_str() << ",";
-    printDict(out, the_dict.toGenericDict(), std::move(formatter)) << ")";
+    printDict(out, the_dict.toGenericDict(), formatter) << ")";
   } else {
-    return printDict(out, the_dict.toGenericDict(), std::move(formatter));
+    return printDict(out, the_dict.toGenericDict(), formatter);
   }
   return out;
 }
@@ -761,11 +766,6 @@ IValueComparator getGreaterThanComparator(const IValue& v) {
   return [lt = std::move(lt)](const IValue& a, const IValue& b) {
     return lt(b, a);  // gt(a, b) === lt(b, a)
   };
-}
-
-static std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
-  out << v.qualifiedClassName() << "." << v.name();
-  return out;
 }
 
 std::ostream& operator<<(std::ostream & out, const IValue & v) {

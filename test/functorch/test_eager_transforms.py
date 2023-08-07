@@ -312,6 +312,7 @@ class TestGradTransform(TestCase):
         result = grad(grad(torch.sin))(x)
         self.assertEqual(result, -torch.sin(x))
 
+    @skipIfTorchDynamo("Ref: https://github.com/pytorch/pytorch/issues/103613")
     def test_escaped_wrappers_are_marked_as_dead(self, device):
         x = torch.randn([], device=device)
         escaped = []
@@ -324,6 +325,7 @@ class TestGradTransform(TestCase):
         grad(foo)(x)
         self.assertEqual(torch._C._functorch.dlevel(escaped[0]), -1)
 
+    @skipIfTorchDynamo("Ref: https://github.com/pytorch/pytorch/issues/103613")
     def test_escaped_wrappers_are_ignored(self, device):
         x = torch.randn([], device=device)
         escaped = []
@@ -3464,8 +3466,8 @@ class TestMakeFunctional(TestCase):
                 super().__init__()
                 self.bias = nn.Parameter(torch.randn(3))
                 self.linear = nn.Linear(3, 3)
-                self.register_buffer('buffer', torch.randn(3))
-                self.register_buffer('buffer_tied', self.buffer)
+                self.buffer = nn.Buffer(torch.randn(3))
+                self.buffer_tied = self.buffer
 
             def forward(self, x):
                 x = self.linear(x)
@@ -3495,7 +3497,7 @@ class TestMakeFunctional(TestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = nn.Linear(3, 3)
-                self.register_buffer('buffer', torch.randn(3))
+                self.buffer = nn.Buffer(torch.randn(3))
 
             def forward(self, x):
                 x = self.linear(x)
@@ -3515,7 +3517,7 @@ class TestMakeFunctional(TestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = nn.Linear(3, 3)
-                self.register_buffer('buffer', torch.randn(3))
+                self.buffer = nn.Buffer(torch.randn(3))
 
             def forward(self, x):
                 x = self.linear(x)
@@ -3571,8 +3573,8 @@ class TestMakeFunctional(TestCase):
                 self.linear = nn.Linear(3, 3)
                 self.weight = self.linear.weight
                 self.bias = self.linear.bias
-                self.register_buffer('buffer', torch.randn(3))
-                self.register_buffer('buffer_tied', self.buffer)
+                self.buffer = nn.Buffer(torch.randn(3))
+                self.buffer_tied = self.buffer
 
             def forward(self, x):
                 x = self.linear(x)
@@ -4708,6 +4710,13 @@ class TestHigherOrderOperatorInteraction(TestCase):
         y = grad(f)(x)
         z, = torch.autograd.grad(y.sum(), x)
         self.assertEqual(z, torch.full_like(x, 2))
+
+    def test_grad_name_wrapping(self, device):
+
+        def my_fn(x):
+            return x.sum()
+        grad_fn = grad(my_fn)
+        self.assertEqual(grad_fn.__name__, "my_fn")
 
     def test_functional_call_multiple_dicts(self):
         mod = nn.Linear(1, 1)

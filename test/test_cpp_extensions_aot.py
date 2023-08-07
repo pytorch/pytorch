@@ -85,6 +85,19 @@ class TestCppExtensionAOT(common.TestCase):
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
+    @unittest.skipIf(not torch.backends.mps.is_available(), "MPS not found")
+    def test_mps_extension(self):
+        import torch_test_cpp_extension.mps as mps_extension
+
+        tensor_length = 100000
+        x = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
+        y = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
+
+        cpu_output = mps_extension.get_cpu_add_output(x, y)
+        mps_output = mps_extension.get_mps_add_output(x.to("mps"), y.to("mps"))
+
+        self.assertEqual(cpu_output, mps_output.to("cpu"))
+
     @common.skipIfRocm
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")

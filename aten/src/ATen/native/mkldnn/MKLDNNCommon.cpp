@@ -47,6 +47,7 @@ ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
     case ScalarType::QInt32:
       return ideep::tensor::data_type::s32;
     case ScalarType::QInt8:
+    case ScalarType::Char:
       return ideep::tensor::data_type::s8;
     case ScalarType::QUInt8:
     case ScalarType::Byte:
@@ -100,6 +101,23 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
   else {
     TORCH_CHECK(false, "itensor_view_from_dense expects float/bfloat16 tensor input");
   }
+}
+
+ideep::tensor itensor_view_from_dense(
+    const at::Tensor& tensor,
+    const ideep::tensor::desc& desc) {
+  TORCH_CHECK(
+      tensor.device().is_cpu(),
+      "itensor_view_from_dense expects CPU tensor input");
+  TORCH_CHECK(
+      tensor.layout() == at::Layout::Strided,
+      "itensor_view_from_dense expects dense tensor input");
+  TORCH_CHECK(
+      tensor.scalar_type() == at::ScalarType::Float ||
+          tensor.scalar_type() == at::ScalarType::BFloat16 ||
+          tensor.scalar_type() == at::ScalarType::Half,
+      "itensor_view_from_dense expects float, bfloat16 or half tensor input");
+  return {desc, tensor.data_ptr()};
 }
 
 // Helper function for getting an ideep tensor out of an aten Tensor.

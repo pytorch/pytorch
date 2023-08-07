@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNoCusolver,
     skipCUDAIfNoMagma,
     skipCUDAIfNoMagmaAndNoCusolver,
+    skipCUDAIfNoMagmaAndNoLinalgsolver,
     skipCUDAIfRocm,
     tol,
     toleranceOverride,
@@ -1006,7 +1007,7 @@ def sample_inputs_linalg_solve(
         nrhs = [(1,), (3,)]
 
     for n, batch, rhs in product(ns, batches, nrhs):
-        yield SampleInput(make_a(*batch, n, n), args=(make_b((batch + (n,) + rhs)),))
+        yield SampleInput(make_a(*batch, n, n), args=(make_b(batch + (n,) + rhs),))
 
 
 def sample_inputs_linalg_solve_triangular(
@@ -1561,7 +1562,7 @@ op_db: List[OpInfo] = [
         dtypes=floating_and_complex_types(),
         supports_autograd=False,
         sample_inputs_func=sample_inputs_linalg_ldl_factor,
-        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
+        decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
     ),
     OpInfo(
         "linalg.ldl_factor_ex",
@@ -1569,7 +1570,7 @@ op_db: List[OpInfo] = [
         dtypes=floating_and_complex_types(),
         supports_autograd=False,
         sample_inputs_func=sample_inputs_linalg_ldl_factor,
-        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
+        decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
     ),
     OpInfo(
         "linalg.ldl_solve",

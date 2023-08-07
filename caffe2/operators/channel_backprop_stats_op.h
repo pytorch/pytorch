@@ -14,7 +14,7 @@ class ChannelBackpropStatsOp : public Operator<Context> {
   template <class... Args>
   explicit ChannelBackpropStatsOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...) {}
-  ~ChannelBackpropStatsOp() {}
+  ~ChannelBackpropStatsOp() override {}
 
   bool RunOnDevice() override {
     return true;

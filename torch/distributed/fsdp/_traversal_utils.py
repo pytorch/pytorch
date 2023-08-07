@@ -74,8 +74,7 @@ def _get_fsdp_states_with_modules(
     # Perform depth-first search from `module` to ensure that we do not
     # traverse into an incompatible API's subtree (use DFS instead of BFS to
     # match `.modules()` order)
-    deque: Deque[nn.Module] = collections.deque()
-    deque.append(module)
+    deque: Deque[nn.Module] = collections.deque([module])
     while deque:
         submodule = deque.popleft()
         visited_modules.add(submodule)
@@ -103,8 +102,9 @@ def _get_fsdp_handles(module: nn.Module) -> List:
     Returns all ``FlatParamHandle`` s in the module tree rooted at ``module``
     following the rules in :func:`_get_fsdp_state`.
     """
-    return [
-        handle
+    handles = [
+        fsdp_state._handle
         for fsdp_state in _get_fsdp_states(module)
-        for handle in fsdp_state._handles
+        if fsdp_state._handle is not None
     ]
+    return handles

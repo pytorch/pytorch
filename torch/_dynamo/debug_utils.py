@@ -9,10 +9,11 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence, TypeVar
 
 import torch
 import torch._prims_common as utils
+import torch._subclasses.meta_utils
 
 from torch._dynamo.testing import rand_strided
 from torch._prims_common import is_float_dtype
@@ -23,6 +24,8 @@ from . import config
 from .utils import clone_inputs, get_debug_dir
 
 log = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 inductor_config = import_module("torch._inductor.config")
@@ -261,7 +264,7 @@ def get_minifier_repro_path():
 
 def helper_for_dump_minify(contents):
     minified_repro_path = get_minifier_repro_path()
-    log.warning("Writing minified repro to %s", minified_repro_path)
+    log.warning("Writing minified repro to:\n%s", minified_repro_path)
 
     if use_buck:
         BuckTargetWriter(minified_repro_path).write()
@@ -291,16 +294,20 @@ def clone_inputs_retaining_gradness(example_inputs):
     return cloned_inputs
 
 
-def run_fwd_maybe_bwd(gm, args, only_fwd=False):
+def run_fwd_maybe_bwd(gm, args, only_fwd=False, disable_clone=False):
     """
     Runs a forward and possibly backward iteration for a given mod and args.
+
+    When disable_clone is True, we will use args as-is without cloning.
+    This is higher fidelity but we may destroy the args in the process.
     """
     from torch._functorch.aot_autograd import make_boxed_func
 
     from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
     gm = copy.deepcopy(gm)
-    args = clone_inputs_retaining_gradness(args)
+    if not disable_clone:
+        args = clone_inputs_retaining_gradness(args)
 
     if hasattr(gm, "zero_grad"):
         gm.zero_grad(True)
@@ -378,11 +385,9 @@ def same_two_models(
         # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return True.
         log.exception(
-            (
-                "While minifying the program in accuracy minification mode, "
-                "ran into a runtime exception which is likely an unrelated issue."
-                " Skipping this graph."
-            )
+            "While minifying the program in accuracy minification mode, "
+            "ran into a runtime exception which is likely an unrelated issue."
+            " Skipping this graph."
         )
         return True
 
@@ -458,11 +463,9 @@ def backend_accuracy_fails(
         # This means that the the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return False.
         log.exception(
-            (
-                "While minifying the program in accuracy minification mode, "
-                "ran into a runtime exception which is likely an unrelated issue."
-                " Skipping this graph"
-            )
+            "While minifying the program in accuracy minification mode, "
+            "ran into a runtime exception which is likely an unrelated issue."
+            " Skipping this graph"
         )
         return False
 
@@ -482,16 +485,15 @@ def _stride_or_default(
     return stride if stride is not None else utils.make_contiguous_strides_for(shape)
 
 
-def _dtype_or_default(dtype: Optional[torch.dtype]) -> torch.dtype:
-    return dtype if dtype is not None else torch.float32
+def _mk_defaulter(d: T) -> Callable[[Optional[T]], T]:
+    return lambda x: x if x is not None else d
 
 
-def _device_or_default(device: Optional[torch.device]) -> torch.device:
-    return device if device is not None else torch.device("cpu")
-
-
-def _storage_offset_or_default(storage_offset: Optional[int]) -> int:
-    return storage_offset if storage_offset is not None else 0
+_dtype_or_default = _mk_defaulter(torch.float32)
+_device_or_default = _mk_defaulter(torch.device("cpu"))
+_storage_offset_or_default = _mk_defaulter(0)
+_requires_grad_or_default = _mk_defaulter(False)
+_is_leaf_or_default = _mk_defaulter(False)
 
 
 class NopInputReader:
@@ -552,13 +554,27 @@ class InputReader:
         *,
         storage_offset=None,
         dtype=None,
+        requires_grad=None,
+        is_leaf=None,
         **metadata,
     ):
         stride = _stride_or_default(stride, shape=shape)
         storage_offset = _storage_offset_or_default(storage_offset)
         dtype = _dtype_or_default(dtype)
-        t = torch.tensor([], dtype=dtype, device=storage.device)
-        t.set_(storage, storage_offset, shape, stride)
+        is_leaf = _is_leaf_or_default(is_leaf)
+        requires_grad = _requires_grad_or_default(requires_grad)
+        t = torch.tensor(
+            [], dtype=dtype, device=storage.device, requires_grad=requires_grad
+        )
+        with torch.no_grad():
+            t.set_(storage, storage_offset, shape, stride)
+        if not is_leaf:
+            # Fake up some autograd history in a very naughty way
+            with torch.enable_grad():
+                t = t.clone(memory_format=torch.preserve_format)
+            with torch.no_grad():
+                t.set_(storage, storage_offset, shape, stride)
+        assert torch._subclasses.meta_utils.safe_is_leaf(t) == is_leaf
         torch._utils.set_tensor_metadata(t, metadata)
         self.args.append(t)
         return t  # for BC
@@ -640,24 +656,26 @@ class InputWriter:
         storage = self.storage(
             t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device
         )
-        maybe_stride = ""
+        args = []
+        # NB: this is positional, must come first
         if _stride_or_default(None, shape=t.shape) != t.stride():
-            maybe_stride = f", {tuple(t.stride())}"
-        maybe_dtype = ""
+            args.append(str(tuple(t.stride())))
         if _dtype_or_default(None) != t.dtype:
-            maybe_dtype = f", dtype={t.dtype!r}"
-        maybe_storage_offset = ""
+            args.append(f"dtype={t.dtype!r}")
         if _storage_offset_or_default(None) != t.storage_offset():
-            maybe_storage_offset = f", storage_offset={t.storage_offset()!r}"
-        maybe_tensor_metadata = ""
+            args.append(f"storage_offset={t.storage_offset()!r}")
         tensor_metadata = torch._utils.get_tensor_metadata(t)
         if tensor_metadata:
-            maybe_tensor_metadata = ", " + ", ".join(
-                f"{k}={v!r}" for k, v in tensor_metadata.items()
-            )
+            args.extend(f"{k}={v!r}" for k, v in tensor_metadata.items())
+        if _requires_grad_or_default(None) != t.requires_grad:
+            args.append(f"requires_grad={t.requires_grad!r}")
+        is_leaf = torch._subclasses.meta_utils.safe_is_leaf(t)
+        if _is_leaf_or_default(None) != is_leaf:
+            args.append(f"is_leaf={is_leaf!r}")
         self._lines.append(
-            f"reader.tensor({storage}, {tuple(t.shape)}"
-            f"{maybe_stride}{maybe_storage_offset}{maybe_dtype}{maybe_tensor_metadata})  # {name}"
+            "reader.tensor("
+            + ", ".join([storage, str(tuple(t.shape)), *args])
+            + f")  # {name}"
         )
 
     # TODO: this doesn't actually symint atm

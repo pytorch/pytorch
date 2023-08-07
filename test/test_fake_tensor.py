@@ -13,20 +13,22 @@ from torch._subclasses.fake_tensor import (
     FakeTensorMode,
     FakeTensorConverter,
     DynamicOutputShapeException,
+    UnsupportedOperatorException,
 )
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, OpDTypes
+from torch.testing._internal.common_cuda import SM80OrLater, PLATFORM_SUPPORTS_FUSED_SDPA
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch._dynamo.testing import rand_strided
 from torch.testing import FileCheck
-from torch import nn
 import unittest
 import torch._prims as prims
 import contextlib
 import weakref
 import copy
 import torch._functorch.config
+import torch.testing._internal.optests as optests
 from unittest.mock import patch
 
 from torch import distributed as dist
@@ -71,6 +73,21 @@ class FakeTensorTest(TestCase):
             y = mode.from_tensor(y, memoized_only=True)
             self.assertIs(y, None)
 
+    def test_custom_op_fallback(self):
+        from torch.library import Library, impl
+
+        test_lib = Library("my_test_op", "DEF")
+        test_lib.define('foo(Tensor self) -> Tensor')
+
+        @impl(test_lib, 'foo', 'CPU')
+        def foo_impl(self):
+            return self.cos()
+
+        x = torch.empty(2, 2, device="cpu")
+        with self.assertRaisesRegex(UnsupportedOperatorException, "my_test_op.foo.default"):
+            with FakeTensorMode(allow_fallback_kernels=True) as mode:
+                x = mode.from_tensor(x)
+                torch.ops.my_test_op.foo(x)
 
     def test_parameter_instantiation(self):
         with FakeTensorMode():
@@ -162,6 +179,14 @@ class FakeTensorTest(TestCase):
                 x = torch.rand([16, 1], device=device)
                 x[..., 0] = 0
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_device_inplace_copy(self):
+        with FakeTensorMode():
+            x = torch.rand([8, 8], device="cpu")
+            y = torch.rand([8, 8], device="cuda")
+            assert x.copy_(y).device.type == "cpu"
+            assert y.copy_(x).device.type == "cuda"
+
     def test_fake_dispatch_keys(self):
         with FakeTensorMode():
             x = torch.rand([4])
@@ -187,6 +212,11 @@ class FakeTensorTest(TestCase):
             out = y + y
 
         self.assertTrue(isinstance(out, FakeTensor))
+
+    def test_full(self):
+        # Test torch.full returns tensor with correct dtype
+        with torch._subclasses.CrossRefFakeMode():
+            y = torch.full((4, 4), 1)
 
     def check_function_with_fake(self, fn):
         out = fn()
@@ -469,22 +499,6 @@ class FakeTensorTest(TestCase):
                 self.assertEqual(h_n.shape, (D * num_layers, N, H_out))
                 self.assertEqual(c_n.shape, (D * num_layers, N, hidden_size))
 
-    @skipIfRocm
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_fallback_memory_prop(self):
-        m = nn.Conv2d(16, 33, 3, stride=2, device="cuda", dtype=torch.half)
-        m = m.to(memory_format=torch.channels_last)
-        mode = FakeTensorMode()
-        # TODO: module.to() doesn't work because it assigns .data, which is ignored
-        with torch._subclasses.fake_tensor.FakeCopyMode(mode):
-            mod_copied = copy.deepcopy(m)
-
-        with mode:
-            input = torch.rand(20, 16, 50, 100, dtype=torch.half, device="cuda").to(memory_format=torch.channels_last)
-            out = mod_copied(input)
-            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-            self.checkType(out, "cuda", [20, 33, 24, 49])
-
     def test_data_dependent_operator(self):
         with FakeTensorMode(allow_fallback_kernels=False):
             x = torch.rand([10, 10])
@@ -553,6 +567,23 @@ class FakeTensorTest(TestCase):
 
         with patch.object(torch._functorch.config, "fake_tensor_allow_meta", False):
             self.assertRaises(Exception, run_meta)
+
+    def test_embedding_bag_meta(self):
+        def f():
+            # This behavior was originally unintentional but we see people
+            # relying on it
+            embedding = torch.nn.EmbeddingBag(10, 3, mode='sum', device='meta')
+            input = torch.tensor([1, 2, 4, 5, 4, 3, 2, 9], dtype=torch.long)
+            offsets = torch.tensor([0, 4], dtype=torch.long)
+            return embedding(input, offsets)
+
+        real_out = f()
+        with FakeTensorMode():
+            fake_out = f()
+
+        for r, f in zip(real_out, fake_out):
+            self.assertEqual(r.size(), f.size())
+            self.assertEqual(r.device, f.device)
 
     def test_mixed_real_and_fake_inputs(self):
         class _TestPattern(torch.nn.Module):
@@ -631,6 +662,13 @@ class FakeTensorTest(TestCase):
         self.checkType(r2, "cuda", (4, 4))
         self.checkType(r3, "cpu", (4, 4))
         self.checkType(out, "cpu", (4, 4))
+
+    def test__adaptive_avg_pool2d_backward(self):
+        with FakeTensorMode():
+            grad_out = torch.rand(2, 3, 4, 4)
+            inp = torch.rand(2, 3, 4, 4).to(memory_format=torch.channels_last)
+            grad_in = torch.ops.aten._adaptive_avg_pool2d_backward(grad_out, inp)
+            self.assertTrue(torch._prims_common.suggest_memory_format(grad_in) == torch.channels_last)
 
 
 class FakeTensorConstHandling(TestCase):
@@ -741,12 +779,7 @@ class FakeTensorOpInfoTest(TestCase):
         for sample_input in sample_inputs_itr:
             args = (sample_input.input,) + sample_input.args
             kwargs = sample_input.kwargs
-        with torch._subclasses.CrossRefFakeMode():
-            try:
-                op(*args, **kwargs)
-            except DynamicOutputShapeException:
-                if op.name not in data_dependent_outputs:
-                    raise
+            optests.fake_check(op, args, kwargs, op.name in data_dependent_outputs)
 
 
 class FakeTensorConverterTest(TestCase):
@@ -827,7 +860,7 @@ class FakeTensorConverterTest(TestCase):
         self.assertEqual(out.device.type, "cpu")
 
     def test_multiple_modes(self):
-        t = torch.rand(([4]))
+        t = torch.rand([4])
         t2 = torch.rand([4])
         with FakeTensorMode() as m:
             with FakeTensorMode() as m2:
@@ -965,6 +998,32 @@ class FakeTensorOperatorInvariants(TestCase):
 
             self.assertEqual(ref.size(), meta_out.size())
 
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
+    def test_flash_attention(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, arg1, arg2, arg3):
+                torch.ops.aten._scaled_dot_product_flash_attention(arg1, arg2, arg3)
+
+        args_new = [
+            ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
+            ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
+            ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
+        ]
+
+        args = [rand_strided(bsz, num_heads, seq_len, head_dim) for
+                (bsz, num_heads, seq_len, head_dim) in args_new]
+        try:
+            with torch._subclasses.CrossRefFakeMode():
+                Repro()(*args)
+        except RuntimeError as e:
+            # We expect the cross ref to succed for the first output to fail
+            # for the rng state, see Note [Seed and Offset]
+            self.assertTrue("output[0]" not in str(e))
+            self.assertTrue("found mismatched tensor metadata for output[6]: Devices cpu and cuda:0 are not equal!" in str(e))
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")

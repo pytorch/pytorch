@@ -79,20 +79,6 @@ namespace at::native {
 
 using namespace at::sparse;
 // --------------------------------------------------------------------
-// Utility functions
-// --------------------------------------------------------------------
-
-namespace {
-
-  inline SparseTensor get_result_tensor_for_unary_op(const SparseTensor& input) {
-    if (c10::isIntegralType(input.scalar_type(), /*includeBool=*/true)) {
-      return at::empty_like(input, input.options().dtype(c10::get_default_dtype()));
-    }
-    return at::empty_like(input);
-  }
-}
-
-// --------------------------------------------------------------------
 // zero_(SparseTensor)
 // --------------------------------------------------------------------
 
@@ -281,7 +267,7 @@ Tensor& div_sparse_(Tensor& self, const Tensor& value) {
   return div_out_sparse_zerodim(self, value, self);
 }
 
-SparseTensor& div_out_sparse_scalar(const SparseTensor& t, Scalar value, SparseTensor& r) {
+static SparseTensor& div_out_sparse_scalar(const SparseTensor& t, Scalar value, SparseTensor& r) {
   return div_out_sparse_zerodim(t, wrapped_scalar_tensor(value), r);
 }
 
@@ -298,7 +284,7 @@ Tensor& div_sparse_(Tensor& self, const Tensor& value, c10::optional<c10::string
   return div_out_sparse_zerodim(self, value, std::move(rounding_mode), self);
 }
 
-SparseTensor& div_out_sparse_scalar(const SparseTensor& t, Scalar value, c10::optional<c10::string_view> rounding_mode, SparseTensor& r) {
+static SparseTensor& div_out_sparse_scalar(const SparseTensor& t, Scalar value, c10::optional<c10::string_view> rounding_mode, SparseTensor& r) {
   return div_out_sparse_zerodim(t, wrapped_scalar_tensor(value), std::move(rounding_mode), r);
 }
 
@@ -361,7 +347,7 @@ Tensor& floor_divide_sparse_(Tensor& self, const Tensor& value) {
   return floor_divide_out_sparse_zerodim(self, value, self);
 }
 
-SparseTensor& floor_divide_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, const Scalar& value) {
+static SparseTensor& floor_divide_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, const Scalar& value) {
   return floor_divide_out_sparse_zerodim(t, wrapped_scalar_tensor(value), r);
 }
 
@@ -459,7 +445,7 @@ Tensor& sub_out_sparse(const Tensor& self, const Tensor& other, const Scalar& al
 }
 
 
-SparseTensor& add_out_sparse_contiguous(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, const Scalar& value, ScalarType commonDtype) {
+static SparseTensor& add_out_sparse_contiguous(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, const Scalar& value, ScalarType commonDtype) {
     // saving those because they can be overwritten when doing in-place operations
     int64_t t_nnz = t._nnz(), s_nnz = src._nnz(), max_nnz = t_nnz + s_nnz;
     bool coalesced = t.is_coalesced() && src.is_coalesced();
@@ -547,7 +533,7 @@ SparseTensor& add_out_sparse_contiguous(SparseTensor& r, const SparseTensor& t, 
     return r._coalesced_(coalesced);
 }
 
-SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, const Scalar& value, ScalarType commonDtype) {
+static SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, const Scalar& value, ScalarType commonDtype) {
     Tensor t_values = t._values().to(commonDtype);
     Tensor s_values = src._values().to(commonDtype);
 
@@ -1173,7 +1159,8 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
       s_i++;
     }
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::BFloat16, at::ScalarType::Half,
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        at::ScalarType::ComplexHalf, at::ScalarType::BFloat16, at::ScalarType::Half,
         commonDtype, "mul_out_sparse", [&] {
           auto r_accessor = r_buffer.accessor<scalar_t, 1>();
           auto t_accessor = t_values.accessor<scalar_t, 1>();
@@ -1235,6 +1222,10 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
     int64_t row = indices_accessor[0][i];
     int64_t col = indices_accessor[1][i];
     if (col >= 0 && col < dim_j && row >= 0 && row < dim_i) {
+      // AXPY call is no-op over an empty vector
+      if (dim_k == 0) {
+        continue;
+      }
       at::native::cpublas::axpy<scalar_t>(dim_k,
             cast_alpha * val,
             dense_ptr + col * dense_stride0, dense_stride1,
@@ -1249,7 +1240,7 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
   }
 };
 
-Tensor& s_addmm_out_sparse_dense_cpu(
+static Tensor& s_addmm_out_sparse_dense_cpu(
     Tensor& r,
     const Tensor& t,
     const SparseTensor& sparse_,
@@ -1337,7 +1328,7 @@ Tensor& addmm_out_sparse_dense_cpu(
   return s_addmm_out_sparse_dense_cpu(result, *b_self, mat1, mat2, beta, alpha);
 }
 
-Tensor s_addmm_sparse_dense_cpu(
+static Tensor s_addmm_sparse_dense_cpu(
     const Tensor& t,
     const SparseTensor& sparse,
     const Tensor& dense,

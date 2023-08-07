@@ -1629,8 +1629,8 @@ class TestOperators(hu.HypothesisTestCase):
         c0 = np.ones([10, 1, 2, 16]).astype(np.float32)
         c1 = np.ones([10, 16, 2, 16]).astype(np.float32)
         c2 = np.ones([10, 16, 2, 1]).astype(np.float32)
-        # index = np.array([0, 1, 2, 1, 4], dtype=np.int)
-        # lengths = np.array([3, 2], dtype=np.int)
+        # index = np.array([0, 1, 2, 1, 4], dtype=int)
+        # lengths = np.array([3, 2], dtype=int)
         index = np.array([0, 1, 2, 1, 4], np.int64)
         lengths = np.array([3, 2], np.int32)
 
