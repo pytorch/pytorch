@@ -50,6 +50,12 @@ class DummyModule:
     def current_device():
         return 0
 
+class DummyBackendModule():
+
+    @staticmethod
+    def is_built():
+        return True
+
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
 class TestCppExtensionOpenRgistration(common.TestCase):
     """Tests Open Device Registration with C++ extensions.
@@ -476,6 +482,15 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertEqual(z_cpu, z[0])
             self.assertEqual(z_cpu, z[1])
 
+        def test_open_device_backend_register():
+            with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
+                torch.backends._register_backend_module('ooo', DummyBackendModule)
+            torch.utils.rename_privateuse1_backend('foo')
+            torch.backends._register_backend_module('foo', DummyBackendModule)
+            with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
+                torch.backends._register_backend_module('foo', DummyBackendModule)
+            self.assertTrue(torch.backends.foo.is_built())
+
         test_base_device_registration()
         test_before_common_registration()
         test_common_registration()
@@ -497,6 +512,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         test_open_device_tensor_type_fallback()
         test_open_device_tensorlist_type_fallback()
+        test_open_device_backend_register()
 
 
 if __name__ == "__main__":
