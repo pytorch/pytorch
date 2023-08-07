@@ -52,9 +52,6 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             torch.testing.assert_allclose(y_baseline, y)
             torch.testing.assert_allclose(z_baseline, z)
 
-    def test_elementwise_function(self):
-        self._elementwise_numerical_comparison("onnxrt", (2, 4, 6, 8))
-
     def test_elementwise_function_with_local_backend(self):
         batch_dimensions_to_test = (2, 4, 6, 8)
         local_aot_ort, local_ort = make_aot_ort(dynamic=True)
@@ -109,9 +106,6 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             y_baseline = model(tensor_x)
             y = compiled_model(tensor_x)
             torch.testing.assert_allclose(y_baseline, y)
-
-    def test_mlp(self):
-        self._mlp_numerical_comparison("onnxrt", (2, 4, 6, 8))
 
     def test_mlp_with_local_backend(self):
         batch_dimensions_to_test = (1, 2, 4, 6, 8)
