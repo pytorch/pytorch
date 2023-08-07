@@ -1,7 +1,7 @@
 import itertools
 import logging
 import operator
-from typing import Callable, List, Sequence, Tuple, Union, Any
+from typing import Callable, List, Sequence, Tuple, Union, Any, Optional
 
 import numpy
 
@@ -446,7 +446,7 @@ class SplitCatSimplifier:
         split_sections,
         next_users,
         user_inputs_list: List[List[Union[torch.fx.Node, Tuple[int, int]]]],
-    ) -> List[Tuple[int, int]]:
+    ) -> Optional[List[Tuple[int, int]]]:
         ranges = set()
         for user_node, user_inputs in zip(next_users, user_inputs_list):
             ranges |= {
@@ -464,7 +464,7 @@ class SplitCatSimplifier:
             split_ranges,
         ):  # This need not be a strict condition
             # However, we keep it now for simplicity.
-            return # type: ignore[return-value]
+            return None
         split_ranges = self.fill_gaps(split_ranges, 0, cumulative_sizes[-1])
         if len(split_sections) == len(split_ranges):  # Simplification not possible
             return # type: ignore[return-value]
@@ -742,12 +742,12 @@ class UnbindCatRemover(SplitCatSimplifier):
         split_sections,
         next_users,
         user_inputs_list: List[List[Union[torch.fx.Node, Tuple[int, int]]]],
-    ) -> List[Tuple[int, int]]:
+    ) -> Optional[List[Tuple[int, int]]]:
         simplified_split_ranges = super().get_simplified_split_ranges(
             split_sections, next_users, user_inputs_list
         )
         if not simplified_split_ranges or len(simplified_split_ranges) != 1:
-            return None # type: ignore[return-value]
+            return None
         return simplified_split_ranges
 
     def get_transform_params(
