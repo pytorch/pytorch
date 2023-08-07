@@ -2012,12 +2012,17 @@ class InstructionTranslator(InstructionTranslatorBase):
                 ), "Export without one graph - something has gone wrong."
 
             vars = list(code_options["co_varnames"])
-            vars.extend(x for x in self.cell_and_freevars() if x not in vars)
+            cells_and_freevars = [x for x in self.cell_and_freevars() if x not in vars]
+            vars.extend(cells_and_freevars)
+            cells_and_freevars_set = set(cells_and_freevars)
 
             self.symbolic_locals = collections.OrderedDict(
                 (
                     k,
-                    VariableBuilder(self, LocalSource(k))(f_locals[k]),
+                    VariableBuilder(
+                        self,
+                        LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
+                    )(f_locals[k]),
                 )
                 for k in vars
                 if k in f_locals
