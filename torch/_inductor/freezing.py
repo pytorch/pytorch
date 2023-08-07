@@ -97,6 +97,15 @@ class ConstantFolder(torch.fx.Interpreter):
             else return_true
         )
 
+    def is_impure(self, node: torch.fx.node.Node):
+        if node.target == torch.ops.quantized_decomposed.dequantize_per_channel.default:
+            # For the pattern fp32_weight -> quantized_decomposed.quantize_per_channel.default
+            # -> quantized_decomposed.dequantize_per_channel.default
+            # We only folding fp32_weight -> quantized_decomposed.quantize_per_channel.default into
+            # int8_weight and leave quantized_decomposed.dequantize_per_channel.default in graph to be fused
+            return True
+        return False
+
     def run_node(self, node):
         aten = torch.ops.aten
         args, kwargs = self.fetch_args_kwargs_from_env(node)
@@ -138,6 +147,9 @@ class ConstantFolder(torch.fx.Interpreter):
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
             if not self.insertable_tensor_check(out):
                 return out
+
+            if self.is_impure(node):
+                return self.unknown_value
 
             self.node_replacements[node] = out
 
