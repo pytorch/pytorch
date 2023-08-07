@@ -209,6 +209,29 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_nodes = 1
             self._test_common(mod, (v,), matcher_count, matcher_nodes)
 
+    def test_linear_used_from_multiple_places(self):
+        class M(torch.nn.Module):
+            def __init__(self, in_channel, out_channel) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(in_channel, out_channel)
+
+            def forward(self, x):
+                res = self.linear(x)
+                res = F.relu(res)
+                res = self.linear(res)
+                return res
+
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            with torch.no_grad():
+                mod = M(224, 224).bfloat16().eval()
+                v = torch.randn(224, 224, dtype=torch.bfloat16)
+                # packing pass(2 times) + relu fusion.
+                matcher_count = 3
+                matcher_nodes = 4
+                self._test_common(
+                    mod, (v,), matcher_count, matcher_nodes, rtol=1e-2, atol=1e-2
+                )
+
     def test_conv_transpose2d_unary(self):
         class M(torch.nn.Module):
             def __init__(

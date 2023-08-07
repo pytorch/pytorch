@@ -128,53 +128,6 @@ class CPUReproTests(TestCase):
             self.assertTrue(conv_seen)
 
     @patch("torch.cuda.is_available", lambda: False)
-    def test_conv2d_bn_mixed_dtype(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    3,
-                    16,
-                    kernel_size=3,
-                    stride=1,
-                    padding=1,
-                    bias=False,
-                    dtype=torch.bfloat16,
-                )
-                self.bn = torch.nn.BatchNorm2d(
-                    16, eps=0.001, momentum=0.1, affine=True, track_running_stats=True
-                )
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = self.bn(x)
-                return x
-
-        v = torch.randn(1, 3, 64, 64, dtype=torch.bfloat16)
-        mod = Model().eval()
-        with torch.no_grad():
-            self.common(
-                mod,
-                (v,),
-            )
-
-    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_conv2d_packed(self):
-        options = itertools.product([[3, 56, 56]], [True, False], [0, (0,)])
-        for x_shape, mode_train, padding in options:
-            mod = torch.nn.Sequential(
-                torch.nn.Conv2d(3, 64, 3, 3, padding=padding)
-            ).train(mode=mode_train)
-            v = torch.randn(x_shape, dtype=torch.float32)
-
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
-
-    @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_autocast(self):
         v = torch.randn(1, 3, 28, 18, dtype=torch.float32)
         mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).eval()
@@ -231,69 +184,6 @@ class CPUReproTests(TestCase):
                 mod,
                 (x,),
             )
-
-    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_linear_used_from_multiple_places(self):
-        class M(torch.nn.Module):
-            def __init__(self, in_channel, out_channel) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(in_channel, out_channel)
-
-            def forward(self, x):
-                res = self.linear(x)
-                res = F.relu(res)
-                res = self.linear(res)
-                return res
-
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-            with torch.no_grad():
-                m = M(224, 224).bfloat16().eval()
-                m_opt = torch.compile(m)
-                x = torch.randn(224, 224, dtype=torch.bfloat16)
-                m_opt(x)
-                self.assertEqual(m(x), m_opt(x))
-
-    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_linear_packed(self):
-        options = itertools.product(
-            [[2, 3, 10], [2, 10], [10], [2, 0]], [3, 0], [True, False]
-        )
-        for input_shape, out_dim, bias in options:
-            mod = torch.nn.Sequential(
-                torch.nn.Linear(input_shape[-1], out_dim, bias=bias)
-            ).eval()
-
-            v = torch.randn(input_shape)
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
-            if torch.ops.mkldnn._is_mkldnn_bf16_supported() and len(input_shape) > 1:
-                mod = mod.to(torch.bfloat16)
-                v = v.to(torch.bfloat16)
-                with torch.no_grad():
-                    self.common(
-                        mod,
-                        (v,),
-                    )
-
-    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_conv_transpose2d_packed_cpu(self):
-        options = itertools.product([[1, 3, 28, 28], [3, 28, 28]], [0, (0,)])
-        for x_shape, padding in options:
-            mod = torch.nn.Sequential(
-                torch.nn.ConvTranspose2d(3, 64, 3, 3, padding=padding)
-            ).eval()
-            v = torch.randn(x_shape, dtype=torch.float32)
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
 
     @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
