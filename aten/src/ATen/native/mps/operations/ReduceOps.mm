@@ -12,6 +12,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_cdist_forward_native.h>
 #include <ATen/ops/all_native.h>
 #include <ATen/ops/amax_native.h>
 #include <ATen/ops/amin_native.h>
@@ -19,15 +20,21 @@
 #include <ATen/ops/any_native.h>
 #include <ATen/ops/argmax_native.h>
 #include <ATen/ops/argmin_native.h>
+#include <ATen/ops/count_nonzero_native.h>
 #include <ATen/ops/linalg_vector_norm_native.h>
 #include <ATen/ops/max_native.h>
 #include <ATen/ops/mean_native.h>
 #include <ATen/ops/median.h>
+#include <ATen/ops/median_native.h>
 #include <ATen/ops/min_native.h>
+#include <ATen/ops/nansum_native.h>
 #include <ATen/ops/norm_native.h>
 #include <ATen/ops/prod_native.h>
+#include <ATen/ops/std_native.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/sum_native.h>
+#include <ATen/ops/trace_native.h>
+#include <ATen/ops/var_native.h>
 #endif
 
 namespace at::native {
@@ -53,12 +60,12 @@ enum MPSReductionType {
 
 using namespace mps;
 
-void set_apparent_shapes(NSMutableArray<NSNumber*>*& apparent_out_shape,
-                         NSMutableArray<NSNumber*>*& apparent_in_shape,
-                         int64_t num_reduce_dims,
-                         int64_t num_output_dims,
-                         const IntArrayRef& input_shape,
-                         NSMutableArray<NSNumber*>*& axes) {
+static void set_apparent_shapes(NSMutableArray<NSNumber*>*& apparent_out_shape,
+                                NSMutableArray<NSNumber*>*& apparent_in_shape,
+                                int64_t num_reduce_dims,
+                                int64_t num_output_dims,
+                                const IntArrayRef& input_shape,
+                                NSMutableArray<NSNumber*>*& axes) {
   if (num_reduce_dims == 0) {
     /* Output shape becomes a one
      * Input shape becomes flattened
@@ -92,10 +99,10 @@ void set_apparent_shapes(NSMutableArray<NSNumber*>*& apparent_out_shape,
 }
 
 // Helper function to set the axes of reduction
-void set_axes(NSMutableArray<NSNumber*>*& axes,
-              int64_t num_reduce_dims,
-              OptionalIntArrayRef opt_dim,
-              int64_t num_input_dims) {
+static void set_axes(NSMutableArray<NSNumber*>*& axes,
+                     int64_t num_reduce_dims,
+                     OptionalIntArrayRef opt_dim,
+                     int64_t num_input_dims) {
   if (num_reduce_dims == 0) {
     axes = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
     axes[0] = @0;
@@ -110,12 +117,12 @@ void set_axes(NSMutableArray<NSNumber*>*& axes,
 }
 
 // Helper function to prepare axes and tensor shapes
-void set_axes_and_shapes(const IntArrayRef& input_shape,
-                         OptionalIntArrayRef opt_dims,
-                         NSMutableArray<NSNumber*>*& axes,
-                         NSMutableArray<NSNumber*>*& apparent_input_shape,
-                         NSMutableArray<NSNumber*>*& apparent_output_shape,
-                         NSMutableArray<NSNumber*>*& output_shape) {
+static void set_axes_and_shapes(const IntArrayRef& input_shape,
+                                OptionalIntArrayRef opt_dims,
+                                NSMutableArray<NSNumber*>*& axes,
+                                NSMutableArray<NSNumber*>*& apparent_input_shape,
+                                NSMutableArray<NSNumber*>*& apparent_output_shape,
+                                NSMutableArray<NSNumber*>*& output_shape) {
   int64_t num_input_dims = input_shape.size();
   int64_t num_reduce_dims = opt_dims.has_value() ? opt_dims.value().size() : 0;
   int64_t num_output_dims;
@@ -137,13 +144,13 @@ void set_axes_and_shapes(const IntArrayRef& input_shape,
   }
 }
 
-void reduction_out_mps(const Tensor& input_t,
-                       OptionalIntArrayRef opt_dim,
-                       bool keepdim,
-                       c10::optional<ScalarType> dtype,
-                       const Tensor& output_t,
-                       MPSReductionType reduction_type,
-                       const std::string& func_name) {
+static void reduction_out_mps(const Tensor& input_t,
+                              OptionalIntArrayRef opt_dim,
+                              bool keepdim,
+                              c10::optional<ScalarType> dtype,
+                              const Tensor& output_t,
+                              MPSReductionType reduction_type,
+                              const std::string& func_name) {
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, func_name);
   bool canSqueezeLastDim = true;
@@ -282,16 +289,16 @@ void reduction_out_mps(const Tensor& input_t,
   }
 }
 
-void impl_func_norm_mps(const Tensor& input_tensor,
-                        const Tensor& other_tensor,
-                        const OptionalScalarRef& opt_p,
-                        IntArrayRef dim,
-                        bool keepdim,
-                        c10::optional<ScalarType> opt_dtype,
-                        const Tensor& output_t,
-                        bool cdist = false,
-                        c10::optional<IntArrayRef> input_broadcasted_shape = c10::nullopt,
-                        NormOpBlock normOpBlock = nullptr) {
+static void impl_func_norm_mps(const Tensor& input_tensor,
+                               const Tensor& other_tensor,
+                               const OptionalScalarRef& opt_p,
+                               IntArrayRef dim,
+                               bool keepdim,
+                               c10::optional<ScalarType> opt_dtype,
+                               const Tensor& output_t,
+                               bool cdist = false,
+                               c10::optional<IntArrayRef> input_broadcasted_shape = c10::nullopt,
+                               NormOpBlock normOpBlock = nullptr) {
   auto p = opt_p.has_value() ? opt_p.get().to<double>() : Scalar(2.0).to<double>();
   if (input_tensor.numel() == 0) {
     output_t.fill_((p < 0) ? INFINITY : 0);
@@ -432,11 +439,11 @@ void impl_func_norm_mps(const Tensor& input_tensor,
   }
 }
 
-Tensor std_var_common_impl_mps(const Tensor& input_t,
-                               at::OptionalIntArrayRef dim,
-                               const c10::optional<Scalar>& correction,
-                               bool keepdim,
-                               StdVarType stdVarType) {
+static Tensor std_var_common_impl_mps(const Tensor& input_t,
+                                      at::OptionalIntArrayRef dim,
+                                      const c10::optional<Scalar>& correction,
+                                      bool keepdim,
+                                      StdVarType stdVarType) {
   using CachedGraph = MPSUnaryCachedGraph;
 
   IntArrayRef input_shape = input_t.sizes();
@@ -609,7 +616,7 @@ Tensor std_var_common_impl_mps(const Tensor& input_t,
   return output_t;
 }
 
-Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction_type, const std::string& func_name) {
+static Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction_type, const std::string& func_name) {
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "min_max");
 
@@ -665,13 +672,13 @@ Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction_type, 
   return output_t;
 }
 
-void min_max_out_mps(const Tensor& input_t,
-                     int64_t dim,
-                     bool keepdim,
-                     const Tensor& output_t,
-                     const Tensor& indices_t,
-                     MPSReductionType reduction_type,
-                     const std::string& func_name) {
+static void min_max_out_mps(const Tensor& input_t,
+                            int64_t dim,
+                            bool keepdim,
+                            const Tensor& output_t,
+                            const Tensor& indices_t,
+                            MPSReductionType reduction_type,
+                            const std::string& func_name) {
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "min_max_out");
 
@@ -762,11 +769,11 @@ void min_max_out_mps(const Tensor& input_t,
 }
 
 // Min/Max with dim
-std::tuple<Tensor, Tensor> min_max_mps_impl(const Tensor& input_t,
-                                            int64_t dim,
-                                            bool keepdim,
-                                            MPSReductionType reduction_type,
-                                            const std::string& func_name) {
+static std::tuple<Tensor, Tensor> min_max_mps_impl(const Tensor& input_t,
+                                                   int64_t dim,
+                                                   bool keepdim,
+                                                   MPSReductionType reduction_type,
+                                                   const std::string& func_name) {
   int64_t dim_ = maybe_wrap_dim(dim, input_t.dim());
   native::zero_numel_check_dims(input_t, dim_, "max()");
 
@@ -818,12 +825,12 @@ std::tuple<Tensor, Tensor> min_max_mps_impl(const Tensor& input_t,
   return std::tuple<Tensor, Tensor>{output_t, indices_t};
 }
 
-void argmax_argmin_out_mps(const Tensor& input_t,
-                           c10::optional<int64_t> dim,
-                           bool keepdim,
-                           const Tensor& output_t,
-                           MPSReductionType reduction_type,
-                           const std::string& func_name) {
+static void argmax_argmin_out_mps(const Tensor& input_t,
+                                  c10::optional<int64_t> dim,
+                                  bool keepdim,
+                                  const Tensor& output_t,
+                                  MPSReductionType reduction_type,
+                                  const std::string& func_name) {
   using CachedGraph = MPSUnaryCachedGraph;
 
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
@@ -1467,12 +1474,12 @@ TORCH_IMPL_FUNC(argmin_out_mps)
 }
 
 // Max with dim
-std::tuple<Tensor, Tensor> max_mps(const Tensor& input_t, int64_t dim, bool keepdim) {
+static std::tuple<Tensor, Tensor> max_mps(const Tensor& input_t, int64_t dim, bool keepdim) {
   return mps::min_max_mps_impl(input_t, dim, keepdim, mps::MPSReductionType::MAX, "max_mps");
 }
 
 // Min with dim
-std::tuple<Tensor, Tensor> min_mps(const Tensor& input_t, int64_t dim, bool keepdim) {
+static std::tuple<Tensor, Tensor> min_mps(const Tensor& input_t, int64_t dim, bool keepdim) {
   return mps::min_max_mps_impl(input_t, dim, keepdim, mps::MPSReductionType::MIN, "min_mps");
 }
 
@@ -1540,12 +1547,12 @@ Tensor median_mps(const Tensor& input_t) {
   return output_t;
 }
 
-void median_out_mps(const Tensor& input_t,
-                    int64_t dim,
-                    bool keepdim,
-                    const Tensor& output_t,
-                    const Tensor& indices_t,
-                    const std::string& func_name) {
+static void median_out_mps(const Tensor& input_t,
+                           int64_t dim,
+                           bool keepdim,
+                           const Tensor& output_t,
+                           const Tensor& indices_t,
+                           const std::string& func_name) {
   using namespace mps;
 
   if (output_t.numel() == 0) {
@@ -1631,13 +1638,13 @@ void median_out_mps(const Tensor& input_t,
 }
 
 // in case mps sortWithTensor do not supported on macOS
-std::tuple<Tensor&, Tensor&> median_from_cpu(const Tensor& self,
-                                             int64_t dim,
-                                             bool keepdim,
-                                             Tensor& valuesI,
-                                             Tensor& indicesI,
-                                             IntArrayRef vec_out_shape,
-                                             IntArrayRef vec_apparent_out_shape) {
+static std::tuple<Tensor&, Tensor&> median_from_cpu(const Tensor& self,
+                                                    int64_t dim,
+                                                    bool keepdim,
+                                                    Tensor& valuesI,
+                                                    Tensor& indicesI,
+                                                    IntArrayRef vec_out_shape,
+                                                    IntArrayRef vec_apparent_out_shape) {
   Tensor values;
   Tensor indices;
   if (!keepdim) {
