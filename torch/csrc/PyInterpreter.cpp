@@ -659,19 +659,19 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
   TORCH_CHECK(
       py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
       "Symshape must be a list or a tuple");
-  py::list symints;
+  std::vector<c10::SymInt> symints;
   for (auto it = out.begin(); it != out.end(); it++) {
     auto elm = *it;
     auto si = py::cast<c10::SymInt>(elm);
     // TODO: the buffer will need to be made owning later
-    symints.append(si.as_int_unchecked());
+    symints.emplace_back(si);
   }
-
-  auto result = values_from_buffer(self, symints);
-  c10::SymInt* start = (c10::SymInt*)result[0];
-  int64_t len = result[1];
-
-  return c10::SymIntArrayRef(start, len);
+  // Allocate an array on the heap and copy elements from symints.
+  int64_t len = symints.size();
+  c10::SymInt* ptr = new c10::SymInt[len];
+  std::copy(symints.begin(), symints.end(), ptr);
+  auto ret = c10::SymIntArrayRef(ptr, len);
+  return ret;
   END_HANDLE_TH_ERRORS_PYBIND
 }
 
@@ -770,19 +770,18 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
   TORCH_CHECK(
       py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
       "Symshape must be a list or a tuple");
-  py::list symints;
+  std::vector<c10::SymInt> symints;
   for (auto it = out.begin(); it != out.end(); it++) {
     auto elm = *it;
-    auto si = torch::is_symint(elm) ? elm.cast<c10::SymInt>()
-                                    : c10::SymInt{py::cast<int64_t>(elm)};
-    symints.append(si.as_int_unchecked());
+    auto si = py::cast<c10::SymInt>(elm);
+    // TODO: the buffer will need to be made owning later
+    symints.emplace_back(si);
   }
-
-  auto result = values_from_buffer(self, symints);
-  c10::SymInt* start = (c10::SymInt*)result[0];
-  int64_t len = result[1];
-
-  return c10::SymIntArrayRef(start, len);
+  int64_t len = symints.size();
+  c10::SymInt* ptr = new c10::SymInt[len];
+  std::copy(symints.begin(), symints.end(), ptr);
+  auto ret = c10::SymIntArrayRef(ptr, len);
+  return ret;
   END_HANDLE_TH_ERRORS_PYBIND
 }
 

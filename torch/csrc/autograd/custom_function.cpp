@@ -2,29 +2,46 @@
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
-
+#include <ATen/NestedTensorImpl.h>
+#include <iostream>
 #include <utility>
 
 namespace torch {
 namespace autograd {
 
+NestedSizeInfo::NestedSizeInfo(c10::SymInt numel_, const Variable& nested_size_)
+  : numel(numel_),
+    nested_size(nested_size_) {}
+
 VariableInfo::VariableInfo(const Variable& var)
     : layout(var.layout()),
       device(var.device()),
       scalar_type(var.scalar_type()),
-      size(var.sym_sizes().vec()),
+      size(var.is_nested()
+        ? VariableInfoSizeType(
+          NestedSizeInfo(
+            var.sym_numel(),
+            var._nested_tensor_size()))
+        : VariableInfoSizeType(var.sym_sizes().vec())),
       requires_grad(var.requires_grad()),
       is_empty(false) {}
 
 VariableInfo::VariableInfo() : requires_grad(false), is_empty(true) {}
 
 Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
+  const NestedSizeInfo *nested_size_info = c10::get_if<NestedSizeInfo>(&size);
   if (is_empty) {
     // Return undefined tensor.
     return at::Tensor();
+  } else if (nested_size_info) {
+    TORCH_CHECK(false);
+    // auto buffer = at::zeros_symint(
+    //     {nested_size_info->numel}, at::TensorOptions(scalar_type).device(device).layout(layout));
+    // return at::_nested_view_from_buffer(buffer, nested_size_info->nested_size);
   } else {
+    auto *size_arr = c10::get_if<std::vector<c10::SymInt>>(&size);
     return at::zeros_symint(
-        size, at::TensorOptions(scalar_type).device(device).layout(layout));
+        *size_arr, at::TensorOptions(scalar_type).device(device).layout(layout));
   }
 }
 

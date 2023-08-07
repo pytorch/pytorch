@@ -39,8 +39,15 @@ Tensor TensorMaker::make_tensor() {
 
    Storage storage{Storage::use_byte_size_t{}, size_bytes, std::move(data_ptr), /*allocator=*/c10::GetAllocator(c10::kMeta), /*resizeable=*/resizeable_};
 
+   auto keys = c10::DispatchKeySet({opts_.computeDispatchKey()});
+   if (is_nested_) {
+    if (!is_fake_) {
+      keys = keys.add(c10::DispatchKey::NestedTensor);
+    }
+    keys = keys.add(c10::DispatchKey::AutogradNestedTensor);
+   }
    Tensor tensor = detail::make_tensor<TensorImpl>(
-       std::move(storage), opts_.computeDispatchKey(), opts_.dtype());
+       std::move(storage), keys, opts_.dtype());
 
   TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
   if (strides_) {

@@ -629,13 +629,15 @@ static PyObject* THPVariable_make_wrapper_subclass(
       "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, "
       "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
-      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
-      "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef? strides=None, "
+      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
+      "bool is_nested=False, bool is_fake=False)",
+      "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef strides=None, "
       "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
-      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
+      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
+      "bool is_nested=False, bool is_fake=False)",
   });
-  ParsedArgs<13> parsed_args{};
+  ParsedArgs<15> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
 
@@ -684,6 +686,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
                                        // it came from options
                  .options(options)
                  .resizeable_storage()
+                 .is_nested(r.toBool(13))
+                 .is_fake(r.toBool(14))
                  .make_tensor();
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
@@ -704,8 +708,18 @@ static PyObject* THPVariable_make_wrapper_subclass(
         /*allocator=*/c10::GetAllocator(c10::kMeta),
         /*resizeable=*/true};
 
+    auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
+    if (r.toBool(13)) {
+      // HACK: don't include the NestedTensor key if this is subclass holds
+      // fake tensors so that we go through the .sizes() path instead of
+      // _nested_tensor_sizes path.
+      if (!r.toBool(14)) {
+        keys = keys.add(c10::DispatchKey::NestedTensor);
+      }
+      keys = keys.add(c10::DispatchKey::AutogradNestedTensor);
+    }
     tensor = at::detail::make_tensor<TensorImpl>(
-        std::move(storage), options.computeDispatchKey(), options.dtype());
+        std::move(storage), keys, options.dtype());
 
     auto sym_sizes = r.symintlist(1);
     auto sym_strides = r.symintlistOptional(2);
@@ -727,9 +741,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {
-      TORCH_CHECK(
-          false,
-          "Setting sizes_strides_policy isn't supported for this overload")
+      tensor.unsafeGetTensorImpl()->set_python_custom_sizes_strides(
+          parseSizesStridesPolicyArgument(*sizes_strides_policy));
     }
   }
 

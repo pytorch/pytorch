@@ -391,7 +391,8 @@ class MetaConverter:
 
                 else:
                     is_leaf = safe_is_leaf(t)
-                    sizes, strides, storage_offset = sym_sizes_strides_storage_offset(t)
+                    if not t.is_nested:
+                        sizes, strides, storage_offset = sym_sizes_strides_storage_offset(t)
 
                     # If we have a subclass that desugars into dense tensors,
                     # perform our callback on each inner tensor.
@@ -411,6 +412,7 @@ class MetaConverter:
                         r = transform_subclass(
                             t,
                             lambda inner: callback(lambda: empty_create(inner)),
+                            source=source
                         )
                     else:
                         r = callback(
@@ -437,12 +439,13 @@ class MetaConverter:
                     swr = StorageWeakRef(s)
                     if (
                         swr not in self.storage_memo
-                        and r.stride() == strides
-                        and r.storage_offset() == storage_offset
+                        # and ((r.is_nested and r.buffer.stride() == strides) or (r.stride() == strides))
+                        # and r.storage_offset() == storage_offset
                     ):
                         # You're normal and happy, install the fresh storage into the memo
                         self.storage_memo[swr] = r.untyped_storage()
                     else:
+                        assert not r.is_nested
                         # You're in crazy town; somehow you gave us a tensor
                         # that wasn't a view, but had nonzero storage offset,
                         # nontrivial strides (such that clone() couldn't
@@ -540,7 +543,6 @@ class MetaConverter:
                     t.is_sparse_csr,
                     t.layout in [torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc],
                     t.is_quantized,
-                    t.is_nested,
                     t._is_view() and t._base is not None and t._base.is_sparse,
                     torch._is_functional_tensor(t),
                     t.device.type in ("lazy"),

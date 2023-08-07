@@ -146,14 +146,14 @@ def is_traceable_wrapper_subclass(t):
     tensor_like = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
     return tensor_like and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
 
-def transform_subclass(t, callback):
+def transform_subclass(t, callback, source=None):
     assert is_traceable_wrapper_subclass(t)
     # convert the tensor subclass into its constituent dense tensors,
     # and apply a transformation to each dense tensor.
     from torch.utils._pytree import tree_map_only
     flattened_tensors, ctx = type(t).__tensor_flatten__(t)
     transformed_tensors = tree_map_only(torch.Tensor, callback, flattened_tensors)
-    return type(t).__tensor_unflatten__(transformed_tensors, ctx)
+    return type(t).__tensor_unflatten__(transformed_tensors, ctx, source=source)
 
 # TODO: this.
 #def set_subclass_output_aliasing(func, outputs
