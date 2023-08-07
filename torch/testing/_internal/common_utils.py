@@ -2321,6 +2321,19 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
     def assertExpectedInline(self, actual, expect, skip=0):
         return super().assertExpectedInline(actual if isinstance(actual, str) else str(actual), expect, skip + 1)
 
+    # Munges exceptions that internally contain stack traces, using munge_exc
+    def assertExpectedInlineMunged(
+        self, exc_type, callable, expect, *, suppress_suffix=True
+    ):
+        try:
+            callable()
+        except exc_type as e:
+            self.assertExpectedInline(
+                munge_exc(e, suppress_suffix=suppress_suffix, skip=1), expect, skip=1
+            )
+            return
+        self.fail(msg="Did not raise when expected to")
+
     def assertLogs(self, logger=None, level=None):
         if logger is None:
             logger = logging.getLogger("torch")
@@ -4627,9 +4640,9 @@ class LazyVal:
     pass
 
 
-def munge_exc(e, suppress_suffix=True, file=None):
+def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=0):
     if file is None:
-        file = inspect.stack()[1].filename  # skip one frame
+        file = inspect.stack()[1 + skip].filename  # skip one frame
 
     s = str(e)
 
@@ -4650,6 +4663,9 @@ def munge_exc(e, suppress_suffix=True, file=None):
     s = re.sub(os.path.join(os.path.dirname(torch.__file__), ""), "", s)
     s = re.sub(r"\\", "/", s)  # for Windows
     if suppress_suffix:
-        s = re.sub(r"\nSet TORCH_LOGS.+", "", s, flags=re.DOTALL)
+        s = re.sub(r"\n*Set TORCH_LOGS.+", "", s, flags=re.DOTALL)
+        s = re.sub(r"\n*You can suppress this exception.+", "", s, flags=re.DOTALL)
+    if suppress_prefix:
+        s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.M)
     return s
