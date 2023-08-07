@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfTorchDynamo,
     suppress_warnings,
+    TEST_MKL,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase,
@@ -342,26 +343,22 @@ if not TEST_WITH_ROCM:
     inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
 else:
     # aten.miopen_batch_norm is unsupported for lowering
-    inductor_expected_failures_single_sample["cuda"]["nn.functional.batch_norm"] = {
-        f16,
-        f32,
-    }
-    inductor_expected_failures_single_sample["cuda"]["nn.functional.instance_norm"] = {
-        f16,
-        f32,
-    }
+    inductor_expected_failures_single_sample["cuda"].update({
+        "nn.functional.batch_norm": {f16, f32},
+        "nn.functional.instance_norm": {f16, f32},
+    })
+
+if not TEST_MKL:
+    inductor_expected_failures_single_sample["cpu"].update({
+        "fft.hfft2": {b8, i32, i64, f32, f64},
+        "fft.hfftn": {b8, i32, i64, f32, f64},
+        "fft.ihfft2": {b8, i32, i64, f32, f64},
+        "fft.ihfftn": {b8, i32, i64, f32, f64},
+    })
 
 inductor_should_fail_with_exception = defaultdict(dict)
-
 inductor_should_fail_with_exception["cpu"] = {}
-
-
-inductor_should_fail_with_exception["cuda"] = {
-    "__rpow__": {
-        i32: "Pow input must be floating point.",
-        i64: "Pow input must be floating point.",
-    }
-}
+inductor_should_fail_with_exception["cuda"] = {}
 
 
 def get_skips_and_xfails(from_dict, xfails=True):
