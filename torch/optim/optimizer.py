@@ -236,6 +236,46 @@ class Optimizer:
     _optimizer_load_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     _optimizer_load_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
 
+    @staticmethod
+    def _cast_state_to_match_params_hook(optimizer, state_dict) -> None:
+        # Validate the state_dict
+        groups = optimizer.param_groups
+        saved_groups = state_dict['param_groups']
+
+        if len(groups) != len(saved_groups):
+            raise ValueError("loaded state dict has a different number of "
+                             "parameter groups")
+        param_lens = (len(g['params']) for g in groups)
+        saved_lens = (len(g['params']) for g in saved_groups)
+        if any(p_len != s_len for p_len, s_len in zip(param_lens, saved_lens)):
+            raise ValueError("loaded state dict contains a parameter group "
+                             "that doesn't match the size of optimizer's group")
+
+        # Update the state_dict with casted values
+        id_map = dict(zip(chain.from_iterable(g['params'] for g in saved_groups),
+                      chain.from_iterable(g['params'] for g in groups)))
+
+        def _cast(param, value, param_id=None, param_groups=None, key=None):
+            r"""Make a deep copy of value, casting all tensors to device of param."""
+            if isinstance(value, torch.Tensor):
+                return Optimizer._process_value_according_to_param_policy(param, value, param_id, param_groups, key)
+            elif isinstance(value, dict):
+                return {k: _cast(param, v, param_id=param_id, param_groups=param_groups, key=k)
+                        for k, v in value.items()}
+            elif isinstance(value, Iterable):
+                return type(value)(_cast(param, v, param_id=param_id, param_groups=param_groups)
+                                   for v in value)  # type: ignore[call-arg]
+            else:
+                return value
+
+        # Cast state tensors to appropriate types in the state_dict
+        for k in state_dict['state'].keys():
+            v = state_dict['state'][k]
+            if k in id_map:
+                param = id_map[k]
+                state_dict['state'][k] = _cast(param, v, param_id=k, param_groups=saved_groups)
+
+
     def __init__(self, params: params_t, defaults: Dict[str, Any]) -> None:
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
@@ -244,6 +284,7 @@ class Optimizer:
         self._optimizer_state_dict_pre_hooks = OrderedDict()
         self._optimizer_state_dict_post_hooks = OrderedDict()
         self._optimizer_load_state_dict_pre_hooks = OrderedDict()
+        self.register_load_state_dict_pre_hook(Optimizer._cast_state_to_match_params_hook)
         self._optimizer_load_state_dict_post_hooks = OrderedDict()
 
         self._patch_step_function()
@@ -650,6 +691,13 @@ class Optimizer:
         calling ``load_state_dict`` on ``self``. The registered hook can be used to
         perform pre-processing before the ``load_state_dict`` call is made.
 
+        Note:
+            There is an automatically registered load_state_dict pre-hook which
+            casts the state to match the params in dtype and device. Set ``prepend``
+            to True in order to insert the your defined hook before this pre-processing,
+            otherwise, leaving ``prepend``=False will have your registered hook run
+            after the casting has taken place.
+
         Args:
             hook (Callable): The user defined hook to be registered.
             prepend (bool): If True, the provided pre ``hook`` will be fired before
@@ -720,44 +768,27 @@ class Optimizer:
             if hook_result is not None:
                 state_dict = hook_result
 
-        # Validate the state_dict
-        groups = self.param_groups
-
         # Deepcopy as we write into saved_groups later to update state
         saved_groups = deepcopy(state_dict['param_groups'])
 
+        # Validate the state_dict
+        groups = self.param_groups
         if len(groups) != len(saved_groups):
             raise ValueError("loaded state dict has a different number of "
                              "parameter groups")
-        param_lens = (len(g['params']) for g in groups)
-        saved_lens = (len(g['params']) for g in saved_groups)
-        if any(p_len != s_len for p_len, s_len in zip(param_lens, saved_lens)):
-            raise ValueError("loaded state dict contains a parameter group "
-                             "that doesn't match the size of optimizer's group")
 
         # Update the state
         id_map = dict(zip(chain.from_iterable(g['params'] for g in saved_groups),
                       chain.from_iterable(g['params'] for g in groups)))
 
-        def _cast(param, value, param_id=None, param_groups=None, key=None):
-            r"""Make a deep copy of value, casting all tensors to device of param."""
-            if isinstance(value, torch.Tensor):
-                return Optimizer._process_value_according_to_param_policy(param, value, param_id, param_groups, key)
-            elif isinstance(value, dict):
-                return {k: _cast(param, v, param_id=param_id, param_groups=param_groups, key=k) for k, v in value.items()}
-            elif isinstance(value, Iterable):
-                return type(value)(_cast(param, v, param_id=param_id, param_groups=param_groups) for v in value)  # type: ignore[call-arg]
-            else:
-                return value
-
-        # Copy state assigned to params (and cast tensors to appropriate types).
+        # Copy state assigned to params
         # State that is not assigned to params is copied as is (needed for
         # backward compatibility).
         state: DefaultDict[torch.Tensor, Dict[Any, Any]] = defaultdict(dict)
         for k, v in state_dict['state'].items():
             if k in id_map:
                 param = id_map[k]
-                state[param] = _cast(param, v, param_id=k, param_groups=state_dict['param_groups'])
+                state[param] = v
             else:
                 state[k] = v
 
@@ -767,6 +798,7 @@ class Optimizer:
             return new_group
         param_groups = [
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
+
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
         for post_hook in self._optimizer_load_state_dict_post_hooks.values():
