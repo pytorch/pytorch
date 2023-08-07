@@ -20,10 +20,10 @@ from torch.testing._internal.optests.compile_check import operator_compile_check
 from typing import *  # noqa: F403
 
 
-@unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-class TestCustomOpTesting(TestCase):
+class CustomOpTestCaseBase(TestCase):
+    test_ns = "_test_custom_op"
+
     def setUp(self):
-        self.test_ns = "_test_custom_op"
         self.libraries = []
 
     def tearDown(self):
@@ -49,9 +49,11 @@ class TestCustomOpTesting(TestCase):
         return result
 
     def get_op(self, qualname):
-        ns, name = qualname.split("::")
-        return getattr(getattr(torch.ops, ns), name).default
+        return torch._custom_op.impl.get_op(qualname)
 
+
+@unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+class TestCustomOpTesting(CustomOpTestCaseBase):
     @parametrize("check_gradients", (False, "auto"))
     @parametrize("dynamic", (True, False))
     def test_aot_autograd_check_degenerate_cases(
@@ -465,21 +467,8 @@ class TestCustomOpTesting(TestCase):
                 raise RuntimeError("abcd")
 
 
-class TestCustomOp(TestCase):
+class TestCustomOp(CustomOpTestCaseBase):
     test_ns = "_test_custom_op"
-
-    def tearDown(self):
-        import torch._custom_op
-
-        keys = list(torch._custom_op.impl.global_registry.keys())
-        for key in keys:
-            if not key.startswith(f"{TestCustomOp.test_ns}::"):
-                continue
-            torch._custom_op.impl.global_registry[key]._destroy()
-
-    def get_op(self, qualname):
-        ns, name = qualname.split("::")
-        return getattr(getattr(torch.ops, ns), name).default
 
     def test_invalid_schemas(self):
         # function schmea validation goes through torchgen, so this is just a
@@ -1452,9 +1441,41 @@ def forward(self, x_1):
 
         self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_impl_on_existing_op(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        @torch._custom_ops.impl(qualname)
+        def foo_impl(x):
+            return x.sin()
+
+        op = self.get_op(qualname)
+        x = torch.randn(3)
+        result = op(x)
+        self.assertEqual(result, x.sin())
+
+    @parametrize(
+        "key", ["CPU", "CUDA", "CompositeImplicitAutograd", "CompositeExplicitAutograd"]
+    )
+    def test_impl_on_existing_op_with_cpu_registration(self, key):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        def foo_impl(x):
+            return x.sin()
+
+        lib.impl("foo", foo_impl, key)
+        op = self.get_op(qualname)
+
+        with self.assertRaisesRegex(RuntimeError, "already has an implementation"):
+            custom_ops.impl(qualname, func=foo_impl)
+
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestCustomOpTesting, globals(), only_for=only_for)
+instantiate_parametrized_tests(TestCustomOp)
 
 if __name__ == "__main__":
     run_tests()

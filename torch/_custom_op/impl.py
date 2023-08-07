@@ -137,7 +137,7 @@ def custom_op(
         lib = library.Library(ns, "FRAGMENT")
         lib.define(schema_str)
         ophandle = find_ophandle_or_throw(ns, function_schema.name)
-        result = CustomOp(lib, ns, function_schema, function_schema.name, ophandle, _private_access=True)
+        result = CustomOp(lib, ns, function_schema, name, ophandle, _private_access=True)
 
         result.__name__ = func.__name__
         result.__module__ = func.__module__
@@ -182,13 +182,13 @@ class CustomOp:
                 "The CustomOp constructor is private and we do not guarantee "
                 "BC for it. Please use custom_op(...) to create a CustomOp object"
             )
-        name = f"{cpp_ns}::{str(operator_name.name)}"
+        name = f"{cpp_ns}::{operator_name}"
         self._schema = schema
         self._cpp_ns = cpp_ns
         self._lib: library.Library = lib
         self._ophandle: _C._DispatchOperatorHandle = ophandle
         # Has the name of the op, e.g. "foo". We cache here for convenience.
-        self._opname: str = str(operator_name)
+        self._opname: str = operator_name
         # this is _opname but with namespace. e.g. "custom::foo"
         self._qualname: str = name
         self.__name__ = None  # mypy requires this
@@ -298,12 +298,23 @@ class CustomOp:
 
         def inner(f):
             for device_type in set(device_types):
+                self._check_doesnt_have_library_impl(device_type)
                 self._register_impl(device_type, f, stacklevel=_stacklevel)
                 dispatch_key = SUPPORTED_DEVICE_TYPE_TO_KEY[device_type]
                 library.impl(self._lib, self._opname, dispatch_key)(f)
             return f
 
         return inner
+
+    def _check_doesnt_have_library_impl(self, device_type):
+        if self._has_impl(device_type):
+            return
+        key = SUPPORTED_DEVICE_TYPE_TO_KEY[device_type]
+        if _C._dispatch_has_computed_kernel_for_dispatch_key(self._qualname, key):
+            raise RuntimeError(
+                f"impl(..., device_types={device_type}): the operator {self._qualname} "
+                f"already has an implementation for this device type via a "
+                f"pre-existing torch.library or TORCH_LIBRARY registration.")
 
     def impl_factory(self) -> typing.Callable:
         r"""Register an implementation for a factory function."""
@@ -900,17 +911,43 @@ def report_error_callback(custom_op: typing.Any, key: str) -> None:
     )
 
 
+def custom_op_from_existing(op):
+    ns = op.namespace
+    lib = torch.library.Library(ns, "FRAGMENT")
+    name = op.name().split("::")[-1]
+    schema = FunctionSchema.parse(str(op._schema))
+    return CustomOp(lib, ns, schema, name, op, _private_access=True)
+
+
 def get_op(qualname):
-    ns, name = qualname.split("::")
-    return getattr(getattr(torch.ops, ns), name)
+    def error_not_found():
+        raise ValueError(
+            f"Could not find the operator {qualname}. Please make sure you have "
+            f"already registered the operator and (if registered from C++) "
+            f"loaded it via torch.ops.load_library.")
+
+    ns, name = parse_qualname(qualname)
+    if not hasattr(torch.ops, ns):
+        error_not_found()
+    opnamespace = getattr(torch.ops, ns)
+    if not hasattr(opnamespace, name):
+        error_not_found()
+    packet = getattr(opnamespace, name)
+    if not hasattr(packet, 'default'):
+        error_not_found()
+    return packet.default
 
 
-def _find_custom_op(qualname):
+def _find_custom_op(qualname, also_check_torch_library=False):
     if qualname in global_registry:
         return global_registry[qualname]
-    raise RuntimeError(
-        f"Could not find custom op \"{qualname}\". Did you register it via "
-        f"the torch._custom_ops API?")
+    if not also_check_torch_library:
+        raise RuntimeError(
+            f"Could not find custom op \"{qualname}\". Did you register it via "
+            f"the torch._custom_ops API?")
+    overload = get_op(qualname)
+    result = custom_op_from_existing(overload)
+    return result
 
 
 def _custom_op_with_schema(qualname, schema):
@@ -922,7 +959,7 @@ def _custom_op_with_schema(qualname, schema):
     lib = library.Library(ns, "FRAGMENT")
     lib.define(schema_str)
     ophandle = find_ophandle_or_throw(ns, function_schema.name)
-    result = CustomOp(lib, ns, function_schema, function_schema.name, ophandle, _private_access=True)
+    result = CustomOp(lib, ns, function_schema, name, ophandle, _private_access=True)
 
     library.impl(lib, result._opname, "Autograd")(
         autograd_kernel_indirection(weakref.proxy(result))
