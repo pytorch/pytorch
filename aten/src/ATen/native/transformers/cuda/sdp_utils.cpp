@@ -268,6 +268,8 @@ bool check_safe_kv_broadcast(at::Tensor param, bool debug) {
   return true;
 }
 
+// FlashAttentionV2 supports fused MQA/GQA in the kernel
+template <bool supports_gqa = false>
 bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
   // This is expected to be called after check_tensor_shapes ensuring that the
   // size() calls won't error since the inputs are all 4 dimensional
@@ -308,13 +310,11 @@ bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
   auto q_num_heads = params.query.sym_size(1);
   auto k_num_heads = params.key.sym_size(1);
   auto v_num_heads = params.value.sym_size(1);
-  bool same_num_heads =
-      q_num_heads == k_num_heads && q_num_heads == v_num_heads;
-
-  if (!(same_batch_size && same_num_heads)) {
+  bool same_kv_heads = k_num_heads == v_num_heads;
+  if (!(same_batch_size)){
     if (debug) {
       TORCH_WARN(
-          "For dense inputs, both fused kernels require query, key and value to have the same batch_size and num_heads. ",
+          "For dense inputs, both fused kernels require query, key and value to have the same batch_size. ",
           "Query.sizes(): ",
           params.query.sizes(),
           ", Key sizes(): ",
@@ -325,6 +325,50 @@ bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
     }
     return false;
   }
+  if (!(same_kv_heads)) {
+    if (debug) {
+      TORCH_WARN(
+          "For dense inputs, both fused kernels require key and value to have the same num_heads but got: ",
+          "Key sizes(): ",
+          params.key.sizes(),
+          ", Value sizes(): ",
+          params.value.sizes(),
+          " instead. To broadcast dense inputs, try using unsqueeze and expand_to before passing them into the kernel.");
+    }
+    return false;
+  }
+  // Check if grouped query attention is supported and validate the number of
+  // heads
+  if (supports_gqa && q_num_heads % k_num_heads != 0) {
+    if (debug) {
+      TORCH_WARN(
+          "FlashAttentionV2 only supports grouped query attention, where the number of heads in key/value must divide number of heads in query.",
+          "Got input Key sizes(): ",
+          params.key.sizes(),
+          ", Value sizes(): ",
+          params.value.sizes(),
+          " instead.");
+    }
+    return false;
+  }
+  // If grouped query attention is not supported, ensure query and key have the
+  // same number of heads
+  else if (!supports_gqa && q_num_heads != k_num_heads) {
+    if (debug) {
+      TORCH_WARN(
+          "MemoryEfficient attention requires query, key and value to have the same num_heads but got: ",
+          "Query.sizes(): ",
+          params.query.sizes(),
+          ", Key sizes(): ",
+          params.key.sizes(),
+          ", Value sizes(): ",
+          params.value.sizes(),
+          " instead.");
+    }
+    return false;
+  }
+
+  // If all checks pass, return true
   return true;
 }
 
@@ -582,7 +626,7 @@ bool use_flash_attention(sdp_params params, bool debug) {
   constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
       check_runtime_disabled_flash,
       check_tensor_shapes,
-      check_batch_size_and_num_heads,
+      check_batch_size_and_num_heads<true>, // supports_grouped_query_attention = true
       check_for_attn_mask,
       check_head_dim_size_flash,
       check_for_seq_len_0_nested_tensor,
