@@ -499,6 +499,8 @@ _OP_TO_ANNOTATOR = {
     "conv2d_bn": _annotate_conv2d_bn,
     "conv2d_bn_relu": _annotate_conv2d_bn_relu,
     "maxpool2d": _annotate_maxpool2d,
+    "add": _annotate_add,
+    "add_relu": _annotate_add_relu,
     # input output only gru
     "gru_io_only": _annotate_gru_io_only,
 }
