@@ -125,6 +125,8 @@ template <>
 void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
 template <>
 void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
+template <>
+void bgemm<at::Float8_e5m2>(CUDABLAS_BGEMM_ARGTYPES(at::Float8_e5m2));
 
 #if defined(USE_ROCM) && ROCM_VERSION <= 55000
 // ROCm 5.6 hipblas matches the const Dtype *A API, but prior hipblas does not.

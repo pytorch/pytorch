@@ -162,9 +162,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
   IntArrayRef self__sizes;
-  bool useLtInterface = false;
   static bool disable_addmm_cuda_lt = getDisableAddmmCudaLt();
   at::ScalarType scalar_type = self.scalar_type();
+  bool useLtInterface = scalar_type == at::ScalarType::Float8_e5m2 || scalar_type == at::ScalarType::Float8_e4m3fn;
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11040 && !defined(_MSC_VER)
@@ -267,9 +267,11 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
 #if !defined(USE_ROCM) && !defined(_MSC_VER)
   if (useLtInterface) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(
+    AT_DISPATCH_FLOATING_TYPES_AND4(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
+        at::ScalarType::Float8_e5m2,
+        at::ScalarType::Float8_e4m3fn,
         scalar_type,
         "addmm_cuda_lt",
         [&] {

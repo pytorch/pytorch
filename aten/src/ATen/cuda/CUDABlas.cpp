@@ -693,6 +693,7 @@ void gemm_and_bias(
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
+  constexpr bool is_fp8_dtype = std::is_same_v<Dtype, at::Float8_e4m3fn> || std::is_same_v<Dtype, at::Float8_e5m2>;
   if constexpr (std::is_same_v<Dtype, double>) {
     abcType = CUDA_R_64F;
     computeType = CUBLAS_COMPUTE_64F;
@@ -706,6 +707,10 @@ void gemm_and_bias(
     abcType = CUDA_R_16F;
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abcType = CUDA_R_16BF;
+  } else if constexpr (std::is_same_v<Dtype, at::Float8_e4m3fn>) {
+    abcType = CUDA_R_8F_E4M3;
+  } else if constexpr (std::is_same_v<Dtype, at::Float8_e5m2>) {
+    abcType = CUDA_R_8F_E5M2;
   }
 
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
@@ -721,19 +726,27 @@ void gemm_and_bias(
     epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
 #endif
   }
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
+
+  if constexpr (!is_fp8_dtype) {
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
+  }
 
   CuBlasLtMatrixLayout Adesc(
       abcType, transpose_mat1 ? k : m, transpose_mat1 ? m : k, mat1_ld);
   CuBlasLtMatrixLayout Bdesc(
       abcType, transpose_mat2 ? n : k, transpose_mat2 ? k : n, mat2_ld);
-  CuBlasLtMatrixLayout Cdesc(abcType, m, n, result_ld);
+  CuBlasLtMatrixLayout Cdesc(is_fp8_dtype ? CUDA_R_16BF: abcType, m, n, result_ld);
+  CuBlasLtMatrixLayout Ddesc(abcType, m, n, result_ld);
 
   CuBlasLtMatmulPreference preference;
   // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
   // setting this to 1M.
   size_t workspaceSize = _getWorkspaceSize();
+  // FP8 (and H100) needs at least 3Mb workspace, see https://docs.nvidia.com/cuda/cublas/index.html#cublassetworkspace
+  if constexpr (is_fp8_dtype) {
+    workspaceSize = std::max(workspaceSize, 32*1024*1024LU);
+  }
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
 
   uint32_t a_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat1_ptr));
@@ -759,7 +772,7 @@ void gemm_and_bias(
       Adesc.descriptor(),
       Bdesc.descriptor(),
       Cdesc.descriptor(),
-      Cdesc.descriptor(),
+      Ddesc.descriptor(),
       preference.descriptor(),
       1,
       &heuristicResult,
@@ -777,10 +790,10 @@ void gemm_and_bias(
       mat2_ptr,
       Bdesc.descriptor(),
       &beta_val,
-      result_ptr,
+      !is_fp8_dtype ? result_ptr : nullptr,
       Cdesc.descriptor(),
       result_ptr,
-      Cdesc.descriptor(),
+      Ddesc.descriptor(),
       &heuristicResult.algo,
       workspace.data_ptr(),
       workspaceSize,
@@ -874,6 +887,38 @@ template void gemm_and_bias(
     int64_t mat2_ld,
     const at::BFloat16* bias,
     at::BFloat16* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
+template void gemm_and_bias(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<at::Float8_e5m2> alpha_val,
+    const at::Float8_e5m2* mat1_ptr,
+    int64_t mat1_ld,
+    const at::Float8_e5m2* mat2_ptr,
+    int64_t mat2_ld,
+    const at::Float8_e5m2* bias,
+    at::Float8_e5m2* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
+template void gemm_and_bias(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<at::Float8_e4m3fn> alpha_val,
+    const at::Float8_e4m3fn* mat1_ptr,
+    int64_t mat1_ld,
+    const at::Float8_e4m3fn* mat2_ptr,
+    int64_t mat2_ld,
+    const at::Float8_e4m3fn* bias,
+    at::Float8_e4m3fn* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
 
