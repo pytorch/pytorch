@@ -3414,7 +3414,7 @@ Target Guards:
             guard = ShapeGuard(g, stack)
             self.guards.append(guard)
             self.refine_ranges(guard)
-            self._log_guard(self, "eval", g, tb)
+            self._log_guard("eval", g, tb)
         else:
             self.log.debug("eval %s [guard suppressed]", g)
 
