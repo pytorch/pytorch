@@ -48,7 +48,7 @@ from torch.distributed.checkpoint._nested_dict import (
 from torch.distributed.checkpoint._sharded_tensor_utils import (
     _flatten_sharded_tensors,
 )
-from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
+from torch.distributed.checkpoint.dedup_tensors import dedup_tensors
 from torch.distributed.checkpoint.utils import find_state_dict_object
 from torch.distributed.checkpoint._traverse import set_element
 
