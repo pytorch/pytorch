@@ -2353,8 +2353,8 @@ class DeviceCachingAllocator {
           block->requested_size,
           block->stream,
           block->context_when_allocated);
-      block->context_when_allocated = nullptr;
     }
+    block->context_when_allocated = nullptr;
     size_t original_block_size = block->size;
     size_t requested_size = block->requested_size;
 
