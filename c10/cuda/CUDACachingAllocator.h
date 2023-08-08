@@ -183,7 +183,7 @@ struct CheckpointDelta {
 
 enum struct RecordContext {
   NEVER = 0,
-  STATE = 1, // only keep stacks only for active allocations
+  STATE = 1, // only keep stacks for active allocations
   ALLOC = 2, // additionally keep stacks for allocations in the trace history
   ALL = 3, // additionally record stacks for when something is freed
 };
