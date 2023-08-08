@@ -9,16 +9,24 @@
 #else
 #include <ATen/ops/_log_softmax_backward_data_native.h>
 #include <ATen/ops/_log_softmax_native.h>
+#include <ATen/ops/_prelu_kernel_backward_native.h>
+#include <ATen/ops/_prelu_kernel_native.h>
 #include <ATen/ops/elu_backward_native.h>
 #include <ATen/ops/elu_native.h>
 #include <ATen/ops/gelu_backward_native.h>
 #include <ATen/ops/gelu_native.h>
+#include <ATen/ops/glu_backward_native.h>
 #include <ATen/ops/glu_native.h>
 #include <ATen/ops/hardsigmoid_backward_native.h>
 #include <ATen/ops/hardsigmoid_native.h>
+#include <ATen/ops/hardswish_backward_native.h>
+#include <ATen/ops/hardswish_native.h>
 #include <ATen/ops/hardtanh_backward_native.h>
 #include <ATen/ops/leaky_relu_backward_native.h>
 #include <ATen/ops/leaky_relu_native.h>
+#include <ATen/ops/log_sigmoid_backward_native.h>
+#include <ATen/ops/log_sigmoid_forward_native.h>
+#include <ATen/ops/relu_native.h>
 #include <ATen/ops/sigmoid_backward_native.h>
 #include <ATen/ops/silu_backward_native.h>
 #include <ATen/ops/silu_native.h>
@@ -664,7 +672,7 @@ TORCH_IMPL_FUNC(threshold_backward_out_mps)
   }
 }
 
-MPSGraphTensor* normcdf(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+static MPSGraphTensor* normcdf(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
   // (1.0f + erf(x*SQRT1_2)) * 0.5f * x;
   auto dataType = [inputTensor dataType];
   const float SQRT1_2 = 0.707106781186547524400844362104849039f;
@@ -680,7 +688,7 @@ MPSGraphTensor* normcdf(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
   return erfTensor;
 }
 
-MPSGraphTensor* tanh(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+static MPSGraphTensor* tanh(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
   // 0.5 * x * (1 + text{Tanh}(sqrt(2 / pi) * (x + 0.044715 * x^3)))
   auto dataType = [inputTensor dataType];
   constexpr float kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
@@ -840,12 +848,12 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps)
   }
 }
 
-void elu_variants_out_mps(const Tensor& self,
-                          const Scalar& alpha,
-                          const Scalar& scale,
-                          const Scalar& input_scale,
-                          const Tensor& result,
-                          string func_name) {
+static void elu_variants_out_mps(const Tensor& self,
+                                 const Scalar& alpha,
+                                 const Scalar& scale,
+                                 const Scalar& input_scale,
+                                 const Tensor& result,
+                                 string func_name) {
   using namespace mps;
   using CachedGraph = MPSUnaryCachedGraph;
 

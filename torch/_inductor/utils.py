@@ -12,19 +12,9 @@ import sys
 import tempfile
 import textwrap
 import time
+import unittest
 from io import StringIO
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    NamedTuple,
-    Optional,
-    Set,
-    TypeVar,
-    Union,
-)
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Union
 from unittest import mock
 
 import sympy
@@ -38,7 +28,6 @@ from .cuda_properties import current_device, get_device_capability
 
 log = logging.getLogger(__name__)
 
-T = TypeVar("T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 
@@ -74,7 +63,7 @@ def do_bench(*args, **kwargs):
 
 
 @functools.lru_cache(None)
-def has_triton() -> bool:
+def has_triton():
     if not torch.cuda.is_available():
         return False
     try:
@@ -86,7 +75,7 @@ def has_triton() -> bool:
 
 
 @functools.lru_cache(None)
-def has_torchvision_roi_align() -> bool:
+def has_torchvision_roi_align():
     try:
         from torchvision.ops import roi_align  # noqa: F401
 
@@ -101,7 +90,7 @@ def conditional_product(*args):
     return functools.reduce(operator.mul, [x for x in args if x])
 
 
-def decode_device(device: Optional[torch.device]) -> torch.device:
+def decode_device(device):
     if device is None:
         return torch.tensor(0.0).device  # default device
     if isinstance(device, str):
@@ -120,11 +109,11 @@ def sympy_dot(seq1, seq2):
     return sympy.expand(sum(a * b for a, b in zip(seq1, seq2)))
 
 
-def unique(it: Iterable[T]) -> Iterable[T]:
+def unique(it):
     return {id(x): x for x in it}.values()
 
 
-def ceildiv(numer: int, denom: int) -> int:
+def ceildiv(numer: int, denom: int):
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
@@ -134,7 +123,7 @@ def ceildiv(numer: int, denom: int) -> int:
     return -(numer // -denom)
 
 
-def next_power_of_2(n: int) -> int:
+def next_power_of_2(n):
     """Return the smallest power of 2 greater than or equal to n"""
     assert n <= 2**32, "32-bit only"
     n -= 1
@@ -205,7 +194,7 @@ def synchronize():
         torch.cuda.synchronize()
 
 
-def timed(model: Callable[..., Any], example_inputs, times: int = 1) -> float:
+def timed(model, example_inputs, times=1):
     synchronize()
     torch.manual_seed(1337)
     t0 = time.perf_counter()
@@ -229,6 +218,29 @@ immutable_dict.__hash__ = lambda self: hash(tuple(self.items()))
 immutable_list.__hash__ = lambda self: hash(tuple(self))
 
 
+def freeze_inputs(f):
+    """
+    Useful for wrapping lists in tuples for caching purposes
+    """
+
+    def freeze_value(x):
+        if isinstance(x, (immutable_dict, immutable_list)):
+            return x
+        if isinstance(x, list):
+            return immutable_list(x)
+        if isinstance(x, dict):
+            return immutable_dict(x)
+        return x
+
+    @functools.wraps(f)
+    def wrapped(*args):
+        args = [freeze_value(x) for x in args]
+        return f(*args)
+
+    wrapped.cache_info = f.cache_info
+    return wrapped
+
+
 def precompute_method(obj: Any, method: str):
     """Replace obj.method() with a new method that returns a precomputed constant."""
     result = getattr(obj, method)()
@@ -241,7 +253,7 @@ def precompute_methods(obj: Any, methods: List[str]):
         precompute_method(obj, method)
 
 
-def cmp(a, b) -> int:
+def cmp(a, b):
     return int(a > b) - int(a < b)
 
 
@@ -339,9 +351,7 @@ def get_kernel_metadata(node_schedule, wrapper):
     return metadata, "\n".join(detailed_metadata)
 
 
-def dominated_nodes(
-    initial_queue: Iterable[torch.fx.Node], skip_filter=None
-) -> Set[torch.fx.Node]:
+def dominated_nodes(initial_queue: Iterable[torch.fx.Node], skip_filter=None):
     """Returns the set of nodes whose values depend on those within initial_queue"""
     initial_queue = list(initial_queue)
     dominated_set = set(initial_queue)
@@ -375,7 +385,7 @@ def gather_origins(args, kwargs):
     return set(itertools.chain(*arg_origins, *kwarg_origins))
 
 
-def sympy_str(expr: sympy.Expr) -> str:
+def sympy_str(expr: sympy.Expr):
     """
     Normal sympy str is very slow, this is a lot faster.  The result are
     somewhat worse, as it doesn't do as much simplification.  So don't
@@ -393,7 +403,7 @@ def sympy_str(expr: sympy.Expr) -> str:
     return str(expr)
 
 
-def sympy_symbol(name: str) -> sympy.Symbol:
+def sympy_symbol(name) -> sympy.Symbol:
     # This should never be used for creating shape/stride symbols, as those
     # should all be allocated before Inductor.
     assert name[0] != "s"
@@ -598,7 +608,7 @@ class IndentedBuffer:
                 if isinstance(line, LineContext):
                     self._lines.append(line)
                 else:
-                    IndentedBuffer.writeline(self, line[int(dedent) :])
+                    IndentedBuffer.writeline(self, line[dedent:])
         else:
             other_code = textwrap.dedent(other_code)
             if strip:
@@ -652,9 +662,9 @@ def is_big_gpu(index):
 
 
 def use_triton_template(layout, *, enable_int32=False):
-    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+    layout_dtypes = (torch.float16, torch.bfloat16, torch.float32)
     if enable_int32:
-        layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
+        layout_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.int32)
     return (
         (
             config.max_autotune
@@ -734,6 +744,25 @@ def override_lowering(aten_op, override_fn):
         lowering.lowerings[aten_op] = orig_fn
 
 
+def add_scheduler_init_hook(pre_fn, post_fn=None):
+    """
+    Add hook functions to be called at the beginning and end of Scheduler.__init__.
+    Used for unit tests.
+    """
+    from torch._inductor.scheduler import Scheduler
+
+    orig_fn = Scheduler.__init__
+
+    def wrapper(scheduler, nodes):
+        pre_fn(scheduler, nodes)
+        out = orig_fn(scheduler, nodes)
+        if post_fn:
+            post_fn(scheduler, nodes)
+        return out
+
+    return unittest.mock.patch.object(Scheduler, "__init__", wrapper)
+
+
 def developer_warning(msg):
     """
     Warnings that will be actionable for PyTorch developers, but not
@@ -746,7 +775,7 @@ def developer_warning(msg):
         log.info(msg)
 
 
-def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
+def get_num_bytes(*args, num_in_out_args=0):
     """
     Return the total number of bytes the arguments of tensor type takes.
 

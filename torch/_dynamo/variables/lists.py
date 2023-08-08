@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.fx
+from torch.fx import _pytree as fx_pytree
 from torch.utils import _pytree as pytree
 
 from .. import variables
@@ -714,6 +715,11 @@ def _register_dynamo_list_to_tree_spec():
         pytree._maybe_str_to_list,
     )
 
+    fx_pytree.register_pytree_flatten_spec(
+        ListVariable,
+        _listvariable_flatten,
+    )
+
 
 def _tuplevariable_flatten(d: TupleVariable) -> Tuple[List[Any], pytree.Context]:
     return d.items, None
@@ -735,6 +741,11 @@ def _register_dynamo_tuple_to_tree_spec():
         _tuplevariable_unflatten,
         pytree._tuple_to_str,
         pytree._maybe_str_to_tuple,
+    )
+
+    fx_pytree.register_pytree_flatten_spec(
+        TupleVariable,
+        _tuplevariable_flatten,
     )
 
 
@@ -883,3 +894,9 @@ class SetVariable(VariableTracker):
 
     def getitem_const(self, arg: VariableTracker):
         raise RuntimeError("Illegal to getitem on a set")
+
+    def as_python_constant(self):
+        return self.python_type()([x.as_python_constant() for x in self.items])
+
+    def unpack_var_sequence(self, tx):
+        return [x.add_options(self) for x in self.items]

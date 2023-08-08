@@ -153,6 +153,14 @@ FILENAME_ALLOWLIST |= set(
 # torch.func.grad: need to allow this file to be able to look at `grad_impl`
 FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "_functorch/apis.py",
+    _module_dir(torch) + "_functorch/deprecated.py",
+}
+
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "distributed/tensor/parallel/_utils.py",
+    _module_dir(torch) + "distributed/tensor/parallel/style.py",
+    _module_dir(torch) + "distributed/_tensor/api.py",
+    _module_dir(torch) + "distributed/_tensor/device_mesh.py",
 }
 
 SKIP_DIRS_RE = None
