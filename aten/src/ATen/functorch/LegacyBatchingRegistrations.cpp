@@ -9,6 +9,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/TensorShape.h>
 
+#include <ATen/NestedTensorImpl.h>
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <ATen/functorch/BatchingMetaprogramming.h>
@@ -704,6 +705,19 @@ Tensor new_empty_strided_batching_rule(
   return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
+Tensor nested_tensor_size_batching_rule(const Tensor& self) {
+  auto* maybe_batched_impl = maybeGetBatchedImpl(self);
+  if (!maybe_batched_impl) {
+    TORCH_INTERNAL_ASSERT(false,
+        "Tried to run batching rule for _nested_tensor_size() on a non-batched tensor")
+  }
+  auto* nt_impl = at::native::get_nested_tensor_impl(maybe_batched_impl->value());
+  if (!nt_impl) {
+    TORCH_INTERNAL_ASSERT(false,
+        "Tried to run batching rule for _nested_tensor_size() on a non-nested tensor")
+  }
+  return nt_impl->get_nested_sizes();
+}
 
 }
 
@@ -737,6 +751,11 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 
 TORCH_LIBRARY_IMPL(_, BatchedNestedTensor, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedNestedTensorForLoopFallback>());
+}
+
+// TODO: Move this somewhere better
+TORCH_LIBRARY_IMPL(aten, BatchedNestedTensor, m) {
+  m.impl("_nested_tensor_size", nested_tensor_size_batching_rule);
 }
 } // namespace functorch
 } // namespace at
