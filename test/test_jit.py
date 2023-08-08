@@ -15038,19 +15038,20 @@ dedent """
         seq_length = 5
         tgt_length = 3
 
-        src = torch.randn(seq_length, bsz, d_model)
-        tgt = torch.randn(tgt_length, bsz, d_model)
-        transformer = nn.Transformer(d_model, nhead, num_encoder_layers,
-                                     num_decoder_layers, dim_feedforward, dropout=0.0)
-        model = MyModule(transformer, tgt, src)
+        with torch.no_grad():
+            src = torch.randn(seq_length, bsz, d_model)
+            tgt = torch.randn(tgt_length, bsz, d_model)
+            transformer = nn.Transformer(d_model, nhead, num_encoder_layers,
+                                         num_decoder_layers, dim_feedforward, dropout=0.0)
+            model = MyModule(transformer, tgt, src)
 
-        src = torch.randn(seq_length, bsz, d_model)
-        tgt = torch.randn(tgt_length, bsz, d_model)
-        jit_out = model(tgt, src)
-        py_out = transformer(tgt, src)
+            src = torch.randn(seq_length, bsz, d_model)
+            tgt = torch.randn(tgt_length, bsz, d_model)
+            jit_out = model(tgt, src)
+            py_out = transformer(tgt, src)
 
-        # print(jit_out/py_out-1)
-        # print(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
+            # print(jit_out/py_out-1)
+            # print(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
         self.assertEqual(jit_out, py_out, atol=5e-4, rtol=1e-4)
 
     def test_list_python_op(self):
