@@ -1,7 +1,6 @@
 import contextlib
 import dataclasses
 import functools
-import itertools
 import logging
 import math
 import re
@@ -14,7 +13,6 @@ import sympy
 
 import torch
 import torch.fx
-from torch._inductor import dependencies
 from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
 from torch.utils._sympy.functions import FloorDiv
@@ -2588,8 +2586,7 @@ class CppKernelProxy(CppKernel):
         def select_tiling_indices():
             all_index = []
             for node in nodes:
-                rw = dependencies.extract_read_writes(node._body, *node._sizes)
-                all_index += [dep.index for dep in itertools.chain(rw.reads, rw.writes)]
+                all_index += list(node._body.indexing_exprs.values())
             contig_vars = set()
             contig_vars_list = []
             non_contig_stride_const = set()
