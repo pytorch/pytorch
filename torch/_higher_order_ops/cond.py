@@ -57,6 +57,17 @@ def _turn_off_functorch():
 class UnsupportedAliasMutationException(RuntimeError):
     reason: str
 
+def cond_compiled(pred, true_fn, false_fn, args):
+    if torch._dynamo.is_compiling():
+        return cond(pred, true_fn, false_fn, args)
+
+    @torch.compile(backend="eager", fullgraph=True)
+    def f(pred, true_fn, false_fn, args):
+        return cond(pred, true_fn, false_fn, args)
+
+    with _turn_off_is_fx_tracing():
+        return f(pred, true_fn, false_fn, args)
+
 
 def exported_cond(op, *args):
     exclude_keys = (
@@ -156,11 +167,11 @@ def exported_cond(op, *args):
     return cond(args[0], *bind_branch_and_args(gm, pos_args))
 
 
-def cond_compiled(pred, true_fn, false_fn, args):
-    if torch._dynamo.is_compiling():
-        return cond(pred, true_fn, false_fn, args)
-    else:
-        return exported_cond(cond, pred, true_fn, false_fn, args)
+# def cond_compiled(pred, true_fn, false_fn, args):
+#     if torch._dynamo.is_compiling():
+#         return cond(pred, true_fn, false_fn, args)
+#     else:
+#         return exported_cond(cond, pred, true_fn, false_fn, args)
 
 
 """

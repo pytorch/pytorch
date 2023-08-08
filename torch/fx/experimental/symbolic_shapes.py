@@ -191,7 +191,7 @@ def tensor_has_hints(t):
     return all(has_hint(s) for s in t.size())
 
 def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
-    if isinstance(val, (SymInt, SymFloat)):
+    if isinstance(val, (SymInt, SymFloat, SymBool)):
         return val.node.expr.free_symbols
     elif isinstance(val, sympy.Expr):
         return val.free_symbols
@@ -2199,7 +2199,7 @@ class ShapeEnv:
             dynamic_dim=dynamic_strides_offset,
             constraint_dim=None,
         ), hint=ex.storage_offset(), source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
-        return sym_sizes, sym_stride, sym_storage_offset
+        return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
 
     # If you know what the current hint value of the SymInt to be created
     # is, pass it into hint.  Otherwise, pass None and we will make our best
