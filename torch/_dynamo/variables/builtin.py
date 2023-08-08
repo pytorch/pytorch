@@ -965,17 +965,6 @@ class BuiltinVariable(VariableTracker):
             if a.source is None or b.source is None
             else SuperSource(type=a.source, base=b.source)
         )
-        print("Super called", a, b)
-        print(
-            "Super inners",
-            a.value,
-            type(tx.output.nn_modules[b.module_key]),
-            a.value == type(tx.output.nn_modules[b.module_key]),
-        )
-        print(
-            "Made super source", source.name(), "from", a.source.name(), b.source.name()
-        )
-        # source = None
         return variables.SuperVariable(a, b, source=source)
 
     def call_next(self, tx, arg):
@@ -1100,7 +1089,6 @@ class BuiltinVariable(VariableTracker):
                     example_value=obj.as_proxy().node.meta["example_value"].grad,
                     **options,
                 )
-                # unimplemented("tensor grad without source")
         elif isinstance(
             obj,
             (
@@ -1158,18 +1146,6 @@ class BuiltinVariable(VariableTracker):
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
-            # if isinstance(obj, variables.nn_module.FSDPManagedNNModuleVariable):
-            #     if isinstance(val, variables.DeletedVariable):
-            #         # Gross - but required for safety to not raise atm
-            #         print("DELETING FROM FSDP", obj.value, name_var.value)
-            #         # if hasattr(obj.value, name_var.value):
-            #             # delattr(obj.value, name_var.value)
-            #         print("DELETED FROM FSDP", name_var.value)
-            #     else:
-            #         print("SETTING ON FSDP", name_var.value)
-            # return val
-            # unimplemented("NYI - delattr on FSDP")
-
             tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
             if isinstance(obj, variables.TensorVariable):
                 from .builder import (

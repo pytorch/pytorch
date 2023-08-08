@@ -504,10 +504,6 @@ class GetAttrVariable(VariableTracker):
         assert isinstance(name, str)
         self.obj = obj
         self.name = name
-        if name == "_handle":
-            raise RuntimeError("Handle?")
-        if isinstance(self.obj, variables.nn_module.FSDPManagedNNModuleVariable):
-            raise RuntimeError("Nope!")
 
     def __str__(self):
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
@@ -598,7 +594,6 @@ class GetAttrVariable(VariableTracker):
             and len(args) > 0
             and issubclass(args[0].python_type(), self.obj.value)
         ):
-            print("Making super of", self.obj)
             return SuperVariable(self.obj, args[0], True).call_method(
                 tx, self.name, args[1:], kwargs
             )

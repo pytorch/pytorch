@@ -187,9 +187,9 @@ class MetaConverter:
         # function.  This is an error: we may be creating fake tensors and
         # will perform operations on them which need fake tensor mode to
         # be active.  You will segfault if you are in a no_dispatch() block.
-        # assert not torch._C._dispatch_tls_local_exclude_set().has(
-        #     torch._C.DispatchKey.Python
-        # )
+        assert not torch._C._dispatch_tls_local_exclude_set().has(
+            torch._C.DispatchKey.Python
+        )
         arg_cnt = self.arg_cnt
         self.arg_cnt += 1
 
@@ -500,7 +500,6 @@ class MetaConverter:
 
         if (
             type(t) is torch.Tensor
-            or type(t) is torch.nn.Buffer
             or type(t) is torch.nn.Parameter
             or (ignore_subclass and isinstance(t, torch.Tensor))
             or isinstance(t, FakeTensor)
@@ -549,9 +548,6 @@ class MetaConverter:
                     # NB: Cannot directly use Parameter constructor
                     # because that would force a detach, not desirable
                     r._is_param = True
-                elif type(t) is torch.nn.Buffer:
-                    # similar to above
-                    r._is_buffer = True
                 return r
         elif torch.overrides.is_tensor_like(t):
             if is_traceable_wrapper_subclass(t):

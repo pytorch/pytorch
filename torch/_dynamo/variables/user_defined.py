@@ -81,7 +81,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             name == "WORLD"
             and self.value is torch.distributed.distributed_c10d.GroupMember
         ):
-            # print("world PG")
             return ProcessGroupVariable(self.value.WORLD).add_options(options)
         return super().var_getattr(tx, name)
 
@@ -186,7 +185,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             options["mutable_local"] = MutableLocal()
             return variables.DataClassVariable.create(self.value, args, kwargs, options)
 
-        # print("Is it partial?", isinstance(self.value, functools.partial), self.value == functools.partial, args, kwargs)
         if self.value == functools.partial:
             subargs = args[1:]
             subargs_real_values = []
@@ -211,10 +209,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
-        if isinstance(value, collections.deque) or value == collections.deque:
-            raise RuntimeError("not allowed!")
-        # if isinstance(self.value, (types.FunctionType, types.MethodType)):
-        # raise RuntimeError(f"Trying to make a UDO func {self.value}")
         if (
             getattr(self.value, "_is_fsdp_managed_module", False)
             and type(self) == UserDefinedObjectVariable
@@ -235,16 +229,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def python_type(self):
         return self.value_type
-
-    def reconstruct(self, codegen):
-        if isinstance(
-            self.value,
-            torch.distributed.fsdp.fully_sharded_data_parallel.FullyShardedDataParallel,
-        ):
-            raise RuntimeError(
-                f"Attempted reconstruct? {self.value}, {type(self.value)} {getattr(self.value, '_is_fsdp_managed_module', False)}"
-            )
-        return super().reconstruct(codegen)
 
     @staticmethod
     @functools.lru_cache(None)
@@ -430,14 +414,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return super().call_function(tx, args, kwargs)
 
     def _check_for_getattribute(self):
-        # Hack :(
+        # Hack - we know this is sound because of the contents of this fn and how we inline
         if isinstance(self, variables.nn_module.FSDPManagedNNModuleVariable):
             return
         if object_has_getattribute(self.value):
             unimplemented("UserDefinedObjectVariable with custom __getattribute__")
 
     def _check_for_getattr(self):
-        # Hack :(
+        # Hack - we know this is sound because of the contents of this fn and how we inline
         if isinstance(self, variables.nn_module.FSDPManagedNNModuleVariable):
             return None
         return get_custom_getattr(self.value)
@@ -465,8 +449,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         getattr_fn = self._check_for_getattr()
 
         try:
-            # if name == "_handle":
-            # print("CHECKING FOR ATTR?", self, name)
             subobj = self._getattr_static(name)
         except AttributeError:
             subobj = None
@@ -476,8 +458,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).call_function(tx, [ConstantVariable(name)], {})
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
-        # if name == "_handle":
-        # print("Got subobj!", subobj)
         if isinstance(subobj, property):
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source, **options
@@ -525,11 +505,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 elif is_allowed(func):
                     return variables.TorchVariable(func, source=source, **options)
                 return variables.UserFunctionVariable(func, source=source, **options)
-        # elif isinstance(subobj, types.FunctionType) or (
-        #     isinstance(subobj, types.MethodType)
-        #     and isinstance(self.value, torch.distributed.fsdp.flat_param.FlatParamHandle)
-        # ):
-        # print("Gettattr driven via subobj?", type(self.value), subobj, type(subobj))
         if (
             name in getattr(value, "__dict__", {})
             or ConstantVariable.is_literal(subobj)
@@ -541,8 +516,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ),
             )
         ):
-            # if name == "_handle":
-            # print("NAME IN DICT")
             if source:
                 return VariableBuilder(tx, source)(subobj).add_options(options)
             elif ConstantVariable.is_literal(subobj):
@@ -589,9 +562,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if source:
             return VariableBuilder(tx, source)(subobj).add_options(options)
-            # elif ConstantVariable.is_literal(subobj):
-            #     return ConstantVariable(subobj, **options)
-        # print("GETATTR, but subobj?", subobj, self.source)
         if isinstance(subobj, torch.distributed.fsdp.flat_param.FlatParamHandle):
             return UserDefinedObjectVariable(subobj, **options)
         return variables.GetAttrVariable(self, name, **options)
@@ -668,18 +638,6 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
     def as_proxy(self):
         return self.proxy
 
-    # def reconstruct(self, codegen):
-    #     return []
-    # try:
-    #     return variables.ConstantVariable(self.value).reconstruct(codegen)
-    # except Exception as e:
-    #     print("FAILED! BAD!", str(e))
-    #     import traceback
-    #     traceback.print_exc(limit=5)
-    #     print("FAILED! BAD!", str(e))
-    #     raise
-
-
 class AutogradNodeVariable(UserDefinedObjectVariable):
     def __init__(self, value, proxy, value_type=None, **kwargs):
         self.proxy = proxy
@@ -713,7 +671,5 @@ class AutogradNodeVariable(UserDefinedObjectVariable):
                 outer_tuple_items, **options
             )
             result = outer_tuple_obj
-            # print("MADE from next_func?", result, [item.items for item in result.items])
             return result
-            # return UserDefinedObjectVariable(getattr(self.value, name), **options)
         return super().var_getattr(tx, name)

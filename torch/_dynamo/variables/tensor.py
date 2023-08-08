@@ -296,7 +296,6 @@ class TensorVariable(VariableTracker):
                 if type(static_attr) != types.GetSetDescriptorType:
                     return None
 
-                # print("Falling back to generic", self.as_proxy(), name)
                 if name == "grad_fn":
                     return variables.user_defined.AutogradNodeVariable(
                         self.as_proxy().node.meta["example_value"].grad_fn,
@@ -698,7 +697,6 @@ class TensorVariable(VariableTracker):
                 and isinstance(args[0], (SizeVariable, ShapeVariable))
             ):
                 name = "new_empty"
-            # print("Fallthrough?", name)
             return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
@@ -1128,5 +1126,4 @@ class TypedStorageVariable(VariableTracker):
             assert len(args) == 1
             self.value._resize_(args[0].value)
             return ConstantVariable(None)
-        # print("TypedStorageVariable Call method", name, self.value, args)
         unimplemented(f"typed_storage method calls WIP {name}")
