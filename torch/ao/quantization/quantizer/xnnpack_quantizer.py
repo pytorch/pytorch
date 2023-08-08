@@ -76,10 +76,8 @@ def _supported_symmetric_quantized_operators() -> Dict[str, List[OperatorPattern
         ],
         "linear": [[torch.nn.Linear], [F.linear]],
         "add": [[torch.add]],
-        "maxpool2d": [[torch.nn.MaxPool2d], [F.max_pool2d]],
-        "hardtanh": [[torch.nn.Hardtanh], [F.hardtanh]],
-        "mean": [[torch.mean]],
-        "adaptive_avgpool2d": [
+        "max_pool2d": [[torch.nn.MaxPool2d], [F.max_pool2d]],
+        "adaptive_avg_pool2d": [
             [torch.nn.AdaptiveAvgPool2d],
             [F.adaptive_avg_pool2d],
         ],
@@ -334,10 +332,10 @@ class XNNPACKQuantizer(Quantizer):
 
         self._annotate_linear(model, config, filter_fn)
         self._annotate_conv2d_patterns(model, config, filter_fn)
-        self._annotate_maxpool2d(model, config, filter_fn)
+        self._annotate_max_pool2d(model, config, filter_fn)
         self._annotate_add_patterns(model, config, filter_fn)
-        self._annotate_hardtanh(model, config, filter_fn)
         self._annotate_mean(model, config, filter_fn)
+        self._annotate_hardtanh(model, config, filter_fn)
         self._annotate_adaptive_avg_pool2d(model, config, filter_fn)
         self._annotate_gru_io_only(model, config, filter_fn)
         return model
@@ -428,6 +426,30 @@ class XNNPACKQuantizer(Quantizer):
     ) -> None:
         return _OP_TO_ANNOTATOR["linear"](gm, quantization_config, filter_fn)
 
+    def _annotate_mean(
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
+    ) -> None:
+        return _OP_TO_ANNOTATOR["mean"](gm, quantization_config, filter_fn)
+
+    def _annotate_hardtanh(
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
+    ) -> None:
+        return _OP_TO_ANNOTATOR["hardtanh"](gm, quantization_config, filter_fn)
+
+    def _annotate_adaptive_avg_pool2d(
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
+    ) -> None:
+        return _OP_TO_ANNOTATOR["adaptive_avg_pool2d"](gm, quantization_config, filter_fn)
+
     # TODO: move this to BoltNNQuantizer?
     def _annotate_gru_io_only(
         self,
@@ -437,84 +459,13 @@ class XNNPACKQuantizer(Quantizer):
     ) -> None:
         return _OP_TO_ANNOTATOR["gru_io_only"](gm, quantization_config, filter_fn)
 
-    def _annotate_maxpool2d(
+    def _annotate_max_pool2d(
         self,
         gm: torch.fx.GraphModule,
         quantization_config: QuantizationConfig,
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
-        return _OP_TO_ANNOTATOR["maxpool2d"](gm, quantization_config, filter_fn)
-
-    # this should be handled by propagation, TODO: remove
-    def _annotate_input_out_obs_sharing_op(
-        self,
-        op: Callable,
-        gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> None:
-        module_partitions = get_source_partitions(gm.graph, [op], filter_fn)
-        partitions = list(itertools.chain(*module_partitions.values()))
-        for partition in partitions:
-            io_obs_sharing_node = partition.output_nodes[0]
-            if _is_annotated([io_obs_sharing_node]):
-                continue
-
-            input_act = io_obs_sharing_node.args[0]
-            assert isinstance(input_act, Node)
-
-            # only annotate input output sharing operator
-            # when the output of the input node is annotated
-            if (
-                "quantization_annotation" not in input_act.meta
-                or not input_act.meta["quantization_annotation"]._annotated
-                or input_act.meta["quantization_annotation"].output_qspec is None
-            ):
-                continue
-
-            act_qspec = SharedQuantizationSpec(input_act)
-            io_obs_sharing_node.meta[
-                "quantization_annotation"
-            ] = QuantizationAnnotation(
-                input_qspec_map={
-                    input_act: act_qspec,
-                },
-                output_qspec=act_qspec,
-                _annotated=True,
-            )
-
-    def _annotate_hardtanh(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> None:
-        self._annotate_input_out_obs_sharing_op(
-            torch.nn.modules.Hardtanh, gm, quantization_config, filter_fn
-        )
-        self._annotate_input_out_obs_sharing_op(
-            torch.nn.modules.ReLU6, gm, quantization_config, filter_fn
-        )
-
-    def _annotate_mean(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> None:
-        self._annotate_input_out_obs_sharing_op(
-            torch.mean, gm, quantization_config, filter_fn
-        )
-
-    def _annotate_adaptive_avg_pool2d(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> None:
-        self._annotate_input_out_obs_sharing_op(
-            torch.nn.AdaptiveAvgPool2d, gm, quantization_config, filter_fn
-        )
+        return _OP_TO_ANNOTATOR["max_pool2d"](gm, quantization_config, filter_fn)
 
     def _annotate_add_patterns(
         self,
