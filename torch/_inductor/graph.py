@@ -894,11 +894,11 @@ class GraphLowering(torch.fx.Interpreter):
         # TODO. Revisit this once the logging API is more mature
         output_code_log.info("Output code written to: %s", mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
-        output_code_log.debug("Output code: \n%s", code)
+        # output_code_log.debug("Output code: \n%s", code)
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
-        V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
+        # V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
 
     def compile_to_fn(self):

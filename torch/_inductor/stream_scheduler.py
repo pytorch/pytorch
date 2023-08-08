@@ -104,6 +104,25 @@ class CheckPoints:
         self.this_time_node = None
         self.stream_pool_pop = ssgraph.stream_pool_pop
         
+    def check_graph_status(self):
+        # check if no graph_names in self.checkpoints
+        if len(self.checkpoints) == 0:
+            self.checkpoints["cur_graph"] = self.graph_name
+            self.checkpoints[self.graph_name] = {}
+        else:
+            next_graph = None
+            for tmp_graph_name in self.checkpoints:
+                # check if it has key 'done'
+                if not 'done' in self.checkpoints[tmp_graph_name]:
+                    next_graph = tmp_graph_name
+                    break
+            if next_graph is None:
+                self.checkpoints["finished"] = True
+                raise RuntimeError("All graphs are finished.")
+            else:
+                if 'done' in self.checkpoints['cur_graph']:
+                    self.checkpoints['cur_graph'] = next_graph
+                
     def load(self):
         if not os.path.exists(self.checkpoints_file):
             open(self.checkpoints_file, "w").close()
@@ -113,6 +132,7 @@ class CheckPoints:
         else:
             with open(self.checkpoints_file, "r") as f:
                 checkpoints = json.load(f)
+            
             return checkpoints
     
     def save(self):
@@ -124,8 +144,25 @@ class CheckPoints:
             json.dump(self.checkpoints, f)
 
     def stream_assign(self):
+        self.check_graph_status()
+        if 'done' in self.checkpoints.get(self.graph_name, {}):
+            for node in self.ss_graph.critical_path:
+                self.dig_node(node, 0, True, False)
+            return
+        elif self.checkpoints.get('cur_graph', '') != self.graph_name:
+            for node in self.ss_graph.critical_path:
+                self.dig_node(node, 0, False, False)
+            return
+
         this_time = None
         self.ss_graph.stream_pool[0] = len(self.ss_graph.ssnodes) + 2
+        for node in self.ss_graph.critical_path:
+            if node.name not in self.done_nodes:
+                break
+        else:
+            self.checkpoints[self.graph_name]["done"] = True
+            return
+        
         for node in self.ss_graph.critical_path:
             if node.name in self.done_nodes:
                 self.dig_node(node)
@@ -145,6 +182,7 @@ class CheckPoints:
                         this_time = None
             else:
                 self.dig_node(node, 0, False)
+        
 
     
     def dig_node(self, cur_node: SSNode, level=0, assign_all=True, target_node = False):
@@ -559,6 +597,9 @@ def stream_schedule(snodes):
         checkpoints = CheckPoints(debug_path, ssgraph)
         checkpoints.load()
         checkpoints.stream_assign()
+        if checkpoints.checkpoints[ssgraph.graph_name].get("done", False) == True:
+            checkpoints.save()
+            raise RuntimeError("All possible assignments are done.")
         ssgraph.event_assign()
         checkpoints.save()
     else:
