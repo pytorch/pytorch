@@ -6827,13 +6827,7 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     // The usual use case is for PT2, where we don't support double backward
     // anyway - so if we can't verify src_num_zeros <= 0, then don't support
     // double backward.
-    if (src_num_zeros.is_meta() || at::isTensorSubclassLike(src_num_zeros)) {
-      auto node = std::make_shared<DelayedError>(
-          "index_reduce(): Double backward is unsupported for meta/fake tensors",
-          /* num inputs */ 1);
-      auto result = node->apply({std::move(grad_src1)});
-      grad_src = result[0];
-    } else if ((src_num_zeros > 1).any().item<bool>()) {
+    if (GradMode::is_enabled() && (src_num_zeros > 1).any().item<bool>()) {
       auto node = std::make_shared<DelayedError>(
           "index_reduce(): Double backward is unsupported for source when >1 zeros in source are scattered to the same position in self",
           /* num inputs */ 1);
