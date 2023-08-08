@@ -103,7 +103,10 @@ DONT_WRAP_FILES = {
 CacheEntry = namedtuple("CacheEntry", "check_fn, code")
 
 
-def _debug_get_cache_entry_list(code):
+def _debug_get_cache_entry_list(code: types.CodeType) -> List[CacheEntry]:
+    """
+    Given a code object, retrieve the cache entries stored in this code.
+    """
     cache_list = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
     return list(map(CacheEntry._make, cache_list))
 
