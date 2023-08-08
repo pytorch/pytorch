@@ -5743,24 +5743,71 @@ def log_normal(self, mean=1, std=2, generator=None):
 
 
 # TODO: add support for functionalization aten.normal_functional
+# NOTE: the device and dtype will be ignored when shape is None
 @register_decomposition(aten.normal)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("self",),
+    type_promoting_args=(
+        "mean",
+        "std",
+    ),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-def normal(self, mean=0, std=1, generator=None):
+def normal(
+    mean=0,
+    std=1,
+    shape=None,
+    *,
+    generator=None,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+):
     assert generator is None
-    torch._check(std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}")
+    assert layout is None
+
+    if not isinstance(std, TensorLike):
+        torch._check(
+            std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}"
+        )
+
+    if shape is None:
+        tensors = tuple(t for t in (mean, std) if isinstance(t, TensorLike))
+        torch._check(
+            len(tensors) > 0,
+            lambda: "normal expects that either mean or std is a tensor, or shape is defined",
+        )
+        torch._check(
+            layout is None and pin_memory is None,
+            lambda: "Cannot pass layout, or pin_memory without shape",
+        )
+
+        shape = _broadcast_shapes(*(t.shape for t in tensors))
+        dtype = tensors[0].dtype
+        device = tensors[0].device
+    else:
+        torch._check(
+            not isinstance(mean, TensorLike) and not isinstance(std, TensorLike),
+            lambda: "normal expects mean and std to be scalars when shape is defined",
+        )
+        dtype = torch.get_default_dtype() if dtype is None else dtype
+        device = torch.device("cpu") if device is None else device
+
     normal_samples = prims.normal(
-        self.shape,
+        shape,
         mean=0.0,
         std=1.0,
-        dtype=self.dtype,
-        device=self.device,
+        dtype=dtype,
+        device=device,
         requires_grad=False,
     )
     return std * normal_samples + mean
+
+
+@register_decomposition(aten.normal_)
+def normal_(self, mean=0, std=1, *, generator=None):
+    return normal(mean, std, self.shape, out=self, generator=generator)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -5882,7 +5929,6 @@ xlogy_ = _make_inplace(xlogy)
 cauchy_ = _make_inplace(cauchy)
 exponential_ = _make_inplace(exponential)
 geometric_ = _make_inplace(geometric)
-normal_ = _make_inplace(normal)
 log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
 
