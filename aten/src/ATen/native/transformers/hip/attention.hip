@@ -35,7 +35,7 @@
 // MemoryEfficient Attention Specific Imports
 //#include <ATen/native/transformers/hip/mem_eff_attention/kernel_forward.h>
 //#include <ATen/native/transformers/hip/mem_eff_attention/kernels/cutlassF.h>
-//#include <ATen/native/transformers/hip/mem_eff_attention/pytorch_utils.h>
+#include <ATen/native/transformers/hip/mem_eff_attention/pytorch_utils.h>
 #endif
 
 namespace at {
