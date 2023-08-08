@@ -238,7 +238,6 @@ filegroup(
             "aten/src/ATen/native/quantized/cuda/*.cpp",
             "aten/src/ATen/native/quantized/cudnn/*.cpp",
             "aten/src/ATen/native/sparse/cuda/*.cpp",
-            "aten/src/ATen/native/transformers/*.cpp",
             "aten/src/ATen/native/transformers/cuda/*.cpp",
         ],
     ),
