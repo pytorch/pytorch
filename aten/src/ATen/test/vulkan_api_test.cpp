@@ -1808,6 +1808,69 @@ TEST_F(VulkanAPITest, expand_as) {
   ASSERT_TRUE(check);
 }
 
+void test_flip(const at::IntArrayRef input_shape, const at::IntArrayRef dim_list) {
+  c10::InferenceMode mode;
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::flip(in_cpu, dim_list);
+  const auto out_vulkan = at::flip(in_vulkan, dim_list);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+    std::cout << "test flip failed with input_shape: " << input_shape
+              << " and dim_list: " << dim_list << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, flip_1d) {
+  test_flip({5}, {0});
+  test_flip({5}, {-1});
+}
+
+TEST_F(VulkanAPITest, flip_2d) {
+  test_flip({5, 5}, {-1});
+  test_flip({2, 7}, {-2});
+
+  test_flip({5, 5}, {0, 1});
+}
+
+TEST_F(VulkanAPITest, flip_3d) {
+  test_flip({5, 7, 5}, {-1});
+  test_flip({2, 9, 7}, {-2});
+  test_flip({9, 7, 5}, {-3});
+
+  test_flip({10, 7, 5}, {0, 1});
+  test_flip({10, 7, 5}, {0, 2});
+  test_flip({10, 7, 5}, {1, 2});
+
+  test_flip({10, 7, 5}, {2, 1, 0});
+}
+
+TEST_F(VulkanAPITest, flip_4d) {
+  test_flip({2, 9, 1, 1}, {-1});
+  test_flip({7, 5, 9, 3}, {-2});
+  test_flip({3, 8, 5, 2}, {-3});
+  test_flip({7, 9, 5, 3}, {-4});
+
+  test_flip({10, 7, 5, 6}, {0, 1});
+  test_flip({10, 7, 5, 6}, {0, 2});
+  test_flip({10, 7, 5, 6}, {0, 3});
+  test_flip({10, 7, 5, 6}, {1, 2});
+  test_flip({10, 7, 5, 6}, {1, 3});
+  test_flip({10, 7, 5, 6}, {2, 3});
+
+  test_flip({10, 7, 5, 6}, {0, 1, 2});
+  test_flip({10, 7, 5, 6}, {0, 1, 3});
+  test_flip({10, 7, 5, 6}, {0, 2, 3});
+  test_flip({10, 7, 5, 6}, {3, 2, 1});
+
+  test_flip({10, 7, 5, 6}, {3, 2, 1, 0});
+}
+
 TEST_F(VulkanAPITest, gelu) {
   const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
@@ -3700,6 +3763,90 @@ TEST_F(VulkanAPITest, sub_to_scalar_wrapped) {
   }
 
   ASSERT_TRUE(check);
+}
+
+void test_sum_dim(const at::IntArrayRef input_shape, const at::IntArrayRef dim_list, bool keepdim=false) {
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::sum(in_cpu, dim_list, keepdim);
+  const auto out_vulkan = at::sum(in_vulkan, dim_list, keepdim);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    std::cout << "sum_dim test failed with input shape: "
+              << input_shape << " and dim_list: " << dim_list << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, sum_dim_2d) {
+  test_sum_dim({2, 3}, {-1});
+  test_sum_dim({2, 7}, {-2});
+}
+
+TEST_F(VulkanAPITest, sum_dim_3d) {
+  test_sum_dim({9, 7, 5}, {-1});
+  test_sum_dim({5, 7, 9}, {-2});
+  test_sum_dim({5, 7, 9}, {-3});
+
+  test_sum_dim({10, 7, 5}, {0, 1});
+  test_sum_dim({10, 7, 5}, {0, 2});
+  test_sum_dim({10, 7, 5}, {1, 2});
+}
+
+TEST_F(VulkanAPITest, sum_dim_4d) {
+  test_sum_dim({7, 9, 6, 5}, {-1});
+  test_sum_dim({6, 5, 7, 9}, {-2});
+  test_sum_dim({6, 5, 7, 9}, {-3});
+  test_sum_dim({6, 5, 7, 9}, {-4});
+
+  test_sum_dim({10, 7, 5, 6}, {0, 1});
+  test_sum_dim({10, 7, 5, 6}, {0, 2});
+  test_sum_dim({10, 7, 5, 6}, {0, 3});
+  test_sum_dim({10, 7, 5, 6}, {1, 2});
+  test_sum_dim({10, 7, 5, 6}, {1, 3});
+  test_sum_dim({10, 7, 5, 6}, {2, 3});
+
+  test_sum_dim({10, 7, 5, 6}, {0, 1, 2});
+  test_sum_dim({10, 7, 5, 6}, {0, 1, 3});
+  test_sum_dim({10, 7, 5, 6}, {0, 2, 3});
+  test_sum_dim({10, 7, 5, 6}, {3, 2, 1});
+}
+
+TEST_F(VulkanAPITest, sum_dim_keepdim_2d) {
+  test_sum_dim({5, 7}, {-1}, true);
+  test_sum_dim({5, 7}, {-2}, true);
+}
+
+TEST_F(VulkanAPITest, sum_dim_keepdim_3d) {
+  test_sum_dim({9, 5, 7}, {-1}, true);
+  test_sum_dim({5, 9, 7}, {-2}, true);
+  test_sum_dim({7, 9, 5}, {-3}, true);
+
+  test_sum_dim({9, 5, 7}, {0, 1}, true);
+  test_sum_dim({5, 9, 7}, {0, 2}, true);
+  test_sum_dim({7, 9, 5}, {1, 2}, true);
+}
+
+TEST_F(VulkanAPITest, sum_dim_keepdim_4d) {
+  test_sum_dim({9, 5, 7, 11}, {-1}, true);
+  test_sum_dim({5, 9, 11, 7}, {-2}, true);
+  test_sum_dim({7, 11, 9, 5}, {-3}, true);
+  test_sum_dim({11, 7, 9, 5}, {-4}, true);
+
+  test_sum_dim({9, 5, 7, 11}, {0, 1}, true);
+  test_sum_dim({5, 9, 11, 7}, {0, 2}, true);
+  test_sum_dim({7, 11, 9, 5}, {0, 3}, true);
+  test_sum_dim({11, 7, 9, 5}, {1, 2}, true);
+  test_sum_dim({9, 5, 7, 11}, {1, 3}, true);
+  test_sum_dim({5, 9, 11, 7}, {2, 3}, true);
+
+  test_sum_dim({7, 11, 9, 5}, {-1, -2, -3}, true);
+  test_sum_dim({11, 7, 9, 5}, {-1, -2, -4}, true);
+  test_sum_dim({9, 5, 7, 11}, {-2, -3, -4}, true);
 }
 
 TEST_F(VulkanAPITest, uniform) {

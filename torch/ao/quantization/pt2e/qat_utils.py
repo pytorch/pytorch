@@ -8,7 +8,7 @@ from torch.fx import Graph, GraphModule, Node
 from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 import torch.nn.functional as F
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
-from .quantizer import (
+from torch.ao.quantization.quantizer import (
     DerivedQuantizationSpec,
     EdgeOrNode,
     SharedQuantizationSpec,
