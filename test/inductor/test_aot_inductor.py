@@ -32,14 +32,10 @@ class AOTInductorModelRunner:
             output_tensors.append(torch.empty_like(output))
 
         # The exact API is subject to change
-        exported = torch._export.export(model, example_inputs)
-        param_buffer_values = list(exported.state_dict.values())
-        flat_example_inputs = fx_pytree.tree_flatten_spec(
-            example_inputs, exported.call_spec.in_spec
+        so_path, exported = torch._export.aot_compile(
+            model,
+            example_inputs,
         )
-        all_args = (*param_buffer_values, *flat_example_inputs)
-        # AOT compile into a .so
-        so_path = torch._inductor.aot_compile(exported.graph_module, all_args)
 
         # Use a utility function for easier testing
         source = """
@@ -79,6 +75,24 @@ class AOTInductorModelRunner:
 
 
 class AotInductorTests(TestCase):
+    def test_simple(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device="cuda")
+
+            def forward(self, x, y):
+                return x + torch.nn.functional.linear(y, self.weight)
+
+        model = Repro()
+        example_inputs = (
+            torch.randn(10, 10, device="cuda"),
+            torch.randn(10, 10, device="cuda"),
+        )
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
+        self.assertTrue(same(actual, expected))
+
     def test_missing_output(self):
         class Repro(torch.nn.Module):
             def __init__(self):
