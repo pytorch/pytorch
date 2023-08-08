@@ -1633,8 +1633,14 @@ Tensor asarray(
   bool force_alias = !copy.value_or(true);
   bool should_warn_numpy_not_writable = false;
 
+  // Used when:
+  // 1. 'obj' implements the buffer protocol and no type is given.
+  // 2. creating a new tensor from a Python sequence.
   auto dtype_unwrapped =
       dtype.value_or(torch::tensors::get_default_scalar_type());
+  // Used when creating a new tensor from a Python sequence.
+  auto device_unwrapped =
+      device.value_or(torch::tensors::get_default_device());
 
   // Check whether 'obj' is a 'Tensor'
   if (THPVariable_Check(obj)) {
@@ -1753,7 +1759,7 @@ Tensor asarray(
     tensor = internal_new_from_data(
         TensorOptions(),
         dtype_unwrapped,
-        device,
+        device_unwrapped,
         obj,
         /* copy_variables = */ false,
         /* copy_numpy = */ false,

@@ -3966,6 +3966,11 @@ class TestAsArray(TestCase):
         self.assertEqual(tensor.item(), zerodim_arr.item())
         self.assertEqual(tensor.dtype, torch.int32)
 
+    def test_default_device(self, device):
+        with torch.device(device):
+            tensor = torch.asarray(3)
+            self.assertEqual(tensor.device.type, device)
+
 
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())
