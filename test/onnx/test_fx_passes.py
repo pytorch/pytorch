@@ -1,4 +1,6 @@
 # Owner(s): ["module: onnx"]
+from __future__ import annotations
+
 import torch
 import torch._dynamo
 import torch.fx
@@ -58,12 +60,14 @@ class TestFxPasses(common_utils.TestCase):
         ), f"Expected all names to be unique, got {nodes}"
 
     def test_onnx_dynamo_export_raises_when_model_contains_unsupported_fx_nodes(self):
-        @custom_op.custom_op("mylibrary::foo_op")
-        def foo_op(x: torch.Tensor) -> torch.Tensor:
+        # TODO: Manual schema is used because torch._custom_op doesn't support
+        # from __future__ import annotations
+        @custom_op.custom_op("mylibrary::foo_op", "(Tensor x) -> Tensor")
+        def foo_op(x):
             ...
 
-        @custom_op.custom_op("mylibrary::bar_op")
-        def bar_op(x: torch.Tensor) -> torch.Tensor:
+        @custom_op.custom_op("mylibrary::bar_op", "(Tensor x) -> Tensor")
+        def bar_op(x):
             ...
 
         @foo_op.impl_abstract()
