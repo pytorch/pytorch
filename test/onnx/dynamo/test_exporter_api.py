@@ -128,6 +128,17 @@ class TestDynamoExportAPI(common_utils.TestCase):
             )
             self.assertTrue(os.path.exists(path))
 
+    def test_save_sarif_log_to_file_with_successful_export_by_setting_path_in_export_options(
+        self,
+    ):
+        with common_utils.TemporaryFileName(suffix=".sarif") as path:
+            dynamo_export(
+                SampleModel(),
+                torch.randn(1, 1, 2),
+                export_options=ExportOptions(diagnostic_sarif_log_path=path),
+            )
+            self.assertTrue(os.path.exists(path))
+
     def test_save_sarif_log_to_file_with_failed_export(self):
         class ModelWithExportError(torch.nn.Module):
             def forward(self, x):
