@@ -74,7 +74,10 @@ CUDA_CLANG_VERSIONS: VersionMap = {
     '11.7': (MINIMUM_CLANG_VERSION, (14, 0)),
 }
 
-__all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",
+__all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_pybind11_abi_build_flags",
+           "get_glibcxx_abi_build_flags", "get_cxx_compiler",
+           "get_compiler_abi_compatibility_and_version",
+           "check_and_build_precompiler_headers", "BuildExtension",
            "CppExtension", "CUDAExtension", "include_paths", "library_paths", "load", "load_inline", "is_ninja_available",
            "verify_ninja_availability"]
 # Taken directly from python stdlib < 3.9
@@ -1343,19 +1346,6 @@ def get_glibcxx_abi_build_flags():
     glibcxx_abi_cflags = ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
     return glibcxx_abi_cflags
 
-def check_compiler_is_gcc(compiler):
-    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT).decode(*SUBPROCESS_DECODE_ARGS)
-    # Check for 'gcc' or 'g++' for sccache wrapper
-    pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
-    results = re.findall(pattern, version_string)
-    if len(results) != 1:
-        # Clang is return False
-        return False
-    compiler_path = os.path.realpath(results[0].strip())
-    # On RHEL/CentOS c++ is a gcc compiler wrapper
-    if os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string:
-        return True
-
 def check_and_build_precompiler_headers(extra_cflags,
                             extra_include_paths,
                             with_cuda=None,
@@ -1377,6 +1367,19 @@ def check_and_build_precompiler_headers(extra_cflags,
 
     if with_cuda is True:
         return
+
+    def check_compiler_is_gcc(compiler):
+        version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT).decode(*SUBPROCESS_DECODE_ARGS)
+        # Check for 'gcc' or 'g++' for sccache wrapper
+        pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
+        results = re.findall(pattern, version_string)
+        if len(results) != 1:
+            # Clang is return False
+            return False
+        compiler_path = os.path.realpath(results[0].strip())
+        # On RHEL/CentOS c++ is a gcc compiler wrapper
+        if os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string:
+            return True
 
     compiler = get_cxx_compiler()
 
