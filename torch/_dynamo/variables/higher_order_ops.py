@@ -606,7 +606,7 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
             unimplemented(
                 "torch.func.grad capture is disabled, "
                 "it can be turned on by setting "
-                "`dynamo.config.capture_func_transforms=True`"
+                "`torch._dynamo.config.capture_func_transforms=True`"
             )
         # [NOTE] Here we are (roughly) modelling the following
         #
@@ -772,7 +772,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             unimplemented(
                 "torch.func.vmap capture is disabled, "
                 "it can be turned on by setting "
-                "`dynamo.config.capture_func_transforms=True`"
+                "`torch._dynamo.config.capture_func_transforms=True`"
             )
 
         checkpoint = tx.copy_graphstate()

@@ -196,8 +196,12 @@ def _allowed_function_ids():
                     continue
 
                 # We want to trace through `grad` and `vmap`
-                if obj in (torch.func.grad, deprecated_func.grad,
-                           torch.func.vmap, deprecated_func.vmap):
+                if obj in (
+                    torch.func.grad,
+                    deprecated_func.grad,
+                    torch.func.vmap,
+                    deprecated_func.vmap,
+                ):
                     continue
 
                 if isinstance(obj, types.ModuleType):

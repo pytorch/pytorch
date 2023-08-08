@@ -2095,7 +2095,7 @@ class GraphModule(torch.nn.Module):
                 dict(counters["graph_break"]),
                 {
                     "torch.func.grad capture is disabled, it can be turned "
-                    "on by setting `dynamo.config.capture_func_transforms=True`": 2
+                    "on by setting `torch._dynamo.config.capture_func_transforms=True`": 2
                 },
             )
             self.assertEqual(actual, expected)
@@ -2590,7 +2590,7 @@ class GraphModule(torch.nn.Module):
                 dict(counters["graph_break"]),
                 {
                     "torch.func.vmap capture is disabled, it can be "
-                    "turned on by setting `dynamo.config.capture_func_transforms=True`": 2
+                    "turned on by setting `torch._dynamo.config.capture_func_transforms=True`": 2
                 },
             )
             self.assertEqual(actual, expected)
@@ -2615,14 +2615,11 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
-    def test_vmap_symint_in_dims_graph_break(self):
+    def test_vmap_multiple_invocation_in_dims(self):
         counters.clear()
 
-        def identity(x):
-            return x
-
         def wrapper_fn(x, in_dims):
-            return torch.func.vmap(identity, in_dims)(x)
+            return torch.func.vmap(torch.sum, in_dims)(x)
 
         x = torch.randn(3, 3, 3, 3)
         opt = torch.compile(wrapper_fn, backend="eager", fullgraph=False, dynamic=True)
@@ -2634,6 +2631,24 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(
             dict(counters["graph_break"]),
             {"torch.func.vmap: in_dims is not an int or tuple variable.": 2},
+        )
+
+    def test_vmap_multiple_invocation_out_dims(self):
+        counters.clear()
+
+        def wrapper_fn(x, out_dims):
+            return torch.func.vmap(lambda x: torch.sum(x, 0), out_dims=out_dims)(x)
+
+        x = torch.randn(3, 3, 3, 3)
+        opt = torch.compile(wrapper_fn, backend="eager", fullgraph=False, dynamic=True)
+        expected = wrapper_fn(x, 0), wrapper_fn(x, 1), wrapper_fn(x, 2)
+        # Third invocation of `opt` makes `in_dims` as SymInt.
+        actual = opt(x, 0), opt(x, 1), opt(x, 2)
+        self.assertEqual(expected, actual)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"torch.func.vmap: out_dims is not an int or tuple variable.": 2},
         )
 
 
