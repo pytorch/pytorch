@@ -25,14 +25,16 @@ from torch.fx.passes.utils.source_matcher_utils import (
     SourcePartition,
 )
 from .quantizer import (
-    OperatorConfig,
-    OperatorPatternType,
     QuantizationAnnotation,
-    QuantizationConfig,
     QuantizationSpec,
     Quantizer,
 )
-from .xnnpack_quantizer import _is_annotated
+from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
+    _is_annotated,
+    OperatorConfig,
+    OperatorPatternType,
+    QuantizationConfig,
+)
 
 __all__ = [
     "X86InductorQuantizer",

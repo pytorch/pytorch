@@ -24,17 +24,21 @@ from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from torch.fx import Node
 from torch.fx.passes.utils.source_matcher_utils import get_source_partitions
 
-from .quantizer import (
-    OperatorConfig,
-    OperatorPatternType,
+from torch.ao.quantization.quantizer import (
     QuantizationAnnotation,
-    QuantizationConfig,
     QuantizationSpec,
     Quantizer,
     SharedQuantizationSpec,
 )
 
-from .xnnpack_quantizer_utils import _is_annotated, _OP_TO_ANNOTATOR
+from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
+    _is_annotated,
+    _OP_TO_ANNOTATOR,
+    OperatorConfig,
+    OperatorPatternType,
+    QuantizationConfig,
+)
+
 
 
 __all__ = [

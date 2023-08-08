@@ -3,7 +3,7 @@ import copy
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn as nn
-from torch.ao.quantization.quantizer import (
+from torch.ao.quantization.quantizer.x86_inductor_quantizer import (
     X86InductorQuantizer,
 )
 from torch.ao.quantization.quantize_pt2e import (
