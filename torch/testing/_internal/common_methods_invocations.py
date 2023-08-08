@@ -2986,20 +2986,25 @@ def error_inputs_bucketize(opinfo, device, **kwargs):
 def sample_inputs_searchsorted(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    # (unsorted tensor size, (input sizes,))
+    # (unsorted tensor size, (input sizes,), is_scalar)
     sizes = (
-        ((0,), ((0,),)),
-        ((M,), ((), (M,), (M, M))),
-        ((0, 0), ((0, 0),)),
-        ((M, M), ((M, M),)),
-        ((0, 0, 0), ((0, 0, 0),)),
-        ((M, M, M), ((M, M, M),)),
+        ((0,), ((0,),), False),
+        ((M,), ((), (M,), (M, M)), False),
+        ((0, 0), ((0, 0),), False),
+        ((M, M), ((M, M),), False),
+        ((0, 0, 0), ((0, 0, 0),), False),
+        ((M, M, M), ((M, M, M),), False),
+        ((L,), ((),), True),
     )
 
-    for (size, input_sizes), noncontiguous, out_int32, right in product(sizes, [False, True], [False, True], [False, True]):
+    for (size, input_sizes, is_scalar), noncontiguous, out_int32, right in product(
+        sizes, [False, True], [False, True], [False, True]
+    ):
         unsorted_tensor = make_arg(size, noncontiguous=noncontiguous)
         for input_size in input_sizes:
-            input_tensor = make_arg(input_size, noncontiguous=noncontiguous)
+            input = make_arg(input_size, noncontiguous=noncontiguous)
+            if is_scalar:
+                input = input.item()
             if np.prod(size) == 0:
                 boundary_tensor = unsorted_tensor
                 sorter = make_tensor(size, dtype=torch.int64, device=device, noncontiguous=noncontiguous)
@@ -3007,11 +3012,11 @@ def sample_inputs_searchsorted(op_info, device, dtype, requires_grad, **kwargs):
                 boundary_tensor, sorter = torch.sort(unsorted_tensor)
             side = "right" if right else "left"
 
-            yield SampleInput(boundary_tensor, input_tensor, out_int32=out_int32, right=right)
-            yield SampleInput(boundary_tensor, input_tensor, out_int32=out_int32, side=side)
+            yield SampleInput(boundary_tensor, input, out_int32=out_int32, right=right)
+            yield SampleInput(boundary_tensor, input, out_int32=out_int32, side=side)
 
-            yield SampleInput(unsorted_tensor, input_tensor, out_int32=out_int32, right=right, sorter=sorter)
-            yield SampleInput(unsorted_tensor, input_tensor, out_int32=out_int32, side=side, sorter=sorter)
+            yield SampleInput(unsorted_tensor, input, out_int32=out_int32, right=right, sorter=sorter)
+            yield SampleInput(unsorted_tensor, input, out_int32=out_int32, side=side, sorter=sorter)
 
 def sample_inputs_gradient(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
@@ -7590,6 +7595,10 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     for input, target, kwargs in gen_shape_kwargs():
         yield SampleInput(input, args=(target,), kwargs=kwargs)
 
+    target = torch.tensor([-1, 2], device=device, dtype=torch.long)
+    yield SampleInput(make_input(shape), args=(target,), kwargs={'ignore_index': -1})
+
+
 def sample_inputs_binary_cross_entropy_with_logits(
     op_info, device, dtype, requires_grad, **kwargs
 ):
@@ -8281,9 +8290,10 @@ def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_g
 NUM_SIZE0_TENSORS = 10000
 foreach_num_tensors = [20, 23] if not TEST_WITH_SLOW else [23, 30, 300]
 class ForeachRightmostArgType(enum.Enum):
-    TensorList = 1
-    ScalarList = 2
-    Scalar = 3
+    TensorList = enum.auto()
+    ScalarList = enum.auto()
+    Scalar = enum.auto()
+    Tensor = enum.auto()
 _foreach_inputs_default_kwargs = {"noncontiguous": False, "same_size": False, "low": None, "high": None}
 class foreach_inputs_sample_func:
     def __init__(
@@ -8291,14 +8301,18 @@ class foreach_inputs_sample_func:
         arity: int,
         rightmost_supports_scalar: bool,
         rightmost_supports_scalarlist: bool,
+        rightmost_supports_tensor: bool = False,
     ) -> None:
         self.arity = arity
-        self._set_rightmost_arg_types(rightmost_supports_scalar, rightmost_supports_scalarlist)
+        self._set_rightmost_arg_types(
+            rightmost_supports_scalar, rightmost_supports_scalarlist, rightmost_supports_tensor,
+        )
 
     def _set_rightmost_arg_types(
         self,
         rightmost_supports_scalar: bool,
         rightmost_supports_scalarlist: bool,
+        rightmost_supports_tensor: bool,
     ) -> None:
         self._rightmost_arg_types = [ForeachRightmostArgType.TensorList]
         if self.arity > 1:
@@ -8306,10 +8320,18 @@ class foreach_inputs_sample_func:
                 self._rightmost_arg_types.append(ForeachRightmostArgType.Scalar)
             if rightmost_supports_scalarlist:
                 self._rightmost_arg_types.append(ForeachRightmostArgType.ScalarList)
+            if rightmost_supports_tensor:
+                self._rightmost_arg_types.append(ForeachRightmostArgType.Tensor)
 
     def _sample_rightmost_arg(self, opinfo, rightmost_arg_type, device, dtype, num_tensors, **_foreach_inputs_kwargs):
         if rightmost_arg_type == ForeachRightmostArgType.TensorList:
             return [sample_inputs_foreach(None, device, dtype, num_tensors, **_foreach_inputs_kwargs)]
+        if rightmost_arg_type == ForeachRightmostArgType.Tensor:
+            return [make_tensor(
+                (), device=device, dtype=dtype,
+                noncontiguous=_foreach_inputs_kwargs["noncontiguous"],
+                requires_grad=_foreach_inputs_kwargs.get("requires_grad", False),
+            )]
         should_use_simpler_scalars = opinfo.name == "_foreach_pow" and dtype in (torch.float16, torch.bfloat16)
 
         def sample_float():
@@ -8339,7 +8361,7 @@ class foreach_inputs_sample_func:
         raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
 
     def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):
-        if self.arity < 2:
+        if self.arity < 2 or rightmost_arg_type == ForeachRightmostArgType.Tensor:
             return None
         if "foreach_pow" in opinfo.name and dtype in integral_types():
             return True
@@ -8490,7 +8512,6 @@ class foreach_lerp_sample_func(foreach_inputs_sample_func):
         if rightmost_arg_type == ForeachRightmostArgType.Scalar:
             return [random.random()]
         raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
-
 
 
 class foreach_pointwise_sample_func(foreach_inputs_sample_func):
@@ -8814,7 +8835,7 @@ foreach_binary_op_db: List[OpInfo] = [
         "mul",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True, True),
         supports_autograd=True,
         supports_forward_ad=True,
     ),
@@ -20769,6 +20790,31 @@ python_ref_db = [
         "_refs.allclose",
         torch_opinfo_name="allclose",
         supports_nvfuser=False,
+    ),
+    #
+    # Misc functions
+    #
+    PythonRefInfo(
+        "_refs.stft",
+        torch_opinfo_name="stft",
+        supports_nvfuser=False,
+        skips=[
+            # RuntimeError: no _refs support for aten.pad
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref'
+            ),
+        ],
+    ),
+    PythonRefInfo(
+        "_refs.istft",
+        torch_opinfo_name="istft",
+        supports_nvfuser=False,
+        skips=[
+            # RuntimeError: no _refs support for aten.unfold_backward
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref'
+            ),
+        ],
     ),
 ]
 python_ref_db += opinfo.definitions.python_ref_db
