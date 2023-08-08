@@ -7,7 +7,6 @@ from .. import _reduction as _Reduction
 
 from torch import Tensor
 from typing import Callable, Optional
-import torch
 
 __all__ = ['L1Loss', 'NLLLoss', 'NLLLoss2d', 'PoissonNLLLoss', 'GaussianNLLLoss', 'KLDivLoss',
            'MSELoss', 'BCELoss', 'BCEWithLogitsLoss', 'HingeEmbeddingLoss', 'MultiLabelMarginLoss',
