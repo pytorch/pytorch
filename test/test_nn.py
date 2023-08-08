@@ -374,6 +374,20 @@ class TestNN(NNTestCase):
         self.assertEqual(names(m.named_buffers(remove_duplicate=False)),
                          ["buffer1", "buffer2"])
 
+    def test_buffer_bad_subclass(self):
+        class MyBadModule(nn.Linear):
+            def __init__(self):
+                super().__init__(2, 2)
+                self.bar = Buffer(torch.rand(2, 2))
+
+
+            # persistent is explicitly missing!
+            def register_buffer(self, name, value):
+                super().register_buffer(name, value, True)
+
+        foo = MyBadModule()
+        self.assertIsNotNone(foo.bar)
+
     def test_call_supports_python_dict_output(self):
         class Net(nn.Module):
             def __init__(self):
