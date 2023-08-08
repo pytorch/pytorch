@@ -558,7 +558,8 @@ class CudaReproTests(TestCase):
                 start = math.log2(0.5)
                 end = math.log2(1 / (2**8))
 
-                self.scales = nn.Buffer(
+                self.register_buffer(
+                    "scales",
                     2
                     ** torch.arange(
                         start,

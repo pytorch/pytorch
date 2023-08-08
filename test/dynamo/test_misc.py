@@ -27,6 +27,7 @@ import torch._dynamo.testing
 import torch.onnx.operators
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
+from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
@@ -82,6 +83,25 @@ qconfig_dict = {"object_type": [(torch.nn.Linear, uniform_qconfig_8bit)]}
 
 
 class MiscTests(torch._dynamo.test_case.TestCase):
+    def test_get_cache_entry(self):
+        def f(x):
+            return x + 1
+
+        torch.compile(f)(torch.randn(5, 5, 5))
+        entries = _debug_get_cache_entry_list(f.__code__)
+        self.assertTrue(len(entries) > 0)
+
+        def g(x):
+            return x + 2
+
+        entries = _debug_get_cache_entry_list(g.__code__)
+        self.assertTrue(len(entries) == 0)
+
+        try:
+            _debug_get_cache_entry_list(1)
+        except TypeError as e:
+            self.assertIn("expected a code object!", str(e))
+
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
             if flag:
@@ -676,10 +696,32 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         self.assertEqual(opt_fn({"a": v1, "b": v2})[0], -200)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_tensor_dict3(self):
+        def fn(inputs_a, inputs_b):
+            total = torch.zeros(1)
+            input_keys = inputs_a.keys() | inputs_b.keys()
+            for k in input_keys:
+                if k in inputs_a:
+                    total += inputs_a[k]
+                if k in inputs_b:
+                    total += inputs_b[k]
+            return total
+
+        v1 = torch.Tensor([100])
+        v2 = torch.Tensor([200])
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        self.assertEqual(
+            opt_fn({"a": v1, "b": v2}, {"b": v1, "c": v2}),
+            fn({"a": v1, "b": v2}, {"b": v1, "c": v2}),
+        )
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 5)
 
     def test_tensor_dict2(self):
         def fn1(inputs):
@@ -703,9 +745,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn1 = torch._dynamo.optimize(cnts)(fn1)
-        opt_fn2 = torch._dynamo.optimize(cnts)(fn2)
-        opt_fn3 = torch._dynamo.optimize(cnts)(fn3)
+        opt_fn1 = torch._dynamo.optimize(cnts, nopython=True)(fn1)
+        opt_fn2 = torch._dynamo.optimize(cnts, nopython=True)(fn2)
+        opt_fn3 = torch._dynamo.optimize(cnts, nopython=True)(fn3)
         self.assertEqual(opt_fn1({"a": v1, "b": v2})[0], 300)
         self.assertEqual(opt_fn2({"a": v1, "b": v2})[0], 300)
         self.assertEqual(opt_fn3({"a": v1, "b": v2})[0], 300)
