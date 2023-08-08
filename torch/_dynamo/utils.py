@@ -80,7 +80,9 @@ nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitat
 log = logging.getLogger(__name__)
 
 # profiling compilation time
-compilation_metrics = collections.OrderedDict()
+compilation_time_metrics = collections.OrderedDict()
+
+compilation_metrics = collections.defaultdict(collections.Counter)
 
 timer_counter = itertools.count()
 
@@ -117,8 +119,6 @@ def dynamo_profiled(func):
     return profile_wrapper
 
 
-frame_phase_timing = collections.OrderedDict()
-
 curr_frame = 0
 
 
@@ -131,7 +131,8 @@ def increment_frame():
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
 def reset_frame_count():
     global curr_frame
-    frame_phase_timing.clear()
+    compilation_metrics.clear()
+    compilation_time_metrics.clear()
     curr_frame = 0
 
 
@@ -143,6 +144,18 @@ def increment_op_count(cnt):
     op_count += cnt
 
 
+def store_compilation_metrics(metrics: Dict[str, Any]):
+    frame_key = str(curr_frame)
+    for key, value in metrics.items():
+        assert key not in compilation_metrics[frame_key].keys()
+        compilation_metrics[frame_key][key] = value
+
+
+@atexit.register
+def dump_compilation_metrics():
+    dynamo_compilation_events(compilation_metrics)
+
+
 # Print a report of time spent so far
 # Ex:
 # TIMING:
@@ -151,13 +164,14 @@ def increment_op_count(cnt):
 def print_time_report():
     total = 0
     total_by_key = {}
-    for timings in frame_phase_timing.values():
+    for timings in compilation_metrics.values():
         for key, timing in timings.items():
-            total += timing
-            if key not in total_by_key:
-                total_by_key[key] = timing
-            else:
-                total_by_key[key] += timing
+            if key in ["entire_frame_compile", "backend_compile"]:
+                total += timing
+                if key not in total_by_key:
+                    total_by_key[key] = timing
+                else:
+                    total_by_key[key] += timing
 
     out = "TIMING:"
     for key, value in total_by_key.items():
@@ -167,7 +181,7 @@ def print_time_report():
 
 
 # dynamo_timed API works as a function decorator
-# By wrapping a function in dynamo_timed, we can store a record in compilation_metrics
+# By wrapping a function in dynamo_timed, we can store a record in compilation_time_metrics
 # where the key is the functions name.
 # For example:
 #
@@ -187,22 +201,15 @@ def dynamo_timed(original_function=None, phase_name=None):
         @wraps(func)
         def time_wrapper(*args, **kwargs):
             key = func.__qualname__
-            if key not in compilation_metrics:
-                compilation_metrics[key] = []
+            if key not in compilation_time_metrics:
+                compilation_time_metrics[key] = []
             with torch.profiler.record_function(f"{key} (dynamo_timed)"):
                 t0 = time.time()
                 r = func(*args, **kwargs)
                 time_spent = time.time() - t0
-            # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
-            compilation_metrics[key].append(time_spent)
+            compilation_time_metrics[key].append(time_spent)
             if phase_name:
-                frame_key = str(curr_frame)
-                if frame_key not in frame_phase_timing:
-                    frame_phase_timing[frame_key] = {}
-                assert (
-                    phase_name not in frame_phase_timing[frame_key]
-                ), f"Duplicate phase name {phase_name} for frame {frame_key}"
-                frame_phase_timing[frame_key][phase_name] = time_spent
+                store_compilation_metrics({phase_name: time_spent})
             return r
 
         return time_wrapper
@@ -233,8 +240,8 @@ def compile_times(repr="str", aggregate=False):
 
     if repr == "str":
         rows = [
-            (k, fmt_fn(compilation_metrics[k], item_fn=lambda x: f"{x:.4f}"))
-            for k in compilation_metrics
+            (k, fmt_fn(compilation_time_metrics[k], item_fn=lambda x: f"{x:.4f}"))
+            for k in compilation_time_metrics
         ]
         out = "TorchDynamo compilation metrics:\n"
         out += tabulate(rows, headers=("Function", "Runtimes (s)"))
@@ -242,9 +249,9 @@ def compile_times(repr="str", aggregate=False):
     elif repr == "csv":
         values = [
             fmt_fn(v, item_fn=lambda x: f"{x:.6f}")
-            for v in compilation_metrics.values()
+            for v in compilation_time_metrics.values()
         ]
-        headers = list(compilation_metrics.keys())
+        headers = list(compilation_time_metrics.keys())
         return headers, values
 
 

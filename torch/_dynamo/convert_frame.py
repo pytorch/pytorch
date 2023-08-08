@@ -58,6 +58,7 @@ from .utils import (
     orig_code_map,
     reset_graph_break_dup_checker,
     setup_compile_debug,
+    store_compilation_metrics,
     troubleshooting_url,
     write_record_to_file,
 )
@@ -358,6 +359,15 @@ def convert_frame_assert(
             },
         )
 
+        store_compilation_metrics(
+            {
+                "co_name": code.co_name,
+                "co_filename": code.co_filename,
+                "co_firstlineno": code.co_firstlineno,
+                "cache_size": cache_size,
+            }
+        )
+
         return _compile(
             frame.f_code,
             frame.f_globals,
@@ -493,16 +503,17 @@ def _compile(
 
         guarded_code = GuardedCode(out_code, check_fn.check_fn)
 
+        guard_str = "GUARDS:\n"
+        guard_str += "\n".join(
+            [
+                f"  {code}"
+                for guard in sorted(output.guards)
+                if guard.code_list is not None
+                for code in guard.code_list
+            ]
+        )
+        store_compilation_metrics({"guards": guard_str})
         if guards_log.isEnabledFor(logging.DEBUG):
-            guard_str = "GUARDS:\n"
-            guard_str += "\n".join(
-                [
-                    f"  {code}"
-                    for guard in sorted(output.guards)
-                    if guard.code_list is not None
-                    for code in guard.code_list
-                ]
-            )
             guards_log.debug(guard_str)
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
@@ -524,9 +535,11 @@ def _compile(
         GuardOnDataDependentSymNode,
     ) as e:
         exception_handler(e, code, frame, export=export)
+        store_compilation_metrics({"fail_reason": str(e)})
         raise
     except Exception as e:
         exception_handler(e, code, frame, export=export)
+        store_compilation_metrics({"fail_reason": str(e)})
         raise InternalTorchDynamoError(str(e)).with_traceback(e.__traceback__) from None
 
 

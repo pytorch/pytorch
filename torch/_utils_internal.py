@@ -64,6 +64,14 @@ def signpost_event(category: str, name: str, parameters: Dict[str, Any]):
     log.info("%s %s: %r", category, name, parameters)
 
 
+def dynamo_compilation_event(metrics: Dict[str, Dict[str, Any]]):
+    log.info("TorchDynamo compilation metrics:")
+    for fid, frame_metrics in metrics.items():
+        out = f"Frame: {fid}\n"
+        out += "\n".join([f" {k} : {v}" for k, v in sorted(frame_metrics.items())])
+        log.info(out)
+
+
 TEST_MASTER_ADDR = "127.0.0.1"
 TEST_MASTER_PORT = 29500
 # USE_GLOBAL_DEPS controls whether __init__.py tries to load

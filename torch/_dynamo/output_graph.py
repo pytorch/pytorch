@@ -73,6 +73,7 @@ from .utils import (
     nnmodule_doc_url_msg,
     nnmodule_has_hooks,
     same,
+    store_compilation_metrics,
 )
 from .variables.base import VariableTracker
 from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
@@ -1003,6 +1004,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 "node_count": len(gm.graph.nodes),
                 "input_count": len(placeholders),
             },
+        )
+
+        store_compilation_metrics(
+            {
+                "op_count": tot,
+                "node_count": len(gm.graph.nodes),
+                "input_count": len(placeholders),
+            }
         )
 
         return compiled_fn
