@@ -52,7 +52,6 @@ class TestDynamismExpression(TestCase):
                 constraints=inp_constraints,
             )
 
-
         def conflicting_constraints(x):
             b = x.item()
             constrain_as_size(b)
