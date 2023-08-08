@@ -2175,7 +2175,3 @@ class TestQuantizePT2EModels(PT2EQuantizationTestCase):
             self._verify_symmetric_qnnpack_qat_numerics(
                 m, example_inputs, is_per_channel=True, verify_convert=True,
             )
-
-if __name__ == "__main__":
-    from torch.testing._internal.common_utils import run_tests
-    run_tests()
