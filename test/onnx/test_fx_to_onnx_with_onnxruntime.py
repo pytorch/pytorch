@@ -126,7 +126,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
         # Test while specifying optional kwarg.
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            func, (tensor_x,), {"b": torch.tensor(5.0)}
+            func, (tensor_x,), input_kwargs={"b": torch.tensor(5.0)}
         )
 
     @pytorch_test_common.xfail(
@@ -150,6 +150,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 dynamic_shapes=self.dynamic_shapes,
             ),
         )
+        onnx_test_common.assert_dynamic_shapes(export_output, self.dynamic_shapes)
         onnx_format_args = export_output.adapt_torch_inputs_to_onnx(tensor_x, 8.0)
         ref_outputs = export_output.adapt_torch_outputs_to_onnx(func(tensor_x, 8.0))
         ort_outputs = onnx_test_common.run_ort(export_output, onnx_format_args)
@@ -499,7 +500,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             ViewModel(),
             (x,),
-            # additional_test_inputs=[((y,),)],
+            # additional_test_inputs=[((y,),)],  # TODO: Without `additional_test_inputs` arg, dynamic shape cannot be verified
+            skip_dynamic_shapes_check=True,  # Has static shape for dynamic_shapes=True due to 0/1 specialization
         )
 
     def test_flatten_dynamic_axes(self):
@@ -564,7 +566,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         another_inputs = tokenizer("Another Hello world!", return_tensors="pt")
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            model, [], inputs, additional_test_inputs=[((), another_inputs)]
+            model,
+            [],
+            input_kwargs=inputs,
+            additional_test_inputs=[((), another_inputs)],
         )
 
     def test_prims_device_put(self):
@@ -654,6 +659,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 )
 
                 onnx_model = export_output.model_proto
+
+            onnx_test_common.assert_dynamic_shapes(export_output, self.dynamic_shapes)
 
             # Tasks done by the following block.
             #  1. Iterate through all tensors stored in ctx.paths (the file content is loaded torch.load)
@@ -871,6 +878,8 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 export_output = torch.onnx.dynamo_export(
                     fake_model, *fake_args, **fake_kwargs, export_options=export_options
                 )
+
+            onnx_test_common.assert_dynamic_shapes(export_output, self.dynamic_shapes)
 
             with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
                 export_output.save(
