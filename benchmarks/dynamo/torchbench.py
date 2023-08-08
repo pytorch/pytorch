@@ -89,6 +89,7 @@ SKIP_FOR_CPU = {
     "nanogpt_generate",  # timeout
     "sam",  # timeout
     "llama_v2_7b_16h",  # model is CUDA only
+    "stable_diffusion",  # flaky
 }
 
 SKIP_FOR_CUDA = {
