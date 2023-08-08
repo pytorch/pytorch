@@ -79,6 +79,8 @@ SKIP = {
     "tacotron2",
     "hf_Bert",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
     "hf_Bert_large",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
+    # takes too long, extreme slowdown (< .001)
+    "maml",
 }
 
 SKIP_FOR_CPU = {
@@ -87,6 +89,7 @@ SKIP_FOR_CPU = {
     "nanogpt_generate",  # timeout
     "sam",  # timeout
     "llama_v2_7b_16h",  # model is CUDA only
+    "stable_diffusion",  # flaky
 }
 
 SKIP_FOR_CUDA = {
