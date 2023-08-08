@@ -2333,7 +2333,7 @@ class CPUReproTests(TestCase):
             x = torch.ops.aten.permute.default(x, [0, 1, 3, 2])
             y = torch.ops.aten.mul.Tensor(y, x)
             return torch.ops.aten.constant_pad_nd.default(y, [0, 0, 1, 0, 0, 0], 0.0)
-        
+
         x = torch.randn(8, 64, 56, 56)
         y = torch.randn(8, 8, 3136, 8)
         self.common(fn, (x, y))
