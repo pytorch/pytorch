@@ -3740,6 +3740,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('ge', device_type='cuda'),
         xfail('_upsample_bilinear2d_aa'),
         xfail('argsort'),  # aten::argsort.stable hit the vmap fallback which is currently disabled
+        xfail('searchsorted'),  # aten::searchsorted.Scalar hit the vmap fallback which is currently disabled
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed

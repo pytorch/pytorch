@@ -185,7 +185,6 @@ def create_export_diagnostic_context() -> (
     try:
         yield _context
     finally:
-        _context.pretty_print(_context.options.log_verbose, _context.options.log_level)
         _context = engine.background_context
 
 
