@@ -17,7 +17,9 @@ def init():
         "use_orig_params": True,
         "auto_wrap_policy": ModuleWrapPolicy({nn.Linear}),
     }
-    model = nn.Linear(3, 3, device="cuda")
+    model = nn.Sequential(
+        nn.Linear(3, 3, device="cuda"), nn.ReLU(), nn.Linear(3, 3, device="cuda")
+    )
     model = FSDP(
         model,
         **fsdp_kwargs,

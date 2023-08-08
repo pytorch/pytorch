@@ -841,7 +841,11 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
             )
             bound_args.apply_defaults()
             bound_args = bound_args.arguments
-            return {k: bound_args[k] for k in names}
+            res = {}
+            for k in names:
+                if k in bound_args:
+                    res[k] = bound_args[k]
+            return res
 
         def gen_source(source, name):
             name_split = name.split(".")
