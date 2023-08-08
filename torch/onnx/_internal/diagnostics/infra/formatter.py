@@ -65,7 +65,7 @@ def _convert_key(
         else:
             new_v = v
         if new_v is None:
-            # Otherwise unnesseraily bloated sarif log with "null"s.
+            # Otherwise unnecessarily bloated sarif log with "null"s.
             continue
         if new_v == -1:
             # WAR: -1 as default value shouldn't be logged into sarif.
@@ -81,39 +81,6 @@ def sarif_to_json(attr_cls_obj: _SarifClass, indent: Optional[str] = " ") -> str
     dict = dataclasses.asdict(attr_cls_obj)
     dict = _convert_key(dict, snake_case_to_camel_case)
     return json.dumps(dict, indent=indent, separators=(",", ":"))
-
-
-@_beartype.beartype
-def pretty_print_title(
-    title: str, width: int = 80, fill_char: str = "=", print_output: bool = True
-) -> str:
-    """Pretty prints title in below format:
-
-    ==================== title ====================
-    """
-    msg = f" {title} ".center(width, fill_char)
-    if print_output:
-        print(msg)
-    return msg
-
-
-@_beartype.beartype
-def pretty_print_item_title(
-    title: str, fill_char: str = "=", print_output: bool = True
-) -> str:
-    """Pretty prints title in below format:
-
-    title
-    =====
-    """
-    msg_list = []
-    msg_list.append(title)
-    msg_list.append(fill_char * len(title))
-
-    msg = "\n".join(msg_list)
-    if print_output:
-        print(msg)
-    return msg
 
 
 @_beartype.beartype
