@@ -857,7 +857,9 @@ TORCH_IMPL_FUNC(index_copy_out)
 // Not calling into index_reduce_func_impl because of a different dtype dispatch
 TORCH_IMPL_FUNC(index_add_cpu_out)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
-  if (!result.is_same(self)) result.copy_(self);
+  if (!result.is_same(self)) {
+     result.copy_(self);
+  }
   auto numel = index.numel();
 
   auto index_contig = index.contiguous();
@@ -870,7 +872,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     //     selfSlice.add_(sourceSlice);
     //   }
     // But much faster as this reuses the iterator from add_
-    if (numel == 0) {
+    if (numel == 0 || self.numel() == 0) {
       return;
     }
 
@@ -945,8 +947,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
           add_stub(iter.device_type(), iter, alpha);
       }
     });
-  }
-  else {
+  } else {
     TORCH_CHECK(source.dim() <= 1, "source.dim() (", source.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
 
     // explicitly capture all required variables to work around windows build
