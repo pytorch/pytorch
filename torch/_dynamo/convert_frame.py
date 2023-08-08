@@ -418,6 +418,7 @@ def _compile(
                 tracer.run()
         except Exception:
             from torch.fx.experimental.validator import translation_validation_enabled
+
             if translation_validation_enabled():
                 fakes = tracer.output.tracked_fakes
                 tracer.output.shape_env.produce_guards(

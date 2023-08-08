@@ -1710,7 +1710,6 @@ if TEST_Z3:
 
     from torch.fx.experimental.validator import SympyToZ3, TranslationValidator, ValidationException, z3str
     from torch.utils._sympy.functions import FloorDiv, Mod
-    from torch.testing._internal.logging_utils import make_logging_test
 
     class TestTranslationValidation(TestCase):
         def _prepare_for_translation_validation(self):
@@ -1864,7 +1863,11 @@ if TEST_Z3:
             for expr, expected in test_cases:
                 self.assertEqual(z3str(expr), expected)
 
-        @torch._dynamo.config.patch(inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True, assume_static_by_default=False, translation_validation=True)
+        @torch._dynamo.config.patch(
+            inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True,
+            assume_static_by_default=False,
+            translation_validation=True
+        )
         def test_trigger_on_error(self):
             @torch.compile
             def fn(x):
