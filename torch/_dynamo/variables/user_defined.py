@@ -638,6 +638,7 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
     def as_proxy(self):
         return self.proxy
 
+
 class AutogradNodeVariable(UserDefinedObjectVariable):
     def __init__(self, value, proxy, value_type=None, **kwargs):
         self.proxy = proxy

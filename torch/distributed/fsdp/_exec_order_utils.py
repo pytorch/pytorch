@@ -250,7 +250,9 @@ class _ExecOrderData:
                         (
                             rank,
                             world_indices[
-                                rank * num_valid_indices : (rank + 1) * num_valid_indices
+                                rank
+                                * num_valid_indices : (rank + 1)
+                                * num_valid_indices
                             ],
                         )
                         for rank in range(self.world_size)
@@ -264,7 +266,7 @@ class _ExecOrderData:
                             f"{msg_prefix} rank {r1} is all-gathering parameters "
                             f"for {r1_param_names} while rank {r2} is all-gathering "
                             f"parameters for {r2_param_names}"
-                )
+                        )
         elif self._checking_order:
             # Only issue warnings on the first deviating iteration and stop
             # checking thereafter to avoid flooding the console

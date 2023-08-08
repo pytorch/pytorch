@@ -390,7 +390,9 @@ def _apply_to_modules(
                         submodule_name == "_fsdp_wrapped_module"
                         or submodule_name == "_dmp_wrapped_module"
                     ):
-                        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                        if (
+                            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
+                        ):
                             # TODO(voz): Don't graph break on this
                             warnings.warn(
                                 "An unexpected prefix is detected. This case "

@@ -152,6 +152,7 @@ class NNModuleVariable(VariableTracker):
 
         if getattr(base, "_is_fsdp_managed_module", False):
             from .builder import VariableBuilder
+
             return VariableBuilder(tx, source)(getattr_fn(base, name))
         return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
             tx, [variables.ConstantVariable(name)], {}
@@ -818,7 +819,6 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
             # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
             self.source = NotNNModuleSource(source)
         self.module_key = module_key
-
 
     def call_method(
         self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
