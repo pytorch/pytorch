@@ -3967,9 +3967,27 @@ class TestAsArray(TestCase):
         self.assertEqual(tensor.dtype, torch.int32)
 
     def test_default_device(self, device):
-        with torch.device(device):
-            tensor = torch.asarray(3)
-            self.assertEqual(tensor.device, torch.device(device))
+        import array
+
+        examples = [
+            3,
+            np.arange(5),
+            torch.arange(5),
+            array.array("f", [1, 2, 3, 4]),
+        ]
+
+        for data in examples:
+            with torch.device(device):
+                tensor = torch.asarray(data)
+                self.assertEqual(tensor.device, torch.device(device))
+
+                # Check the contents of the tensor.
+                if isinstance(data, int):
+                    self.assertEqual(data, tensor.item())
+                else:
+                    self.assertEqual(len(data), len(tensor))
+                    for i in range(len(data)):
+                        self.assertEqual(data[i], tensor[i])
 
 
 instantiate_device_type_tests(TestTensorCreation, globals())
