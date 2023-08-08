@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import os
 import sys
+from typing import Tuple
 
 import torch
 import torch.onnx
@@ -67,14 +68,18 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         self,
         ort_backend: OrtBackend,
         # Number of session runs.
-        expected_execution_count,
-        # Number of GraphModule cached.
-        number_of_cached_graph_modules,
+        # If there is no graph break, this should be the same as
+        # total number of forward calls.
+        expected_execution_count: int,
+        # Number of GraphModule's cached.
+        # With one graph break, a model will be mapped
+        # to two GraphModule's.
+        number_of_cached_graph_modules: int,
         # Number of ONNX models cached for each GraphModule,
-        # number_of_exported_onnx_models[i] contains all ONNX models for the i-th
-        # element (type: torch.fx.GraphModule) in
+        # number_of_exported_onnx_models[i] contains all ONNX models exported from
+        # the i-th element (type: torch.fx.GraphModule) in
         # OrtBackend._all_ort_execution_info.execution_info_per_graph_module.values().
-        number_of_exported_onnx_models_for_all_graph_modules,
+        number_of_exported_onnx_models_for_all_graph_modules: Tuple[int, ...],
     ):
         self.assertEqual(expected_execution_count, ort_backend.execution_count)
         self.assertEqual(
@@ -83,7 +88,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.assertEqual(
             len(ort_backend._all_ort_execution_info.execution_info_per_graph_module),
-            number_of_exported_onnx_models_for_all_graph_modules,
+            len(number_of_exported_onnx_models_for_all_graph_modules),
         )
         for (
             onnx_info,
