@@ -7493,6 +7493,18 @@ class TestNLLLoss(TestCaseMPS):
         x = net1(x)
         torch.mps.profiler.stop()
 
+    def test_mps_event_module(self):
+        startEvent = torch.mps.Event(enable_timing=True)
+        startEvent.record()
+        net1 = torch.nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)\
+            .to(device='mps', dtype=torch.float)
+        x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
+        x = net1(x)
+        endEvent = torch.mps.Event(enable_timing=True)
+        endEvent.record()
+        elapsedTime = startEvent.elapsed_time(endEvent)
+        self.assertTrue(elapsedTime > 0.0)
+
     def test_jit_save_load(self):
         m = torch.nn.Module()
         m.x = torch.rand(3, 3, device='mps')
