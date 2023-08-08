@@ -3969,7 +3969,7 @@ class TestAsArray(TestCase):
     def test_default_device(self, device):
         with torch.device(device):
             tensor = torch.asarray(3)
-            self.assertEqual(tensor.device.type, device)
+            self.assertEqual(tensor.device, torch.device(device))
 
 
 instantiate_device_type_tests(TestTensorCreation, globals())
