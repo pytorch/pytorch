@@ -897,7 +897,7 @@ class NumpyVariable(VariableTracker):
 # Used to keep track of NULLs pushed on the stack for Python 3.11 function calls
 class NullVariable(VariableTracker):
     def __init__(self, **kwargs):
-        super(NullVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
     def __str__(self):
         return "NullVariable"

@@ -271,9 +271,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
                 parent_attr_key = parent.output().debugName()
                 parent_scope = attr_to_scope[parent_attr_key]
                 attr_scope = parent_scope.split("/")[-1]
-                attr_to_scope[attr_key] = "{}/{}.{}".format(
-                    parent_scope, attr_scope, attr_name
-                )
+                attr_to_scope[attr_key] = f"{parent_scope}/{attr_scope}.{attr_name}"
             else:
                 attr_to_scope[attr_key] = f"__module.{attr_name}"
             # We don't need classtype nodes; scope will provide this information

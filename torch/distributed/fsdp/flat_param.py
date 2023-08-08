@@ -31,6 +31,8 @@ from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp._common_utils import (
     _FSDPDeviceHandle,
     _named_parameters_with_duplicates,
+    _no_dispatch_record_stream,
+    _same_storage_as_data_ptr,
     _set_fsdp_flattened,
     HandleTrainingState,
 )
@@ -38,7 +40,6 @@ from torch.distributed.utils import _alloc_storage, _free_storage, _p_assert
 from torch.nn.parameter import _ParameterMeta  # type: ignore[attr-defined]
 
 from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
-from ._utils import _no_dispatch_record_stream, _same_storage_as_data_ptr
 
 __all__ = [
     "FlatParameter",
@@ -342,7 +343,7 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
         r._is_flat_param = True  # type: ignore[attr-defined]
         return r
 
-    # NB: This is not a regular method, because FlatParameter are not actually
+    # NB: This is not a regular method, because FlatParameters are not actually
     # instances of this class (see __new__ above).  So you must indirectly
     # call this directly through the classmethod.
     @classmethod
@@ -510,6 +511,19 @@ class FlatParamHandle:
         # it points to parameterizes behavior. We use the following attribute
         # to track which tensor data the parameters are unsharded views into.
         self._unsharded_flat_param_for_skipped_views: Optional[Tensor] = None
+        # The index in the state's `all_handles`, which must be the
+        # same across ranks for the execution order validation to work
+        self._handle_index: Optional[int] = None
+        # Index in handles_to_pre_forward_order
+        self._pre_forward_order_index: Optional[int] = None
+        # Index in `handles_post_forward_order`
+        self._post_forward_index: Optional[int] = None
+        # Used for guarding against mistargeted forward prefetches
+        self._needs_pre_forward_unshard = False
+        # Used for guarding against mistargeted backward prefetches
+        self._needs_pre_backward_unshard = False
+        # Was the handle prefetched? Set on successful _prefetch_handle and unshard
+        self._prefetched = False
         # Optimistically assume a valid input `params` and set dtype attributes
         # before `_init_flat_param()`, which performs the actual validation
         self._orig_param_dtype = params[0].dtype
@@ -1657,7 +1671,8 @@ class FlatParamHandle:
         if self._use_orig_params:
             in_forward = self._training_state == HandleTrainingState.FORWARD
             skip_use_sharded_views = (
-                in_forward
+                torch.is_grad_enabled()
+                and in_forward
                 and self._sharding_strategy
                 in NO_RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES
             )
@@ -2582,9 +2597,3 @@ def _construct_padding_tensor(
 @functools.lru_cache(1)
 def _warn_skip_writeback_check(log: logging.Logger, warning: str):
     log.warning(warning)
-
-
-# A handles key represents the group of `FlatParamHandle`s involved in a given
-# module's forward. These will be all-gathered together in the pre-forward and
-# pre-backward.
-_HandlesKey = Tuple[FlatParamHandle, ...]
