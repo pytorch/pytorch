@@ -288,6 +288,28 @@ def _prelu_kernel_backward(
     return (input_grad, weight_grad)
 
 
+@register_decomposition(aten.rrelu_with_noise)
+@pw_cast_for_opmath
+def rrelu_with_noise(
+    self: Tensor,
+    noise: Tensor,
+    lower: float,
+    upper: float,
+    training: bool=False,
+    generator: Optional[torch.Generator]=None,
+) -> Tensor:
+    assert generator is None
+    if training:
+        not_positive = self <= 0
+        r = aten.uniform(self, lower, upper)
+        output = torch.where(not_positive, self * r, self)
+        noise.copy_(torch.where(not_positive, r, 1))
+        return output
+    else:
+        negative_slope = (lower + upper) / 2;
+        return aten.leaky_relu(self, negative_slope)
+
+
 @register_decomposition(aten.rrelu_with_noise_backward)
 @pw_cast_for_opmath
 def rrelu_with_noise_backward(
