@@ -895,7 +895,7 @@ std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
   const int computeCapability = p->major * 10 + p->minor;
 
   bool kernel_launched = false;
-  const auto maxShmem = p->sharedMemPerBlockOptin;
+  const auto maxShmem = p->sharedMemPerBlock;
 
   auto launchKernel = [&](auto _k, auto kernel_fn) {
     using Kernel = decltype(_k);

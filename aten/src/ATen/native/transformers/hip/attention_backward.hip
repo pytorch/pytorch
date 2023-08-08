@@ -17,14 +17,16 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <ATen/hip/HIPGeneratorImpl.h>
 
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
+
 #ifdef USE_FLASH_ATTENTION
 // FlashAttention Specific Imports
 #include <ATen/native/transformers/hip/flash_attn/fmha_api.h>
 // MemoryEfficient Attention Specific Imports
 //#include <ATen/native/transformers/hip/mem_eff_attention/kernel_backward.h>
 //#include <ATen/native/transformers/hip/mem_eff_attention/kernels/cutlassB.h>
-//#include <ATen/native/transformers/hip/mem_eff_attention/gemm_kernel_utils.h>
-//#include <ATen/native/transformers/hip/mem_eff_attention/pytorch_utils.h>
+#include <ATen/native/transformers/hip/mem_eff_attention/gemm_kernel_utils.h>
+#include <ATen/native/transformers/hip/mem_eff_attention/pytorch_utils.h>
 #endif
 namespace at {
 
@@ -219,7 +221,7 @@ _efficient_attention_backward(
 
   bool kernel_launched = false;
   const auto maxK = ::max(query.size(3), value.size(3));
-  const auto maxShmem = p->sharedMemPerBlockOptin;
+  const auto maxShmem = p->sharedMemPerBlock;
 
   auto launchKernel = [&](auto _k, auto kernel_fn) {
     using Kernel = decltype(_k);
