@@ -1,6 +1,7 @@
 from typing import Callable, Optional
 
-from torch._prims.context import TorchRefsMode
+from torch._prims.context import NvfuserPrimsMode, TorchRefsMode
+from torch._prims.nvfuser_executor import nvfuser_execute, nvfuser_execute_partitioned
 
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx, wrapper_and_args_for_make_fx
@@ -20,8 +21,14 @@ def execute(
 
     if executor == "aten":
         return gm.forward(*args)
+    elif executor == "nvfuser":
+        return nvfuser_execute_partitioned(
+            gm, *args, executor_parameters=executor_parameters
+        )
+    elif executor == "strictly_nvfuser":
+        return nvfuser_execute(gm, *args, executor_parameters=executor_parameters)
 
-    msg = f"Received unexpected value for 'executor': {executor}. Allowed values are: aten."
+    msg = f"Received unexpected value for 'executor': {executor}. Allowed values are: aten, nvfuser."
     raise ValueError(msg)
 
 
@@ -46,14 +53,16 @@ def make_traced(fn: Callable):
 
     a = torch.randn((1, 2, 3, 4, 5), device='cuda')
     b = torch.randn((1, 2, 3, 4, 5), device='cuda')
-    result = traced_foo(a, b, executor='aten')
+    result = traced_foo(a, b, executor='nvfuser')
+
+    Executor may be either 'aten' or 'nvfuser'.
     """
 
     def _traced(*args, executor="aten", **kwargs):
         # TODO: caching
         wrapped, all_args = wrapper_and_args_for_make_fx(fn, args, kwargs)
 
-        with TorchRefsMode():
+        with NvfuserPrimsMode(), TorchRefsMode():
             gm = make_fx(wrapped)(all_args)
         return execute(gm, all_args, executor=executor)
 
