@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/ops/_local_scalar_dense_native.h>
 
 #ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>

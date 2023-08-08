@@ -445,8 +445,6 @@ def _init_runtime_state(
     state._comm_hook = None
     state._comm_hook_state = None
     # Used to prevent running the pre-backward hook multiple times
-    _ran_pre_backward_hook: Dict[FlatParamHandle, bool] = {}
-    state._ran_pre_backward_hook = _ran_pre_backward_hook
     return state
 
 
@@ -458,14 +456,6 @@ def _init_prefetching_state(
 ) -> _FSDPState:
     state.backward_prefetch = backward_prefetch
     state.forward_prefetch = forward_prefetch
-    _handles_prefetched: Dict[FlatParamHandle, bool] = {}
-    state._handles_prefetched = _handles_prefetched
-    # Used for guarding against mistargeted backward prefetches
-    _needs_pre_backward_unshard: Dict[FlatParamHandle, bool] = {}
-    state._needs_pre_backward_unshard = _needs_pre_backward_unshard
-    # Used for guarding against mistargeted forward prefetches
-    _needs_pre_forward_unshard: Dict[FlatParamHandle, bool] = {}
-    state._needs_pre_forward_unshard = _needs_pre_forward_unshard
     # The data structures use tuples of handles to generalize over the case
     # where a module's forward involves multiple handles.
     return state

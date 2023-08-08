@@ -274,7 +274,8 @@ class DiagnosticOptions:
     """
 
     verbosity_level: int = dataclasses.field(default=logging.INFO)
-    """The verbosity level of the diagnostic context."""
+    """Diagnostic context verbosity level, equivalent to the 'level' in Python logging module.
+    Controls the amount of information logged inside each diagnostics."""
 
     warnings_as_errors: bool = dataclasses.field(default=False)
-    """If True, warnings are treated as errors."""
+    """If True, warning diagnostics are treated as error diagnostics."""

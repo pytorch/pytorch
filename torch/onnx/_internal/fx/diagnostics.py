@@ -120,9 +120,9 @@ def _bool(obj: bool) -> str:
 
 
 @_format_argument.register
-def _registration_symbolic_function(obj: registration.SymbolicFunction) -> str:
+def _registration_onnx_function(obj: registration.ONNXFunction) -> str:
     # TODO: Compact display of `param_schema`.
-    return f"registration.SymbolicFunction({obj.op_full_name}, is_custom={obj.is_custom}, is_complex={obj.is_complex})"
+    return f"registration.ONNXFunction({obj.op_full_name}, is_custom={obj.is_custom}, is_complex={obj.is_complex})"
 
 
 @_format_argument.register
@@ -198,6 +198,7 @@ rules = diagnostics.rules
 levels = diagnostics.levels
 RuntimeErrorWithDiagnostic = infra.RuntimeErrorWithDiagnostic
 LazyString = formatter.LazyString
+DiagnosticOptions = infra.DiagnosticOptions
 
 
 @dataclasses.dataclass
@@ -226,9 +227,6 @@ class DiagnosticContext(infra.DiagnosticContext):
             return super().__enter__()
         else:
             return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.logger.level = self._previous_log_level
 
 
 diagnose_call = functools.partial(
