@@ -20586,7 +20586,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.stft",
         torch_opinfo_name="stft",
-        supports_nvfuser=False,
         skips=[
             # RuntimeError: no _refs support for aten.pad
             DecorateInfo(
@@ -20597,7 +20596,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.istft",
         torch_opinfo_name="istft",
-        supports_nvfuser=False,
         skips=[
             # RuntimeError: no _refs support for aten.unfold_backward
             DecorateInfo(
