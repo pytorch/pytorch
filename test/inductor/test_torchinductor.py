@@ -938,8 +938,8 @@ class CommonTemplate:
             return torch.max(a), torch.sum(a)
 
         # Requires masked loading for the intermediate reduction
-        sample = torch.full((3999971,), torch.iinfo(torch.int64).min, dtype=torch.int64)
-        sample[-1] = 0
+        sample = torch.full((3999971,), 0, dtype=torch.int64)
+        sample[-1] = 1
         self.common(fn, (sample,))
 
     def test_expanded_reduction(self):
