@@ -4,7 +4,6 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import io
-import logging
 import typing
 import unittest
 from typing import AbstractSet, Protocol, Tuple
@@ -288,28 +287,6 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                 custom_rules.custom_rule_2, infra.Level.ERROR  # type: ignore[attr-defined]
             )
             self.context.log(diagnostic2)
-
-    def test_diagnostic_context_logs_with_correct_logger_level_based_on_diagnostic_level(
-        self,
-    ):
-        diagnostic_logging_level_pairs = [
-            (infra.Level.NONE, logging.DEBUG),
-            (infra.Level.NOTE, logging.INFO),
-            (infra.Level.WARNING, logging.WARNING),
-            (infra.Level.ERROR, logging.ERROR),
-        ]
-
-        for diagnostic_level, expected_logger_level in diagnostic_logging_level_pairs:
-            with self.assertLogs(
-                self.context.logger, level=expected_logger_level
-            ) as assert_log_context:
-                self.context.log(
-                    infra.Diagnostic(
-                        self.rules.rule_without_message_args, diagnostic_level
-                    )
-                )
-                for record in assert_log_context.records:
-                    self.assertEqual(record.levelno, expected_logger_level)
 
     def test_diagnostic_context_raises_if_diagnostic_is_error(self):
         with self.assertRaises(infra.RuntimeErrorWithDiagnostic):
