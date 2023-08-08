@@ -225,11 +225,11 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
     def test_dynamic_shape_parameter_recompile(self):
         # Test the matrix multiplication with Parameters.
-        # Without the config assume_parameters_shapes_static_by_default, 
+        # Without the config assume_parameters_shapes_static_by_default,
         # the torch.nn.Parameter shapes are assumed to be static which leads to recompilation
-        
+
         w = torch.nn.Parameter(torch.randn(3, 2))
-        
+
         def foo(x):
             return x @ w
 
@@ -295,6 +295,8 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(dynamic_comp_dynamic_param.frame_count, 2)
         self.assertEqual(dynamic_comp_dynamic_param.op_count, 2)
 
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
+
     run_tests()
