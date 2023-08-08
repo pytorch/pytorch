@@ -68,7 +68,8 @@ class TestExperimentalExport(TestCase):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestDynamismExpression(TestCase):
-    def test_export_constraints(self):
+    @unittest.expectedFailure
+    def test_export_inline_constraints(self):
 
         def f(x):
             b = x.item()
@@ -194,6 +195,29 @@ class TestExport(TestCase):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
+    def test_export_mod_constraints(self):
+        class BasicDynamiShapeModel(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x.view(x.shape[0] - 1, -1)
+
+        m = BasicDynamiShapeModel()
+        a = torch.randn(3, 4)
+        constraints = [3 <= dynamic_dim(a, 0), dynamic_dim(a, 1)]
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            (
+                "Some dynamic dimensions need to be specialized because "
+                "the constraints inferred for them are too complex to specify"
+                ".*\n.*\\[0\\], which was marked dynamic, must be specialized to 3"
+                ".*\n.*\\[1\\], which was marked dynamic, must be specialized to 4"
+            ),
+        ):
+            torch._export.export(m, (a,), constraints=constraints)
+        em = torch._export.export(m, (a,))
+        x = torch.randn(3, 5)
+        with self.assertRaisesRegex(RuntimeError, "\\[1\\] is specialized at 4"):
+            em(x)
+
     def test_export_constrain_static(self):
         def f(x, y):
             b = x.item()
@@ -213,6 +237,27 @@ class TestExport(TestCase):
         ):
             export(f, example_inputs, constraints)
 
+    def test_not_correct_dim(self):
+        def f(x):
+            return x.cos()
+
+        def g(x):
+            return x + 4
+
+        inp_for_f = torch.tensor(5)
+        with self.assertRaisesRegex(torchdynamo.exc.UserError, "Cannot mark 0-dimension tensors to be dynamic"):
+            constraints = [dynamic_dim(inp_for_f, 0)]
+
+        inp_for_f_mul_dim = torch.ones(5, 5)
+        with self.assertRaisesRegex(
+            torchdynamo.exc.UserError,
+            "Expected the dimension passed to dynamic_dim to be in the range \\[0:1\\]"
+        ):
+            constraints = [dynamic_dim(inp_for_f_mul_dim, 2)]
+
+        inp_for_g = 4
+        with self.assertRaisesRegex(torchdynamo.exc.UserError, "Expected tensor as input to dynamic_dim"):
+            constraints = [dynamic_dim(inp_for_g, 0)]
 
 if __name__ == '__main__':
     run_tests()

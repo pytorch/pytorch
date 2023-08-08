@@ -1,12 +1,14 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
-from typing import List, Optional, TYPE_CHECKING, Union
+from typing import List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed._functional_collectives as funcol
 
 from torch.distributed.distributed_c10d import (
+    _find_pg_by_ranks_and_tag,
     _get_default_group,
+    _get_group_tag,
     all_gather,
     all_to_all,
     broadcast,
@@ -49,6 +51,16 @@ class _MeshEnv(object):
 mesh_resources: _MeshEnv = _MeshEnv()
 
 
+def _get_device_handle(device_type: str = "cuda"):
+    """
+    Get the module corresponding to the device_type which is cuda or cuda-like device.
+    For example, when the device_type is cuda, the module `torch.cuda` is returned.
+    Return None when device_type is cpu or there is no corresponding module,
+    otherwise return the corresponding module.
+    """
+    return getattr(torch, device_type, None) if device_type != "cpu" else None
+
+
 class DeviceMesh(object):
     """
     DeviceMesh represents a mesh of devices, where layout of devices could be
@@ -65,7 +77,7 @@ class DeviceMesh(object):
 
     DeviceMesh can be used as a context manager.
     Args:
-        device_type (str): device type of the mesh. Currently supports: cpu, cuda.
+        device_type (str): device type of the mesh. Currently supports: cpu, cuda/cuda-like.
         mesh (ndarray): could be a multi-dimension array or an integer tensor that
             describes the layout of devices, the ids are global ids of the
             default process group.
@@ -111,7 +123,7 @@ class DeviceMesh(object):
         # process (we need to know if the current global rank is in the mesh or not)
         self._get_or_create_default_group()
         if _init_process_groups:
-            self._dim_groups = self._init_process_groups()
+            self._init_process_groups()
 
     def _get_or_create_default_group(self):
         default_initialized = is_initialized()
@@ -124,17 +136,18 @@ class DeviceMesh(object):
                 f"Mesh should not be bigger than default world size, but found {self.mesh.numel()} ranks!"
             )
 
+        device_handle = _get_device_handle(self.device_type)
         # TODO: if user want to pass pg_options, offer a way to do it
-        if not default_initialized and self.device_type == "cuda":
-            # automatically set the current cuda device base on num of gpu devices available in each host
+        if not default_initialized and device_handle:
+            # automatically set the current cuda/cuda-like device base on num of gpu devices available in each host
             # NOTE: This device selection would only work for homogeneous hardware.
-            num_gpus_per_host = torch.cuda.device_count()
-            if world_size % num_gpus_per_host != 0:
+            num_devices_per_host = device_handle.device_count()
+            if world_size % num_devices_per_host != 0:
                 raise RuntimeError(
                     f"DeviceMesh only support homogeneous hardware, but found "
-                    f"{world_size} ranks and {num_gpus_per_host} cuda devices!"
+                    f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
                 )
-            torch.cuda.set_device(get_rank() % num_gpus_per_host)
+            device_handle.set_device(get_rank() % num_devices_per_host)
         # TODO (xilunwu): to perform DTensor random ops, we need to ensure all ranks in mesh is initialized
         # with the same random seed. The seed to use will be the current seed on rank 0. We store this seed
         # as an attribute of device mesh for future use. However, the detail is still TBD how we gonna use
@@ -150,7 +163,6 @@ class DeviceMesh(object):
         return _get_default_group()
 
     def _init_process_groups(self):
-        default_pg = _get_default_group()
         # check mesh tensor validity
         unique_mesh_values = self.mesh.unique(sorted=True)
         if unique_mesh_values.numel() != self.mesh.numel():
@@ -169,15 +181,17 @@ class DeviceMesh(object):
                     f"has mesh {other_mesh}!"
                 )
 
-        # groups created by dimension, each dimension should have exact
-        # one valid process group per rank
-        dim_groups: List[ProcessGroup] = []
+        # group tag/ranks associated with each mesh dimension, each mesh dimension should
+        # have one sub-group per rank
+        dim_group_infos: List[Tuple[str, List[int]]] = []
 
         if self.mesh.ndim == 1 and len(unique_mesh_values) == get_world_size():
             # if the mesh is the same as world_pg, we just append the default
             # pg to the first dim groups, as new_group cannot have the exact
             # same ranks as world
-            dim_groups.append(default_pg)
+            dim_group_infos.append(
+                (_get_group_tag(_get_default_group()), list(range(get_world_size())))
+            )
         else:
             # create sub pgs base on the mesh argument specified
             for dim in range(self.mesh.ndim):
@@ -193,16 +207,18 @@ class DeviceMesh(object):
                     # call new_group regardless of the current rank in the
                     # pg or not, it's required that all ranks participate
                     # in subgroup construction
-                    new_subgroup = new_group(ranks=subgroup_ranks)
+                    dim_group = new_group(ranks=subgroup_ranks)
                     # only add to dim_groups if the current rank in the subgroup
                     if self.get_rank() in subgroup_ranks:
-                        if len(dim_groups) > dim:
+                        if len(dim_group_infos) > dim:
                             raise RuntimeError(
                                 f"Each device mesh dimension should get only one process group, but got {self.get_rank} "
                                 f"in {subgroup_ranks}!"
                             )
-                        dim_groups.append(new_subgroup)
-        return dim_groups
+                        dim_group_infos.append(
+                            (_get_group_tag(dim_group), subgroup_ranks)
+                        )
+        self._dim_group_infos = dim_group_infos
 
     def __enter__(self) -> "DeviceMesh":
         # set this mesh as the current mesh in mesh env
@@ -227,10 +243,20 @@ class DeviceMesh(object):
             return True
         return self.mesh.equal(other.mesh)
 
-    def get_dim_groups(self) -> List[ProcessGroup]:
-        if not hasattr(self, "_dim_groups"):
+    def get_dim_groups(
+        self, mesh_dim: Optional[int] = None
+    ) -> Union[ProcessGroup, List[ProcessGroup]]:
+        if not hasattr(self, "_dim_group_infos"):
             raise RuntimeError("DeviceMesh process groups not initialized!")
-        return self._dim_groups
+        if mesh_dim is not None:
+            return _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim])
+        else:
+            dim_groups = []
+            for mesh_dim in range(self.mesh.ndim):
+                dim_groups.append(
+                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim])
+                )
+            return dim_groups
 
     def size(self, dim: Optional[int] = None) -> int:
         return self.mesh.numel() if dim is None else self.mesh.size(dim)
@@ -279,9 +305,11 @@ class DeviceMesh(object):
         # remove the check below once that is done.
         if output.is_meta:
             return None
-        dim_group = self._dim_groups[mesh_dim]
+        dim_group = self.get_dim_groups(mesh_dim)
+        assert isinstance(dim_group, ProcessGroup)
         # src need to be global rank
         src_for_dim = 0
+
         if dim_group is not GroupMember.WORLD:
             src_for_dim = get_global_rank(dim_group, 0)
 
@@ -332,7 +360,8 @@ class DeviceMesh(object):
         # remove the check below once that is done.
         if tensor.is_meta:
             return None
-        dim_group = self._dim_groups[mesh_dim]
+        dim_group = self.get_dim_groups(mesh_dim)
+        assert isinstance(dim_group, ProcessGroup)
         # src need to be global rank
         src_for_dim = 0
         if dim_group is not GroupMember.WORLD:
@@ -360,7 +389,8 @@ class DeviceMesh(object):
         Returns:
             A :class:`AsyncCollectiveTensor` object
         """
-        dim_group = self._dim_groups[mesh_dim]
+        dim_group = self.get_dim_groups(mesh_dim)
+        assert isinstance(dim_group, ProcessGroup)
         return funcol.all_gather_tensor(tensor, gather_dim=gather_dim, group=dim_group)
 
     def all_reduce(
@@ -407,13 +437,15 @@ class DeviceMesh(object):
         Returns:
             A :class:`torch.Tensor` object
         """
+
+        dim_group = self.get_dim_groups(mesh_dim)
+        assert isinstance(dim_group, ProcessGroup)
         if self.device_type == "cpu":
             # cpu::gloo backend does not have reduce_scatter we fallback to do all_reduce
             # + local chunk
             logger.warning(
                 "ProcessGroupGloo does not support reduce_scatter, falling back with all reduce!"
             )
-            dim_group = self._dim_groups[mesh_dim]
             group_size = get_world_size(dim_group)
             group_rank = get_rank(dim_group)
             if scatter_dim != 0:
@@ -424,7 +456,6 @@ class DeviceMesh(object):
             chunks = flat_tensor.chunk(group_size, dim=0)
             scatter_tensor = chunks[group_rank]
         else:
-            dim_group = self._dim_groups[mesh_dim]
             scatter_tensor = funcol.reduce_scatter_tensor(
                 input, reduceOp=op.name, scatter_dim=scatter_dim, group=dim_group
             )
@@ -439,7 +470,8 @@ class DeviceMesh(object):
         mesh_dim: int = 0,
         async_op: bool = False,
     ) -> Optional[Work]:
-        dim_group = self._dim_groups[mesh_dim]
+        dim_group = self.get_dim_groups(mesh_dim)
+        assert isinstance(dim_group, ProcessGroup)
 
         work = None
         # no direct dist.all_to_all support on 'gloo' so we manually do scatters

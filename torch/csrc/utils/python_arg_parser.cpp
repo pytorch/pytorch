@@ -784,12 +784,12 @@ auto FunctionParameter::check(
       if (THPUtils_checkScalar(obj)) {
         return true;
       }
-      // fallthrough
+      [[fallthrough]];
     case ParameterType::COMPLEX:
       if (PyComplex_Check(obj)) {
         return true;
       }
-      // fallthrough
+      [[fallthrough]];
     case ParameterType::DOUBLE: {
       if (THPUtils_checkDouble(obj)) {
         return true;

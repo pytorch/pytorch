@@ -588,10 +588,6 @@ class GuardBuilder(GuardBuilderBase):
                     "requires_grad",
                     "ndimension()",
                 ]
-                if not config.dynamic_shapes:
-                    terms.append("stride()")
-                    # We need to do this to avoid the torch.Size type in guards
-                    code.append(f"{tensor_name}.shape == {tuple(value.shape)}")
 
                 for term in terms:
                     real_value = self.get(tensor_name + "." + term)

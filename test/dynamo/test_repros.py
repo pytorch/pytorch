@@ -37,7 +37,7 @@ from torch.nn import functional as F
 
 _orig_module_call = torch.nn.Module.__call__
 
-# Custom operator that only supports CPU
+# Custom operator that only supports CPU and Meta
 lib = torch.library.Library("test_sample", "DEF")
 lib.define("foo(Tensor self) -> Tensor")
 lib.impl("foo", torch.sin, "CPU")
@@ -982,7 +982,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(
-            cnt.op_count, ifunspec(37, ifdyn(ifdynstaticdefault(15, 20), 4))
+            cnt.op_count, ifunspec(35, ifdyn(ifdynstaticdefault(4, 20), 4))
         )
 
     def test_hf_t5_forward(self):
@@ -1658,6 +1658,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch._dynamo.optimize("aot_eager")(fn)
         x = torch.randn(4, requires_grad=True)
+        b = torch.tensor([True, False, True, False])
+        y = torch.randn(2, requires_grad=True)
+        opt_fn(x, b, y)
+
+    def test_setitem_tuple_boolean_mask_diff(self):
+        def fn(x, b, y):
+            x = x.clone()
+            x[:, b] = y
+            return x
+
+        opt_fn = torch._dynamo.optimize("aot_eager")(fn)
+        x = torch.randn(8, 4, requires_grad=True)
         b = torch.tensor([True, False, True, False])
         y = torch.randn(2, requires_grad=True)
         opt_fn(x, b, y)
@@ -2828,14 +2840,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_graph_break_unsupported_fake(self):
         counter = torch._dynamo.testing.CompileCounter()
 
+        torch._dynamo.config.verbose = True
+
         @torch._dynamo.optimize(counter)
         def f(x):
             return torch.ops.test_sample.foo(x + 1) + 1
 
         f(torch.randn(3))
 
-        self.assertEqual(counter.op_count, ifdyn(ifunspec(2, 3), 3))
-        self.assertEqual(counter.frame_count, ifdyn(ifunspec(2, 1), 1))
+        self.assertEqual(counter.op_count, 2)
+        self.assertEqual(counter.frame_count, 2)
 
     def test_delattr(self):
         class MyObj:

@@ -225,12 +225,19 @@ def parse_native_yaml(
     ignore_keys: Optional[Set[DispatchKey]] = None,
     *,
     skip_native_fns_gen: bool = False,
+    loaded_yaml: Optional[object] = None,
 ) -> ParsedYaml:
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
         valid_tags = parse_tags_yaml(tags_yaml_path)
-        with open(path, "r") as f:
-            es = yaml.load(f, Loader=LineLoader)
+
+        # if a loaded yaml is provided, use that instead of reading from path
+        if loaded_yaml is None:
+            with open(path, "r") as f:
+                es = yaml.load(f, Loader=LineLoader)
+        else:
+            es = loaded_yaml
+
         _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = parse_native_yaml_struct(
             es,
             valid_tags,

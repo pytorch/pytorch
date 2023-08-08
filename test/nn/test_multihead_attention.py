@@ -152,7 +152,6 @@ class TestMultiheadAttentionNN(NNTestCase):
                 attn_mask_tensor = torch.from_numpy(attn_mask).float()
                 attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, float('-inf'))
                 attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, float('0.0'))
-                attn_mask_tensor = attn_mask_tensor.double()
 
                 decoder_state_tensor = torch.from_numpy(decoder_state).to(torch.get_default_dtype())
                 source_hid_tensor = torch.from_numpy(K).to(torch.get_default_dtype()).transpose(0, 1)

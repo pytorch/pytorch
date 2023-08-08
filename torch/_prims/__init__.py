@@ -16,6 +16,7 @@ from torch._prims.debug_prims import register_debug_prims
 from torch._prims.nvfuser_prims import register_nvprims
 from torch._prims.rng_prims import register_rng_prims
 from torch._prims_common import (
+    check,
     Dim,
     DimsSequenceType,
     DimsType,
@@ -265,6 +266,7 @@ def _make_prim(
     meta: Callable,
     impl_aten: Callable,
     doc: str,
+    tags: Optional[Sequence[torch.Tag]] = None,
 ):
     """
     Creates a primitive operation.
@@ -300,6 +302,8 @@ def _make_prim(
 
     _prim_packet = getattr(torch._ops.ops.prims, name)
     _prim = _prim_packet.default
+    if tags:
+        _prim._tags = tags
 
     from torch._subclasses.fake_tensor import contains_tensor_types
 
@@ -418,7 +422,7 @@ def _elementwise_meta(
 
 
 def _complex_only_elementwise_meta(*args, **kwargs):
-    torch._check(
+    utils.check(
         utils.is_complex_dtype(args[0].dtype), lambda: "Only complex dtype is supported"
     )
     return _elementwise_meta(*args, **kwargs)
@@ -577,7 +581,7 @@ bitwise_not = _make_elementwise_unary_prim(
 
 
 def _cbrt_aten(a: torch.Tensor) -> Tensor:
-    torch._check(
+    utils.check(
         not a.is_complex(),
         lambda: "cbrt: Complex inputs not supported. Consider calling torch.pow(a, 1.0/3.0)",
     )
@@ -1289,9 +1293,10 @@ def _validate_collapse_args(a: Tensor, start: int, end: int) -> None:
 
     # Verifies end is strictly greater than start
     # (Collapse requires a non-empty interval)
-    torch._check_value(
+    utils.check(
         end >= start,
         lambda: f"Attempting to collapse but end, {end}, is less than start, {start}!",
+        ValueError,
     )
 
 
@@ -1818,7 +1823,7 @@ def _as_strided_scatter_meta(
     utils.validate_strides(stride)
 
     required_size = utils.compute_required_storage_length(size, stride, storage_offset)
-    torch._check(
+    utils.check(
         input.numel() >= required_size,
         lambda: (
             f"as_strided_scatter: sizes {size}, strides {stride}, storage offset {storage_offset} "
@@ -1827,7 +1832,7 @@ def _as_strided_scatter_meta(
             f"for storage of size {input.numel() * input.element_size()}"
         ),
     )
-    torch._check(
+    utils.check(
         utils.is_same_shape(src.shape, size),
         lambda: f"expected src to have a size equal to the slice of self. src size = {src.shape}, slice size = {size}",
     )
@@ -2427,11 +2432,11 @@ def _iota_meta(
     device: torch.device,
     requires_grad: bool,
 ) -> TensorLikeType:
-    torch._check(
+    utils.check(
         utils.is_integer_dtype(dtype),
         lambda: "prims.iota only supports integer dtypes",
     )
-    torch._check(step != 0, lambda: "step must be nonzero")
+    utils.check(step != 0, lambda: "step must be nonzero")
     return torch.empty(
         length,
         dtype=dtype,
@@ -2527,7 +2532,7 @@ def _empty_permuted_meta(
 ) -> TensorLikeType:
     p_strides = utils.make_contiguous_strides_for([shape[l] for l in physical_layout])
     dim = len(shape)
-    torch._check(
+    utils.check(
         len(physical_layout) == dim,
         lambda: (
             "Number of dimensions in the tensor input does not match the "
@@ -2538,7 +2543,7 @@ def _empty_permuted_meta(
     strides = [0] * len(shape)
     seen_dims = set()
     for p, l in enumerate(physical_layout):
-        torch._check(
+        utils.check(
             0 <= l < dim,
             lambda: (
                 f"Dimension out of range (expected to be between 0 and {dim - 1}, but got "
@@ -2546,7 +2551,7 @@ def _empty_permuted_meta(
                 "not currently supported; file an issue if you want it."
             ),
         )
-        torch._check(l not in seen_dims, lambda: "Duplicate dim not allowed")
+        utils.check(l not in seen_dims, lambda: "Duplicate dim not allowed")
         strides[l] = p_strides[p]
         seen_dims.add(l)
     return TensorMeta(
@@ -2774,12 +2779,12 @@ def _normal_meta(
     device: torch.device,
     requires_grad: bool,
 ) -> TensorLikeType:
-    torch._check(
+    utils.check(
         std >= 0.0,
         lambda: f"expected non-negative standard deviation, but got std={std}",
     )
 
-    torch._check(
+    utils.check(
         utils.is_float_dtype(dtype) or utils.is_complex_dtype(dtype),
         lambda: f"expected a floating-point or complex dtype, but got dtype={dtype}",
     )

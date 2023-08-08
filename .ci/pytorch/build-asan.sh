@@ -30,7 +30,8 @@ mkdir -p /tmp/tmp
 pushd /tmp/tmp
 tar zxf "$(dirname "${BASH_SOURCE[0]}")/../../dist/"*.tar.gz
 cd torch-*
-python setup.py build --cmake-only
+# TODO: Remove USE_MKLDNN=OFF once https://github.com/pytorch/pytorch/issues/103212 is resolved
+USE_MKLDNN=OFF python setup.py build --cmake-only
 popd
 
 print_sccache_stats

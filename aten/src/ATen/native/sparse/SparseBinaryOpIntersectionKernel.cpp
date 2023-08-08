@@ -35,6 +35,13 @@ struct RhsProjOp {
   }
 };
 
+struct LhsProjOp {
+  template <typename scalar_t>
+  static scalar_t apply(scalar_t a, scalar_t b) {
+    return a;
+  }
+};
+
 template <typename binary_op_t>
 struct CPUValueSelectionIntersectionKernel {
   static Tensor apply(
@@ -43,7 +50,8 @@ struct CPUValueSelectionIntersectionKernel {
       const Tensor& rhs_values,
       const Tensor& rhs_select_idx,
       const Tensor& intersection_counts,
-      const Tensor& argsort) {
+      const Tensor& argsort,
+      const bool accumulate_matches) {
     auto iter = make_value_selection_intersection_iter(
         lhs_values,
         lhs_select_idx,
@@ -86,7 +94,8 @@ struct CPUValueSelectionIntersectionKernel {
                 accscalar_t lhs_values = static_cast<accscalar_t>(*ptr_lhs_begin);
                 accscalar_t rhs_values;
                 index_t rhs_sorted_nnz_idx;
-                for (int64_t c = 0; c < count; ++c) {
+                const auto match_count = accumulate_matches ? count : std::min<int64_t>(count, 1);
+                for (int64_t c = 0; c < match_count; ++c) {
                   rhs_sorted_nnz_idx = *ptr_rhs_sorted_nnz_idx++;
                   rhs_values = static_cast<accscalar_t>(*(ptr_rhs_values + rhs_sorted_nnz_idx * rhs_nnz_stride));
                   res_values += binary_op_t::apply(lhs_values, rhs_values);
@@ -132,6 +141,17 @@ void sparse_mask_intersection_out_cpu_kernel(
   );
 }
 
+void sparse_mask_projection_out_cpu_kernel(
+    Tensor& result,
+    const Tensor& x,
+    const Tensor& y,
+    const OptTensor& x_hash_opt = c10::nullopt) {
+  using CPUValueLhsProjKernel = CPUValueSelectionIntersectionKernel<LhsProjOp>;
+  _sparse_binary_op_intersection_kernel_out<CPUKernelLauncher, CPUValueLhsProjKernel>(
+      result, x, y, x_hash_opt, c10::nullopt, /*accumulate_matches=*/false
+  );
+}
+
 }
 
 REGISTER_ARCH_DISPATCH(mul_sparse_sparse_out_stub, DEFAULT, &mul_sparse_sparse_out_cpu_kernel);
@@ -145,4 +165,10 @@ REGISTER_AVX512_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_interse
 REGISTER_AVX2_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cpu_kernel);
 REGISTER_VSX_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cpu_kernel);
 REGISTER_ZVECTOR_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cpu_kernel);
-} // namespace at::native
+
+REGISTER_ARCH_DISPATCH(sparse_mask_projection_out_stub, DEFAULT, &sparse_mask_projection_out_cpu_kernel);
+REGISTER_AVX512_DISPATCH(sparse_mask_projection_out_stub, &sparse_mask_projection_out_cpu_kernel);
+REGISTER_AVX2_DISPATCH(sparse_mask_projection_out_stub, &sparse_mask_projection_out_cpu_kernel);
+REGISTER_VSX_DISPATCH(sparse_mask_projection_out_stub, &sparse_mask_projection_out_cpu_kernel);
+REGISTER_ZVECTOR_DISPATCH(sparse_mask_projection_out_stub, &sparse_mask_projection_out_cpu_kernel);
+}

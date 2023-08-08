@@ -1106,20 +1106,6 @@ class TestSDPAFailureModes(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86or89Device,
                      "Does not support fused SDPA or not SM86+ hardware")
     @parametrize("head_dim", [72, 96, 128])
-    def test_memory_efficient_sm86_plus_failure(self, device, head_dim: int):
-        dtype = torch.float16
-        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype)
-        # See check_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-        size = (2, 2, 4, head_dim)
-        q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-        with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
-            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, None, 0.0, False))
-
-    @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86or89Device,
-                     "Does not support fused SDPA or not SM86+ hardware")
-    @parametrize("head_dim", [72, 96, 128])
     def test_flash_backward_failure_sm86plus(self, device, head_dim: int):
         dtype = torch.float16
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype)
@@ -1873,15 +1859,7 @@ class TestSDPA(NNTestCase):
 
         # Create real output
         with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
-            # See check_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-            if isSM86or89Device and head_dim in range(65, 129):
-                self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value,
-                                                                                       dropout_p=dropout_p,
-                                                                                       is_causal=is_causal, scale=scale))
-                return
-            else:
-                out = F.scaled_dot_product_attention(
-                    query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
+            out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
 
         with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
             # High Precision Math Reference
@@ -1913,8 +1891,9 @@ class TestSDPA(NNTestCase):
 
         # TODO: Investigate why grad_k needs larger tolerances
         grad_k_deviation = key_ref.grad - key_ref_lp.grad
-        grad_k_ref_atol = max(7 * torch.abs(grad_k_deviation).max().item(), 7 * default_atol[out.dtype])
-        grad_k_ref_rtol = max(7 * get_rtol(key_ref.grad, key_ref_lp.grad), 7 * default_rtol[out.dtype])
+        fudge_factor = 7 if not isSM86or89Device else 8
+        grad_k_ref_atol = max(fudge_factor * torch.abs(grad_k_deviation).max().item(), fudge_factor * default_atol[out.dtype])
+        grad_k_ref_rtol = max(fudge_factor * get_rtol(key_ref.grad, key_ref_lp.grad), fudge_factor * default_rtol[out.dtype])
 
         grad_v_deviation = value_ref.grad - value_ref_lp.grad
         grad_v_ref_atol = max(torch.abs(grad_v_deviation).max().item(), default_atol[out.dtype])

@@ -66,7 +66,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, locality_reorder: bool):
 
 @init_once_fakemode
 def lazy_init():
-    if torch._C.has_mkldnn:
+    if torch._C._has_mkldnn:
         from .mkldnn_fusion import _mkldnn_fusion_init
 
         _mkldnn_fusion_init()

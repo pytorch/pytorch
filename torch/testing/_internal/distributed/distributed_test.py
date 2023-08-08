@@ -9918,7 +9918,7 @@ class DistributedTest:
             }
 
             if rank == 0:
-                with self.assertLogs() as captured:
+                with self.assertLogs("torch.distributed") as captured:
                     torch.save(state, chkpt_file)
 
                 # Check that the logger has only one entry
@@ -9931,7 +9931,7 @@ class DistributedTest:
 
             dist.barrier()
             map_location = {"cuda:%d" % 0: "cuda:%d" % rank}
-            with self.assertLogs() as captured:
+            with self.assertLogs("torch.distributed") as captured:
                 checkpoint = torch.load(chkpt_file, map_location=map_location)
 
             # Check that the logger has only one entry

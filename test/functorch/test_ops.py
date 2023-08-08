@@ -1122,6 +1122,7 @@ class TestOperators(TestCase):
         xfail('as_strided_scatter', ''),
         xfail('masked.cumprod', ''),
         xfail("_upsample_bilinear2d_aa"),  # hit vmap fallback, which is disabled
+        xfail("renorm"),  # hit vmap fallback, which is disabled
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
@@ -1383,7 +1384,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.hardsigmoid', ''),  # NYI: forward AD for hardsigmoid_backward
         xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
         xfail('NumpyCubeNotComposableAutogradFunction'),  # not composable
-        xfail('renorm', ''),  # NYI: forward AD for renorm
         xfail('ormqr', ''),  # NYI: forward AD for ormqr
         xfail('nn.functional.multilabel_margin_loss', ''),  # NYI: multilabel_margin_loss_forward
         xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for soft_margin_loss_backward
@@ -1543,7 +1543,6 @@ class TestOperators(TestCase):
         xfail('normal', 'number_mean'),  # calls random op
         xfail('pca_lowrank'),  # calls random op
         xfail('quantile'),  # Batching rule not implemented for aten::equal
-        xfail('renorm'),  # Forward AD not implemented and no decomposition
         xfail('scatter_reduce', 'prod'),  # Forward AD not implemented and no decomposition
         xfail('_segment_reduce', 'lengths'),  # Forward AD not implemented and no decomposition
         xfail('_segment_reduce', 'offsets'),  # Forward AD not implemented and no decomposition

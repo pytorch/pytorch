@@ -497,5 +497,10 @@ class TestPaternMatcher(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CPU and torch._C.has_mkldnn and not TEST_WITH_ROCM:
+    if (
+        IS_LINUX
+        and HAS_CPU
+        and torch.backends.mkldnn.is_available()
+        and not TEST_WITH_ROCM
+    ):
         run_tests()

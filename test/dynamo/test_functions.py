@@ -6,7 +6,7 @@ import inspect
 import itertools
 import operator
 import unittest
-from typing import Any
+from typing import Any, NamedTuple
 from unittest.mock import patch
 
 import torch
@@ -414,6 +414,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return z
 
     @make_test
+    def test_ordered_dict_kwargs(x):
+        z = collections.OrderedDict(sample=torch.ones(10))
+        return z
+
+    @make_test
     def test_float(x):
         y = float(1.2)
         y += float("1.2")
@@ -432,6 +437,30 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_get_default_dtype(x):
         if x.dtype == torch.get_default_dtype():
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_get_autocast_gpu_dtype(x):
+        dtype = torch.get_autocast_gpu_dtype()
+        return x.type(dtype)
+
+    @make_test
+    def test_get_calculate_correct_fan(x):
+        fan_in = torch.nn.init._calculate_correct_fan(x, "fan_in")
+        return x + fan_in
+
+    @make_test
+    def test_is_complex(x):
+        if torch.is_complex(x):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_get_privateuse1_name(x):
+        if torch._C._get_privateuse1_backend_name() == "privateuseone":
             return x + 1
         else:
             return x - 1
@@ -862,6 +891,26 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         tmp = mytuple(a, b, a + b)
         return mytuple(tmp.x, tmp[1], tmp.xy + b)
 
+    class MyNamedTuple(NamedTuple):
+        first: torch.Tensor
+        second: torch.Tensor
+
+        def add(self) -> torch.Tensor:
+            return self.first + self.second
+
+        @staticmethod
+        def static_method() -> int:
+            return 1
+
+        @classmethod
+        def class_method(cls) -> str:
+            return cls.__name__
+
+    @make_test
+    def test_namedtuple_user_methods(a, b):
+        mytuple = FunctionTests.MyNamedTuple(a, b)
+        return mytuple.add(), mytuple.static_method(), mytuple.class_method()
+
     @make_test
     def test_is_quantized(a, b):
         if not a.is_quantized:
@@ -887,14 +936,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if tmp.startswith("Tensor"):
             return x + 1
 
-    @requires_static_shapes
     @make_test
     def test_tensor_new_with_size(x):
         y = torch.rand(5, 8)
         z = x.new(y.size())
         assert z.size() == y.size()
 
-    @requires_static_shapes
     @make_test
     def test_tensor_new_with_shape(x):
         y = torch.rand(5, 8)
@@ -1036,6 +1083,30 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_return_multiple_numpy_ndarray(x):
         a = x.numpy()
         return a.T, a.imag, a.real
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_ndarray_method(x):
+        a = x.numpy()
+        return a.copy()
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_ndarray_transpose(x):
+        a = x.numpy()
+        return a.transpose(0, 1)
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_ndarray_reshape(x):
+        a = x.numpy()
+        return a.reshape([1, a.size])
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_ndarray_methods_returning_scalar(x):
+        a = x.numpy()
+        return a.max(axis=0), a.all(axis=0)
 
 
 def global_func_with_default_tensor_args(

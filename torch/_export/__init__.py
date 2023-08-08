@@ -17,6 +17,7 @@ from .exported_program import (
     ExportGraphSignature,
     _process_constraints,
 )
+from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
 from torch._functorch.aot_autograd import aot_export_module
@@ -67,6 +68,25 @@ from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeError
 #     ]
 # )
 def dynamic_dim(t: torch.Tensor, index: int):
+    if not isinstance(t, torch.Tensor):
+        raise UserError(
+            UserErrorType.DYNAMIC_DIM,
+            f"Expected tensor as input to dynamic_dim but got {type(t)}"
+        )
+
+    if t.dim() < 1:
+        raise UserError(
+            UserErrorType.DYNAMIC_DIM,
+            "Cannot mark 0-dimension tensors to be dynamic"
+        )
+
+    if index >= t.dim():
+        raise UserError(
+            UserErrorType.DYNAMIC_DIM,
+            f"Expected the dimension passed to dynamic_dim to be in the range [0:{t.dim()-1}]"
+            f" but got {index}, which is out of bounds for the given tensor."
+        )
+
     return Constraint(
         weakref.ref(t),
         id(t),
@@ -98,6 +118,8 @@ def export(
     f: Callable,
     args: Tuple[Any],
     constraints: Optional[List[Constraint]] = None,
+    *,
+    _add_runtime_assertions=True,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -201,6 +223,7 @@ def export(
                 export_graph_signature,
                 flat_args,
             )
+            assert orig_out_spec is not None
             exported_program = ExportedProgram(
                 gm,
                 gm.graph,
@@ -210,7 +233,11 @@ def export(
                 range_constraints,
                 equality_constraints,
             )
-            return exported_program
+
+            if _add_runtime_assertions:
+                exported_program = exported_program._add_runtime_assertions()
+
+            return exported_program.transform(_ReplaceSymSizeOpPass())
 
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))

@@ -15,8 +15,9 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 
-from typing import Any, NamedTuple
+from typing import Any, List, NamedTuple, Set
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -35,8 +36,7 @@ from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.nn.parallel import DistributedDataParallel as DDP
+
 from torch.utils._pytree import tree_map, tree_map_only
 
 from tqdm.auto import tqdm, trange
@@ -273,6 +273,12 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     "sebotnet33ts_256",  # Flaky accuracy failed
 ]
 
+CI_SKIP[CI("inductor", training=False, dynamic=True, device="cpu")] = [
+    *CI_SKIP[CI("inductor", training=False, device="cpu")],
+    "pyhpc_isoneutral_mixing",
+    "dpn107",
+]
+
 CI_SKIP_OPTIMIZER = {
     # TIMM
     "convmixer_768_32",  # accuracy
@@ -285,6 +291,42 @@ CI_SKIP_OPTIMIZER = {
     "MobileBertForQuestionAnswering",  # Stack issue in fx
     "PegasusForConditionalGeneration",  # OOM
 }
+
+
+# Model Groups
+@dataclass(frozen=True)
+class ModelGroup:
+    name: str
+    models: Set[str]
+
+
+BLUEBERRY_MODELS = ModelGroup("Blueberries", {"llama", "nanogpt_generate"})
+
+
+@dataclass(frozen=True)
+class GroupMap:
+    groups: List[ModelGroup]
+
+    def model_group(self, model_name):
+        for group in self.groups:
+            if model_name in group.models:
+                return group.name
+        return None
+
+    @classmethod
+    def assert_single_group(cls, groups: List[ModelGroup]):
+        model_to_group = {}
+        for group in groups:
+            for model in group.models:
+                if model in model_to_group:
+                    raise ValueError(
+                        f"Model {model} appears in multiple groups, {model_to_group[model]} and {group.name}"
+                    )
+                model_to_group[model] = group.name
+        return cls(groups)
+
+
+ALL_MODEL_GROUPS = GroupMap.assert_single_group([BLUEBERRY_MODELS])
 
 
 def model_specified_by_path(path_and_class_str):
@@ -689,8 +731,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             timings,
         )
 
-    first_headers = ["dev", "name", "batch_size"]
-    first_fields = [current_device, current_name, current_batch_size]
+    current_group = ALL_MODEL_GROUPS.model_group(current_name)
+    first_headers = ["dev", "name", "group", "batch_size"]
+    first_fields = [current_device, current_name, current_group, current_batch_size]
     if "tag" in kwargs:
         first_headers.append("tag")
         first_fields.append(kwargs["tag"])
@@ -1151,7 +1194,10 @@ class BenchmarkRunner:
         self._args = None
 
     def setup_amp(self):
-        if self.args.amp and self.args.training and self.args.devices == ["cuda"]:
+        if self.args.only in self.fp32_only_models:
+            return
+
+        if self.args.amp and self.args.devices == ["cuda"]:
             # AMP training can lead to small loss values which can undeflow
             # gradient values returning in zero gradients. To solve this
             # problem, PyTorch introduces GradScaler. GradScaler is a stateful
@@ -1216,6 +1262,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def fp32_only_models(self):
+        return set()
+
+    @property
     def skip_not_suitable_for_training_models(self):
         return set()
 
@@ -1263,10 +1313,7 @@ class BenchmarkRunner:
                     continue  # bad benchmark implementation
 
     def deepcopy_model(self, model):
-        try:
-            return copy.deepcopy(model)
-        except TypeError:
-            return model
+        return copy.deepcopy(model)
 
     def validate_model(self, model, example_inputs):
         """
@@ -1393,8 +1440,18 @@ class BenchmarkRunner:
         def deepcopy_and_maybe_ddp(model):
             model = self.deepcopy_model(model)
             if self.args.ddp:
+                assert (
+                    torch.distributed.is_available()
+                ), "Can't use DDP without a distributed enabled build"
+                from torch.nn.parallel import DistributedDataParallel as DDP
+
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
+                assert (
+                    torch.distributed.is_available()
+                ), "Can't use FSDP without a distributed enabled build"
+                from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
                 model = FSDP(model, use_orig_params=True)
                 if torch._inductor.config.triton.cudagraphs:
                     log.warning("Disabling cudagraphs for FSDP compatibility")
@@ -2282,8 +2339,10 @@ def run(runner, args, original_dir=None):
     if args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
+        torch._dynamo.config.automatic_dynamic_shapes = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
+        torch._dynamo.config.automatic_dynamic_shapes = True
         if not args.dynamic_batch_only:
             torch._dynamo.config.assume_static_by_default = False
     if args.specialize_int:
@@ -2350,12 +2409,20 @@ def run(runner, args, original_dir=None):
             "pytorch_unet",
             "Super_SloMo",
             "vgg16",
+            # https://github.com/pytorch/pytorch/issues/96724
+            "Wav2Vec2ForCTC",
+            "Wav2Vec2ForPreTraining",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
         if args.only in {"hf_T5_generate"}:
             # See https://github.com/pytorch/pytorch/issues/102814
-            torch._dynamo.config.assume_static_by_default = False
+            if torch._dynamo.config.dynamic_shapes:
+                torch._dynamo.config.assume_static_by_default = False
+            if not torch._dynamo.config.automatic_dynamic_shapes:
+                log.warning(
+                    "hf_T5_generate compiles extremely slowly without dynamic shapes; consider lowering cache_size_limit"
+                )
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
@@ -2449,25 +2516,6 @@ def run(runner, args, original_dir=None):
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
 
-    if args.inductor or args.inductor_settings:
-        runner.skip_models.update(runner.failing_torchinductor_models)
-        if args.float16:
-            # TODO(jansel): check if correctness issue is real
-            runner.skip_models.add("yolov3")
-
-    if args.float16:
-        # these give `INCORRECT - Variation in Eager runs itself` sometimes
-        runner.non_deterministic_models.update(
-            {
-                "demucs",
-                "pyhpc_equation_of_state",
-                "timm_efficientdet",
-                "pyhpc_isoneutral_mixing",
-                "pyhpc_turbulent_kinetic_energy",
-                "shufflenet_v2_x1_0",
-            }
-        )
-
     if args.no_skip:
         runner.skip_models.clear()
 
@@ -2550,7 +2598,9 @@ def run(runner, args, original_dir=None):
         output_filename = "coverage.csv"
 
     if args.inductor or args.backend == "inductor":
-        inductor_config.triton.cudagraphs = not args.disable_cudagraphs
+        inductor_config.triton.cudagraphs = (
+            not args.disable_cudagraphs and not args.dynamic_shapes
+        )
         inductor_config.triton.persistent_reductions = (
             not args.disable_persistent_reductions
         )
@@ -2743,12 +2793,27 @@ def run(runner, args, original_dir=None):
                 print(f"Running model {i+1}/{nmodels}", flush=True)
 
             def write_csv(status):
-                for device in args.devices:
-                    output_csv(
-                        output_filename,
-                        ["dev", "name", "batch_size", "accuracy"],
-                        [device, name, placeholder_batch_size, status],
-                    )
+                if args.accuracy:
+                    headers = ["dev", "name", "batch_size", "accuracy"]
+                    rows = [
+                        [device, name, placeholder_batch_size, status]
+                        for device in args.devices
+                    ]
+                elif args.performance:
+                    headers = ["dev", "name", "batch_size", "speedup", "abs_latency"]
+                    rows = [
+                        [device, name, placeholder_batch_size, 0.0, 0.0]
+                        for device in args.devices
+                    ]
+                else:
+                    headers = []
+                    rows = [
+                        [device, name, placeholder_batch_size, 0.0]
+                        for device in args.devices
+                    ]
+
+                for row in rows:
+                    output_csv(output_filename, headers, row)
 
             try:
                 timeout = args.timeout

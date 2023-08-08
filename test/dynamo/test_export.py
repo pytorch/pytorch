@@ -2701,35 +2701,6 @@ def forward(self, x):
         self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
     @config.patch(dynamic_shapes=True)
-    def test_functionalize(self):
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.register_buffer("buffer1", torch.ones(6, 2))
-
-            def forward(self, x):
-                x.add_(2)
-                return x.sum() + self.buffer1.sum()
-
-        example_inputs = (torch.ones(1, 2, 3),)
-        gm, _ = torch._dynamo.export(
-            Foo(),
-            *example_inputs,
-            aten_graph=True,
-            tracing_mode="symbolic",
-            functionalize=True,
-        )
-
-        count = 0
-        for node in gm.graph.nodes:
-            if node.target == torch.ops.aten.add_.Tensor:
-                count += 1
-        self.assertEqual(count, 0)
-        test_inp = (torch.ones(1, 2, 3),)
-        test_inp_v2 = (torch.ones(1, 2, 3),)
-        self.assertEqual(gm(*test_inp), Foo()(*test_inp_v2))
-
-    @config.patch(dynamic_shapes=True)
     def test_not_functionalize(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2746,7 +2717,6 @@ def forward(self, x):
             *example_inputs,
             aten_graph=True,
             tracing_mode="symbolic",
-            functionalize=False,
         )
         count = 0
         for node in gm.graph.nodes:
@@ -2756,55 +2726,6 @@ def forward(self, x):
         test_inp = (torch.ones(1, 2, 3),)
         test_inp_v2 = (torch.ones(1, 2, 3),)
         self.assertEqual(gm(*test_inp), Foo()(*test_inp_v2))
-
-    @config.patch(dynamic_shapes=True, assume_static_by_default=False)
-    def test_functionalize_cond(self):
-        def foo(x):
-            def true_true_fn(x):
-                return x.sum() + 6
-
-            def true_false_fn(x):
-                return x.sum() + 9
-
-            def true_fn(x):
-                return cond(x.shape[0] > 6, true_true_fn, true_false_fn, [x])
-
-            def false_fn(x):
-                return x.sum() - 1
-
-            return cond(x.shape[0] > 5, true_fn, false_fn, [x])
-
-        example_inputs = (torch.ones(5, 2, 3),)
-        gm, _ = torch._dynamo.export(
-            foo,
-            *example_inputs,
-            aten_graph=True,
-            tracing_mode="symbolic",
-            functionalize=True,
-        )
-        self.assertEqual(gm(torch.ones(7, 2, 3)), foo(torch.ones(7, 2, 3)))
-
-    @config.patch(dynamic_shapes=True)
-    def test_functionalize_simple(self):
-        def foo(x):
-            def true_fn(x):
-                return x.sum() + 1
-
-            def false_fn(x):
-                return x.sum() - 1
-
-            return cond(x.shape[0] > 5, true_fn, false_fn, [x])
-
-        example_inputs = (torch.ones(5, 2, 3),)
-        gm, _ = torch._dynamo.export(
-            foo,
-            *example_inputs,
-            aten_graph=True,
-            tracing_mode="symbolic",
-            functionalize=True,
-        )
-        self.assertEqual(gm.true_graph_0(torch.ones(6, 4)), torch.ones(6, 4).sum() + 1)
-        self.assertEqual(gm.false_graph_0(torch.ones(6, 4)), torch.ones(6, 4).sum() - 1)
 
     @config.patch(dynamic_shapes=True)
     def test_round_dynamic_shapes(self):

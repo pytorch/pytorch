@@ -45,65 +45,34 @@ def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
     return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
 
 
-class OpDtypeClassifier:
-    @staticmethod
-    @functools.lru_cache(None)
-    def io_ops():
-        return ["placeholder", "output"]
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def index_ops():
-        return ["get_index", "index_expr"]
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def load_store_ops():
-        return ["load", "store"]
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def reduction_ops():
-        return ["reduction"]
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def boolean_ops():
-        return [
-            "is_inf",
-            "is_nan",
-            "bitwise_xor",
-            "logical_not",
-            "signbit",
-            "le",
-            "lt",
-            "ge",
-            "gt",
-            "eq",
-            "ne",
-        ]
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def explicit_dtype_ops():
-        return ["constant", "to_dtype", "index_expr"]
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def rand_ops():
-        return ["rand", "randn"]
+@functools.lru_cache(None)
+def boolean_ops():
+    return (
+        "is_inf",
+        "is_nan",
+        "bitwise_xor",
+        "logical_not",
+        "signbit",
+        "le",
+        "lt",
+        "ge",
+        "gt",
+        "eq",
+        "ne",
+    )
 
 
 class DataTypePropagation:
-    def __init__(self, graph: torch.fx.Graph) -> None:
-        self.graph: torch.fx.Graph = graph
+    def __init__(self, body) -> None:
+        self.body = body
+        self.graphs = {"root": body.root_block.graph}
+        for k, v in body.subblocks.items():
+            self.graphs[k] = v.graph
 
     def deduce_node_dtype_by_inputs(self, node: torch.fx.Node):
         inputs = node.all_input_nodes
         input_nodes = [
-            n
-            for n in inputs
-            if isinstance(n, torch.fx.Node) and n.op not in OpDtypeClassifier.io_ops()
+            n for n in inputs if isinstance(n, torch.fx.Node) and n.op != "placeholder"
         ]
         if len(input_nodes) == 0:
             return None
@@ -121,34 +90,66 @@ class DataTypePropagation:
             [n.meta[OptimizationContext.key].dtype for n in input_nodes],
         )
 
+    def deduce_node_dtype_by_subgraph(self, node: torch.fx.Node):
+        sub_graph = self.graphs[node.target]
+        dtype = self.propagate_graph(sub_graph)
+        assert dtype
+        return dtype
+
     def deduce_node_dtype(self, node: torch.fx.Node):
-        if node.target in OpDtypeClassifier.boolean_ops():
+        if node.target in boolean_ops():
             return torch.bool
 
-        if node.op in OpDtypeClassifier.io_ops():
+        if node.op == "placeholder":
             return None
 
-        if node.target in OpDtypeClassifier.explicit_dtype_ops():
+        if node.target == "output":
+            # we can infer output node if it only have 1 arg
+            if len(node.args) != 1:
+                return None
+
+        if node.target in (
+            "constant",
+            "to_dtype",
+            "index_expr",
+        ):
             return node.args[-1]
 
-        if node.target in OpDtypeClassifier.rand_ops():
+        if node.target in (
+            "rand",
+            "randn",
+        ):
             return torch.float
 
-        if node.target in OpDtypeClassifier.index_ops():
+        if node.target in (
+            "get_index",
+            "index_expr",
+        ):
             return torch.int64
 
-        if node.target in OpDtypeClassifier.load_store_ops():
+        if node.target in (
+            "load",
+            "store",
+        ):
             buf_name = node.args[1]
             return V.graph.get_dtype(buf_name)
 
-        if node.target in OpDtypeClassifier.reduction_ops():
+        if node.target == "reduction":
             _, _, dtype, _, _, _, _ = node.args
             return dtype
 
+        if node.target.startswith("masked_subblock"):
+            return self.deduce_node_dtype_by_subgraph(node)
+
         return self.deduce_node_dtype_by_inputs(node)
 
-    def propagate(self):
-        for node in self.graph.nodes:
+    def propagate_graph(self, graph: torch.fx.Graph):
+        assert graph.nodes
+        graph_dtype = None
+        # For masked_subblock, we use output's dtype to represent
+        # the dtype of this subgraph. For other cases, graph_dtype
+        # might be None
+        for node in graph.nodes:
             if OptimizationContext.key in node.meta:
                 opt_ctx = node.meta[OptimizationContext.key]
             else:
@@ -156,10 +157,16 @@ class DataTypePropagation:
 
             opt_ctx.dtype = self.deduce_node_dtype(node)
             node.meta[OptimizationContext.key] = opt_ctx
+            if node.target == "output":
+                graph_dtype = opt_ctx.dtype
+        return graph_dtype
+
+    def propagate(self):
+        self.propagate_graph(self.graphs["root"])
 
     @classmethod
-    def propagate_graph(cls, graph: torch.fx.Graph):
-        return cls(graph).propagate()
+    def propagate_loopbody(cls, body):
+        return cls(body).propagate()
 
     @classmethod
     def propagate_scheduler_node(cls, node):
@@ -167,11 +174,8 @@ class DataTypePropagation:
         from ..scheduler import SchedulerNode
 
         assert isinstance(node, SchedulerNode)
-        if isinstance(node._body, LoopBody):
-            body: LoopBody = node._body
-            sub_blocks = [body.root_block] + list(body.subblocks.values())
-            for sub_block in sub_blocks:
-                DataTypePropagation.propagate_graph(sub_block.graph)
+        assert isinstance(node._body, LoopBody)
+        DataTypePropagation.propagate_loopbody(node._body)
 
 
 class ExprPrinter(Printer):
@@ -206,14 +210,14 @@ class ExprPrinter(Printer):
     def _print_Pow(self, expr):
         # Pow() confuses triton
         base, exp = expr.args
-        base = self._print(base)
         # NB: Remember this is sizevar computation!  You don't typically
         # expect to have to do floating point computation including exponents
         # in sizevar compute.  Instead of adding support for floating
         # point pow, you should make upstream retranslate the Sympy expression
         # into Tensor expressions earlier and do that instead.
         if exp == 0.5:
-            return f"math.sqrt({base})"
+            return self._helper_sqrt(base)
+        base = self._print(base)
         assert exp == int(exp), exp
         exp = int(exp)
         if exp > 0:
@@ -251,6 +255,9 @@ class PythonPrinter(ExprPrinter):
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         return f"({x} // {div})"
+
+    def _helper_sqrt(self, expr):
+        return f"math.sqrt({self._print(expr)})"
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
@@ -579,8 +586,9 @@ class KernelArgs:
 
 class CSEVariable:
     """A CSEVariable is just a name for an expression but it is useful to be able to annotate them on a backend dependent basis.
-    The backends can inherit from this class and overload the "create_cse_var" Kernel to do that.
-    The "update_on_args" method gives you a hook for annotations, see example of TritonCSEVariable in triton.py.
+    To do so, the backends can simply overload `Kernel.create_cse_var`
+    The "CSEVariable.update_on_args" method gives you a hook for annotations
+    See example of TritonCSEVariable in triton.py
     """
 
     def __init__(self, name):
@@ -665,7 +673,8 @@ class CSE:
         if isinstance(expr, CSEVariable):
             return expr
         cache_key = expr
-        if cache_key not in self.cache:
+        var = self.cache.get(cache_key, None)
+        if not var:
             var = self.newvar() if assignment else None
             self.cache[cache_key] = var
             if write:
@@ -679,7 +688,7 @@ class CSE:
                     line = f"{expr}{self.suffix}"
                 buffer.writeline(line)
 
-        return self.cache[cache_key]
+        return var
 
     def newvar(self) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
@@ -854,13 +863,6 @@ class OptimizationContext:
 
     # Load value as mask
     is_load_as_mask: bool = False
-    # Load bfloat16 value as float32
-    is_load_bf16_as_fp32: bool = False
-    # Store float32 value as bfloat16
-    is_store_fp32_as_bf16: bool = False
-    # do not  need type cast for
-    # for mem copy only node bf16 load -> bf16 store,
-    is_bf16_mem_copy: bool = False
 
     dtype: torch.dtype = None
     ops_name: str = ""

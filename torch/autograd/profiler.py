@@ -179,6 +179,7 @@ class profile:
             with_modules=False,
             use_kineto=False,
             use_cpu=True,
+            use_mtia=False,
             experimental_config=None):
         self.enabled: bool = enabled
         if not self.enabled:
@@ -194,6 +195,7 @@ class profile:
         self.with_stack = with_stack
         self.with_modules = with_modules
         self.use_cpu = use_cpu
+        self.use_mtia = use_mtia
         if experimental_config is None:
             experimental_config = _ExperimentalConfig()
         self.experimental_config = experimental_config
@@ -210,6 +212,8 @@ class profile:
         self.kineto_activities = set()
         if self.use_cpu:
             self.kineto_activities.add(ProfilerActivity.CPU)
+        if self.use_mtia:
+            self.kineto_activities.add(ProfilerActivity.MTIA)
 
         self.profiler_kind = ProfilerState.KINETO
         if self.use_cuda:

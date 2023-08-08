@@ -1651,9 +1651,7 @@ class FunctionSchema:
         return self.kind() in [SchemaKind.inplace, SchemaKind.out, SchemaKind.mutable]
 
     def has_symint(self) -> bool:
-        return self.arguments.has_symint_arg() or any(
-            r.type.is_symint_like() for r in self.returns
-        )
+        return self.arguments.has_symint_arg()
 
     def __str__(self) -> str:
         all_arguments_str = str(self.arguments)

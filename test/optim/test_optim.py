@@ -20,13 +20,15 @@ from torch.optim.lr_scheduler import (
 )
 from torch.testing._internal.common_utils import (
     TestCase,
-    run_tests,
     TEST_WITH_UBSAN,
     load_tests,
     gradcheck,
     skipIfRocm,
     skipIfTorchDynamo
 )
+
+from torch._dynamo import disable as disable_dynamo
+
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_device_type import largeTensorTest
 from typing import Dict, Any, Tuple
@@ -49,7 +51,7 @@ def drosenbrock(tensor):
     x, y = tensor
     return torch.tensor((-400 * x * (y - x**2) - 2 * (1 - x), 200 * (y - x**2)))
 
-
+@skipIfTorchDynamo("This is a TEMPORARY stopgap, see https://github.com/pytorch/pytorch/issues/103322")
 class TestOptim(TestCase):
     exact_dtype = True
 
@@ -191,12 +193,23 @@ class TestOptim(TestCase):
             else:
                 self.assertLess(fn().item(), initial_value)
 
+    # Note: disable dynamo on this function
+    # This allows us to continue running actual logic of the optimizer
+    # tests in dynamo without tracing this test code which has a lot of unsupported
+    # behavior
+    @disable_dynamo(recursive=False)
     def _test_state_dict(self, weight, bias, input, constructor, atol=None, rtol=None):
         weight = Parameter(weight)
         bias = Parameter(bias)
         with torch.no_grad():
             input = input.clone().detach().requires_grad_()
 
+        # Note: Disable dynamo on this function
+        # This avoids a bug where input_cuda is not detected in the environment
+        # because it currently is not defined in the local environmet. Unable to repro
+        # anywhere else however and this is test code that we don't need to spend
+        # time getting dynamo to trace unless the issue repros in real models.
+        @disable_dynamo(recursive=False)
         def fn_base(optimizer, weight, bias):
             optimizer.zero_grad()
             i = input_cuda if weight.is_cuda else input
@@ -220,7 +233,7 @@ class TestOptim(TestCase):
         state_dict = deepcopy(optimizer.state_dict())
         state_dict_c = deepcopy(optimizer.state_dict())
         optimizer_c.load_state_dict(state_dict_c)
-        # Run both optimizations in parallel
+        # Run both optimizers in parallel
         for _ in range(20):
             optimizer.step(fn)
             optimizer_c.step(fn_c)
@@ -1656,6 +1669,32 @@ class TestOptim(TestCase):
             self.assertEqual(params, prev_params)
 
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required.")
+    def test_fused_optimizer_load_state_dict(self):
+        # NOTE: This SIMULATES a fused/capturable optimizer with state moved to CPU, issue 103256
+        # How do we get there? Users typically create CUDA models on fused optimizers and then
+        # store checkpoints on CPU as CUDA memory is limited with torch.load(...map_location="cpu").
+        # Since this is a unit test, it is more expedient to simulate what the state_dict
+        # would look like, which is basically CPU tensors with fused/capturable flag = True.
+        for optimC, kwarg in itertools.product((Adam, optim.AdamW), ("fused", "capturable")):
+            input = torch.tensor([0.1, 0.2], dtype=torch.float32, device="cpu")
+            optimizer = optimC([input])
+            optimizer.zero_grad()
+            input.grad = torch.rand_like(input)
+            optimizer.step()
+            optim_state_dict_cpu = deepcopy(optimizer.state_dict())
+            optim_state_dict_cpu["param_groups"][0][kwarg] = True
+
+            # load
+            input_cuda = input.clone().detach().to(device="cuda")
+            defaults = {kwarg: True}
+            optimizer_cuda = optimC([input_cuda], **defaults)
+            optimizer_cuda.load_state_dict(optim_state_dict_cpu)
+            optimizer_cuda.zero_grad()
+            input_cuda.grad = torch.rand_like(input_cuda)
+            optimizer_cuda.step()
+
+
     @skipIfTorchDynamo()
     def test_post_hook(self):
         def post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
@@ -1783,7 +1822,9 @@ def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
     )
 
 
+@skipIfTorchDynamo("Differentiable optimizers not supported")
 class TestDifferentiableOptimizer(TestCase):
+
     def test_sgd(self):
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
         grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -1800,6 +1841,7 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
+
 
     def test_adam(self):
         state = {}
@@ -1825,6 +1867,7 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
+
 
     def test_rmsprop(self):
         state = {}
@@ -1858,6 +1901,7 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
+
     def test_adadelta(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -1879,6 +1923,7 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
+
     def test_adagrad(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -1898,6 +1943,7 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
+
 
     def test_adamax(self):
         state = {}
@@ -1919,6 +1965,7 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
+
 
     @skipIfTorchDynamo("The inplace mu update fails with dynamo, "
                        "since this is only happening when differentiable is enabled, skipping for now")
@@ -1945,7 +1992,6 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
-    @skipIfTorchDynamo()
     def test_rprop(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -2074,4 +2120,4 @@ class TestDifferentiableOptimizer(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    print("These tests should be run through test/test_optim.py instead")

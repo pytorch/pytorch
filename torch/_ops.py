@@ -251,8 +251,11 @@ class HigherOrderOperator(OperatorBase):
         dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
         return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
 
+    def __str__(self):
+        return f"{self.name()}"
+
     def name(self):
-        return self.name
+        return self._name
 
 
 def _to_flat_tuple(args, kwargs):

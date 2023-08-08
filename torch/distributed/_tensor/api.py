@@ -188,8 +188,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         )
 
         # TODO: populate all tensor meta fields properly
+        # NOTE: memory_format is non-pickable so we intentionally skip it
         tensor_meta = TensorMetadata(
-            shape, dtype, requires_grad, stride, torch.contiguous_format, False, {}
+            shape, dtype, requires_grad, stride, None, False, {}
         )
         # deepcopy and set spec
         r._spec = DTensorSpec(

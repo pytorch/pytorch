@@ -15,6 +15,7 @@ import torch._logging
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
+    check,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -833,7 +834,9 @@ def get_fast_op_impls():
 def init_cuda_context():
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
     if torch.cuda.is_available():
-        torch.empty(1, device="cuda")
+        torch.empty(1, device="cuda") if torch.version.hip is None else torch.zeros(
+            1, device="cuda"
+        )
 
 
 @contextlib.contextmanager
@@ -1379,6 +1382,22 @@ class FakeTensorMode(TorchDispatchMode):
                 if op_impl_out != NotImplemented:
                     return op_impl_out
 
+        def can_fallback(func: OpOverload):
+            if not self.allow_fallback_kernels:
+                return False
+            # It's OK to try the fallback for built-in ops (e.g. aten, prims)
+            # because we control and test these but the fallback leads to unexpected behavior
+            # in user-defined custom ops
+            return func.namespace in {
+                "debugprims",
+                "prims",
+                "aten",
+                "xla",
+                "vision",
+                "torchtext",
+                "torchaudio",
+            }
+
         # run kernel registered to meta for func, which include
         # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
         try:
@@ -1386,7 +1405,7 @@ class FakeTensorMode(TorchDispatchMode):
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             # no meta kernel registered, fallback to kernel for the device
-            if has_symbolic_sizes or not self.allow_fallback_kernels:
+            if has_symbolic_sizes or not can_fallback(func):
                 raise UnsupportedOperatorException(func)
             return run_fallback_kernel(self, func, args, kwargs, not_implemented_error)
 
@@ -1476,7 +1495,7 @@ class FakeTensorMode(TorchDispatchMode):
                 ) = FakeTensor._find_common_device(func, args, kwargs)
 
             if isinstance(e, FakeTensor):
-                torch._check(
+                check(
                     e.device == common_device,
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
                 )

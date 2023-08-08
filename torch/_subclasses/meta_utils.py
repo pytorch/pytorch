@@ -239,10 +239,6 @@ class MetaConverter:
         if self.get_tensor_memo(t) is None:
             with torch.inference_mode(t.is_inference()):
                 if t.is_sparse:
-                    # TODO: Delete this assert, and just attempt making the
-                    # sparse tensor anyway; even if there is a shape_env, this
-                    # tensor might be all static
-                    assert shape_env is None, "symbolic on sparse NYI"
                     is_leaf = safe_is_leaf(t)
                     r = callback(
                         lambda: torch.ops.aten._sparse_coo_tensor_with_dims(
@@ -381,6 +377,12 @@ class MetaConverter:
                                 mid.requires_grad = t.requires_grad
                                 with torch.enable_grad(), maybe_suppress():
                                     r = mid.as_strided(sizes, strides, storage_offset)
+                        # The CreationMeta influences whether or not inplace
+                        # mutation is an error or not.  So we need to make
+                        # sure we properly propagate this as well.
+                        torch._C._autograd._set_creation_meta(
+                            r, torch._C._autograd._get_creation_meta(t)
+                        )
                     finally:
                         torch._C._dispatch_tls_set_dispatch_key_excluded(
                             torch._C.DispatchKey.ADInplaceOrView, old_exclude
