@@ -1247,6 +1247,56 @@ class TestCustomOp(CustomOpTestCaseBase):
             def foo_backward(ctx, saved, grad):
                 return {"xs": None}
 
+    def test_backward_output_differentiability_tensorlist(self):
+        @custom_ops.custom_op(f"{self.test_ns}::foo")
+        def foo(x: Tensor) -> Tuple[List[Tensor], Tensor]:
+            raise NotImplementedError()
+
+        @custom_ops.impl(f"{self.test_ns}::foo")
+        def foo_impl(x):
+            return [x.clone(), x.clone()], x.clone()
+
+        @custom_ops.impl_save_for_backward(f"{TestCustomOp.test_ns}::foo")
+        def foo_save_for_backward(inputs, output):
+            return []
+
+        @custom_ops.impl_backward(
+            f"{TestCustomOp.test_ns}::foo", output_differentiability=[False, True]
+        )
+        def foo_backward(ctx, saved, grad_lst, grad):
+            return {"x": grad}
+
+        op = self.get_op(f"{self.test_ns}::foo")
+        x = torch.randn(3, requires_grad=True)
+        [a, b], c = op(x)
+        self.assertFalse(a.requires_grad)
+        self.assertFalse(b.requires_grad)
+        self.assertTrue(c.requires_grad)
+
+    def test_backward_output_differentiability_non_tensor(self):
+        @custom_ops.custom_op(f"{self.test_ns}::foo")
+        def foo(x: Tensor) -> Tuple[Tensor, int]:
+            raise NotImplementedError()
+
+        @custom_ops.impl(f"{self.test_ns}::foo")
+        def foo_impl(x):
+            return x.clone(), 3
+
+        @custom_ops.impl_save_for_backward(f"{TestCustomOp.test_ns}::foo")
+        def foo_save_for_backward(inputs, output):
+            return []
+
+        @custom_ops.impl_backward(
+            f"{TestCustomOp.test_ns}::foo", output_differentiability=[True, True]
+        )
+        def foo_backward(ctx, saved, grad0, grad1):
+            return {"x": grad0}
+
+        op = self.get_op(f"{self.test_ns}::foo")
+        x = torch.randn(3, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "is not a Tensor"):
+            op(x)
+
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_impl_separate(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")

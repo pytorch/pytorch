@@ -580,7 +580,6 @@ def validate_namespace(ns: str) -> None:
             f"please choose something else. "
         )
 
-
 def validate_schema(schema: FunctionSchema) -> None:
     # Coming in the future. Requires us to have correct logic for
     # the ADInplaceOrView key
