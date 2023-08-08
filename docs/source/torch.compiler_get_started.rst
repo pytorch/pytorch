@@ -93,7 +93,7 @@ hub.
 
 And that is not the only available backend, you can run in a REPL
 ``torch.compile.list_backends()`` to see all the available backends. Try out the
-``cudagraphs`` next as inspiration.
+``cudagraphs`` or ``nvfuser`` next as inspiration.
 
 Using a pretrained model
 ~~~~~~~~~~~~~~~~~~~~~~~~
