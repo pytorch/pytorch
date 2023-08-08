@@ -4,11 +4,11 @@ import functools
 import itertools
 import logging
 import sys
-import unittest
 import warnings
 
 from functools import wraps
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Union
+from unittest import mock
 
 from functorch.compile import min_cut_rematerialization_partition
 
@@ -166,7 +166,7 @@ def count_bytes_inner(
     shape_env = _shape_env_from_inputs(example_inputs)
 
     graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
-    with V.set_graph_handler(graph):  # type: ignore[call-arg]
+    with V.set_graph_handler(graph):
         graph.run(*example_inputs)
         num_bytes, nodes_num_elem = graph.count_bytes()
         metrics.num_bytes_accessed += num_bytes
@@ -240,6 +240,8 @@ def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
                 with torch.utils._python_dispatch._disable_current_modes():
                     compiled(real_inputs)
 
+                del real_inputs
+
                 # second pass
                 kwargs_patched = {**kwargs, "cpp_wrapper": True}
                 return inner_compile(gm, example_inputs, **kwargs_patched)
@@ -265,7 +267,7 @@ def fake_tensor_prop(
         ctx = (
             contextlib.nullcontext()
             if not force_allow_non_fake_inputs
-            else unittest.mock.patch.object(fake_mode, "allow_non_fake_inputs", True)  # type: ignore[attr-defined]
+            else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
         )
         with ctx:  # type: ignore[attr-defined]
             FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
@@ -505,12 +507,12 @@ def fx_codegen_and_compile(
     # on node.meta["val"]. if in the future we rely on these being
     # correct we will need to fix.
 
-    with V.set_fake_mode(fake_mode):  # type: ignore[call-arg]
+    with V.set_fake_mode(fake_mode):
         # has some issues with memory in training
         post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
-    with V.set_fake_mode(fake_mode):  # type: ignore[call-arg]
+    with V.set_fake_mode(fake_mode):
         graph = GraphLowering(
             gm,
             shape_env=shape_env,
@@ -520,7 +522,7 @@ def fx_codegen_and_compile(
             aot_mode=aot_mode,
             user_visible_outputs=user_visible_outputs,
         )
-        with V.set_graph_handler(graph):  # type: ignore[call-arg]
+        with V.set_graph_handler(graph):
             graph.run(*example_inputs)
             context = torch._guards.TracingContext.get()
             if context is not None and context.output_strides is not None:
@@ -580,16 +582,18 @@ def get_input_idxs_to_check(
     def is_aligned(storage_offset, dtype):
         return (storage_offset * get_dtype_size(dtype)) % ALIGNMENT == 0
 
-    return [
-        i
-        for i in range(len(inputs))
-        if isinstance(inputs[i], torch.Tensor)
-        and (
-            i not in static_input_idxs
-            or not is_aligned(inputs[i].storage_offset(), inputs[i].dtype)  # type: ignore[union-attr]
-        )
-        and inputs[i].device.type == "cuda"  # type: ignore[union-attr]
-    ]
+    ids_to_check = []
+    for i, input in enumerate(inputs):
+        if (
+            isinstance(input, torch.Tensor)
+            and (
+                i not in static_input_idxs
+                or not is_aligned(input.storage_offset(), input.dtype)
+            )
+            and input.device.type == "cuda"
+        ):
+            ids_to_check.append(i)
+    return ids_to_check
 
 
 def align_inputs_from_check_idxs(
@@ -837,7 +841,7 @@ def compile_fx_aot(
             "aot_inductor_output_path": code_hash(model_.code),
         }
 
-    with unittest.mock.patch.object(_in_aot_compilation, "value", True):  # type: ignore[attr-defined]
+    with mock.patch.object(_in_aot_compilation, "value", True):
         return compile_fx(
             model_,
             example_inputs_,
@@ -894,7 +898,7 @@ def fw_compiler_freezing(
         if i not in preserved_arg_indices:
             params_flat[i] = None
 
-    with unittest.mock.patch.object(fake_mode, "allow_non_fake_inputs", True):  # type: ignore[attr-defined]
+    with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(
             opt_model,
             aot_example_inputs,
@@ -949,9 +953,7 @@ def compile_fx(
                 # CudaWrapperCodeGen relies on kernel name to find the autotuned cubin file
                 "triton.unique_kernel_names": True,
             }
-        ), V.set_real_inputs(
-            example_inputs_
-        ):  # type: ignore[call-arg]
+        ), V.set_real_inputs(example_inputs_):
             return compile_fx(
                 model_,
                 example_inputs_,
@@ -1123,7 +1125,7 @@ def compile_fx(
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(
         tracing_context
-    ), compiled_autograd.disable():  # type: ignore[call-arg]
+    ), compiled_autograd.disable():
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
