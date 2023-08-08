@@ -1346,6 +1346,17 @@ def get_glibcxx_abi_build_flags():
 def check_precompiler_headers(extra_cflags,
                             extra_include_paths,
                             is_standalone=False):
+    r'''
+    Precompiled Headers(PCH) can pre-build the same headers and reduce build time for pytorch load_inline modules.
+    GCC offical manual: https://gcc.gnu.org/onlinedocs/gcc-4.0.4/gcc/Precompiled-Headers.html
+    PCH only works when built pch file(header.h.gch) and build target have the same build parameters. So, We need
+    add a signture file to recoder PCH file parameters. If the build parameters(signture) changed, it should rebuild
+    PCH file.
+    
+    Note:
+    1. Windows and MacOS have different PCH mechanism, We only support on Linux currently.
+    2. It is only woeks on GCC/G++. Clang(Clang++) will not boost build and will not break build.
+    '''
     if not IS_LINUX:
         return
 
@@ -1405,7 +1416,6 @@ def check_precompiler_headers(extra_cflags,
             f.close()
 
     def build_precompile_header(pch_cmd):
-        print('!!!!!pch_cmd:{}.'.format(pch_cmd))
         try:
             subprocess.check_output(pch_cmd, shell=True, stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
@@ -1426,7 +1436,6 @@ def check_precompiler_headers(extra_cflags,
 
     pch_cmd = format_precompiler_header_cmd(compiler, head_file, head_file_pch, common_cflags_str, extra_cflags_str, extra_include_paths_str)
     pch_sign = command_to_signature(pch_cmd)
-    # print('!!!!!pch_sign:{}.'.format(pch_sign))
 
     if os.path.isfile(head_file_pch) is not True:
         build_precompile_header(pch_cmd)
