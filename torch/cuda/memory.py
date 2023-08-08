@@ -739,8 +739,7 @@ def _record_memory_history_impl(
     max_entries: int = sys.maxsize,
     device: Union[Device, int] = None,
 ):
-    with torch.cuda.device(device):
-        _C._cuda_record_memory_history(enabled, context, stacks, max_entries)
+    _C._cuda_record_memory_history(enabled, context, stacks, max_entries)
 
 
 def _snapshot(device: Union[Device, int] = None):
