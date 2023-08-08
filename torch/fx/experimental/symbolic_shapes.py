@@ -3215,6 +3215,10 @@ class ShapeEnv:
             )
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
 
+        if torch._dynamo.config.inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY and isinstance(hint, bool):
+            if isinstance(expr, (sympy.Eq, sympy.Ne)):
+                expr = sympy.Not(expr)
+
         if isinstance(expr, (sympy.Eq, sympy.Ne)):
             self._maybe_guard_eq(expr, bool(concrete_val))
             # TODO: If we successfully eliminate a symbol via equality, it
