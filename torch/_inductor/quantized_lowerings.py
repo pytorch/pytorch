@@ -12,4 +12,4 @@ def register_quantized_ops():
         ]
     )
 
-    lowering.make_fallback(quantized.max_pool2d, lowering.require_channels_last)
+    lowering.make_fallback(quantized.max_pool2d)
