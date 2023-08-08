@@ -90,8 +90,7 @@ def mark_non_differentiable(ctx, output, output_differentiability):
 def construct_autograd_kernel(
         schema,
         output_differentiability,
-        custom_op,
-        op_overload,
+        forward_op,
         save_for_backward_fn,
         backward_fn):
 
@@ -103,7 +102,7 @@ def construct_autograd_kernel(
             ctx.set_materialize_grads(True)
             args = pytree.tree_unflatten(list(flat_args), spec)
             with torch._C._AutoDispatchBelowAutograd():
-                output = op_overload(*args)
+                output = forward_op(*args)
 
             # We use the info about args to give better error messages in backward
             args_info = namedtuple_args(
@@ -132,11 +131,11 @@ def construct_autograd_kernel(
 
             # Massage the grad_inputs_dict to a form acceptable by
             # autograd.Function.
-            validate_grad_inputs_dict(grad_inputs_dict, custom_op, args_info)
+            validate_grad_inputs_dict(grad_inputs_dict, forward_op, args_info)
             return grad_inputs_dict_to_flat_tuple(grad_inputs_dict, args_info)
 
         generated_cls = gen_autograd_function(
-            custom_op._opname + '_customop', forward, backward)
+            forward_op._opname + '_customop', forward, backward)
 
         flat_output = generated_cls.apply(*flat_args)
         assert out_spec is not None
