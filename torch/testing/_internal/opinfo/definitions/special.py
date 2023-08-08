@@ -690,56 +690,67 @@ python_ref_db: List[OpInfo] = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.bessel_j0",
         torch_opinfo_name="special.bessel_j0",
+        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.bessel_j1",
         torch_opinfo_name="special.bessel_j1",
+        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.entr",
         torch_opinfo_name="special.entr",
+        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.erfcx",
         torch_opinfo_name="special.erfcx",
+        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i0e",
         torch_opinfo_name="special.i0e",
+        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i1",
         torch_opinfo_name="special.i1",
+        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i1e",
         torch_opinfo_name="special.i1e",
+        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.log_ndtr",
         torch_opinfo_name="special.log_ndtr",
+        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.ndtr",
         torch_opinfo_name="special.ndtr",
+        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.ndtri",
         torch_opinfo_name="special.ndtri",
+        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.spherical_bessel_j0",
         torch_opinfo_name="special.spherical_bessel_j0",
+        supports_nvfuser=False,
         op_db=op_db,
     ),
     #
@@ -749,6 +760,7 @@ python_ref_db: List[OpInfo] = [
         "_refs.special.zeta",
         torch_opinfo_name="special.zeta",
         supports_one_python_scalar=True,
+        supports_nvfuser=False,
         op_db=op_db,
         skips=(
             # Reference reference_inputs nans and infs on cuda and nan, inf, 0., -inf for cpu
