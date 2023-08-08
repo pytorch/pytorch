@@ -674,6 +674,13 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   TORCH_INTERNAL_ASSERT(embed_dim == embed_dim_to_check);
   TORCH_INTERNAL_ASSERT(key.sizes() == value.sizes());
 
+  TORCH_CHECK(
+      embed_dim > 0 && num_heads > 0,
+      "embed_dim and num_heads must be greater than 0, got embed_dim=",
+      embed_dim,
+      " and num_heads=",
+      num_heads,
+      " instead");
   const auto head_dim = embed_dim / num_heads;
   TORCH_CHECK(
       head_dim * num_heads == embed_dim,

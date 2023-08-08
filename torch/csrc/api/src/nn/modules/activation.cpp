@@ -495,6 +495,13 @@ std::tuple<Tensor, Tensor> MultiheadAttentionImpl::forward(
 }
 
 void MultiheadAttentionImpl::reset() {
+  TORCH_CHECK(
+      options.embed_dim() > 0 && options.num_heads() > 0,
+      "embed_dim and num_heads must be greater than 0, got embed_dim=",
+      options.embed_dim(),
+      " and num_heads=",
+      options.num_heads(),
+      " instead");
   _qkv_same_embed_dim = options.kdim() == options.embed_dim() &&
       options.vdim() == options.embed_dim();
   head_dim = options.embed_dim() / options.num_heads();
