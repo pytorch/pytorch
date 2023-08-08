@@ -25,8 +25,6 @@ debug_assert = False
 
 debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", False)
 
-partitioner_aggressive_fusion = False
-
 static_weight_shapes = True
 
 # Applies CSE to the graph before partitioning
