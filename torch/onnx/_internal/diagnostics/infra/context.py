@@ -7,8 +7,6 @@ import contextlib
 import dataclasses
 import gzip
 
-import logging
-
 from typing import Callable, Generator, List, Literal, Mapping, Optional, TypeVar
 
 from torch.onnx._internal.diagnostics import infra
@@ -143,41 +141,6 @@ class Diagnostic:
         self.with_thread_flow_location(thread_flow_location)
         return thread_flow_location
 
-    def pretty_print(
-        self, verbose: bool = False, log_level: infra.Level = infra.Level.ERROR
-    ):
-        """Prints the diagnostics in a human-readable format.
-
-        Args:
-            verbose: If True, prints all information. E.g. stack frames, graphs, etc.
-                Otherwise, only prints compact information. E.g., rule name and display message.
-            log_level: The minimum level of diagnostics to print.
-        """
-        if self.level.value < log_level.value:
-            return
-        formatter.pretty_print_item_title(f"{self.level.name}: {self.rule.name}")
-        print(self.message)
-        print(self.additional_message)
-
-        if not verbose:
-            print("<Set verbose=True to see more details>\n")
-            return
-
-        formatter.pretty_print_title("Locations", fill_char="-")
-        for location in self.locations:
-            location.pretty_print()
-        for stack in self.stacks:
-            stack.pretty_print()
-        formatter.pretty_print_title("Thread Flow Locations", fill_char="-")
-        for thread_flow_location in self.thread_flow_locations:
-            thread_flow_location.pretty_print(verbose=verbose)
-        for graph in self.graphs:
-            graph.pretty_print(verbose=verbose)
-
-        print()
-
-        # TODO: print help url to rule at the end.
-
 
 class RuntimeErrorWithDiagnostic(RuntimeError):
     """Runtime error with enclosed diagnostic information."""
@@ -195,9 +158,6 @@ class DiagnosticContext:
         default_factory=infra.DiagnosticOptions
     )
     diagnostics: List[Diagnostic] = dataclasses.field(init=False, default_factory=list)
-    logger: logging.Logger = dataclasses.field(
-        init=True, default_factory=lambda: logging.getLogger().getChild("diagnostics")
-    )
     # TODO(bowbao): Implement this.
     # _invocation: infra.Invocation = dataclasses.field(init=False)
     _inflight_diagnostics: List[Diagnostic] = dataclasses.field(
@@ -258,8 +218,6 @@ class DiagnosticContext:
         if self.options.warnings_as_errors and diagnostic.level == infra.Level.WARNING:
             diagnostic.level = infra.Level.ERROR
         self.diagnostics.append(diagnostic)
-        self.logger.log(diagnostic.level, diagnostic.message)
-        self.logger.log(diagnostic.level, diagnostic.additional_message)
 
     def log_and_raise_if_error(self, diagnostic: Diagnostic) -> None:
         self.log(diagnostic)
@@ -311,50 +269,7 @@ class DiagnosticContext:
 
             return self._inflight_diagnostics[-1]
         else:
-            # TODO(bowbao): Improve efficiency with Mapping[Rule, List[Diagnostic]]
             for diagnostic in reversed(self._inflight_diagnostics):
                 if diagnostic.rule == rule:
                     return diagnostic
             raise AssertionError(f"No inflight diagnostic for rule {rule.name}")
-
-    def pretty_print(
-        self, verbose: Optional[bool] = None, log_level: Optional[infra.Level] = None
-    ) -> None:
-        """Prints the diagnostics in a human-readable format.
-
-        Args:
-            verbose: Whether to print the diagnostics in verbose mode. See Diagnostic.pretty_print.
-                If not specified, uses the value of 'self.options.log_verbose'.
-            log_level: The minimum level of diagnostics to print.
-                If not specified, uses the value of 'self.options.log_level'.
-        """
-        if verbose is None:
-            verbose = self.options.log_verbose
-        if log_level is None:
-            log_level = self.options.log_level
-
-        formatter.pretty_print_title(
-            f"Diagnostic Run {self.name} version {self.version}"
-        )
-        print(f"verbose: {verbose}, log level: {log_level}")
-        diagnostic_stats = {level: 0 for level in infra.Level}
-        for diagnostic in self.diagnostics:
-            diagnostic_stats[diagnostic.level] += 1
-        formatter.pretty_print_title(
-            " ".join(f"{diagnostic_stats[level]} {level.name}" for level in infra.Level)
-        )
-
-        for diagnostic in self.diagnostics:
-            diagnostic.pretty_print(verbose, log_level)
-
-        unprinted_diagnostic_stats = [
-            (level, count)
-            for level, count in diagnostic_stats.items()
-            if count > 0 and level.value < log_level.value
-        ]
-        if unprinted_diagnostic_stats:
-            print(
-                f"{' '.join(f'{count} {level.name}' for level, count in unprinted_diagnostic_stats)} "
-                "were not printed due to the log level."
-            )
-        print()
