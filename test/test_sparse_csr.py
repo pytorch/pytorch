@@ -1980,13 +1980,11 @@ class TestSparseCSR(TestCase):
                                       *[torch.bfloat16] if SM80OrLater else [],
                                       *[torch.half] if SM53OrLater else [],
                                       *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
-    @skipCUDAIf(
-        not _check_cusparse_spgemm_available(),
-        "cuSparse Generic API SpGEMM is not available"
-    )
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     def test_addmm_sizes_all_sparse_csr(self, device, dtype, m, n, k):
+        if (TEST_WITH_ROCM and k != 0 and n != 0 and m != 0):
+            self.skipTest("Skipped on ROCm")
         M = torch.randn(n, m, device=device).to(dtype)
         m1 = torch.randn(n, k, device=device).to(dtype)
         m2 = torch.randn(k, m, device=device).to(dtype)

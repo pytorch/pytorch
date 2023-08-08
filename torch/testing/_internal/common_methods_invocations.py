@@ -997,7 +997,7 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
     # Extra case to replicate off-by-one issue on CUDA
     cases = list(product(starts, ends, nsteps)) + [(0, 7, 50)]
     for start, end, nstep in cases:
-        if dtype == torch.uint8 and end < 0 or start < 0:
+        if dtype == torch.uint8 and (end < 0 or start < 0):
             continue
         yield SampleInput(start, args=(end, nstep), kwargs={"dtype": dtype, "device": device})
 
@@ -2986,20 +2986,25 @@ def error_inputs_bucketize(opinfo, device, **kwargs):
 def sample_inputs_searchsorted(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    # (unsorted tensor size, (input sizes,))
+    # (unsorted tensor size, (input sizes,), is_scalar)
     sizes = (
-        ((0,), ((0,),)),
-        ((M,), ((), (M,), (M, M))),
-        ((0, 0), ((0, 0),)),
-        ((M, M), ((M, M),)),
-        ((0, 0, 0), ((0, 0, 0),)),
-        ((M, M, M), ((M, M, M),)),
+        ((0,), ((0,),), False),
+        ((M,), ((), (M,), (M, M)), False),
+        ((0, 0), ((0, 0),), False),
+        ((M, M), ((M, M),), False),
+        ((0, 0, 0), ((0, 0, 0),), False),
+        ((M, M, M), ((M, M, M),), False),
+        ((L,), ((),), True),
     )
 
-    for (size, input_sizes), noncontiguous, out_int32, right in product(sizes, [False, True], [False, True], [False, True]):
+    for (size, input_sizes, is_scalar), noncontiguous, out_int32, right in product(
+        sizes, [False, True], [False, True], [False, True]
+    ):
         unsorted_tensor = make_arg(size, noncontiguous=noncontiguous)
         for input_size in input_sizes:
-            input_tensor = make_arg(input_size, noncontiguous=noncontiguous)
+            input = make_arg(input_size, noncontiguous=noncontiguous)
+            if is_scalar:
+                input = input.item()
             if np.prod(size) == 0:
                 boundary_tensor = unsorted_tensor
                 sorter = make_tensor(size, dtype=torch.int64, device=device, noncontiguous=noncontiguous)
@@ -3007,11 +3012,11 @@ def sample_inputs_searchsorted(op_info, device, dtype, requires_grad, **kwargs):
                 boundary_tensor, sorter = torch.sort(unsorted_tensor)
             side = "right" if right else "left"
 
-            yield SampleInput(boundary_tensor, input_tensor, out_int32=out_int32, right=right)
-            yield SampleInput(boundary_tensor, input_tensor, out_int32=out_int32, side=side)
+            yield SampleInput(boundary_tensor, input, out_int32=out_int32, right=right)
+            yield SampleInput(boundary_tensor, input, out_int32=out_int32, side=side)
 
-            yield SampleInput(unsorted_tensor, input_tensor, out_int32=out_int32, right=right, sorter=sorter)
-            yield SampleInput(unsorted_tensor, input_tensor, out_int32=out_int32, side=side, sorter=sorter)
+            yield SampleInput(unsorted_tensor, input, out_int32=out_int32, right=right, sorter=sorter)
+            yield SampleInput(unsorted_tensor, input, out_int32=out_int32, side=side, sorter=sorter)
 
 def sample_inputs_gradient(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
@@ -7590,6 +7595,10 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     for input, target, kwargs in gen_shape_kwargs():
         yield SampleInput(input, args=(target,), kwargs=kwargs)
 
+    target = torch.tensor([-1, 2], device=device, dtype=torch.long)
+    yield SampleInput(make_input(shape), args=(target,), kwargs={'ignore_index': -1})
+
+
 def sample_inputs_binary_cross_entropy_with_logits(
     op_info, device, dtype, requires_grad, **kwargs
 ):
@@ -8779,15 +8788,15 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
-        skips=(
-            # note(crcrpar): excluding cdouble from dtypes above might be better.
-            # Guard for `error: "In-place abs is not supported for complex tensors."`
-            DecorateInfo(
-                unittest.skip("_foreach_zero is not implemented"),
-                'TestForeach',
-                'test_outplace_forward_mode_AD',
-            ),
-        ),
+    ),
+
+    ForeachFuncInfo(
+        'sign',
+        dtypes=floating_types_and(torch.bool, torch.bfloat16, torch.half),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
     ),
 ]
 
