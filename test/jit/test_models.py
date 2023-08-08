@@ -407,12 +407,6 @@ class TestModels(JitTestCase):
     def test_snli(self):
         self._test_snli(self, device='cpu')
 
-    @skipIfNoFBGEMM
-    # Suppression: this exercises a deprecated API
-    @suppress_warnings
-    def test_snli_quantized(self):
-        self._test_snli(self, device='cpu', quantized=True)
-
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_snli_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
@@ -552,12 +546,6 @@ class TestModels(JitTestCase):
 
     def test_vae(self):
         self._test_vae(self, device='cpu')
-
-    @skipIfNoFBGEMM
-    # Suppression: this exercises a deprecated API
-    @suppress_warnings
-    def test_vae_quantized(self):
-        self._test_vae(self, device='cpu', quantized=True)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_vae_cuda(self):
