@@ -569,16 +569,16 @@ class TestProfilerTree(TestCase):
                               aten::t
                                 aten::transpose
                                   aten::as_strided
-                              aten::matmul
-                                aten::unsqueeze
+                              aten::reshape
+                                aten::view
+                              aten::addmm
+                                aten::expand
                                   aten::as_strided
-                                aten::mm
-                                  aten::resolve_conj
-                                  aten::resolve_conj
-                                  aten::resolve_conj
-                                aten::squeeze_
-                                  aten::as_strided_
-                              aten::add_
+                                aten::copy_
+                                aten::resolve_conj
+                                aten::resolve_conj
+                                aten::resolve_conj
+                              aten::view
                     nn.Module: ReLU_1
                       torch/nn/modules/module.py(...): _call_impl
                         <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
@@ -616,16 +616,16 @@ class TestProfilerTree(TestCase):
                               aten::t
                                 aten::transpose
                                   aten::as_strided
-                              aten::matmul
-                                aten::unsqueeze
+                              aten::reshape
+                                aten::view
+                              aten::addmm
+                                aten::expand
                                   aten::as_strided
-                                aten::mm
-                                  aten::resolve_conj
-                                  aten::resolve_conj
-                                  aten::resolve_conj
-                                aten::squeeze_
-                                  aten::as_strided_
-                              aten::add_
+                                aten::copy_
+                                aten::resolve_conj
+                                aten::resolve_conj
+                                aten::resolve_conj
+                              aten::view
                     nn.Module: ReLU_1
                       torch/nn/modules/module.py(...): _call_impl
                         <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
