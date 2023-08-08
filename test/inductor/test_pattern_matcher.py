@@ -9,6 +9,7 @@ from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
 from torch._inductor.utils import run_and_get_code
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -423,6 +424,37 @@ class TestPaternMatcher(TestCase):
         # clone would create a buf1
         self.assertIn("return (buf0, )", code[0])
         self.assertNotIn("async_compile.cpp", code[0])
+
+    def test_unfuse_bias_addmm(self):
+        args = [
+            torch.randn(20, device="cuda"),
+            torch.randn(10, 15, device="cuda"),
+            torch.randn(15, 20, device="cuda"),
+        ]
+
+        @torch.compile()
+        def fn(inp, a, b):
+            return torch.ops.aten.addmm(inp, a, b)
+
+        _, (code) = run_and_get_code(fn, args[0], args[1], args[2])
+        FileCheck().check("extern_kernels.addmm(").run(code[0])
+
+        @torch.compile()
+        def fn2(inp, a, b):
+            return torch.nn.functional.gelu(torch.ops.aten.addmm(inp, a, b))
+
+        _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
+        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+        @torch.compile()
+        def fn2(inp, a, b):
+            return torch.nn.functional.gelu(
+                torch.ops.aten.addmm(inp, a, b).unsqueeze(0)
+            )
+
+        # hit the view path
+        _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
+        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
 
 if __name__ == "__main__":

@@ -483,3 +483,35 @@ def view_to_reshape(gm):
     for nd in gm.graph.nodes:
         if nd.target == torch.ops.aten.view.default:
             nd.target = torch.ops.aten.reshape.default
+
+
+def is_pointwise_use(use):
+    if not use.op == "call_function":
+        return False
+
+    if use.target.is_view:
+        return all(is_pointwise_use(u) for u in use.users)
+
+    if use.target is aten.clone.default:
+        return True
+
+    return torch.Tag.pointwise in use.target.tags
+
+
+@register_graph_pattern(
+    CallFunction(aten.addmm, Arg(), Arg(), Arg()),
+    pass_dict=pass_patterns[2],
+)
+def unfuse_bias_add_to_pointwise(match: Match, inp, mat1, mat2):
+    if not inp.meta["val"].is_cuda:
+        return
+
+    output = match.output_node()
+    if not all(is_pointwise_use(use) for use in output.users):
+        return
+
+    def repl(inp, x1, x2):
+        return x1 @ x2 + inp
+
+    with V.fake_mode:
+        match.replace_by_example(repl, [inp, mat1, mat2])
