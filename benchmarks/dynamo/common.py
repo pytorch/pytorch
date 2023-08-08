@@ -239,7 +239,6 @@ CI_SKIP[CI("inductor", training=True)] = [
     *CI_SKIP[CI("inductor", training=False)],
     # TorchBench
     "Background_Matting",  # fp64_OOM
-    "dlrm",  # Fails on CI - unable to repro locally
     "hf_T5_base",  # accuracy
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
@@ -260,7 +259,6 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     "vision_maskrcnn",  # accuracy failure on boxes, after https://github.com/pytorch/pytorch/issues/101093
     # https://github.com/pytorch/pytorch/issues/103760
-    "dlrm",
     "hf_T5_generate",
     "hf_Bert",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
 ]
@@ -296,8 +294,6 @@ CI_SKIP_OPTIMIZER = {
     # TIMM
     "convmixer_768_32",  # accuracy
     "hrnet_w18",  # Stack issue in fx
-    # TorchBench
-    "dlrm",  # symbolic shapes error
     # HF
     "pnasnet5large",  # Stack issue in fx
     "MobileBertForMaskedLM",  # Stack issue in fx
