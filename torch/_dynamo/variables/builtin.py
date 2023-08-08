@@ -619,12 +619,11 @@ class BuiltinVariable(VariableTracker):
         if has_constant_handler:
             args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
-            result = self.as_python_constant()(
-                *[x.as_python_constant() for x in args],
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
             return variables.ConstantVariable(
-                result,
+                self.as_python_constant()(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                ),
                 **options,
             )
 
@@ -925,31 +924,6 @@ class BuiltinVariable(VariableTracker):
     def call_len(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
 
-    def call_format(self, tx, *args, **kwargs):
-        if kwargs:
-            unimplemented("Format with kwargs - NYI")
-        assert len(args) > 0
-        inp_string = args[0].value
-        real_args = []
-        for arg in args[1:]:
-            if isinstance(arg, ConstantVariable):
-                real_args.append(arg.value)
-            elif isinstance(arg, variables.TensorVariable):
-                real_args.append(arg.as_proxy().node.meta["example_value"])
-            elif isinstance(arg, SizeVariable):
-                for item in arg.unpack_var_sequence(tx):
-                    if free_symbols(item.value):
-                        unimplemented("Free symbols in formatted size - NYI")
-                real_args.append(
-                    torch.Size([item.value for item in arg.unpack_var_sequence(tx)])
-                )
-            else:
-                # lol
-                real_args.append(arg)
-                # unimplemented(f"Format with {type(arg)} - NYI")
-
-        return ConstantVariable(inp_string.format(*real_args))
-
     def call_getitem(self, tx, *args, **kwargs):
         if self.unspec_python_args(*args, **kwargs):
             args, kwargs = specialize_args_kwargs(tx, args, kwargs)
@@ -986,12 +960,22 @@ class BuiltinVariable(VariableTracker):
         return variables.ConstantVariable(val)
 
     def call_super(self, tx, a, b):
-        # source = (
-        #     None
-        #     if a.source is None or b.source is None
-        #     else SuperSource(type=a.source, base=b.source)
-        # )
-        source = None
+        source = (
+            None
+            if a.source is None or b.source is None
+            else SuperSource(type=a.source, base=b.source)
+        )
+        print("Super called", a, b)
+        print(
+            "Super inners",
+            a.value,
+            type(tx.output.nn_modules[b.module_key]),
+            a.value == type(tx.output.nn_modules[b.module_key]),
+        )
+        print(
+            "Made super source", source.name(), "from", a.source.name(), b.source.name()
+        )
+        # source = None
         return variables.SuperVariable(a, b, source=source)
 
     def call_next(self, tx, arg):

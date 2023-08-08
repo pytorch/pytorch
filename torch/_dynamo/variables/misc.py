@@ -598,6 +598,7 @@ class GetAttrVariable(VariableTracker):
             and len(args) > 0
             and issubclass(args[0].python_type(), self.obj.value)
         ):
+            print("Making super of", self.obj)
             return SuperVariable(self.obj, args[0], True).call_method(
                 tx, self.name, args[1:], kwargs
             )

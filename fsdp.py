@@ -59,7 +59,6 @@ def main(compiled):
 gpu_id = int(os.environ["LOCAL_RANK"])
 
 
-
 if __name__ == "__main__":
     import time
 
@@ -71,4 +70,3 @@ if __name__ == "__main__":
     time.sleep(2)
     compiled = main(compiled=True)
     print("COMPILED:", compiled)
-

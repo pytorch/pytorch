@@ -584,7 +584,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if isinstance(oldvar.mutable_local, side_effects.MutableSideEffects):
             newvar = self.output.side_effects.mutation(oldvar, newvar)
         else:
-            # assert isinstance(oldvar.mutable_local, variables.base.MutableLocal)
+            # assert isinstance(oldvar.mutable_local, variables.base.MutableLocal), f"Expected mutable local, got {oldvar.mutable_local} on {oldvar}"
             newvar = newvar.clone(mutable_local=oldvar.mutable_local)
         self.update_locals_and_stack(oldvar, newvar)
         return newvar
@@ -1207,7 +1207,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             ), f"Mutating module attribute {inst.argval} during export."
 
         try:
-            # print(f"TRYING SETATTR {val} {obj}")
             self.output.guards.update(
                 BuiltinVariable(setattr)
                 .call_function(self, [obj, ConstantVariable(inst.argval), val], {})
@@ -1215,7 +1214,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             )
             return
         except Unsupported as e:
-            # print(f"FAILING SETATTR {val} {obj} {e}")
             if not self.should_compile_partial_graph():
                 raise
             log.debug("STORE_ATTR triggered compile", exc_info=True)
