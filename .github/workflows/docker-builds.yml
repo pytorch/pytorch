@@ -35,6 +35,8 @@ jobs:
         include:
           - docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9
           - docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks
+          - docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc11
+          - docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc11-inductor-benchmarks
           - docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc9
           - docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
           - docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7-inductor-benchmarks
