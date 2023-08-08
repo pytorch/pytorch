@@ -106,12 +106,10 @@ void _record_memory_history(
     bool trace_alloc_record_context,
     bool record_cpp_context) {
   c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
-  if (record_cpp_context) {
+  if (enabled && record_cpp_context) {
     recorder = gather_with_cpp;
-    if (enabled) {
-      // warm up C++ stack gathering
-      unwind::unwind();
-    }
+    // warm up C++ stack unwinding
+    unwind::unwind();
   }
   auto when = c10::cuda::CUDACachingAllocator::RecordContext::NEVER;
   if (trace_alloc_record_context) {
@@ -124,32 +122,39 @@ void _record_memory_history(
       enabled, recorder, trace_alloc_max_entries, when);
 }
 
+static void checkOptionIn(
+    const std::string& option,
+    std::initializer_list<std::string> valid,
+    const char* error) {
+  TORCH_CHECK(
+      valid.end() != std::find(valid.begin(), valid.end(), option), error);
+}
+
 void _record_memory_history(
     c10::optional<std::string> enabled,
     c10::optional<std::string> context,
     std::string stacks,
     size_t max_entries) {
-  // if enabled not in ["state", "all", None]:
-  //       raise TypeError("expected state to be 'state', 'all', or None")
-  //   if context not in ["state", "all", None]:
-  //       raise TypeError("expected context to be 'state', 'all', or None")
-  //   if stacks not in ["python", "all"]:
-  //       raise TypeError("expected stacks to be 'python', or 'all'")
+  if (enabled) {
+    checkOptionIn(
+        *enabled,
+        {"state", "all"},
+        "expected state to be 'state', 'all', or None");
+  }
+  if (context) {
+    checkOptionIn(
+        *context,
+        {"state", "alloc", "all"},
+        "expected context to be 'state', 'alloc', 'all', or None");
+  }
+  checkOptionIn(
+      stacks, {"python", "all"}, "expected stacks to be 'python', or 'all'");
 
-  //   enabled_ = enabled is not None
-  //   record_context = context is not None
-  //   trace_alloc_max_entries = max_entries if enabled == "all" else 1
-  //   trace_alloc_record_context = context == "all"
-  //   record_context_cpp = stacks == "all"
-
-  bool e = bool(enabled);
   c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
-  if (stacks == "all") {
+  if (enabled && stacks == "all") {
     recorder = gather_with_cpp;
-    if (e) {
-      // warm up C++ stack gathering
-      unwind::unwind();
-    }
+    // warm up C++ stack unwinding
+    unwind::unwind();
   }
   max_entries = (enabled && *enabled == "all") ? max_entries : 1;
   auto when = c10::cuda::CUDACachingAllocator::RecordContext::NEVER;
@@ -164,7 +169,7 @@ void _record_memory_history(
   }
   at::globalContext().lazyInitCUDA();
   c10::cuda::CUDACachingAllocator::recordHistory(
-      e, recorder, max_entries, when);
+      enabled.has_value(), recorder, max_entries, when);
 }
 
 std::string _memory_snapshot_pickled() {
