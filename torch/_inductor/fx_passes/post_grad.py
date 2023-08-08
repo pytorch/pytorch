@@ -489,11 +489,8 @@ def is_pointwise_use(use):
     if not use.op == "call_function":
         return False
 
-    if use.target.is_view:
+    if use.target is operator.getitem or use.target.is_view:
         return all(is_pointwise_use(u) for u in use.users)
-
-    if use.target is aten.clone.default:
-        return True
 
     return torch.Tag.pointwise in use.target.tags
 
