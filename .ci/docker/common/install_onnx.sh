@@ -14,10 +14,10 @@ pip_install \
   networkx==2.0 \
   numpy==1.22.4
 
+# ONNXRuntime should be installed before installing
+# onnx-weekly. Otherwise, onnx-weekly could be
+# overwritten by onnx.
 pip_install \
-  # ONNXRuntime should be installed before installing
-  # onnx-weekly. Otherwise, onnx-weekly could be
-  # overwritten onnx.
   onnxruntime-training==1.15.1 \
   parameterized==0.8.1 \
   pytest-cov==4.0.0 \
