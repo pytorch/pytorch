@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import copy
 
-import onnx_test_common
 import torch
 import torch.onnx
 from torch import nn
 
 from torch.onnx._backend.core import make_aot_ort
 from torch.testing._internal import common_utils
+
+from .. import onnx_test_common
 
 
 class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
