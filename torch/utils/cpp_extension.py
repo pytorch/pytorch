@@ -256,7 +256,7 @@ def get_cxx_compiler():
         compiler = os.environ.get('CXX', 'cl')
     else:
         compiler = os.environ.get('CXX', 'c++')
-    return compiler  
+    return compiler
 
 def _is_binary_build() -> bool:
     return not BUILT_FROM_SOURCE_VERSION_PATTERN.match(torch.version.__version__)
@@ -1330,7 +1330,7 @@ def get_pybind11_abi_build_flags():
     # This was done in order to further narrow down the chances of compiler ABI incompatibility
     # that can cause a hard to debug segfaults.
     # For PyTorch extensions we want to relax those restrictions and pass compiler, stdlib and abi properties
-    # captured during PyTorch native library compilation in torch/csrc/Module.cpp 
+    # captured during PyTorch native library compilation in torch/csrc/Module.cpp
 
     abi_cflags = []
     for pname in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
@@ -1352,7 +1352,7 @@ def check_precompiler_headers(extra_cflags,
     PCH only works when built pch file(header.h.gch) and build target have the same build parameters. So, We need
     add a signture file to recoder PCH file parameters. If the build parameters(signture) changed, it should rebuild
     PCH file.
-    
+
     Note:
     1. Windows and MacOS have different PCH mechanism, We only support on Linux currently.
     2. It is only woeks on GCC/G++. Clang(Clang++) will not boost build and will not break build.
@@ -1365,14 +1365,14 @@ def check_precompiler_headers(extra_cflags,
     head_file_pch = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h.gch')
     head_file_signature = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h.sign')
 
-    def listToString(s): 
-        # initialize an empty string 
-        string = "" 
-        # traverse in the string 
+    def listToString(s):
+        # initialize an empty string
+        string = ""
+        # traverse in the string
         for element in s:
             string += (element + ' ')
-        # return string 
-        return string 
+        # return string
+        return string
 
     def format_precompiler_header_cmd(compiler, head_file, head_file_pch, common_cflags, extra_cflags, extra_include_paths):
         return re.sub(
@@ -1385,7 +1385,7 @@ def check_precompiler_headers(extra_cflags,
 
     def command_to_signature(cmd):
         signature = cmd.replace(' ', '_')
-        return signature   
+        return signature
 
     def check_pch_signature_in_file(file_path, signature):
         b_exist = os.path.isfile(file_path)
@@ -1420,7 +1420,7 @@ def check_precompiler_headers(extra_cflags,
             subprocess.check_output(pch_cmd, shell=True, stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
             from .._inductor.exc import CppCompileError
-            raise CppCompileError(pch_cmd, e.output) from e 
+            raise CppCompileError(pch_cmd, e.output) from e
 
     extra_cflags_str = listToString(extra_cflags)
     extra_include_paths_str = listToString(extra_include_paths)
@@ -1541,7 +1541,7 @@ def load_inline(name,
         cuda_sources = [cuda_sources]
 
     cpp_sources.insert(0, '#include <torch/extension.h>')
-    
+
     # Using PreCompile Header('torch/extension.h') to reduce compile time.
     check_precompiler_headers(extra_cflags,
                         extra_include_paths)
@@ -1698,9 +1698,9 @@ def _write_ninja_file_and_compile_objects(
         verbose: bool,
         with_cuda: Optional[bool]) -> None:
     verify_ninja_availability()
-    
+
     compiler = get_cxx_compiler()
-    
+
     get_compiler_abi_compatibility_and_version(compiler)
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
@@ -1741,9 +1741,9 @@ def _write_ninja_file_and_build_library(
         with_cuda: Optional[bool],
         is_standalone: bool = False) -> None:
     verify_ninja_availability()
-    
+
     compiler = get_cxx_compiler()
-    
+
     get_compiler_abi_compatibility_and_version(compiler)
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
@@ -2127,7 +2127,7 @@ def _write_ninja_file_to_build_library(path,
     if not is_standalone:
         common_cflags.append(f'-DTORCH_EXTENSION_NAME={name}')
         common_cflags.append('-DTORCH_API_INCLUDE_EXTENSION_H')
-    
+
     common_cflags += [f"{x}" for x in get_pybind11_abi_build_flags()]
 
     common_cflags += [f'-I{include}' for include in user_includes]
