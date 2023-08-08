@@ -165,18 +165,8 @@ function install_torchrec_and_fbgemm() {
   fbgemm_commit=$(get_pinned_commit fbgemm)
   pip_uninstall torchrec-nightly
   pip_uninstall fbgemm-gpu-nightly
-  function doit() {
-    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
-    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${commit}"
-  }
-  if [[ "$1" == "cuda" ]]; then
-    # TODO: This is better to be passed as a parameter from _linux-test workflow
-    # so that it can be consistent with what is set in build
-    TORCH_CUDA_ARCH_LIST="8.0;8.6" doit
-  else
-    doit
-  fi
-
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
 }
 
 function install_numpy_pytorch_interop() {
