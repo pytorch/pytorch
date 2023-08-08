@@ -48,7 +48,8 @@ is calculated as follows:
 - If the number of dimensions of :attr:`x` and :attr:`y` are not equal, prepend 1
   to the dimensions of the tensor with fewer dimensions to make them equal length.
 - Then, for each dimension size, the resulting dimension size is the max of the sizes of
-  :attr:`x` and :attr:`y` along that dimension.
+  :attr:`x` and :attr:`y` along that dimension, but when one tensor has dimension
+  size 0, the resulting dimension size is 0.
 
 For Example::
 
@@ -68,6 +69,11 @@ For Example::
     >>> y=torch.empty(3,1,1)
     >>> (x+y).size()
     RuntimeError: The size of tensor a (2) must match the size of tensor b (3) at non-singleton dimension 1
+
+    >>> x=torch.empty(1,0)
+    >>> y=torch.empty(1,1,1)
+    >>> (x+y).size()
+    torch.Size([1, 1, 0])
 
 In-place semantics
 ------------------
