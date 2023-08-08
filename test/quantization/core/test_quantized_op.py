@@ -4114,18 +4114,9 @@ class TestQuantizedLinear(TestCase):
                                         use_channelwise)
 
     @skipIfNoONEDNN
-    def test_qlinear_with_cpu_tensor_onednn(self):
-        '''
-        Prepack
-        - input: weight is an int8 tensor from CPU backend
-        - output: packed weight from MkldnnCPU backend
-        Linear
-        - inputs: int8 input from CPU backend, packed weight from MkldnnCPU backend
-        - output: int8 tensor from CPU backend
-        These ops are used for quantization PT2E with Inductor
-        '''
-        qlinear_prepack = torch.ops.quantized.linear_prepack_onednn
-        qlinear = torch.ops.quantized.linear_with_onednn_weight
+    def test_qlinear_pt2e(self):
+        qlinear_prepack = torch.ops.onednn.qlinear_prepack
+        qlinear = torch.ops.onednn.qlinear_pointwise
         qlinear_prepack_ref = torch.ops.quantized.linear_prepack
         post_op_to_qlinear_ref_dict = {
             'none': torch.ops.quantized.linear,
@@ -4137,15 +4128,18 @@ class TestQuantizedLinear(TestCase):
         use_bias_list = [True, False]
         supported_post_ops = ['none', 'relu']
         weight_quant_per_channel_list = [True, False]
+        fp32_output_list = [True, False]
         x_scale, x_zp = 1.2, 1
         w_scale, w_zp = 0.8, 0
         y_scale, y_zp = 4.7, 2
         post_op_args = []
         cases = itertools.product(
             in_channels_list, out_channels_list, use_bias_list,
-            supported_post_ops, weight_quant_per_channel_list)
+            supported_post_ops, weight_quant_per_channel_list, fp32_output_list)
         with override_quantized_engine('onednn'):
-            for ic, oc, use_bias, post_op, weight_quant_per_channel, in cases:
+            for ic, oc, use_bias, post_op, weight_quant_per_channel, fp32_out in cases:
+                if fp32_out:
+                    y_scale, y_zp = 1.0, 0
                 x = torch.rand(batch_size, ic) * 10
                 w = torch.rand(oc, ic) * 10
                 qx = torch.quantize_per_tensor(x, x_scale, x_zp, torch.quint8)
@@ -4167,7 +4161,7 @@ class TestQuantizedLinear(TestCase):
                 qw_cpu = qw.int_repr()
                 qw_packed = qlinear_prepack(qw_cpu, x.shape)
                 qy_cpu = qlinear(qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                                 b, post_op, post_op_args, y_scale, y_zp)
+                                 b, post_op, post_op_args, fp32_out, y_scale, y_zp)
 
                 # Reference
                 qw_packed_ref = qlinear_prepack_ref(qw, b)
@@ -4175,7 +4169,11 @@ class TestQuantizedLinear(TestCase):
                 qy_ref = qlinear_ref(qx, qw_packed_ref, y_scale, y_zp)
 
                 # Compare results
-                self.assertEqual(qy_cpu, qy_ref.int_repr(), "Results not equal!")
+                if fp32_out:
+                    qy_cpu = torch.quantize_per_tensor(qy_cpu, y_scale, y_zp, dtype=torch.quint8).dequantize()
+                    self.assertEqual(qy_cpu, qy_ref.dequantize(), "Results not equal!")
+                else:
+                    self.assertEqual(qy_cpu, qy_ref.int_repr(), "Results not equal!")
 
 @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
 class TestQuantizedEmbeddingOps(TestCase):

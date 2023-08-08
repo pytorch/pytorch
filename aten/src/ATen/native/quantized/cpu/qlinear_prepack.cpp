@@ -439,8 +439,8 @@ TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_prepack_fp16_legacy"), TORCH_FN(QLinearPackWeightFp16Legacy::run));
 }
 
-TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack_onednn"), TORCH_FN(QLinearPackWeightInt8Onednn::run));
+TORCH_LIBRARY_IMPL(onednn, CPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qlinear_prepack"), TORCH_FN(QLinearPackWeightInt8Onednn::run));
 }
 
 } // namespace
