@@ -160,25 +160,23 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         rho (float, optional): coefficient used for computing a running average
-            of squared gradients (default: 0.9)
+            of squared gradients (default: 0.9). The `rho` parameter controls the 
+            rate at which the squared gradients are averaged. A higher value of 
+            `rho` will result in a slower average, which can be helpful for preventing 
+            oscillations in the learning process.
         eps (float, optional): term added to the denominator to improve
-            numerical stability (default: 1e-6)
+            numerical stability (default: 1e-6). The `eps` parameter is a small value that is added to the denominator to
+            improve numerical stability.
         lr (float, optional): coefficient that scale delta before it is applied
-            to the parameters (default: 1.0)
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+            to the parameters (default: 1.0). The `lr` parameter controls the overall
+            learning rate of the optimizer. A higher value of `lr` will result in
+            faster learning, but it can also lead to overfitting.
+        weight_decay (float, optional): weight decay (L2 penalty) (default: 0).
+                      The `weight_decay` parameter applies a penalty to the weights
+                      of the model, which can help to prevent overfitting.
         {foreach}
         {maximize}
         {differentiable}
-        
-    The `rho` parameter controls the rate at which the squared gradients are
-    averaged. A higher value of `rho` will result in a slower average, which
-    can be helpful for preventing oscillations in the learning process. The
-    `eps` parameter is a small value that is added to the denominator to
-    improve numerical stability. The `lr` parameter controls the overall
-    learning rate of the optimizer. A higher value of `lr` will result in
-    faster learning, but it can also lead to overfitting. The `weight_decay`
-    parameter applies a penalty to the weights of the model, which can help
-    to prevent overfitting.
 
 
     .. _ADADELTA\: An Adaptive Learning Rate Method:
