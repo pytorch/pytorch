@@ -465,7 +465,7 @@ class _OnnxSchemaChecker:
     ```
 
     2. Optional attribute: attribute could be "unprovided". The difference from 2 is that dtype
-        would not be None.
+        would not be None. If a None attribute is provided, it will be treated as "unprovided".
 
         ```python
         @torch_op("aten::new_full")
@@ -731,6 +731,12 @@ class _OnnxSchemaChecker:
     ) -> Tuple[List[Any], Dict[str, Any]]:
         """Separate Python args and kwargs into ONNX inputs and attributes.
 
+        Extra_kwargs are ignored if their values are None. For example, if the
+        OpSchema has an attribute "rounding_mode" and the caller provides
+        "rounding_mode=None", the attribute "rounding_mode" will not be included
+        in the returned attributes when the OnnxFunction signature doesn't have
+        "rounding_mode" as an attribute.
+
         Args:
             param_schemas: The parameter schemas of an Op or a OnnxFunction.
             args: The Python positional arguments supplied by the caller.
@@ -793,7 +799,6 @@ class _OnnxSchemaChecker:
         for k, v in copy_kwargs.items():
             if k not in onnx_attributes and v is not None:
                 onnx_attributes[k] = v
-
         return onnx_inputs, onnx_attributes
 
 

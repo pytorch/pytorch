@@ -86,7 +86,7 @@ class TestDispatcher(common_utils.TestCase):
         # TODO: remove this once we have a better way to do this
         logger = logging.getLogger("TestDispatcher")
         self.diagnostic_context = infra.DiagnosticContext(
-            "torch.onnx.dynamo_export", torch.__version__, logger=logger
+            "torch.onnx.dynamo_export", torch.__version__
         )
         self.dispatcher = onnxfunction_dispatcher.OnnxFunctionDispatcher(
             self.registry, self.diagnostic_context
@@ -220,9 +220,6 @@ class TestDispatcher(common_utils.TestCase):
         )
 
         # Non-registered op
-        internal_opname_class_unsupported = registration.OpName.from_name_parts(
-            namespace="aten", op_name="made_up_node", overload=None
-        )
         unsupported_op_node = torch.fx.Node(
             graph=torch.fx.Graph(),
             name="aten::made_up_node",
@@ -246,7 +243,7 @@ class TestDispatcher(common_utils.TestCase):
                     name="aten::add.Tensor",
                     op="call_function",
                     target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
-                    args=(torch.tensor(3), torch.tensor(4)),
+                    args=(torch.tensor(3.0), torch.tensor(4.0)),
                     kwargs={},
                 ),
                 name="nearest_match",
@@ -257,7 +254,7 @@ class TestDispatcher(common_utils.TestCase):
                     name="aten::add.Tensor",
                     op="call_function",
                     target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
-                    args=(torch.tensor(3), torch.tensor(4)),
+                    args=(torch.tensor(3.0), torch.tensor(4.0)),
                     kwargs={"alpha": 1},
                 ),
                 name="perfect_match_with_kwargs",
@@ -310,7 +307,65 @@ class TestDispatcher(common_utils.TestCase):
                     name="aten::add.Tensor",
                     op="call_function",
                     target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
-                    args=(torch.tensor(3), torch.tensor(4)),
+                    args=(torch.tensor(3.0), torch.tensor(4.0)),
+                    kwargs={"attr": None},
+                ),
+                name="perfect_match_with_ignoring_none_attribute",
+            ),
+            common_utils.subtest(
+                torch.fx.Node(
+                    graph=torch.fx.Graph(),
+                    name="aten::add.Tensor",
+                    op="call_function",
+                    target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
+                    args=(torch.tensor(3.0), torch.tensor(4.0)),
+                    kwargs={"unrelated": None},
+                ),
+                name="perfect_match_with_ignoring_unrelated_none_attribute",
+            ),
+        ],
+    )
+    def test_find_the_perfect_or_nearest_match_onnxfunction_ignores_attribute_with_none(
+        self, node
+    ):
+        custom_domain = onnxscript.values.Opset(domain="custom", version=1)
+
+        @onnxscript.script(custom_domain)
+        def test_op_attribute(
+            x: TCustomFloat, y: TCustomFloat, attr: int
+        ) -> TCustomFloat:
+            return op.Add(x, y)
+
+        @onnxscript.script(custom_domain)
+        def test_op(x: TCustomFloat, y: TCustomFloat) -> TCustomFloat:
+            return op.Add(x, y)
+
+        op_full_name = "test::test_op"
+
+        function_overloads = [
+            registration.ONNXFunction(test_op_attribute, op_full_name=op_full_name),
+            registration.ONNXFunction(test_op, op_full_name=op_full_name),
+        ]
+
+        symbolic_fn = self.dispatcher._find_the_perfect_or_nearest_match_onnxfunction(
+            node,
+            function_overloads,
+            node.args,
+            node.kwargs,
+            self.diagnostic_context,
+        )
+        self.assertEqual(symbolic_fn, test_op)
+
+    @common_utils.parametrize(
+        "node",
+        [
+            common_utils.subtest(
+                torch.fx.Node(
+                    graph=torch.fx.Graph(),
+                    name="aten::add.Tensor",
+                    op="call_function",
+                    target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
+                    args=(torch.tensor(3.0), torch.tensor(4.0)),
                     kwargs={},
                 ),
                 name="nearest_match",
@@ -321,7 +376,7 @@ class TestDispatcher(common_utils.TestCase):
                     name="aten::add.Tensor",
                     op="call_function",
                     target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
-                    args=(torch.tensor(3), torch.tensor(4)),
+                    args=(torch.tensor(3.0), torch.tensor(4.0)),
                     kwargs={"alpha": 1},
                 ),
                 name="perfect_match_with_kwargs",
