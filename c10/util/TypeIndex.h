@@ -10,55 +10,6 @@
 namespace c10 {
 namespace util {
 
-// TODO Make it work for more compilers
-
-// Intel compiler works
-#if defined(__INTEL_COMPILER)
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
-#define C10_TYPENAME_CONSTEXPR
-
-// Clang works
-#elif defined(__clang__)
-
-// except for NVCC
-#if defined(__CUDACC__)
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
-#define C10_TYPENAME_CONSTEXPR
-#else
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
-#define C10_TYPENAME_CONSTEXPR constexpr
-#endif
-
-// Windows works
-#elif defined(_MSC_VER)
-
-// except for NVCC
-#if defined(__CUDACC__)
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
-#define C10_TYPENAME_CONSTEXPR
-#else
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
-#define C10_TYPENAME_CONSTEXPR constexpr
-#endif
-
-// GCC works
-#elif defined(__GNUC__)
-
-// except when gcc < 9
-#if (__GNUC__ < 9) || defined(__CUDACC__)
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
-#define C10_TYPENAME_CONSTEXPR
-#else
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
-#define C10_TYPENAME_CONSTEXPR constexpr
-#endif
-
-// some other compiler we don't know about
-#else
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
-#define C10_TYPENAME_CONSTEXPR constexpr
-#endif
-
 struct type_index final : IdWrapper<type_index, uint64_t> {
   constexpr explicit type_index(uint64_t checksum) : IdWrapper(checksum) {}
 
@@ -100,7 +51,7 @@ inline constexpr string_view extract(
 }
 
 template <typename T>
-inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() {
+inline constexpr c10::string_view fully_qualified_type_name_impl() {
 #if defined(_MSC_VER) && !defined(__clang__)
 #if defined(__NVCC__)
   return extract(
@@ -120,11 +71,7 @@ inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() 
       __PRETTY_FUNCTION__);
 #elif defined(__GNUC__)
   return extract(
-#if C10_TYPENAME_SUPPORTS_CONSTEXPR
       "constexpr c10::string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
-#else
-      "c10::string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
-#endif
       "; c10::string_view = c10::basic_string_view<char>]",
       __PRETTY_FUNCTION__);
 #endif
@@ -180,15 +127,9 @@ inline constexpr type_index get_type_index<std::string>() {
 #endif
 
 template <typename T>
-inline C10_TYPENAME_CONSTEXPR string_view
+inline constexpr string_view
 get_fully_qualified_type_name() noexcept {
-#if C10_TYPENAME_SUPPORTS_CONSTEXPR
-  constexpr
-#else
-  static
-#endif
-      string_view name = detail::fully_qualified_type_name_impl<T>();
-  return name;
+  return detail::fully_qualified_type_name_impl<T>();
 }
 } // namespace util
 } // namespace c10
