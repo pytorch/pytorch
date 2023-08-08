@@ -820,11 +820,14 @@ class TritonKernel(Kernel):
         )
 
     def initialize_range_tree(self, pid_cache):
-        names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
+        names = list(
+            reversed(["xindex", "yindex", "zindex"][: len(self.numels) - 1])
+        ) + ["rindex"]
         for i in range(len(self.numels)):
+            pid_idx = i if names[i][0] == "r" else "xyz".find(names[i][0])
             self.range_trees.append(
                 IterationRangesRoot(
-                    names[i], self.numels[i], names[i][0], i, self, pid_cache
+                    names[i], self.numels[i], names[i][0], pid_idx, self, pid_cache
                 )
             )
         for tree in self.range_trees:

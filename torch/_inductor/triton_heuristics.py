@@ -976,8 +976,17 @@ def foreach(meta, num_warps, filename=None):
     )
 
 
-def grid(xnumel, ynumel=None, znumel=None):
+def grid(*numels):
     """Helper function to compute triton grids"""
+
+    if len(numels) == 1:
+        xnumel, ynumel, znumel = numels[0], None, None
+    elif len(numels) == 2:
+        xnumel, ynumel, znumel = numels[1], numels[0], None
+    elif len(numels) == 3:
+        xnumel, ynumel, znumel = numels[2], numels[1], numels[0]
+    else:
+        raise AssertionError(f"invalid size for numels {len(numels)}")
 
     def get_grid_dim(numel, block):
         if numel is None:
