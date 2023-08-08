@@ -1343,6 +1343,20 @@ def get_glibcxx_abi_build_flags():
     glibcxx_abi_cflags = ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
     return glibcxx_abi_cflags
 
+def check_compiler_is_gcc(compiler):
+    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT).decode(*SUBPROCESS_DECODE_ARGS)
+    if IS_LINUX:
+        # Check for 'gcc' or 'g++' for sccache wrapper
+        pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
+        results = re.findall(pattern, version_string)
+        if len(results) != 1:
+            # Clang is return False
+            return False
+        compiler_path = os.path.realpath(results[0].strip())
+        # On RHEL/CentOS c++ is a gcc compiler wrapper
+        if os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string:
+            return True
+
 def check_and_build_precompiler_headers(extra_cflags,
                             extra_include_paths,
                             with_cuda=None,
@@ -1356,7 +1370,8 @@ def check_and_build_precompiler_headers(extra_cflags,
 
     Note:
     1. Windows and MacOS have different PCH mechanism, We only support on Linux currently.
-    2. It is only woeks on GCC/G++. Clang(Clang++) will not boost build and will not break build.
+    2. It is only works on GCC/G++.
+    3. Skip when build with CUDA.
     '''
     if not IS_LINUX:
         return
@@ -1365,6 +1380,11 @@ def check_and_build_precompiler_headers(extra_cflags,
         return
 
     compiler = get_cxx_compiler()
+
+    b_is_gcc = check_compiler_is_gcc(compiler)
+    if b_is_gcc is False:
+        return
+
     head_file = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h')
     head_file_pch = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h.gch')
     head_file_signature = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h.sign')
