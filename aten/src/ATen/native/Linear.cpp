@@ -87,7 +87,9 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   if (bias->defined() && !input.is_xla()) {
     // Also hit the fused path for contiguous 3D input, if not using xla
     // backend. Reshaping/flattening has some performance implications on xla.
-    if (input.is_contiguous()) {
+    if (input.is_contiguous() && input_dim == 3) {
+      return _flatten_nd_linear(input, weight, *bias);
+    } else if (input.is_contiguous() && input.layout() == c10::kStrided && weight.layout() == c10::kStrided) {
       return _flatten_nd_linear(input, weight, *bias);
     } else if (parseLinearFlatten3d() && input_dim == 3) {
       // If user forces flattening via env var
