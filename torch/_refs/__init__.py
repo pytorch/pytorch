@@ -1706,9 +1706,9 @@ def sub(
 
     out = prims.sub(a, b)
     device = None
-    if hasattr(a, 'fake_device'):
+    if hasattr(a, "fake_device"):
         device = a.fake_device
-    elif hasattr(b, 'fake_device'):
+    elif hasattr(b, "fake_device"):
         device = b.fake_device
 
     if is_noncontiguous_supported(device) is False:
