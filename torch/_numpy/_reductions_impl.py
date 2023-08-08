@@ -54,7 +54,7 @@ def _atleast_float(dtype, other_dtype):
     if dtype is None:
         dtype = other_dtype
     if not (dtype.is_floating_point or dtype.is_complex):
-        return _dtypes_impl.default_dtypes.float_dtype
+        return _dtypes_impl.default_dtypes().float_dtype
     return dtype
 
 
@@ -178,7 +178,7 @@ def sum(
     assert dtype is None or isinstance(dtype, torch.dtype)
 
     if dtype == torch.bool:
-        dtype = _dtypes_impl.default_dtypes.int_dtype
+        dtype = _dtypes_impl.default_dtypes().int_dtype
 
     axis_kw = {} if axis is None else {"dim": axis}
     return a.sum(dtype=dtype, **axis_kw)
@@ -197,7 +197,7 @@ def prod(
     axis = _util.allow_only_single_axis(axis)
 
     if dtype == torch.bool:
-        dtype = _dtypes_impl.default_dtypes.int_dtype
+        dtype = _dtypes_impl.default_dtypes().int_dtype
 
     axis_kw = {} if axis is None else {"dim": axis}
     return a.prod(dtype=dtype, **axis_kw)
@@ -280,7 +280,7 @@ def cumsum(
     out: Optional[OutArray] = None,
 ):
     if dtype == torch.bool:
-        dtype = _dtypes_impl.default_dtypes.int_dtype
+        dtype = _dtypes_impl.default_dtypes().int_dtype
     if dtype is None:
         dtype = a.dtype
 
@@ -297,7 +297,7 @@ def cumprod(
     out: Optional[OutArray] = None,
 ):
     if dtype == torch.bool:
-        dtype = _dtypes_impl.default_dtypes.int_dtype
+        dtype = _dtypes_impl.default_dtypes().int_dtype
     if dtype is None:
         dtype = a.dtype
 
@@ -382,7 +382,7 @@ def quantile(
         pass
 
     if not a.dtype.is_floating_point:
-        dtype = _dtypes_impl.default_dtypes.float_dtype
+        dtype = _dtypes_impl.default_dtypes().float_dtype
         a = a.to(dtype)
 
     # edge case: torch.quantile only supports float32 and float64

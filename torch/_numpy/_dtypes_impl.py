@@ -12,12 +12,26 @@ DefaultDTypes = namedtuple(
     "DefaultDTypes", ["float_dtype", "complex_dtype", "int_dtype"]
 )
 
-# a global state: NumPy defaults
-default_dtypes_numpy = DefaultDTypes(
-    float_dtype=torch.float64, complex_dtype=torch.complex128, int_dtype=torch.int64
-)
+# a global state
+# We set it the first time we call default_dtypes() to avoid importing
+# torch._dynamo.config and create a circular reference
+_default_dtypes = None
 
-default_dtypes = default_dtypes_numpy
+
+def default_dtypes():
+    global _default_dtypes
+    if _default_dtypes is None:
+        import torch._dynamo.config as config
+
+        _default_dtypes = DefaultDTypes(
+            float_dtype=getattr(torch, config.numpy_default_float),
+            complex_dtype=getattr(torch, config.numpy_default_complex),
+            int_dtype=getattr(torch, config.numpy_default_int),
+        )
+        assert isinstance(_default_dtypes.float_dtype, torch.dtype)
+        assert isinstance(_default_dtypes.complex_dtype, torch.dtype)
+        assert isinstance(_default_dtypes.int_dtype, torch.dtype)
+    return _default_dtypes
 
 
 def get_default_dtype_for(dtype):
@@ -25,11 +39,11 @@ def get_default_dtype_for(dtype):
     if dtype == torch.bool:
         return dtype
     if dtype.is_complex:
-        return default_dtypes.complex_dtype
+        return default_dtypes().complex_dtype
     if dtype.is_floating_point:
-        return default_dtypes.float_dtype
+        return default_dtypes().float_dtype
     # else, it must be (some) integer
-    return default_dtypes.int_dtype
+    return default_dtypes().int_dtype
 
 
 from . import _casting_dicts as _cd

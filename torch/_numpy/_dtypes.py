@@ -237,7 +237,7 @@ def sctype_from_torch_dtype(torch_dtype):
 
 def dtype(arg):
     if arg is None:
-        arg = _dtypes_impl.default_dtypes.float_dtype
+        arg = _dtypes_impl.default_dtypes().float_dtype
     return DType(arg)
 
 
@@ -363,7 +363,7 @@ def set_default_dtype(fp_dtype="numpy", int_dtype="numpy"):
         int_dtype = dtype(int_dtype).torch_dtype
 
     if fp_dtype == "numpy":
-        float_dtype = _dtypes_impl.default_dtypes_numpy.float_dtype
+        float_dtype = torch.float64
     elif fp_dtype == "pytorch":
         float_dtype = torch.float32
     else:
@@ -376,7 +376,7 @@ def set_default_dtype(fp_dtype="numpy", int_dtype="numpy"):
     }[float_dtype]
 
     if int_dtype in ["numpy", "pytorch"]:
-        int_dtype = _dtypes_impl.default_dtypes_numpy.int_dtype
+        int_dtype = torch.int64
     else:
         int_dtype = int_dtype
 
@@ -386,7 +386,7 @@ def set_default_dtype(fp_dtype="numpy", int_dtype="numpy"):
 
     # set the new global state and return the old state
     old_defaults = _dtypes_impl.default_dtypes
-    _dtypes_impl.default_dtypes = new_defaults
+    _dtypes_impl._default_dtypes = new_defaults
     return old_defaults
 
 

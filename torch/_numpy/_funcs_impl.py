@@ -298,7 +298,7 @@ def linspace(
     if axis != 0 or retstep or not endpoint:
         raise NotImplementedError
     if dtype is None:
-        dtype = _dtypes_impl.default_dtypes.float_dtype
+        dtype = _dtypes_impl.default_dtypes().float_dtype
     # XXX: raises TypeError if start or stop are not scalars
     return torch.linspace(start, stop, num, dtype=dtype)
 
@@ -358,7 +358,7 @@ def arange(
 
     # the dtype of the result
     if dtype is None:
-        dtype = _dtypes_impl.default_dtypes.int_dtype
+        dtype = _dtypes_impl.default_dtypes().int_dtype
     # XXX: default values do not get normalized
     start, stop, step = (_util._coerce_to_tensor(x) for x in (start, stop, step))
 
@@ -388,7 +388,7 @@ def empty(
     like: NotImplementedType = None,
 ):
     if dtype is None:
-        dtype = _dtypes_impl.default_dtypes.float_dtype
+        dtype = _dtypes_impl.default_dtypes().float_dtype
     return torch.empty(shape, dtype=dtype)
 
 
@@ -449,7 +449,7 @@ def ones(
     like: NotImplementedType = None,
 ):
     if dtype is None:
-        dtype = _dtypes_impl.default_dtypes.float_dtype
+        dtype = _dtypes_impl.default_dtypes().float_dtype
     return torch.ones(shape, dtype=dtype)
 
 
@@ -474,7 +474,7 @@ def zeros(
     like: NotImplementedType = None,
 ):
     if dtype is None:
-        dtype = _dtypes_impl.default_dtypes.float_dtype
+        dtype = _dtypes_impl.default_dtypes().float_dtype
     return torch.zeros(shape, dtype=dtype)
 
 
@@ -618,7 +618,7 @@ def bincount(x: ArrayLike, /, weights: Optional[ArrayLike] = None, minlength=0):
         # edge case allowed by numpy
         x = x.new_empty(0, dtype=int)
 
-    int_dtype = _dtypes_impl.default_dtypes.int_dtype
+    int_dtype = _dtypes_impl.default_dtypes().int_dtype
     (x,) = _util.typecast_tensors((x,), int_dtype, casting="safe")
 
     return torch.bincount(x, weights, minlength)
@@ -1122,7 +1122,7 @@ def eye(
     like: NotImplementedType = None,
 ):
     if dtype is None:
-        dtype = _dtypes_impl.default_dtypes.float_dtype
+        dtype = _dtypes_impl.default_dtypes().float_dtype
     if M is None:
         M = N
     z = torch.zeros(N, M, dtype=dtype)
@@ -1867,27 +1867,27 @@ def isscalar(a):
 
 
 def hamming(M):
-    dtype = _dtypes_impl.default_dtypes.float_dtype
+    dtype = _dtypes_impl.default_dtypes().float_dtype
     return torch.hamming_window(M, periodic=False, dtype=dtype)
 
 
 def hanning(M):
-    dtype = _dtypes_impl.default_dtypes.float_dtype
+    dtype = _dtypes_impl.default_dtypes().float_dtype
     return torch.hann_window(M, periodic=False, dtype=dtype)
 
 
 def kaiser(M, beta):
-    dtype = _dtypes_impl.default_dtypes.float_dtype
+    dtype = _dtypes_impl.default_dtypes().float_dtype
     return torch.kaiser_window(M, beta=beta, periodic=False, dtype=dtype)
 
 
 def blackman(M):
-    dtype = _dtypes_impl.default_dtypes.float_dtype
+    dtype = _dtypes_impl.default_dtypes().float_dtype
     return torch.blackman_window(M, periodic=False, dtype=dtype)
 
 
 def bartlett(M):
-    dtype = _dtypes_impl.default_dtypes.float_dtype
+    dtype = _dtypes_impl.default_dtypes().float_dtype
     return torch.bartlett_window(M, periodic=False, dtype=dtype)
 
 

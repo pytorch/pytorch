@@ -16,7 +16,6 @@ import torch
 from . import _dtypes_impl, _util
 from ._normalizations import array_or_scalar, ArrayLike, normalizer
 
-_default_dtype = _dtypes_impl.default_dtypes.float_dtype
 
 __all__ = [
     "seed",
@@ -63,7 +62,8 @@ def seed(seed=None):
 def random_sample(size=None):
     if size is None:
         size = ()
-    values = torch.empty(size, dtype=_default_dtype).uniform_()
+    dtype = _dtypes_impl.default_dtypes().float_dtype
+    values = torch.empty(size, dtype=dtype).uniform_()
     return array_or_scalar(values, return_scalar=size is None)
 
 
@@ -80,13 +80,15 @@ random = random_sample
 def uniform(low=0.0, high=1.0, size=None):
     if size is None:
         size = ()
-    values = torch.empty(size, dtype=_default_dtype).uniform_(low, high)
+    dtype = _dtypes_impl.default_dtypes().float_dtype
+    values = torch.empty(size, dtype=dtype).uniform_(low, high)
     return array_or_scalar(values, return_scalar=size is None)
 
 
 @deco_stream
 def randn(*size):
-    values = torch.randn(size, dtype=_default_dtype)
+    dtype = _dtypes_impl.default_dtypes().float_dtype
+    values = torch.randn(size, dtype=dtype)
     return array_or_scalar(values, return_scalar=size is None)
 
 
@@ -94,7 +96,8 @@ def randn(*size):
 def normal(loc=0.0, scale=1.0, size=None):
     if size is None:
         size = ()
-    values = torch.empty(size, dtype=_default_dtype).normal_(loc, scale)
+    dtype = _dtypes_impl.default_dtypes().float_dtype
+    values = torch.empty(size, dtype=dtype).normal_(loc, scale)
     return array_or_scalar(values, return_scalar=size is None)
 
 

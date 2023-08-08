@@ -16,14 +16,14 @@ class LinAlgError(Exception):
 
 def _atleast_float_1(a):
     if not (a.dtype.is_floating_point or a.dtype.is_complex):
-        a = a.to(_dtypes_impl.default_dtypes.float_dtype)
+        a = a.to(_dtypes_impl.default_dtypes().float_dtype)
     return a
 
 
 def _atleast_float_2(a, b):
     dtyp = _dtypes_impl.result_type_impl(a, b)
     if not (dtyp.is_floating_point or dtyp.is_complex):
-        dtyp = _dtypes_impl.default_dtypes.float_dtype
+        dtyp = _dtypes_impl.default_dtypes().float_dtype
 
     a = _util.cast_if_needed(a, dtyp)
     b = _util.cast_if_needed(b, dtyp)
