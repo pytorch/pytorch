@@ -299,7 +299,7 @@ class Optimizer:
         self._optimizer_state_dict_pre_hooks = OrderedDict()
         self._optimizer_state_dict_post_hooks = OrderedDict()
         self._optimizer_load_state_dict_pre_hooks = OrderedDict()
-        self.load_state_dict_cast_handle = self.register_load_state_dict_pre_hook(
+        self._load_state_dict_cast_handle = self.register_load_state_dict_pre_hook(
             Optimizer._cast_state_to_match_params_hook
         )
         self._optimizer_load_state_dict_post_hooks = OrderedDict()
@@ -328,6 +328,9 @@ class Optimizer:
         # https://github.com/pytorch/pytorch/issues/72948
         self._warned_capturable_if_run_uncaptured = True
 
+    def get_load_state_dict_cast_hook_handle(self) -> RemovableHandle:
+        return self._load_state_dict_cast_handle
+
     def __getstate__(self) -> Dict[str, Any]:
         return {
             'defaults': self.defaults,
@@ -347,6 +350,9 @@ class Optimizer:
             self._optimizer_state_dict_post_hooks = OrderedDict()
         if '_optimizer_load_state_dict_pre_hooks' not in self.__dict__:
             self._optimizer_load_state_dict_pre_hooks = OrderedDict()
+            self._load_state_dict_cast_handle = self.register_load_state_dict_pre_hook(
+                Optimizer._cast_state_to_match_params_hook
+            )
         if '_optimizer_load_state_dict_post_hooks' not in self.__dict__:
             self._optimizer_load_state_dict_post_hooks = OrderedDict()
         self._patch_step_function()  # To support multiprocessing pickle/unpickle
