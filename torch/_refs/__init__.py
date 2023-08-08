@@ -442,7 +442,7 @@ def _make_elementwise_unary_reference(
             out = prim(a)
 
             device = None
-            if hasattr(a, 'fake_device'):
+            if hasattr(a, "fake_device"):
                 device = a.fake_device
 
             if is_noncontiguous_supported(device) is False:
@@ -973,12 +973,12 @@ def _make_elementwise_binary_reference(
             a, b = _maybe_broadcast(a, b)
 
             device = None
-            if hasattr(a, 'fake_device'):
+            if hasattr(a, "fake_device"):
                 device = a.fake_device
-            elif hasattr(b, 'fake_device'):
+            elif hasattr(b, "fake_device"):
                 device = b.fake_device
 
-            out = prim(a,b)
+            out = prim(a, b)
             if is_noncontiguous_supported(device) is False:
                 out = out.new_empty(out.shape)
 
@@ -1704,7 +1704,16 @@ def sub(
             # which will mess with type promotion.
             b = b * alpha
 
-    return prims.sub(a, b)
+    out = prims.sub(a, b)
+    device = None
+    if hasattr(a, 'fake_device'):
+        device = a.fake_device
+    elif hasattr(b, 'fake_device'):
+        device = b.fake_device
+
+    if is_noncontiguous_supported(device) is False:
+        out = out.new_empty(out.shape)
+    return out
 
 
 # TODO: add docstring
@@ -4576,7 +4585,7 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
 
     device = None
     for t in inputs:
-        if hasattr(t, 'fake_device'):
+        if hasattr(t, "fake_device"):
             device = t.fake_device
             break
 
