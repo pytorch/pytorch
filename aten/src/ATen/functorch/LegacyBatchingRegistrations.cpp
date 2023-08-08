@@ -734,5 +734,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("new_empty_strided", new_empty_strided_batching_rule);
 
 }
+
+TORCH_LIBRARY_IMPL(_, BatchedNestedTensor, m) {
+  m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedNestedTensorForLoopFallback>());
+}
 } // namespace functorch
 } // namespace at

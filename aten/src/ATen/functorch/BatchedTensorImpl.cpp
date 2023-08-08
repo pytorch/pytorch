@@ -15,7 +15,11 @@ namespace functorch {
 
 BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64_t bdim, int64_t level)
   : TensorImpl(
-      key_set.add(DispatchKey::FuncTorchBatched),
+      key_set.add(
+          value.is_nested() ? DispatchKeySet({
+              DispatchKey::NestedTensor,
+              DispatchKey::BatchedNestedTensor
+          }) : DispatchKeySet({DispatchKey::FuncTorchBatched})),
       value.dtype(),
       value.device()
     )
@@ -25,20 +29,24 @@ BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
   set_storage_access_should_throw();
-  set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
+  set_custom_sizes_strides(
+      value_.is_nested() ? SizesStridesPolicy::CustomSizes : SizesStridesPolicy::CustomStrides);
   checkInvariants();
   refreshTensorMetadata();
 }
 
 void BatchedTensorImpl::refreshTensorMetadata() {
   const auto public_dims = value_.dim() - 1;
-  const auto value_sizes = value_.sizes();
-  const auto value_strides = value_.strides();
   sizes_and_strides_.resize(public_dims);
-  for (const auto dim : c10::irange(0, public_dims)) {
-    auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
-    sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);
-    sizes_and_strides_.stride_at_unchecked(dim) = value_strides.at(actual_dim);
+
+  if (!value_.is_nested()) {
+    const auto value_sizes = value_.sizes();
+    const auto value_strides = value_.strides();
+    for (const auto dim : c10::irange(0, public_dims)) {
+      auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
+      sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);
+      sizes_and_strides_.stride_at_unchecked(dim) = value_strides.at(actual_dim);
+    }
   }
   storage_offset_= value_.storage_offset();
   refresh_numel();
