@@ -9380,8 +9380,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: lerp_Tensor
-    MPS: lerp_Tensor_mps
+    CPU, CUDA, MPS: lerp_Tensor
   tags: pointwise
 
 - func: lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor

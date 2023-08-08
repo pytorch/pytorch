@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/Lerp.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -7,7 +8,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/add.h>
 #include <ATen/ops/lerp_native.h>
 #endif
 
@@ -84,11 +84,13 @@ static id<MTLComputePipelineState> lerpTensorPipelineState(id<MTLDevice> device,
   return pso;
 }
 
-void lerp_tensor_mps(const Tensor& self, const Tensor& end, const Tensor& weight, const Tensor& out) {
-  TORCH_CHECK(self.dtype() != at::kDouble, "float64 is not supported on MPS");
-  TORCH_CHECK(end.dtype() != at::kDouble, "float64 is not supported on MPS");
-  TORCH_CHECK(weight.dtype() != at::kDouble, "float64 is not supported on MPS");
-  TORCH_CHECK(out.is_mps(), "Output tensor is not MPS");
+void lerp_tensor_mps(TensorIteratorBase& iter) {
+  TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
+
+  Tensor self = iter.input(0);
+  Tensor end = iter.input(1);
+  Tensor weight = iter.input(2);
+  Tensor out = iter.output();
 
   id<MTLBuffer> selfBuffer = getMTLBufferStorage(self);
   id<MTLBuffer> endBuffer = getMTLBufferStorage(end);
@@ -99,6 +101,7 @@ void lerp_tensor_mps(const Tensor& self, const Tensor& end, const Tensor& weight
   MPSStream* mpsStream = getCurrentMPSStream();
 
   const uint32_t numThreads = self.numel();
+
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
@@ -127,8 +130,9 @@ void lerp_tensor_mps(const Tensor& self, const Tensor& end, const Tensor& weight
 
 } // namespace mps
 
-TORCH_IMPL_FUNC(lerp_Tensor_mps)(const Tensor& self, const Tensor& end, const Tensor& weight, const Tensor& out) {
-  mps::lerp_tensor_mps(self, end, weight, out);
+void lerp_tensor_mps_kernel(TensorIteratorBase& iter) {
+  mps::lerp_tensor_mps(iter);
 }
 
+REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_tensor_mps_kernel);
 } // namespace at::native
