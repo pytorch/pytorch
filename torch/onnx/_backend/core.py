@@ -44,8 +44,6 @@ try:
 
     _SUPPORT_ONNXRT = True
 except ImportError:
-    _TORCH_DTYPE_TO_NUMPY_DTYPE = {}
-    _TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE = {}
     _SUPPORT_ONNXRT = False
 
 
@@ -701,57 +699,42 @@ class OrtBackend:
 
         self.execution_count += 1
 
-        if isinstance(prim_outputs, tuple):
-            assert all(isinstance(elem, torch.Tensor) for elem in prim_outputs)
-            # ORT always returns a tuple of outputs. If the original is a tuple, just returning
-            # ORT output is ok.
-            _nvtx_range_push("run_onnx_session_with_ortvaluevector")
-            onnx_outputs = _run_onnx_session_with_ortvaluevector(
-                onnx_session,
-                input_names,
-                args,
-                input_devices,
-                output_names,
-                prim_outputs,
-                output_devices,
-                self.preallocate_output,
+        # ORT always returns a tuple of outputs. If the original output is a tensor,
+        # ORT output's first element must be extracted and returned. Otherwise, type
+        # mismatch may happen in downstream computation.
+        is_single_tensor_output = isinstance(prim_outputs, torch.Tensor)
+        normalized_prim_outputs = (
+            (prim_outputs,) if is_single_tensor_output else prim_outputs
+        )
+        assert isinstance(normalized_prim_outputs, tuple)
+        assert all(isinstance(elem, torch.Tensor) for elem in normalized_prim_outputs)
+
+        _nvtx_range_push("run_onnx_session_with_ortvaluevector")
+        onnx_outputs = _run_onnx_session_with_ortvaluevector(
+            onnx_session,
+            input_names,
+            args,
+            input_devices,
+            output_names,
+            normalized_prim_outputs,
+            output_devices,
+            self.preallocate_output,
+        )
+        _nvtx_range_pop()
+        if self._assert_allclose_to_baseline:
+            # Compute baseline.
+            baseline_outputs = torch._prims.executor.execute(
+                graph_module, *args, executor="aten"
             )
-            _nvtx_range_pop()
-            if self._assert_allclose_to_baseline:
-                # Compute baseline.
-                baseline_outputs = torch._prims.executor.execute(
-                    graph_module, *args, executor="aten"
-                )
-                # Ensure every output tensor is close to the corresponding baseline.
-                for onnx_output, baseline_output in zip(onnx_outputs, baseline_outputs):
-                    torch.testing.assert_close(onnx_output, baseline_output)
-            return onnx_outputs
-        else:
-            assert isinstance(prim_outputs, torch.Tensor)
-            # ORT always returns a tuple of outputs. If the original output is a tensor,
-            # ORT output's first element must be extracted and returned. Otherwise, type
-            # mismatch may happen in downstream computation.
-            _nvtx_range_push("run_onnx_session_with_ortvaluevector")
-            onnx_outputs = _run_onnx_session_with_ortvaluevector(
-                onnx_session,
-                input_names,
-                args,
-                input_devices,
-                output_names,
-                (prim_outputs,),
-                output_devices,
-                self.preallocate_output,
+            normalized_baseline_ouptuts = (
+                (baseline_outputs,) if is_single_tensor_output else baseline_outputs
             )
-            _nvtx_range_pop()
-            assert len(onnx_outputs) == 1
-            if self._assert_allclose_to_baseline:
-                # Compute baseline.
-                baseline_outputs = torch._prims.executor.execute(
-                    graph_module, *args, executor="aten"
-                )
-                # Ensure output tensor is close to the corresponding baseline.
-                torch.testing.assert_close(onnx_outputs[0], baseline_outputs)
-            return onnx_outputs[0]
+            # Ensure every output tensor is close to the corresponding baseline.
+            for onnx_output, baseline_output in zip(
+                onnx_outputs, normalized_baseline_ouptuts
+            ):
+                torch.testing.assert_close(onnx_output, baseline_output)
+        return onnx_outputs[0] if is_single_tensor_output else onnx_outputs
 
     def compile(self, graph_module: torch.fx.GraphModule, args) -> torch.fx.GraphModule:
         # FX graph based partitioning based on ONNX supported ops.
