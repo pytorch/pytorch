@@ -121,7 +121,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, cudaStreamCaptureModeGlobal));
 
-  // Stashes the current capture's uuid.
   cudaStreamCaptureStatus status;
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, nullptr));
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
