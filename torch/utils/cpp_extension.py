@@ -12,6 +12,8 @@ import sys
 import sysconfig
 import warnings
 import collections
+from pathlib import Path
+import errno
 
 import torch
 import torch._appdirs
@@ -249,6 +251,12 @@ PLAT_TO_VCVARS = {
     'win-amd64' : 'x86_amd64',
 }
 
+def get_cxx_compiler():
+    if IS_WINDOWS:
+        compiler = os.environ.get('CXX', 'cl')
+    else:
+        compiler = os.environ.get('CXX', 'c++')
+    return compiler  
 
 def _is_binary_build() -> bool:
     return not BUILT_FROM_SOURCE_VERSION_PATTERN.match(torch.version.__version__)
@@ -884,10 +892,8 @@ class BuildExtension(build_ext):
         # On some platforms, like Windows, compiler_cxx is not available.
         if hasattr(self.compiler, 'compiler_cxx'):
             compiler = self.compiler.compiler_cxx[0]
-        elif IS_WINDOWS:
-            compiler = os.environ.get('CXX', 'cl')
         else:
-            compiler = os.environ.get('CXX', 'c++')
+            compiler = get_cxx_compiler()
         _, version = get_compiler_abi_compatibility_and_version(compiler)
         # Warn user if VC env is activated but `DISTUILS_USE_SDK` is not set.
         if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' in os.environ and 'DISTUTILS_USE_SDK' not in os.environ:
@@ -1313,6 +1319,124 @@ def load(name,
         is_standalone,
         keep_intermediates=keep_intermediates)
 
+def get_pybind11_abi_build_flags():
+    # Note [Pybind11 ABI constants]
+    #
+    # Pybind11 before 2.4 used to build an ABI strings using the following pattern:
+    # f"__pybind11_internals_v{PYBIND11_INTERNALS_VERSION}{PYBIND11_INTERNALS_KIND}{PYBIND11_BUILD_TYPE}__"
+    # Since 2.4 compier type, stdlib and build abi parameters are also encoded like this:
+    # f"__pybind11_internals_v{PYBIND11_INTERNALS_VERSION}{PYBIND11_INTERNALS_KIND}{PYBIND11_COMPILER_TYPE}{PYBIND11_STDLIB}{PYBIND11_BUILD_ABI}{PYBIND11_BUILD_TYPE}__"
+    #
+    # This was done in order to further narrow down the chances of compiler ABI incompatibility
+    # that can cause a hard to debug segfaults.
+    # For PyTorch extensions we want to relax those restrictions and pass compiler, stdlib and abi properties
+    # captured during PyTorch native library compilation in torch/csrc/Module.cpp 
+
+    abi_cflags = []
+    for pname in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
+        pval = getattr(torch._C, f"_PYBIND11_{pname}")
+        if pval is not None and not IS_WINDOWS:
+            abi_cflags.append(f'-DPYBIND11_{pname}=\\"{pval}\\"')
+    return abi_cflags
+
+def get_glibcxx_abi_build_flags():
+    glibcxx_abi_cflags = ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
+    return glibcxx_abi_cflags
+
+def check_precompiler_headers(extra_cflags,
+                            extra_include_paths,
+                            is_standalone=False):
+    if not IS_LINUX:
+        return
+
+    compiler = get_cxx_compiler()
+    head_file = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h')
+    head_file_pch = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h.gch')
+    head_file_signature = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h.sign')
+
+    def listToString(s): 
+        # initialize an empty string 
+        string = "" 
+        # traverse in the string 
+        for element in s:
+            string += (element + ' ')
+        # return string 
+        return string 
+
+    def format_precompiler_header_cmd(compiler, head_file, head_file_pch, common_cflags, extra_cflags, extra_include_paths):
+        return re.sub(
+            r"[ \n]+",
+            " ",
+            f"""
+                {compiler} -x c++-header {head_file} -o {head_file_pch} {extra_include_paths} {extra_cflags} {common_cflags}
+            """,
+        ).strip()
+
+    def command_to_signature(cmd):
+        signature = cmd.replace(' ', '_')
+        return signature   
+
+    def check_pch_signature_in_file(file_path, signature):
+        b_exist = os.path.isfile(file_path)
+        if b_exist is False:
+            return False
+
+        with open(file_path) as file:
+            # read all content of a file
+            content = file.read()
+            # check if string present in a file
+            if signature == content:
+                return True
+            else:
+                return False
+
+    def _create_if_not_exist(path_dir):
+        if not os.path.exists(path_dir):
+            try:
+                Path(path_dir).mkdir(parents=True, exist_ok=True)
+            except OSError as exc:  # Guard against race condition
+                if exc.errno != errno.EEXIST:
+                    raise RuntimeError("Fail to create path {}".format(path_dir))
+
+    def write_pch_signature_to_file(file_path, pch_sign):
+        _create_if_not_exist(os.path.dirname(file_path))
+        with open(file_path, "w") as f:
+            f.write(pch_sign)
+            f.close()
+
+    def build_precompile_header(pch_cmd):
+        print('!!!!!pch_cmd:{}.'.format(pch_cmd))
+        try:
+            subprocess.check_output(pch_cmd, shell=True, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            from .._inductor.exc import CppCompileError
+            raise CppCompileError(pch_cmd, e.output) from e 
+
+    extra_cflags_str = listToString(extra_cflags)
+    extra_include_paths_str = listToString(extra_include_paths)
+
+    common_cflags = []
+    if not is_standalone:
+        common_cflags += ['-DTORCH_API_INCLUDE_EXTENSION_H']
+
+    common_cflags += ['-std=c++17', '-fPIC']
+    common_cflags += [f"{x}" for x in get_pybind11_abi_build_flags()]
+    common_cflags += [f"{x}" for x in get_glibcxx_abi_build_flags()]
+    common_cflags_str = listToString(common_cflags)
+
+    pch_cmd = format_precompiler_header_cmd(compiler, head_file, head_file_pch, common_cflags_str, extra_cflags_str, extra_include_paths_str)
+    pch_sign = command_to_signature(pch_cmd)
+    # print('!!!!!pch_sign:{}.'.format(pch_sign))
+
+    if os.path.isfile(head_file_pch) is not True:
+        build_precompile_header(pch_cmd)
+        write_pch_signature_to_file(head_file_signature, pch_sign)
+    else:
+        b_same_sign = check_pch_signature_in_file(head_file_signature, pch_sign)
+        if b_same_sign is False:
+            build_precompile_header(pch_cmd)
+            write_pch_signature_to_file(head_file_signature, pch_sign)
+
 
 def load_inline(name,
                 cpp_sources,
@@ -1408,6 +1532,10 @@ def load_inline(name,
         cuda_sources = [cuda_sources]
 
     cpp_sources.insert(0, '#include <torch/extension.h>')
+    
+    # Using PreCompile Header('torch/extension.h') to reduce compile time.
+    check_precompiler_headers(extra_cflags,
+                        extra_include_paths)
 
     # If `functions` is supplied, we create the pybind11 bindings for the user.
     # Here, `functions` is (or becomes, after some processing) a map from
@@ -1561,10 +1689,9 @@ def _write_ninja_file_and_compile_objects(
         verbose: bool,
         with_cuda: Optional[bool]) -> None:
     verify_ninja_availability()
-    if IS_WINDOWS:
-        compiler = os.environ.get('CXX', 'cl')
-    else:
-        compiler = os.environ.get('CXX', 'c++')
+    
+    compiler = get_cxx_compiler()
+    
     get_compiler_abi_compatibility_and_version(compiler)
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
@@ -1605,10 +1732,9 @@ def _write_ninja_file_and_build_library(
         with_cuda: Optional[bool],
         is_standalone: bool = False) -> None:
     verify_ninja_availability()
-    if IS_WINDOWS:
-        compiler = os.environ.get('CXX', 'cl')
-    else:
-        compiler = os.environ.get('CXX', 'c++')
+    
+    compiler = get_cxx_compiler()
+    
     get_compiler_abi_compatibility_and_version(compiler)
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
@@ -1992,28 +2118,13 @@ def _write_ninja_file_to_build_library(path,
     if not is_standalone:
         common_cflags.append(f'-DTORCH_EXTENSION_NAME={name}')
         common_cflags.append('-DTORCH_API_INCLUDE_EXTENSION_H')
-
-    # Note [Pybind11 ABI constants]
-    #
-    # Pybind11 before 2.4 used to build an ABI strings using the following pattern:
-    # f"__pybind11_internals_v{PYBIND11_INTERNALS_VERSION}{PYBIND11_INTERNALS_KIND}{PYBIND11_BUILD_TYPE}__"
-    # Since 2.4 compier type, stdlib and build abi parameters are also encoded like this:
-    # f"__pybind11_internals_v{PYBIND11_INTERNALS_VERSION}{PYBIND11_INTERNALS_KIND}{PYBIND11_COMPILER_TYPE}{PYBIND11_STDLIB}{PYBIND11_BUILD_ABI}{PYBIND11_BUILD_TYPE}__"
-    #
-    # This was done in order to further narrow down the chances of compiler ABI incompatibility
-    # that can cause a hard to debug segfaults.
-    # For PyTorch extensions we want to relax those restrictions and pass compiler, stdlib and abi properties
-    # captured during PyTorch native library compilation in torch/csrc/Module.cpp
-
-    for pname in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
-        pval = getattr(torch._C, f"_PYBIND11_{pname}")
-        if pval is not None and not IS_WINDOWS:
-            common_cflags.append(f'-DPYBIND11_{pname}=\\"{pval}\\"')
+    
+    common_cflags += [f"{x}" for x in get_pybind11_abi_build_flags()]
 
     common_cflags += [f'-I{include}' for include in user_includes]
     common_cflags += [f'-isystem {include}' for include in system_includes]
 
-    common_cflags += ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
+    common_cflags += [f"{x}" for x in get_glibcxx_abi_build_flags()]
 
     if IS_WINDOWS:
         cflags = common_cflags + COMMON_MSVC_FLAGS + ['/std:c++17'] + extra_cflags
@@ -2125,10 +2236,7 @@ def _write_ninja_file(path,
     assert len(sources) == len(objects)
     assert len(sources) > 0
 
-    if IS_WINDOWS:
-        compiler = os.environ.get('CXX', 'cl')
-    else:
-        compiler = os.environ.get('CXX', 'c++')
+    compiler = get_cxx_compiler()
 
     # Version 1.3 is required for the `deps` directive.
     config = ['ninja_required_version = 1.3']
