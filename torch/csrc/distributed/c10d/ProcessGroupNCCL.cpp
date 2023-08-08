@@ -427,7 +427,7 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
 }
 
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
-  auto mode = cudaStreamCaptureModeGlobal;
+  auto mode = cudaStreamCaptureModeThreadLocal;
   // push
   cudaThreadExchangeStreamCaptureMode(&mode);
   try {
