@@ -1,4 +1,3 @@
-#pragma once
 #include <ATen/Context.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/TensorSubclassLikeUtils.h>
@@ -8,78 +7,48 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <c10/core/ScalarType.h>
-
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 
 #include <c10/core/SymInt.h>
-#include <c10/core/SymFloat.h>
 #include <c10/util/string_view.h>
 #include <cmath>
-#include <cstdint>
 #include <functional>
+
 namespace sdp {
-
-constexpr int32_t num_backends = 3;
-enum class SDPBackend {
-  error = -1,
-  math = 0,
-  flash_attention = 1,
-  efficient_attention = 2
-};
-
-// Note that if this changed make sure to update
-// the templated enum in mem_eff/kernel_forward.h and mem_eff/kernel_backward.h
-enum class CustomMaskType {
-  NoCustomMask = 0,
-  CausalFromTopLeft = 1,
-  CausalFromBottomRight = 2,
-  NumCustomMaskTypes,
-};
-
-struct sdp_params {
-  const at::Tensor& query;
-  const at::Tensor& key;
-  const at::Tensor& value;
-  const c10::optional<at::Tensor> attn_mask;
-  double dropout;
-  bool is_causal;
-};
-
-SDPBackend select_sdp_backend_cpp(sdp_params kernel_params);
-
-inline c10::SymFloat calculate_scale(
-    const at::Tensor& query,
-    c10::optional<double> scale) {
-  const auto softmax_scale = scale.has_value()
-      ? scale.value()
-      : (c10::SymFloat(1.0) / (c10::SymFloat(query.sym_size(-1)).sqrt()));
-  return c10::SymFloat(softmax_scale);
-}
-
+namespace {
 // This helper function creates a constexpr std::array
 // From a compile time list of values
 template <typename V, typename... T>
-inline constexpr auto array_of(T&&... t) -> std::array<V, sizeof...(T)> {
+constexpr auto array_of(T&&... t) -> std::array<V, sizeof...(T)> {
   return {{std::forward<T>(t)...}};
 }
 
-inline bool input_requires_grad(sdp_params params) {
+bool input_requires_grad(sdp_params params) {
   const bool any_inputs_require_grad = params.query.requires_grad() ||
       params.key.requires_grad() || params.value.requires_grad();
   const bool gradmode_enabled = at::GradMode::is_enabled();
   return any_inputs_require_grad && gradmode_enabled;
 }
 
-inline bool has_for_nested_inputs(sdp_params params) {
+bool has_for_nested_inputs(sdp_params params) {
   return (
       params.query.is_nested() || params.key.is_nested() ||
       params.value.is_nested());
 }
 
+std::array<SDPBackend, num_backends> priority_order_cpp(sdp_params params) {
+  constexpr std::array<SDPBackend, num_backends> default_order{
+      SDPBackend::flash_attention,
+      // SDPBackend::efficient_attention,
+      SDPBackend::math};
+
+  return default_order;
+}
+
 template <typename dtype_vector>
-inline bool check_tensor_dtype(
+bool check_tensor_dtype(
     sdp_params params,
     dtype_vector allowed_dtypes,
     bool debug) {
@@ -107,7 +76,7 @@ inline bool check_tensor_dtype(
 }
 
 
-inline bool try_broadcast_param_size(
+bool try_broadcast_param_size(
     const c10::SymInt q_size,
     const c10::SymInt k_size,
     const c10::SymInt v_size,
@@ -137,7 +106,7 @@ inline bool try_broadcast_param_size(
   return true;
 }
 
-inline bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
+bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
     at::Tensor param,
     c10::string_view param_name,
     bool debug) {
@@ -174,7 +143,7 @@ inline bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
   return true;
 }
 
-inline bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
+bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
   // When this function is called we are assured that the nt is dim==4
   if (!has_for_nested_inputs(params)) {
     return true;
@@ -221,7 +190,7 @@ inline bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_nested_tensor(sdp_params params, bool debug) {
+bool check_nested_tensor(sdp_params params, bool debug) {
   // Return false if have nested tensor
   if (has_for_nested_inputs(params)) {
     if (debug) {
@@ -233,7 +202,7 @@ inline bool check_nested_tensor(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_for_dropout(sdp_params params, bool debug) {
+bool check_for_dropout(sdp_params params, bool debug) {
   if (params.dropout > 0.00001) {
     if (debug) {
       TORCH_WARN("Both fused kernels do not support non-zero dropout.");
@@ -243,7 +212,7 @@ inline bool check_for_dropout(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_requires_grad_and_nested(sdp_params params, bool debug) {
+bool check_requires_grad_and_nested(sdp_params params, bool debug) {
   // If we fail both checks then we return false
   if (has_for_nested_inputs(params) && input_requires_grad(params)) {
     if (debug) {
@@ -255,7 +224,7 @@ inline bool check_requires_grad_and_nested(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_for_attn_mask(sdp_params params, bool debug) {
+bool check_for_attn_mask(sdp_params params, bool debug) {
   if (params.attn_mask.has_value()) {
     if (debug) {
       TORCH_WARN("Both fused kernels do not support non-null attn_mask.");
@@ -265,7 +234,7 @@ inline bool check_for_attn_mask(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_tensor_shapes(sdp_params params, bool debug) {
+bool check_tensor_shapes(sdp_params params, bool debug) {
   auto query_dim = params.query.dim();
   if (!(query_dim == params.key.dim() && query_dim == params.value.dim() &&
         (query_dim == 4))) {
@@ -284,7 +253,7 @@ inline bool check_tensor_shapes(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_safe_kv_broadcast(at::Tensor param, bool debug) {
+bool check_safe_kv_broadcast(at::Tensor param, bool debug) {
   const auto nt_tensor_impl = at::native::get_nested_tensor_impl(param);
   auto seq_len = nt_tensor_impl->opt_size(2);
   if (!seq_len.has_value()) {
@@ -299,7 +268,7 @@ inline bool check_safe_kv_broadcast(at::Tensor param, bool debug) {
   return true;
 }
 
-inline bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
+bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
   // This is expected to be called after check_tensor_shapes ensuring that the
   // size() calls won't error since the inputs are all 4 dimensional
   auto q_batch_size = params.query.sym_size(0);
@@ -359,7 +328,54 @@ inline bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_nonzero_sequence_lengths(sdp_params params, bool debug) {
+bool check_head_dim_size_cpp(sdp_params params, bool debug) {
+  const auto query_size_last = params.query.sym_size(-1);
+  const auto key_size_last = params.key.sym_size(-1);
+  const auto value_size_last = params.value.sym_size(-1);
+  if (!(query_size_last == key_size_last &&
+        query_size_last == value_size_last)) {
+    if (debug) {
+      TORCH_WARN(
+          "Flash attention requires q,k,v to have the same last dimension.",
+          " Got Query.size(-1): ",
+          query_size_last,
+          ", Key.size(-1): ",
+          params.key.sym_size(-1),
+          ", Value.size(-1): ",
+          params.value.sym_size(-1),
+          " instead.");
+    }
+    return false;
+  }
+  return true;
+}
+
+bool check_head_dim_size_mem_efficient_cpp(sdp_params params, bool debug) {
+  const auto query_size_last = params.query.sym_size(-1);
+  const auto value_size_last = params.value.sym_size(-1);
+  const int64_t alignment = 1;
+  if (!(query_size_last == params.key.sym_size(-1) &&
+        query_size_last % alignment == 0 && query_size_last > 0 &&
+        value_size_last % alignment == 0 && value_size_last > 0)) {
+    if (debug) {
+      TORCH_WARN(
+          "Mem efficient attention requires last dimension of inputs to be divisible by ",
+          alignment,
+          ". ",
+          "Got Query.size(-1): ",
+          query_size_last,
+          ", Key.size(-1): ",
+          params.key.sym_size(-1),
+          ", Value.size(-1): ",
+          params.value.sym_size(-1),
+          " instead.");
+    }
+    return false;
+  }
+  return true;
+}
+
+bool check_nonzero_sequence_lengths(sdp_params params, bool debug) {
   if (has_for_nested_inputs(params)){
     // Currently we do not support any masking with NestedTensors
     // This is checked in validate_sdpa_input so this filter func
@@ -380,7 +396,7 @@ inline bool check_nonzero_sequence_lengths(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_last_dim_stride_equals_1(sdp_params params, bool debug) {
+bool check_last_dim_stride_equals_1(sdp_params params, bool debug) {
   if (has_for_nested_inputs(params)){
     // The stride checking for NestedTensors is done within the kernel
     // And .contiguous will be called if needed
@@ -417,7 +433,7 @@ inline bool check_last_dim_stride_equals_1(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_runtime_disabled_flash(sdp_params params, bool debug) {
+bool check_runtime_disabled_flash(sdp_params params, bool debug) {
   // We check the global context to see if user has explicitly turned of flash
   // sdp kernels
   if (!at::globalContext().userEnabledFlashSDP()) {
@@ -429,7 +445,7 @@ inline bool check_runtime_disabled_flash(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_runtime_disabled_mem_efficient(sdp_params params, bool debug) {
+bool check_runtime_disabled_mem_efficient(sdp_params params, bool debug) {
   // We check the global context to see if user has explicitly turned of
   // mem_efficient sdp kernels
   if (!at::globalContext().userEnabledMemEfficientSDP()) {
@@ -441,5 +457,105 @@ inline bool check_runtime_disabled_mem_efficient(sdp_params params, bool debug) 
   return true;
 }
 
+bool use_flash_attention_cpp(sdp_params params, bool debug) {
+  constexpr auto cpp_supported_flash_dtypes =
+      array_of<at::ScalarType>(at::kFloat, at::kDouble, at::kBFloat16);
 
+  // Define gate functions that determine if a flash kernel can be run
+  constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
+      check_runtime_disabled_flash,
+      check_nested_tensor,
+      check_for_dropout,
+      check_tensor_shapes,
+      check_batch_size_and_num_heads,
+      check_for_attn_mask,
+      check_head_dim_size_cpp,
+      check_nonzero_sequence_lengths,
+      check_last_dim_stride_equals_1);
+  for (auto& constraint : constraints) {
+    if (!constraint(params, debug)) {
+      return false;
+    }
+  }
+
+  return check_tensor_dtype(params, cpp_supported_flash_dtypes, debug);
+}
+
+bool use_mem_efficient_attention_cpp(sdp_params params, bool debug) {
+  constexpr auto cpp_supported_mem_efficient_dtypes =
+      array_of<at::ScalarType>(at::kFloat, at::kDouble, at::kBFloat16);
+
+  //  Define gate functions that determine if a mem efficient kernel can be run
+  constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
+      check_runtime_disabled_mem_efficient,
+      check_nested_tensor,
+      check_for_dropout,
+      check_tensor_shapes,
+      check_batch_size_and_num_heads,
+      check_for_attn_mask,
+      check_head_dim_size_mem_efficient_cpp,
+      check_nonzero_sequence_lengths,
+      check_last_dim_stride_equals_1);
+  for (auto& constraint : constraints) {
+    if (!constraint(params, debug)) {
+      return false;
+    }
+  }
+
+  return check_tensor_dtype(params, cpp_supported_mem_efficient_dtypes, debug);
+}
+} // namespace
+
+SDPBackend select_sdp_backend_cpp(sdp_params kernel_params) {
+  // This function defines the priority order of the different sdp backends
+  // 1. Flash Attention
+  // 2. Mem Efficient Attention
+  // 3. Math fallback
+  auto& ctx = at::globalContext();
+  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP() &&
+      !ctx.userEnabledMemEfficientSDP()) {
+    return SDPBackend::error;
+  }
+  // Get ideal kernel ordering
+  const auto ordering = priority_order_cpp(kernel_params);
+
+  // Because TORCHCHECK checks if condition is true we negate debug so that
+  // The statements will be printed when debug is true
+  bool print_debug = false;
+  for (auto& backend : ordering) {
+    switch (backend) {
+      case SDPBackend::flash_attention:
+        if (use_flash_attention_cpp(kernel_params, print_debug)) {
+          return SDPBackend::flash_attention;
+        }
+        break;
+      // case SDPBackend::efficient_attention:
+      //   if (use_mem_efficient_attention_cpp(kernel_params, print_debug)) {
+      //     return SDPBackend::efficient_attention;
+      //   }
+      //   break;
+      case SDPBackend::math:
+        if (ctx.userEnabledMathSDP()) {
+          return SDPBackend::math;
+        }
+        break;
+      default:
+        TORCH_CHECK(false, "Invalid backend");
+    }
+  }
+  // If we have gotten to this point then two things have happened:
+  // 1. use_flash_attention or use_mem_efficient did not satisfy the
+  // constraints to be ran
+  // 2. The user has explicitly disabled the math kernel
+  // We then re-run the kernel checks with debug enabled to print out the
+  // reason why the kernel was not selected
+
+  print_debug = true;
+  TORCH_WARN("Memory efficient kernel not used because:");
+  use_mem_efficient_attention_cpp(kernel_params, print_debug);
+  TORCH_WARN("Flash attention kernel not used because:");
+  use_flash_attention_cpp(kernel_params, print_debug);
+  TORCH_CHECK(!print_debug, "No available kernel.  Aborting execution.")
+  return SDPBackend::error;
+}
 } // namespace sdp
