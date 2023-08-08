@@ -1,7 +1,7 @@
 import inspect
 import itertools
 
-from . import _funcs_impl, _reductions
+from . import _funcs_impl, _reductions_impl
 from ._normalizations import normalizer
 
 # _funcs_impl.py contains functions which mimic NumPy's eponymous equivalents,
@@ -27,7 +27,7 @@ __all__ = []
 
 # decorate implementer functions with argument normalizers and export to the top namespace
 for name, func in itertools.chain(
-    _public_functions(_funcs_impl), _public_functions(_reductions)
+    _public_functions(_funcs_impl), _public_functions(_reductions_impl)
 ):
     if name in ["percentile", "quantile", "median"]:
         decorated = normalizer(func, promote_scalar_result=True)
