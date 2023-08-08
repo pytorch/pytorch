@@ -258,9 +258,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             DTensor._propagator,
         )
 
-    @classmethod
+    @staticmethod
     def from_local(
-        cls,
         local_tensor: torch.Tensor,
         device_mesh: Optional[DeviceMesh] = None,
         placements: Optional[Sequence[Placement]] = None,
@@ -405,7 +404,7 @@ def distribute_tensor(
     Args:
         tensor (torch.Tensor): torch.Tensor to be distributed. Note that if you
             want to shard a tensor on a dimension that is not evenly divisible by
-            the number of devices in that mesh dimension, we use `torch.tensor_split`
+            the number of devices in that mesh dimension, we use `torch.chunk`
             semantic to shard the tensor and scatter the shards.
         device_mesh (:class:`DeviceMesh`, optional): DeviceMesh to distribute the
             tensor, if not specified, must be called under a DeviceMesh context

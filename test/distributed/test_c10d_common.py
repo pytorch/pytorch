@@ -127,7 +127,7 @@ class AbstractTimeoutTest:
                 # let @retry_on_connect_failures handle the error
                 raise c2p[0]
             else:
-                raise RuntimeError("Unexpected type {}".format(type(c2p[0])))
+                raise RuntimeError(f"Unexpected type {type(c2p[0])}")
 
 
 class TimeoutTest(TestCase):
@@ -348,7 +348,7 @@ class CommonDistributedDataParallelTest:
     ):
         self.assertTrue(
             len(devices) == 2 or len(devices) == 4,
-            "unexpected devices for ddp tests {}".format(devices),
+            f"unexpected devices for ddp tests {devices}",
         )
         if len(devices) == 2:
             model = DoubleGpuNet(devices)
@@ -1354,7 +1354,7 @@ class AbstractCommTest:
         self.assertEqual(outensor, tensor)
 
 # Variant of AbstractCommTest that expects world size of 4
-class AbstractLargeCommTest(object):
+class AbstractLargeCommTest:
     @property
     def op_timeout_sec(self):
         return 1

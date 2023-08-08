@@ -1870,14 +1870,14 @@ class TestFSDPOptimState(FSDPTest):
 
             step()
             original_osd = deepcopy(optim.state_dict())
-            for param_id, state in original_osd["state"].items():
+            for state in original_osd["state"].values():
                 # Add customized value
                 state["value1"] = 2.74
                 state["value2"] = None
 
             osd = FSDP.optim_state_dict(model, optim, optim_state_dict=original_osd)
             osd_to_load = FSDP.optim_state_dict_to_load(model, optim, osd)
-            for param_id, state in osd_to_load["state"].items():
+            for state in osd_to_load["state"].values():
                 self.assertEqual(state["value1"], 2.74)
                 self.assertEqual(state["value2"], None)
 

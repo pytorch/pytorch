@@ -470,17 +470,19 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         # a bias in this rank's shard
         has_both = False
         for fsdp_module in FSDP.fsdp_modules(fsdp_model):
-            for handle in fsdp_module._handles:
-                flat_param = handle.flat_param
-                assert flat_param._params is not None
-                has_weight = False
-                has_bias = False
-                for param, fqn in zip(flat_param._params, flat_param._fqns):
-                    if "weight" in fqn and param.numel() > 0:
-                        has_weight = True
-                    elif "bias" in fqn and param.numel() > 0:
-                        has_bias = True
-                has_both |= has_weight and has_bias
+            handle = fsdp_module._handle
+            if not handle:
+                continue
+            flat_param = handle.flat_param
+            assert flat_param._params is not None
+            has_weight = False
+            has_bias = False
+            for param, fqn in zip(flat_param._params, flat_param._fqns):
+                if "weight" in fqn and param.numel() > 0:
+                    has_weight = True
+                elif "bias" in fqn and param.numel() > 0:
+                    has_bias = True
+            has_both |= has_weight and has_bias
         assert has_both, (
             f"Rank {self.rank} does not have a `FlatParameter` with both a "
             "weight and a bias in its shard, meaning that this test is vacuous"

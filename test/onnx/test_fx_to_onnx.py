@@ -4,7 +4,6 @@ from __future__ import annotations
 import tempfile
 
 import onnx
-import pytest
 import pytorch_test_common
 import torch
 from torch import nn
@@ -12,7 +11,7 @@ from torch._subclasses import fake_tensor
 from torch.nn import functional as F
 from torch.onnx import dynamo_export, ExportOptions
 from torch.onnx._internal.diagnostics import infra
-from torch.onnx._internal.fx import diagnostics
+from torch.onnx._internal.fx import diagnostics, registration
 from torch.testing._internal import common_utils
 
 
@@ -83,7 +82,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         self.assertNotIsInstance(tensor_x, fake_tensor.FakeTensor)
         self.assertNotIsInstance(tensor_y, fake_tensor.FakeTensor)
 
-    def test_mnist(self):
+    def test_mnist_exported_with_no_warnings_on_get_attr_node_in_op_level_debug(self):
         class MNISTModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -106,7 +105,19 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-        _ = dynamo_export(MNISTModel(), tensor_x, export_options=self.export_options)
+        export_output = dynamo_export(
+            MNISTModel(), tensor_x, export_options=ExportOptions(op_level_debug=True)
+        )
+
+        # NOTE: This additional test makes sure that op level debug supports `get_attr`
+        # fx.Node, also known as weight in PyTorch. aten.convolution.default is one of
+        # the nodes that has weight attribute.
+        assert_has_diagnostics(
+            export_output.diagnostic_context,
+            diagnostics.rules.op_level_debugging,
+            diagnostics.levels.NONE,
+            expected_node="aten.convolution.default",
+        )
 
     def test_trace_only_op_with_evaluator(self):
         model_input = torch.tensor([[1.0, 2.0, 3.0], [1.0, 1.0, 2.0]])
@@ -201,10 +212,25 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     def test_dispatch_overload_fall_back_default_raise_diagnostic_warning(self):
         class TraceModel(torch.nn.Module):
             def forward(self, input):
-                return torch.ops.aten.add(input, input)
+                return torch.ops.aten.add.Tensor(input, input)
+
+        onnx_registry = torch.onnx.OnnxRegistry()
+        self.assertTrue(
+            onnx_registry.is_registered_op(
+                namespace="aten", op_name="add", overload="Tensor"
+            )
+        )
+        # TODO: Replace this example with a torch custom op when overload is supported
+        # Currently, torch only supports custom op with namespace and op_name
+        aten_add_Tensor = registration.OpName.from_name_parts(
+            namespace="aten", op_name="add", overload="Tensor"
+        )
+        onnx_registry._registry.pop(aten_add_Tensor)
 
         x = torch.tensor(3)
-        export_output = dynamo_export(TraceModel(), x)
+        export_output = dynamo_export(
+            TraceModel(), x, export_options=ExportOptions(onnx_registry=onnx_registry)
+        )
         assert_has_diagnostics(
             export_output.diagnostic_context,
             diagnostics.rules.find_operator_overloads_in_onnx_registry,
@@ -325,46 +351,33 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             fake_model = Model()
             fake_x = torch.rand(5, 2, 2)
 
+        # TODO: Split each scenario on its own test case
         # Scenario 1: Fake model and fake input WITHOUT fake_context
-        with pytest.raises(torch.onnx.OnnxExporterError):
+        with self.assertRaises(torch.onnx.OnnxExporterError):
             export_options = ExportOptions(fake_context=None)
             _ = torch.onnx.dynamo_export(
                 fake_model, fake_x, export_options=export_options
             )
 
         # Scenario 2: Fake model and real input WITHOUT fake_context
-        with pytest.raises(torch.onnx.OnnxExporterError):
+        with self.assertRaises(torch.onnx.OnnxExporterError):
             export_options = ExportOptions(fake_context=None)
             _ = torch.onnx.dynamo_export(
                 fake_model, real_x, export_options=export_options
             )
 
-        # Scenario 3: Real model and fake input WITHOUT fake_context
-        with pytest.raises(torch.onnx.OnnxExporterError):
-            export_options = ExportOptions(fake_context=None)
-            _ = torch.onnx.dynamo_export(
-                real_model, fake_x, export_options=export_options
-            )
-
-        # Scenario 4: Real model and real input WITH fake_context
-        with pytest.raises(torch.onnx.OnnxExporterError):
+        # Scenario 3: Real model and real input WITH fake_context
+        with self.assertRaises(torch.onnx.OnnxExporterError):
             export_options = ExportOptions(fake_context=fake_context)
             _ = torch.onnx.dynamo_export(
                 real_model, real_x, export_options=export_options
             )
 
-        # Scenario 5: Fake model and real input WITH fake_context
-        with pytest.raises(torch.onnx.OnnxExporterError):
+        # Scenario 4: Fake model and real input WITH fake_context
+        with self.assertRaises(torch.onnx.OnnxExporterError):
             export_options = ExportOptions(fake_context=fake_context)
             _ = torch.onnx.dynamo_export(
                 fake_model, real_x, export_options=export_options
-            )
-
-        # Scenario 6: Real model and fake input WITH fake_context
-        with pytest.raises(torch.onnx.OnnxExporterError):
-            export_options = ExportOptions(fake_context=fake_context)
-            _ = torch.onnx.dynamo_export(
-                real_model, fake_x, export_options=export_options
             )
 
 
