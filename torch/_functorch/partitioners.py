@@ -130,7 +130,7 @@ def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
     return fwd_outputs, bwd_outputs
 
 
-def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_sym_nodes=(), *, num_fwd_outputs):
+def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_sym_nodes, *, num_fwd_outputs):
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     tangent_inputs = list(filter(_is_tangent, joint_module.graph.nodes))
@@ -199,9 +199,11 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
         saved_symbols |= new_symbols
 
 
-    # Update saved_sym_nodes that are now reordered to have all bindings
-    # at front
-    saved_sym_nodes = saved_sym_nodes_binding + saved_sym_nodes_derived
+    # Update saved_sym_nodes that are now reordered to have all bindings at
+    # front. This can also be used later on to figure out the position of saved
+    # sym nodes in the output of fwd graph.
+    saved_sym_nodes.clear()
+    saved_sym_nodes.extend(saved_sym_nodes_binding + saved_sym_nodes_derived)
 
     # Now, we re-generate the fwd/bwd graphs.
     # NB: This might increase compilation time, but I doubt it matters
@@ -480,7 +482,7 @@ def reordering_to_mimic_autograd_engine(gm):
     return new_gm
 
 
-def functionalize_rng_ops(joint_module, fw_module, bw_module):
+def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
     # During user-driven activation checkpointing, we have to ensure that a rng
     # op in fwd yields the same output as the recomputed rng op in the bwd.  To
     # do this, we use functionalize wrappers to wrap the random ops and share
@@ -491,7 +493,9 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module):
     # Step 2 - Modify the fwd pass such that
     #   1) Replace rand with run_and_save_rng_state wrapper
     #   2) Replace the users of the original op with the output[1] of this op.
-    #   3) Collect all the rng_state - output[0] of each op, and make them output nodes.
+    #   3) Collect all the rng_state - output[0] of each op, and make them
+    #   output nodes. Special care needs to be taken here because fwd outputs
+    #   has symints at the very end.
     # Step 3 - Modify the bwd pass such that
     #   1) Add the input nodes just before the tangents for the stashed rng states
     #   2) Replace rand with run_with_save_rng_state wrappers
@@ -574,11 +578,15 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module):
             bw_graph.erase_node(bw_node)
 
 
-    # Add the rng states in the output of the fwd graph
-    fw_output = [node for node in fw_module.graph.nodes if node.op == "output"][0]
-    outputs = fw_output.args[0] + fw_rng_state_outputs
+    # Add the rng states in the output of the fwd graph. AOT Autograd assumes
+    # that symints are at the end of forward graph outputs. So, insert the new
+    # rng states accordingly.
+    fw_output_node = [node for node in fw_module.graph.nodes if node.op == "output"][0]
+    fw_outputs = fw_output_node.args[0]
+    sym_node_start_idx = len(fw_outputs) - num_sym_nodes
+    outputs = fw_outputs[:sym_node_start_idx] + fw_rng_state_outputs + fw_outputs[sym_node_start_idx:]
     fw_module.graph.output(outputs)
-    fw_module.graph.erase_node(fw_output)
+    fw_module.graph.erase_node(fw_output_node)
     fw_module.recompile()
     bw_module.recompile()
     return fw_module, bw_module
@@ -694,9 +702,6 @@ def min_cut_rematerialization_partition(
     aten = torch.ops.aten
     prims = torch.ops.prims
 
-    # TODO - check tags
-    random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like, aten.bernoulli, aten.bernoulli_]
-
     # compiler == "nvfuser" is the default set of recomputable ops
     default_recomputable_ops = [aten.add, aten.sub, aten.div, aten.atan2, aten.mul, aten.max, aten.min, aten.pow, aten.remainder, aten.fmod, aten.__and__, aten.__or__, aten.__xor__, aten.__lshift__, aten.__rshift__, aten.eq, aten.ne, aten.ge, aten.gt, aten.le, aten.lt, aten.abs, aten.bitwise_not, aten.ceil, aten.floor, aten.frac, aten.neg, aten.relu, aten.round, aten.silu, aten.trunc, aten.log, aten.log10, aten.log1p, aten.log2, aten.lgamma, aten.exp, aten.expm1, aten.erf, aten.erfc, aten.cos, aten.acos, aten.cosh, aten.sin, aten.asin, aten.sinh, aten.tan, aten.atan, aten.tanh, aten.atanh, aten.sqrt, aten.rsqrt, aten.reciprocal, aten.sigmoid, aten.softplus, aten.threshold, aten.threshold_backward, aten.clamp, aten.where, aten.lerp, aten.addcmul, aten.gelu, aten.gelu_backward, aten.sum, aten.mean, aten._grad_sum_to_size, aten.sum_to_size, aten.amax, aten.to, aten.type_as, operator.getitem, aten.squeeze, aten.unsqueeze, aten.rsub, aten._to_copy]  # noqa: E501,B950
     view_ops = [aten.squeeze, aten.unsqueeze, aten.alias]
@@ -705,13 +710,6 @@ def min_cut_rematerialization_partition(
         view_ops += [aten.view, aten.slice, aten.permute, aten.t, prims.broadcast_in_dim, aten.expand, aten.as_strided]
         # Natalia said that we should allow recomputing indexing :)
         default_recomputable_ops += [aten.index]
-
-        # this takes in a seed, so it's deterministic, and we can recompute it
-        if hasattr(prims, "inductor_random"):
-            default_recomputable_ops += [prims.inductor_random]
-
-            random_ops += [prims.inductor_seeds, prims.inductor_seed]
-
     default_recomputable_ops += view_ops
 
     default_recomputable_ops += pointwise_ops()
@@ -727,6 +725,7 @@ def min_cut_rematerialization_partition(
 
     recomputable_ops = set(recomputable_ops) if recomputable_ops is not None else set(default_recomputable_ops)
 
+    random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
     compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten.upsample_bilinear2d, aten._softmax, aten._softmax_backward_data, aten.native_layer_norm, aten.native_layer_norm_backward, aten.native_batch_norm, aten.native_batch_norm_backward, aten._native_batch_norm_legit]  # noqa: E501,B950
 
     unrecomputable_ops = random_ops + compute_intensive_ops
@@ -742,7 +741,7 @@ def min_cut_rematerialization_partition(
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
-    AGGRESSIVE_RECOMPUTATION = config.partitioner_aggressive_fusion
+    AGGRESSIVE_RECOMPUTATION = False
 
     def is_materialized_backwards(node):
         cur_nodes = {node}
@@ -810,6 +809,7 @@ def min_cut_rematerialization_partition(
         # Heuristic to bias towards nodes closer to the backwards pass
         # Complete guess about current value
         mem_sz = int(mem_sz * (1.1 ** max(min(node.dist_from_bw, 100), 1)))
+        # mem_sz = int(mem_sz + node.dist_from_bw)
 
         if is_materialized(node):
             return mem_sz
@@ -874,13 +874,14 @@ def min_cut_rematerialization_partition(
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(lambda n: is_sym_node(n), saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
+    # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols
     fw_module, bw_module = _extract_fwd_bwd_modules(
         joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
 
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
             fw_module, bw_module = functionalize_rng_ops(
-                joint_module, fw_module, bw_module
+                joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
         bw_module = reordering_to_mimic_autograd_engine(bw_module)
 

@@ -40,7 +40,6 @@ static void record_function_exit(
   record->record.end();
 }
 
-
 c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut_new(
     const c10::intrusive_ptr<PythonRecordFunction>& record,
     const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
