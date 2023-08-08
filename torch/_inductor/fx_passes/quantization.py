@@ -3,7 +3,7 @@ import functools
 import operator
 
 import torch
-from ..lowering import lowerings as L
+from ..lowering import lowerings as L, require_channels_last
 from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, Match
 from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
@@ -391,6 +391,7 @@ def _register_quantized_maxpool2d_lowering(
             dilation,
             ceil_mode,
         )
+        computation_args, _ = require_channels_last(computation_op, *computation_args)
         return L[computation_op](*computation_args)
 
     return qmaxpool2d
