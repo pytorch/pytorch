@@ -37,7 +37,7 @@ class RegularFuncWrapper:
             if isinstance(values, Number):
                 values = [values for _ in range(len(inputs[0]))]
             return [self.func(*i, value=values[idx], **kwargs) for idx, i in enumerate(zip(*inputs))]
-        if len(inputs) == 2 and isinstance(inputs[1], Number):
+        if len(inputs) == 2 and isinstance(inputs[1], (Number, torch.Tensor)):
             # binary op with tensorlist and scalar.
             inputs[1] = [inputs[1] for _ in range(len(inputs[0]))]
         return [self.func(*i, **kwargs) for i in zip(*inputs)]
@@ -86,6 +86,8 @@ class InplaceForeachVersionBumpCheck:
 def get_transform_func(num_tensors, dtype, device, is_fastpath):
     def transform(t):
         if not torch.is_tensor(t):
+            return t
+        if torch.is_tensor(t) and t.ndim == 0:
             return t
         return make_tensor(
             (num_tensors, num_tensors), dtype=dtype, device=device,
@@ -1058,6 +1060,20 @@ class TestForeach(TestCase):
                 self.assertEqual(l2[i], list2[index])
                 self.assertEqual(l3[i], list3[index])
         self.assertEqual(num_tensors_seen, 2 * num_tensors_per_list)
+
+    @onlyCUDA
+    def test_0dim_tensor_overload_exception(self):
+        # check exceptions of fast path
+        tensors = [make_tensor((2, 2), dtype=torch.float, device="cuda") for _ in range(2)]
+
+        with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be 0 dim but"):
+            torch._foreach_mul(tensors, torch.tensor([1.0, 1.0], device="cuda"))
+        with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be on"):
+            torch._foreach_mul(tensors, torch.tensor(1.0, device="cpu"))
+
+        tensors = [make_tensor((2, 2), dtype=torch.float, device=d) for d in ("cpu", "cuda")]
+        with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be 0 dim but"):
+            torch._foreach_mul(tensors, torch.tensor([1.0, 1.0], device="cuda"))
 
 
 instantiate_device_type_tests(TestForeach, globals())
