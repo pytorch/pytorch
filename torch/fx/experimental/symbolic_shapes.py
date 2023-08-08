@@ -3007,7 +3007,9 @@ Target Guards:
         return shape_groups
 
     @_lru_cache
-    def _maybe_evaluate_static(self, expr: "sympy.Expr", *, unbacked_only: bool = False) -> "Optional[sympy.Expr]":
+    def _maybe_evaluate_static(
+        self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False
+    ) -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
 
@@ -3023,7 +3025,19 @@ Target Guards:
             # Unbacked symints only
             if s in self.var_to_val:
                 continue
-            expr = expr.subs({ra.expr: sympy.true for ra in self.deferred_runtime_asserts[s]})
+            subst = {}
+            for ra in self.deferred_runtime_asserts[s]:
+                if compute_hint:
+                    e = ra.expr.xreplace(self.var_to_val)
+                else:
+                    e = ra.expr
+                subst[e] = sympy.true
+                subst[sympy.Not(e)] = sympy.false
+                # NB: this doesn't match relations if they're flipped; e.g.,
+                # if you have x < 5, we won't get 5 > x.  Holler if this is
+                # a problem
+            # NB: this helps us deal with And/Or connectives
+            expr = expr.subs(subst)
 
         # Simplify making use of value range lower bound
         new_shape_env = {}
@@ -3138,7 +3152,7 @@ Target Guards:
         """
         result_expr = safe_expand(expr).xreplace(self.var_to_val)
         if len(result_expr.free_symbols) != 0:
-            r = self._maybe_evaluate_static(result_expr)
+            r = self._maybe_evaluate_static(result_expr, compute_hint=True)
             if r is not None:
                 return r
             raise self._make_data_dependent_error(result_expr, expr)
@@ -3454,9 +3468,9 @@ Target Guards:
             tb = traceback.extract_stack()[:-1]
             stack = ''.join(traceback.format_list(tb))
             ra = RuntimeAssert(expr, msg, stack)
-            # TODO: index on the last symbol
-            s = next(iter(expr.free_symbols))
-            self.deferred_runtime_asserts[s].append(ra)
+            # TODO: Do this in a way that is less janky than int(s.name[1:])
+            cands = sorted([s for s in expr.free_symbols if s.name.startswith("i")], key=lambda s: int(s.name[1:]))
+            self.deferred_runtime_asserts[cands[-1]].append(ra)
             self.num_deferred_runtime_asserts += 1
             # TODO: refine ranges
             # Unfortunately, range refinement is probably going to not
