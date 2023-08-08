@@ -1696,7 +1696,7 @@ def main():
             emit_metric("cats_td_experiment_1", metrics_dict)
 
     all_failures = prioritized_failures + general_failures
-    if len() != 0:
+    if len(all_failures) != 0:
         for _, err in all_failures:
             print_to_stderr(err)
 
