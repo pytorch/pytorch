@@ -275,6 +275,9 @@ TreeSpec(TupleVariable, None, [*,
             self.assertEqual(result, expected, msg=str([pytree, to_spec, expected]))
 
     @parametrize("spec, str_spec", [
+        (TreeSpec(list, None, []), "L()"),
+        (TreeSpec(tuple, None, []), "T()"),
+        (TreeSpec(dict, [], []), "D()"),
         (TreeSpec(list, None, [LeafSpec()]), "L(*)"),
         (TreeSpec(list, None, [LeafSpec(), LeafSpec()]), "L(*,*)"),
         (TreeSpec(tuple, None, [LeafSpec(), LeafSpec(), LeafSpec()]), "T(*,*,*)"),

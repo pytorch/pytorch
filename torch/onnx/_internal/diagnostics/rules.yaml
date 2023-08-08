@@ -338,13 +338,12 @@
         - ValueError: Arguments/keyword arguments do not match the signature of the symbolic function.
 
       2. Potentially wrong torchlib operators:
-        If the warnings are triggered by the following error, users should be aware that
-        the results from symbolic functions do not match the results of torch ops, suggesting
-        that the symbolic functions may be incorrect in dispatching or implementation. In such cases,
-        it is recommended to report the issue to the PyTorch-ONNX team, or create/register a custom
-        symbolic function to replace the default one.
+        If the warnings are triggered by the following error, users should be aware that the symbolic functions
+        may be incorrect in dispatching or implementation. In such cases, it is recommended to report
+        the issue to the PyTorch-ONNX team, or create/register a custom symbolic function to replace the default one.
 
-        - AssertionError: The symbolic function is potentially wrong.
+        - AssertionError: The symbolic function is potentially wrong as the results do not match the results of torch ops.
+        - TypeError: The symbolic function is potentially wrong as the opschema doesn't match inputs.
 
   message_strings:
     default:
@@ -357,15 +356,15 @@
 - id: FXE0014
   name: find-opschema-matched-symbolic-function
   short_description:
-    text: Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas.
+    text: Find the OnnxFunction that matches the input/attribute dtypes by comparing them with their opschemas.
   full_description:
     text: "Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas.
       A warning will be issued if the matched OnnxFunction is not an exact match."
     markdown: |
-      When an ATen/Custom operator is registered and needs to be dispatched to an OnnxFunction, the input
-      dtypes of the ATen/Custom operator are compared with the input dtypes of the OnnxFunction opschemas
+      When an ATen/Custom operator is registered and needs to be dispatched to an OnnxFunction, the input/attribute
+      dtypes of the ATen/Custom operator are compared with the input/attribute dtypes of the OnnxFunction opschemas
       to find a match. However, if a perfect/exact match is not found, the dispatcher will attempt to find
-      the nearest match with the highest number of input dtypes matching the OnnxFunction opschemas, while
+      the nearest match with the highest number of input/attribute dtypes matching the OnnxFunction opschemas, while
       issuing a warning.
 
       There are two types of level that can be triggered in this rule:
@@ -385,6 +384,71 @@
   message_strings:
     default:
       text: "The OnnxFunction: {symbolic_fn} is the nearest match of the node {node}."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
+- id: FXE0015
+  name: fx-node-insert-type-promotion
+  short_description:
+    text: Determine if type promotion is required for the FX node. Insert cast nodes if needed.
+  full_description:
+    text: "Determine if type promotion is required for the FX node. Insert cast nodes if needed."
+    markdown: |
+      This diagnostic monitors the node-level type promotion insertion process. In PyTorch, there is an automatic process called implicit type promotion,
+      where the input types of an operator are promoted to a common type. The determination of the common type is based on the type promotion rule specific to each operator.
+      To learn more about PyTorch's type promotion rules, refer to the [elementwise_dtypes doc](https://github.com/pytorch/pytorch/blob/f044613f78df713fb57f70c608483c9f10ad332e/torch/_prims_common/__init__.py#L1252-L1335)
+      and [torch._refs ops](https://github.com/pytorch/pytorch/blob/a475ea4542dfe961c9d097e33ab5041f61c8c17f/torch/_refs/__init__.py#L484).
+
+      However, implicit type promotion is not supported in ONNX. Therefore, to replicate the PyTorch behavior, we need to explicitly insert cast nodes.
+      This diagnostic tracks the process of node-level type promotion insertion.
+
+      The type promotion rules used by this process can be found in `torch/onnx/_internal/fx/passes/type_promotion.py.`
+      To update or add new type promotion rules, please refer to the [Note: Update type promotion rule] section.
+  message_strings:
+    default:
+      text: "Performing explicit type promotion for node {target}. "
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
+- id: FXE0016
+  name: find-operator-overloads-in-onnx-registry
+  short_description:
+    text: Find the list of OnnxFunction of the PyTorch operator in onnx registry.
+  full_description:
+    text: "This rule involves finding the list of OnnxFunction for the PyTorch operator overload in the ONNX registry.
+      If the operator overload is not supported but its default overload is, a warning will be issued.
+      If both the operator overload and its default overload are not supported, an error will be issued."
+    markdown: |
+      The operator overload name serves the purpose of verifying whether a PyTorch operator is registered in the ONNX registry.
+      If it's not found, the dispatcher takes a fallback approach and tries to locate the default overload of the PyTorch
+      operator in the registry. If even the default overload is absent, it signifies that the operator is officially unsupported.
+
+      There are three types of level that can be triggered in this rule:
+
+      1. NOTE: The op overload is supported.
+      2. WARNING: The op overload is not supported, but it's default overload is supported.
+      3. ERROR: The op overload is not supported, and it's default overload is also not supported.
+
+      Here are some suggestions based on the WARNING situation:
+
+      1. If there are NO errors or mismatches in the results, it is safe to disregard this warning.
+      2. If there are errors or mismatches in the results, it is recommended to:
+        (a) Enable op_level_debugging to determine if the OnnxFunction might be incorrect.
+        (b) Report the unsupported overload to the PyTorch-ONNX team.
+        (c) Create/register a custom symbolic function to replace the default one.
+
+      Here are some suggestions based on the ERROR situation:
+
+      1. Report the unsupported operator to the PyTorch-ONNX team.
+      2. Create/register a custom symbolic function to replace the default one.
+
+  message_strings:
+    default:
+      text: "Checking if the FX node: {node} is supported in onnx registry."
   help_uri:
   properties:
     deprecated: false
