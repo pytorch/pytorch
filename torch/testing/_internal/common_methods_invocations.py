@@ -8407,8 +8407,6 @@ class foreach_inputs_sample_func:
         assert isinstance(num_input_tensors, list)
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
-        if len(kwargs) > 0:
-            print(f"{list(kwargs.keys())} are not used")
 
         # zero_size tensor
         if dtype == torch.float32 and (not num_input_tensors_specified) and ("cuda" in device):
