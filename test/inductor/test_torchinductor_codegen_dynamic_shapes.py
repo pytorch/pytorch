@@ -176,6 +176,7 @@ test_failures = {
         ("cpu", "cuda")
     ),
     "test_misaligned_address_issue1_dynamic_shapes": TestFailure(("cpu",)),
+    "test_multilayer_cumsum_dynamic_shapes": TestFailure(("cpu",)),
     "test_mm_views_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_new_empty_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_new_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda")),

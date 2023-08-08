@@ -1241,14 +1241,13 @@ class Scan(Loops):
         split = sympy.Integer(split)
         block_size = FloorDiv(scan_numel + (split - 1), split)
         need_mask = not sizevars.is_expr_static_and_true(
-            sympy.Eq(scan_numel % split, 0))
+            sympy.Eq(scan_numel % split, 0)
+        )
 
         reindex = View.dynamic_reshape_indexer(scan_ranges, [scan_numel])
 
         intermediate_dtype = (
-            dtype
-            if dtype not in (torch.float16, torch.bfloat16)
-            else torch.float
+            dtype if dtype not in (torch.float16, torch.bfloat16) else torch.float
         )
         default = Reduction.default_value(scan_op, intermediate_dtype)
 
@@ -1272,7 +1271,6 @@ class Scan(Loops):
                 return ops.masked(mask, body, default)
             else:
                 return body()
-
 
         # Reduce each block of elements
         def reduce_inner_fn(idx, reduction_idx):
@@ -1298,6 +1296,7 @@ class Scan(Loops):
                 ops.index_expr(scan_idx - 1, torch.int32),
                 ops.constant(0, torch.int32),
             )
+
             def body():
                 offset_idx = [*idx[:-1], scan_idx - 1]
                 return intermediate_reduce_loader(offset_idx)
@@ -1328,15 +1327,15 @@ class Scan(Loops):
 
         # Final result
         combine_fn = REDUCTION_COMBINE_FN[scan_op]
+
         def final_combine_fn(idx):
-            pointwise_idx = [*idx[:axis], *idx[axis + 1:]]
+            pointwise_idx = [*idx[:axis], *idx[axis + 1 :]]
             elem_idx = idx[axis] % block_size
             block_idx = FloorDiv(idx[axis], block_size)
 
             a = intra_block_scan_loader([*pointwise_idx, block_idx, elem_idx])
             b = intermediate_scan_loader([*pointwise_idx, block_idx])
             return combine_fn(a, b)
-
 
         return Pointwise.create(
             device=device,
