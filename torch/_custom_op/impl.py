@@ -896,23 +896,35 @@ def get_supported_param_types():
     return dict(result)
 
 
+SUPPORTED_RETURN_TYPES = {
+    torch.Tensor: "Tensor",
+    typing.List[torch.Tensor]: "Tensor[]",
+    int: "SymInt",
+    float: "float",
+    bool: "bool",
+    torch.types.Number: "Scalar",
+}
+
+
 def parse_return(annotation, error_fn):
-    if annotation is torch.Tensor:
-        return "Tensor"
     origin = typing.get_origin(annotation)
     if origin is not tuple:
-        error_fn(
-            "Expected output of func to be type annotated as either Tensor "
-            "or a Tuple of known size of one or more tensors"
-        )
+        if annotation not in SUPPORTED_RETURN_TYPES.keys():
+            error_fn(
+                f"Return has unsupported type {annotation}. "
+                f"The valid types are: {SUPPORTED_RETURN_TYPES}."
+            )
+        return SUPPORTED_RETURN_TYPES[annotation]
+
     args = typing.get_args(annotation)
     for arg in args:
-        if arg is not torch.Tensor:
+        if arg not in SUPPORTED_RETURN_TYPES:
             error_fn(
-                "Expected output of func to be type annotated as either Tensor "
-                "or a Tuple of known size of one or more tensors"
+                f"Return has unsupported type {annotation}. "
+                f"The valid types are: {SUPPORTED_RETURN_TYPES}."
             )
-    return "(" + ", ".join(["Tensor"] * len(args)) + ")"
+
+    return "(" + ", ".join([SUPPORTED_RETURN_TYPES[arg] for arg in args]) + ")"
 
 
 SUPPORTED_PARAM_TYPES = get_supported_param_types()

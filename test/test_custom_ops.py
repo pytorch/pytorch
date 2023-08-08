@@ -618,23 +618,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
             del foo
 
-        with self.assertRaisesRegex(ValueError, "either Tensor or a Tuple"):
-
-            @custom_op(f"{TestCustomOp.test_ns}::foo")
-            def foo(x: Tensor) -> int:
-                raise NotImplementedError()
-
-            del foo
-
-        with self.assertRaisesRegex(ValueError, "either Tensor or a Tuple"):
-
-            @custom_op(f"{TestCustomOp.test_ns}::foo")
-            def foo(x: Tensor) -> Tuple[Tensor, int]:
-                raise NotImplementedError()
-
-            del foo
-
-        with self.assertRaisesRegex(ValueError, "either Tensor or a Tuple"):
+        with self.assertRaisesRegex(ValueError, "unsupported"):
 
             @custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Tensor) -> Tuple[Tensor, ...]:
@@ -642,41 +626,89 @@ class TestCustomOp(CustomOpTestCaseBase):
 
             del foo
 
-    def test_supported_param_types(self):
-        def generate_examples(typ):
-            if typ is int:
-                return [17]
-            if typ is float:
-                return [3.14]
-            if typ is bool:
-                return [True]
-            if typ is str:
-                return ["foo"]
-            if typ is torch.dtype:
-                return [torch.float32]
-            if typ is torch.device:
-                return [torch.device("cpu")]
-            if typ == torch.types.Number:
-                return [2.718]
-            if typ is torch.Tensor:
-                return [torch.tensor(3)]
-            if typ == Optional[torch.types.Number]:
-                return [None, 2.718]
-            origin = typing.get_origin(typ)
-            if origin is Union:
-                args = typing.get_args(typ)
-                assert len(args) == 2 and (
-                    args[0] is type(None) or args[1] is type(None)
-                )
-                elt = args[0] if args[1] is type(None) else args[1]
-                return generate_examples(elt) + [None]
-            if origin is collections.abc.Sequence:
-                args = typing.get_args(typ)
-                assert len(args) == 1
-                examples = generate_examples(args[0])
-                return list(itertools.product(examples, examples)) + []
-            raise AssertionError(f"unsupported param type {typ}")
+    def _generate_examples(self, typ):
+        if typ is int:
+            return [17]
+        if typ is float:
+            return [3.14]
+        if typ is bool:
+            return [True]
+        if typ is str:
+            return ["foo"]
+        if typ is torch.dtype:
+            return [torch.float32]
+        if typ is torch.device:
+            return [torch.device("cpu")]
+        if typ == torch.types.Number:
+            return [2.718]
+        if typ is torch.Tensor:
+            return [torch.tensor(3)]
+        if typ == Optional[torch.types.Number]:
+            return [None, 2.718]
+        origin = typing.get_origin(typ)
+        if origin is Union:
+            args = typing.get_args(typ)
+            assert len(args) == 2 and (args[0] is type(None) or args[1] is type(None))
+            elt = args[0] if args[1] is type(None) else args[1]
+            return self._generate_examples(elt) + [None]
+        if origin is list:
+            args = typing.get_args(typ)
+            assert len(args) == 1
+            elt = args[0]
+            return [
+                self._generate_examples(elt),
+                self._generate_examples(elt),
+                self._generate_examples(elt),
+            ]
+        if origin is collections.abc.Sequence:
+            args = typing.get_args(typ)
+            assert len(args) == 1
+            examples = self._generate_examples(args[0])
+            return list(itertools.product(examples, examples)) + []
+        raise NotImplementedError(
+            f"testrunner cannot generate instanstance of type {typ}"
+        )
 
+    def test_supported_return_types_single_return(self):
+        for typ in torch._custom_op.impl.SUPPORTED_RETURN_TYPES:
+            for example in self._generate_examples(typ):
+                try:
+
+                    @custom_ops.custom_op(f"{self.test_ns}::foo")
+                    def foo(x: Tensor) -> typ:
+                        raise NotImplementedError()
+
+                    @custom_ops.impl(f"{self.test_ns}::foo")
+                    def foo_impl(x: Tensor) -> typ:
+                        return example
+
+                    op = self.get_op(f"{self.test_ns}::foo")
+                    result = op(torch.randn([]))
+                    self.assertEqual(result, example, msg=f"{typ} {example}")
+                finally:
+                    custom_ops._destroy(f"{self.test_ns}::foo")
+
+    def test_supported_return_types_multi_return(self):
+        for typ in torch._custom_op.impl.SUPPORTED_RETURN_TYPES:
+            for example in self._generate_examples(typ):
+                try:
+
+                    @custom_ops.custom_op(f"{self.test_ns}::foo")
+                    def foo(x: Tensor) -> Tuple[typ, typ]:
+                        raise NotImplementedError()
+
+                    @custom_ops.impl(f"{self.test_ns}::foo")
+                    def foo_impl(x: Tensor) -> Tuple[typ, typ]:
+                        return (example, example)
+
+                    op = self.get_op(f"{self.test_ns}::foo")
+                    result = op(torch.randn([]))
+                    expected = (example, example)
+                    self.assertEqual(result, expected, msg=f"{typ} {example}")
+                finally:
+                    custom_ops._destroy(f"{self.test_ns}::foo")
+
+    def test_supported_param_types(self):
         for typ in torch._custom_op.impl.SUPPORTED_PARAM_TYPES:
 
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
@@ -692,7 +724,7 @@ class TestCustomOp(CustomOpTestCaseBase):
                 return x.clone()
 
             try:
-                for example in generate_examples(typ):
+                for example in self._generate_examples(typ):
                     op = self.get_op(f"{self.test_ns}::foo")
                     op(torch.randn([]), example)
                     self.assertEqual(yeet, example, msg=f"{typ} {example}")
