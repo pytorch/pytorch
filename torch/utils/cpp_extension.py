@@ -1343,8 +1343,9 @@ def get_glibcxx_abi_build_flags():
     glibcxx_abi_cflags = ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
     return glibcxx_abi_cflags
 
-def check_precompiler_headers(extra_cflags,
+def check_and_build_precompiler_headers(extra_cflags,
                             extra_include_paths,
+                            with_cuda=None,
                             is_standalone=False):
     r'''
     Precompiled Headers(PCH) can pre-build the same headers and reduce build time for pytorch load_inline modules.
@@ -1358,6 +1359,9 @@ def check_precompiler_headers(extra_cflags,
     2. It is only woeks on GCC/G++. Clang(Clang++) will not boost build and will not break build.
     '''
     if not IS_LINUX:
+        return
+
+    if with_cuda is True:
         return
 
     compiler = get_cxx_compiler()
@@ -1543,8 +1547,9 @@ def load_inline(name,
     cpp_sources.insert(0, '#include <torch/extension.h>')
 
     # Using PreCompile Header('torch/extension.h') to reduce compile time.
-    check_precompiler_headers(extra_cflags,
-                        extra_include_paths)
+    check_and_build_precompiler_headers(extra_cflags,
+                        extra_include_paths,
+                        with_cuda)
 
     # If `functions` is supplied, we create the pybind11 bindings for the user.
     # Here, `functions` is (or becomes, after some processing) a map from
