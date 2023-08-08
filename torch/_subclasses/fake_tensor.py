@@ -428,10 +428,7 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     )
 
 
-# Many of these operators mutate striding in place and output conj depending on input
-# that is not reflected in meta registration.
-# TODO: fix registrations, add all existing impls that are correct
-def unsupported_complex_op(op):
+def stride_incorrect_op(op):
     if op.namespace not in ("aten", "prims"):
         return False
     if op is aten._fft_c2c.default:
@@ -443,10 +440,26 @@ def unsupported_complex_op(op):
     return False
 
 
-# These operators mutate striding in place and output conj depending on input
-# that is not reflected in meta registration
-@register_op_impl(unsupported_complex_op)
-def unsupported_fft(fake_mode, func, *args, **kwargs):
+# These operators have meta implementations with incorrect strides
+@register_op_impl(stride_incorrect_op)
+def wordaround_stride_incorrect_op(fake_mode, func, *args, **kwargs):
+    # This is a workaround for meta implmentations with incorrect strides
+
+    def is_symbolic(x):
+        if isinstance(x, FakeTensor):
+            return x._has_symbolic_sizes_strides
+        if isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            return True
+        return False
+
+    # For static shapes, we can fall back to eager for the real strides
+    if fake_mode.allow_fallback_kernels:
+        require_dynamic = any(
+            is_symbolic(x) for x in itertools.chain(args, kwargs.values())
+        )
+        if not require_dynamic:
+            return run_fallback_kernel(fake_mode, func, args, kwargs, None)
+
     raise UnsupportedOperatorException(func)
 
 
@@ -1436,7 +1449,7 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             "prims::" in func._schema.name
             and hasattr(func, "prim_meta_impl")
-            and not unsupported_complex_op(func)
+            and not stride_incorrect_op(func)
         ):
             with self:
                 return func.prim_meta_impl(*args, **kwargs)
