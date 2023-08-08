@@ -1464,6 +1464,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   // `getKeyFromDevices` is how we get keys for both collectives and batch P2P
   const auto key = getKeyFromDevices(devices);
   auto& ncclStreams = ncclStreams_[key];
+  // TODO(eqy): is this still necessary if avoidRecordStreams_ is set?
   for (const auto i : c10::irange(devices.size())) {
     auto& devEvent = (*work->ncclEndEvents_)[i];
     devEvent.record(ncclStreams[i]);
@@ -1474,7 +1475,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   work->avoidRecordStreams_ = avoidRecordStreams_;
   work->opTimeout_ = options_->timeout;
   work->store_ = store_;
-
+  if (avoidRecordStreams_) {
+    // other functions expect an initialized ptr if avoidRecordStreams_ is set
+    work->stashed_for_allocator_safety_ =
+        std::make_shared<std::vector<at::Tensor>>();
+  }
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
 
