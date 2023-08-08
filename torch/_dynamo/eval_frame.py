@@ -14,6 +14,7 @@ import traceback
 import types
 import warnings
 import weakref
+from collections import namedtuple
 from enum import Enum
 from os.path import dirname, join
 from typing import (
@@ -97,6 +98,17 @@ DONT_WRAP_FILES = {
     inspect.getsourcefile(GraphModule),
     join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"),
 }
+
+
+CacheEntry = namedtuple("CacheEntry", "check_fn, code")
+
+
+def _debug_get_cache_entry_list(code: types.CodeType) -> List[CacheEntry]:
+    """
+    Given a code object, retrieve the cache entries stored in this code.
+    """
+    cache_list = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
+    return list(map(CacheEntry._make, cache_list))
 
 
 class OptimizedModule(torch.nn.Module):
