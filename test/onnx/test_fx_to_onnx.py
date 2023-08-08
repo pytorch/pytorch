@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 
 import onnx
 import pytorch_test_common
@@ -12,7 +11,7 @@ from torch._subclasses import fake_tensor
 from torch.nn import functional as F
 from torch.onnx import dynamo_export, ExportOptions
 from torch.onnx._internal.diagnostics import infra
-from torch.onnx._internal.fx import diagnostics
+from torch.onnx._internal.fx import diagnostics, registration
 from torch.testing._internal import common_utils
 
 
@@ -210,20 +209,28 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             expected_node="aten.convolution.default",
         )
 
-    # TODO: When registry is public, add a custom op cases to replace
-    # aten::add
-    # Temporarily disable this test since updates in ONNXScript annotating correct
-    # overload names for `aten::add` resolves this warning.
-    # The test will be properly fixed w/ new onnx registry api in
-    # https://github.com/pytorch/pytorch/pull/106140
-    @unittest.expectedFailure
     def test_dispatch_overload_fall_back_default_raise_diagnostic_warning(self):
         class TraceModel(torch.nn.Module):
             def forward(self, input):
-                return torch.ops.aten.add(input, input)
+                return torch.ops.aten.add.Tensor(input, input)
+
+        onnx_registry = torch.onnx.OnnxRegistry()
+        self.assertTrue(
+            onnx_registry.is_registered_op(
+                namespace="aten", op_name="add", overload="Tensor"
+            )
+        )
+        # TODO: Replace this example with a torch custom op when overload is supported
+        # Currently, torch only supports custom op with namespace and op_name
+        aten_add_Tensor = registration.OpName.from_name_parts(
+            namespace="aten", op_name="add", overload="Tensor"
+        )
+        onnx_registry._registry.pop(aten_add_Tensor)
 
         x = torch.tensor(3)
-        export_output = dynamo_export(TraceModel(), x)
+        export_output = dynamo_export(
+            TraceModel(), x, export_options=ExportOptions(onnx_registry=onnx_registry)
+        )
         assert_has_diagnostics(
             export_output.diagnostic_context,
             diagnostics.rules.find_operator_overloads_in_onnx_registry,
