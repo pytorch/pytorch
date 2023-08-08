@@ -1022,6 +1022,12 @@ class TestFSDPStateDict(FSDPTest):
             model.inner.buffer: "inner.buffer",
             model.outer.buffer: "outer.buffer",
         }
+        # expect fp16 model.inner.buffer with mixed_precisions
+        # expect fp32 sd.inner.buffer after restoring to original precision
+        # so skip AssertEqual
+        if mixed_precision and not ignore_inner:
+            buffer_to_buffer_name.pop(model.inner.buffer)
+
         fsdp_model = FSDP(
             model,
             ignored_modules=ignored_modules,
