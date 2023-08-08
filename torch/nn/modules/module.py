@@ -1750,7 +1750,7 @@ class Module:
                         persistent = value.persistent
                     else:
                         persistent = name not in self._non_persistent_buffers_set
-                    ### HACK
+                    # === HACK ===
                     # This whole block below should just be:
                     # self.register_buffer(name, value, persistent)
 
@@ -1773,7 +1773,7 @@ class Module:
                             # Assume that the implementation without the argument has the
                             # behavior from before the argument was added: persistent=True
                             self.register_buffer(name, value)
-                    ### HACK END
+                    # === HACK END ===
                 else:
                     super().__setattr__(name, value)
 

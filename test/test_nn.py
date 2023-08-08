@@ -380,9 +380,8 @@ class TestNN(NNTestCase):
                 super().__init__(2, 2)
                 self.bar = Buffer(torch.rand(2, 2))
 
-
-            # persistent is explicitly missing!
             def register_buffer(self, name, value):
+                # persistent is explicitly missing!
                 super().register_buffer(name, value, True)
 
         foo = MyBadModule()
