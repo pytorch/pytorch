@@ -423,7 +423,7 @@ class TestUnshardParams(TestUnshardParamsBase):
             CUDAInitMode.CUDA_BEFORE,
             deterministic=True,
         )
-        model.buffer = nn.Buffer(torch.ones(1))
+        model.register_buffer("buffer", torch.ones(1))
         # Wrap the top-level with FSDP since `named_parameters()` and
         # `named_buffers` will contain FSDP prefixes if called on a non-FSDP
         # root module
@@ -436,7 +436,7 @@ class TestUnshardParams(TestUnshardParamsBase):
             ),
             self.process_group,
         )
-        fsdp_model.buffer = nn.Buffer(torch.ones(1))
+        fsdp_model.register_buffer("buffer", torch.ones(1))
         with FSDP.summon_full_params(fsdp_model):
             for call in ["named_parameters", "named_buffers"]:
                 for (n1, p1), (n2, p2) in itertools.zip_longest(

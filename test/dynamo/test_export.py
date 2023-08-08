@@ -978,7 +978,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             def __init__(self):
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.ones(1, 1))
-                self.buffer = torch.nn.Buffer(torch.ones(1, 1))
+                self.register_buffer("buffer", torch.ones(1, 1))
 
             def forward(self, x):
                 x = torch.nn.functional.linear(x, torch.randn(4, 4))
@@ -2670,7 +2670,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer1 = torch.nn.Buffer(torch.ones(6, 2))
+                self.register_buffer("buffer1", torch.ones(6, 2))
 
             def forward(self, x):
                 x.add_(2)

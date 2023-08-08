@@ -270,12 +270,7 @@ class VariableBuilder:
         # NB: Careful not to close over self to avoid ref cycle from lru_cache
         entries = [
             (
-                (
-                    torch.Tensor,
-                    torch.nn.Buffer,
-                    torch.nn.Parameter,
-                    torch._subclasses.FakeTensor,
-                ),
+                (torch.Tensor, torch.nn.Parameter, torch._subclasses.FakeTensor),
                 cls.wrap_tensor,
             ),
             ((tuple, list, odict_values), cls.wrap_listlike),
@@ -888,7 +883,6 @@ class VariableBuilder:
         else:
             assert type(value) in (
                 torch.Tensor,
-                torch.nn.Buffer,
                 torch.nn.Parameter,
                 torch._subclasses.fake_tensor.FakeTensor,
             ) or is_traceable_wrapper_subclass(value), type(value)
@@ -1516,7 +1510,7 @@ def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
     if (
-        type(e) in (torch.Tensor, torch.nn.Parameter, torch.nn.Buffer, FakeTensor)
+        type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
         or (ignore_subclass and isinstance(e, torch.Tensor))
         or is_traceable_wrapper_subclass(e)
     ):
