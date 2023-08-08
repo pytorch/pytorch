@@ -185,6 +185,7 @@ include_patterns = [
     'torch/_dynamo/repro/**/*.py',
     'torch/_inductor/autotune_process.py',
     'torch/_inductor/graph.py',
+    'torch/_inductor/codegen/common.py',
     'torch/_inductor/codegen/wrapper.py',
     'torch/_inductor/cudagraph_trees.py',
     'torch/_inductor/lowering.py',
