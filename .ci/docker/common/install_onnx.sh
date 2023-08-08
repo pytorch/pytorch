@@ -18,7 +18,7 @@ pip_install \
   # ONNXRuntime should be installed before installing
   # onnx-weekly. Otherwise, onnx-weekly could be
   # overwritten onnx.
-  onnxruntime-training==1.15.0 \
+  onnxruntime-training==1.15.1 \
   parameterized==0.8.1 \
   pytest-cov==4.0.0 \
   pytest-subtests==0.10.0 \
