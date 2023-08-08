@@ -123,7 +123,7 @@ std::tuple<Tensor,optional<int64_t>> _unsafe_view_batch_rule(
     c10::SymIntArrayRef size) {
   auto self_ = moveBatchDimToFront(self, self_bdim);
   SymDimVector view_size(size);
-  view_size.insert(view_size.begin(), self_.size(0));
+  view_size.insert(view_size.begin(), self_.sym_size(0));
 
   // See if the view is valid. If it's not, then we copy.
   // It's OK to copy, because _unsafe_view(x) guarantees that x isn't used

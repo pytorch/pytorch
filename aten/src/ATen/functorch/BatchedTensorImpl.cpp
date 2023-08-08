@@ -86,7 +86,7 @@ bool BatchedTensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) con
   TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
       "NYI: querying is_contiguous inside of vmap for memory_format ",
       "other than torch.contiguous_format");
-  return is_contiguous_;
+  return is_contiguous_default(memory_format);
 }
 
 // The following are some internal inherited methods that we do not support.
