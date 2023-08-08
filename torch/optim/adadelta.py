@@ -151,11 +151,11 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
     """ + r"""
     The `Adadelta` optimizer is a popular choice for deep learning, as it is
     relatively simple to implement and can be effective in a variety of
-    settings. The optimizer is based on the idea of adaptive learning rates,
+    settings.`Adadelta` is based on the idea of adaptive learning rates,
     which means that the learning rate for each parameter is adjusted
-    individually based on its own history of gradients. This can help to
-    prevent the optimizer from getting stuck in local minima, and can also
-    make the optimizer more robust to changes in the data.
+    individually based on its own history of gradients. This strategy can
+    increase robustness against changes in the data and prevent the optimizer
+    from getting stuck in local minima.
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
