@@ -11,6 +11,7 @@ import warnings
 from typing import cast, Dict, Optional, Set
 
 import torch
+import torch._functorch.deprecated as deprecated_func
 from torch.fx._symbolic_trace import is_fx_tracing
 
 from . import config
@@ -194,7 +195,7 @@ def _allowed_function_ids():
                 if isinstance(obj, torch._ops.HigherOrderOperator):
                     continue
                 # We want to trace through `grad`
-                if obj is torch.func.grad:
+                if obj in (torch.func.grad, deprecated_func.grad):
                     continue
 
                 if isinstance(obj, types.ModuleType):
