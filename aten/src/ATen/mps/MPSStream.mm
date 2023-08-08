@@ -20,6 +20,7 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
   TORCH_CHECK(_stream.device_type() == DeviceType::MPS);
   _serialQueue = dispatch_queue_create("metal gpu stream", nullptr);
   _executionDescriptor = [MPSGraphExecutionDescriptor new];
+  _executableExecutionDescriptor = [MPSGraphExecutableExecutionDescriptor new];
   _compilationDescriptor = [MPSGraphCompilationDescriptor new];
 
   // disable commitAndContinue if Signpost tracing is enabled
@@ -38,8 +39,11 @@ MPSStream::~MPSStream() {
   _commandQueue = nil;
   [_executionDescriptor release];
   [_compilationDescriptor release];
+  [_executableExecutionDescriptor release];
+
   _executionDescriptor = nil;
   _compilationDescriptor = nil;
+  _executableExecutionDescriptor = nil;
 
   assert(_commandBuffer == nil);
 }
@@ -207,36 +211,59 @@ void MPSStream::copy_and_sync(id<MTLBuffer> srcBuffer,
        !non_blocking ? SyncType::COMMIT_AND_WAIT : SyncType::COMMIT);
 }
 
-void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results, SyncType syncType) {
+void MPSStream::executeMPSGraph(MPSGraph* mpsGraph,
+                                NSDictionary* feeds,
+                                NSDictionary* results,
+                                SyncType syncType,
+                                MPSGraphExecutable* executable) {
   auto& profiler = getMPSProfiler();
   const bool isGraphProfilingEnabled = profiler.isOperationProfilingEnabled();
 
   dispatch_sync(_serialQueue, ^() {
-    endKernelCoalescing();
-    if (isGraphProfilingEnabled) {
-      // this function call is only relevant for interval-based Signposts
-      // which exclude schedule time (only includes GPU run time)
-      profiler.beginProfileGPUInterval(mpsGraph);
-    }
-    // note: CommitAndContinue feature is enabled/disabled via "_executionDescriptor"
-    [mpsGraph encodeToCommandBuffer:commandBuffer()
-                              feeds:feeds
-                   targetOperations:nil
-                  resultsDictionary:results
-                executionDescriptor:_executionDescriptor];
+    @autoreleasepool {
+      endKernelCoalescing();
+      if (isGraphProfilingEnabled) {
+        // this function call is only relevant for interval-based Signposts
+        // which exclude schedule time (only includes GPU run time)
+        profiler.beginProfileGPUInterval(mpsGraph);
+      }
 
-    SyncType _syncType = syncType;
-    // if commitAndContinue is disabled, we need to always commit manually after encoding
-    if (!_enableCommitAndContinue && syncType != SyncType::COMMIT_AND_WAIT) {
-      _syncType = SyncType::COMMIT;
-    }
+      if (executable) {
+        NSMutableArray* inputsArray = [NSMutableArray arrayWithCapacity:[feeds count]];
+        NSMutableArray* resultsArray = [NSMutableArray arrayWithCapacity:[results count]];
+        NSUInteger inputIndex = 0, ouputIndex = 0;
+        for (MPSGraphTensor* tensor in [executable feedTensors]) {
+          inputsArray[inputIndex++] = feeds[tensor];
+        }
 
-    // check if graph execution profiling is enabled
-    if (isGraphProfilingEnabled) {
-      // with profiler enabled, we commit after adding the completedHandler in MPSProfiler
-      profiler.endProfileKernel(mpsGraph, _syncType);
-    } else {
-      synchronize(_syncType);
+        for (MPSGraphTensor* tensor in [executable targetTensors]) {
+          resultsArray[ouputIndex++] = results[tensor];
+        }
+
+        [executable encodeToCommandBuffer:commandBuffer()
+                              inputsArray:inputsArray
+                             resultsArray:resultsArray
+                      executionDescriptor:_executableExecutionDescriptor];
+      } else {
+        // note: CommitAndContinue feature is enabled/disabled via "_executionDescriptor"
+        [mpsGraph encodeToCommandBuffer:commandBuffer()
+                                  feeds:feeds
+                       targetOperations:nil
+                      resultsDictionary:results
+                    executionDescriptor:_executionDescriptor];
+      }
+      // if commitAndContinue is disabled, we need to always commit manually after encoding
+      SyncType _syncType = _enableCommitAndContinue == false ? SyncType::COMMIT : syncType;
+      if (_syncType != SyncType::COMMIT_AND_WAIT) {
+        _syncType = SyncType::COMMIT;
+      }
+      // check if graph execution profiling is enabled
+      if (isGraphProfilingEnabled) {
+        // with profiler enabled, we commit after adding the completedHandler in MPSProfiler
+        profiler.endProfileKernel(mpsGraph, _syncType);
+      } else {
+        synchronize(_syncType);
+      }
     }
   });
 }

@@ -46,6 +46,40 @@ void runMPSGraph(MPSStream* mpsStream, MPSGraph* mpsGraph, NSDictionary* feeds, 
   mpsStream->executeMPSGraph(mpsGraph, feeds, results, SyncType::COMMIT_ADAPTIVE);
 }
 
+void runMPSGraph(MPSStream* mpsStream,
+                 MPSCachedGraph* cachedGraph,
+                 NSDictionary* feeds,
+                 NSDictionary* results,
+                 bool disableTypeInference,
+                 SyncType syncType) {
+  MPSGraphExecutable* executable = nil;
+  if (disableTypeInference) {
+    @autoreleasepool {
+      MPSGraph* mpsGraph = cachedGraph->graph();
+      executable = cachedGraph->getExecultable();
+      if (!executable) {
+        NSMutableDictionary* shapes = [[NSMutableDictionary new] autorelease];
+        for (MPSGraphTensor* graphTensor in feeds) {
+          MPSGraphTensorData* graphTensorData = [feeds objectForKey:graphTensor];
+          shapes[graphTensor] = [[[MPSGraphShapedType alloc] initWithShape:nil
+                                                                  dataType:graphTensorData.dataType] autorelease];
+        }
+        MPSGraphCompilationDescriptor* compilationDescriptor = [[MPSGraphCompilationDescriptor new] autorelease];
+        [compilationDescriptor disableTypeInference];
+        executable = [[mpsGraph compileWithDevice:nil
+                                            feeds:shapes
+                                    targetTensors:[results allKeys]
+                                 targetOperations:nil
+                            compilationDescriptor:compilationDescriptor] retain];
+        // store the executable within the cachedGraph to reuse next time
+        cachedGraph->setExecultable(executable);
+      }
+    }
+  }
+
+  mpsStream->executeMPSGraph(cachedGraph->graph(), feeds, results, syncType, executable);
+}
+
 MPSDataType getMPSDataType(ScalarType scalar_type) {
   switch (scalar_type) {
     case ScalarType::Float:
@@ -234,7 +268,7 @@ std::string getArrayRefString(const IntArrayRef s) {
   return ss.str();
 }
 
-std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype) {
+std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, bool exclude_shape) {
   std::string str;
   // The key format per tensor would look like ":Float32[1,1,1,10]:"
   for (const Tensor& tensor : tensors) {
@@ -245,8 +279,12 @@ std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype) {
       if (tensor.dim() == 0) {
         str += "Scalar";
       } else {
-        const NSString* ns_shape_key = [[getMPSShape(tensor) valueForKey:@"description"] componentsJoinedByString:@","];
-        str += std::string(ns_shape_key.UTF8String);
+        if (exclude_shape) {
+          str += "NA";
+        } else {
+          str +=
+              std::string([[getMPSShape(tensor) valueForKey:@"description"] componentsJoinedByString:@","].UTF8String);
+        }
       }
       str += "]";
     } else {

@@ -35,29 +35,6 @@ static std::vector<int64_t> getTopK0Shape(IntArrayRef sizes, const int64_t dim_)
   return numbers;
 }
 
-static void check_shape_except_dim(const Tensor& first, const Tensor& second, int dimension, int index) {
-  int first_dims = first.dim();
-  int second_dims = second.dim();
-  TORCH_CHECK(
-      first_dims == second_dims, "Tensors must have same number of dimensions: got ", first_dims, " and ", second_dims);
-  for (int dim = 0; dim < first_dims; dim++) {
-    if (dim == dimension) {
-      continue;
-    }
-    int64_t first_dim_size = first.size(dim);
-    int64_t second_dim_size = second.size(dim);
-    TORCH_CHECK(first_dim_size == second_dim_size,
-                "Sizes of tensors must match except in dimension ",
-                dim,
-                ". Got ",
-                static_cast<long long>(first_dim_size),
-                " and ",
-                static_cast<long long>(second_dim_size),
-                " (The offending index is ",
-                index,
-                ")");
-  }
-}
 } // namespace mps
 
 // topk
@@ -302,8 +279,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
   idx = 0;
   for (const Tensor& tensor : materialized_inputs) {
     if (!should_skip(tensor)) {
-      // TODO: Factor out `check_shape_except_dim`
-      check_shape_except_dim(notSkippedTensor, tensor, dimension, idx);
+      check_cat_shape_except_dim(notSkippedTensor, tensor, dimension, idx);
       cat_dim_size += tensor.size(dimension);
       idx++;
     }
@@ -325,8 +301,16 @@ TORCH_IMPL_FUNC(cat_out_mps)
   };
 
   @autoreleasepool {
-    string key = "cat_out_mps:" + to_string(dimension) + getTensorsStringKey(input_tensors, /*short_dtype*/ true) +
-        ":" + (memory_format == MemoryFormat::ChannelsLast ? "NHWC" : "NCHW");
+    string key =
+        "cat_out_mps:" + to_string(dimension) + ":" + (memory_format == MemoryFormat::ChannelsLast ? "NHWC" : "NCHW");
+    if (!all_same_dtype) {
+      key += getTensorsStringKey(input_tensors, true, all_same_sizes_and_stride);
+    } else {
+      key += ":" + getMPSTypeString(input_tensors[0].scalar_type(), true) + ":" + to_string(inputs.size());
+    }
+    for (const auto idx : skipped_tensor_indices) {
+      key += "," + std::to_string(idx);
+    }
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       auto len_tensor_array = inputs.size() - skipped_tensor_indices.size();
@@ -339,8 +323,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
         if (tensor.scalar_type() == kBool) {
           scalar_type = MPSDataTypeInt8;
         }
-        newCachedGraph->inputTensors_[idx] =
-            mpsGraphRankedPlaceHolder(mpsGraph, scalar_type, getMPSShape(tensor, MemoryFormat::Contiguous));
+        newCachedGraph->inputTensors_[idx] = mpsGraphUnrankedPlaceHolder(mpsGraph, scalar_type);
         if (tensor.scalar_type() != out_dtype) {
           castInputTensors[idx] = [mpsGraph castTensor:newCachedGraph->inputTensors_[idx]
                                                 toType:getMPSDataType(out_dtype)
@@ -371,7 +354,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
         }
         inputPlaceholders.emplace_back(cachedGraph->inputTensors_[t_idx],
                                        tensor,
-                                       getMPSShape(tensor, MemoryFormat::Contiguous),
+                                       nullptr,
                                        /*gatherTensorData*/ true,
                                        scalar_type);
         t_idx++;
@@ -393,7 +376,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
         @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
 
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph, feeds, results, /*disable_type_inference*/ true);
   }
 }
 
