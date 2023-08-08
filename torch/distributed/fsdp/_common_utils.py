@@ -111,6 +111,7 @@ class _FSDPState(_State):
         # FSDP/fully_shard.
         self._ignored_modules: Set[nn.Module] = set()
         self._ignored_params: Set[nn.Parameter] = set()
+        self._ignored_buffer_names: Set[str] = set()
         self.process_group: Optional[dist.ProcessGroup] = None
         self.rank: int = -1
         self.world_size: int = -1
