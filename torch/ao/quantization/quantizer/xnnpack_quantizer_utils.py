@@ -466,32 +466,6 @@ def _annotate_adaptive_avg_pool2d(
     )
 
 
-def _annotate_mean(
-    gm: torch.fx.GraphModule,
-    quantization_config: QuantizationConfig,
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> None:
-    _annotate_input_out_obs_sharing_op(
-        torch.mean, gm, quantization_config, filter_fn
-    )
-
-
-def _annotate_hardtanh(
-    gm: torch.fx.GraphModule,
-    quantization_config: QuantizationConfig,
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> None:
-    _annotate_input_out_obs_sharing_op(
-        torch.nn.Hardtanh, gm, quantization_config, filter_fn
-    )
-    _annotate_input_out_obs_sharing_op(
-        torch.nn.ReLU6, gm, quantization_config, filter_fn
-    )
-    _annotate_input_out_obs_sharing_op(
-        F.hardtanh, gm, quantization_config, filter_fn
-    )
-
-
 def _annotate_add_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -576,8 +550,6 @@ _OP_TO_ANNOTATOR = {
     "max_pool2d": _annotate_max_pool2d,
     "add": _annotate_add,
     "add_relu": _annotate_add_relu,
-    "mean": _annotate_mean,
-    "hardtanh": _annotate_hardtanh,
     "adaptive_avg_pool2d": _annotate_adaptive_avg_pool2d,
     # input output only gru
     "gru_io_only": _annotate_gru_io_only,

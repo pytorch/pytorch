@@ -334,8 +334,6 @@ class XNNPACKQuantizer(Quantizer):
         self._annotate_conv2d_patterns(model, config, filter_fn)
         self._annotate_max_pool2d(model, config, filter_fn)
         self._annotate_add_patterns(model, config, filter_fn)
-        self._annotate_mean(model, config, filter_fn)
-        self._annotate_hardtanh(model, config, filter_fn)
         self._annotate_adaptive_avg_pool2d(model, config, filter_fn)
         self._annotate_gru_io_only(model, config, filter_fn)
         return model
@@ -425,22 +423,6 @@ class XNNPACKQuantizer(Quantizer):
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         return _OP_TO_ANNOTATOR["linear"](gm, quantization_config, filter_fn)
-
-    def _annotate_mean(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> None:
-        return _OP_TO_ANNOTATOR["mean"](gm, quantization_config, filter_fn)
-
-    def _annotate_hardtanh(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> None:
-        return _OP_TO_ANNOTATOR["hardtanh"](gm, quantization_config, filter_fn)
 
     def _annotate_adaptive_avg_pool2d(
         self,
