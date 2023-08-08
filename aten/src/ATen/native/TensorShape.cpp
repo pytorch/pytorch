@@ -1349,8 +1349,12 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   TORCH_CHECK(length >= 0, "narrow(): length must be non-negative.");
   auto cur_size = self.size(dim);
-  if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
-    start = maybe_wrap_dim(start, cur_size);
+  TORCH_CHECK_INDEX(
+    -cur_size <= start && start <= cur_size,
+    "start out of range (expected to be in range of [", -cur_size, ", ", cur_size, "], but got ", start, ")"
+  )
+  if (start < 0) {
+    start = start + cur_size;
   }
   TORCH_CHECK(start <= cur_size - length,
            "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
@@ -1361,7 +1365,10 @@ Tensor narrow_symint(const Tensor& self, int64_t dim, SymInt start, SymInt lengt
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   TORCH_SYM_CHECK(length.sym_ge(0), "narrow(): length must be non-negative.");
   auto cur_size = self.sym_size(dim);
-  TORCH_SYM_CHECK((-cur_size).sym_le(start).sym_and(start.sym_le(cur_size)), "narrow(): start must be within [-cur_size, cur_size]");
+  TORCH_CHECK_INDEX(
+    ((-cur_size).sym_le(start).sym_and(start.sym_le(cur_size))).expect_true(__FILE__, __LINE__),
+    "start out of range (expected to be in range of [", -cur_size, ", ", cur_size, "], but got ", start, ")"
+  )
   if (start < 0) {
     start = start + cur_size;
   }

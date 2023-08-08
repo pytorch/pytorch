@@ -5016,11 +5016,11 @@ def error_inputs_narrow_narrow_copy(op_info, device, *, is_narrow, is_ref):
     else:
         yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, M + 1, 0),
                          error_type=IndexError,
-                         error_regex=r"Dimension out of range \(expected to be in range of \[-10, 9\], but got 11\)")
+                         error_regex=r"start out of range \(expected to be in range of \[-10, 10\], but got 11\)")
     # out of bounds start (negative)
     yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, -M - 1, 0),
                      error_type=IndexError,
-                     error_regex=r"Dimension out of range \(expected to be in range of \[-10, 9\], but got -11\)")
+                     error_regex=r"start out of range \(expected to be in range of \[-10, 10\], but got -11\)")
 
     # out of bounds length
     yield ErrorInput(SampleInput(make_arg((S, L, M)), 2, 0, M + 1),
