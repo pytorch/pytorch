@@ -6,17 +6,16 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import sympy
 
 import torch
-
 import torch.fx
 import torch.fx._pytree as fx_pytree
-from torch.fx._compatibility import compatibility
-from torch.fx.experimental.symbolic_shapes import SymInt
-from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from torch.fx.passes.infra.pass_manager import PassManager
 
 import torch.utils._pytree as pytree
 from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx._compatibility import compatibility
+from torch.fx.experimental.symbolic_shapes import SymInt
+from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.fx.passes.infra.pass_manager import PassManager
 
 from . import error
 from .pass_base import PassType
@@ -358,21 +357,6 @@ class ExportedProgram:
             f"Symbol to range: {self.range_constraints}\n"
         )
         return string
-
-    def __deepcopy__(
-        self, memo: Optional[Dict[int, Any]] = None
-    ) -> "ExportedProgram":
-        gm = copy.deepcopy(self.graph_module, memo)
-        new_ep = ExportedProgram(
-            gm,
-            gm.graph,
-            copy.deepcopy(self.graph_signature, memo),
-            copy.deepcopy(self.call_spec, memo),
-            copy.deepcopy(self.state_dict, memo),
-            copy.deepcopy(self.range_constraints, memo),
-            copy.deepcopy(self.equality_constraints, memo),
-        )
-        return new_ep
 
     def module(self) -> torch.nn.Module:
         """
