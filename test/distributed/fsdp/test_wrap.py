@@ -11,6 +11,7 @@ from typing import Callable, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributed.fsdp._wrap_utils import _validate_frozen_params
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     BackwardPrefetch,
     CPUOffload,

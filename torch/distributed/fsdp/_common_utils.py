@@ -27,6 +27,7 @@ import torch.distributed as dist
 import torch.distributed.fsdp.flat_param as flat_param_file
 import torch.nn as nn
 from torch.distributed._composable_state import _get_module_state, _State
+from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
@@ -389,12 +390,14 @@ def _apply_to_modules(
                         submodule_name == "_fsdp_wrapped_module"
                         or submodule_name == "_dmp_wrapped_module"
                     ):
-                        # warnings.warn(
-                        #     "An unexpected prefix is detected. This case "
-                        #     " should only happen when using DMP with FSDP. "
-                        #     f"prefix = {prefix}, "
-                        #     f"submodule_name = {submodule_name}"
-                        # )
+                        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                            # TODO(voz): Don't graph break on this
+                            warnings.warn(
+                                "An unexpected prefix is detected. This case "
+                                " should only happen when using DMP with FSDP. "
+                                f"prefix = {prefix}, "
+                                f"submodule_name = {submodule_name}"
+                            )
                         new_prefix = prefix
                     elif submodule_name == "module":
                         warnings.warn(
