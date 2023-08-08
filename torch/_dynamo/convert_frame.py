@@ -33,7 +33,6 @@ from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
     format_error_msg,
-    format_error_msg_verbose,
     InternalTorchDynamoError,
     TorchRuntimeError,
     unimplemented,
@@ -566,17 +565,7 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
             # possible to accidentally not log at all.
             record_filename = getattr(e, "record_filename", None)
             code = frame.f_code
-            if config.is_fbcode():
-                from torch._dynamo.fb.logging import (  # type: ignore[import]
-                    log_dynamo_suppress_errors,
-                )
-
-                error_msg = format_error_msg_verbose(e, code, record_filename, frame)
-                log_dynamo_suppress_errors(
-                    code.co_name, code.co_filename, code.co_firstlineno, error_msg
-                )
-            else:
-                error_msg = format_error_msg(e, code, record_filename, frame)
+            error_msg = format_error_msg(e, code, record_filename, frame)
 
             if soft_fail:
                 log.info(error_msg, exc_info=True)
