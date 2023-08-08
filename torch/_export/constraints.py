@@ -1,4 +1,3 @@
-import sys
 from typing import Optional
 
 import torch
@@ -11,12 +10,6 @@ def constrain_as_value(symbol, min: Optional[int] = None, max: Optional[int] = N
     Add min/max constraint on the intermediate symbol at tracing time. If called in eager mode,
     it will still check if the input value is within the specified range.
     """
-
-    if min is None:
-        min = 0
-    if max is None:
-        max = sys.maxsize
-
     torch.sym_constrain_range(symbol, min=min, max=max)
 
 
@@ -29,4 +22,4 @@ def constrain_as_size(symbol):
     """
     # NOTE: If min, max value are not passed, we will assume it means this is only used for compiler hint.
     # Runtime will assume min value will be 0 and max value will be INT_MAX
-    torch.sym_constrain_range_for_size(symbol)
+    torch.sym_constrain_for_size(symbol)

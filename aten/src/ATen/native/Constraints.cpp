@@ -16,6 +16,8 @@
 #include <ATen/ops/_make_dep_token_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/sym_constrain_range_native.h>
+#include <ATen/ops/sym_constrain_for_size_native.h>
+#include <ATen/ops/_functional_sym_constrain_for_size_native.h>
 #endif
 
 namespace at {
@@ -26,7 +28,7 @@ void sym_constrain_range(
     c10::optional<int64_t> min,
     c10::optional<int64_t> max) {
 
-    int64_t min_val = min.has_value() ? min.value() : 0;
+    int64_t min_val = min.has_value() ? min.value() : std::numeric_limits<int64_t>::min();
     int64_t max_val = max.has_value() ? max.value() : std::numeric_limits<int64_t>::max();
     int64_t size_as_int = size.toInt();
 
@@ -51,11 +53,11 @@ Tensor _functional_sym_constrain_range(
   return dep_token.clone();
 }
 
-void sym_constrain_range_for_size(const Scalar& size) {
+void sym_constrain_for_size(const Scalar& size) {
 }
 
-Tensor _functional_sym_constrain_range_for_size(const Scalar& size, const Tensor& dep_token) {
-  sym_constrain_range_for_size(size);
+Tensor _functional_sym_constrain_for_size(const Scalar& size, const Tensor& dep_token) {
+  sym_constrain_for_size(size);
   return dep_token.clone();
 }
 

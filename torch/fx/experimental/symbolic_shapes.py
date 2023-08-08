@@ -312,7 +312,12 @@ def _constrain_symbol_range(shape_env, s: sympy.Symbol, min: int, max: int):
     else:
         shape_env.var_to_range[s] = ValueRanges(min, max)
 
-    shape_env.runtime_var_to_range[s] = shape_env.var_to_range[s]
+    if r := shape_env.runtime_var_to_range.get(s, None):
+        shape_env.runtime_var_to_range[s] = ValueRanges(
+            builtins.max(r.lower, min), builtins.min(r.upper, max)
+        )
+    else:
+        shape_env.runtime_var_to_range[s] = ValueRanges(min, max)
 
 def _constrain_unbacked_symint_for_size(a):
     if isinstance(a, int):
@@ -329,20 +334,20 @@ def _constrain_unbacked_symint_for_size(a):
 
     if r := shape_env.var_to_range.get(s, None):
         shape_env.var_to_range[s] = ValueRanges(
-            builtins.max(r.lower, 2), builtins.min(r.upper, sys.maxsize)
+            builtins.max(r.lower, 2), builtins.min(r.upper, sympy.oo)
         )
     else:
-        shape_env.var_to_range[s] = ValueRanges(2, sys.maxsize)
+        shape_env.var_to_range[s] = ValueRanges(2, sympy.oo)
 
     # The only reason r.lower > 0 is that this symbol is constrained before via constrain_as_value,
     # so we should respect that
     if r := shape_env.runtime_var_to_range.get(s, None):
         shape_env.var_to_range[s] = ValueRanges(
-            builtins.max(r.lower, 0), builtins.min(r.upper, sys.maxsize)
+            builtins.max(r.lower, 0), builtins.min(r.upper, sympy.oo)
         )
 
     else:
-        shape_env.runtime_var_to_range[s] = ValueRanges(0, sys.maxsize)
+        shape_env.runtime_var_to_range[s] = ValueRanges(0, sympy.oo)
 
 
 # inclusive both ways

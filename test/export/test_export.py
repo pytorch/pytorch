@@ -61,7 +61,7 @@ class TestDynamismExpression(TestCase):
 
         inp = (torch.tensor([3]),)
 
-        with self.assertRaisesRegex(torchdynamo.exc.UserError, "Invalid ranges"):
+        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 3 between \[4, 5\]"):
             export(conflicting_constraints, inp)
 
     def test_export_assume_static_by_default(self):

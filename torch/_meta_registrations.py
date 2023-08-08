@@ -411,16 +411,16 @@ def functional_sym_constrain_range(size, min, max, dep_token):
     return dep_token
 
 
-@register_meta(aten.sym_constrain_range_for_size.default)
-def sym_constrain_range_for_size(size):
+@register_meta(aten.sym_constrain_for_size.default)
+def sym_constrain_for_size(size):
     if isinstance(size, (SymFloat, SymBool)):
         raise ValueError("Constraining SymFloat or Symbool is nyi")
     _constrain_unbacked_symint_for_size(size)
 
 
-@register_meta(aten._functional_sym_constrain_range_for_size.default)
-def functional_sym_constrain_range_for_size(size, min, max, dep_token):
-    aten.sym_constrain_range_for_size(size)
+@register_meta(aten._functional_sym_constrain_for_size.default)
+def functional_sym_constrain_for_size(size, min, max, dep_token):
+    aten.sym_constrain_for_size(size)
     return dep_token
 
 
