@@ -36,7 +36,7 @@ import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
 from torch._subclasses import fake_tensor
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
 from ..fx import GraphModule
@@ -918,10 +918,7 @@ def export(
         out_guards = None
         graph_captured_input = None
         graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
-        fake_mode = _guards.detect_fake_mode(args)
-        _allow_fake_constant: bool = (
-            fake_mode is not None
-        )  # Allow fake constants during symbolic tracing
+        fake_mode = None
 
         def produce_matching(source_args, candidate_args):
             matched_elements_positions = []
@@ -971,7 +968,12 @@ def export(
             graph = gm
 
             nonlocal fake_mode, example_inputs
-            fake_mode = fake_mode or _guards.detect_fake_mode(inner_example_inputs)
+            # NB: do NOT pass inner_example_inputs here, we are detecting the
+            # Dynamo allocated fake mode, which should be DISTINCT from a
+            # potential outer ambient fake mode which the user provided.
+            # example_inputs is always the user specified inputs, so they
+            # would have the wrong fake mode attached to them
+            fake_mode = _guards.detect_fake_mode()
             example_inputs = inner_example_inputs
 
             def result_capturing_wrapper(*graph_inputs):
@@ -997,7 +999,7 @@ def export(
             automatic_dynamic_shapes=False,
             capture_dynamic_output_shape_ops=True,
             capture_scalar_outputs=True,
-        ), torch._guards.export_fake_mode(fake_mode):
+        ):
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
                 hooks=Hooks(
@@ -1120,7 +1122,9 @@ def export(
                 with torch.fx.traceback.preserve_node_meta():
                     return torch.fx.Interpreter(graph).run(*args)
 
-            with enable_python_dispatcher(), fake_mode:
+            with maybe_disable_fake_tensor_mode(), enable_python_dispatcher(), (
+                fake_mode
+            ):
                 try:
                     graph = make_fx(
                         graph_with_interpreter,
@@ -1128,7 +1132,7 @@ def export(
                         tracing_mode="real",
                         _allow_non_fake_inputs=True,
                         pre_dispatch=pre_dispatch,
-                        _allow_fake_constant=_allow_fake_constant,
+                        _allow_fake_constant=False,
                     )(*example_fake_inputs)
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
