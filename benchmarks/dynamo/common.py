@@ -297,6 +297,7 @@ CI_SKIP_OPTIMIZER = {
 
 CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "sam",
+    "dlrm",
 }
 
 

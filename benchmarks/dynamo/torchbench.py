@@ -227,6 +227,11 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
     "tts_angular",
 }
 
+# models in canary_models that we should run anyway
+CANARY_MODELS = {
+    "torchrec_dlrm",
+}
+
 
 class TorchBenchmarkRunner(BenchmarkRunner):
     def __init__(self):
@@ -392,9 +397,16 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return device, benchmark.name, model, example_inputs, batch_size
 
     def iter_model_names(self, args):
-        from torchbenchmark import _list_model_paths
+        from torchbenchmark import _list_canary_model_paths, _list_model_paths
 
         models = _list_model_paths()
+        models += [
+            f
+            for f in _list_canary_model_paths()
+            if os.path.basename(f) in CANARY_MODELS
+        ]
+        models.sort()
+
         start, end = self.get_benchmark_indices(len(models))
         for index, model_path in enumerate(models):
             if index < start or index >= end:

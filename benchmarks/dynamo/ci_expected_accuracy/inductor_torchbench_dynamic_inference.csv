@@ -12,6 +12,7 @@ basic_gnn_sage,pass,0
 clip,pass,0
 cm3leon_generate,pass,6
 dcgan,pass,0
+dlrm,fail_to_run,0
 doctr_det_predictor,pass,4
 doctr_reco_predictor,fail_accuracy,4
 drq,pass,0

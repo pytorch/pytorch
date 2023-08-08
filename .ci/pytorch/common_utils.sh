@@ -165,6 +165,7 @@ function install_torchrec_and_fbgemm() {
   fbgemm_commit=$(get_pinned_commit fbgemm)
   pip_uninstall torchrec-nightly
   pip_uninstall fbgemm-gpu-nightly
+  pip_install setuptools-git-versioning
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
 }

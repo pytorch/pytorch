@@ -10,6 +10,7 @@ basic_gnn_gin,pass,8
 basic_gnn_sage,pass,8
 clip,pass,8
 dcgan,pass,8
+dlrm,pass,8
 drq,pass,7
 fastNLP_Bert,pass,13
 functorch_dp_cifar10,pass,8
