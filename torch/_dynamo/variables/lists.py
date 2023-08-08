@@ -1,3 +1,4 @@
+import builtins
 import collections
 import dataclasses
 import functools
@@ -31,6 +32,7 @@ class BaseListVariable(VariableTracker):
             torch.Size: SizeVariable,
             tuple: TupleVariable,
             set: SetVariable,
+            collections.deque: DequeVariable,
         }[obj]
 
     def __init__(
@@ -426,6 +428,16 @@ class DequeVariable(CommonListMethodsVariable):
                     **options,
                 ),
             )
+        elif name == "appendleft" and self.mutable_local:
+            assert not kwargs
+            return tx.replace_all(
+                self,
+                DequeVariable(
+                    [args[0]] + list(self.items),
+                    regen_guards=False,
+                    **options,
+                ),
+            )
         elif name == "popleft" and self.mutable_local:
             assert not args
             assert not kwargs
@@ -445,6 +457,7 @@ class TupleVariable(BaseListVariable):
         return tuple
 
     def reconstruct(self, codegen):
+        print("CODEGEN FOR?", self.items)
         codegen.foreach(self.items)
         return [create_instruction("BUILD_TUPLE", arg=len(self.items))]
 
@@ -540,6 +553,10 @@ class SizeVariable(TupleVariable):
             assert not kwargs and len(args) == 1
             out = self.get_item_dyn(tx, args[0])
             return out
+        if name == "numel":
+            return ConstantVariable(
+                torch.Size([item.value for item in self.items]).numel()
+            )
         return super().call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx, arg: VariableTracker):
@@ -815,6 +832,10 @@ class SetVariable(VariableTracker):
             return SetVariable.SetElement(vt, tensor_node)
         if isinstance(vt, ConstantVariable):
             return SetVariable.SetElement(vt, vt.value)
+        if isinstance(vt, variables.UserDefinedObjectVariable):
+            return SetVariable.SetElement(vt, vt.value)
+        if isinstance(vt, variables.NNModuleVariable):
+            return SetVariable.SetElement(vt, tx.output.get_submodule(vt.module_key))
 
         unimplemented(f"Sets with {type(vt)} NYI")
 
@@ -888,7 +909,41 @@ class SetVariable(VariableTracker):
             )
             return result
         elif name == "__len__":
-            return ConstantVariable(len(self.items)).add_options(options)
+            return ConstantVariable(len(self.items))
+        elif name == "__contains__":
+            assert len(args) == 1
+            assert not kwargs
+
+            search = args[0]
+
+            def _search(item):
+                if isinstance(item, variables.NNModuleVariable):
+                    return (
+                        self.tx.output.nn_modules[item.module_key]
+                        == search.as_python_constant()
+                    )
+                return item.as_python_constant() == search.as_python_constant()
+
+                x.as_python_constant() == search.as_python_constant()
+
+            if check_constant_args(args, {}) and search.is_python_constant():
+                result = any(_search(x) for x in self.items)
+                return variables.ConstantVariable(result, **options)
+
+            from .builtin import BuiltinVariable
+
+            result = None
+            for x in self.items:
+                check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+                if result is None:
+                    result = check
+                else:
+                    result = BuiltinVariable(operator.or_).call_function(
+                        tx, [check, result], {}
+                    )
+            if result is None:
+                return ConstantVariable(None)
+            return result
         else:
             return super().call_method(tx, name, args, kwargs)
 

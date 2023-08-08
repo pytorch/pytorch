@@ -501,7 +501,7 @@ def proxy_args_kwargs(args, kwargs):
         from .variables.base import typestr
 
         raise unimplemented(
-            f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
+            f"Tried to get proxy to call_function with args: {typestr(*args)} kwargs: {typestr(*list(kwargs.values()))}"
         ) from e
 
 
@@ -1299,6 +1299,8 @@ def get_fake_value(node, tx):
         return e
 
     def visit(n: torch.fx.Node):
+        if "example_value" not in n.meta:
+            print("MISSING META?", n)
         return n.meta["example_value"]
 
     args, kwargs = torch.fx.node.map_arg((node.args, node.kwargs), visit)

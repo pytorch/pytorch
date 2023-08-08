@@ -64,7 +64,7 @@ class SideEffects:
     """
 
     id_to_variable: Dict[int, VariableTracker]
-    store_attr_mutations: Dict[AttributeMutation, Dict[str, VariableTracker]]
+    store_attr_mutations: Dict[AttributeMutation, Dict[str, List[VariableTracker]]]
     keepalive: List[Any]
 
     def __init__(
@@ -160,14 +160,21 @@ class SideEffects:
         self.check_allowed_side_effect(item)
         if item.mutable_local not in self.store_attr_mutations:
             self.store_attr_mutations[item.mutable_local] = collections.OrderedDict()
-        self.store_attr_mutations[item.mutable_local][name] = value
+        # if name in self.store_attr_mutations[item.mutable_local]:
+        # result = self.store_attr_mutations[item.mutable_local][name]
+        # if isinstance(result, variables.DeletedVariable):
+        #     # unimplemented("Writing to deleted field")
+        #     print("Writing to deleted field")
+        if name not in self.store_attr_mutations[item.mutable_local]:
+            self.store_attr_mutations[item.mutable_local][name] = []
+        self.store_attr_mutations[item.mutable_local][name].append(value)
 
     def load_attr(self, item, name, deleted_ok=False):
         assert self.is_attribute_mutation(item)
-        result = self.store_attr_mutations[item.mutable_local][name]
-        if not deleted_ok and isinstance(result, variables.DeletedVariable):
+        results = self.store_attr_mutations[item.mutable_local][name]
+        if not deleted_ok and isinstance(results[-1], variables.DeletedVariable):
             unimplemented("read deleted attribute")
-        return result
+        return results[-1]
 
     def store_cell(self, cellvar, value):
         assert isinstance(cellvar, variables.NewCellVariable)
@@ -410,31 +417,37 @@ class SideEffects:
                     ]
                 )
             elif self.is_attribute_mutation(var):
-                for name, value in self.store_attr_mutations.get(
+                for name, values in self.store_attr_mutations.get(
                     var.mutable_local, {}
                 ).items():
-                    if isinstance(var, variables.NewGlobalVariable):
-                        cg.tx.output.update_co_names(name)
-                        cg(value)
-                        suffixes.append(
-                            [create_instruction("STORE_GLOBAL", argval=name)]
-                        )
-                    elif name == "__call_nn_module_init":
-                        pass  # handled in codegen_save_tempvars
-                    elif isinstance(value, variables.DeletedVariable):
-                        if isinstance(
-                            var.mutable_local, AttributeMutationExisting
-                        ) and hasattr(getattr(var, "value", None), name):
+                    for value in reversed(values):
+                        # print("Value for record:", var, value)
+                        if isinstance(var, variables.NewGlobalVariable):
                             cg.tx.output.update_co_names(name)
+                            cg(value)
+                            suffixes.append(
+                                [create_instruction("STORE_GLOBAL", argval=name)]
+                            )
+                        elif name == "__call_nn_module_init":
+                            pass  # handled in codegen_save_tempvars
+                        elif isinstance(value, variables.DeletedVariable):
+                            if isinstance(
+                                var.mutable_local, AttributeMutationExisting
+                            ) and hasattr(getattr(var, "value", None), name):
+                                cg.tx.output.update_co_names(name)
+                                cg(var.mutable_local.source)
+                                suffixes.append(
+                                    [create_instruction("DELETE_ATTR", argval=name)]
+                                )
+                                # print(f"Made delattr {name}")
+                        else:
+                            cg.tx.output.update_co_names(name)
+                            cg(value)
                             cg(var.mutable_local.source)
                             suffixes.append(
-                                [create_instruction("DELETE_ATTR", argval=name)]
+                                [create_instruction("STORE_ATTR", argval=name)]
                             )
-                    else:
-                        cg.tx.output.update_co_names(name)
-                        cg(value)
-                        cg(var.mutable_local.source)
-                        suffixes.append([create_instruction("STORE_ATTR", argval=name)])
+                            # print(f"Made storeattr {name}")
             else:
                 raise AssertionError(type(var))
 

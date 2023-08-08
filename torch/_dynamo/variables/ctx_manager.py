@@ -421,12 +421,13 @@ class CUDAStreamContextVariable(ContextWrappingVariable):
 
 
 class CUDAStreamVariable(VariableTracker):
-    def __init__(self, proxy, value, **kwargs):
+    def __init__(self, proxy, value, device, **kwargs):
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
+        self.device = device
 
     def call_method(
         self,
@@ -435,10 +436,18 @@ class CUDAStreamVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        unimplemented("cuda stream")
+        if name == "wait_stream":
+            return variables.ConstantVariable(None)
+        unimplemented(f"Attempting to invoke {name} on cuda stream")
 
     def as_proxy(self):
         return self.proxy
+
+    def reconstruct(self, codegen):
+        unimplemented(
+            f"Can I reconstruct stream? {self.source} {self.value} {self.proxy}"
+        )
+        return super().reconstruct(codegen)
 
 
 class WithExitFunctionVariable(VariableTracker):

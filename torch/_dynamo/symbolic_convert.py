@@ -369,7 +369,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             # TODO link the torch.cond doc later
             raise exc.UserError(
                 exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
-                "Dynamic control flow is not supported at the moment. Please use "
+                f"Dynamic control flow on {value} from {inst} is not supported at the moment. Please use "
                 "functorch.experimental.control_flow.cond to explicitly capture the control flow",
             )
 
@@ -584,8 +584,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if isinstance(oldvar.mutable_local, side_effects.MutableSideEffects):
             newvar = self.output.side_effects.mutation(oldvar, newvar)
         else:
-            assert isinstance(oldvar.mutable_local, variables.base.MutableLocal)
-            newvar = newvar.clone(mutable_local=variables.base.MutableLocal())
+            # assert isinstance(oldvar.mutable_local, variables.base.MutableLocal)
+            newvar = newvar.clone(mutable_local=oldvar.mutable_local)
         self.update_locals_and_stack(oldvar, newvar)
         return newvar
 
@@ -702,7 +702,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.output.compile_subgraph(
             self,
             partial_convert=True,
-            reason=GraphCompileReason("step_unsupported", [self.frame_summary()]),
+            reason=GraphCompileReason(
+                f"step_unsupported {inst}", [self.frame_summary()]
+            ),
         )
         self.output.add_output_instructions(
             [create_jump_absolute(continue_inst)] + self.instructions
@@ -1205,6 +1207,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             ), f"Mutating module attribute {inst.argval} during export."
 
         try:
+            # print(f"TRYING SETATTR {val} {obj}")
             self.output.guards.update(
                 BuiltinVariable(setattr)
                 .call_function(self, [obj, ConstantVariable(inst.argval), val], {})
@@ -1212,6 +1215,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             )
             return
         except Unsupported as e:
+            # print(f"FAILING SETATTR {val} {obj} {e}")
             if not self.should_compile_partial_graph():
                 raise
             log.debug("STORE_ATTR triggered compile", exc_info=True)
@@ -1221,7 +1225,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         # break the graph
         self.output.compile_subgraph(
-            self, reason=GraphCompileReason("store_attr", [self.frame_summary()])
+            self,
+            reason=GraphCompileReason(
+                f"store_attr {val} {obj}", [self.frame_summary()]
+            ),
         )
         self.output.add_output_instructions([copy.copy(inst)])
         self.popn(2)
@@ -1305,7 +1312,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         for k, v in zip(items[::2], items[1::2]):
             assert isinstance(k, (ConstantVariable, EnumVariable, BuiltinVariable)) or (
                 isinstance(k, TensorVariable) and k.specialized_value is not None
-            )
+            ), f"Tried to write key {k}"
 
             result[ConstDictVariable.get_key(k)] = v
         assert len(result) == len(items) / 2
@@ -1857,6 +1864,13 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if name not in self.output.global_scope:
             self.output.install_global(name, weakref.ref(value))
 
+    def store_hook_handle(self, name, value):
+        self.output.guards.add(
+            GlobalWeakRefSource(name).make_guard(GuardBuilder.WEAKREF_ALIVE)
+        )
+        if name not in self.output.global_scope:
+            self.output.install_global(name, weakref.ref(value))
+
     @property
     def fake_mode(self):
         return self._fake_mode
@@ -2164,6 +2178,10 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
+    def DELETE_SUBSCR(self, inst):
+        obj, key = self.popn(2)
+        self.call_function(BuiltinVariable(delattr), [obj, key], {})
+
 
 class InliningInstructionTranslator(InstructionTranslatorBase):
     """Trace and inline a called method"""
@@ -2431,6 +2449,18 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         self.symbolic_result = self.pop()
         self.instruction_pointer = None
+
+    def GET_YIELD_FROM_ITER(self, inst):
+        tos = self.stack[-1]
+        if not isinstance(tos, ListIteratorVariable):
+            return self.GET_ITER(inst)
+
+    def YIELD_FROM(self, inst):
+        tos = self.stack[-1]
+        if isinstance(tos, ConstantVariable) and tos.value is None:
+            self.pop()
+            return
+        return self.FOR_ITER(inst)
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):

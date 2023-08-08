@@ -1,5 +1,4 @@
 import dataclasses
-import traceback
 from typing import Any, Callable, Container, Dict, List, Optional, OrderedDict, Tuple, TypeVar, overload
 
 import torch
@@ -141,8 +140,8 @@ def _p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
     """This is used as an alternate to ``assert`` when in the backward context
     to print the error message ``s`` since otherwise, it is swallowed."""
     if not cond:
-        print(s)
-        traceback.print_stack()
+        # print(s)
+        # traceback.print_stack()
         if raise_assertion_error:
             raise AssertionError(s)
 
@@ -181,7 +180,7 @@ def _free_storage(tensor: torch.Tensor) -> bool:
             _p_assert(
                 tensor.storage_offset() == 0,
                 "Freeing a tensor's storage is unsafe when it is not the sole occupant\n"
-                f"storage offset: {tensor.storage_offset()}\n"
+                "storage offset: {tensor.storage_offset()}\n"
                 f"storage size: {tensor._typed_storage()._size()}\n"
                 f"tensor shape: {tensor.shape}",
             )

@@ -7,7 +7,7 @@ import sympy
 
 import torch.fx
 import torch.random
-
+from torch._dynamo.variables.base import VariableTracker
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
 from .. import config, variables
@@ -88,6 +88,8 @@ class TensorVariable(VariableTracker):
         stride=None,
         is_contiguous=None,
         specialized_value=None,
+        _typed_storage=None,
+        storage_offset=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -104,6 +106,8 @@ class TensorVariable(VariableTracker):
         self.is_sparse = is_sparse
         self.class_type = class_type
         self.specialized_value = specialized_value
+        self._typed_storage = _typed_storage
+        self.storage_offset = storage_offset
 
     def as_proxy(self):
         return self.proxy
@@ -124,6 +128,14 @@ class TensorVariable(VariableTracker):
         else:
             return check_type(tensor_type)
 
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        options = VariableTracker.propagate(self)
+        val = self.as_proxy().node.meta["example_value"]
+        result = hasattr(val, name)
+        return variables.ConstantVariable(result, **options).add_guard(
+            AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
+        )
+
     @staticmethod
     def specialize(value: torch.Tensor):
         props = {
@@ -135,6 +147,7 @@ class TensorVariable(VariableTracker):
             "is_quantized": value.is_quantized,
             "is_sparse": value.is_sparse,
             "class_type": type(value),
+            "_typed_storage": value._typed_storage,
         }
         if not free_symbols(value):
             # this is a fully static shape, and the keys on props here inform specialization.
@@ -237,6 +250,10 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "detach", [], {})
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
+        if name == "_typed_storage":
+            return variables.LambdaVariable(
+                lambda *args, **kwargs: TypedStorageVariable(self._typed_storage())
+            ).add_options(self)
 
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
@@ -279,6 +296,13 @@ class TensorVariable(VariableTracker):
                 if type(static_attr) != types.GetSetDescriptorType:
                     return None
 
+                # print("Falling back to generic", self.as_proxy(), name)
+                if name == "grad_fn":
+                    return variables.user_defined.AutogradNodeVariable(
+                        self.as_proxy().node.meta["example_value"].grad_fn,
+                        self.as_proxy().grad_fn,
+                        **options,
+                    )
                 return wrap_fx_proxy(
                     tx=tx,
                     proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
@@ -462,6 +486,22 @@ class TensorVariable(VariableTracker):
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable(index, **options)
+        elif name == "storage_offset":
+            # Constant path
+            if self.storage_offset is not None:
+                return ConstantVariable(self.storage_offset, **options)
+            # dyn shapes path
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self] + list(args), kwargs),
+                ),
+                **options,
+            )
+        elif name == "_typed_storage":
+            return TypedStorageVariable(self._typed_storage())
         else:
             constant_result = None
 
@@ -624,6 +664,11 @@ class TensorVariable(VariableTracker):
             )
             result = TorchVariable(torch.any, **options).call_function(tx, [result], {})
             return result.call_method(tx, "item", [], {})
+        elif name == "register_hook":
+            assert len(args) == 1
+            fn_var = args[0]
+            self.as_proxy().node.meta["example_value"].register_hook(fn_var.fn)
+            return ConstantVariable(None)
         elif name == "redistribute":
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
             # and rewrite args to have only proxyable args, then insert call_function
@@ -653,6 +698,7 @@ class TensorVariable(VariableTracker):
                 and isinstance(args[0], (SizeVariable, ShapeVariable))
             ):
                 name = "new_empty"
+            # print("Fallthrough?", name)
             return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
@@ -1039,3 +1085,48 @@ class TensorSubclassVariable(VariableTracker):
             )
 
         return super().call_function(tx, args, kwargs)
+
+
+class TypedStorageVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        self.value = value
+        super().__init__(**kwargs)
+
+    def reconstruct(self, codegen):
+        return super().reconstruct(codegen)
+
+    def as_proxy(self):
+        return self.proxy
+
+    def var_getattr(self, tx, name: str) -> VariableTracker:
+        if name == "_size":
+            return variables.LambdaVariable(
+                lambda *args, **kwargs: self.call_method(tx, name, [], {})
+            ).add_options(self)
+        return super().var_getattr(tx, name)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "_data_ptr":
+            return ConstantVariable(self.value._data_ptr())
+        if name == "_size":
+            if free_symbols(self.value._size()):
+                # TODO(voz): should be ez, pass a proxy in, make a symnodevariable
+                unimplemented("Dynamic sizing in typed storage - NYI")
+            if isinstance(self.value._size(), int):
+                return ConstantVariable(self.value._size())
+            sizes = [ConstantVariable(x) for x in self.value._size()]
+            return SizeVariable(sizes)
+        if name == "device":
+            return ConstantVariable(self.value.device)
+        if name == "_resize_":
+            assert len(args) == 1
+            self.value._resize_(args[0].value)
+            return ConstantVariable(None)
+        # print("TypedStorageVariable Call method", name, self.value, args)
+        unimplemented(f"typed_storage method calls WIP {name}")

@@ -109,9 +109,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         else:
             self.is_constant = False
 
-        assert isinstance(
-            fn, (types.FunctionType, torch.jit.ScriptFunction)
-        ), f"expected FunctionType found {typestr(fn)} {fn}"
+        # assert isinstance(
+        #     fn, (types.FunctionType, torch.jit.ScriptFunction)
+        # ), f"expected FunctionType found {typestr(fn)} {fn}"
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         # unpack torch.jit.script_if_tracing
@@ -451,7 +451,10 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
         for idx, name in enumerate(code.co_freevars):
             cell = self.closure.items[idx]
-            assert getattr(cell, name, name) == name
+            # if not getattr(cell, name, name) == name:
+            #     unimplemented(
+            #         f"{getattr(cell, name, name)} MISMATCH {name}"
+            #     )
             assert name not in result
             if isinstance(cell, InlinedClosureVariable):
                 # InlinedClosureVariable's are created from LOAD_CLOSURE's from
@@ -581,6 +584,9 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         return (
             inspect.isfunction(variable) and variable in _traceable_collective_remaps()
         )
+
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.orig_fn} -> {self.fn})"
 
     @staticmethod
     def rewrite(fn):

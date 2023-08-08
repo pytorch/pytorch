@@ -81,10 +81,6 @@ constant_fold_functions = [
 ]
 
 
-if torch.distributed.is_available():
-    constant_fold_functions.append(torch.distributed.is_initialized)
-
-
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
 def remap_as_fn___radd__(*args):
     return torch._C._TensorBase.__radd__(*args)
@@ -143,7 +139,12 @@ class TorchVariable(VariableTracker):
         ):
             value = tensor_dunder_fns_remap[value]
 
+        if isinstance(value, dict):
+            raise RuntimeError("Nope")
+
         self.value = value
+        if value is torch.distributed.distributed_c10d.all_gather_into_tensor:
+            raise RuntimeError("???")
 
         # the remainder of this is just optional debug checks
         try:

@@ -9,6 +9,7 @@ from typing import Dict, List
 
 import torch
 from torch import sym_float, sym_int
+from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from .. import config, variables
 from ..allowed_functions import is_allowed
@@ -618,11 +619,12 @@ class BuiltinVariable(VariableTracker):
         if has_constant_handler:
             args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
+            result = self.as_python_constant()(
+                *[x.as_python_constant() for x in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
             return variables.ConstantVariable(
-                self.as_python_constant()(
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
+                result,
                 **options,
             )
 
@@ -923,6 +925,31 @@ class BuiltinVariable(VariableTracker):
     def call_len(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
 
+    def call_format(self, tx, *args, **kwargs):
+        if kwargs:
+            unimplemented("Format with kwargs - NYI")
+        assert len(args) > 0
+        inp_string = args[0].value
+        real_args = []
+        for arg in args[1:]:
+            if isinstance(arg, ConstantVariable):
+                real_args.append(arg.value)
+            elif isinstance(arg, variables.TensorVariable):
+                real_args.append(arg.as_proxy().node.meta["example_value"])
+            elif isinstance(arg, SizeVariable):
+                for item in arg.unpack_var_sequence(tx):
+                    if free_symbols(item.value):
+                        unimplemented("Free symbols in formatted size - NYI")
+                real_args.append(
+                    torch.Size([item.value for item in arg.unpack_var_sequence(tx)])
+                )
+            else:
+                # lol
+                real_args.append(arg)
+                # unimplemented(f"Format with {type(arg)} - NYI")
+
+        return ConstantVariable(inp_string.format(*real_args))
+
     def call_getitem(self, tx, *args, **kwargs):
         if self.unspec_python_args(*args, **kwargs):
             args, kwargs = specialize_args_kwargs(tx, args, kwargs)
@@ -959,11 +986,12 @@ class BuiltinVariable(VariableTracker):
         return variables.ConstantVariable(val)
 
     def call_super(self, tx, a, b):
-        source = (
-            None
-            if a.source is None or b.source is None
-            else SuperSource(type=a.source, base=b.source)
-        )
+        # source = (
+        #     None
+        #     if a.source is None or b.source is None
+        #     else SuperSource(type=a.source, base=b.source)
+        # )
+        source = None
         return variables.SuperVariable(a, b, source=source)
 
     def call_next(self, tx, arg):
@@ -1077,9 +1105,18 @@ class BuiltinVariable(VariableTracker):
                         return VariableBuilder(tx, source)(example_value).add_options(
                             options
                         )
-                unimplemented("tensor grad")
+                unimplemented(f"tensor grad with source {source}")
             else:
-                unimplemented("tensor grad")
+                from .builder import wrap_fx_proxy
+
+                grad_proxy = obj.as_proxy().grad
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=grad_proxy,
+                    example_value=obj.as_proxy().node.meta["example_value"].grad,
+                    **options,
+                )
+                # unimplemented("tensor grad without source")
         elif isinstance(
             obj,
             (
@@ -1137,11 +1174,48 @@ class BuiltinVariable(VariableTracker):
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
+            # if isinstance(obj, variables.nn_module.FSDPManagedNNModuleVariable):
+            #     if isinstance(val, variables.DeletedVariable):
+            #         # Gross - but required for safety to not raise atm
+            #         print("DELETING FROM FSDP", obj.value, name_var.value)
+            #         # if hasattr(obj.value, name_var.value):
+            #             # delattr(obj.value, name_var.value)
+            #         print("DELETED FROM FSDP", name_var.value)
+            #     else:
+            #         print("SETTING ON FSDP", name_var.value)
+            # return val
+            # unimplemented("NYI - delattr on FSDP")
+
             tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
+            if isinstance(obj, variables.TensorVariable):
+                from .builder import (
+                    VariableBuilder,
+                    wrap_fx_proxy,
+                    wrap_to_fake_tensor_and_record,
+                )
+
+                if name_var.value == "data":
+                    to_remove = []
+                    for tf in tx.output.tracked_fakes:
+                        if tf.source == obj.source:
+                            to_remove.append(tf)
+                    for tf in to_remove:
+                        tx.output.tracked_fakes.remove(tf)
+
+                    out = wrap_fx_proxy(
+                        tx,
+                        tx.output.create_proxy(
+                            "call_function",
+                            torch._set_data,
+                            *proxy_args_kwargs([obj, val], {}),
+                        ),
+                    )
+                    tx.replace_all(obj, out)
+
             return val.add_options(self, obj, name_var)
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(
-                f"setattr(UserDefinedObjectVariable) {type(obj.value).__setattr__}"
+                f"setattr(UserDefinedObjectVariable) {obj.source} {type(obj.value).__setattr__}"
             )
         elif isinstance(obj, variables.NNModuleVariable):
             if not tx.output.is_root_tracer():
@@ -1172,6 +1246,7 @@ class BuiltinVariable(VariableTracker):
             obj.convert_to_unspecialized(tx)
 
     def call_delattr(self, tx, obj: VariableTracker, name_var: VariableTracker):
+        print("REAL DELATTR HOURS", obj, name_var.value)
         return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
 
     def call_type(self, tx, obj: VariableTracker):
@@ -1283,6 +1358,7 @@ class BuiltinVariable(VariableTracker):
             UserFunctionVariable,
         )
         from .lists import SizeVariable
+        from .nn_module import FSDPManagedNNModuleVariable
         from .tensor import (
             supported_const_comparison_ops,
             supported_tensor_comparison_ops,
@@ -1293,23 +1369,40 @@ class BuiltinVariable(VariableTracker):
         def _unimplemented():
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
 
+        def _resolve_getattr(get_attr_var):
+            print("Resolving getattr")
+            assert isinstance(get_attr_var, variables.GetAttrVariable)
+            try:
+                return get_attr_var.call_function(tx, [], {})
+            except Exception as e:
+                _unimplemented()
+
+        if isinstance(left, variables.GetAttrVariable):
+            left = _resolve_getattr(left)
+
+        if isinstance(right, variables.GetAttrVariable):
+            right = _resolve_getattr(right)
+
         if (
             all(
-                isinstance(x, (NNModuleVariable, ConstantVariable))
+                isinstance(
+                    x, (NNModuleVariable, ConstantVariable, FSDPManagedNNModuleVariable)
+                )
                 for x in [left, right]
             )
             and op in supported_const_comparison_ops.values()
         ):
-            left = (
-                tx.output.get_submodule(left.module_key)
-                if isinstance(left, NNModuleVariable)
-                else left.as_python_constant()
-            )
-            right = (
-                tx.output.get_submodule(right.module_key)
-                if isinstance(right, NNModuleVariable)
-                else right.as_python_constant()
-            )
+
+            def _get(element):
+                if isinstance(element, NNModuleVariable):
+                    return tx.output.get_submodule(element.module_key)
+                if isinstance(element, FSDPManagedNNModuleVariable):
+                    return element.value
+                else:
+                    return element.as_python_constant()
+
+            left = _get(left)
+            right = _get(right)
             return ConstantVariable(op(left, right))
 
         if isinstance(left, UserFunctionVariable):
@@ -1318,6 +1411,15 @@ class BuiltinVariable(VariableTracker):
             if not isinstance(right, UserFunctionVariable):
                 _unimplemented()
             return ConstantVariable(op(left.fn, right.fn))
+
+        if isinstance(left, variables.distributed.ProcessGroupVariable):
+            if op not in supported_const_comparison_ops.values():
+                _unimplemented()
+            if not isinstance(
+                right, (variables.distributed.ProcessGroupVariable, ConstantVariable)
+            ):
+                _unimplemented()
+            return ConstantVariable(op(left.value, right.value))
 
         # Note, we have a rare BaseListVariable subtype mismatch with valid comparison
         # x = torch.randn([3, 3])
@@ -1334,6 +1436,9 @@ class BuiltinVariable(VariableTracker):
             return BaseListVariable.list_compare(tx, op, left, right)
 
         if isinstance(left, SetVariable):
+            if isinstance(right, ConstantVariable) and right.value == None:
+                return ConstantVariable(op(left._underlying_items, right.value))
+
             if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
                 _unimplemented()
             return ConstantVariable(op(left._underlying_items, right._underlying_items))
@@ -1370,6 +1475,17 @@ class BuiltinVariable(VariableTracker):
             # If the two objects are of different type, we can safely return False
             if type(left) is not type(right):
                 return ConstantVariable(False)
+
+        # Would this invoke user code?
+        if isinstance(left, variables.UserDefinedObjectVariable) and isinstance(
+            right, variables.UserDefinedObjectVariable
+        ):
+            return ConstantVariable(op(left.value, right.value))
+
+        if isinstance(left, variables.UserDefinedObjectVariable) and isinstance(
+            right, variables.ConstantVariable
+        ):
+            return ConstantVariable(op(left.value, right.value))
 
         _unimplemented()
 

@@ -138,8 +138,15 @@ class IncorrectUsage(Exception):
     pass
 
 
+unimpl_and_count = {}
+
+
 def unimplemented(msg: str):
+    global unimpl_and_count
     assert msg != os.environ.get("BREAK", False)
+    if msg not in unimpl_and_count:
+        unimpl_and_count[msg] = 0
+    unimpl_and_count[msg] += 1
     raise Unsupported(msg)
 
 

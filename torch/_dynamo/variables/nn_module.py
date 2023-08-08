@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from typing import Dict, List
 
 import torch.nn
+from torch._dynamo.variables.base import VariableTracker
 
 from .. import skipfiles, variables
 from ..allowed_functions import is_allowed
@@ -137,7 +138,7 @@ class NNModuleVariable(VariableTracker):
             GenerationTracker.mark_class_dynamic(type(mod))
         raise RestartAnalysis()
 
-    def _custom_getattr_fallback(self, base, tx, name, options):
+    def _custom_getattr_fallback(self, base, tx, name, source, options):
         """Check for a __getattr__ and handle it specially if it is implemented"""
         if object_has_getattribute(base):
             unimplemented("torch.nn.Module with a custom __getattribute__ defined")
@@ -149,6 +150,12 @@ class NNModuleVariable(VariableTracker):
         if not isinstance(getattr_fn, types.FunctionType):
             unimplemented("torch.nn.Module with a non-function custom __getattr__")
 
+        # print("Fallback?", name, self, getattr(base, "_is_fsdp_managed_module", False))
+        if getattr(base, "_is_fsdp_managed_module", False):
+            from .builder import VariableBuilder
+
+            # TODO(voz): Why is fsdp here?
+            return VariableBuilder(tx, source)(getattr_fn(base, name))
         return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
             tx, [variables.ConstantVariable(name)], {}
         )
@@ -194,7 +201,7 @@ class NNModuleVariable(VariableTracker):
             except AttributeError:
                 # see if we can fallback to __getattr__, which is not checked by getattr_static
                 result = self._custom_getattr_fallback(
-                    base=base, tx=tx, name=name, options=options
+                    base=base, tx=tx, name=name, source=source, options=options
                 )
                 if result is not None:
                     return result
@@ -226,8 +233,15 @@ class NNModuleVariable(VariableTracker):
             elif is_safe_constant(subobj) or istensor(subobj):
                 # Support possibly common cases of class members
                 return VariableBuilder(tx, NNModuleSource(source))(subobj)
+            elif istype(subobj, types.GetSetDescriptorType):
+                assert source
+                return VariableBuilder(tx, source)(subobj.__get__(base)).add_options(
+                    options
+                )
             else:
-                unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
+                unimplemented(
+                    f"class property {typestr(base)} {typestr(subobj)} {subobj.__class__} {isinstance(subobj, types.GetSetDescriptorType)} {subobj.__get__(base)}"
+                )
 
         return variables.GetAttrVariable(self, name, **options)
 
@@ -643,6 +657,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, **kwargs):
+        if (
+            getattr(value, "_is_fsdp_managed_module", False)
+            and type(self) == UnspecializedNNModuleVariable
+        ):
+            raise RuntimeError(f"How? {type(self)}")
         if type(value) is torch.jit._script.RecursiveScriptModule:
             raise Unsupported(
                 "ScriptModules aren't supported in UnspecializedNNModuleVariable"
@@ -789,7 +808,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     compilation.
     """
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, module_key, **kwargs):
         source = kwargs.get("source", None)
         assert (
             source is not None
@@ -801,3 +820,101 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
         else:
             # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
             self.source = NotNNModuleSource(source)
+        self.module_key = module_key
+
+    def call_function(
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        # print("FSDPManagedNNModuleVariable FUNC", args, kwargs)
+        return super().call_function(tx, args, kwargs)
+
+    def call_method(
+        self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        # print("FSDPManagedNNModuleVariableMETHOD", name)
+        key = self.module_key
+        options = VariableTracker.propagate(self, args, kwargs.values())
+
+        def assert_all_args_kwargs_const():
+            if not all(
+                x.is_python_constant() for x in itertools.chain(args, kwargs.values())
+            ):
+                raise unimplemented(f"non-const NNModule method {name}")
+
+        def get_kwargs(*names):
+            assert_all_args_kwargs_const()
+            fn = getattr(self.value, name)
+            bound_args = inspect.signature(fn).bind(
+                *([x.as_python_constant() for x in args]),
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+            bound_args.apply_defaults()
+            bound_args = bound_args.arguments
+            return {k: bound_args[k] for k in names}
+
+        def gen_source(source, name):
+            name_split = name.split(".")
+            if name_split[0] == "":
+                return source
+            while len(name_split) > 0:
+                x = name_split.pop(0)
+                source = AttrSource(source, x)
+            return source
+
+        def wrap_values(items):
+            result = []
+            for name, submod in items:
+                result.append(
+                    tx.output.register_attr_or_module(
+                        submod,
+                        key,
+                        name,
+                        source=FSDPNNModuleSource(gen_source(self.source, name)),
+                        **options,
+                    )
+                )
+            return variables.ListIteratorVariable(
+                result, mutable_local=MutableLocal(), **options
+            )
+
+        def named_embed(name, obj):
+            return variables.TupleVariable(
+                [
+                    variables.ConstantVariable(name, **options),
+                    tx.output.register_attr_or_module(
+                        obj,
+                        key,
+                        name,
+                        source=FSDPNNModuleSource(gen_source(self.source, name)),
+                        **options,
+                    ),
+                ]
+            )
+
+        if name == "buffers":
+            return wrap_values(self.value.named_buffers(**get_kwargs("recurse")))
+        elif name == "named_buffers":
+            result = []
+            for name, buffer in self.value.named_buffers(
+                **get_kwargs("prefix", "recurse", "remove_duplicate")
+            ):
+                result.append(named_embed(name, buffer))
+            return variables.ListIteratorVariable(
+                result, mutable_local=MutableLocal(), **options
+            )
+        elif name == "children":
+            assert not (args or kwargs)
+            return wrap_values(self.value.named_children())
+        return super().call_method(tx, name, args, kwargs)
+
+    def var_getattr(self, tx, name):
+        # print("FSDPGetattr", name)
+        if name in ["named_buffers", "children", "buffers"]:
+            # Route this to produce a ListIteratorVariable instead of getting the generator
+            return variables.LambdaVariable(
+                lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
+            ).add_options(self)
+        return super().var_getattr(tx, name)
+
+    def as_python_constant(self):
+        return self.value
