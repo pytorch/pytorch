@@ -68,6 +68,7 @@ if(USE_CUDA)
     else()
       caffe2_update_option(USE_TENSORRT OFF)
     endif()
+    find_program(SCCACHE_EXECUTABLE sccache)
     if(SCCACHE_EXECUTABLE)
       # Using RSP/--options-file renders output noncacheable by sccache
       # as they fall under `multiple input files` non-cacheable rule
