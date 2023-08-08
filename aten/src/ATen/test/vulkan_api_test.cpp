@@ -1808,6 +1808,69 @@ TEST_F(VulkanAPITest, expand_as) {
   ASSERT_TRUE(check);
 }
 
+void test_flip(const at::IntArrayRef input_shape, const at::IntArrayRef dim_list) {
+  c10::InferenceMode mode;
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::flip(in_cpu, dim_list);
+  const auto out_vulkan = at::flip(in_vulkan, dim_list);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+    std::cout << "test flip failed with input_shape: " << input_shape
+              << " and dim_list: " << dim_list << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, flip_1d) {
+  test_flip({5}, {0});
+  test_flip({5}, {-1});
+}
+
+TEST_F(VulkanAPITest, flip_2d) {
+  test_flip({5, 5}, {-1});
+  test_flip({2, 7}, {-2});
+
+  test_flip({5, 5}, {0, 1});
+}
+
+TEST_F(VulkanAPITest, flip_3d) {
+  test_flip({5, 7, 5}, {-1});
+  test_flip({2, 9, 7}, {-2});
+  test_flip({9, 7, 5}, {-3});
+
+  test_flip({10, 7, 5}, {0, 1});
+  test_flip({10, 7, 5}, {0, 2});
+  test_flip({10, 7, 5}, {1, 2});
+
+  test_flip({10, 7, 5}, {2, 1, 0});
+}
+
+TEST_F(VulkanAPITest, flip_4d) {
+  test_flip({2, 9, 1, 1}, {-1});
+  test_flip({7, 5, 9, 3}, {-2});
+  test_flip({3, 8, 5, 2}, {-3});
+  test_flip({7, 9, 5, 3}, {-4});
+
+  test_flip({10, 7, 5, 6}, {0, 1});
+  test_flip({10, 7, 5, 6}, {0, 2});
+  test_flip({10, 7, 5, 6}, {0, 3});
+  test_flip({10, 7, 5, 6}, {1, 2});
+  test_flip({10, 7, 5, 6}, {1, 3});
+  test_flip({10, 7, 5, 6}, {2, 3});
+
+  test_flip({10, 7, 5, 6}, {0, 1, 2});
+  test_flip({10, 7, 5, 6}, {0, 1, 3});
+  test_flip({10, 7, 5, 6}, {0, 2, 3});
+  test_flip({10, 7, 5, 6}, {3, 2, 1});
+
+  test_flip({10, 7, 5, 6}, {3, 2, 1, 0});
+}
+
 TEST_F(VulkanAPITest, gelu) {
   const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();

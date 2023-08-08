@@ -47,7 +47,7 @@ jobs:
           - docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
           - docker-image-name: pytorch-linux-focal-py3.8-gcc7
           - docker-image-name: pytorch-linux-focal-py3.8-gcc7-inductor-benchmarks
-          - docker-image-name: pytorch-linux-focal-py3-clang7-asan
+          - docker-image-name: pytorch-linux-jammy-py3-clang12-asan
           - docker-image-name: pytorch-linux-focal-py3-clang10-onnx
           - docker-image-name: pytorch-linux-focal-linter
     env:

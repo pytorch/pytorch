@@ -37,6 +37,8 @@ jobs:
           { config: "dynamic_aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
   linux-bionic-cuda12_1-py3_10-gcc9-periodic-dynamo-benchmarks-test:
     name: cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks
@@ -46,3 +48,5 @@ jobs:
       build-environment: linux-bionic-cuda12.1-py3.10-gcc9-sm86
       docker-image: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}

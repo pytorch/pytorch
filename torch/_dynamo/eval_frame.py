@@ -36,7 +36,7 @@ import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
 from torch._subclasses import fake_tensor
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
 from ..fx import GraphModule
@@ -239,7 +239,7 @@ class _TorchDynamoContext:
         if config.raise_on_ctx_manager_usage:
             raise RuntimeError(
                 "torch._dynamo.optimize(...) is used with a context manager. "
-                "Please refer to https://github.com/pytorch/torchdynamo#usage-example "
+                "Please refer to https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html "
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
         self.on_enter()
@@ -860,7 +860,6 @@ def export(
     tracing_mode: str = "symbolic",
     constraints: Optional[List[Constraint]] = None,
     assume_static_by_default: bool = False,
-    fake_mode: fake_tensor.FakeTensorMode = None,
     **extra_kwargs,
 ) -> Callable[..., ExportResult]:
     """
@@ -884,10 +883,6 @@ def export(
 
         tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
 
-        fake_mode (fake_tensor.FakeTensorMode): Use this fake_mode instead of creating an internal one.
-        Useful during symbolic tracing, when user input is already fakefied. Implies free fake tensors
-        are allowed on `make_fx`. `fake_mode` must contain a valid (not None) `shape_env` instance.
-
     Returns:
         A function that given args and kwargs, returns a tuple of (graph, guards)
         Graph: An FX graph representing the execution of the input PyTorch function with the provided arguments and options.
@@ -902,12 +897,10 @@ def export(
     Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
     """
     # Deal with "local variable referenced before assignment"
-    _fake_mode = fake_mode
     _f = f
     _assume_static_by_default = assume_static_by_default
 
     def inner(*args, **kwargs):
-        fake_mode = _fake_mode
         f = _f
         assume_static_by_default = _assume_static_by_default
         check_if_dynamo_supported()
@@ -921,17 +914,11 @@ def export(
         f = innermost_fn(f)
         call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
         original_signature = inspect.signature(call_to_inspect)
-        assert (
-            not fake_mode or fake_mode.shape_env is not None
-        ), "The specified fake_mode must contain a valid shape_env"
         graph = None
         out_guards = None
         graph_captured_input = None
         graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
-        fake_mode = fake_mode or _guards.detect_fake_mode(args)
-        _allow_fake_constant: bool = (
-            fake_mode is not None
-        )  # Allow fake constants during symbolic tracing
+        fake_mode = None
 
         def produce_matching(source_args, candidate_args):
             matched_elements_positions = []
@@ -981,7 +968,12 @@ def export(
             graph = gm
 
             nonlocal fake_mode, example_inputs
-            fake_mode = fake_mode or _guards.detect_fake_mode(inner_example_inputs)
+            # NB: do NOT pass inner_example_inputs here, we are detecting the
+            # Dynamo allocated fake mode, which should be DISTINCT from a
+            # potential outer ambient fake mode which the user provided.
+            # example_inputs is always the user specified inputs, so they
+            # would have the wrong fake mode attached to them
+            fake_mode = _guards.detect_fake_mode()
             example_inputs = inner_example_inputs
 
             def result_capturing_wrapper(*graph_inputs):
@@ -1007,7 +999,7 @@ def export(
             automatic_dynamic_shapes=False,
             capture_dynamic_output_shape_ops=True,
             capture_scalar_outputs=True,
-        ), torch._guards.export_fake_mode(fake_mode):
+        ):
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
                 hooks=Hooks(
@@ -1066,8 +1058,49 @@ def export(
         assert (
             graph is not None
         ), "Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph."
+        assert hasattr(graph, "_source_to_user_stacks")
         assert out_guards is not None, "Failed to produce guards during tracing"
         assert fake_mode is not None
+
+        input_errors = []
+        for node in graph.graph.nodes:
+            if node.op == "placeholder":
+                assert hasattr(node, "_dynamo_source")
+                source = node._dynamo_source
+                user_stacks = graph._source_to_user_stacks.get(source)
+                if user_stacks is None:
+                    continue
+                assert len(user_stacks) > 0
+                # In some cases we may not have a useful stack.  Look for a
+                # useful stack
+                stack = None
+                for s in user_stacks:
+                    if len(s) == 0:
+                        continue
+                    stack = s
+                    break
+                if stack is None:
+                    msg = f"{source.name()}, a closed over free variable"
+                else:
+                    tb = "".join(traceback.format_list(stack))
+                    extra = ""
+                    if len(user_stacks) > 1:
+                        extra = f"(elided {len(user_stacks)-1} more accesses)"
+                    msg = f"{source.name()}, accessed at:\n{tb}{extra}"
+                # TODO: option to print ALL of the stack traces at once
+                input_errors.append(msg)
+
+        if input_errors:
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                "Cannot export model which references tensors that are neither "
+                "buffers/parameters/constants nor are direct inputs.  For each tensor, if you'd "
+                "like this tensor to be an explicit input, add it as a dummy argument "
+                "to the top-level model definition you are exporting; if you would "
+                "like its value to be embedded as an exported constant, wrap its access "
+                "in a function marked with @assume_constant_result.\n\n"
+                + "\n\n".join(input_errors),
+            )
 
         matched_input_elements_positions = produce_matching(
             flat_args, graph_captured_input
@@ -1089,7 +1122,9 @@ def export(
                 with torch.fx.traceback.preserve_node_meta():
                     return torch.fx.Interpreter(graph).run(*args)
 
-            with enable_python_dispatcher(), fake_mode:
+            with maybe_disable_fake_tensor_mode(), enable_python_dispatcher(), (
+                fake_mode
+            ):
                 try:
                     graph = make_fx(
                         graph_with_interpreter,
@@ -1097,7 +1132,7 @@ def export(
                         tracing_mode="real",
                         _allow_non_fake_inputs=True,
                         pre_dispatch=pre_dispatch,
-                        _allow_fake_constant=_allow_fake_constant,
+                        _allow_fake_constant=False,
                     )(*example_fake_inputs)
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
