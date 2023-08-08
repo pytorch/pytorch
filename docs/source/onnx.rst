@@ -740,3 +740,4 @@ Preview: torch.onnx TorchDynamo Exporter
     torch.onnx.ExportOutput
     torch.onnx.ExportOutputSerializer
     torch.onnx.OnnxExporterError
+    torch.onnx.OnnxRegistry
