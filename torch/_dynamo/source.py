@@ -16,8 +16,6 @@ _GUARD_SOURCE_NN_MODULE = {
     GuardSource.GLOBAL: GuardSource.GLOBAL_NN_MODULE,
     GuardSource.LOCAL_NN_MODULE: GuardSource.LOCAL_NN_MODULE,
     GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL_NN_MODULE,
-    # This shoudln't be here - hasattr failure we need to fix to replace NNModuleSource
-    # with NotNNModuleSource
     GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL_FSDP_MODULE,
 }
 

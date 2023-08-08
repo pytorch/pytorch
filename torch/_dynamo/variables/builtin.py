@@ -1436,17 +1436,6 @@ class BuiltinVariable(VariableTracker):
             if type(left) is not type(right):
                 return ConstantVariable(False)
 
-        # Would this invoke user code?
-        if isinstance(left, variables.UserDefinedObjectVariable) and isinstance(
-            right, variables.UserDefinedObjectVariable
-        ):
-            return ConstantVariable(op(left.value, right.value))
-
-        if isinstance(left, variables.UserDefinedObjectVariable) and isinstance(
-            right, variables.ConstantVariable
-        ):
-            return ConstantVariable(op(left.value, right.value))
-
         _unimplemented()
 
     # and_ is a constant fold function, so we only get here if constant fold is not valid

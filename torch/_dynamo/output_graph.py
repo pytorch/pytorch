@@ -593,7 +593,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         if is_dynamic_nn_module(target) and getattr(
             target, "_is_fsdp_managed_module", False
         ):
-            # TODO(dedup)
             name = "_".join(map(str, names))
             base = name
             for i in itertools.count():
