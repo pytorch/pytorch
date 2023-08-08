@@ -94,10 +94,11 @@ class CheckPoints:
             os.makedirs(debug_path)
         self.debug_path = debug_path
         self.checkpoints_file = os.path.join(debug_path, "checkpoints.json")
-        self.checkpoints = self.load_checkpoints()
+        self.checkpoints = self.load()
         self.ss_graph = ssgraph
         self.graph_name = ssgraph.graph_name
-        self.done_nodes = list(self.checkpoints[self.graph_name]["done_nodes"])
+        current_graph_checkpoints = self.checkpoints.get(self.graph_name, {})
+        self.done_nodes = set(current_graph_checkpoints.get("done_nodes", []))
         self.cur_node_pre_suc_done = []
         # The node is being assigned this time. It is the direct predecessor and successor of a critical node.
         self.this_time_node = None
@@ -107,17 +108,24 @@ class CheckPoints:
         if not os.path.exists(self.checkpoints_file):
             open(self.checkpoints_file, "w").close()
             return {}
-        with open(self.checkpoints_file, "r") as f:
-            checkpoints = json.load(f)
-        return checkpoints
+        if os.stat(self.checkpoints_file).st_size == 0:
+            return {}
+        else:
+            with open(self.checkpoints_file, "r") as f:
+                checkpoints = json.load(f)
+            return checkpoints
     
     def save(self):
-        self.checkpoints[self.graph_name]["done_nodes"] = list(set(self.done_nodes))
+        if self.graph_name not in self.checkpoints:
+            self.checkpoints[self.graph_name] = {}
+        self.checkpoints[self.graph_name]["done_nodes"] = list(self.done_nodes)
+        self.checkpoints[self.graph_name]["this_time_node"] = self.this_time_node.name if self.this_time_node else None
         with open(self.checkpoints_file, "w") as f:
             json.dump(self.checkpoints, f)
 
     def stream_assign(self):
         this_time = None
+        self.ss_graph.stream_pool[0] = len(self.ss_graph.ssnodes) + 2
         for node in self.ss_graph.critical_path:
             if node.name in self.done_nodes:
                 self.dig_node(node)
@@ -128,11 +136,13 @@ class CheckPoints:
                 all_pre_suc.extend(node.predecessors.values())
                 all_pre_suc.extend(node.successors.values())
                 for tmp_node in all_pre_suc:
-                    if tmp_node.name not in self.done_nodes:
+                    if tmp_node not in self.ss_graph.critical_path and tmp_node.name not in self.done_nodes:
                         break
                 else:
                     # all predecessors and successors are done for current node
                     self.done_nodes.add(node.name)
+                    if self.this_time_node is None:
+                        this_time = None
             else:
                 self.dig_node(node, 0, False)
 
@@ -151,16 +161,21 @@ class CheckPoints:
                 else:
                     self.this_time_node = tmp_node
             for tmp_node in cur_node.successors.values():
+                if tmp_node in self.ss_graph.critical_path:
+                    continue
                 if tmp_node.name in self.done_nodes:
                     self.cur_node_pre_suc_done.append(tmp_node)
                 elif not self.this_time_node:
                     self.this_time_node = tmp_node
-            assert self.this_time_node is not None
-            self.done_nodes.append(self.this_time_node.name)
+            if self.this_time_node is None:
+                print(f"Info: no valid prede- or suc- cessors for node {cur_node.name}")
+                return
+            self.done_nodes.add(self.this_time_node.name)
 
         for predecessor in cur_node.predecessors.values():
             if predecessor.stream_id == -1:
-                if level == 1 and target_node:
+                # iterate all prede- and suc- cessors of the critical node
+                if level == 0 and target_node:
                     if predecessor in self.cur_node_pre_suc_done or predecessor.name == self.this_time_node.name:
                         self.dig_node(predecessor, level + 1, True, True)
                     else:
@@ -168,7 +183,7 @@ class CheckPoints:
                 else:
                     self.dig_node(predecessor, level + 1, assign_all, target_node)
         if cur_node.stream_id == -1:
-            if cur_node in self.critical_path:
+            if cur_node in self.ss_graph.critical_path:
                 cur_node.stream_id = 0
             # if the node has only one predecessor and the predecessor has only one successor, then we can assign the same stream_id to the node
             elif len(cur_node.predecessors) == 1:
@@ -186,8 +201,10 @@ class CheckPoints:
                 else:
                     cur_node.stream_id = 0
         for successor in cur_node.successors.values():
+            if successor in self.ss_graph.critical_path:
+                continue
             if successor.stream_id == -1:
-                if level == 1 and target_node:
+                if level == 0 and target_node:
                     if successor in self.cur_node_pre_suc_done or successor.name == self.this_time_node.name:
                         self.dig_node(successor, level + 1, True, True)
                     else:
@@ -536,14 +553,14 @@ def stream_schedule(snodes):
     if accuracy_fix and not V.debug:
         raise RuntimeError("TORCHINDUCTOR_STREAM_ACCURACY_FIX is set to 1 but debug is not enabled")
     if accuracy_fix:
-        ssgraph.graph_name = V.debug._path.split(os.sep)[:-1]
+        ssgraph.graph_name = V.debug._path.split(os.sep)[-1]
         osenv_debug_folder = os.getenv("DEBUG_FOLDER")
         debug_path = f"{torch._dynamo.config.debug_dir_root}/{osenv_debug_folder}"
         checkpoints = CheckPoints(debug_path, ssgraph)
         checkpoints.load()
         checkpoints.stream_assign()
         ssgraph.event_assign()
-        CheckPoints.save()
+        checkpoints.save()
     else:
         ssgraph.stream_assign()
         ssgraph.event_assign()
