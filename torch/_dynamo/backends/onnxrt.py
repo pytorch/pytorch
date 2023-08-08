@@ -90,10 +90,15 @@ def onnxrt(
         providers = [default_provider(device_type)]
 
     for provider in providers:
+        available_providers: List[str] = onnxruntime.get_available_providers()
         if isinstance(provider, str):
-            assert provider in onnxruntime.get_available_providers()
+            assert (
+                provider in available_providers
+            ), f"the available providers are {available_providers}, but got {provider}"
         elif isinstance(provider, tuple):
-            assert provider[0] in onnxruntime.get_available_providers()
+            assert (
+                provider[0] in available_providers
+            ), f"the available providers are {available_providers}, but got {provider[0]}"
 
     session = onnxruntime.InferenceSession(filename, providers=providers)
 

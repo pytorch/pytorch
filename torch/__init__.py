@@ -1649,7 +1649,8 @@ def compile(model: Optional[Callable] = None, *,
         - `trace.enabled` which is the most useful debugging flag to turn on
         - `trace.graph_diagram` which will show you a picture of your graph after fusion
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
-        - For onnxrt `providers` which will be useful to configure detailed EP information
+        - For onnxrt `providers` which will be useful to configure detailed EP information, refer to
+        https://onnxruntime.ai/docs/execution-providers/#summary-of-supported-execution-providers
        disable (bool): Turn torch.compile() into a no-op for testing
 
     Example::
