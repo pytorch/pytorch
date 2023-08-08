@@ -1639,8 +1639,7 @@ Tensor asarray(
   auto dtype_unwrapped =
       dtype.value_or(torch::tensors::get_default_scalar_type());
   // Used when creating a new tensor from a Python sequence.
-  auto device_unwrapped =
-      device.value_or(torch::tensors::get_default_device());
+  auto device_unwrapped = device.value_or(torch::tensors::get_default_device());
 
   // Check whether 'obj' is a 'Tensor'
   if (THPVariable_Check(obj)) {
