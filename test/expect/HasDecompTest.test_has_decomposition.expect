@@ -60,6 +60,8 @@ aten::_copy_from
 aten::_copy_from.out
 aten::_copy_from_and_resize
 aten::_copy_from_and_resize.out
+aten::_cslt_compress
+aten::_cslt_sparse_mm
 aten::_ctc_loss
 aten::_ctc_loss.Tensor
 aten::_ctc_loss.Tensor_out
@@ -257,9 +259,12 @@ aten::_foreach_mul.Scalar
 aten::_foreach_mul.ScalarList
 aten::_foreach_mul.ScalarList_out
 aten::_foreach_mul.Scalar_out
+aten::_foreach_mul.Tensor
+aten::_foreach_mul.Tensor_out
 aten::_foreach_mul_.List
 aten::_foreach_mul_.Scalar
 aten::_foreach_mul_.ScalarList
+aten::_foreach_mul_.Tensor
 aten::_foreach_neg
 aten::_foreach_neg.out
 aten::_foreach_neg_
@@ -284,6 +289,9 @@ aten::_foreach_round_
 aten::_foreach_sigmoid
 aten::_foreach_sigmoid.out
 aten::_foreach_sigmoid_
+aten::_foreach_sign
+aten::_foreach_sign.out
+aten::_foreach_sign_
 aten::_foreach_sin
 aten::_foreach_sin.out
 aten::_foreach_sin_
@@ -949,8 +957,6 @@ aten::multi_margin_loss_backward
 aten::multi_margin_loss_backward.grad_input
 aten::multilabel_margin_loss_backward
 aten::multilabel_margin_loss_backward.grad_input
-aten::multilabel_margin_loss_forward
-aten::multilabel_margin_loss_forward.output
 aten::multinomial
 aten::multinomial.out
 aten::nanmedian
@@ -962,8 +968,6 @@ aten::native_norm
 aten::native_norm.ScalarOpt_dim_dtype
 aten::native_norm.ScalarOpt_dim_dtype_out
 aten::native_norm.out
-aten::nll_loss2d_forward
-aten::nll_loss2d_forward.output
 aten::nonzero
 aten::nonzero.out
 aten::nonzero_static
@@ -1258,7 +1262,6 @@ aten::t_copy
 aten::t_copy.out
 aten::take
 aten::take.out
-aten::tensordot.out
 aten::to_mkldnn
 aten::to_mkldnn.out
 aten::to_padded_tensor

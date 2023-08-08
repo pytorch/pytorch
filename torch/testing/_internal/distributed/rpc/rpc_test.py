@@ -264,7 +264,7 @@ def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
     res = list_input[0]
     for t in list_input:
         res += t
-    for k, v in dict_input.items():
+    for v in dict_input.values():
         res += v
     complex_tensors = tensor_class_input.tensors
     return (res, complex_tensors[0], complex_tensors[1], complex_tensors[2])
@@ -914,9 +914,7 @@ class RpcTestCommon:
             self.assertEqual(val, 0)
         tok = time.time()
         print(
-            "Rank {} finished testing {} times in {} seconds.".format(
-                self.rank, repeat, tok - tik
-            )
+            f"Rank {self.rank} finished testing {repeat} times in {tok - tik} seconds."
         )
 
     def _builtin_remote_ret(self, x, y, expected):

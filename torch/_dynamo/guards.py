@@ -607,15 +607,18 @@ class GuardBuilder(GuardBuilderBase):
                 self.TYPE_MATCH(guard)
                 terms = [
                     "dtype",
-                    "device.type",
-                    "device.index",
+                    "device",
                     "requires_grad",
                     "ndimension()",
                 ]
 
                 for term in terms:
                     real_value = self.get(tensor_name + "." + term)
-                    code.append(f"{tensor_name}.{term} == {real_value}")
+                    if istype(real_value, (torch.device, torch.dtype)):
+                        # copy pasted from EQUALS_MATCH
+                        code.append(f"str({tensor_name}.{term}) == {str(real_value)!r}")
+                    else:
+                        code.append(f"{tensor_name}.{term} == {real_value}")
             else:
                 self.tensor_check_names.append(tensor_name)
                 self.tensor_check_examples.append(value)
@@ -832,7 +835,7 @@ class CheckFunctionManager:
     ):
         guards = output_graph.guards if output_graph else None
         self.valid = True
-        self._weakrefs: List["ReferenceType[object]"] = []
+        self._weakrefs: List[ReferenceType[object]] = []
         self._seen_ids: Set[int] = set()
         self.output_graph = output_graph
 

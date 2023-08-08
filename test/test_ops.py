@@ -1325,7 +1325,7 @@ class TestCommon(TestCase):
                 # one or more tensors requiring grad
                 def _tensor_requires_grad(x):
                     if isinstance(x, dict):
-                        for k, v in x.items():
+                        for v in x.values():
                             if _tensor_requires_grad(v):
                                 return True
                     if isinstance(x, (list, tuple)):
@@ -1390,9 +1390,7 @@ class TestCommon(TestCase):
 
         # Partially supporting a dtype is not an error, but we print a warning
         if (len(partially_supported_forward) + len(partially_supported_backward)) > 0:
-            msg = "Some dtypes for {} on device type {} are only partially supported!\n".format(
-                op.name, device_type
-            )
+            msg = f"Some dtypes for {op.name} on device type {device_type} are only partially supported!\n"
             if len(partially_supported_forward) > 0:
                 msg = (
                     msg
@@ -1426,9 +1424,7 @@ class TestCommon(TestCase):
                 return
 
         # Generates error msg
-        msg = "The supported dtypes for {} on device type {} are incorrect!\n".format(
-            op.name, device_type
-        )
+        msg = f"The supported dtypes for {op.name} on device type {device_type} are incorrect!\n"
         if len(supported_but_unclaimed_forward) > 0:
             msg = (
                 msg
@@ -1862,6 +1858,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.isclose',
         '_refs.isfinite',
         '_refs.isreal',
+        '_refs.istft',
         '_refs.log_softmax',
         '_refs.movedim',
         '_refs.narrow',
@@ -1879,6 +1876,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.special.log_softmax',
         '_refs.special.softmax',
         '_refs.square',
+        '_refs.stft',
         '_refs.T',
         '_refs.tensor_split',
         '_refs.to',
@@ -1939,8 +1937,6 @@ class TestRefsOpsInfo(TestCase):
 
 fake_skips = (
     "aminmax",  # failing input
-    "cholesky",  # Could not run 'aten::cholesky' with arguments from the 'Meta' backend
-    "cholesky_inverse",  # Could not run 'aten::cholesky' with arguments from the 'Meta' backend
     "cov",  # aweights cannot be negtaive
     "istft",  # window overlap add min: 0
     "linalg.eigvals",  # The tensor has a non-zero number of elements, but its data is not allocated yet
@@ -2018,11 +2014,12 @@ fake_backward_skips = {
     "roll",
     "svd_lowrank",
     "sgn",
-    "cholesky",
 }
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     xfail("_segment_reduce", "lengths"),
+    xfail("fft.ihfftn"),  # Mismatch in aten._conj_physical.default
+    xfail("fft.ihfft2"),  # Mismatch in aten._conj_physical.default
     skip('nn.functional.ctc_loss'),
 }
 

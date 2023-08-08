@@ -2699,6 +2699,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, "size mismatch for fc1.weight: copying a param with shape"):
             net2.load_state_dict(state_dict, strict=False, assign=True)
 
+    def test_load_state_dict_warn_assign(self):
+        with torch.device('meta'):
+            m = torch.nn.Linear(3, 5)
+        state_dict = m.state_dict()
+        state_dict['weight'] = torch.empty_like(state_dict['weight'], device='cpu')
+        with self.assertWarnsRegex(UserWarning, "for weight: copying from a non-meta parameter in the checkpoint to a meta"):
+            m.load_state_dict(state_dict)
+
     def test_extra_state_missing_set_extra_state(self):
 
         class MyModule(torch.nn.Module):
@@ -2852,22 +2860,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
                 hx.sum().backward()
 
-    def test_RNN_cell_forward_input_size(self):
-        input = torch.randn(3, 11)
-        hx = torch.randn(3, 20)
-        for module in (nn.RNNCell, nn.GRUCell):
-            cell = module(10, 20)
-            self.assertRaises(Exception, lambda: cell(input, hx))
-
-    def test_RNN_cell_forward_hidden_size(self):
-        input = torch.randn(3, 10)
-        hx = torch.randn(3, 21)
-        cell_shared_param = (10, 20)
-        for cell in (nn.RNNCell(*cell_shared_param, nonlinearity="relu"),
-                     nn.RNNCell(*cell_shared_param, nonlinearity="tanh"),
-                     nn.GRUCell(*cell_shared_param)):
-            self.assertRaises(Exception, lambda: cell(input, hx))
-
     def test_RNN_cell_forward_zero_hidden_size(self):
         input = torch.randn(3, 10)
         hx = torch.randn(3, 0)
@@ -2890,7 +2882,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         input = cast(torch.randn(3, 5))
         target = cast(torch.randn(5, 3))
-        for _name, fn in losses.items():
+        for fn in losses.values():
             self.assertRaises(Exception, lambda: fn(input, target))
 
     def test_loss_equal_input_target_shape(self):
@@ -3831,7 +3823,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                  src_mask_len=None, tgt_mask_len=None, memory_mask_size=None,
                  src_key_padding_mask_size=None, tgt_key_padding_mask_size=None,
                  memory_key_padding_mask_size=None,
-                 raises=False):
+                 src_is_causal=False, tgt_is_causal=False,
+                 memory_is_causal=False):
+
             encoder_input = torch.randn(encoder_input_shape)
             decoder_input = torch.randn(decoder_input_shape)
             model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers,
@@ -3867,23 +3861,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             else:
                 memory_key_padding_mask = None
 
-            if raises:
-                with self.assertRaises(RuntimeError):
-                    model(encoder_input, decoder_input,
-                          src_mask=src_mask,
-                          tgt_mask=tgt_mask,
-                          memory_mask=memory_task,
-                          src_key_padding_mask=src_key_padding_mask,
-                          tgt_key_padding_mask=tgt_key_padding_mask,
-                          memory_key_padding_mask=memory_key_padding_mask)
-            else:
+            with self.assertRaises(RuntimeError):
                 model(encoder_input, decoder_input,
                       src_mask=src_mask,
                       tgt_mask=tgt_mask,
                       memory_mask=memory_task,
                       src_key_padding_mask=src_key_padding_mask,
                       tgt_key_padding_mask=tgt_key_padding_mask,
-                      memory_key_padding_mask=memory_key_padding_mask)
+                      memory_key_padding_mask=memory_key_padding_mask,
+                      src_is_causal=src_is_causal,
+                      tgt_is_causal=tgt_is_causal,
+                      memory_is_causal=memory_is_causal)
 
 
         correct_encoder_input_shape = (seq_len, bsz, d_model)
@@ -3897,22 +3885,22 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # Incorrect encoder_input batch size
         encoder_input_shape = update_shape(correct_encoder_input_shape, 1, wrong_bsz)
         decoder_input_shape = correct_decoder_input_shape
-        test(encoder_input_shape, decoder_input_shape, raises=True)
+        test(encoder_input_shape, decoder_input_shape)
 
         # Incorrect decoder_input batch size
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = update_shape(correct_decoder_input_shape, 1, wrong_bsz)
-        test(encoder_input_shape, decoder_input_shape, raises=True)
+        test(encoder_input_shape, decoder_input_shape)
 
         # Incorrect encoder_input input size
         encoder_input_shape = update_shape(correct_encoder_input_shape, 2, wrong_d_model)
         decoder_input_shape = correct_decoder_input_shape
-        test(encoder_input_shape, decoder_input_shape, raises=True)
+        test(encoder_input_shape, decoder_input_shape)
 
         # Incorrect decoder_input input size
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = update_shape(correct_decoder_input_shape, 2, wrong_d_model)
-        test(encoder_input_shape, decoder_input_shape, raises=True)
+        test(encoder_input_shape, decoder_input_shape)
 
         # Incorrect nhead
         encoder_input_shape = correct_encoder_input_shape
@@ -3925,23 +3913,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = correct_decoder_input_shape
         wrong_src_mask_size = seq_len + 1
-        test(encoder_input_shape, decoder_input_shape, src_mask_len=wrong_src_mask_size,
-             raises=True)
+        test(encoder_input_shape, decoder_input_shape, src_mask_len=wrong_src_mask_size)
 
         # Incorrect tgt_mask
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = correct_decoder_input_shape
         wrong_tgt_mask_size = tgt_len + 1
-        test(encoder_input_shape, decoder_input_shape, tgt_mask_len=wrong_tgt_mask_size,
-             raises=True)
+        test(encoder_input_shape, decoder_input_shape, tgt_mask_len=wrong_tgt_mask_size)
 
         # Incorrect memory_mask
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = correct_decoder_input_shape
         wrong_tgt_mask_size = tgt_len + 1
         test(encoder_input_shape, decoder_input_shape,
-             memory_mask_size=(wrong_tgt_mask_size, wrong_src_mask_size),
-             raises=True)
+             memory_mask_size=(wrong_tgt_mask_size, wrong_src_mask_size))
 
         # Incorrect src_key_padding_mask
         encoder_input_shape = correct_encoder_input_shape
@@ -5075,20 +5060,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(x.grad, x_grad_ref)
 
     def test_batchnorm_nhwc_cpu(self):
-        def helper(self, size, dtype, mixed_dtype=False):
+        def helper(self, mod, size, dtype, mixed_dtype=False, format=torch.channels_last):
             channels = size[1]
             input = torch.randn(size, dtype=dtype, device='cpu', requires_grad=True)
-            input = input.contiguous(memory_format=torch.channels_last).to(dtype)
+            input = input.contiguous(memory_format=format).to(dtype)
             input.retain_grad()
             grad = torch.randn(size, dtype=dtype, device='cpu')
-            grad = grad.contiguous(memory_format=torch.channels_last)
-            bn = nn.BatchNorm2d(channels).cpu().to(dtype)
+            grad = grad.contiguous(memory_format=format)
+            bn = mod(channels).cpu().to(dtype)
             bn.weight.data.uniform_()
             bn.bias.data.uniform_()
 
             ref_input = input.detach().clone().contiguous().requires_grad_(True)
             ref_grad = grad.detach().clone().contiguous()
-            ref_bn = nn.BatchNorm2d(channels).cpu().to(dtype)
+            ref_bn = mod(channels).cpu().to(dtype)
             ref_bn.load_state_dict(bn.state_dict())
 
             if mixed_dtype:
@@ -5100,7 +5085,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             ref_out = ref_bn(ref_input)
             ref_out.backward(ref_grad)
 
-            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(out.is_contiguous(memory_format=format))
             self.assertTrue(ref_out.is_contiguous())
             self.assertEqual(out, ref_out)
             self.assertEqual(bn.weight.grad, ref_bn.weight.grad)
@@ -5109,9 +5094,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         # test NC11 and N1HW; test mixed dtype
         for shape in [(4, 8, 10, 10), (4, 1, 9, 9), (4, 9, 1, 1)]:
-            helper(self, shape, torch.float, False)
-            helper(self, shape, torch.bfloat16, False)
-            helper(self, shape, torch.bfloat16, True)
+            helper(self, nn.BatchNorm2d, shape, torch.float, False, torch.channels_last)
+            helper(self, nn.BatchNorm2d, shape, torch.bfloat16, False, torch.channels_last)
+            helper(self, nn.BatchNorm2d, shape, torch.bfloat16, True, torch.channels_last)
+
+        for shape in [(4, 8, 2, 10, 10), (4, 1, 2, 9, 9), (4, 9, 1, 1, 1)]:
+            helper(self, nn.BatchNorm3d, shape, torch.float, False, torch.channels_last_3d)
+            helper(self, nn.BatchNorm3d, shape, torch.bfloat16, False, torch.channels_last_3d)
+            helper(self, nn.BatchNorm3d, shape, torch.bfloat16, True, torch.channels_last_3d)
 
     @parametrize_test(
         'bn_module',
@@ -5522,7 +5512,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         }
 
         input = torch.randn(2, 1, requires_grad=True)
-        for _name, fn in losses.items():
+        for fn in losses.values():
             for requires_grad in [True, False]:
                 # When target.requires_grad=True, its impl is in Python, while the other is in TH.
                 target = torch.randn(2, 10, requires_grad=requires_grad)
@@ -9231,7 +9221,6 @@ class TestNNDeviceType(NNTestCase):
 
             zeros = torch.zeros_like(input).to(torch.int64)
             v(lambda: F.multilabel_soft_margin_loss(input, zeros, reduction=reduction))
-            v(lambda: F.multilabel_margin_loss(input, zeros, reduction=reduction))
 
             v(lambda: F.triplet_margin_loss(input, input, input, reduction=reduction))
             v(lambda: F.triplet_margin_with_distance_loss(input, input, input, reduction=reduction))

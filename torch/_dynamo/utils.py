@@ -47,17 +47,19 @@ except ModuleNotFoundError:
     torch_np = None
     HAS_NUMPY_TORCH_INTEROP = False
 
-if HAS_NUMPY:
-    # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TORCH_NP_MODULE` are in sync.
-    NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
+# NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TORCH_NP_MODULE` are in sync.
+NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random) if HAS_NUMPY else tuple()
 
-if HAS_NUMPY_TORCH_INTEROP:
-    NP_TO_TORCH_NP_MODULE = {
+NP_TO_TORCH_NP_MODULE = (
+    {
         np: torch_np,
         np.fft: torch_np.fft,
         np.linalg: torch_np.linalg,
         np.random: torch_np.random,
     }
+    if HAS_NUMPY_TORCH_INTEROP
+    else {}
+)
 
 import importlib
 
@@ -149,7 +151,7 @@ def increment_op_count(cnt):
 def print_time_report():
     total = 0
     total_by_key = {}
-    for frame, timings in frame_phase_timing.items():
+    for timings in frame_phase_timing.values():
         for key, timing in timings.items():
             total += timing
             if key not in total_by_key:
@@ -1526,12 +1528,12 @@ def tensor_always_has_static_shape(
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
     The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
     """
-    if type(tensor) is torch.nn.Parameter:
+    if guard_source.is_nn_module() and config.force_nn_module_property_static_shapes:
+        return True, TensorStaticReason.NN_MODULE_PROPERTY
+    if type(tensor) is torch.nn.Parameter and config.force_parameter_static_shapes:
         return True, TensorStaticReason.PARAMETER
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
-    if guard_source.is_nn_module():
-        return True, TensorStaticReason.NN_MODULE_PROPERTY
     return False, None
 
 
@@ -1601,12 +1603,13 @@ state_dict_hook_names = [
 all_hook_names = forward_hook_names + backward_hook_names + state_dict_hook_names
 
 
-def nnmodule_has_hooks(
+def nn_module_get_all_hooks(
     mod,
     check_forward_hooks=False,
     check_backward_hooks=False,
     check_state_dict_hooks=False,
 ):
+    reset_code = torch._C._dynamo.eval_frame.reset_code
     """
     Sometimes its useful to differentiate between types of hooks such as forward/backward/pre
     hooks executed during module.__call__, and state_dict hooks which are executed separately.
@@ -1623,7 +1626,33 @@ def nnmodule_has_hooks(
         hook_dicts_to_check.extend(backward_hook_names)
     if check_state_dict_hooks:
         hook_dicts_to_check.extend(state_dict_hook_names)
-    return any(len(getattr(mod, x)) > 0 for x in hook_dicts_to_check if hasattr(mod, x))
+
+    all_hooks = []
+    for hook_dict_name in hook_dicts_to_check:
+        hooks = getattr(mod, hook_dict_name, [])
+        for hook_name in hooks:
+            hook = hooks[hook_name]
+
+            all_hooks.append(hook)
+    return all_hooks
+
+
+def nnmodule_has_hooks(
+    mod,
+    check_forward_hooks=False,
+    check_backward_hooks=False,
+    check_state_dict_hooks=False,
+):
+    """
+    Helper function to check if a module has any hooks attached to it.
+    """
+    hooks = nn_module_get_all_hooks(
+        mod,
+        check_forward_hooks=check_forward_hooks,
+        check_backward_hooks=check_backward_hooks,
+        check_state_dict_hooks=check_state_dict_hooks,
+    )
+    return bool(hooks)
 
 
 def to_numpy_helper(value):
