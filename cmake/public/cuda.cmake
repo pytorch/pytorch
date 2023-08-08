@@ -67,8 +67,12 @@ if(NOT CMAKE_CUDA_COMPILER_VERSION STREQUAL CUDAToolkit_VERSION OR
                       "V${CUDAToolkit_VERSION} in '${CUDAToolkit_INCLUDE_DIR}'")
 endif()
 
-if(NOT TARGET CUDA::nvToolsExt)
-  message(FATAL_ERROR "Failed to find nvToolsExt")
+# CUDA SDK >= 12 doesn't include NVTX anymore (all references to nvToolsExt will use
+# the NVTX from third_party/nccl/nccl/src/include/nvtx3).
+if(CUDA_VERSION_MAJOR LESS 12)
+  if(NOT TARGET CUDA::nvToolsExt)
+    message(FATAL_ERROR "Failed to find nvToolsExt")
+  endif()
 endif()
 
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
@@ -213,12 +217,6 @@ else()
         TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
         CUDA::cudart)
 endif()
-
-# nvToolsExt
-add_library(torch::nvtoolsext INTERFACE IMPORTED)
-set_property(
-    TARGET torch::nvtoolsext PROPERTY INTERFACE_LINK_LIBRARIES
-    CUDA::nvToolsExt)
 
 # cublas
 add_library(caffe2::cublas INTERFACE IMPORTED)
