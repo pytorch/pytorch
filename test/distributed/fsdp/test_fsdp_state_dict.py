@@ -1051,9 +1051,9 @@ class TestFSDPStateDict(FSDPTest):
                 f"{prefixed_tensor_name}",
             )
         # should not apply mixed_precision to ignored buffers
-        for buffer, buffer_name in {
+        for buffer_name in {
             **buffer_to_buffer_name,
-        }.items():
+        }.values():
             prefixed_buffer_name = f"{prefix_str}{buffer_name}"
             self.assertTrue(prefixed_buffer_name in sd1)
             self.assertEqual(sd1[prefixed_buffer_name].dtype, torch.float32)
