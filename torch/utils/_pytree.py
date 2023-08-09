@@ -28,6 +28,14 @@ This pytree implementation is not very performant due to Python overhead
 To improve the performance we can move parts of the implementation to C++.
 """
 
+"""
+TreeSpecSchema is the schema used to serialize the TreeSpec
+It contains the following fields:
+- type: A string name of the type. null for the case of a LeafSpec.
+- context: A string format of the context, optional.
+- children_spec: A list of children serialized specs.
+"""
+
 @dataclasses.dataclass
 class TreeSpecSchema:
     type: Optional[str]
