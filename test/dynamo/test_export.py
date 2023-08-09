@@ -2344,7 +2344,7 @@ def forward(self, x):
     def test_export_with_inline_constraints(self):
         def f(x):
             a = x.item()
-            constrain_as_size(a, 4)
+            constrain_as_size(a, 4, 7)
             return torch.empty((a, 4))
 
         with self.assertRaisesRegex(
