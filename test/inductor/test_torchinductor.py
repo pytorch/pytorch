@@ -372,8 +372,7 @@ def check_model(
             g /= g.norm()
 
         correct_grad = compute_grads(ref_inputs, ref_kwargs, correct, grads)
-        flat_grads, _ = tree_flatten(correct_grad)
-        all_none_grads = all(x is None for x in flat_grads)
+        all_none_grads = all(x is None for x in correct_grad)
         if all_none_grads:
             # See Note [Detaching inputs that never need gradients]
             # There are a handful of ops that can return None gradients, into of zero gradients.
@@ -390,16 +389,15 @@ def check_model(
             self.assertEqual(len(results_that_require_grad), 0)
         else:
             actual_grad = compute_grads(example_inputs, kwargs, actual, grads)
-            flat_actual, _ = tree_flatten(actual_grad)
 
             if reference_in_float:
-                flat_expect = reference_to_expect(flat_actual, flat_grads)
+                expect_grad = reference_to_expect(actual_grad, correct_grad)
             else:
-                flat_expect = flat_grads
+                expect_grad = correct_grad
 
             self.assertEqual(
-                flat_actual,
-                flat_expect,
+                actual_grad,
+                expect_grad,
                 atol=atol,
                 rtol=rtol,
                 equal_nan=True,
