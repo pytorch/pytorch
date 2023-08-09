@@ -9,6 +9,7 @@
 #include <c10/core/SymInt.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -58,7 +59,13 @@ static inline bool parseLinearFlatten3d() {
 // before passing it to linear operation
 static inline Tensor _flatten_nd_linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
     const auto input_sizes = input.sym_sizes();
-    const auto result = at::addmm(bias, input.reshape_symint({-1, input_sizes.at(input_sizes.size() -1)}), weight.t());
+    // can't use -1 in reshape because it errors when a dimension is 0
+    c10::SymInt flattened_dim = 1;
+    for (size_t i = 0, ndim = input_sizes.size(); i < ndim - 1; ++i) {
+      flattened_dim = flattened_dim * input_sizes[i];
+    }
+    auto inp_reshape = input.reshape_symint({flattened_dim, input_sizes.at(input_sizes.size() -1)});
+    const auto result = at::addmm(bias, inp_reshape, weight.t());
     auto new_size = input_sizes.slice(0, input_sizes.size() - 1);
     std::vector<SymInt> sizes_vec(new_size.begin(), new_size.end());
     sizes_vec.push_back(result.sym_size(1));
@@ -89,7 +96,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
     // backend. Reshaping/flattening has some performance implications on xla.
     if (input.is_contiguous() && input_dim == 3) {
       return _flatten_nd_linear(input, weight, *bias);
-    } else if (input.is_contiguous() && input.layout() == c10::kStrided && weight.layout() == c10::kStrided) {
+    } else if (input.is_contiguous() && input.layout() == c10::kStrided && weight.layout() == c10::kStrided && bias->dim() == 1) {
       return _flatten_nd_linear(input, weight, *bias);
     } else if (parseLinearFlatten3d() && input_dim == 3) {
       // If user forces flattening via env var
