@@ -24,6 +24,7 @@ from torch._higher_order_ops.utils import autograd_not_implemented
 ALLOWABLE_OPS = [
     torch.ops.aten.mm.default,
     torch.ops.aten.conv2d.default,
+    torch.ops.aten.convolution.default,
     torch.ops.aten.mul.Tensor,
     torch.ops.aten.mul.Scalar,
 ]
