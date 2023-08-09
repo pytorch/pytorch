@@ -615,7 +615,10 @@ def _load_libnvml():
                 try:
                     # Check for nvml.dll in System32 first for DCH drivers
                     libnvml = CDLL(
-                        os.path.join(os.getenv("WINDIR", "C:/Windows"), "System32/nvml.dll")
+                        os.path.join(
+                            os.getenv("WINDIR", "C:/Windows"),
+                            "System32/nvml.dll",
+                        )
                     )
                 except OSError as ose:
                     # If nvml.dll is not found in System32, it should be in ProgramFiles
@@ -666,7 +669,7 @@ def _raw_device_count_nvml() -> int:
 def _raw_device_uuid_nvml() -> Optional[List[str]]:
     """Return list of device UUID as reported by NVML
     or None if NVM discovery/initialization failed."""
-    from ctypes import POINTER, Structure, byref, c_uint, create_string_buffer
+    from ctypes import byref, c_uint, create_string_buffer, POINTER, Structure
 
     class nvmlDevice_st(Structure):
         pass  # opaque structure
@@ -693,7 +696,11 @@ def _raw_device_uuid_nvml() -> Optional[List[str]]:
                 return None
 
             uuid = create_string_buffer(NVML_DEVICE_UUID_BUFFER_SIZE)
-            ret = libnvml.nvmlDeviceGetUUID(handle, uuid, c_uint(NVML_DEVICE_UUID_BUFFER_SIZE))
+            ret = libnvml.nvmlDeviceGetUUID(
+                handle,
+                uuid,
+                c_uint(NVML_DEVICE_UUID_BUFFER_SIZE),
+            )
             if ret != 0:
                 warnings.warn(f"Can't get NVML device UUID. Exit with code {ret}.")
                 return None
