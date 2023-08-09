@@ -6443,7 +6443,7 @@
     QuantizedCPU, QuantizedCUDA: quantized_clone
     NestedTensorCPU, NestedTensorCUDA: clone_nested
   autogen: clone.out
-  tags: core
+  tags: [core, pointwise]
 
 - func: positive(Tensor(a) self) -> Tensor(a)
   variants: function, method
