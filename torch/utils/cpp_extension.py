@@ -1361,12 +1361,13 @@ def _check_and_build_precompiler_headers(extra_cflags,
         return
 
     def check_compiler_is_gcc(compiler):
-        version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT).decode(*SUBPROCESS_DECODE_ARGS)
+        env = os.environ.copy()
+        env['LC_ALL'] = 'C'  # Don't localize output
+        version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
         # Check for 'gcc' or 'g++' for sccache wrapper
         pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
         results = re.findall(pattern, version_string)
         if len(results) != 1:
-            # Clang is return False
             return False
         compiler_path = os.path.realpath(results[0].strip())
         # On RHEL/CentOS c++ is a gcc compiler wrapper
