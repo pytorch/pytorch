@@ -135,6 +135,7 @@ class TensorVariable(VariableTracker):
             "is_quantized": value.is_quantized,
             "is_sparse": value.is_sparse,
             "class_type": type(value),
+            "_typed_storage": value._typed_storage,
         }
         if not free_symbols(value):
             # this is a fully static shape, and the keys on props here inform specialization.
@@ -237,6 +238,10 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "detach", [], {})
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
+        if name == "_typed_storage":
+            return variables.LambdaVariable(
+                lambda *args, **kwargs: TypedStorageVariable(self._typed_storage())
+            ).add_options(self)
 
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
@@ -462,6 +467,22 @@ class TensorVariable(VariableTracker):
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable(index, **options)
+        elif name == "storage_offset":
+            # Constant path
+            if self.storage_offset is not None:
+                return ConstantVariable(self.storage_offset, **options)
+            # dyn shapes path
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self] + list(args), kwargs),
+                ),
+                **options,
+            )
+        elif name == "_typed_storage":
+            return TypedStorageVariable(self._typed_storage())
         else:
             constant_result = None
 
@@ -1039,3 +1060,47 @@ class TensorSubclassVariable(VariableTracker):
             )
 
         return super().call_function(tx, args, kwargs)
+
+
+class TypedStorageVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        self.value = value
+        super().__init__(**kwargs)
+
+    def reconstruct(self, codegen):
+        return super().reconstruct(codegen)
+
+    def as_proxy(self):
+        return self.proxy
+
+    def var_getattr(self, tx, name: str) -> VariableTracker:
+        if name == "_size":
+            return variables.LambdaVariable(
+                lambda *args, **kwargs: self.call_method(tx, name, [], {})
+            ).add_options(self)
+        return super().var_getattr(tx, name)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "_data_ptr":
+            return ConstantVariable(self.value._data_ptr())
+        if name == "_size":
+            if free_symbols(self.value._size()):
+                # TODO(voz): should be ez, pass a proxy in, make a symnodevariable
+                unimplemented("Dynamic sizing in typed storage - NYI")
+            if isinstance(self.value._size(), int):
+                return ConstantVariable(self.value._size())
+            sizes = [ConstantVariable(x) for x in self.value._size()]
+            return SizeVariable(sizes)
+        if name == "device":
+            return ConstantVariable(self.value.device)
+        if name == "_resize_":
+            assert len(args) == 1
+            self.value._resize_(args[0].value)
+            return ConstantVariable(None)
+        unimplemented(f"typed_storage method call {name} - NYI")
