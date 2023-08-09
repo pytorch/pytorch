@@ -6823,10 +6823,8 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
         (grad * masked_src_result).index_select(dim, index),
         (grad * result).index_select(dim, index) /
             source.masked_fill(src_zero, 1));
-    // is_meta(): meta tensors don't support .item(), so we can't do this check.
-    // The usual use case is for PT2, where we don't support double backward
-    // anyway - so if we can't verify src_num_zeros <= 0, then don't support
-    // double backward.
+    // GradMode::is_enabled() - this check is so that we can skip the .item()
+    // call in PT2.
     if (GradMode::is_enabled() && (src_num_zeros > 1).any().item<bool>()) {
       auto node = std::make_shared<DelayedError>(
           "index_reduce(): Double backward is unsupported for source when >1 zeros in source are scattered to the same position in self",
