@@ -188,6 +188,7 @@ include_patterns = [
     'torch/_inductor/codegen/common.py',
     'torch/_inductor/codegen/wrapper.py',
     'torch/_inductor/cudagraph_trees.py',
+    'torch/_inductor/compile_fx.py',
     'torch/_inductor/lowering.py',
     'torch/_inductor/metrics.py',
     'torch/_inductor/fx_passes/fuse_attention.py',
