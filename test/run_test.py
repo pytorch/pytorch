@@ -317,8 +317,8 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_cuda_primary_ctx",
     "test_cuda_trace",
     "test_cuda_nvml_based_avail",
-    "autograd/test_fallback",  # uses torch.library
-    "test_custom_ops",  # uses torch.library
+    # temporarily sets a global config
+    "test_autograd_fallback",
 ] + FSDP_TEST
 
 # Test files that should always be run serially with other test files,
@@ -374,6 +374,7 @@ ONNX_SERIAL_LIST = [
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
 CORE_TEST_LIST = [
     "test_autograd",
+    "test_autograd_fallback",
     "test_modules",
     "test_nn",
     "test_ops",
