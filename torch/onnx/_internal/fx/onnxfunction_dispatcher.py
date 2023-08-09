@@ -447,38 +447,84 @@ class _OnnxSchemaChecker:
 
     It provides methods to check for input compatibility based on the OpSchema. It also
     provides a matching score to indicate how well the OpSchema matches the input and
-    kwargs types.
+    kwargs types. A function will be evaluated as perfect match, nearest match eligible,
+    or no match.
 
-    There are two types of ONNX variants in torchlib:
+    Here are some common examples in categories:
 
-    1. Different types: Caused by the difference between the ONNX spec and PyTorch.The
-        matching system finds the correct one.
-
-        ```python
-        @torch_op("aten::mul")
-        def aten_mul(self: TReal, other: TReal) -> TReal:
-            ...
-
-        @torch_op("aten::mul")
-        def aten_mul_bool(self: BOOL, other: BOOL) -> BOOL:
-            ...
-    ```
-
-    2. Optional attribute: attribute could be "unprovided". The difference from 2 is that dtype
-        would not be None. If a None attribute is provided, it will be treated as "unprovided".
+    1. [NOTE: Perfect match]: The number of inputs and attributes are exactly the same as
+        the OpSchema. The types of inputs and attributes are exactly the same as the
+        OpSchema.
 
         ```python
-        @torch_op("aten::new_full")
-        def aten_new_full(self: TTensor, size: INT64, fill_value: TTensor) -> TTensor:
+        inputs = (Tensor[2, 3], Tensor[2, 3])
+        attributes = {"alpha": 1.0}
+
+        @torch_op("aten::op")
+        def aten_op(self: TReal, other: TReal, alpha: float = 1) -> TReal:
             ...
 
-        @torch_op("aten::new_full")
-        def aten_new_full_dtype(self: TTensor, size: INT64, fill_value: TTensor, dtype: int) -> TTensor:
+        ```
+        Result: Perfect match.
+
+    2. [NOTE: Optional input]: The dispatcher recognizes optional inputs. However,
+        the input can't be ignored. None must be provided.
+
+        ```python
+        inputs = (Tensor([2, 3]), None)
+        attributes = {}
+
+        aten_op(X: TTensor, Y: Optional[INT64]):
             ...
         ```
+        Result: Perfect match.
+        Real example: `aten::convolution`.
 
-        Depends on dtype is provided or not, matching system will dispatch the ATen op to
-        the correct one.
+    3. [NOTE: Different attributes]: If an attribute is provided with value, it's
+        a must to match the attribute in function signature.
+        ```python
+        inputs = (Tensor([2, 3]),)
+        attributes = {"a":1, "b":2}
+
+        aten_op(X: TTensor, a: int):
+            ...
+        ```
+        Result: No match.
+        Real example: `aten::div` vs `aten::div.Tensor_mode`.
+
+    4. [NOTE: Default attributes]: Default attribute will fill in the value into
+        inputs/attributes.
+        ```python
+        inputs = (Tensor([2, 3]),)
+        attributes = {}
+
+        aten_op(X: TTensor, a: int = 3):
+            ...
+        ```
+        Result: Perfect match.
+        Real example: `aten::clone`
+
+    5. [NOTE: Ignore attribute with None value]: The attributes with None value
+        will be ignored in matching.
+        ```python
+        inputs = (Tensor([2, 3]),)
+        attributes = {"a": None}
+
+        aten_op(X: TTensor):
+            ...
+        ```
+        Result: Perfect match.
+
+        ```python
+        inputs = (Tensor([2, 3]),)
+        attributes = {"a": None}
+
+        aten_op(X: TTensor, a: int = 3):
+            ...
+        ```
+        Result: Nearest match eligible.
+
+        Real example: `aten::div` vs `aten::div.Tensor_mode`.
 
     Attributes:
         onnxfunction: The OnnxFunction.
