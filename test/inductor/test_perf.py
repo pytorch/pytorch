@@ -89,22 +89,29 @@ class EstimateSnodeRuntimeTests(TestCase):
         def f(x, y):
             return torch.nn.functional.conv1d(x, y)
 
-        inp = (T(10, 10, 10), T(10, 10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), """2100""")
+        inp = (T(33, 16, 30), T(20, 16, 5))
+        self.assertExpectedInline(count_numel(f, *inp), """34600""")
 
     def test_conv2d(self):
         def f(x, y):
             return torch.nn.functional.conv2d(x, y, padding=1)
 
-        inp = (T(10, 10, 10, 10), T(10, 10, 10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), """20900""")
+        inp = (T(8, 4, 3, 3), T(1, 4, 5, 5))
+        self.assertExpectedInline(count_numel(f, *inp), """396""")
+
+    def test_conv2d_transpose(self):
+        def f(x, y):
+            return torch.nn.functional.conv_transpose2d(x, y, padding=1)
+
+        inp = (T(8, 1, 1, 1), T(1, 4, 5, 5))
+        self.assertExpectedInline(count_numel(f, *inp), """396""")
 
     def test_conv3d(self):
         def f(x, y):
-            return torch.nn.functional.conv3d(x, y, padding=1)
+            return torch.nn.functional.conv3d(x, y)
 
-        inp = (T(10, 10, 10, 10, 10), T(10, 10, 10, 10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), """202700""")
+        inp = (T(20, 16, 50, 10, 20), T(33, 16, 3, 3, 3))
+        self.assertExpectedInline(count_numel(f, *inp), """777617""")
 
     def test_mm(self):
         def f(a, b):
