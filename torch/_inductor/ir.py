@@ -236,6 +236,11 @@ class OptionalLayout(OptionalAttr):
         self.name = "optional_layout"
 
 
+class OptionalTensor(OptionalAttr):
+    def __init__(self):
+        self.name = "optional_tensor"
+
+
 default_value_map = {"Optional[Layout]": OptionalLayout}
 
 

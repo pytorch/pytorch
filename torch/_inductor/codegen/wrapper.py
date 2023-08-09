@@ -896,13 +896,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def __init__(self):
         super().__init__()
+        from ..ir import OptionalTensor
+
         self.declare = "auto "
         self.ending = ";"
         self.open_bracket = "{"
         self.closed_bracket = "}"
         self.comment = "//"
         self.namespace = "at::"
-        self.none_str = "at::Tensor()"
+        self.none_str = repr(OptionalTensor())
         self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
@@ -1012,6 +1014,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 c10::optional<at::Scalar> optional_scalar;
                 c10::optional<c10::string_view> optional_string;
                 c10::optional<at::Layout> optional_layout;
+                c10::optional<at::Tensor> optional_tensor;
                 torch::List<c10::optional<at::Scalar>> optional_list;
                 """
             )
