@@ -665,6 +665,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 "ScriptModules aren't supported in UnspecializedNNModuleVariable"
                 " becuase their .forward function isn't a static member of their type"
             )
+        if (
+            getattr(value, "_is_fsdp_managed_module", False)
+            and type(self) == UnspecializedNNModuleVariable
+        ):
+            raise RuntimeError(f"Illegal construction {type(self)}")
         if "value_type" in kwargs:
             lazy_value_to_become = getattr(kwargs["value_type"], "cls_to_become", None)
             if type(value) is lazy_value_to_become:

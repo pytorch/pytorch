@@ -1126,4 +1126,4 @@ class TypedStorageVariable(VariableTracker):
             assert len(args) == 1
             self.value._resize_(args[0].value)
             return ConstantVariable(None)
-        unimplemented(f"typed_storage method calls WIP {name}")
+        unimplemented(f"typed_storage method call {name} - NYI")
