@@ -1693,7 +1693,7 @@ def main():
                     cov.html_report()
 
         if IS_CI and HAVE_TEST_SELECTION_TOOLS:
-            emit_metric("cats_td_experiment_1", metrics_dict)
+            emit_metric("td_experiment_1", metrics_dict)
 
     all_failures = prioritized_failures + general_failures
     if len(all_failures) != 0:
