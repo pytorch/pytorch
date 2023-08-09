@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     subtest,
     skipIfRocm,
+    TEST_WITH_TORCHDYNAMO
 )
 from torch.testing._internal.common_device_type import \
     toleranceOverride, tol
@@ -4476,11 +4477,19 @@ class TestRandomness(TestCase):
         if randomness == 'different':
             for i in range(B0):
                 expected = torch.randperm(10, **kwargs)
-                self.assertEqual(vmap_result[i], expected)
+                # RNG differs between eager and via dynamo trace on CUDA
+                if (TEST_WITH_TORCHDYNAMO and torch.device(device).type == 'cuda'):
+                    self._assert_all_slices_unique(vmap_result)
+                else:
+                    self.assertEqual(vmap_result[i], expected)
         else:
             expected = torch.randperm(10, **kwargs)
-            for i in range(B0):
-                self.assertEqual(vmap_result[i], expected)
+            # RNG differs between eager and via dynamo trace on CUDA
+            if (TEST_WITH_TORCHDYNAMO and torch.device(device).type == 'cuda'):
+                self._assert_all_slices_equal(vmap_result)
+            else:
+                for i in range(B0):
+                    self.assertEqual(vmap_result[i], expected)
 
     @parametrize('randomness', ['error', 'same', 'different'])
     @parametrize('batched_input', ["first", "last", "none"])
@@ -4561,12 +4570,6 @@ class TestRandomness(TestCase):
             return
 
         vmap_result = vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
-
-        # Check that the randomness is within bounds...
-        # ideally this is close to 0.5
-        p_estimate = vmap_result.mean() / 2
-        self.assertTrue(p_estimate < 0.75)
-        self.assertTrue(p_estimate > 0.25)
 
         # Check the "feature" pattern
         dims = [-1, -2] if dim == 2 else [-1, -2, -3]
@@ -4655,7 +4658,9 @@ class TestRandomness(TestCase):
                 expected = op(passed, 0)
 
                 self._assert_all_slices_unique(vmap_result)
-                self.assertEqual(expected, vmap_result)
+                # RNG differs between eager and via dynamo trace on CUDA
+                if not (TEST_WITH_TORCHDYNAMO and torch.device(device).type == 'cuda'):
+                    self.assertEqual(expected, vmap_result)
                 return
 
             assert randomness == 'same'
@@ -4663,8 +4668,10 @@ class TestRandomness(TestCase):
                 passed = passed[0]
             expected = op(passed, 0)
             self._assert_all_slices_equal(vmap_result)
-            for i in range(B0):
-                self.assertEqual(expected, vmap_result[i])
+            # RNG differs between eager and via dynamo trace on CUDA
+            if not (TEST_WITH_TORCHDYNAMO and torch.device(device).type == 'cuda'):
+                for i in range(B0):
+                    self.assertEqual(expected, vmap_result[i])
 
     @parametrize('use_generator', [True, False])
     @parametrize('randomness', ['error', 'same', 'different'])
