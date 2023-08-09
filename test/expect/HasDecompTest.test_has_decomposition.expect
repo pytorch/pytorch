@@ -60,6 +60,8 @@ aten::_copy_from
 aten::_copy_from.out
 aten::_copy_from_and_resize
 aten::_copy_from_and_resize.out
+aten::_cslt_compress
+aten::_cslt_sparse_mm
 aten::_ctc_loss
 aten::_ctc_loss.Tensor
 aten::_ctc_loss.Tensor_out
@@ -260,9 +262,12 @@ aten::_foreach_mul.Scalar
 aten::_foreach_mul.ScalarList
 aten::_foreach_mul.ScalarList_out
 aten::_foreach_mul.Scalar_out
+aten::_foreach_mul.Tensor
+aten::_foreach_mul.Tensor_out
 aten::_foreach_mul_.List
 aten::_foreach_mul_.Scalar
 aten::_foreach_mul_.ScalarList
+aten::_foreach_mul_.Tensor
 aten::_foreach_neg
 aten::_foreach_neg.out
 aten::_foreach_neg_
@@ -1260,7 +1265,6 @@ aten::t_copy
 aten::t_copy.out
 aten::take
 aten::take.out
-aten::tensordot.out
 aten::to_mkldnn
 aten::to_mkldnn.out
 aten::to_padded_tensor
