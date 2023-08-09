@@ -1711,7 +1711,6 @@ make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
-make_fallback(aten.cumprod, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
 make_fallback(aten._flash_attention_forward)
@@ -1748,9 +1747,6 @@ make_fallback(aten._addmm_activation, warn=False)
 make_fallback(aten.avg_pool3d)
 make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
-make_fallback(aten.cummax)
-make_fallback(aten.cummin)
-make_fallback(aten.cumprod, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
@@ -4320,6 +4316,9 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 
 
 fallback_cumsum = fallback_handler(aten.cumsum)
+fallback_cumprod = fallback_handler(aten.cumprod)
+fallback_cummin = fallback_handler(aten.cummin)
+fallback_cummax = fallback_handler(aten.cummax)
 
 
 @register_lowering(aten.cumsum)
@@ -4333,6 +4332,37 @@ def cumsum(x, axis=None, dtype=None):
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     return ir.Scan.create(**kwargs, scan_op="sum")
+
+
+@register_lowering(aten.cumprod)
+def cumprod(x, axis=None, dtype=None):
+    if x.get_device().type != "cuda":
+        return fallback_cumprod(x, dim=axis, dtype=dtype)
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
+        dtype = torch.int64
+
+    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
+    return ir.Scan.create(**kwargs, scan_op="prod")
+
+
+@register_lowering(aten.cummin)
+def cummin(x, axis=None, dtype=None):
+    if x.get_device().type != "cuda":
+        return fallback_cummin(x, dim=axis, dtype=dtype)
+
+    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
+    return ir.Scan.create(**kwargs, scan_op="min")
+
+
+@register_lowering(aten.cummax)
+def cummax(x, axis=None, dtype=None):
+    if x.get_device().type != "cuda":
+        return fallback_cummax(x, dim=axis, dtype=dtype)
+
+    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
+    return ir.Scan.create(**kwargs, scan_op="max")
 
 
 @register_lowering(aten.prod)
