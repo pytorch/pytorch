@@ -88,6 +88,8 @@ class TensorVariable(VariableTracker):
         stride=None,
         is_contiguous=None,
         specialized_value=None,
+        _typed_storage=None,
+        storage_offset=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -104,6 +106,8 @@ class TensorVariable(VariableTracker):
         self.is_sparse = is_sparse
         self.class_type = class_type
         self.specialized_value = specialized_value
+        self._typed_storage = _typed_storage
+        self.storage_offset = storage_offset
 
     def as_proxy(self):
         return self.proxy
@@ -123,6 +127,14 @@ class TensorVariable(VariableTracker):
             return any(check_type(ty) for ty in tensor_type)
         else:
             return check_type(tensor_type)
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        options = VariableTracker.propagate(self)
+        val = self.as_proxy().node.meta["example_value"]
+        result = hasattr(val, name)
+        return variables.ConstantVariable(result, **options).add_guard(
+            AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
+        )
 
     @staticmethod
     def specialize(value: torch.Tensor):
