@@ -1236,7 +1236,7 @@ def gen_pyi(
 
     tag_names = sorted(parse_tags_yaml(tags_yaml_path))
     tag_attributes = "\n".join(
-        f"{name}: int = {index}" for index, name in enumerate(tag_names)
+        f"{name}: _int = {index}" for index, name in enumerate(tag_names)
     )
 
     # Write out the stub
