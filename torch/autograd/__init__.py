@@ -450,6 +450,7 @@ from torch._C._autograd import (
     _enable_profiler,
     _enable_profiler_legacy,
     _enable_record_function,
+    _get_sequence_nr,
     _kineto_step,
     _KinetoEvent,
     _pop_saved_tensors_default_hooks,
@@ -481,4 +482,9 @@ def _register_py_tensor_class_for_device(device, cls):
 is_multithreading_enabled = torch._C._is_multithreading_enabled
 torch._C._add_docstr(
     is_multithreading_enabled, "Returns True if multithreading is currently enabled."
+)
+
+is_view_replay_enabled = torch._C._is_view_replay_enabled
+torch._C._add_docstr(
+    is_view_replay_enabled, "Returns True if view-replay is currently enabled."
 )
