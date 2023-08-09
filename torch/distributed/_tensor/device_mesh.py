@@ -151,8 +151,8 @@ class DeviceMesh:
         # calculate the coordinates of the current global rank on the mesh
         rank_coords = (self.mesh == get_rank()).nonzero()
         assert rank_coords.size(0) in (0, 1)
-        self._coordinate_on_dim: Optional[List[int]] = (
-            rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
+        self._coordinate_on_dim: Optional[Tensor] = (
+            rank_coords if rank_coords.size(0) > 0 else None
         )
         return _get_default_group()
 
@@ -269,7 +269,7 @@ class DeviceMesh:
     def get_rank(self) -> int:
         return get_rank()
 
-    def get_coordinate(self) -> Optional[List[int]]:
+    def get_coordinate(self):
         """
         Return the relative indices of this rank relative to all
         dimensions of the mesh. If this rank is not part of the mesh, return None.
