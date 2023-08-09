@@ -1345,7 +1345,6 @@ def _get_glibcxx_abi_build_flags():
 
 def _check_and_build_precompiler_headers(extra_cflags,
                             extra_include_paths,
-                            with_cuda=None,
                             is_standalone=False):
     r'''
     Precompiled Headers(PCH) can pre-build the same headers and reduce build time for pytorch load_inline modules.
@@ -1357,12 +1356,8 @@ def _check_and_build_precompiler_headers(extra_cflags,
     Note:
     1. Windows and MacOS have different PCH mechanism, We only support on Linux currently.
     2. It is only works on GCC/G++.
-    3. Skip when build with CUDA.
     '''
     if not IS_LINUX:
-        return
-
-    if with_cuda is True:
         return
 
     def check_compiler_is_gcc(compiler):
@@ -1568,8 +1563,7 @@ def load_inline(name,
 
     # Using PreCompile Header('torch/extension.h') to reduce compile time.
     _check_and_build_precompiler_headers(extra_cflags,
-                        extra_include_paths,
-                        with_cuda)
+                        extra_include_paths)
 
     # If `functions` is supplied, we create the pybind11 bindings for the user.
     # Here, `functions` is (or becomes, after some processing) a map from
