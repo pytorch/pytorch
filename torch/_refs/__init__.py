@@ -5665,7 +5665,6 @@ def bucketize(
 )
 def cauchy(self, median=0, sigma=1, generator=None):
     assert generator is None
-    # breakpoint()
     torch._check(
         not utils.is_complex_dtype(self.dtype)
         and not utils.is_integer_dtype(self.dtype)
