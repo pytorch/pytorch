@@ -549,7 +549,7 @@ try:
                 "Model:\n" + model_str + "\n\n"
                 "Assertions:\n" + assertions_str + "\n\n"
                 "Target Expressions:\n" + target_exprs_str + "\n\n"
-                "Failed Source Expressions:\n" + failed_source_exprs_str + "\n\n"
+                "Failed Source Expressions:\n" + failed_source_exprs_str
             )
 
 

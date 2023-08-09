@@ -390,6 +390,8 @@ def _compile(
     frame: Optional[types.FrameType] = None,
     frame_state=None,
 ) -> Optional[GuardedCode]:
+    from torch.fx.experimental.validator import translation_validation_enabled, ValidationException
+
     output: Optional[OutputGraph] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
@@ -417,8 +419,6 @@ def _compile(
             with tracing(tracer.output.tracing_context):
                 tracer.run()
         except Exception:
-            from torch.fx.experimental.validator import translation_validation_enabled
-
             if translation_validation_enabled():
                 fakes = tracer.output.tracked_fakes
                 tracer.output.shape_env.produce_guards(
@@ -535,6 +535,7 @@ def _compile(
         AssertionError,
         ConstraintViolationError,
         GuardOnDataDependentSymNode,
+        ValidationException,
     ) as e:
         exception_handler(e, code, frame, export=export)
         raise
