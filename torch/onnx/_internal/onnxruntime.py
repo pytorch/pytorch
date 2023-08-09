@@ -209,6 +209,7 @@ def _replace_to_copy_with_to(fx_module: torch.fx.GraphModule) -> None:
 
 def _create_onnx_session(onnx_proto, eps: Tuple[str, ...], session_options):
     # TODO(wschin): enable external allocators.
+    # See https://github.com/pytorch/pytorch/issues/106867
     return onnxruntime.InferenceSession(
         onnx_proto, providers=eps, sess_options=session_options
     )
@@ -528,10 +529,17 @@ class OrtBackend:
             torch.onnx._internal.exporter.ResolvedExportOptions(onnx_exporter_options)
         )
 
-        # TODO(wschin): This line must generate result identical to the call of
-        # _create_onnx_supports_op_overload_table(...) inside
-        # create_onnx_friendly_decomposition_table(...) in
-        # torch/onnx/_internal/fx/decomposition_table.py.
+        #  Given DORT's computation flow:
+        #   1. OrtOperatorSupport uses support_dict and extra_support_dict to select operators
+        #      and send them to DORT.
+        #   2. Then, DORT exports the selected sub-graphs into ONNX.
+        #   3. Finally DORT calls ORT to do the computation.
+        #  OrtOperatorSupport and create_onnx_friendly_decomposition_table(...)
+        #  must use the same support_dict. If the support_dict here contains something not
+        #  supported by exporter, exporter will fails in step 2 since the selected graphs may
+        #  contains unsupported operators such as aten::_who_you_are.
+        #  This restriction is automatically done since DORT and exporter shares the same
+        #  self.resolved_onnx_exporter_options.
         support_dict = torch.onnx._internal.fx.decomposition_table._create_onnx_supports_op_overload_table(
             self.resolved_onnx_exporter_options.onnx_registry
         )
@@ -543,6 +551,7 @@ class OrtBackend:
 
         self._supported_ops = OrtOperatorSupport(support_dict, extra_support_dict)
         # TODO(wschin): this is a naive implementation of cache without proper guard
+        # See https://github.com/pytorch/pytorch/issues/106868.
         self._partitioner_cache: Dict[torch.fx.GraphModule, torch.fx.GraphModule] = {}
         # Conceptually, this filed is a 2-layer dictionary
         #   GraphModule 0
@@ -578,6 +587,7 @@ class OrtBackend:
         # It can be avoided by allowing for preallocation for output buffers allocated by a custom aten allocator,
         # and use the preallocated output buffers for InferenceSession not holding any ownership for them.
         # TODO(wschin): Make it to inference session level flag.
+        # See https://github.com/pytorch/pytorch/issues/106869.
         self.preallocate_output = preallocate_output
         # Function which invokes ORT do to the real computation.
         self.run = (
@@ -697,8 +707,6 @@ class OrtBackend:
             )
             # Cache ORT session. It's reused for the same "graph_module".
             # Generate ONNX model and extract its input and output names.
-            # TODO(wschin): ORT session should provide a API to extract
-            # input and output names from the underlying model.
             input_names = tuple(input.name for input in onnx_model.graph.input)
             output_names = tuple(output.name for output in onnx_model.graph.output)
             input_devices = _get_onnx_devices(args)
@@ -790,6 +798,7 @@ class OrtBackend:
         else:
             prim_graph_module = graph_module
             # TODO(wschin): this is required for removing aten::_to_copy in _replace_to_copy_with_to.
+            # See https://github.com/pytorch/pytorch/issues/106871.
             _replace_to_copy_with_to(prim_graph_module)
             partitioner = CapabilityBasedPartitioner(
                 prim_graph_module,
@@ -805,6 +814,7 @@ class OrtBackend:
             # Inside _ort_accelerated_call, the partition's graph is exported into ONNX and executed by ORT.
             for node in partitioned_prim_graph_module.graph.nodes:
                 # TODO(wschin): use a better way to identify fused submodule
+                # See https://github.com/pytorch/pytorch/issues/106872.
                 if node.op == "call_module" and "fused_" in node.name:
                     fused_module = getattr(partitioned_prim_graph_module, node.name)
                     # self.ort_acclerated_call is responsible for exporting graph to ONNX,
