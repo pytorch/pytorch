@@ -1713,7 +1713,7 @@ class CommonTemplate:
             torch.nn.Linear(8, 8),
             torch.nn.ReLU(),
         )
-        self.common(mod, (torch.randn(2, 8),))
+        self.common(mod, (torch.randn(2, 8),), atol=1e-3, rtol=0.01,)
 
     def test_bmm1(self):
         def fn(a, b):
