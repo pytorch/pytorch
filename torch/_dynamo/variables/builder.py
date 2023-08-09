@@ -272,7 +272,6 @@ class VariableBuilder:
             (
                 (
                     torch.Tensor,
-                    torch.nn.Buffer,
                     torch.nn.Parameter,
                     torch._subclasses.FakeTensor,
                 ),
@@ -650,7 +649,7 @@ class VariableBuilder:
             )
         elif isinstance(value, (torch.SymBool, torch.SymInt, torch.SymFloat)):
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value), source=self.source
             )
             sym_node_proxy.node.meta["grapharg"] = GraphArg(
                 self.source,
@@ -901,12 +900,16 @@ class VariableBuilder:
         else:
             assert type(value) in (
                 torch.Tensor,
-                torch.nn.Buffer,
                 torch.nn.Parameter,
                 torch._subclasses.fake_tensor.FakeTensor,
             ) or is_traceable_wrapper_subclass(value), type(value)
             ignore_subclass = False
 
+        # NB: this just says we accessed a tensor from the same source again
+        # (e.g., a tensor lives in a global foo, and we LOAD_GLOBAL it twice).
+        # This is distinct from two distinct sources mapping to the same
+        # Tensor (per id())!  No guard is necessary here.  See below for the
+        # other case.
         is_duplicate_tensor = source in self.tx.output.input_source_to_var
         if is_duplicate_tensor:
             return self.tx.output.input_source_to_var[source]
@@ -926,6 +929,16 @@ class VariableBuilder:
         #     # in real_value_tensor_positive_aliases in the common case)
         #     assert not isinstance(value, torch._subclasses.fake_tensor.FakeTensor)
 
+
+        # We have accessed the SAME tensor from a different source.  In some
+        # situations, it doesn't matter if you have the same tensor identity
+        # or not, but we are unable to do this fine-grained tracking.  So
+        # instead we just say, if x is y, then to successfully reuse this
+        # compiled tensor again, you must have x is y again.  Negative
+        # aliases, that is, that x is not y, are IMPLICITLY checked as part of
+        # the code cache matching process, you don't need to explicitly
+        # generate a guard for it (nor would you want to, you need O(n^2)
+        # pairwise 'is not' tests to do it.)
         if value in self.tx.output.real_value_tensor_positive_aliases:
             stored_value = self.tx.output.real_value_tensor_positive_aliases[value]
             # TODO(voz): Decently common pattern, refactor at some point.
@@ -935,7 +948,7 @@ class VariableBuilder:
             return stored_value
 
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
-            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value), source=source
         )
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
@@ -982,7 +995,7 @@ class VariableBuilder:
         tensor_value = torch.as_tensor(value)
 
         proxy = self.tx.output.root_tracer.create_graph_input(
-            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(tensor_value)
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(tensor_value), source=source
         )
         options = {"source": source}
         numpy_ndarray_variable = wrap_fx_proxy_cls(
@@ -1513,7 +1526,7 @@ def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
     if (
-        type(e) in (torch.Tensor, torch.nn.Parameter, torch.nn.Buffer, FakeTensor)
+        type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
         or (ignore_subclass and isinstance(e, torch.Tensor))
         or is_traceable_wrapper_subclass(e)
     ):

@@ -857,13 +857,6 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
 class ExportResult(NamedTuple):
     graph_module: torch.fx.GraphModule
     guards: Set[_guards.Guard]
-    example_inputs: List[Any]
-
-    # NB: Do not add new fields in __iter__; people are
-    # destructuring so it is BC-breaking
-    def __iter__(self):
-        yield self.graph_module
-        yield self.guards
 
 
 def check_signature_rewritable(graph):

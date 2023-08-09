@@ -528,6 +528,7 @@ class MetaConverter:
                 from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional
 
                 meta_t = lambda : _unwrap_all_tensors_from_functional(torch.empty_strided(sym_sizes, sym_stride, device="meta", dtype=t.dtype), reapply_views=False)
+                # Further wrap it up with FunctionalTensorWrapper
                 return callback(meta_t)
                 self.miss += 1
             else:

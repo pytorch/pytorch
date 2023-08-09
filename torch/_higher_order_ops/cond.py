@@ -65,6 +65,7 @@ def cond_compiled(pred, true_fn, false_fn, args):
     def f(pred, true_fn, false_fn, args):
         return cond(pred, true_fn, false_fn, args)
 
+    torch._dynamo.reset()
     with _turn_off_is_fx_tracing():
         return f(pred, true_fn, false_fn, args)
 

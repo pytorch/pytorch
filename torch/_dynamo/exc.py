@@ -140,7 +140,6 @@ class IncorrectUsage(Exception):
 
 def unimplemented(msg: str):
     assert msg != os.environ.get("BREAK", False)
-    breakpoint()
     raise Unsupported(msg)
 
 
