@@ -10,7 +10,7 @@ import torch
 import torch.onnx
 from torch import nn
 
-from torch.onnx._backend.core import make_aot_ort, OrtBackend
+from torch.onnx._internal.onnxruntime import make_aot_ort, OrtBackend
 from torch.testing._internal import common_utils
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
