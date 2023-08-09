@@ -9,6 +9,7 @@ import warnings
 import unittest
 from itertools import product, combinations, combinations_with_replacement, permutations
 import random
+from typing import Any, Dict, List, Tuple
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
@@ -3967,27 +3968,25 @@ class TestAsArray(TestCase):
         self.assertEqual(tensor.dtype, torch.int32)
 
     def test_default_device(self, device):
-        import array
+        original = torch.arange(5)
 
-        examples = [
-            3,
-            np.arange(5),
-            torch.arange(5),
-            array.array("f", [1, 2, 3, 4]),
+        examples: List[Tuple[Any, Dict]] = [
+            (3, {}),
+            (original, {}),
+            (to_numpy(original), {}),
+            (to_memview(original), {"dtype": original.dtype}),
         ]
 
-        for data in examples:
+        for data, kwargs in examples:
             with torch.device(device):
-                tensor = torch.asarray(data)
+                tensor = torch.asarray(data, **kwargs)
                 self.assertEqual(tensor.device, torch.device(device))
 
                 # Check the contents of the tensor.
                 if isinstance(data, int):
                     self.assertEqual(data, tensor.item())
                 else:
-                    self.assertEqual(len(data), len(tensor))
-                    for i in range(len(data)):
-                        self.assertEqual(data[i], tensor[i])
+                    self.assertEqual(data, tensor)
 
 
 instantiate_device_type_tests(TestTensorCreation, globals())
