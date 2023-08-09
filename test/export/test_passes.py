@@ -9,6 +9,7 @@ from typing import List, Set
 import operator
 
 import torch
+from torch.compiler import dynamic_dim
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing import FileCheck
 from torch._dynamo.eval_frame import is_dynamo_supported

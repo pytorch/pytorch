@@ -2,8 +2,9 @@
 import unittest
 
 import torch
+from torch.compiler import dynamic_dim
 import torch._dynamo as torchdynamo
-from torch._export import dynamic_dim, export
+from torch._export import export
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (

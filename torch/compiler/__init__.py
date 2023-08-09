@@ -1,5 +1,12 @@
 import torch
-from typing import List
+from typing import Any, List, Optional
+
+from torch.utils._pytree import (
+    FlattenFunc,
+    MaybeFromStrFunc,
+    ToStrFunc,
+    UnflattenFunc,
+)
 
 __all__ = [
     "compile",
@@ -8,6 +15,8 @@ __all__ = [
     "allow_in_graph",
     "list_backends",
     "disable",
+    "dynamic_dim",
+    "register_dataclass_as_pytree_node",
 ]
 
 def compile(*args, **kwargs):
@@ -92,3 +101,64 @@ def disable(fn=None, recursive=True):
     import torch._dynamo
 
     return torch._dynamo.disable(fn, recursive)
+
+
+def dynamic_dim(t: torch.Tensor, index: int):
+    """
+    Note - [On Export Dynamic Dimension UX]
+
+    After a lot of discussion, we have settled on a dynamic marking API
+    for export that meets the following constraints:
+    1) Stateless
+    2) Safe for numerous .export calls within a single process
+    3) Simple to use
+    4) Can be extended to constraints easily
+
+    While the underlying API is still torch._dynamo.mark_dynamic, we offer a higher
+    level API that meets the constraints above.
+
+    This API produces an object that is meant to be passed into torch.export()
+    constraints field. See docs on torch.export for more details.
+
+    Note - The output type and structure here is NOT BC and NOT A CONTRACT, we reserve
+    the right to change the output here at any time, and will do so as we extend the API.
+
+    result = torch.export(
+        my_model,
+        args,
+        kwargs,
+        constraints=[
+            # if you do only dynamic_dim, this is sugar for
+            # -Inf <= dynamic_dim(blah, 0) <= Inf; we don’t otherwise
+            # permit direct int->bool conversion
+            dynamic_dim(blah, 0),
+            # operator overloading because it makes it clear whether
+            # or not you’re inclusive-exclusive range or not
+            0 <= dynamic_dim(blah, 1) <= 100,
+            # NB: But we actually truncate ranges to be >= 2, because of
+            # 0/1 specialization
+        ]
+    )
+    """
+    return torch._export.dynamic_dim(t, index)
+
+
+def register_dataclass_as_pytree_node(
+    typ: Any,
+    flatten_fn: Optional[FlattenFunc] = None,
+    unflatten_fn: Optional[UnflattenFunc] = None,
+    to_str_fn: Optional[ToStrFunc] = None,
+    maybe_from_str_fn: Optional[MaybeFromStrFunc] = None,
+    *,
+    return_none_fields: bool = False,
+) -> None:
+    """
+    Registers a customized flatten/unflatten/serialization/deserialization for a dataclass.
+
+    Once registered, the custom dataclass type can be used as valid input/output types for
+    torch.export()
+    """
+    from torch._export.utils import register_dataclass_as_pytree_node
+    return register_dataclass_as_pytree_node(
+        typ, flatten_fn, unflatten_fn, to_str_fn, maybe_from_str_fn,
+        return_none_fields=return_none_fields)

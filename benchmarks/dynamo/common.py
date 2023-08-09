@@ -534,7 +534,7 @@ def _register_dataclass_output_as_pytree(example_outputs) -> None:
         type(out) for out in example_outputs_flat if dataclasses.is_dataclass(type(out))
     ]
     for output_type in output_dataclass_types:
-        from torch._export.utils import register_dataclass_as_pytree_node
+        from torch.compiler import register_dataclass_as_pytree_node
 
         register_dataclass_as_pytree_node(output_type)
 

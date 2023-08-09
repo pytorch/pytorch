@@ -10,6 +10,7 @@ from torch.utils._pytree import (
     ToStrFunc,
     UnflattenFunc,
 )
+from .error import ExportError, ExportErrorType
 
 
 def register_dataclass_as_pytree_node(
@@ -24,6 +25,18 @@ def register_dataclass_as_pytree_node(
     assert dataclasses.is_dataclass(
         typ
     ), f"Only dataclasses can be registered with this function: {typ}"
+
+    if to_str_fn:
+        raise ExportError(
+            ExportErrorType.NOT_SUPPORTED,
+            "serializing custom dataclass is not supported yet",
+        )
+
+    if maybe_from_str_fn:
+        raise ExportError(
+            ExportErrorType.NOT_SUPPORTED,
+            "deserializing custom dataclass is not supported yet",
+        )
 
     def default_flatten_fn(obj: Any) -> Tuple[List[Any], Context]:
         flattened = []

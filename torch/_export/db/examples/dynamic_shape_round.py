@@ -1,7 +1,7 @@
 import torch
 
+from torch.compiler import dynamic_dim
 from torch._export.db.case import export_case, SupportLevel
-from torch._export import dynamic_dim
 
 x = torch.ones(3, 2)
 dynamic_constraint = dynamic_dim(x, 0)

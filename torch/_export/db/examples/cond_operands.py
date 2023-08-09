@@ -1,7 +1,7 @@
 import torch
 
+from torch.compiler import dynamic_dim
 from torch._export.db.case import export_case
-from torch._export import dynamic_dim
 from functorch.experimental.control_flow import cond
 
 x = torch.randn(3, 2)
