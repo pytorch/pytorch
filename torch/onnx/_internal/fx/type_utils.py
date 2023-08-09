@@ -16,7 +16,6 @@ from typing import (
 )
 
 import numpy
-
 import onnx
 
 import torch

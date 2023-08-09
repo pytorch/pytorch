@@ -191,12 +191,6 @@ def _ort_session(
         ort_providers = _ORT_PROVIDERS
 
     session_options = onnxruntime.SessionOptions()
-    # onnxruntime-training's layernorm fusion has a bug, so we can't
-    # enable all optimizations. Using ORT_ENABLE_BASIC is ok since the
-    # correctness of fusion should be guarded by ORT, not exporter.
-    session_options.graph_optimization_level = (
-        onnxruntime.GraphOptimizationLevel.ORT_ENABLE_BASIC
-    )
     # suppress ort warnings.
     # 0:Verbose, 1:Info, 2:Warning. 3:Error, 4:Fatal. Default is 2.
     session_options.log_severity_level = 3

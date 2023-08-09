@@ -18,7 +18,7 @@ pip_install \
 # onnx-weekly. Otherwise, onnx-weekly could be
 # overwritten by onnx.
 pip_install \
-  onnxruntime-training==1.15.1 \
+  onnxruntime==1.15.1 \
   parameterized==0.8.1 \
   pytest-cov==4.0.0 \
   pytest-subtests==0.10.0 \

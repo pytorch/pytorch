@@ -373,6 +373,28 @@ def _run_onnx_session_with_ortvaluevector(
         return pth_outputs
 
 
+def _run_onnx_session_with_fetch(
+    sess: "onnxruntime.InferenceSession",
+    input_names: Tuple[str, ...],
+    inputs: Tuple[torch.Tensor, ...],
+    input_devices: Tuple["ORTC.OrtDevice", ...],
+    output_names: Tuple[str, ...],
+    outputs: Tuple[torch.Tensor, ...],
+    output_devices: Tuple["ORTC.OrtDevice", ...],
+    preallocate_output: bool,
+) -> Tuple[torch.Tensor, ...]:
+    feed = {
+        name: onnxruntime.OrtValue.ortvalue_from_numpy(tensor.cpu().numpy())
+        for name, tensor in zip(input_names, inputs)
+    }
+    ort_outputs = sess.run(output_names, feed)
+    pth_outputs = tuple(
+        torch.from_numpy(value).to(tensor.device)
+        for value, tensor in zip(ort_outputs, outputs)
+    )
+    return pth_outputs
+
+
 class OrtExecutionInfoPerSession:
     """Information required to execute torch.fx.GraphModule using onnxruntime.InferenceSession"""
 
@@ -557,6 +579,12 @@ class OrtBackend:
         # and use the preallocated output buffers for InferenceSession not holding any ownership for them.
         # TODO(wschin): Make it to inference session level flag.
         self.preallocate_output = preallocate_output
+        # Function which invokes ORT do to the real computation.
+        self.run = (
+            _run_onnx_session_with_ortvaluevector
+            if hasattr(ORTC, "push_back_batch")
+            else _run_onnx_session_with_fetch
+        )
 
     def _ort_acclerated_call(self, graph_module: torch.fx.GraphModule, *args, **kwargs):
         """This function replaces GraphModule._wrapped_call in compiled model.
@@ -710,7 +738,7 @@ class OrtBackend:
         assert all(isinstance(elem, torch.Tensor) for elem in normalized_prim_outputs)
 
         _nvtx_range_push("run_onnx_session_with_ortvaluevector")
-        onnx_outputs = _run_onnx_session_with_ortvaluevector(
+        onnx_outputs = self.run(
             onnx_session,
             input_names,
             args,

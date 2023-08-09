@@ -4,7 +4,6 @@ from __future__ import annotations
 import tempfile
 
 import onnx
-
 import pytorch_test_common
 import torch
 from torch import nn
