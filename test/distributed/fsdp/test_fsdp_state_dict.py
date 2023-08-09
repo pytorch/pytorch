@@ -66,7 +66,6 @@ if TEST_WITH_DEV_DBG_ASAN:
 INNER_SHAPE = [4, 4]
 OUTER_SHAPE = [4, 5]
 BUFFER_SHAPE = [5, 5]
-EXTRA_SHAPE = [6, 6]
 
 NON_ROOT_FSDP_PREFIX = "non_fsdp_lin"
 
@@ -90,7 +89,6 @@ class Model(Module):
         register_buffers=False,
         ignore_inner=False,
         mixed_precision=False,
-        extra_submodule=False,
     ):
         super().__init__()
         self.inner = Linear(*INNER_SHAPE)
@@ -117,11 +115,6 @@ class Model(Module):
             self.outer.register_buffer(
                 "non_persistent_buffer", torch.randn(BUFFER_SHAPE), persistent=False
             )
-
-        if extra_submodule:
-            # to test buffer upcasting in _state_dict_utils.py
-            # we need at least one fsdp params after ignored modules
-            self.extra_submodule = Linear(*EXTRA_SHAPE)
 
     def forward(self, x):
         # Forward twice.
@@ -1011,7 +1004,6 @@ class TestFSDPStateDict(FSDPTest):
             register_buffers=True,
             ignore_inner=ignore_inner,
             mixed_precision=mixed_precision,
-            extra_submodule=True,
         ).cuda()
         ignored_modules = [model.outer]
         ignored_tensor_to_tensor_name = {
