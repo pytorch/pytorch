@@ -314,6 +314,16 @@ void initPythonBindings(PyObject* module) {
       "_set_cuda_sync_enabled_val",
       &torch::profiler::impl::set_cuda_sync_enabled_val);
 
+  m.def(
+      "_record_function_fast_start",
+      &torch::profiler::impl::recordFunctionFastStart);
+  m.def(
+      "_record_function_fast_stop",
+      &torch::profiler::impl::recordFunctionFastStop);
+  m.def(
+      "_record_function_repeated",
+      &torch::profiler::impl::recordFunctionRepeated);
+
   py::class_<CapturedTraceback, std::shared_ptr<CapturedTraceback>>(
       m, "CapturedTraceback");
   m.def(

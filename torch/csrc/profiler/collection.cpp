@@ -1488,6 +1488,26 @@ void set_cuda_sync_enabled_val(bool val) {
   cuda_sync_enabled_fn() = [val]() { return val; };
 }
 
+thread_local std::vector<std::unique_ptr<at::RecordFunction>> record_functions;
+
+void recordFunctionFastStart(std::string name, c10::optional<std::string> args) {
+  int sz = record_functions.size();
+  auto guard = std::make_unique<at::RecordFunction>(at::RecordScope::FUNCTION);
+  guard->before(name);
+  record_functions.push_back(std::move(guard));
+  // return sz;
+}
+void recordFunctionFastStop(/*int idx*/) {
+  record_functions.back().reset();
+  record_functions.pop_back();
+}
+void recordFunctionRepeated() {
+  for (int i=0; i<1000; ++i) {
+    recordFunctionFastStart("asdf", c10::nullopt);
+    recordFunctionFastStop();
+  }
+}
+
 } // namespace impl
 } // namespace profiler
 } // namespace torch

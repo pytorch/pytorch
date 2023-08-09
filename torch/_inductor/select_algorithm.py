@@ -931,6 +931,7 @@ class AlgorithmSelectorCache(PersistentCache):
             V.graph.sizevars.size_hints(node.get_stride()),
             device=node.get_device(),
             dtype=node.get_dtype(),
+            extra_size=node.layout.offset,
         )
 
     @staticmethod
