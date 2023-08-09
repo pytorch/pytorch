@@ -704,6 +704,10 @@ def get_include_and_linking_paths(
         os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
     from torch.utils import cpp_extension
 
+    if aot_mode and config.is_fbcode():
+        # Hack.  The AOT inductor libs reference CUDA, so let's just include it for now.
+        cuda = True
+
     macros = ""
     if sys.platform == "linux" and (
         include_pytorch
@@ -728,6 +732,8 @@ def get_include_and_linking_paths(
         else:
             # internal remote execution is able to find omp, but not gomp
             libs += ["omp"]
+            if aot_mode:
+                ipaths += [os.path.dirname(cpp_prefix_path())]
         macros = vec_isa.build_macro()
         if macros:
             if config.is_fbcode() and vec_isa != invalid_vec_isa:
@@ -783,7 +789,7 @@ def get_include_and_linking_paths(
         ipaths.append(build_paths.openmp())
         ipaths.append(build_paths.gcc_include())
         ipaths.append(build_paths.libgcc())
-        ipaths.append(build_paths.libgcc_x86_64())
+        ipaths.append(build_paths.libgcc_arch())
         ipaths.append(build_paths.libgcc_backward())
         ipaths.append(build_paths.glibc())
         ipaths.append(build_paths.linux_kernel())
@@ -910,11 +916,8 @@ class AotCodeCache:
 
                 cls.cache[key] = output_so
 
-        def wrapper_call(*args):
-            assert len(graph.graph_outputs) > 0
-            return cls.cache[key], *(None for i in range(len(graph.graph_outputs) - 1))
-
-        return wrapper_call
+            return cls.cache[key]
+        return None
 
 
 # Putting this fn in cpp.py (unfortunately) causes a deadlock, which is why it's in codecache.py.

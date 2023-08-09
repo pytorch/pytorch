@@ -298,6 +298,12 @@ class OptimizeForInferenceTemplate(TestCase):
             code[0],
         )
 
+        # we unfuse the conv bias, but it should only have one constant in the kernel
+        if self.device == "cuda":
+            FileCheck().check(".run(").check_same("constant").check_not(
+                "constant"
+            ).check_next("return").run(code[0])
+
         self.assertEqual(out_optimized_for_infernece, out_eager)
 
     def test_param_deallocated(self):

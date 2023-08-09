@@ -511,6 +511,19 @@ class FlatParamHandle:
         # it points to parameterizes behavior. We use the following attribute
         # to track which tensor data the parameters are unsharded views into.
         self._unsharded_flat_param_for_skipped_views: Optional[Tensor] = None
+        # The index in the state's `all_handles`, which must be the
+        # same across ranks for the execution order validation to work
+        self._handle_index: Optional[int] = None
+        # Index in handles_to_pre_forward_order
+        self._pre_forward_order_index: Optional[int] = None
+        # Index in `handles_post_forward_order`
+        self._post_forward_index: Optional[int] = None
+        # Used for guarding against mistargeted forward prefetches
+        self._needs_pre_forward_unshard = False
+        # Used for guarding against mistargeted backward prefetches
+        self._needs_pre_backward_unshard = False
+        # Was the handle prefetched? Set on successful _prefetch_handle and unshard
+        self._prefetched = False
         # Optimistically assume a valid input `params` and set dtype attributes
         # before `_init_flat_param()`, which performs the actual validation
         self._orig_param_dtype = params[0].dtype
@@ -1124,7 +1137,7 @@ class FlatParamHandle:
             # sharded tensor on the compute device to be all-gathered (for
             # sharded strategies) or directly used (for `NO_SHARD`) for
             # computation.
-            flat_param._mp_shard = torch.zeros_like(
+            flat_param._mp_shard = torch.empty_like(
                 flat_param._local_shard,
                 device=self.device,
                 dtype=self._fwd_bwd_param_dtype,
@@ -1139,7 +1152,7 @@ class FlatParamHandle:
                 else flat_param.dtype
             )  # use low precision if parameter mixed precision is enabled
             padded_unsharded_numel = flat_param.numel() * self.world_size
-            flat_param._full_param_padded = torch.zeros(
+            flat_param._full_param_padded = torch.empty(
                 padded_unsharded_numel,
                 device=self.device,
                 dtype=unsharded_param_dtype,
@@ -1150,7 +1163,7 @@ class FlatParamHandle:
             if self._uses_param_mixed_precision:
                 # For parameter mixed precision, we maintain a full precision
                 # padded unsharded tensor for when we force full precision.
-                flat_param._full_prec_full_param_padded = torch.zeros(
+                flat_param._full_prec_full_param_padded = torch.empty(
                     padded_unsharded_numel,
                     device=self.device,
                     dtype=flat_param.dtype,  # full precision
