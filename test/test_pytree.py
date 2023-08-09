@@ -10,6 +10,7 @@ from torch.utils._pytree import (
     LeafSpec,
     pytree_to_str,
     str_to_pytree,
+    _register_pytree_node,
 )
 import unittest
 from torch.utils._pytree import _broadcast_to_and_flatten, tree_map_only, tree_all
@@ -317,6 +318,12 @@ TreeSpec(TupleVariable, None, [*,
         # The context in the namedtuple is different now because we recreated
         # the namedtuple type.
         self.assertEqual(spec.context._fields, roundtrip_spec.context._fields)
+
+    def test_pytree_custom_type_serialize(self):
+        _register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
+        spec = TreeSpec(torch.Size, "size1", [LeafSpec(), LeafSpec()])
+        roundtrip_spec = str_to_pytree(pytree_to_str(spec))
+        self.assertEqual(roundtrip_spec, spec)
 
 
 instantiate_parametrized_tests(TestPytree)

@@ -3,6 +3,7 @@ import functools
 from collections import namedtuple, OrderedDict
 import dataclasses
 import json
+import importlib
 
 
 T = TypeVar('T')
@@ -62,6 +63,49 @@ class NodeDef(NamedTuple):
 
 SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
 
+def _default_serialize(spec: "TreeSpec") -> Tuple[Optional[str], Optional[str]]:
+    serialized_type = f"{spec.type.__module__}.{spec.type.__name__}"
+
+    try:
+        serialized_context = json.dumps(spec.context)
+    except Exception as e:
+        raise RuntimeError(
+            f"Unable to serialize spec {spec} as the context is not json "
+            "dump-able. Please implement and register your own "
+            "serializer/deserializer, or make your context json dump-able."
+        ) from e
+
+    return serialized_type, serialized_context
+
+def _default_deserialize(type_str: Optional[str], context_str: Optional[str]) -> Optional[Tuple[Any, Context]]:
+    if type_str is None:
+        return None
+
+    # Import the modules iteratively
+    try:
+        current_module = None
+        for module_name in type_str.split("."):
+            if current_module is None:
+                current_module = importlib.import_module(module_name)
+            else:
+                current_module = getattr(current_module, module_name)
+    except Exception as e:
+        raise RuntimeError(f"Unable to deserialize the type {type_str}.") from e
+
+    try:
+        if context_str is None:
+            context = None
+        else:
+            context = json.loads(context_str)
+    except Exception as e:
+        raise RuntimeError(
+            f"Unable to deserialize the context {context_str} as the context "
+            "is not json load-able. Please implement and register your own "
+            "serializer/deserializer, or make your serialized context json load-able."
+        ) from e
+
+    return current_module, context
+
 def _register_pytree_node(
     typ: Any,
     flatten_fn: FlattenFunc,
@@ -70,14 +114,10 @@ def _register_pytree_node(
     maybe_deserialize_fn: Optional[MaybeDeserializeFn] = None,
 ) -> None:
     if serialize_fn is None:
-        def _raise_error(spec: "TreeSpec") -> Tuple[Optional[str], Optional[str]]:
-            raise NotImplementedError(f"Serializing {typ} in pytree is not registered.")
-        serialize_fn = _raise_error
+        serialize_fn = _default_serialize
 
     if maybe_deserialize_fn is None:
-        def dummy(type_: Optional[str], context: Optional[str]) -> Optional[Tuple[Any, Context]]:
-            return None
-        maybe_deserialize_fn = dummy
+        maybe_deserialize_fn = _default_deserialize
 
     assert serialize_fn is not None
     assert maybe_deserialize_fn is not None
