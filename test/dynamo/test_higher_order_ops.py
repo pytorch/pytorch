@@ -994,7 +994,8 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         actual = mod_for_compile(torch.ones(6, 4))
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError, r"Can't inplace modify module params/buffers inside HigherOrderOp"
+            torch._dynamo.exc.UserError,
+            r"Can't inplace modify module params/buffers inside HigherOrderOp",
         ):
             mod_for_eager(torch.ones(6, 4))
 

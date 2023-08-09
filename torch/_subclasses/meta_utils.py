@@ -523,11 +523,29 @@ class MetaConverter:
                 # instrumentation will see the meta conversions and the
                 # tests all break so we just exclude this.  In any case
                 # the to conversion isn't really right anyhow.
-                sym_sizes, sym_stride, sym_storage_offset = shape_env.create_symbolic_sizes_strides_storage_offset(t, source, dynamic_dims=dynamic_dims, constraint_dims=constraint_dims)
+                (
+                    sym_sizes,
+                    sym_stride,
+                    sym_storage_offset,
+                ) = shape_env.create_symbolic_sizes_strides_storage_offset(
+                    t,
+                    source,
+                    dynamic_dims=dynamic_dims,
+                    constraint_dims=constraint_dims,
+                )
                 # disable dispatch key doesn't work
-                from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional
+                from torch._functorch.eager_transforms import (
+                    _unwrap_all_tensors_from_functional,
+                )
 
-                meta_t = lambda : _unwrap_all_tensors_from_functional(torch.empty_strided(sym_sizes, sym_stride, device="meta", dtype=t.dtype), reapply_views=False)
+                def meta_t():
+                    return _unwrap_all_tensors_from_functional(
+                        torch.empty_strided(
+                            sym_sizes, sym_stride, device="meta", dtype=t.dtype
+                        ),
+                        reapply_views=False,
+                    )
+
                 # Further wrap it up with FunctionalTensorWrapper
                 return callback(meta_t)
                 self.miss += 1

@@ -649,7 +649,9 @@ class VariableBuilder:
             )
         elif isinstance(value, (torch.SymBool, torch.SymInt, torch.SymFloat)):
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value), source=self.source
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(value),
+                source=self.source,
             )
             sym_node_proxy.node.meta["grapharg"] = GraphArg(
                 self.source,
@@ -659,7 +661,12 @@ class VariableBuilder:
                 is_tensor=False,
                 example_strong_ref=value,
             )
-            return SymNodeVariable(sym_node_proxy, value, source=self.source, guards=self.make_guards(GuardBuilder.ID_MATCH))
+            return SymNodeVariable(
+                sym_node_proxy,
+                value,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.ID_MATCH),
+            )
         else:
             result = UserDefinedObjectVariable(
                 value,
@@ -929,7 +936,6 @@ class VariableBuilder:
         #     # in real_value_tensor_positive_aliases in the common case)
         #     assert not isinstance(value, torch._subclasses.fake_tensor.FakeTensor)
 
-
         # We have accessed the SAME tensor from a different source.  In some
         # situations, it doesn't matter if you have the same tensor identity
         # or not, but we are unable to do this fine-grained tracking.  So
@@ -1103,7 +1109,9 @@ class VariableBuilder:
                 options.update({"raw_value": value})
 
             proxy = self.tx.output.root_tracer.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value), source=self.get_source()
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(wrapped_value),
+                source=self.get_source(),
             )
 
             unspec_var = wrap_fx_proxy_cls(

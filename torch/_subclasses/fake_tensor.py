@@ -302,14 +302,12 @@ class FakeTensorConverter:
             # for which it is not strictly necessary to use the
             # invocation manager (I think!)
             with no_dispatch():
-                meta_t = make_meta_t()
-                fake_t = FakeTensor(
+                return FakeTensor(
                     fake_mode,
                     make_meta_t(),
                     existing_device,
                     constant=t if make_constant else None,
                 )
-                return fake_t
 
         out = self.meta_converter(
             t,

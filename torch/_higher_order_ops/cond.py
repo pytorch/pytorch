@@ -6,7 +6,11 @@ import torch
 import torch.utils._pytree as pytree
 
 from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
-from torch._C._functorch import peek_interpreter_stack, pop_dynamic_layer_stack, push_dynamic_layer_stack
+from torch._C._functorch import (
+    peek_interpreter_stack,
+    pop_dynamic_layer_stack,
+    push_dynamic_layer_stack,
+)
 from torch._dynamo.exc import CondOpArgsMismatchError
 from torch._functorch.eager_transforms import (
     _unwrap_all_tensors_from_functional,
@@ -31,31 +35,28 @@ from torch.utils._python_dispatch import (
 
 
 @contextmanager
-def _turn_off_is_fx_tracing():
+def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
+    _old_capture_dyn_ops = torch._dynamo.config.capture_dynamic_output_shape_ops
+    _old_capture_scalar = torch._dynamo.config.capture_scalar_outputs
 
     try:
+        torch._dynamo.reset()
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
+        torch._dynamo.config.capture_dynamic_output_shape_ops = True
+        torch._dynamo.config.capture_scalar_outputs = True
         yield
     finally:
+        torch._dynamo.reset()
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
-
-@contextmanager
-def _turn_off_functorch():
-    interpreter = peek_interpreter_stack()
-    _old_stack = None
-    try:
-        if interpreter is not None:
-            _old_stack = pop_dynamic_layer_stack()
-        yield
-    finally:
-        if _old_stack is not None:
-            push_dynamic_layer_stack(_old_stack)
+        torch._dynamo.config.capture_dynamic_output_shape_ops = _old_capture_dyn_ops
+        torch._dynamo.config.capture_scalar_outputs = _old_capture_scalar
 
 
 @dataclass
 class UnsupportedAliasMutationException(RuntimeError):
     reason: str
+
 
 def cond_compiled(pred, true_fn, false_fn, args):
     if torch._dynamo.is_compiling():
@@ -65,114 +66,8 @@ def cond_compiled(pred, true_fn, false_fn, args):
     def f(pred, true_fn, false_fn, args):
         return cond(pred, true_fn, false_fn, args)
 
-    torch._dynamo.reset()
-    with _turn_off_is_fx_tracing():
+    with _set_compilation_env():
         return f(pred, true_fn, false_fn, args)
-
-
-def exported_cond(op, *args):
-    exclude_keys = (
-        DispatchKeySet(DispatchKey.FuncTorchDynamicLayerFrontMode)
-        .add(DispatchKey.FuncTorchDynamicLayerBackMode)
-        .add(DispatchKey.Functionalize)
-    )
-    with _turn_off_functorch():
-        with _ExcludeDispatchKeyGuard(exclude_keys):
-            with torch.utils._python_dispatch._disable_current_modes():
-                from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-                fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
-                if fake_tensor_mode is None:
-                    shape_env = ShapeEnv()
-                    fake_tensor_mode = FakeTensorMode(
-                        allow_fallback_kernels=False,
-                        allow_non_fake_inputs=True,
-                        shape_env=shape_env,
-                    )
-                else:
-                    if fake_tensor_mode.shape_env is None:
-                        fake_tensor_mode.shape_env = ShapeEnv()
-
-                def from_fun(t):
-                    if isinstance(t, torch.Tensor):
-                        from torch._subclasses.fake_tensor import FakeTensor
-
-                        if isinstance(t, FakeTensor):
-                            return t
-                        return torch.empty_strided(
-                            t.size(),
-                            t.stride(),
-                            device=t.device,
-                            dtype=t.dtype,
-                            requires_grad=t.requires_grad,
-                        )
-                    # Need to specialize symbool for now. Won't affect traced graph.
-                    elif isinstance(t, torch.SymBool):
-                        return t.node._hint
-                    elif isinstance(t, torch.fx.proxy.Proxy):
-                        raise RuntimeError(
-                            f"Unable to symbolically trace HigherOrderOperators {op}"
-                        )
-                    return t
-
-                args = (args[0], args[1], args[2], tuple(args[3]))
-                with fake_tensor_mode:
-                    new_args = pytree.tree_map(from_fun, args)
-
-                    # we need to wrap true_fn/false_fn up otherwise the local scope
-                    # will contain the original true_fn and false_fn's signature
-                    def wrapper(new_args):
-                        return cond(*new_args)
-
-                    # need to do it together otherwise will need to merge input ->
-                    # duplicated effort with what we have already
-                    with _turn_off_is_fx_tracing():
-                        expo_result = torch._dynamo.export(
-                            wrapper, rewrite_sig=False, fake_mode=fake_tensor_mode
-                        )(new_args)
-                    gm, guards = expo_result
-                    example_inputs = expo_result.example_inputs
-                    example_inputs_ids = [id(inp) for inp in example_inputs]
-                    id_to_name = {
-                        id(guard.obj_weakref()): guard.name
-                        for guard in guards
-                        if guard.obj_weakref is not None
-                        and id(guard.obj_weakref()) in example_inputs_ids
-                    }
-                    example_names = [id_to_name[id(inp)] for inp in example_inputs]
-
-    # fake the new_args with original args
-    local_scope = {"L": {**locals(), "new_args": args}, "G": globals()}
-    pos_args = [eval(name, {}, local_scope) for name in example_names]
-
-    # We need to extract true_gm and false_gm from export
-    # as export won't add sym bool
-    def bind_branch_and_args(gm, pos_args):
-        ph2orig = dict(
-            zip((ph for ph in gm.graph.nodes if ph.op == "placeholder"), pos_args)
-        )
-        cond_node = next((n for n in gm.graph.nodes if n.target is cond), None)
-        assert cond_node
-        true_gm = getattr(gm, cond_node.args[1].name)
-        false_gm = getattr(gm, cond_node.args[2].name)
-        pos_args = []
-        for arg_node in cond_node.args[3]:
-            if arg_node.op == "placeholder" and arg_node in ph2orig:
-                pos_args.append(ph2orig[arg_node])
-            elif arg_node.op == "get_attr":
-                pos_args.append(getattr(gm, arg_node.target))
-            else:
-                raise RuntimeError(f"Cannot bind to original argumentes for {arg_node}")
-        return true_gm, false_gm, tuple(pos_args)
-
-    return cond(args[0], *bind_branch_and_args(gm, pos_args))
-
-
-# def cond_compiled(pred, true_fn, false_fn, args):
-#     if torch._dynamo.is_compiling():
-#         return cond(pred, true_fn, false_fn, args)
-#     else:
-#         return exported_cond(cond, pred, true_fn, false_fn, args)
 
 
 """
