@@ -71,8 +71,17 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
             assert isinstance(observed_arg, Node), f"expect observed argument to be a Node, but got: {type(observed_arg)}"
             assert observed_arg in obs_or_fq_map, \
                 f"can't refer to a node that does not have observer/fake_quant inserted yet: {observed_arg}"
-            arg_as_input_act_obs_or_fq = obs_or_fq_map[observed_arg]
+
             new_arg = arg
+            from torch.ao.quantization.quantizer import SharedQuantizationSpec
+            if isinstance(quantization_annotation.input_qspec_map[observed_arg], SharedQuantizationSpec):
+                # If user annotates the edge as SharedQuantizationSpec, we will create a new Node with this
+                # observer instead of using the original observer node.
+                new_obs_node = _insert_obs_or_fq(
+                    observed_arg, arg_as_input_act_obs_or_fq, model, named_modules, model.graph)  # type: ignore[arg-type]
+                new_arg = new_obs_node
+            else:
+                arg_as_input_act_obs_or_fq = obs_or_fq_map[observed_arg]
             obs_or_fq_map[(observed_arg, node)] = arg_as_input_act_obs_or_fq
         else:
             assert arg_as_input_act_obs_or_fq is not None
