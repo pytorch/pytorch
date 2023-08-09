@@ -184,7 +184,7 @@ if RUN_CPU:
         ),
         BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_mm_views"),
-        BaseTest("test_multihead_attention"),
+        BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_randint"),
         BaseTest("test_randn_with_dtype_and_device"),

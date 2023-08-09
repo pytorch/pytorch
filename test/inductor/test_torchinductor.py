@@ -5774,64 +5774,6 @@ class CommonTemplate:
             ],
         )
 
-    @config.patch(implicit_fallbacks=True)
-    def test_multihead_attention(self):
-        def fn(
-            q,
-            k,
-            v,
-            embed_dim,
-            num_heads,
-            qkv_weight,
-            qkv_bias,
-            proj_weight,
-            proj_bias,
-            mask,
-            need_weights,
-        ):
-            return torch._native_multi_head_attention(
-                q,
-                k,
-                v,
-                embed_dim,
-                num_heads,
-                qkv_weight,
-                qkv_bias,
-                proj_weight,
-                proj_bias,
-                mask,
-                need_weights,
-            )
-
-        B = 1
-        T = 3
-        embed_dim = 6
-        num_heads = 2
-        q = torch.randn([B, T, embed_dim])
-        k = torch.randn([B, T, embed_dim])
-        v = torch.randn([B, T, embed_dim])
-        qkv_weight = torch.randn([3 * embed_dim, embed_dim])
-        qkv_bias = torch.randn([3 * embed_dim])
-        proj_weight = torch.randn([3 * embed_dim, embed_dim])
-        proj_bias = torch.randn([3 * embed_dim])
-        mask = None
-        need_weights = False
-
-        inps = [
-            q,
-            k,
-            v,
-            embed_dim,
-            num_heads,
-            qkv_weight,
-            qkv_bias,
-            proj_weight,
-            proj_bias,
-            mask,
-            need_weights,
-        ]
-        self.common(fn, inps)
-
     def test_tmp_not_defined_issue1(self):
         def forward(
             primals_3,
