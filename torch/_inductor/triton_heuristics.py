@@ -649,6 +649,10 @@ def triton_config(
     override the num_elements_per_warp.
     """
     # Ideally we want to read this from some device config
+
+    # for a 2d size_hints [a, b], a should be mapped to YBLOCK rather than XBLOCK
+    size_hints = list(reversed(size_hints))
+
     maxGridSize = [2147483647, 65535, 65535]
 
     target = conditional_product(x, y, z)

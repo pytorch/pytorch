@@ -1897,6 +1897,13 @@ class TritonKernel(Kernel):
                 sizes.append(f"{tree.prefix.upper()}BLOCK")
             elif tree.prefix == "r" and tree.numel != 1:
                 sizes.append("1")
+
+        if sizes[0:3] == ["ZBLOCK", "YBLOCK", "XBLOCK"]:
+            sizes[0:3] = reversed(sizes[0:3])
+
+        if sizes[0:2] == ["YBLOCK", "XBLOCK"]:
+            sizes[0:2] = reversed(sizes[0:2])
+
         return f"[{', '.join(sizes)}]"
 
     def call_kernel(self, name: str):
