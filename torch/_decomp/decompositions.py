@@ -3709,6 +3709,19 @@ def multilabel_margin_loss_forward(
     return z, is_target
 
 
+@register_decomposition(aten._scaled_mm)
+def _scaled_mm(mat1: Tensor, mat2: Tensor, *,
+               dtype: Optional[torch.dtype] = None,
+               scale_a: Optional[Tensor] = None,
+               scale_b: Optional[Tensor] = None,
+               scale_result: Optional[Tensor] = None) -> (Tensor, Tensor):
+  rc = torch.mm(mat1.to(torch.float32), mat2.to(torch.float32))
+  rc = scale_a * rc if scale_a is not None else rc
+  rc = scale_b * rc if scale_b is not None else rc
+  rc = scale_result * rc if scale_result is not None else rc
+  return rc.to(dtype if dtype is not None else mat1.dtype)
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
