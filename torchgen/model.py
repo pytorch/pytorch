@@ -40,7 +40,7 @@ class Location:
     line: int
 
     def __str__(self) -> str:
-        return "{}:{}".format(self.file, self.line)
+        return f"{self.file}:{self.line}"
 
 
 # Valid values of the 'variants' field in native_functions.yaml
@@ -298,6 +298,8 @@ class ScalarType(Enum):
     ComplexDouble = auto()
     Bool = auto()
     BFloat16 = auto()
+    Float8_e5m2 = auto()
+    Float8_e4m3fn = auto()
 
     def __str__(self) -> str:
         return self.name
@@ -1429,7 +1431,7 @@ class FunctionSchema:
 
         if self.arguments.tensor_options is not None:
             assert self.kind() == SchemaKind.functional, (
-                "Found an operator that is not functional or out varuabt, but has tensor options arguments."
+                "Found an operator that is not functional or out variant, but has tensor options arguments."
                 "This is not allowed- tensor options arguments are only allowed for factory functions."
                 f"schema: {str(self)}"
             )

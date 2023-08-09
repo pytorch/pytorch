@@ -5,10 +5,9 @@ from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
 
-from torch._inductor.ir import ModularIndexing
 from torch._inductor.sizevars import SizeVarAllocator
-from torch.fx.experimental.symbolic_shapes import FloorDiv
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 
 class TestIndexingSimplification(TorchTestCase):
@@ -237,6 +236,21 @@ class ExprPrinterTests(TorchTestCase):
                     cexpr(expr),
                     "at::native::div_floor_floating(static_cast<double>(s1), static_cast<double>(s2))",
                 )
+
+    def test_print_Min_Max(self):
+        cases = (
+            (sympy.Min, "min"),
+            (sympy.Max, "max"),
+        )
+        for f, s in cases:
+            x = sympy.Symbol("x", integer=True)
+            expr = f(-2, x)
+            self.assertEqual(texpr(expr), f"tl.math.{s}(-2, x)")
+            self.assertEqual(cexpr(expr), f"std::{s}(-2L, x)")
+
+            expr = f(x, 2 * x, 3 * x)
+            self.assertEqual(texpr(expr), f"tl.math.{s}(x, tl.math.{s}(2*x, 3*x))")
+            self.assertEqual(cexpr(expr), f"std::{s}({{x, 2L*x, 3L*x}})")
 
 
 if __name__ == "__main__":

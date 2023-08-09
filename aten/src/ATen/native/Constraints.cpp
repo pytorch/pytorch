@@ -30,7 +30,7 @@ Tensor _functional_sym_constrain_range_cpu(
     c10::optional<int64_t> min,
     c10::optional<int64_t> max,
     const Tensor& dep_token) {
-  return dep_token;
+  return dep_token.clone();
 }
 
 Tensor _make_dep_token_cpu(
