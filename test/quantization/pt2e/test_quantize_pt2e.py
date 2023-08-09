@@ -5,6 +5,7 @@ from typing import Any, List, Optional, Tuple, Dict
 
 import torch
 import torch._dynamo as torchdynamo
+import torch._export as export
 from torch import Tensor
 from torch.ao.ns.fx.utils import compute_sqnr
 from torch.ao.quantization import (
@@ -239,18 +240,16 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
 
         # program capture
         m = copy.deepcopy(m_eager)
-        with torchdynamo.config.patch(dynamic_shapes=export_with_dynamic_shape):
-            m, guards = torchdynamo.export(
-                m,
-                *copy.deepcopy(example_inputs),
-                aten_graph=True,
-                tracing_mode="symbolic" if export_with_dynamic_shape else "real",
-            )
+        m = export.capture_pre_autograd_graph(
+            m,
+            example_inputs,
+        )
 
         m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
         m = convert_pt2e(m)
+
         pt2_quant_output = m(*example_inputs)
         node_occurrence = {
             ns.call_function(k): v for k, v in expected_node_occurrence.items()
@@ -1017,7 +1016,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         }
         node_list = [
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.aten.convolution.default,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
         ]
@@ -1152,7 +1150,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         }
         node_list = [
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.aten.convolution.default,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
