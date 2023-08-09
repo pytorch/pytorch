@@ -933,7 +933,6 @@ class CommonTemplate:
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float16),)))
 
     def test_multilayer_prime_size(self):
-
         def fn(a):
             return torch.max(a), torch.sum(a)
 
