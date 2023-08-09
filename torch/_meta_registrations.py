@@ -319,7 +319,7 @@ def meta_index_reduce(
     *,
     include_self: bool = True,
 ) -> Tensor:
-    return torch.empty_like(self).contiguous()
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
 @register_meta(aten.index_reduce_.default)
