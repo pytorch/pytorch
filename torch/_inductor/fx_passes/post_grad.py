@@ -5,6 +5,7 @@ import operator
 
 import torch
 import torch._inductor as inductor
+
 from .. import config, ir, pattern_matcher
 
 from ..lowering import lowerings as L
@@ -15,6 +16,7 @@ from ..pattern_matcher import (
     filter_nodes,
     get_arg_value,
     Ignored,
+    inference_graph,
     init_once_fakemode,
     KeywordArg,
     ListOf,
@@ -22,9 +24,12 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
+    register_replacement,
+    remove_extra_clones,
     stable_topological_sort,
 )
 from ..virtualized import V
+from .group_batch_fusion import group_batch_fusion_post_grad_passes
 
 
 log = logging.getLogger(__name__)
@@ -37,9 +42,11 @@ pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
+# patterns applied only in inference
+inference_patterns = PatternMatcherPass()
 
 
-def post_grad_passes(gm: torch.fx.GraphModule, locality_reorder: bool):
+def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
     graph and once on the backwards graph.
@@ -50,14 +57,19 @@ def post_grad_passes(gm: torch.fx.GraphModule, locality_reorder: bool):
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
 
-    if locality_reorder:
+    if is_inference and config.reordering:
         reorder_for_locality(gm.graph)
 
     if config.pattern_matcher:
         lazy_init()
 
+        group_batch_fusion_post_grad_passes(gm.graph)
+        remove_extra_clones(gm.graph)
+
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
+        if is_inference:
+            inference_patterns.apply(gm.graph)
 
     stable_topological_sort(gm.graph)
     gm.recompile()
@@ -74,6 +86,7 @@ def lazy_init():
     from .quantization import register_quantization_lowerings
 
     register_quantization_lowerings()
+    register_addmm_activation_replacement()
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
@@ -143,21 +156,17 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     CallFunction(
         aten.cumsum.default,
         CallFunction(
-            prims.convert_element_type.default,
-            CallFunction(
-                torch.ops.aten.full.default,
-                [Arg(), Arg()],
-                1,
-                dtype=Ignored(),
-                layout=Ignored(),
-                device=KeywordArg("device"),
-                pin_memory=False,
-                _users=MULTIPLE,
-            ),
-            KeywordArg("dtype"),
+            torch.ops.aten.full.default,
+            [Arg(), Arg()],
+            1,
+            dtype=KeywordArg("dtype"),
+            layout=Ignored(),
+            device=KeywordArg("device"),
+            pin_memory=False,
             _users=MULTIPLE,
         ),
         1,
+        _users=MULTIPLE,
     ),
     pass_dict=pass_patterns[1],
 )
@@ -346,6 +355,70 @@ def addmm(match, mat1, mat2, inp):
         return L[aten.addmm](inp, mat1, mat2)
     else:
         return L[aten.add](inp, L[aten.mm](mat1, mat2))
+
+
+def addmm_relu_pattern(input, mat1, mat2):
+    output = aten.addmm(input, mat1, mat2)
+    return aten.relu(output)
+
+
+def addmm_relu_replacement(input, mat1, mat2):
+    return aten._addmm_activation(input, mat1, mat2, use_gelu=False)
+
+
+def addmm_gelu_pattern(input, mat1, mat2):
+    output = aten.addmm(input, mat1, mat2)
+    return aten.gelu(output)
+
+
+def addmm_gelu_replacement(input, mat1, mat2):
+    return aten._addmm_activation(input, mat1, mat2, use_gelu=True)
+
+
+def should_replace_addmm_activation(match):
+    if config.max_autotune_gemm:
+        # keep addmm for tuning
+        return False
+
+    input = match.kwargs["input"].meta["val"]
+    # conditions of epilogue fusion in _addmm_activation
+    return input.is_cuda and input.dim() == 1 and input.is_contiguous()
+
+
+def register_addmm_activation_replacement():
+    if torch.cuda.is_available():
+        # workaround https://github.com/pytorch/pytorch/issues/97894
+        device = "cuda"
+    else:
+        device = "cpu"
+
+    # sizes/values dont actually matter for initial trace
+    # once we get a possible match we re-trace with the actual values and verify the match still holds
+
+    inp = functools.partial(torch.empty, (5,), device=device)
+    mat1 = functools.partial(torch.empty, (3, 4), device=device)
+    mat2 = functools.partial(torch.empty, (4, 5), device=device)
+
+    for pattern, replacement, args in [
+        (
+            addmm_relu_pattern,
+            addmm_relu_replacement,
+            [inp(), mat1(), mat2()],
+        ),
+        (
+            addmm_gelu_pattern,
+            addmm_gelu_replacement,
+            [inp(), mat1(), mat2()],
+        ),
+    ]:
+        register_replacement(
+            pattern,
+            replacement,
+            args,
+            inference_graph,
+            inference_patterns,
+            extra_check=should_replace_addmm_activation,
+        )
 
 
 def is_valid_splitwithsizes_cat(match):

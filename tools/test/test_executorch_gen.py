@@ -5,10 +5,11 @@ from typing import Dict
 
 import yaml
 
-from torchgen.executorch.model import ETKernelIndex
+from torchgen.executorch.model import ETKernelIndex, ETKernelKey
 from torchgen.gen import LineLoader
 
 from torchgen.gen_executorch import (
+    ComputeCodegenUnboxedKernels,
     gen_functions_declarations,
     parse_yaml_files,
     translate_native_yaml,
@@ -180,7 +181,7 @@ class TestParseNativeYaml(unittest.TestCase):
                 use_aten_lib=False,
                 out_file=out_file,
             )
-        with open(out_yaml_path, "r") as out_file:
+        with open(out_yaml_path) as out_file:
             es = yaml.load(out_file, Loader=LineLoader)
         self.assertTrue(all("func" in e for e in es))
         self.assertTrue(all(e.get("variants") == "function" for e in es))
@@ -267,7 +268,7 @@ class TestParseKernelYamlFiles(unittest.TestCase):
                 use_aten_lib=False,
                 out_file=out_file,
             )
-        with open(out_yaml_path, "r") as out_file:
+        with open(out_yaml_path) as out_file:
             es = yaml.load(out_file, Loader=LineLoader)
         self.assertTrue(all("func" in e for e in es))
         self.assertTrue(all(e.get("variants") == "function" for e in es))
@@ -365,7 +366,7 @@ class TestGenFunctionsDeclarations(unittest.TestCase):
 namespace custom_1 {
 
 // custom_1::op_1() -> bool
-TORCH_API inline bool op_1(torch::executor::RuntimeContext & context) {
+TORCH_API inline bool op_1(torch::executor::KernelRuntimeContext & context) {
     return ::at::native::kernel_1(context);
 }
 
@@ -379,7 +380,7 @@ TORCH_API inline bool op_1(torch::executor::RuntimeContext & context) {
 namespace custom_2 {
 
 // custom_2::op_2() -> bool
-TORCH_API inline bool op_2(torch::executor::RuntimeContext & context) {
+TORCH_API inline bool op_2(torch::executor::KernelRuntimeContext & context) {
     return ::at::native::kernel_2(context);
 }
 
@@ -397,13 +398,12 @@ TORCH_API inline bool op_2(torch::executor::RuntimeContext & context) {
             selector=SelectiveBuilder.get_nop_selector(),
             use_aten_lib=True,
         )
-        print(declarations)
         self.assertTrue(
             """
 namespace custom_1 {
 
 // custom_1::op_1() -> bool
-TORCH_API inline bool op_1(torch::executor::RuntimeContext & context) {
+TORCH_API inline bool op_1(torch::executor::KernelRuntimeContext & context) {
     return at::op_1();
 }
 
@@ -411,3 +411,188 @@ TORCH_API inline bool op_1(torch::executor::RuntimeContext & context) {
         """
             in declarations
         )
+
+
+class TestComputeCodegenUnboxedKernels(unittest.TestCase):
+    def setUp(self) -> None:
+        (
+            self.native_function_no_kern,
+            _,
+        ) = NativeFunction.from_yaml(
+            {
+                "func": "custom_1::op_1() -> bool",
+                "dispatch": {"CPU": "unused_kernel_1"},
+            },
+            loc=Location(__file__, 1),
+            valid_tags=set(),
+        )
+
+        self.default_kernel_key = ETKernelKey(default=True)
+        self.default_backend_metadata = BackendMetadata(
+            "default_kernel", False, "at::native"
+        )
+        self.default_kernel_entry = (
+            [self.default_kernel_key],
+            self.default_backend_metadata,
+        )
+
+    def test_codegen_unboxed_specialized(self) -> None:
+        specialized_kernel_key = ETKernelKey.gen_from_yaml(
+            {"self": ("T0", "D0"), "other": ("T0", "D0"), "out": ("T0", "D0")},
+            {"T0": ["Double"]},
+            {"D0": [0, 1, 2, 3]},
+        )
+        selector = SelectiveBuilder.from_yaml_dict(
+            {
+                "include_all_operators": True,
+                "et_kernel_metadata": {
+                    "custom_1::op_1": ["v1/7;0,1,2,3|7;0,1,2,3|7;0,1,2,3"]
+                },
+            }
+        )
+        use_aten_lib = False
+        entry = (
+            self.native_function_no_kern,
+            (specialized_kernel_key, self.default_backend_metadata),
+        )
+
+        result = ComputeCodegenUnboxedKernels(selector, use_aten_lib)(entry)
+        # Concat used to prevent whitespace stripping
+        expected_str = (
+            """
+Kernel(
+    "custom_1::op_1",
+    "v1/7;0,1,2,3|7;0,1,2,3|7;0,1,2,3",
+    [](torch::executor::KernelRuntimeContext & context, EValue** stack) {
+        """
+            + """
+
+        EXECUTORCH_SCOPE_PROF("native_call_op_1");
+        bool result_ = at::native::default_kernel(context, );
+
+        *stack[0] = EValue(result_);
+    }
+),
+"""
+        )
+
+        self.assertEqual(expected_str, result)
+
+    def test_codegen_unboxed_specialized_not_matching(self) -> None:
+        specialized_kernel_key = ETKernelKey.gen_from_yaml(
+            {"self": ("T0", "D0"), "other": ("T0", "D0"), "out": ("T0", "D0")},
+            {"T0": ["Double"]},
+            {"D0": [0, 1, 2, 3]},
+        )
+        selector = SelectiveBuilder.from_yaml_dict(
+            {
+                "include_all_operators": True,
+                "et_kernel_metadata": {
+                    "custom_1::op_1": ["v1/8;0,1,2,3|7;0,1,2,3|7;0,1,2,3"]
+                },
+            }
+        )
+        use_aten_lib = False
+        entry = (
+            self.native_function_no_kern,
+            (specialized_kernel_key, self.default_backend_metadata),
+        )
+
+        self.assertRaises(
+            Exception, ComputeCodegenUnboxedKernels(selector, use_aten_lib), entry
+        )
+
+    def test_codegen_unboxed_specialized_missing_root_op(self) -> None:
+        specialized_kernel_key = ETKernelKey.gen_from_yaml(
+            {"self": ("T0", "D0"), "other": ("T0", "D0"), "out": ("T0", "D0")},
+            {"T0": ["Double"]},
+            {"D0": [0, 1, 2, 3]},
+        )
+        selector = SelectiveBuilder.from_yaml_dict(
+            {
+                "et_kernel_metadata": {
+                    "custom_1::op_1": ["v1/7;0,1,2,3|7;0,1,2,3|7;0,1,2,3"]
+                }
+            }
+        )
+        use_aten_lib = False
+        entry = (
+            self.native_function_no_kern,
+            (specialized_kernel_key, self.default_backend_metadata),
+        )
+
+        result = ComputeCodegenUnboxedKernels(selector, use_aten_lib)(entry)
+        # Concat used to prevent whitespace stripping
+        expected_str = """"""
+
+        self.assertEqual(expected_str, result)
+
+    def test_codegen_unboxed_default(self) -> None:
+        """
+        This test checks that if there is no specialized kernel, the default kernel is used.
+        """
+        selector = SelectiveBuilder.from_yaml_dict(
+            {
+                "include_all_operators": True,
+                "et_kernel_metadata": {
+                    "custom_1::op_1": ["v1/7;0,1,2,3|7;0,1,2,3|7;0,1,2,3"]
+                },
+            }
+        )
+        use_aten_lib = False
+        entry = (self.native_function_no_kern, self.default_kernel_entry)
+
+        result = ComputeCodegenUnboxedKernels(selector, use_aten_lib)(entry)
+        # Concat used to prevent whitespace stripping
+        expected_str = (
+            """
+Kernel(
+    "custom_1::op_1",
+    [](torch::executor::KernelRuntimeContext & context, EValue** stack) {
+        """
+            + """
+
+        EXECUTORCH_SCOPE_PROF("native_call_op_1");
+        bool result_ = at::native::default_kernel(context, );
+
+        *stack[0] = EValue(result_);
+    }
+),
+"""
+        )
+
+        self.assertEqual(expected_str, result)
+
+    def test_codegen_unboxed_default_kernel_key_selected(self) -> None:
+        """
+        This test checks that if there is no specialized kernel, the default kernel is used, when the selector only has default key.
+        """
+        selector = SelectiveBuilder.from_yaml_dict(
+            {
+                "include_all_operators": True,
+                "et_kernel_metadata": {"custom_1::op_1": ["default"]},
+            }
+        )
+        use_aten_lib = False
+        entry = (self.native_function_no_kern, self.default_kernel_entry)
+
+        result = ComputeCodegenUnboxedKernels(selector, use_aten_lib)(entry)
+        # Concat used to prevent whitespace stripping
+        expected_str = (
+            """
+Kernel(
+    "custom_1::op_1",
+    [](torch::executor::KernelRuntimeContext & context, EValue** stack) {
+        """
+            + """
+
+        EXECUTORCH_SCOPE_PROF("native_call_op_1");
+        bool result_ = at::native::default_kernel(context, );
+
+        *stack[0] = EValue(result_);
+    }
+),
+"""
+        )
+
+        self.assertEqual(expected_str, result)

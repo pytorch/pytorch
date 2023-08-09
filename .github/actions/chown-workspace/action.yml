@@ -2,10 +2,17 @@ name: Chown workspace
 
 description: Ensure that the working directory gets chowned back to the current user
 
+inputs:
+  ALPINE_IMAGE:
+    type: string
+    required: false
+    default: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+    description: selected Alpine docker image to use for chown of workspace
+
 runs:
   using: composite
   steps:
     - run: docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       shell: bash
       env:
-        ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+        ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}

@@ -315,8 +315,10 @@ def quantized_args(
     *arg_q_descriptors: bool,
     scale: Optional[float] = None,
     zero_point: Optional[int] = None,
+    quantize_output: bool = True,
 ):
     """A decorator which extends support for quantized version of the base operator.
+
     Quantization is detected by examining the arguments that are annotated by
     `arg_q_descriptors`.
 
@@ -353,6 +355,7 @@ def quantized_args(
           the first quantized input scale.
         zero_point: Quantized output zero point. If None,
           derive from the first quantized input zero point.
+        quantize_output: If True, quantize the output of the base operator. Default is True
     """
 
     def decorator(fn):
@@ -435,7 +438,9 @@ def quantized_args(
                 _zero_point is not None
             ), "Bug: Zero point must be set for quantized operator"
 
-            return quantize_helper(g, output, _scale, _zero_point)
+            if quantize_output:
+                return quantize_helper(g, output, _scale, _zero_point)
+            return output
 
         return wrapper
 
@@ -717,7 +722,6 @@ def _slice_helper(
     starts,
     ends,
     steps=None,
-    dynamic_slice=False,
 ):
     if g.opset <= 9:
         from torch.onnx.symbolic_opset9 import _slice as _slice9
@@ -726,7 +730,7 @@ def _slice_helper(
     else:
         from torch.onnx.symbolic_opset10 import _slice as _slice10
 
-        return _slice10(g, input, axes, starts, ends, steps, dynamic_slice)
+        return _slice10(g, input, axes, starts, ends, steps)
 
 
 @_beartype.beartype

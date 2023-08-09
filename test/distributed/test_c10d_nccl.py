@@ -151,20 +151,20 @@ class RendezvousEnvTest(TestCase):
 
         with Env(without(vars, "WORLD_SIZE")):
             self.assertEqual(None, os.environ.get("WORLD_SIZE"))
-            gen = c10d.rendezvous("env://?world_size={}".format(1))
+            gen = c10d.rendezvous(f"env://?world_size={1}")
             _, _, size = next(gen)
             self.assertEqual(size, 1)
 
         with Env(without(vars, "RANK")):
             self.assertEqual(None, os.environ.get("RANK"))
-            gen = c10d.rendezvous("env://?rank={}".format(0))
+            gen = c10d.rendezvous(f"env://?rank={0}")
             _, rank, _ = next(gen)
             self.assertEqual(rank, 0)
 
         with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
             self.assertEqual(None, os.environ.get("RANK"))
             self.assertEqual(None, os.environ.get("WORLD_SIZE"))
-            gen = c10d.rendezvous("env://?rank={}&world_size={}".format(0, 1))
+            gen = c10d.rendezvous(f"env://?rank={0}&world_size={1}")
             _, rank, size = next(gen)
             self.assertEqual(rank, 0)
             self.assertEqual(size, 1)
@@ -305,6 +305,30 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
                 for tensor in xs:
                     self.assertEqual(tensor, expected_tensor)
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_sparse_allreduce_ops(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+
+        indices = torch.tensor([[0, 1]])
+        values = torch.tensor([[1, 2, 0], [4, 0, 6]])
+        sparse_tensor = torch.sparse_coo_tensor(indices, values, size=(2, 3)).to(self.rank)
+
+        # sparse allreduce call is wrapped in a try catch since the c10d API is only available in the nccl experimental branch
+        try:
+            work = pg.allreduce([sparse_tensor])
+            work.wait()
+
+            # work.result() returns a list of size 1, with the allreduce output as a dense tensor
+            a = torch.tensor([[2, 4, 0], [8, 0, 12]]).to(self.rank)
+            self.assertEqual(work.result()[0], a)
+        except RuntimeError as e:
+            if "allreduce_sparse is only available in the NCCL experimental branch." in str(e):
+                pass
+            else:
+                # Rethrow the exception if it's a different error
+                raise
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
@@ -410,6 +434,27 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             work.wait()
         torch.cuda.synchronize(local_device)
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_allreduce_in_cudagraph(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        local_device_idx = self.rank_to_GPU[self.rank][0]
+        with torch.cuda.device(local_device_idx):
+            xs = [torch.FloatTensor([1]).cuda(local_device_idx)]
+
+            # single warmup
+            pg.allreduce(xs).wait()
+            self.assertEqual(xs[0].item(), 2)
+
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                pg.allreduce(xs).wait()
+            self.assertEqual(xs[0].item(), 2)
+
+            graph.replay()
+            graph.replay()
+            self.assertEqual(xs[0].item(), 8)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
@@ -1861,9 +1906,7 @@ class DistributedDataParallelTest(
             ):
                 with first_bucket_size(bucketsize):
                     model_msg = (
-                        "rank = {} formats = {} dtypes = {} bucketsize = {} ".format(
-                            self.rank, formats, dtypes, bucketsize
-                        )
+                        f"rank = {self.rank} formats = {formats} dtypes = {dtypes} bucketsize = {bucketsize} "
                     )
                     try:
                         m = ConvNet(layer_devs, formats, dtypes)
@@ -1887,7 +1930,7 @@ class DistributedDataParallelTest(
                     # 3 iters:  First iter creates grads, second iter retests after rebucketing,
                     # third iter tries zeroed grads.
                     for it in range(3):
-                        iter_msg = "iter = {} ".format(it) + model_msg
+                        iter_msg = f"iter = {it} " + model_msg
                         named_msg = iter_msg
                         try:
                             F.mse_loss(m(input).float(), target).backward()
@@ -2342,9 +2385,7 @@ class DistributedDataParallelTest(
                         "mismatch at "
                         + name
                         + ".grad for "
-                        + "set_to_none = {}, use_bucket_view = {}".format(
-                            try_set_to_none, use_bucket_view
-                        ),
+                        + f"set_to_none = {try_set_to_none}, use_bucket_view = {use_bucket_view}",
                     )
 
     @requires_nccl()
@@ -2748,6 +2789,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         pg_opts.config.max_ctas = 4
         pg_opts.config.min_ctas = 2
         pg_opts.config.cga_cluster_size = 2
+        pg_opts.config.net_name = "Socket"
         nccl_debug_file = tempfile.NamedTemporaryFile()
         os.environ["NCCL_DEBUG"] = "INFO"
         os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
@@ -2760,9 +2802,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         max_ctas = re.search(rb'Max CTAs.*(\d+)|$', nccl_debug_file_content).group(1)
         min_ctas = re.search(rb'Min CTAs.*(\d+)|$', nccl_debug_file_content).group(1)
         cga_cluster_size = re.search(rb'CGA cluster.*(\d+)|$', nccl_debug_file_content).group(1)
+        net_name = re.search(rb'Using network.([a-zA-z]+)|$', nccl_debug_file_content).group(1)
         self.assertEqual(pg_opts.config.max_ctas, int(max_ctas))
         self.assertEqual(pg_opts.config.min_ctas, int(min_ctas))
         self.assertEqual(pg_opts.config.cga_cluster_size, int(cga_cluster_size))
+        self.assertEqual(pg_opts.config.net_name, net_name.decode())
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
@@ -2993,16 +3037,35 @@ class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
         dist.reduce_scatter_tensor(output_tensor, tensor)
         self.assertEqual(output_tensor, tensor)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_reduce_scatter_tensor_coalesced(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        device = "cuda"
+        input_tensors = [torch.ones(10, 10, device=torch.device(device)) for _ in range(self.world_size)]
+        output_tensors = [torch.zeros(10, 10, device=torch.device(device)) for _ in range(self.world_size)]
+        with dist._coalescing_manager():
+            for i in range(self.world_size):
+                dist.reduce_scatter_tensor(output_tensors[i], input_tensors[i])
+        for i in range(self.world_size):
+            self.assertEqual(output_tensors[i], input_tensors[i])
+
 class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
     def setUp(self):
-        super(LargeCommTest, self).setUp()
+        super().setUp()
         # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
         self._spawn_processes()
 
     def tearDown(self):
-        super(LargeCommTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -3027,6 +3090,75 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     def test_new_group_local_sync_duplicated_pg(self):
         self._test_new_group_local_sync_duplicate_pg(backend="nccl")
 
+
+class SparseCollective(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return 1
+
+    def setUp(self):
+        super().setUp()
+        # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        # self.num_gpus = torch.cuda.device_count()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    class ToyModel(nn.Module):
+        def __init__(self, rank, vocab_size, embedding_dim):
+            super().__init__()
+            self.embedding = nn.Embedding(vocab_size, embedding_dim, sparse=True).to(rank)
+            self.linear = nn.Linear(embedding_dim, 1).to(rank)
+
+        def forward(self, inputs):
+            embedded = self.embedding(inputs)
+            # embedded shape: (batch_size, sequence_length, embedding_dim)
+            flattened = torch.mean(embedded, dim=1)
+            # flattened shape: (batch_size, embedding_dim)
+            output = self.linear(flattened)
+            # output shape: (batch_size, 1)
+            return output
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_ddp_set_sparse_metadata(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+
+        vocab_size = 5
+
+        model = SparseCollective.ToyModel(self.rank, vocab_size=vocab_size, embedding_dim=10)
+        ddp_model = DistributedDataParallel(model)
+        inputs = torch.tensor([[1, 0, 0], [0, 0, 0], [0, 0, 0]]).to(self.rank)
+        # set sparse metadata on the DDP model
+        indices = torch.Tensor(list(range(vocab_size)))
+        ddp_model._set_sparse_metadata({"embedding.weight" : indices})
+        # forward pass
+        try:
+            output = ddp_model(inputs)
+            loss = output.sum()
+
+            # backward pass
+            loss.backward()
+            self.assertTrue(ddp_model.module.embedding.weight.grad.indices, indices)
+        except RuntimeError as e:
+            if "allreduce_sparse is only available in the NCCL experimental branch." in str(e):
+                pass
+            else:
+                # Rethrow the exception if it's a different error
+                raise
 
 
 if __name__ == "__main__":

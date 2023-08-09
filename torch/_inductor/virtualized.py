@@ -156,6 +156,7 @@ MockHandler._init_cls()
 
 _ops = Virtualized("ops", MockHandler)
 _graph = Virtualized("graph", NullHandler)
+_real_inputs = Virtualized("real_inputs", NullHandler)
 _fake_mode = Virtualized("fake_mode", NullHandler)
 _kernel = Virtualized("kernel", NullHandler)
 _debug = Virtualized("debug", NullHandler)
@@ -249,6 +250,8 @@ class _V:
     set_ops_handler = _ops._set_handler
     get_ops_handler = _ops._get_handler
     set_graph_handler = _graph._set_handler
+    set_real_inputs = _real_inputs._set_handler
+    get_real_inputs = _real_inputs._get_handler
     set_fake_mode = _fake_mode._set_handler
     get_fake_mode = _fake_mode._get_handler
     set_kernel_handler = _kernel._set_handler
@@ -264,6 +267,11 @@ class _V:
     def graph(self):
         """The graph currently being generated"""
         return _graph._get_handler()
+
+    @property
+    def real_inputs(self):
+        """non-fake example inputs"""
+        return _real_inputs._get_handler()
 
     @property
     def fake_mode(self):

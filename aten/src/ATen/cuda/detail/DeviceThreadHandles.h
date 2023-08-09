@@ -21,7 +21,7 @@
 #include <mutex>
 #include <memory>
 
-#include <ATen/cuda/Exceptions.h>
+#include <c10/util/Exception.h>
 
 namespace at { namespace cuda { namespace {
 

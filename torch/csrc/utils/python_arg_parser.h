@@ -137,7 +137,7 @@ struct ParsedArgs {
 
 struct PYBIND11_EXPORT PythonArgParser {
   explicit PythonArgParser(
-      std::vector<std::string> fmts,
+      const std::vector<std::string>& fmts,
       bool traceable = false);
 
   // meant only for `torch` functions.
@@ -536,6 +536,16 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
     return std::vector<c10::SymInt>(size1, si);
   }
 
+  if (is_dynamo_compiling && size1 > 0 && THPVariable_Check(args[i])) {
+    auto& var = THPVariable_Unpack(args[i]);
+    if (size1 == 1 && var.numel() == 1 && var.sizes().empty() &&
+        at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
+      auto scalar = var.item();
+      TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
+      return std::vector<c10::SymInt>(size1, scalar.toSymInt());
+    }
+  }
+
   PyObject* arg = args[i];
   auto tuple = PyTuple_Check(arg);
   // NOLINTNEXTLINE(bugprone-branch-clone)
@@ -780,7 +790,7 @@ inline at::Device toDevice(PyObject* obj) {
   if (THPUtils_checkLong(obj)) {
     const auto device_index = THPUtils_unpackLong(obj);
     TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(DeviceType::CUDA, device_index);
+    return at::Device(c10::DeviceType::CUDA, device_index);
   }
   const std::string& device_str = THPUtils_unpackString(obj);
   return at::Device(device_str);
@@ -923,6 +933,7 @@ inline int64_t PythonArgs::toInt64(int i) {
 }
 
 inline c10::SymInt PythonArgs::toSymInt(int i) {
+  PyObject* obj = args[i];
   if (!args[i]) {
     return c10::SymInt(signature.params[i].default_int);
   }
@@ -931,6 +942,28 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
     auto& var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
         signature.params[i].name, idx, var, c10::IntType::get());
+  }
+
+  // convert FakeTensor to SymInt
+  // expect empty sizes, numel = 1
+  // and ScalarType::Int
+  if (is_dynamo_compiling && THPVariable_Check(obj)) {
+    auto& var = THPVariable_Unpack(obj);
+
+    if (var.numel() != 1 || !var.sizes().empty() ||
+        !at::isIntegralType(
+            var.dtype().toScalarType(), /*include_bool*/ true)) {
+      throw TypeError(
+          "%s(): argument '%s' must be %s, failed to convert %s with sizes.empty()=%d",
+          signature.name.c_str(),
+          signature.params[i].name.c_str(),
+          signature.params[i].type_name().c_str(),
+          Py_TYPE(obj)->tp_name,
+          var.sizes().empty());
+    }
+    auto scalar = var.item();
+    TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
+    return scalar.toSymInt();
   }
 
   return py::cast<c10::SymInt>(py::handle(args[i]));
@@ -1066,7 +1099,7 @@ inline at::Storage PythonArgs::storage(
 inline c10::Stream PythonArgs::stream(int i) {
   if (!args[i])
     return c10::Stream(
-        c10::Stream::Default::DEFAULT, c10::Device(DeviceType::CPU, -1));
+        c10::Stream::Default::DEFAULT, c10::Device(c10::DeviceType::CPU, -1));
   if (!THPStream_Check(args[i])) {
     throw TypeError(
         "expected Stream object. Got '%s'", Py_TYPE(args[i])->tp_name);
@@ -1074,7 +1107,7 @@ inline c10::Stream PythonArgs::stream(int i) {
   return c10::Stream::unpack3(
       ((THPStream*)args[i])->stream_id,
       ((THPStream*)args[i])->device_index,
-      static_cast<DeviceType>(((THPStream*)args[i])->device_type));
+      static_cast<c10::DeviceType>(((THPStream*)args[i])->device_type));
 }
 
 inline PyObject* PythonArgs::pyobject(int i) {

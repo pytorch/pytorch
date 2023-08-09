@@ -53,7 +53,9 @@ USE_SMALL_BATCH_SIZE = {
     "dlrm": 1024,
     "densenet121": 4,
     "hf_Reformer": 4,
+    "hf_T5_base": 4,
     "timm_efficientdet": 1,
+    "llama_v2_7b_16h": 1,
 }
 
 DETECTRON2_MODELS = {
@@ -75,12 +77,19 @@ SKIP = {
     "fambench_xlmr",
     # TIMEOUT, https://github.com/pytorch/pytorch/issues/98467
     "tacotron2",
+    "hf_Bert",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
+    "hf_Bert_large",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
+    # takes too long, extreme slowdown (< .001)
+    "maml",
 }
 
 SKIP_FOR_CPU = {
     "hf_T5_generate",  # OOMs
     "cm3leon_generate",  # model is CUDA only
     "nanogpt_generate",  # timeout
+    "sam",  # timeout
+    "llama_v2_7b_16h",  # model is CUDA only
+    "stable_diffusion",  # flaky
 }
 
 SKIP_FOR_CUDA = {
@@ -97,6 +106,7 @@ SKIP_TRAIN = {
     "pyhpc_turbulent_kinetic_energy",
     "maml",
     "llama",
+    "llama_v2_7b_16h",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -179,11 +189,6 @@ TRT_NOT_YET_WORKING = {
     "resnext50_32x4d",
 }
 
-DYNAMIC_SHAPES_NOT_YET_WORKING = {
-    "demucs",
-    "timm_nfnet",
-}
-
 DONT_CHANGE_BATCH_SIZE = {
     "demucs",
     "pytorch_struct",
@@ -200,6 +205,7 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "hf_T5_large",
     "timm_vision_transformer_large",
     "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "llama_v2_7b_16h",
 }
 
 SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
@@ -211,6 +217,14 @@ SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
 MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
     "hf_GPT2": 2,
     "pytorch_unet": 2,
+}
+
+FORCE_AMP_FOR_FP16_BF16_MODELS = {
+    "DALLE2_pytorch",
+    "doctr_det_predictor",
+    "doctr_reco_predictor",
+    "Super_SloMo",
+    "tts_angular",
 }
 
 
@@ -253,8 +267,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return TRT_NOT_YET_WORKING
 
     @property
-    def failing_dynamic_shape_models(self):
-        return DYNAMIC_SHAPES_NOT_YET_WORKING
+    def force_amp_for_fp16_bf16_models(self):
+        return FORCE_AMP_FOR_FP16_BF16_MODELS
 
     @property
     def skip_accuracy_checks_large_models_dashboard(self):
@@ -291,8 +305,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             try:
                 module = importlib.import_module(c)
                 break
-            except ModuleNotFoundError:
-                pass
+            except ModuleNotFoundError as e:
+                if e.name != c:
+                    raise
         else:
             raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)
@@ -317,11 +332,26 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         extra_args = []
         if part:
             extra_args = ["--part", part]
-        if is_training:
+
+        if model_name == "vision_maskrcnn" and is_training:
+            # Output of vision_maskrcnn model is a list of bounding boxes,
+            # sorted on the basis of their scores. This makes accuracy
+            # comparison hard with torch.compile. torch.compile can cause minor
+            # divergences in the output because of how fusion works for amp in
+            # TorchInductor compared to eager.  Therefore, instead of looking at
+            # all the bounding boxes, we compare only top 5.
+            model_kwargs = {"box_detections_per_img": 5}
             benchmark = benchmark_cls(
                 test="train",
                 device=device,
-                jit=False,
+                batch_size=batch_size,
+                extra_args=extra_args,
+                model_kwargs=model_kwargs,
+            )
+        elif is_training:
+            benchmark = benchmark_cls(
+                test="train",
+                device=device,
                 batch_size=batch_size,
                 extra_args=extra_args,
             )
@@ -329,7 +359,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             benchmark = benchmark_cls(
                 test="eval",
                 device=device,
-                jit=False,
                 batch_size=batch_size,
                 extra_args=extra_args,
             )

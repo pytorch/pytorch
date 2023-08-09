@@ -34,11 +34,8 @@ def parse_from_yaml(ei: Dict[str, object]) -> Dict[ETKernelKey, BackendMetadata]
     if (kernels := e.pop("kernels", None)) is None:
         return {}
 
-    type_alias: Dict[str, List[str]] = e.pop("type_alias", None)  # type: ignore[assignment]
-    dim_order_alias: Dict[str, List[str]] = e.pop("dim_order_alias", None)  # type: ignore[assignment]
-    assert (
-        type_alias is not None and dim_order_alias is not None
-    ), "type_alias and dim_order_alias cannot be None: " + str(ei)
+    type_alias: Dict[str, List[str]] = e.pop("type_alias", {})  # type: ignore[assignment]
+    dim_order_alias: Dict[str, List[str]] = e.pop("dim_order_alias", {})  # type: ignore[assignment]
     dim_order_alias.pop("__line__", None)
 
     kernel_mapping: Dict[ETKernelKey, BackendMetadata] = {}
@@ -62,7 +59,7 @@ def parse_from_yaml(ei: Dict[str, object]) -> Dict[ETKernelKey, BackendMetadata]
         kernel_keys = (
             [ETKernelKey((), default=True)]
             if arg_meta is None
-            else ETKernelKey.gen_from_yaml(arg_meta, type_alias, dim_order_alias)
+            else ETKernelKey.gen_from_yaml(arg_meta, type_alias, dim_order_alias)  # type: ignore[arg-type]
         )
 
         for kernel_key in kernel_keys:
@@ -127,15 +124,13 @@ def parse_et_yaml(
     """Parse native_functions.yaml into NativeFunctions and an Operator Indexed Dict
     of fields to persist from native_functions.yaml to functions.yaml
     """
-    with open(path, "r") as f:
+    with open(path) as f:
         es = yaml.load(f, Loader=LineLoader)
 
     et_kernel = extract_kernel_fields(es)
 
     # Remove ET specific fields from entries for BC compatibility
-    for entry in es:
-        for field in ET_FIELDS:
-            entry.pop(field, None)
+    strip_et_fields(es)
 
     native_yaml = parse_native_yaml(
         path,
@@ -145,3 +140,12 @@ def parse_et_yaml(
         loaded_yaml=es,
     )
     return native_yaml.native_functions, et_kernel
+
+
+def strip_et_fields(es: object) -> None:
+    """Given a loaded yaml representing a list of operators,
+    remove ET specific fields from every entries for BC compatibility
+    """
+    for entry in es:  # type: ignore[attr-defined]
+        for field in ET_FIELDS:
+            entry.pop(field, None)

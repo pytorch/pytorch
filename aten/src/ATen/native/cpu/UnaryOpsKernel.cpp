@@ -179,6 +179,18 @@ static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
       });
 }
 
+#if !defined(C10_MOBILE)
+#define _AT_DISPATCH_ABS_TYPES(TYPE, NAME, ...)                   \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                   \
+            kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn,       \
+            TYPE, NAME, __VA_ARGS__)
+#else
+#define _AT_DISPATCH_ABS_TYPES(TYPE, NAME, ...)          \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(          \
+            kHalf, kBFloat16,                            \
+            TYPE, NAME, __VA_ARGS__)
+#endif
+
 static void abs_kernel(TensorIteratorBase& iter) {
   auto dtype = iter.dtype();
   if (dtype == kComplexHalf) {
@@ -186,7 +198,7 @@ static void abs_kernel(TensorIteratorBase& iter) {
     using opmath_t = at::opmath_type<scalar_t>;
     cpu_kernel(iter, [=](scalar_t a) -> scalar_t { return abs_impl(opmath_t{a}); });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "abs_cpu", [&]() {
+    _AT_DISPATCH_ABS_TYPES(iter.dtype(), "abs_cpu", [&]() {
       cpu_kernel_vec(
           iter,
           [=](scalar_t a) -> scalar_t { return abs_impl(a); },
@@ -691,7 +703,7 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
 
 #define IMPLEMENT_FLOAT_KERNEL(op)                                                  \
   inline namespace CPU_CAPABILITY {                                                 \
-  void op##_kernel(TensorIteratorBase& iter) {                                      \
+  static void op##_kernel(TensorIteratorBase& iter) {                               \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                    \
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), #op "_vml_cpu", [&]() { \
       constexpr int64_t grain_size = 2048;                                          \
@@ -705,6 +717,19 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
 #define IMPLEMENT_COMPLEX_KERNEL(op)                                                             \
   inline namespace CPU_CAPABILITY {                                                              \
   void op##_kernel(TensorIteratorBase& iter) {                                                   \
+    TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), #op "_vml_cpu", [&]() { \
+        constexpr int64_t grain_size = 2048;                                                     \
+        iter.for_each(IMPLEMENT_ITERATOR_LAMBDA(op), grain_size);                                \
+    });                                                                                          \
+    iter.cast_outputs();                                                                         \
+  }                                                                                              \
+  }                                                                                              \
+  REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
+
+#define STATIC_IMPLEMENT_COMPLEX_KERNEL(op)                                                      \
+  inline namespace CPU_CAPABILITY {                                                              \
+  static void op##_kernel(TensorIteratorBase& iter) {                                            \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), #op "_vml_cpu", [&]() { \
         constexpr int64_t grain_size = 2048;                                                     \
@@ -761,51 +786,28 @@ REGISTER_DISPATCH(special_modified_bessel_i1_stub, &CPU_CAPABILITY::modified_bes
 REGISTER_DISPATCH(special_modified_bessel_k0_stub, &CPU_CAPABILITY::modified_bessel_k0_kernel);
 REGISTER_DISPATCH(special_modified_bessel_k1_stub, &CPU_CAPABILITY::modified_bessel_k1_kernel);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(acos)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(asin)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(atan)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(acos)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(asin)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(atan)
 IMPLEMENT_FLOAT_KERNEL(ceil)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(cos)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(cos)
 IMPLEMENT_FLOAT_KERNEL(erf)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(erfc)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(erfinv)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(exp)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(expm1)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(exp)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(expm1)
 IMPLEMENT_FLOAT_KERNEL(floor)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(log)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(log10)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(log1p)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(log2)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(log)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(log10)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(log1p)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(log2)
 IMPLEMENT_FLOAT_KERNEL(i0)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(round)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(sin)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(sin)
 IMPLEMENT_COMPLEX_KERNEL(sqrt)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(tan)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(tanh)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(tan)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(tanh)
 IMPLEMENT_FLOAT_KERNEL(trunc)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(lgamma)
 
 } // namespace at::native

@@ -1159,7 +1159,8 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
       s_i++;
     }
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::BFloat16, at::ScalarType::Half,
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        at::ScalarType::ComplexHalf, at::ScalarType::BFloat16, at::ScalarType::Half,
         commonDtype, "mul_out_sparse", [&] {
           auto r_accessor = r_buffer.accessor<scalar_t, 1>();
           auto t_accessor = t_values.accessor<scalar_t, 1>();
@@ -1221,6 +1222,10 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
     int64_t row = indices_accessor[0][i];
     int64_t col = indices_accessor[1][i];
     if (col >= 0 && col < dim_j && row >= 0 && row < dim_i) {
+      // AXPY call is no-op over an empty vector
+      if (dim_k == 0) {
+        continue;
+      }
       at::native::cpublas::axpy<scalar_t>(dim_k,
             cast_alpha * val,
             dense_ptr + col * dense_stride0, dense_stride1,

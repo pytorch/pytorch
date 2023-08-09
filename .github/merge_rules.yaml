@@ -17,8 +17,11 @@
   - torch/csrc/jit/serialization/onnx.*
   - torch/csrc/onnx/**
   - torch/onnx/**
+  - torch/testing/_internal/common_methods_invocations.py
   - third_party/onnx
   - caffe2/python/onnx/**
+  - benchmarks/dynamo/_onnx/**
+  - torch/_logging/**
   approved_by:
   - BowenBao
   - abock
@@ -296,6 +299,7 @@
   - mingfeima
   - XiaobingSuper
   - jgong5
+  - vfdev-5
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -412,6 +416,7 @@
   - lezcano
   - Skylion007
   - ngimel
+  - peterbell10
   mandatory_checks_name:
   - EasyCLA
   - Lint
