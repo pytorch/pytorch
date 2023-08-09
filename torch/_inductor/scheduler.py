@@ -365,6 +365,7 @@ class BaseSchedulerNode:
     def get_estimated_runtime(self, rwbytes: int) -> float:
         from .ir import CollectiveKernel, ComputedBuffer
 
+        # TODO: remove logs
         print("BaseSchedulerNode::get_estimated_runtime called")
         print(self.debug_str())
 
@@ -372,53 +373,59 @@ class BaseSchedulerNode:
         gpu_memory_bandwidth = 1555 * 2**30  # 1555 GBps for A100
         gpu_flops = 312**12  # 312 TFLOPS for A100
 
-        from torch.utils.flop_counter import conv_flop, mm_flop
+        from torch.utils.flop_counter import (
+            addmm_flop,
+            baddbmm_flop,
+            bmm_flop,
+            conv_flop,
+            mm_flop,
+        )
 
-        if (
-            isinstance(self, ExternKernelSchedulerNode)
-            and getattr(self.node, "kernel", "") == "extern_kernels.convolution"
-        ):
-            inputs = self.node.inputs
-            assert len(inputs) == 2
+        def handle_extern_kernel(snode: ExternKernelSchedulerNode):
+            inputs = snode.node.inputs
+            input_shapes = [i.get_size() for i in inputs]
+            op = getattr(snode.node, "kernel", "")
+            if op == "extern_kernels.convolution":
+                assert len(inputs) == 2
 
-            x_shape = inputs[0].get_size()
-            w_shape = inputs[1].get_size()
-            out_shape = self.node.get_size()
-            return (
-                1
-                / gpu_flops
-                * conv_flop(
-                    x_shape=x_shape,
-                    w_shape=w_shape,
-                    out_shape=out_shape,
-                    transposed=False,
-                    _bias=None,
-                    _stride=None,
-                    _padding=None,
-                    _dilation=None,
+                # TODO(xmfan): handle transpose
+                return (
+                    1
+                    / gpu_flops
+                    * conv_flop(
+                        x_shape=input_shapes[0],
+                        w_shape=input_shapes[1],
+                        out_shape=snode.node.get_size(),
+                        transposed=False,
+                        _bias=None,
+                        _stride=None,
+                        _padding=None,
+                        _dilation=None,
+                    )
                 )
-            )
+            elif op == "extern_kernels.mm":
+                assert len(inputs) == 2
+                return 1 / gpu_flops * mm_flop(*input_shapes)
+            elif op == "extern_kernels.bmm":
+                assert len(inputs) == 2
+                return 1 / gpu_flops * bmm_flop(*input_shapes)
+            elif op == "extern_kernels.addmm":
+                assert len(inputs) == 3
+                return 1 / gpu_flops * addmm_flop(*input_shapes)
+            elif op == "extern_kernels.baddbmm":
+                assert len(inputs) == 3
+                return 1 / gpu_flops * baddbmm_flop(*input_shapes)
 
-            # TODO(xmfan): handle transpose
-        elif (
-            isinstance(self, ExternKernelSchedulerNode)
-            and getattr(self.node, "kernel", "") == "extern_kernels.mm"
-        ):
-            inputs = self.node.inputs
-            assert len(inputs) == 2
-            a_shape = inputs[0].get_size()
-            b_shape = inputs[1].get_size()
-            return 1 / gpu_flops * mm_flop(a_shape, b_shape)
+            return 0
 
-            # TODO(xmfan): add support for other types of matmul ops e.g. addmm
-        elif (
-            isinstance(self, FusedSchedulerNode)
-            or isinstance(self.node, ComputedBuffer)
-            or isinstance(self.node, CollectiveKernel)
+        if isinstance(self, ExternKernelSchedulerNode):
+            return handle_extern_kernel(self)
+        elif isinstance(self, FusedSchedulerNode) or isinstance(
+            self.node, ComputedBuffer
         ):
             return rwbytes / gpu_memory_bandwidth
 
-        # TODO(xmfan): add support for more node types
+        # TODO(xmfan): add support for CollectiveKernel
 
         return 0
 

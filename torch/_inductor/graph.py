@@ -946,6 +946,8 @@ class GraphLowering(torch.fx.Interpreter):
         total_bytes = 0
         node_counts = []
         for node in scheduler.nodes:
+            # TODO: remove logs
+            print(node.debug_str())
             num_bytes = get_read_write_buffers_sizes(node)
             # temporary code for testing
             runtime = node.get_estimated_runtime(num_bytes)
