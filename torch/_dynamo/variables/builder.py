@@ -1103,7 +1103,7 @@ class VariableBuilder:
                 options.update({"raw_value": value})
 
             proxy = self.tx.output.root_tracer.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value), source=self.get_source()
             )
 
             unspec_var = wrap_fx_proxy_cls(

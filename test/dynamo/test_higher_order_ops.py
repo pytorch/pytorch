@@ -992,8 +992,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         ref = torch.tensor(72.0)
         actual = mod_for_compile(torch.ones(6, 4))
+
         with self.assertRaisesRegex(
-            AssertionError, "Mutating module attribute buffer during export"
+            torch._dynamo.exc.UserError, r"Can't inplace modify module params/buffers inside HigherOrderOp"
         ):
             mod_for_eager(torch.ones(6, 4))
 
