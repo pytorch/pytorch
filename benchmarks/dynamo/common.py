@@ -526,7 +526,7 @@ def _normalize_bench_inputs(example_inputs) -> Tuple[Tuple[Any], Mapping[str, An
     if isinstance(example_inputs, dict):
         return (), example_inputs
     else:
-        return example_inputs, {}
+        return tuple(example_inputs), {}
 
 
 def _register_dataclass_output_as_pytree(example_outputs) -> None:
@@ -1132,14 +1132,9 @@ class AOTInductorModelCache:
                 example_args, example_kwargs
             )
 
-            exported = torch._export.export(model, example_args, example_kwargs)
-            param_buffer_values = list(exported.state_dict.values())
-            flat_example_inputs = fx_pytree.tree_flatten_spec(
-                example_inputs, exported.call_spec.in_spec
+            so_path, exported = torch._export.aot_compile(
+                model, example_args, example_kwargs
             )
-            all_args = (*param_buffer_values, *flat_example_inputs)
-            # AOT compile into a .so
-            so_path = torch._inductor.aot_compile(exported.graph_module, all_args)
 
             output_node = list(exported.graph.nodes)[-1]
             output_tensors = [
@@ -1941,6 +1936,8 @@ class BenchmarkRunner:
                 MixedPrecision,
             )
 
+            from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
+
             if self.args.float16:
                 dtype = torch.float16
             elif self.args.bfloat16:
@@ -1956,16 +1953,19 @@ class BenchmarkRunner:
                 buffer_dtype=dtype,
             )
 
-            device = self.args.devices[-1]
-            device_id = None
-            if device == "cuda":
-                device_id = torch.cuda.current_device()
+            my_auto_wrap_policy = functools.partial(
+                size_based_auto_wrap_policy, recurse=True, min_num_params=int(1e5)
+            )
+
             model = FSDP(
                 model,
                 use_orig_params=True,
-                device_id=device_id,
+                device_id=torch.cuda.current_device()
+                if self.args.devices[-1] == "cuda"
+                else None,
                 mixed_precision=mp_policy,
                 limit_all_gathers=True,
+                auto_wrap_policy=my_auto_wrap_policy,
             )
             if torch._inductor.config.triton.cudagraphs:
                 log.warning("Disabling cudagraphs for FSDP compatibility")

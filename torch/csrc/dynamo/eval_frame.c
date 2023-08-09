@@ -320,6 +320,40 @@ inline static CacheEntry* get_cache_entry(PyCodeObject* code) {
   return extra;
 }
 
+PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
+  PyObject* object;
+  if (!PyArg_ParseTuple(args, "O", &object)) {
+    return NULL;
+  }
+  if (!PyCode_Check(object)) {
+    PyErr_SetString(PyExc_TypeError, "expected a code object!");
+    return NULL;
+  }
+  PyCodeObject* code = (PyCodeObject*)object;
+
+  CacheEntry* current_node = get_cache_entry(code);
+
+  PyObject* outer_list = PyList_New(0);
+  if (!outer_list) {
+    return NULL;  // Return NULL if failed to create list
+  }
+  while (current_node != NULL && current_node != SKIP_CODE) {
+    // Creating a new Python tuple for the check_fn and code of current CacheEntry
+    PyObject* inner_list = PyTuple_Pack(2, current_node->check_fn, current_node->code);
+    int flag = PyList_Append(outer_list, inner_list);  // Add the inner list to the outer list
+    Py_DECREF(inner_list);  // Decrement our own reference
+    if (flag < 0) {
+      Py_DECREF(outer_list);  // Clean up if failed to append
+      return NULL;
+    }
+
+    // Move to the next node in the linked list
+    current_node = current_node->next;
+  }
+  // Return the outer list
+  return outer_list;
+}
+
 inline static void set_cache_entry(PyCodeObject* code, CacheEntry* extra) {
   // TODO(jansel): would it be faster to bypass this?
   _PyCode_SetExtra((PyObject*)code, cache_entry_extra_index, extra);
@@ -867,6 +901,7 @@ static PyMethodDef _methods[] = {
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
     {"set_profiler_hooks", set_profiler_hooks, METH_VARARGS, NULL},
     {"clear_profiler_hooks", clear_profiler_hooks, METH_NOARGS, NULL},
+    {"_debug_get_cache_entry_list", _debug_get_cache_entry_list, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
