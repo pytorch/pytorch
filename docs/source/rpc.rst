@@ -221,7 +221,11 @@ other workers, and calling the appropriate functions to retrieve or modify their
 parameters during training. See :ref:`remote-reference-protocol` for more
 details.
 
-.. autoclass:: RRef
+.. autoclass:: PyRRef(RRef)
+    :members:
+    :inherited-members:
+
+.. autoclass:: PyRRef
     :members:
     :inherited-members:
 
