@@ -492,7 +492,7 @@ def make_cell(val=None):
 
 def proxy_args_kwargs(args, kwargs):
     try:
-        proxy_args = tuple(arg.as_proxy() for arg in args)
+        proxy_args = ([arg.as_proxy() for arg in args],)
         proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return proxy_args, proxy_kwargs
     except NotImplementedError as e:
