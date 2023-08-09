@@ -15,6 +15,7 @@
 #else
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
 #include <ATen/ops/baddbmm_native.h>
@@ -711,6 +712,69 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
 Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
   Tensor result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
   return _int_mm_out_cuda(self, mat2, result);
+}
+
+namespace {
+void check_scaled_mm(const Tensor& self, const Tensor& mat2) {
+  TORCH_CHECK(self.dim() == 2, "self must be a matrix");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
+  TORCH_CHECK(
+      self.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
+      self.sizes()[0], "x", self.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+}
+}
+std::tuple<Tensor&, Tensor&>
+_scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
+          c10::optional<c10::ScalarType> dtype,
+          const c10::optional<at::Tensor>& scale_a,
+          const c10::optional<at::Tensor>& scale_b,
+          const c10::optional<at::Tensor>& scale_result,
+          Tensor& out, Tensor& amax) {
+  check_scaled_mm(mat1, mat2);
+  TensorArg targs[]{{out, "out", 0}, {amax, "amax", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
+  checkAllSameGPU(__func__, targs);
+  TORCH_CHECK(!scale_a || scale_a->numel() == 1);
+  TORCH_CHECK(!scale_b || scale_b->numel() == 1);
+
+  IntArrayRef mat1_sizes = mat1.sizes();
+  IntArrayRef mat2_sizes = mat2.sizes();
+  at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
+  at::native::resize_output(amax, 1);
+
+  cublasCommonArgs args(mat1, mat2, out);
+  at::cuda::blas::scaled_gemm(
+      args.transa,
+      args.transb,
+      args.m,
+      args.n,
+      args.k,
+      args.mata->data_ptr(),
+      scale_a ? scale_a->data_ptr() : nullptr,
+      args.lda,
+      args.mata->scalar_type(),
+      args.matb->data_ptr(),
+      scale_b ? scale_b->data_ptr() : nullptr,
+      args.ldb,
+      args.matb->scalar_type(),
+      args.result->data_ptr(),
+      scale_result ? scale_result->data_ptr() : nullptr,
+      args.result_ld,
+      args.result->scalar_type(),
+      amax.data_ptr());
+
+  return {out, amax};
+}
+
+std::tuple<Tensor, Tensor>
+_scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
+          c10::optional<c10::ScalarType> dtype,
+          const c10::optional<at::Tensor>& scale_a,
+          const c10::optional<at::Tensor>& scale_b,
+          const c10::optional<at::Tensor>& scale_result) {
+  const auto out_dtype = dtype.value_or(mat_a.scalar_type());
+  Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype));
+  Tensor amax = at::empty({0}, mat_a.options().dtype(ScalarType::Float));
+  return _scaled_mm_out_cuda(mat_a, mat_b, dtype, scale_a, scale_b, scale_result, out ,amax);
 }
 
 } // namespace at::native
