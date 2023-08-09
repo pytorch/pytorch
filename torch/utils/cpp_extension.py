@@ -74,10 +74,8 @@ CUDA_CLANG_VERSIONS: VersionMap = {
     '11.7': (MINIMUM_CLANG_VERSION, (14, 0)),
 }
 
-__all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_pybind11_abi_build_flags",
-           "get_glibcxx_abi_build_flags", "get_cxx_compiler", "get_compiler_abi_compatibility_and_version",
-           "check_and_build_precompiler_headers", "BuildExtension", "CppExtension", "CUDAExtension", 
-           "include_paths", "library_paths", "load", "load_inline", "is_ninja_available",
+__all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",
+           "CppExtension", "CUDAExtension", "include_paths", "library_paths", "load", "load_inline", "is_ninja_available",
            "verify_ninja_availability"]
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
@@ -253,7 +251,7 @@ PLAT_TO_VCVARS = {
     'win-amd64' : 'x86_amd64',
 }
 
-def get_cxx_compiler():
+def _get_cxx_compiler():
     if IS_WINDOWS:
         compiler = os.environ.get('CXX', 'cl')
     else:
@@ -895,7 +893,7 @@ class BuildExtension(build_ext):
         if hasattr(self.compiler, 'compiler_cxx'):
             compiler = self.compiler.compiler_cxx[0]
         else:
-            compiler = get_cxx_compiler()
+            compiler = _get_cxx_compiler()
         _, version = get_compiler_abi_compatibility_and_version(compiler)
         # Warn user if VC env is activated but `DISTUILS_USE_SDK` is not set.
         if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' in os.environ and 'DISTUTILS_USE_SDK' not in os.environ:
@@ -1321,7 +1319,7 @@ def load(name,
         is_standalone,
         keep_intermediates=keep_intermediates)
 
-def get_pybind11_abi_build_flags():
+def _get_pybind11_abi_build_flags():
     # Note [Pybind11 ABI constants]
     #
     # Pybind11 before 2.4 used to build an ABI strings using the following pattern:
@@ -1341,11 +1339,11 @@ def get_pybind11_abi_build_flags():
             abi_cflags.append(f'-DPYBIND11_{pname}=\\"{pval}\\"')
     return abi_cflags
 
-def get_glibcxx_abi_build_flags():
+def _get_glibcxx_abi_build_flags():
     glibcxx_abi_cflags = ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
     return glibcxx_abi_cflags
 
-def check_and_build_precompiler_headers(extra_cflags,
+def _check_and_build_precompiler_headers(extra_cflags,
                             extra_include_paths,
                             with_cuda=None,
                             is_standalone=False):
@@ -1380,7 +1378,7 @@ def check_and_build_precompiler_headers(extra_cflags,
         if os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string:
             return True
 
-    compiler = get_cxx_compiler()
+    compiler = _get_cxx_compiler()
 
     b_is_gcc = check_compiler_is_gcc(compiler)
     if b_is_gcc is False:
@@ -1455,8 +1453,8 @@ def check_and_build_precompiler_headers(extra_cflags,
         common_cflags += ['-DTORCH_API_INCLUDE_EXTENSION_H']
 
     common_cflags += ['-std=c++17', '-fPIC']
-    common_cflags += [f"{x}" for x in get_pybind11_abi_build_flags()]
-    common_cflags += [f"{x}" for x in get_glibcxx_abi_build_flags()]
+    common_cflags += [f"{x}" for x in _get_pybind11_abi_build_flags()]
+    common_cflags += [f"{x}" for x in _get_glibcxx_abi_build_flags()]
     common_cflags_str = listToString(common_cflags)
 
     pch_cmd = format_precompiler_header_cmd(compiler, head_file, head_file_pch, common_cflags_str, extra_cflags_str, extra_include_paths_str)
@@ -1568,7 +1566,7 @@ def load_inline(name,
     cpp_sources.insert(0, '#include <torch/extension.h>')
 
     # Using PreCompile Header('torch/extension.h') to reduce compile time.
-    check_and_build_precompiler_headers(extra_cflags,
+    _check_and_build_precompiler_headers(extra_cflags,
                         extra_include_paths,
                         with_cuda)
 
@@ -1725,7 +1723,7 @@ def _write_ninja_file_and_compile_objects(
         with_cuda: Optional[bool]) -> None:
     verify_ninja_availability()
 
-    compiler = get_cxx_compiler()
+    compiler = _get_cxx_compiler()
 
     get_compiler_abi_compatibility_and_version(compiler)
     if with_cuda is None:
@@ -1768,7 +1766,7 @@ def _write_ninja_file_and_build_library(
         is_standalone: bool = False) -> None:
     verify_ninja_availability()
 
-    compiler = get_cxx_compiler()
+    compiler = _get_cxx_compiler()
 
     get_compiler_abi_compatibility_and_version(compiler)
     if with_cuda is None:
@@ -2154,12 +2152,12 @@ def _write_ninja_file_to_build_library(path,
         common_cflags.append(f'-DTORCH_EXTENSION_NAME={name}')
         common_cflags.append('-DTORCH_API_INCLUDE_EXTENSION_H')
 
-    common_cflags += [f"{x}" for x in get_pybind11_abi_build_flags()]
+    common_cflags += [f"{x}" for x in _get_pybind11_abi_build_flags()]
 
     common_cflags += [f'-I{include}' for include in user_includes]
     common_cflags += [f'-isystem {include}' for include in system_includes]
 
-    common_cflags += [f"{x}" for x in get_glibcxx_abi_build_flags()]
+    common_cflags += [f"{x}" for x in _get_glibcxx_abi_build_flags()]
 
     if IS_WINDOWS:
         cflags = common_cflags + COMMON_MSVC_FLAGS + ['/std:c++17'] + extra_cflags
@@ -2271,7 +2269,7 @@ def _write_ninja_file(path,
     assert len(sources) == len(objects)
     assert len(sources) > 0
 
-    compiler = get_cxx_compiler()
+    compiler = _get_cxx_compiler()
 
     # Version 1.3 is required for the `deps` directive.
     config = ['ninja_required_version = 1.3']
