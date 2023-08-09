@@ -549,7 +549,7 @@ def bound_sympy(expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRange
 
     # If there's a tracing context, augment available constrained ranges.
     context = torch._guards.TracingContext.get()
-    if context:
+    if context and context.fake_mode.shape_env:
         ranges = {**ranges, **context.fake_mode.shape_env.var_to_range}
 
     unbounded_vars = expr.free_symbols - ranges.keys()
