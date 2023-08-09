@@ -551,15 +551,14 @@ def bound_sympy(expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRange
     # If there's a tracing context, augment available constrained ranges.
     context = torch._guards.TracingContext.get()
     if context:
-        ranges = deepcopy(ranges)
-        ranges.update(context.fake_mode.shape_env.var_to_range)
+        ranges = {**ranges, **context.fake_mode.shape_env.var_to_range}
 
     unbounded_vars = expr.free_symbols - ranges.keys()
     if unbounded_vars:
         # Give some bounds to the free variables via their SymPy assumptions
         # TODO A better way of doing this would be to assign them a range upon creation, as
         #      size variables can come with a lower bound of 2, as we specialise on 0 and 1
-        ranges = deepcopy(ranges)
+        unbounded_ranges: Dict[sympy.Symbol, ValueRanges] = {}
         for s in unbounded_vars:
             assert s.is_integer  # type: ignore[attr-defined]
             if s.is_positive:  # type: ignore[attr-defined]
@@ -568,7 +567,7 @@ def bound_sympy(expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRange
                 lower = 0
             else:
                 lower = -math.inf  # type: ignore[assignment]
-
             ranges[s] = ValueRanges(lower, math.inf)  # type: ignore[index]
+        ranges = {**ranges, **unbounded_ranges}
 
     return sympy_interp(SymPyValueRangeAnalysis, ranges, expr)
