@@ -1798,8 +1798,7 @@ def export(
     Acceptable types of inputs (for `args` and `kwargs`) and outputs include:
 
     - Primitive types, i.e. `torch.Tensor`, `int`, `float`, `bool` and `str`.
-    - Dataclasses (must be registered with
-        torch._export.utils.register_dataclass_as_pytree_node` first)
+    - Dataclasses (must be registered with torch.compiler.register_dataclass_as_pytree_node` first)
     - (Nested) Data structures comprising of `dict`, `list`, `tuple`, `namedtuple` and `OrderedDict`
         containing all above types.
 
@@ -1858,7 +1857,7 @@ def export(
     Note:
     If you want to preserve dynamic branching behavior based on value or
     shape of torch.Tensor in the generated graph, you will need to use
-    `torch._export.dynamic_dim` to make a dimension of input tensor to be dynamic
+    `torch.compiler.dynamic_dim` to make a dimension of input tensor to be dynamic
     and rewrite the source code using control flow operations like
     `torch.ops.higher_order.cond`.
 
@@ -1875,7 +1874,7 @@ def export(
     Because static shape use cases are more dominant, `torch.export()` chooses to
     assume shapes are all static by default unless there are explicit user
     instructions that say otherwise. Specifically, users can use
-    `torch._export.dynamic_dim` to give a hint to `torch.export()` about dynamism
+    `torch.compiler.dynamic_dim` to give a hint to `torch.export()` about dynamism
     and range of an input tensor dimension.
 
     2. Dynamic Control Flow
@@ -1905,7 +1904,7 @@ def export(
     - Assumptions on static shapes of input tensors are automatically validated
       without additional effort.
     - Assumptions on dynamic shape of input tensors require explicit `Input Constraint`
-      constructed with `torch._export.dynamic_dim` APIs
+      constructed with `torch.compiler.dynamic_dim` APIs
     - Assumptions on range of intermediate values require explicit `Inline Constraint`,
       constructed use `constrain_as_size` and `constraint_as_value` APIs.
 
@@ -1958,9 +1957,9 @@ def export(
         constraints: An optional list of constraints on the dynamic arguments
         that specify their possible range of shapes. By default, shapes of
         input torch.Tensors are assumed to be static. If an input torch.Tensor
-        is expected to have dynamic shapes, please use `torch._export.dynamic_dim()`
+        is expected to have dynamic shapes, please use `torch.compiler.dynamic_dim()`
         to define `Constraint` objects that specify the dynamics and the possible
-        range of shapes. See torch._export.dynamic_dim() docstring for examples on
+        range of shapes. See torch.compiler.dynamic_dim() docstring for examples on
         how to use it.
 
     Returns:
