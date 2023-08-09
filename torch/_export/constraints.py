@@ -15,11 +15,45 @@ def constrain_as_value(symbol, min: Optional[int] = None, max: Optional[int] = N
 
 # TODO: we want to hide this min/max stuff under some abstraction similar to
 # DynamicDim
-def constrain_as_size(symbol):
+def constrain_as_size(symbol, min: Optional[int] = None, max: Optional[int] = None):
     """
-    Add compiler hints to the intermediate symbol which will be used as a size
-    in another tensor.
+    This indicates that a given int is size-like, and can be used in any context where a size is expected.
+    You will typically use this when reading out unbacked integers from Tensors, e.g., max.item() or lengths.tolist()
+    which then need to be used as tensor constructors. Providing these assertions to PyTorch can help resolve
+      GuardOnDataDependentSymNode errors upon export, since we cannot guard on unbacked SymInts.
+
+    This function has unusual semantics which distinguish it from constrain_as_value.
+    Specifically, at compile-time, we will unsoundly assume that the resulting int is always >= 2.
+    As a result, max value you pass in should always be greater than 2.
+    This makes it easier to use the unbacked int in size contexts, as we will often attempt to guard on a size being zero/one
+    (e.g., when computing the contiguity of a tensor, or testing if broadcasting can occur),
+    which will not work on unbacked SymInts. Assuming that the int is >= 2 allows us to
+    report False to these tests. Although this is technically unsound,
+    in practice we observe that if your program works for all sizes >= 2,
+    it probably works for zero and one too.
+    At runtime, we only assert that the user provided min/max values are respected.
+
+    To demonstrate in a scenario, suppose you do
+    ```
+    # Case 1
+    # This will assume symbol is between [2, inf) at compile time, but [0, inf) at runtime
+    constrain_as_size(symbol, min=0)
+
+    # Case 2
+    # This will assume symbol is between [2, N] at compile time, but [0, N] at runtime
+    constrain_as_size(symbol, min=0, max=N)
+
+    # Case 3
+    # This is not valid case as max is <= 2
+    constrain_as_size(symbol, min=0, max=1)
+
+    # Case 4
+    # This will assume symbol is between [2, inf) at compile time, AND [2, inf) at runtime
+    constrain_as_size(symbol, min=2)
+
+    # Case 5
+    # This will assume symbol is between [2, inf) at compile time, but [1, inf) at runtime
+    constrain_as_size(symbol, min=1)
+    ```
     """
-    # NOTE: If min, max value are not passed, we will assume it means this is only used for compiler hint.
-    # Runtime will assume min value will be 0 and max value will be INT_MAX
-    torch.sym_constrain_for_size(symbol)
+    torch.sym_constrain_range_for_size(symbol, min=min, max=max)

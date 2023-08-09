@@ -185,17 +185,17 @@
   dispatch:
     CompositeExplicitAutograd: sym_constrain_range
 
-- func: sym_constrain_for_size(Scalar size) -> ()
+- func: sym_constrain_range_for_size(Scalar size, *, int? min, int? max) -> ()
   dispatch:
-    CompositeExplicitAutograd: sym_constrain_for_size
+    CompositeExplicitAutograd: sym_constrain_range_for_size
 
 - func: _functional_sym_constrain_range(Scalar size, int? min, int? max, Tensor dep_token) -> Tensor
   dispatch:
     CompositeExplicitAutograd: _functional_sym_constrain_range
 
-- func: _functional_sym_constrain_for_size(Scalar size, Tensor dep_token) -> Tensor
+- func: _functional_sym_constrain_range_for_size(Scalar size, int? min, int? max, Tensor dep_token) -> Tensor
   dispatch:
-    CompositeExplicitAutograd: _functional_sym_constrain_for_size
+    CompositeExplicitAutograd: _functional_sym_constrain_range_for_size
 
 - func: _make_dep_token(*, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
@@ -5746,8 +5746,6 @@
 
 - func: tensordot.out(Tensor self, Tensor other, int[] dims_self, int[] dims_other, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
-  dispatch:
-    CPU, CUDA: tensordot_out
 
 # TODO: namespace threshold in 'nn'
 - func: threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor
@@ -9708,6 +9706,7 @@
   structured: True
   dispatch:
     CPU, CUDA: renorm_out
+    MPS: renorm_out_mps
 
 - func: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -10066,6 +10065,21 @@
     CPU: foreach_tensor_mul_scalarlist_kernel_slow_
     CUDA: foreach_tensor_mul_scalarlist_kernel_cuda_
   autogen: _foreach_mul.ScalarList_out
+
+- func: _foreach_mul.Tensor(Tensor[] self, Tensor other) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_mul_tensor_kernel_slow
+    CUDA: foreach_tensor_mul_tensor_kernel_cuda
+
+- func: _foreach_mul_.Tensor(Tensor(a!)[] self, Tensor other) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_mul_tensor_kernel_slow_
+    CUDA: foreach_tensor_mul_tensor_kernel_cuda_
+  autogen: _foreach_mul.Tensor_out
 
 - func: _foreach_div.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -10950,7 +10964,11 @@
   dispatch:
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
-  autogen: searchsorted.Scalar_out
+
+- func: searchsorted.Scalar_out(Tensor sorted_sequence, Scalar self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: searchsorted_out_cpu
+    CUDA: searchsorted_out_cuda
 
 - func: _convert_indices_from_coo_to_csr(Tensor self, int size, *, bool out_int32=False) -> Tensor
   structured_delegate: _convert_indices_from_coo_to_csr.out

@@ -493,6 +493,15 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(ep(*inp_test)["a"], ep_rexported(*inp_test)["a"]))
         self.assertTrue(torch.allclose(ep(*inp_test)["b"], ep_rexported(*inp_test)["b"]))
 
+    def test_args_type_checked(self):
+        def fn(x):
+            return x + 1
+
+        inp = torch.rand(2, 2)
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "to be a tuple"):
+            # Intentionally not wrapping `inp` in a tuple to trigger the error
+            _ = export(fn, inp)
+
     def test_constrain_value_with_no_default(self):
         def fn(x, y):
             n = x.max().item()
@@ -542,6 +551,112 @@ class TestExport(TestCase):
             test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
             _ = ep(*test_inp)
 
+    def test_constrain_size_with_various_cases(self):
+
+        def case_1(x, y):
+            n = x.item()
+            constrain_as_size(n, min=0)
+            return y.sum() + torch.ones(n, 5).sum()
+
+        def case_2(x, y):
+            n = x.item()
+            constrain_as_size(n, min=0, max=6)
+            return y.sum() + torch.ones(n, 5).sum()
+
+        def case_3(x, y):
+            n = x.item()
+            constrain_as_size(n, min=0, max=1)
+            return y.sum() + torch.ones(n, 5).sum()
+
+        def case_4(x, y):
+            n = x.item()
+            constrain_as_size(n, min=2)
+            return y.sum() + torch.ones(n, 5).sum()
+
+        def case_5(x, y):
+            n = x.item()
+            constrain_as_size(n, min=1)
+            return y.sum() + torch.ones(n, 5).sum()
+
+        ep = export(case_1, (torch.tensor(1), torch.ones(4, 5)))
+        with self.assertRaisesRegex(RuntimeError, r"is outside of inline constraint \[0, inf\]."):
+            _ = ep(torch.tensor(-1), torch.randn(4, 5))
+
+        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for -1 between"):
+            _ = case_1(torch.tensor(-1), torch.randn(4, 5))
+
+        self.assertTrue(
+            torch.allclose(
+                ep(torch.tensor(1), torch.ones(4, 5)),
+                case_1(torch.tensor(1), torch.ones(4, 5)),
+            )
+        )
+
+        ep = export(case_2, (torch.tensor(5), torch.randn(4, 5)))
+        with self.assertRaisesRegex(RuntimeError, r"is outside of inline constraint \[0, 6\]."):
+            _ = ep(torch.tensor(7), torch.randn(4, 5))
+
+        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 7 between"):
+            _ = case_2(torch.tensor(7), torch.randn(4, 5))
+
+        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 9 between \[0, 6\]."):
+            _ = export(case_2, (torch.tensor(9), torch.randn(4, 5)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 9 between"):
+            _ = case_2(torch.tensor(9), torch.randn(4, 5))
+
+        self.assertTrue(
+            torch.allclose(
+                ep(torch.tensor(5), torch.ones(4, 5)),
+                case_2(torch.tensor(5), torch.ones(4, 5)),
+            )
+        )
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Maximum value to constrain_as_size must be greater than 2, but was 1"
+        ):
+            _ = export(case_3, (torch.tensor(1), torch.randn(4, 5)))
+
+        with self.assertRaisesRegex(RuntimeError, "Max value to constrain_range_for_size must be greater than 2. got: 1"):
+            _ = case_3(torch.tensor(1), torch.randn(4, 5))
+
+        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 1 between \[2, 9223372036854775807\]."):
+            _ = export(case_4, (torch.tensor(1), torch.randn(4, 5)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 1 between \[2, 9223372036854775807\]."):
+            _ = case_4(torch.tensor(1), torch.randn(4, 5))
+
+        ep = export(case_4, (torch.tensor(5), torch.randn(4, 5)))
+        with self.assertRaisesRegex(RuntimeError, r"is outside of inline constraint \[2, inf\]."):
+            _ = ep(torch.tensor(1), torch.randn(4, 5))
+
+        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 1"):
+            _ = case_4(torch.tensor(1), torch.randn(4, 5))
+
+        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 0 between \[1, 9223372036854775807\]."):
+            _ = export(case_5, (torch.tensor(0), torch.randn(4, 5)))
+
+        self.assertTrue(
+            torch.allclose(
+                ep(torch.tensor(5), torch.ones(4, 5)),
+                case_4(torch.tensor(5), torch.ones(4, 5)),
+            )
+        )
+
+        ep = export(case_5, (torch.tensor(5), torch.randn(4, 5)))
+        with self.assertRaisesRegex(RuntimeError, r"is outside of inline constraint \[1, inf\]."):
+            _ = ep(torch.tensor(0), torch.randn(4, 5))
+
+        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 0"):
+            _ = case_5(torch.tensor(0), torch.randn(4, 5))
+
+        self.assertTrue(
+            torch.allclose(
+                ep(torch.tensor(5), torch.ones(4, 5)),
+                case_5(torch.tensor(5), torch.ones(4, 5)),
+            )
+        )
 
 if __name__ == '__main__':
     run_tests()

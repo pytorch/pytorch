@@ -48,7 +48,7 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
         # TODO: remove the need to run fake_tensor_prop on the whole model.
         if counters["inductor"]["binary_folding"] == binary_folding:
             break
-        binary_folding += counters["inductor"]["binary_folding"]
+        binary_folding = counters["inductor"]["binary_folding"]
 
     constant_fold(gm)
     for pattern in pass_patterns:

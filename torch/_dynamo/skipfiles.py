@@ -154,9 +154,10 @@ FILENAME_ALLOWLIST |= set(
     glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
 )
 
-# torch.func.grad: need to allow this file to be able to look at `grad_impl`
+# torch.func: need to allow this file to be able to look at functorch transforms
 FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "_functorch/apis.py",
+    _module_dir(torch) + "_functorch/deprecated.py",
 }
 
 FILENAME_ALLOWLIST |= {

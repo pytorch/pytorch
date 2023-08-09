@@ -115,6 +115,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "index_put",
         "logit",
         "mean",
+        "native_batch_norm",
         # "new_empty",  non-deterministic
         # "new_empty_strided",  non-deterministic
         "new_full",
@@ -126,6 +127,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.avg_pool1d",
         "nn.functional.avg_pool2d",
         "nn.functional.avg_pool3d",
+        "nn.functional.batch_norm",
         "nn.functional.conv1d",
         # "nn.functional.conv2d",  AssertionError: The values for attribute 'shape' do not match in float32
         # "nn.functional.conv3d",  extra opinfo needed
@@ -498,6 +500,14 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support(
             "https://github.com/pytorch/pytorch/issues/101150"
         ),
+    ),
+    xfail(
+        "native_batch_norm",
+        matcher=lambda sample: sample.args[4]
+        and (
+            isinstance(sample.args[0], torch.Tensor) and sample.args[0].shape == (1,)
+        ),  # Edge case with training=True and mean being 1d tensor of single element.
+        reason="AssertionError: The values for attribute 'shape' do not match: torch.Size([1]) != torch.Size([]).",
     ),
     xfail(
         "nn.functional.avg_pool1d",

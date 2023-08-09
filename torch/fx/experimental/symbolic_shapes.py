@@ -304,24 +304,25 @@ def guard_scalar(a):
     else:
         raise AssertionError(f"unrecognized scalar {a}")
 
-def _constrain_symbol_range(shape_env, s: sympy.Symbol, min: int, max: int):
+def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compiler_max: int, runtime_min: int, runtime_max: int):
     if r := shape_env.var_to_range.get(s, None):
         shape_env.var_to_range[s] = ValueRanges(
-            builtins.max(r.lower, min), builtins.min(r.upper, max)
+            builtins.max(r.lower, compiler_min), builtins.min(r.upper, compiler_max)
         )
     else:
-        shape_env.var_to_range[s] = ValueRanges(min, max)
+        shape_env.var_to_range[s] = ValueRanges(compiler_min, compiler_max)
 
     if r := shape_env.runtime_var_to_range.get(s, None):
         shape_env.runtime_var_to_range[s] = ValueRanges(
-            builtins.max(r.lower, min), builtins.min(r.upper, max)
+            builtins.max(r.lower, runtime_min), builtins.min(r.upper, runtime_max)
         )
     else:
-        shape_env.runtime_var_to_range[s] = ValueRanges(min, max)
+        shape_env.runtime_var_to_range[s] = ValueRanges(runtime_min, runtime_max)
 
-def _constrain_unbacked_symint_for_size(a):
-    if isinstance(a, int):
-        return
+def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] = None):
+    """
+    This function is NOT INTENDED to be used by itself.
+    """
 
     if isinstance(a, (SymFloat, SymBool)):
         raise ValueError("Constraining SymFloat/SymBool is nyi")
@@ -329,25 +330,30 @@ def _constrain_unbacked_symint_for_size(a):
     assert isinstance(a, SymInt)
     assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
 
-    shape_env = a.node.shape_env
-    s = a.node.expr
+    if min is None:
+        min = 0
+    if max is None:
+        max = sympy.oo
 
-    if r := shape_env.var_to_range.get(s, None):
-        shape_env.var_to_range[s] = ValueRanges(
-            builtins.max(r.lower, 2), builtins.min(r.upper, sympy.oo)
-        )
-    else:
-        shape_env.var_to_range[s] = ValueRanges(2, sympy.oo)
+    if max <= 2:
+        raise ValueError(f"Maximum value to constrain_as_size must be greater than 2, but was {max}")
 
-    # The only reason r.lower > 0 is that this symbol is constrained before via constrain_as_value,
-    # so we should respect that
-    if r := shape_env.runtime_var_to_range.get(s, None):
-        shape_env.var_to_range[s] = ValueRanges(
-            builtins.max(r.lower, 0), builtins.min(r.upper, sympy.oo)
+    if max < min:
+        raise ValueError(
+            "Maximum value to constrain_as_size can't be less than the specified min value, "
+            "received min={min} and max={max}"
         )
 
-    else:
-        shape_env.runtime_var_to_range[s] = ValueRanges(0, sympy.oo)
+    compiler_min = 2 if min < 2 else min
+
+    _constrain_symbol_range(
+        a.node.shape_env,
+        a.node.expr,
+        compiler_min=compiler_min,
+        compiler_max=max,
+        runtime_min=min,
+        runtime_max=max
+    )
 
 
 # inclusive both ways
@@ -389,6 +395,12 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     if max is None:
         max = sympy.oo
 
+    if max < min:
+        raise ValueError(
+            "Maximum value to constrain_as_size can't be less than the specified min value, "
+            "received min={min} and max={max}"
+        )
+
     if isinstance(a, int):
         if not (min <= a <= max):
             raise ValueError(f"Invalid value {a} for range [{min}:{max}]")
@@ -404,7 +416,15 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     # semantics that this is an "unchecked" assert (but it this actually
     # something useful?  Might be better to restrict only for unbacked
     # SymInt).
-    _constrain_symbol_range(a.node.shape_env, a.node.expr, min, max)
+    _constrain_symbol_range(
+        a.node.shape_env,
+        a.node.expr,
+        compiler_min=min,
+        compiler_max=max,
+        runtime_min=min,
+        runtime_max=max
+    )
+
 
 def constrain_unify(a, b):
     """
@@ -2032,39 +2052,8 @@ class ShapeEnv:
             self.validator.add_assertion(expr)
 
     def _check_translation_validate(self) -> None:
-        if not _translation_validation_enabled():
-            return
-
-        result = self.validator.validate()
-
-        if result.success:
-            return
-
-        if result.model is None:
-            reason = "no answer"
-            source_exprs = self.validator._source_exprs
-            failed = ""
-        else:
-            assert result.failed_source_expr is not None
-            reason = "model: %s" % {sym: result.model[sym] for sym in result.model}
-            source_exprs = result.failed_source_expr
-            failed = "Failed "
-
-        def exprs_to_str(exprs):
-            return "\n".join(f"==> {e}" for e in exprs)
-
-        assertions = self.validator._assertions
-        target_exprs = self.validator._target_exprs
-
-        raise RuntimeError(f"""translation validation failed with {reason}.
-Assertions:
-{exprs_to_str(assertions)}
-
-Target Guards:
-{exprs_to_str(target_exprs)}
-
-{failed}Source Guards:
-{exprs_to_str(source_exprs)}""")
+        if _translation_validation_enabled():
+            self.validator.validate()
 
     def create_fx_call_function(
             self,
@@ -2951,7 +2940,10 @@ Target Guards:
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
             # SymInt
-            if vr.lower == -sympy.oo or (unbacked_only and k in self.var_to_val):
+            if (
+                vr.lower < (-sys.maxsize - 1) // 2 or
+                (unbacked_only and k in self.var_to_val)
+            ):
                 new_range_env[k] = vr
                 continue
             # Positive means >= 1
@@ -3025,8 +3017,8 @@ Target Guards:
                 base, divisor = atom.args
                 if isinstance(divisor, FloorDiv):
                     base1, divisor1 = divisor.args
-                    if self.replace(base % divisor) in self.divisible and \
-                            base == base1 and self.replace(base1 % divisor1) in self.divisible:
+                    if self.replace(Mod(base, divisor)) in self.divisible and \
+                            base == base1 and self.replace(Mod(base1, divisor1)) in self.divisible:
                         div_replacements[atom] = divisor1
             expr = expr.xreplace(div_replacements)
             expr = safe_expand(expr)
@@ -3036,7 +3028,7 @@ Target Guards:
             rationals = expr.atoms(sympy.Rational).difference(expr.atoms(sympy.Integer))
             for fd in expr.atoms(FloorDiv):
                 base, divisor = fd.args
-                if self.replace(base % divisor) in self.divisible:
+                if self.replace(Mod(base, divisor)) in self.divisible:
                     div_replacements[fd] = base / divisor
             new_expr = expr.xreplace(div_replacements)
             new_expr = safe_expand(new_expr)
