@@ -126,6 +126,7 @@ BLOCKED_OPS = frozenset(
         "zero",
         "_sparse_addmm",
         "sparse_mask",
+        "_sparse_mask_projection",
         "_to_dense",
         "_coalesce",
         "_coalesced",

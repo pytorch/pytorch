@@ -1116,7 +1116,7 @@ void ldl_factor_kernel(
     // By default use cusolver if available and magma otherwise.
     // If cusolver and magma 2.5.4+ are both available and hermitian=true,
     // call magma for complex inputs
-#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
+#if defined(USE_LINALG_SOLVER)
 #if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 254)
       if (LD.is_complex() && hermitian) {
         return ldl_factor_magma(
@@ -2210,19 +2210,6 @@ void svd_kernel(const Tensor& A,
 #if defined(USE_LINALG_SOLVER)
   // We always use cuSOLVER unless the user has specified they want to use MAGMA
   bool use_magma = at::globalContext().linalgPreferredBackend() == at::LinalgBackend::Magma;
-#ifdef USE_ROCM
-  // However for current hipSOLVER, MAGMA is preferred for larger matrices due to
-  // performance. Here are a few performance numbers on MI200, ROCM 5.3.22000:
-  //    Size       MAGMA     hipSOLVER
-  //  100x100      0.127s      0.428s
-  //  200x200      0.113s      3.35s
-  //  300x300      0.111s      10.9s
-  //  400x400      0.126s      25.9s
-  //  500x500      0.146s      > 10 minutes, have to kill with SIGTERM
-  //
-  // TODO: Fix this when hipSOLVER has better performance numbers
-  use_magma = use_magma || (A.size(-1) >= 50 && A.size(-2) >= 50);
-#endif
   if (use_magma) {
     svd_magma(A, full_matrices, compute_uv, U, S, Vh, info);
   } else {

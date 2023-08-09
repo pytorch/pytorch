@@ -65,10 +65,9 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: ./.github/actions/calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ${{ inputs.docker-image }}
-          xla: ${{ contains(inputs.build-environment, 'xla') }}
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
@@ -93,10 +92,10 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
-      - name: Check for keep-going label
+      - name: Check for keep-going label and re-enabled test issues
         # This uses the filter-test-configs action because it conviniently
-        # checks for labels.  It does not actually do any filtering.  All
-        # filtering is done in the build step.
+        # checks for labels and re-enabled test issues.  It does not actually do
+        # any filtering.  All filtering is done in the build step.
         id: keep-going
         uses: ./.github/actions/filter-test-configs
         with:
@@ -116,6 +115,12 @@ jobs:
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_JOB: ${{ github.job }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           PYTORCH_RETRY_TEST_CASES: 1
@@ -124,7 +129,7 @@ jobs:
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-          PR_BODY: ${{ github.event.pull_request.body }}
+          REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
@@ -142,20 +147,6 @@ jobs:
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
 
-          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-main}")
-
-          # sanitize the input commit message and PR body here:
-          #
-          # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
-          # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
-          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
-          PR_BODY="${PR_BODY//[$'\n\r']}"
-
-          # then trim all special characters like single and double quotes to avoid unescaped inputs to
-          # wreak havoc internally
-          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
-          export PR_BODY="${PR_BODY//[\'\"]}"
-
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
@@ -165,6 +156,12 @@ jobs:
             -e BUILD_ENVIRONMENT \
             -e PR_NUMBER \
             -e GITHUB_ACTIONS \
+            -e GITHUB_REPOSITORY \
+            -e GITHUB_WORKFLOW \
+            -e GITHUB_JOB \
+            -e GITHUB_RUN_ID \
+            -e GITHUB_RUN_NUMBER \
+            -e GITHUB_RUN_ATTEMPT \
             -e BRANCH \
             -e SHA1 \
             -e AWS_DEFAULT_REGION \
@@ -172,8 +169,7 @@ jobs:
             -e SHARD_NUMBER \
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
-            -e PR_BODY \
-            -e COMMIT_MESSAGES \
+            -e REENABLED_ISSUES \
             -e PYTORCH_RETRY_TEST_CASES \
             -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             -e CONTINUE_THROUGH_ERROR \

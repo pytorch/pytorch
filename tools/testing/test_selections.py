@@ -11,6 +11,7 @@ from warnings import warn
 from tools.shared.logging_utils import duration_to_str, pluralize
 
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
+from tools.stats.upload_stats_lib import emit_metric
 
 IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
 
@@ -97,15 +98,8 @@ def calculate_shards(
     tests: List[str],
     test_file_times: Dict[str, float],
     must_serial: Optional[Callable[[str], bool]] = None,
-    debug: bool = False,
 ) -> List[Tuple[float, List[ShardedTest]]]:
     must_serial = must_serial or (lambda x: True)
-
-    if debug:
-        print(test_file_times)
-        print(tests)
-        print(num_shards)
-        print([x for x in tests if must_serial(x)])
 
     known_tests = [x for x in tests if x in test_file_times]
     unknown_tests: List[str] = [x for x in tests if x not in known_tests]
@@ -130,11 +124,6 @@ def calculate_shards(
     for unknown_test in unknown_tests:
         sharded_jobs[index].serial.append(ShardedTest(unknown_test, 1, 1, None))
         index = (index + 1) % num_shards
-
-    if debug:
-        for j in sharded_jobs:
-            print(j.convert_to_tuple()[1])
-
     return [job.convert_to_tuple() for job in sharded_jobs]
 
 
@@ -174,7 +163,7 @@ def _get_previously_failing_tests() -> Set[str]:
         )
         return set()
 
-    with open(PYTEST_FAILED_TESTS_CACHE_FILE_PATH, "r") as f:
+    with open(PYTEST_FAILED_TESTS_CACHE_FILE_PATH) as f:
         last_failed_tests = json.load(f)
 
     prioritized_tests = _parse_prev_failing_test_files(last_failed_tests)
@@ -271,6 +260,13 @@ def log_time_savings(
         f"Prioritized tests will run about {duration_to_str(max_time_savings_sec)} sooner than they would've otherwise"
     )
 
+    emit_metric(
+        "test_reordering_time_savings",
+        {
+            "time_savings_sec": max_time_savings_sec,
+        },
+    )
+
     # Return value used by tests
     return max_time_savings_sec
 
@@ -321,7 +317,8 @@ def get_reordered_tests(
         )
         return ([], tests)
 
-    # TODO: Would be great to upload these stats to RDS/Rockset!
+    prioritized_test_names = []
+    remaining_test_names = []
     if bring_to_front:
         test_cnt_str = pluralize(len(tests), "test")
         print(f"Reordering tests: Prioritizing {len(bring_to_front)} of {test_cnt_str}")
@@ -332,6 +329,16 @@ def get_reordered_tests(
         print(f"The Rest: {remaining_test_names}")
     else:
         print("Didn't find any tests to prioritize")
+
+    emit_metric(
+        "test_reordering_prioritized_tests",
+        {
+            "prioritized_test_cnt": len(bring_to_front),
+            "total_test_cnt": len(tests),
+            "prioritized_tests": prioritized_test_names,
+            "remaining_tests": remaining_test_names,
+        },
+    )
 
     return (bring_to_front, the_rest)
 

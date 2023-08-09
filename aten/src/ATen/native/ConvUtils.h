@@ -6,7 +6,7 @@
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 using conv_depthwise2d_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
@@ -407,4 +407,4 @@ static inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at
   return can_use_thnn_channels_last_2d;
 }
 
-}} // namespace at::native
+} // namespace at::native

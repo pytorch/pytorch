@@ -1245,7 +1245,7 @@ void raw_miopen_convolution_backward_input_out(
           &one, args.odesc.desc(), grad_output.data_ptr(),
           args.wdesc.desc(), weight.data_ptr(),
           args.cdesc.desc(), bwdDataAlg, &zero,
-          args.idesc.desc(), grad_input.data_ptr(), workspace.data, workspace.size));
+          args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size));
   }
   else {
       uint64_t solution_id;
@@ -1256,7 +1256,7 @@ void raw_miopen_convolution_backward_input_out(
           args.odesc.desc(), grad_output.data_ptr(),
           args.wdesc.desc(), weight.data_ptr(),
           args.cdesc.desc(),
-          args.idesc.desc(), grad_input.data_ptr(), workspace.data, workspace.size, solution_id));
+          args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size, solution_id));
   }
 }
 
@@ -1354,7 +1354,7 @@ void raw_miopen_depthwise_convolution_backward_input_out(
           &one, args.odesc.desc(), grad_output.data_ptr(),
           args.wdesc.desc(), weight.data_ptr(),
           args.cdesc.desc(), bwdDataAlg, &zero,
-          args.idesc.desc(), grad_input.data_ptr(), workspace.data, workspace.size));
+          args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size));
   }
   else {
       uint64_t solution_id;
@@ -1365,7 +1365,7 @@ void raw_miopen_depthwise_convolution_backward_input_out(
           args.odesc.desc(), grad_output.data_ptr(),
           args.wdesc.desc(), weight.data_ptr(),
           args.cdesc.desc(),
-          args.idesc.desc(), grad_input.data_ptr(), workspace.data, workspace.size, solution_id));
+          args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size, solution_id));
   }
 }
 

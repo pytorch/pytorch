@@ -23,7 +23,7 @@
 
 // This file contains helper functions for batching rules.
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 TORCH_API Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x);
 TORCH_API Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x);
@@ -474,4 +474,4 @@ std::tuple<Tensor, Tensor> _binary_pointwise_helper(
     const Tensor& tensor, optional<int64_t> tensor_batch_dim, const Tensor& other, optional<int64_t> other_batch_dim,
     bool do_type_promotion=true);
 
-}}
+} // namespace at::functorch

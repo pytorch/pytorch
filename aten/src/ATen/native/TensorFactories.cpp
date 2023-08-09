@@ -171,7 +171,7 @@ Tensor arange(
   return at::arange_out(result, start, end, step);
 }
 
-Tensor& arange_start_out(const Scalar& start, const Scalar& end, Tensor& result) {
+static Tensor& arange_start_out(const Scalar& start, const Scalar& end, Tensor& result) {
     return at::arange_out(result, start, end, /*step=*/1);
 }
 
@@ -179,7 +179,7 @@ Tensor& arange_out(const Scalar& end, Tensor& result) {
   return at::arange_out(result, /*start=*/0, end, /*step=*/1);
 }
 
-Tensor& arange_out(Tensor& result, const Scalar& start, const Scalar& end) {
+static Tensor& arange_out(Tensor& result, const Scalar& start, const Scalar& end) {
   return at::arange_out(result, start, end, /*step=*/1);
 }
 
@@ -189,14 +189,14 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ complex / polar ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-void complex_check_floating(const Tensor& a, const Tensor& b) {
+static void complex_check_floating(const Tensor& a, const Tensor& b) {
   TORCH_CHECK((a.scalar_type() == kFloat || a.scalar_type() == kDouble || a.scalar_type() == kHalf) &&
               (b.scalar_type() == kFloat || b.scalar_type() == kDouble || b.scalar_type() == kHalf),
               "Expected both inputs to be Half, Float or Double tensors but got ",
               a.scalar_type(), " and ", b.scalar_type());
 }
 
-void complex_check_dtype(
+static void complex_check_dtype(
     const Tensor& result,
     const Tensor& a,
     const Tensor& b) {
@@ -253,7 +253,12 @@ Tensor polar(const Tensor& abs, const Tensor& angle) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
                  c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
-  return at::detail::empty_cpu(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
+  Tensor result = at::detail::empty_cpu(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
+  // See Note [Enabling Deterministic Operations]
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
+    fill_empty_deterministic_(result);
+  }
+  return result;
 }
 
 Tensor empty_names(
@@ -272,8 +277,8 @@ Tensor empty_names(
   }
   TORCH_CHECK(options.layout() == Layout::Strided,
       "NYI: named tensors only support strided layout");
-  TORCH_CHECK(options.device().is_cpu() || options.device().is_cuda(),
-      "NYI: named tensors only support CPU and CUDA tensors");
+  TORCH_CHECK(options.device().is_cpu() || options.device().is_cuda() || options.device().is_privateuseone(),
+      "NYI: named tensors only support CPU, CUDA or ", c10::get_privateuse1_backend(), " tensors.");
   auto result = at::empty(size, options, optional_memory_format);
   internal_set_names_inplace(result, names);
   return result;
@@ -320,7 +325,12 @@ Tensor empty_permuted_symint(SymIntArrayRef size, IntArrayRef physical_layout, c
 
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt,
                          c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
-  return at::detail::empty_strided_cpu(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+  Tensor result = at::detail::empty_strided_cpu(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+  // See Note [Enabling Deterministic Operations]
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
+    fill_empty_deterministic_(result);
+  }
+  return result;
 }
 
 Tensor& empty_out(IntArrayRef size,
@@ -337,6 +347,10 @@ Tensor& empty_out(IntArrayRef size,
   } else {
     result.resize_(size);
   }
+  // See Note [Enabling Deterministic Operations]
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
+    fill_empty_deterministic_(result);
+  }
   return result;
 }
 
@@ -352,7 +366,12 @@ Tensor& empty_out(IntArrayRef size,
     return self.to(ScalarType::n, non_blocking);                 \
   }
 
+// Some scalar types in CAST_OP have no declarations, they may be unused in Pytorch.
+// But we keep them and ignore the warning here until verified in the future.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)
+#pragma clang diagnostic pop
 
 #undef DEFINE_CAST_OP
 

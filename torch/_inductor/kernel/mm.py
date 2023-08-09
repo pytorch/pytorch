@@ -8,7 +8,7 @@ from ..select_algorithm import (
     ExternKernelChoice,
     TritonTemplate,
 )
-from ..utils import use_triton_template
+from ..utils import use_aten_gemm_kernels, use_triton_template
 from .mm_common import (
     addmm_epilogue,
     int8_mm_configs,
@@ -81,7 +81,7 @@ mm_template = TritonTemplate(
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
 
-aten_addmm = ExternKernelChoice(torch.addmm, "at::addmm_out", ("beta", "alpha"))
+aten_addmm = ExternKernelChoice(torch.addmm, "at::addmm_out")
 
 aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm")
 
@@ -105,7 +105,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
 
     # options to tune from
-    choices = [aten_mm.bind((mat1, mat2), layout)]
+    choices = [aten_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
     if use_triton_template(layout):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
@@ -123,7 +123,9 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=torch.int32
     )
-    choices = [aten__int_mm.bind((mat1, mat2), layout)]
+    choices = (
+        [aten__int_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
+    )
     if use_triton_template(layout, enable_int32=True):
         # TODO: Re-enable eager mode implementation once cuBLAS is fixed
         choices = []
@@ -139,14 +141,38 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
 @register_lowering(aten.addmm)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
+    ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
+
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     if not use_triton_template(layout):
-        choices = [aten_addmm.bind((inp, mat1, mat2), layout, alpha=alpha, beta=beta)]
+        choices = (
+            [
+                aten_addmm.bind(
+                    (inp, mat1, mat2),
+                    layout,
+                    ordered_kwargs_for_cpp_kernel,
+                    alpha=alpha,
+                    beta=beta,
+                )
+            ]
+            if use_aten_gemm_kernels()
+            else []
+        )
         return autotune_select_algorithm("addmm", choices, [inp, mat1, mat2], layout)
 
-    choices = [
-        aten_addmm.bind((inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta)
-    ]
+    choices = (
+        [
+            aten_addmm.bind(
+                (inp_expanded, mat1, mat2),
+                layout,
+                ordered_kwargs_for_cpp_kernel,
+                alpha=alpha,
+                beta=beta,
+            )
+        ]
+        if use_aten_gemm_kernels()
+        else []
+    )
     if (
         inp_expanded.get_stride()[0] == 0
         and inp_expanded.get_device().type == "cuda"

@@ -3,12 +3,9 @@ from caffe2.python import core
 
 
 add_configs = op_bench.cross_product_configs(
-    M=[8],
-    N=[8],
-    K=[8],
-    tags=["short"],
-    device=["cuda", "cpu"]
+    M=[8], N=[8], K=[8], tags=["short"], device=["cuda", "cpu"]
 )
+
 
 class AddBenchmark(op_bench.Caffe2BenchmarkBase):
     def init(self, M, N, K, device):
@@ -27,8 +24,10 @@ class AddBenchmark(op_bench.Caffe2BenchmarkBase):
 
     def backward(self):
         grad_op = core.CreateOperator(
-            "AddGradient", [self.output, self.input_one, self.input_two],
-            [self.input_one_grad, self.input_two_grad], **self.args
+            "AddGradient",
+            [self.output, self.input_one, self.input_two],
+            [self.input_one_grad, self.input_two_grad],
+            **self.args,
         )
         return grad_op
 

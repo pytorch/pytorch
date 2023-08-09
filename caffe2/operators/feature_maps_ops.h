@@ -17,7 +17,7 @@ class MergeDenseFeatureTensorsOp : public Operator<Context> {
       : Operator<Context>(std::forward<Args>(args)...) {
     featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
   }
-  virtual ~MergeDenseFeatureTensorsOp() noexcept {}
+  ~MergeDenseFeatureTensorsOp() noexcept override {}
 
   bool RunOnDevice() override {
     return DispatchHelper<
@@ -83,7 +83,7 @@ class MergeSingleScalarFeatureTensorsOp : public Operator<Context> {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
   }
-  virtual ~MergeSingleScalarFeatureTensorsOp() noexcept {}
+  ~MergeSingleScalarFeatureTensorsOp() noexcept override {}
 
   bool RunOnDevice() override {
     return DispatchHelper<
@@ -148,7 +148,7 @@ class MergeSingleScalarFeatureTensorsGradientOp : public Operator<Context> {
       : Operator<Context>(std::forward<Args>(args)...) {
     numFeatureInputs_ = InputSize() - 1; // Everything other than values_grad
   }
-  virtual ~MergeSingleScalarFeatureTensorsGradientOp() noexcept {}
+  ~MergeSingleScalarFeatureTensorsGradientOp() noexcept override {}
 
   bool RunOnDevice() override {
     return DispatchHelper<
@@ -198,7 +198,7 @@ class MergeSingleListFeatureTensorsOp : public Operator<Context> {
     inValuesOffset_.resize(numInputs_);
     featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
   }
-  virtual ~MergeSingleListFeatureTensorsOp() noexcept {}
+  ~MergeSingleListFeatureTensorsOp() noexcept override {}
 
   bool RunOnDevice() override {
     return DispatchHelper<
@@ -284,7 +284,7 @@ class MergeSingleListOrMapFeatureTensorsGradientOp : public Operator<Context> {
       : Operator<Context>(std::forward<Args>(args)...) {
     numFeatureInputs_ = (InputSize() - 1) / kNumTensorsPerInput;
   }
-  virtual ~MergeSingleListOrMapFeatureTensorsGradientOp() noexcept {}
+  ~MergeSingleListOrMapFeatureTensorsGradientOp() noexcept override {}
 
   bool RunOnDevice() override {
     return DispatchHelper<
@@ -352,7 +352,7 @@ class MergeSingleMapFeatureTensorsOp : public Operator<Context> {
     inValuesOffset_.resize(numInputs_);
     featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
   }
-  virtual ~MergeSingleMapFeatureTensorsOp() noexcept {}
+  ~MergeSingleMapFeatureTensorsOp() noexcept override {}
 
   bool RunOnDevice() override {
     return DispatchHelper<
@@ -454,7 +454,7 @@ class MergeMultiScalarFeatureTensorsOp : public Operator<Context> {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     inKeysOffset_.resize(numInputs_);
   }
-  virtual ~MergeMultiScalarFeatureTensorsOp() noexcept {}
+  ~MergeMultiScalarFeatureTensorsOp() noexcept override {}
 
   bool RunOnDevice() override {
     return DispatchHelper<
@@ -526,7 +526,7 @@ class MergeMultiScalarFeatureTensorsGradientOp : public Operator<Context> {
       : Operator<Context>(std::forward<Args>(args)...) {
     numFeatureInputs_ = (InputSize() - 1) / kNumTensorsPerInput;
   }
-  virtual ~MergeMultiScalarFeatureTensorsGradientOp() noexcept {}
+  ~MergeMultiScalarFeatureTensorsGradientOp() noexcept override {}
 
   bool RunOnDevice() override {
     return DispatchHelper<
@@ -588,7 +588,7 @@ class MergeMultiListFeatureTensorsOp : public Operator<Context> {
     inKeysOffset_.resize(numInputs_);
     inValuesValuesOffset_.resize(numInputs_);
   }
-  virtual ~MergeMultiListFeatureTensorsOp() noexcept {}
+  ~MergeMultiListFeatureTensorsOp() noexcept override {}
 
   bool RunOnDevice() override {
     return DispatchHelper<
@@ -680,7 +680,7 @@ class MergeMultiMapFeatureTensorsOp : public Operator<Context> {
     inKeysOffset_.resize(numInputs_);
     inValuesValuesOffset_.resize(numInputs_);
   }
-  virtual ~MergeMultiMapFeatureTensorsOp() noexcept {}
+  ~MergeMultiMapFeatureTensorsOp() noexcept override {}
 
   bool RunOnDevice() override {
     return DispatchHelper<
@@ -786,7 +786,7 @@ class MergeMultiListOrMapFeatureTensorsGradientOp : public Operator<Context> {
       : Operator<Context>(std::forward<Args>(args)...) {
     numFeatureInputs_ = (InputSize() - 1) / kNumTensorsPerInput;
   }
-  virtual ~MergeMultiListOrMapFeatureTensorsGradientOp() noexcept {}
+  ~MergeMultiListOrMapFeatureTensorsGradientOp() noexcept override {}
 
   bool RunOnDevice() override {
     return DispatchHelper<

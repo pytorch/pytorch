@@ -285,7 +285,7 @@ void ImagingResampleVertical(
   }
 }
 
-// This is the only public entry point in this file.  It supports bilinear
+// This is the only public entry point in this file.  It supports bilinear or bicubic
 // mode for uint8 dtype when C <= 4, with or without antialias. The
 // implem is based on PIL-SIMD.
 // Its equivalent implementation (fallback) for when AVX isn't supported or when
@@ -301,7 +301,7 @@ void ImagingResampleVertical(
 // here: all these kernels are general enough to handle an arbitrary number of
 // weights, but when aa=False they could be optimized further.
 template <typename scale_type, class F>
-void upsample_avx_bilinear_uint8(
+void upsample_avx_bilinear_bicubic_uint8(
     const at::Tensor& input_,
     const at::Tensor& output,
     bool align_corners,

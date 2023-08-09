@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: jit"]
 
 import contextlib
@@ -20,7 +19,6 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraints,
     DimDynamic,
-    FloorDiv,
     guard_bool,
     guard_float,
     guard_int,
@@ -40,6 +38,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
+from torch.utils._sympy.functions import FloorDiv, Mod
 
 aten = torch.ops.aten
 
@@ -195,13 +194,13 @@ class TestPySymInt(TestCase):
 
         self.assertTrue(x.size()[0], 5)
         self.assertTrue(x.size()[1], 4)
-        self.assertTrue(isinstance(x.size()[1], SymInt))
+        self.assertTrue(isinstance(x.size()[1], int))  # due to guard above
         self.assertTrue(x.size()[2] == 3)
 
         self.assertTrue(x.size(0) == 5)
         self.assertTrue(x.size(1) == 4)
         self.assertTrue(x.size(2) == 3)
-        self.assertTrue(isinstance(x.size(2), SymInt))
+        self.assertTrue(isinstance(x.size(2), int))
 
         y = create_symbolic_tensor("y", torch.randn(5, 4, 3)[1:], shape_env)
         self.assertTrue(isinstance(y.storage_offset(), SymInt))
@@ -546,6 +545,15 @@ class TestSymNumberMagicMethods(TestCase):
                 # Complex result, which we do not support:
                 # TypeError: Cannot convert complex to float
                 return self.assertRaises((TypeError,))
+            elif fn in ("lshift", "rshift") and not (
+                isinstance(inp1, (SymInt, int)) and
+                isinstance(inp2, (SymInt, int))
+            ):
+                # TypeError: unsupported operand type(s)
+                return self.assertRaises((TypeError,))
+            elif fn in ("lshift", "rshift") and inp2 < 0:
+                # ValueError: math domain error
+                return self.assertRaises((ValueError,))
             else:
                 return contextlib.nullcontext()
 
@@ -787,6 +795,20 @@ class TestFloorDiv(TestCase):
             self.assertEqual(shape_env.simplify(expr), result)
             self.assertEqual(shape_env.evaluate_expr(expr), result)
 
+    def test_floordiv_simplify_rational(self):
+        result = 21
+
+        a = sympy.Symbol("a", integer=True)
+        b = sympy.Symbol("b")
+
+        cases = [
+            (FloorDiv(a, sympy.Rational(1, 8)), 8 * a),
+            (FloorDiv(b, sympy.Rational(1, 8)), sympy.floor(8 * b)),
+        ]
+
+        for expr, expected in cases:
+            self.assertEqual(expr, expected)
+
     def test_floordiv_assumptions(self):
         # We define two Symbols (with different names) for each type to make
         # sure the behavior is consistent regardless of whether both arguments
@@ -839,7 +861,7 @@ class TestDimConstraints(TestCase):
         from torch.fx.experimental.symbolic_shapes import DimConstraints
 
         s = Symbol("s", positive=True, integer=True)
-        dim_constraints = DimConstraints({}, {})
+        dim_constraints = DimConstraints({}, {}, set())
         dim_constraints._congruences[s] = {
             (s / 2) % 2,
             (s / 2) % 8,
@@ -875,7 +897,7 @@ class TestDimConstraints(TestCase):
         self.assertEqual(solution, {8})
 
     def test_dim_constraints_solve_full(self):
-        from sympy import Eq, Integer, Mod, Ne, Symbol
+        from sympy import Eq, Integer, Ne, Symbol
         from torch._dynamo.source import LocalSource, TensorProperty, TensorPropertySource
 
         src0 = TensorPropertySource(
@@ -933,7 +955,8 @@ class TestDimConstraints(TestCase):
             s6: [src6, src9, src10],
         }
         var_to_val = {s0: 8, s1: 96, s5: 22, s6: 21}
-        dim_constraints = DimConstraints(symbol_to_source, var_to_val)
+        marked_dynamic = {s0, s1, s5, s6}
+        dim_constraints = DimConstraints(symbol_to_source, var_to_val, marked_dynamic)
         dim_constraints.add_equality(src2, s0)
         dim_constraints.add_equality(src3, s0)
         dim_constraints.add_equality(src4, s0)
