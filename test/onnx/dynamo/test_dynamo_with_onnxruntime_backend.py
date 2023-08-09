@@ -24,8 +24,8 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         torch._dynamo.reset()
 
     def tearDown(self):
-        torch._dynamo.reset()
         super().tearDown()
+        torch._dynamo.reset()
 
     def _test_model_numerically(
         self,
@@ -64,7 +64,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 for baseline_elem, result_elem in zip(baseline_result, result):
                     torch.testing.assert_close(baseline_elem, result_elem)
 
-    def _check_counting_information(
+    def _assert_counting_information(
         self,
         ort_backend: OrtBackend,
         # Number of session runs.
@@ -76,7 +76,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         # to two GraphModule's.
         number_of_cached_graph_modules: int,
         # Number of ONNX models cached for each GraphModule,
-        # number_of_exported_onnx_models[i] contains all ONNX models exported from
+        # number_of_exported_onnx_models[i] contains # of ONNX models exported from
         # the i-th element (type: torch.fx.GraphModule) in
         # OrtBackend._all_ort_execution_info.execution_info_per_graph_module.values().
         number_of_exported_onnx_models_for_all_graph_modules: Tuple[int, ...],
@@ -117,7 +117,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             example_args_collection,
         )
 
-        self._check_counting_information(
+        self._assert_counting_information(
             local_ort,
             # OrtBackend._ort_acclerated_call should have been called 5 times because
             # we have 5 different batch sizes to test.
@@ -149,7 +149,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             example_args_collection,
         )
 
-        self._check_counting_information(
+        self._assert_counting_information(
             local_ort,
             expected_execution_count=len(example_args_collection),
             number_of_cached_graph_modules=1,
@@ -182,7 +182,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             example_args_collection,
         )
 
-        self._check_counting_information(
+        self._assert_counting_information(
             local_ort,
             # OrtBackend._ort_acclerated_call should have been called 5 times because
             # we have 5 different batch sizes to test.

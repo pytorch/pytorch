@@ -619,8 +619,10 @@ class OrtBackend:
             # It's first time seeing such as graph. Let's make a new session
             # (type: onnxruntime.InferenceSession) for it.
 
-            # TODO(wschin): this is a workaround for pytorch/pytorch#84311.
-            _move_placeholder_to_front(graph_module)
+            graph_module = torch.onnx._internal.fx.passes.MovePlaceholderToFront(
+                self.resolved_onnx_exporter_options.diagnostic_context,
+                graph_module,
+            ).run()
             # Generate reference outputs. They are used to indicate output
             # tensors' types and devices when calling ORT.
             #
@@ -842,7 +844,7 @@ def make_aot_ort(dynamic: bool = True):
          # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
          >>> import copy
          >>> import torch
-         >>> from torch.onnx._backend.core import make_aot_ort
+         >>> from torch.onnx._internal.onnxruntime import make_aot_ort
          >>> class MyModel(torch.nn.Module):
          ... def __init__(self) -> None:
          ...     super().__init__()
