@@ -6643,11 +6643,11 @@
   variants: function, method
 
 - func: _scaled_mm(Tensor self, Tensor mat2, *, ScalarType? dtype=None, Tensor? scale_a=None, Tensor? scale_b=None, Tensor? scale_result=None) -> (Tensor, Tensor)
-  variants: function, method
+  variants: function
   dispatch:
     CUDA: _scaled_mm_cuda
 
-- func: _scaled_mm.out(Tensor self, Tensor mat2, *, ScalarType? dtype=None, Tensor? scale_a=None, Tensor? scale_b=None, Tensor? scale_result=None, Tensor(a!) out, Tensor(b!) out_amax) -> (Tensor(a!) out, Tensor(b!) out_amax)
+- func: _scaled_mm.out(Tensor self, Tensor mat2, *, ScalarType? dtype=None, Tensor? scale_a=None, Tensor? scale_b=None, Tensor? scale_result=None, Tensor(a!) out, Tensor(b!) out_amax) -> (Tensor(a!), Tensor(b!))
   variants: function
   dispatch:
     CUDA: _scaled_mm_out_cuda

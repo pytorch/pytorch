@@ -741,6 +741,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
   at::native::resize_output(amax, 1);
 
+#if !defined(USE_ROCM) && !defined(_MSC_VER)
   cublasCommonArgs args(mat1, mat2, out);
   at::cuda::blas::scaled_gemm(
       args.transa,
@@ -761,6 +762,9 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       args.result_ld,
       args.result->scalar_type(),
       amax.data_ptr());
+#else
+  TORCH_CHECK(false, "_scaled_mm_out_cuda is not compiled for this platform.");
+#endif
 
   return {out, amax};
 }
