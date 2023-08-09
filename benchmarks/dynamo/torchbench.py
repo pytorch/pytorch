@@ -89,6 +89,7 @@ SKIP_FOR_CPU = {
     "nanogpt_generate",  # timeout
     "sam",  # timeout
     "llama_v2_7b_16h",  # model is CUDA only
+    "stable_diffusion",  # flaky
 }
 
 SKIP_FOR_CUDA = {
@@ -304,8 +305,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             try:
                 module = importlib.import_module(c)
                 break
-            except ModuleNotFoundError:
-                pass
+            except ModuleNotFoundError as e:
+                if e.name != c:
+                    raise
         else:
             raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)

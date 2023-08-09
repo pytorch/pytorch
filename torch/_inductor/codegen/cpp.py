@@ -23,7 +23,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import range_expressable_in_32_bits
-from ..scheduler import BaseScheduling, SchedulerNode
+from ..scheduler import SchedulerNode
 from ..utils import (
     cache_on_self,
     get_fused_kernel_name,
@@ -2699,7 +2699,7 @@ class CppKernelProxy(CppKernel):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
 
 
-class CppScheduling(BaseScheduling):
+class CppScheduling:
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.get_kernel_group()
