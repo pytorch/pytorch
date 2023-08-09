@@ -8,82 +8,14 @@ from ..pattern_matcher import Arg, CallFunction, KeywordArg
 from .freezing_patterns import register_binary_folding_pattern
 
 aten = torch.ops.aten
-prims = torch.ops.prims
-
-
-def mark_mixed_dtype_conv(conv):
-    conv_dtype = conv.meta["val"].dtype
-    if conv_dtype not in (torch.float16, torch.bfloat16):
-        return
-
-    if not len(conv.users) == 1:
-        return
-
-    conv_user = next(iter(conv.users.keys()))
-    if not isinstance(conv_user.meta["val"], torch.Tensor):
-        return
-
-    if not conv_user.meta["val"].dtype == torch.float32:
-        return
-
-    while conv_user.target in _binary_ops:
-        if not len(conv_user.users) == 1:
-            return
-
-        conv_user = next(iter(conv_user.users.keys()))
-
-    if not (
-        conv_user.target == prims.convert_element_type.default
-        and conv_user.args[1] == conv_dtype
-    ):
-        return
-
-    conv.meta["_allow_conv_mixed_dtype_folding"] = conv_dtype
-
-
-def mark_mixed_dtype_allowed_convs(gm):
-    """
-    Mark convolutions which we will binary fold even with mixed precision constants. We constant fold in the higher precision
-    for better accuracy and then recover the original precision after.
-    """
-    for node in gm.graph.nodes:
-        if node.target is aten.convolution.default:
-            mark_mixed_dtype_conv(node)
-
-
-def recover_original_precision_folded_convs(gm):
-    """
-    After binary folding conv weights and biases to a higher dtype, recover the original precision they were in.
-    """
-    graph = gm.graph
-    convs = [node for node in graph.nodes if node.target is aten.convolution.default]
-    for node in convs:
-        orig_dtype = node.meta.get("_allow_conv_mixed_dtype_folding", None)
-        if orig_dtype is None:
-            continue
-
-        with graph.inserting_before(node):
-            for idx in [1, 2]:
-                old_input = node.args[idx]
-                if old_input is None:
-                    continue
-
-                new_input = graph.create_node(
-                    "call_function",
-                    prims.convert_element_type.default,
-                    (old_input, orig_dtype),
-                )
-                node.replace_input_with(old_input, new_input)
-
-
-_binary_ops = [aten.add.Tensor, aten.sub.Tensor, aten.mul.Tensor, aten.div.Tensor]
 
 
 @functools.lru_cache(None)
 def binary_folding_init():
     _conv_args = [Arg() for _ in range(9)]
     _computation_ops = [aten.convolution.default]
-    _computation_calls = [CallFunction(aten.convolution.default, *_conv_args, _users=1)]
+    _binary_ops = [aten.add.Tensor, aten.sub.Tensor, aten.mul.Tensor, aten.div.Tensor]
+    _computation_calls = [CallFunction(aten.convolution.default, *_conv_args)]
 
     """
     In order to fuse add/sub/mul/div with conv, the dimensions of its
@@ -155,15 +87,7 @@ def binary_folding_init():
                 torch.promote_types(other_meta_value.dtype, weight_meta_value.dtype)
                 != weight_meta_value.dtype
             ):
-                if not conv_node.meta.get("_allow_conv_mixed_dtype_folding", False):
-                    return False
-
-                if (
-                    other_meta_value.dtype != torch.float
-                    and weight_meta_value.dtype not in (torch.float16, torch.bfloat16)
-                ):
-                    return False
-
+                return False
             if not _op_not_broadcasting_with_conv(weight_meta_value, other_meta_value):
                 return False
         else:
@@ -268,7 +192,8 @@ def binary_folding_init():
                 new_computation_node = _create_new_conv_node(
                     graph, computation_node, binary_node, other
                 )
+
                 binary_node.replace_all_uses_with(new_computation_node)
-                new_computation_node.meta.update(computation_node.meta)
+                new_computation_node.meta.update(binary_node.meta)
                 graph.erase_node(binary_node)
                 graph.erase_node(computation_node)
