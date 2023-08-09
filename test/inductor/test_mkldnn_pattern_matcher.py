@@ -324,10 +324,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 mod = M(binary_fn, input_shape[-1], out_feature, bias).to(dtype).eval()
                 v = torch.randn(input_shape).to(dtype)
                 other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
-                mod_c = torch.compile(mod)
-                out, code = run_and_get_code(mod_c, v, other)
-                self.assertEqual(out, mod(v, other), rtol=1e-2, atol=1e-2)
-                # TODO - assert fusions work code
+                self._test_common(
+                    mod, (v, other), match_count, match_nodes, rtol=1e-2, atol=1e-2
+                )
 
     def test_multi_linear_share_same_input(self):
         # llama pattern.
