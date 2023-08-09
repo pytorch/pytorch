@@ -1490,10 +1490,7 @@ def _get_buffers_and_dtypes_for_computation(
             if buffer in visited_buffers:
                 continue
             visited_buffers.add(buffer)
-            if (
-                hasattr(fsdp_state, "_ignored_buffer_names")
-                and clean_tensor_name(buffer_name) in fsdp_state._ignored_buffer_names
-            ):
+            if clean_tensor_name(buffer_name) in fsdp_state._ignored_buffer_names:
                 continue
             buffers.append(buffer)
             buffer_dtypes.append(fsdp_state.mixed_precision.buffer_dtype)

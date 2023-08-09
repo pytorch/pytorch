@@ -644,7 +644,7 @@ def _get_ignored_buffer_names(
     ignored_modules: Set[torch.nn.Module],
 ) -> Set[str]:
     """
-    Returns the buffers of the modules in ``ignored_modules``
+    Returns the cleaned buffer FQNs in ``ignored_modules``
     """
     all_ignored_buffer_names: Set[str] = set()
 
@@ -660,7 +660,7 @@ def _get_ignored_buffer_names(
         }
     )
 
-    # Always include nested FSDP modules' ignored buffers
+    # Always include nested FSDP modules' ignored buffer names
     for submodule in root_module.modules():
         optional_fsdp_state = _get_module_fsdp_state(submodule)
         if optional_fsdp_state is not None:

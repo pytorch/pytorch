@@ -93,7 +93,7 @@ class Model(Module):
         super().__init__()
         self.inner = Linear(*INNER_SHAPE)
         if register_buffers:
-            self.inner.buffer = nn.Buffer(torch.randn(BUFFER_SHAPE))
+            self.inner.register_buffer("buffer", torch.randn(BUFFER_SHAPE))
             self.inner.register_buffer(
                 "non_persistent_buffer", torch.randn(BUFFER_SHAPE), persistent=False
             )
@@ -111,7 +111,7 @@ class Model(Module):
             )
         self.outer = Linear(*OUTER_SHAPE)
         if register_buffers:
-            self.outer.buffer = nn.Buffer(torch.randn(BUFFER_SHAPE))
+            self.outer.register_buffer("buffer", torch.randn(BUFFER_SHAPE))
             self.outer.register_buffer(
                 "non_persistent_buffer", torch.randn(BUFFER_SHAPE), persistent=False
             )
@@ -1057,9 +1057,7 @@ class TestFSDPStateDict(FSDPTest):
                 f"{prefixed_tensor_name}",
             )
         # should not apply mixed_precision to ignored buffers
-        for buffer_name in {
-            **buffer_to_buffer_name,
-        }.values():
+        for buffer_name in buffer_to_buffer_name.values():
             prefixed_buffer_name = f"{prefix_str}{buffer_name}"
             self.assertTrue(prefixed_buffer_name in sd1)
             self.assertEqual(sd1[prefixed_buffer_name].dtype, torch.float32)
