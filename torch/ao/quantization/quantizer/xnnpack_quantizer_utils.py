@@ -64,6 +64,10 @@ class OperatorConfig(NamedTuple):
     operators: List[OperatorPatternType]
 
 
+# make everything private for now
+__all__ = ["OP_TO_ANNOTATOR"]
+
+
 def _is_annotated(nodes: List[Node]):
     """
     Given a list of nodes (that represents an operator pattern),
@@ -636,7 +640,7 @@ def _annotate_add(
         )
 
 
-_OP_TO_ANNOTATOR = {
+OP_TO_ANNOTATOR = {
     "linear": _annotate_linear,
     "conv2d": _annotate_conv2d,
     "conv2d_relu": _annotate_conv2d_relu,
