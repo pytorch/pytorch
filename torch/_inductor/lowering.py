@@ -942,6 +942,8 @@ def cat(inputs, dim=0):
     if all(input.get_dtype() is torch.uint8 for input in inputs):
         # TODO <leslie> Remove this fallback when we support vectorization
         # code gen with uint8 data type directly.
+        for input in inputs:
+            input.realize()
         inputs, _ = require_channels_last(aten.cat, *inputs)
         return fallback_handler(aten.cat)(inputs, dim)
 
