@@ -1,16 +1,16 @@
 import itertools
 import operator
-from typing import Callable, Dict, List, Optional, NamedTuple
 from dataclasses import dataclass
+from typing import Callable, Dict, List, NamedTuple, Optional
 
 import torch
 import torch.nn.functional as F
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
 from torch.ao.quantization.quantizer import (
+    QuantizationAnnotation,
+    QuantizationSpec,
     QuantizationSpecBase,
     SharedQuantizationSpec,
-    QuantizationSpec,
-    QuantizationAnnotation,
 )
 
 from torch.ao.quantization.quantizer.utils import (
@@ -22,12 +22,10 @@ from torch.ao.quantization.quantizer.utils import (
 from torch.fx import Node
 from torch.fx.passes.utils.source_matcher_utils import get_source_partitions
 
-from .quantizer import QuantizationAnnotation
-
 
 __all__ = [
     "OperatorConfig",
-    "OperatorPatternConfig",
+    "OperatorPatternType",
     "QuantizationConfig",
     "get_input_act_qspec",
     "get_output_act_qspec",
@@ -48,7 +46,9 @@ class QuantizationConfig:
 
 
 OperatorPatternType = List[Callable]
-OperatorPatternType.__module__ = "torch.ao.quantization.quantizer.xnnpack_quantizer_utils"
+OperatorPatternType.__module__ = (
+    "torch.ao.quantization.quantizer.xnnpack_quantizer_utils"
+)
 
 
 class OperatorConfig(NamedTuple):
@@ -516,10 +516,11 @@ def _annotate_max_pool2d(
             _annotated=True,
         )
 
+
 def _annotate_input_out_obs_sharing_op(
     op: Callable,
     gm: torch.fx.GraphModule,
-    quantization_config: QuantizationConfig,
+    quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> None:
     module_partitions = get_source_partitions(gm.graph, [op], filter_fn)
@@ -542,9 +543,7 @@ def _annotate_input_out_obs_sharing_op(
             continue
 
         act_qspec = SharedQuantizationSpec(input_act)
-        io_obs_sharing_node.meta[
-            "quantization_annotation"
-        ] = QuantizationAnnotation(
+        io_obs_sharing_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map={
                 input_act: act_qspec,
             },
@@ -552,9 +551,10 @@ def _annotate_input_out_obs_sharing_op(
             _annotated=True,
         )
 
+
 def _annotate_adaptive_avg_pool2d(
     gm: torch.fx.GraphModule,
-    quantization_config: QuantizationConfig,
+    quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> None:
     _annotate_input_out_obs_sharing_op(

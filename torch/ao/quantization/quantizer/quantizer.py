@@ -121,6 +121,7 @@ class DerivedQuantizationSpec(QuantizationSpecBase):
     quant_max: Optional[int] = None
     qscheme: Optional[torch.qscheme] = None
 
+
 @dataclass
 class QuantizationAnnotation:
     """How are input arguemnt or output should be quantized,

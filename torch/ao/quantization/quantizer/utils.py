@@ -1,9 +1,7 @@
-from typing import List, Optional
+from typing import List
 
 import torch
-from torch.ao.quantization.quantizer.quantizer import (
-    QuantizationAnnotation,
-)
+from torch.ao.quantization.quantizer.quantizer import QuantizationAnnotation
 from torch.fx import Node
 
 
