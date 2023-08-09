@@ -691,9 +691,6 @@ class TestOperators(TestCase):
         # The failure occurred for item [0]
         xfail('masked.prod')
     }))
-    @skipOpsIfTorchDynamo('TestOperators', 'test_vjpvjp', vjp_fail.union({
-        skip('index_reduce'),  # double backward  not really supported
-    }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
