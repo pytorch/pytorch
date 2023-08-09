@@ -552,7 +552,6 @@ try:
                 "Failed Source Expressions:\n" + failed_source_exprs_str
             )
 
-
 except ImportError:
     _HAS_Z3 = False
 else:

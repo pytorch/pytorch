@@ -12,7 +12,6 @@ from types import BuiltinFunctionType
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import torch
-from torch._dynamo.exc import InternalTorchDynamoError
 import torch.fx.experimental.meta_tracer
 import torch.fx.experimental.optimization as optimization
 from torch.fx._symbolic_trace import symbolic_trace
@@ -1873,7 +1872,7 @@ if TEST_Z3:
             def fn(x):
                 return x.reshape(-1, 4)
 
-            with self.assertRaisesRegex(InternalTorchDynamoError, "translation validation failed."):
+            with self.assertRaisesRegex(ValidationException, "translation validation failed."):
                 fn(torch.randn(20))
 
 

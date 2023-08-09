@@ -390,7 +390,10 @@ def _compile(
     frame: Optional[types.FrameType] = None,
     frame_state=None,
 ) -> Optional[GuardedCode]:
-    from torch.fx.experimental.validator import translation_validation_enabled, ValidationException
+    from torch.fx.experimental.validator import (
+        translation_validation_enabled,
+        ValidationException,
+    )
 
     output: Optional[OutputGraph] = None
     # This is shared across restarts
