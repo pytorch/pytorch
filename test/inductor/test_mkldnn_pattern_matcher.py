@@ -328,6 +328,32 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     mod, (v, other), match_count, match_nodes, rtol=1e-2, atol=1e-2
                 )
 
+    def test_multi_linear_share_same_input(self):
+        # llama pattern.
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.w1 = torch.nn.Linear(16, 16, bias=False)
+                self.w2 = torch.nn.Linear(16, 16, bias=False)
+
+            def forward(self, x):
+                return F.silu(self.w1(x)) * F.relu(self.w2(x))
+
+        mod = M().to(torch.bfloat16).eval()
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            v = torch.randn(2, 4, 16).to(torch.bfloat16)
+            # 1. view(match_count=4, match_nodes=4).
+            # 2. mm to packed linear(match_count=2, match_nodes=2).
+            # 3. view+linear+view to linear(match_count=2, match_nodes=6).
+            # 4. linear+silu fusion(match_count=1, match_nodes=5)
+            # 5. linear+relu fusion(match_count=1, match_nodes=2)
+
+            match_count = 10
+            match_nodes = 19
+            self._test_common(mod, (v,), match_count, match_nodes, rtol=1e-2, atol=1e-2)
+
     # https://github.com/pytorch/pytorch/issues/99841.
     def test_hardtanh_pattern_fallback(self):
         class Model(torch.nn.Module):
