@@ -194,7 +194,7 @@ def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
             kwargs_patched = {**kwargs, "cpp_wrapper": True}
             return inner_compile(gm, example_inputs, **kwargs_patched)
         else:
-            with config.patch(  # type: ignore[attr-defined]
+            with config.patch(
                 {
                     "triton.store_cubin": True,
                 }
@@ -669,12 +669,10 @@ def remove_unaligned_input_idxs(
     We require all inputs to be aligned, so introduce a copy for any
     that aren't.
     """
-    aligned_static_input_idxs = {
-        idx
-        for idx in static_input_idxs
-        if isinstance(inputs[idx], torch.Tensor)
-        and (inputs[idx].data_ptr() % ALIGNMENT) == 0  # type: ignore[union-attr]
-    }
+    aligned_static_input_idxs = []
+    for idx, input in zip(static_input_idxs, inputs):
+        if isinstance(input, torch.Tensor) and (input.data_ptr() % ALIGNMENT) == 0:
+            aligned_static_input_idxs.append(idx)
     if len(aligned_static_input_idxs) != len(static_input_idxs):
         return aligned_static_input_idxs
     return static_input_idxs
@@ -935,17 +933,17 @@ def compile_fx(
 ):
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
-        with config.patch(config_patches):  # type: ignore[attr-defined]
+        with config.patch(config_patches):
             return compile_fx(
                 model_,
                 example_inputs_,
                 # need extra layer of patching as backwards is compiled out of scope
-                inner_compile=config.patch(config_patches)(inner_compile),  # type: ignore[attr-defined]
+                inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
             )
 
     if config.cpp_wrapper:
-        with config.patch(  # type: ignore[attr-defined]
+        with config.patch(
             {
                 "cpp_wrapper": False,
                 "triton.autotune_cublasLt": False,
@@ -1138,8 +1136,8 @@ def compile_fx(
 
 # pass config dict back to user
 def get_patched_config_dict(config_patches=None):
-    with config.patch(config_patches):  # type: ignore[attr-defined]
-        return config.get_config_copy()  # type: ignore[attr-defined]
+    with config.patch(config_patches):
+        return config.get_config_copy()
 
 
 def _shape_env_from_inputs(inputs: List[torch.Tensor]):

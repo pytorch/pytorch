@@ -126,6 +126,53 @@ class MyModule3(torch.nn.Module):
         return torch.cat(post_l2, dim=2)
 
 
+class MyModule4(torch.nn.Module):
+    def __init__(self, z, device, has_bias):
+        super().__init__()
+        self.z = z
+        self.device = device
+        self.has_bias = has_bias
+        self.seq_len = 10
+        self.weights1 = [
+            torch.nn.Parameter(torch.randn(z - i % 5, z)).to(self.device)
+            for i in range(self.seq_len)
+        ]
+        self.weights2 = [
+            torch.nn.Parameter(torch.randn(z - i % 5, z)).to(self.device)
+            for i in range(self.seq_len)
+        ]
+
+        if has_bias:
+            self.biases1 = [
+                torch.nn.Parameter(torch.randn(z - i % 5)).to(self.device)
+                for i in range(self.seq_len)
+            ]
+            self.biases2 = [
+                torch.nn.Parameter(torch.randn(z - i % 5)).to(self.device)
+                for i in range(self.seq_len)
+            ]
+
+    def forward(self, x):
+        x = x + 1.2
+        x1 = [
+            torch.nn.functional.linear(
+                x, self.weights1[i], self.biases1[i] if self.has_bias else None
+            )
+            for i in range(self.seq_len)
+        ]
+        x2 = torch.cat(x1, dim=1)
+        x3 = torch.split(x2, 10, dim=1)
+        x4 = torch.cat(x3)
+        x5 = [
+            torch.nn.functional.linear(
+                x4, self.weights2[i], self.biases2[i] if self.has_bias else None
+            )
+            for i in range(self.seq_len)
+        ]
+        x6 = torch.cat(x5, dim=1)
+        return torch.sigmoid(x6)
+
+
 @requires_cuda()
 @torch._inductor.config.patch(group_fusion=True, batch_fusion=True)
 class TestGroupBatchFusion(TestCase):
@@ -159,7 +206,7 @@ class TestGroupBatchFusion(TestCase):
         z = 10
         for has_bias in [True, False]:
             counters.clear()
-            module = MyModule(z, has_bias).eval().to("cuda")
+            module = MyModule(z, has_bias).to("cuda")
             input = [torch.randn(z, z, device="cuda")]
             traced = torch.compile(module)
             ref = module(*input)
@@ -222,7 +269,7 @@ class TestGroupBatchFusion(TestCase):
         for has_weight in [True, False]:
             for has_bias in [True, False]:
                 counters.clear()
-                module = MyModule3("cuda", has_weight, has_bias).eval().to("cuda")
+                module = MyModule3("cuda", has_weight, has_bias).to("cuda")
                 input = [torch.randn(2, 5, 50, device="cuda")]
                 traced = torch.compile(module)
                 ref = module(*input)
@@ -246,6 +293,31 @@ class TestGroupBatchFusion(TestCase):
                 self.compare_parameters(module, traced)
                 self.compare_gradients(module, traced)
                 counters.clear()
+
+    def test_batch_linear_lhs_fusion(self):
+        z = 10
+        for has_bias in [True, False]:
+            counters.clear()
+            module = MyModule4(z, "cuda", has_bias)
+            input = [torch.randn(20, z, device="cuda")]
+            traced = torch.compile(module)
+            ref = module(*input)
+            res = traced(*input)
+            self.compare_pred(module, traced, input)
+            self.assertEqual(counters["inductor"]["batch_fusion"], 2)
+            self.assertEqual(
+                counters["inductor"]["scmerge_split_removed"],
+                1,
+            )
+            self.assertEqual(
+                counters["inductor"]["scmerge_cat_removed"],
+                1,
+            )
+            ref.sum().backward()
+            res.sum().backward()
+            self.compare_parameters(module, traced)
+            self.compare_gradients(module, traced)
+            counters.clear()
 
 
 if __name__ == "__main__":
