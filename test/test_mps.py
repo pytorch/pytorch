@@ -85,8 +85,6 @@ def mps_ops_grad_modifier(ops):
         'exponential': [torch.float16, torch.float32],
 
         # CPU errors
-        # derivative for aten::renorm is not implemented
-        'renorm': [torch.float16, torch.float32],
         # derivative for aten::floor_divide is not implemented on CPU
         'floor_divide': [torch.float16, torch.float32],
         # derivative for aten::narrow_copy is not implemented on CPU
@@ -10713,7 +10711,7 @@ class TestConsistency(TestCaseMPS):
             elif (op.name == "native_layer_norm"):
                 atol = 1e-4
                 rtol = 1.3e-5
-            elif (op.name == "norm" or op.name == "linalg.norm") and dtype == torch.float16:
+            elif op.name in ["renorm", "norm", "linalg.norm"] and dtype == torch.float16:
                 atol = 7e-4
                 rtol = 1.5e-3
             elif op.name == "unique" and cpu_kwargs["sorted"] is False:
