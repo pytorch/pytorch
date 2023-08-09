@@ -1920,7 +1920,6 @@ def export(
                 dynamic_dim(x, 0),
                 dynamic_dim(x, 0) <= 5,
             ]
-
     This example means the program requires the dim 0 of input `x` to be less
     than or equal to 5 to be valid. You can inspect the constraints needed and
     then copy this exact function into your code to generated needed
@@ -1930,7 +1929,6 @@ def export(
 
     The returned `ExportedProgram` maintains the following invariants:
 
-    - It is guaranteed to be a sound representation of the original
       program.
     - It maintains the exact calling convention of the original program.
     - It contains a `state_dict` that stores the `torch.nn.Parameters`
@@ -1962,10 +1960,6 @@ def export(
         to define `Constraint` objects that specify the dynamics and the possible
         range of shapes. See torch._export.dynamic_dim() docstring for examples on
         how to use it.
-
-    Returns:
-        An ExportedProgram containing the traced callable.
-
     """
 
     from torch._export import export
