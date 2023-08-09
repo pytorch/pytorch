@@ -3,6 +3,7 @@ import contextlib
 import copy
 import dataclasses
 import functools
+import gc
 import importlib
 import itertools
 import math
@@ -6000,6 +6001,8 @@ class CommonTemplate:
                         nonlocal matmul_seen
 
                         # by matmul, inputs should be deallocated
+                        # TODO: should not be necessary, ref-cycle ?
+                        gc.collect()
                         if func is aten.mm.out:
                             matmul_seen = True
                             test_self.assertEqual(len(inps), 0)
@@ -6272,7 +6275,9 @@ class CommonTemplate:
         class Repro(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self._tensor_constant0 = nn.Buffer(torch.randn([], dtype=torch.float32))
+                self.register_buffer(
+                    "_tensor_constant0", torch.randn([], dtype=torch.float32)
+                )
 
             def forward(self, arg0_1, arg1_1):
                 convert_element_type = torch.ops.prims.convert_element_type.default(
