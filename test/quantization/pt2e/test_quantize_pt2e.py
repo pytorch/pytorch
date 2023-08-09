@@ -157,6 +157,17 @@ class TestHelperModules:
             x = self.pool(x)
             return x
 
+    class ConvWithAdaptiveAvgPool2d(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 3, 3)
+            self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
+
+        def forward(self, x):
+            x = self.conv(x)
+            x = self.adaptive_avg_pool2d(x)
+            return x
+
     class ConvWithBNRelu(torch.nn.Module):
         def __init__(self, relu, bn=True, bias=True):
             super().__init__()
@@ -1911,6 +1922,22 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m_eager = TestHelperModules.ConvMaxPool2d().eval()
 
         example_inputs = (torch.randn(1, 2, 2, 2),)
+
+        self._test_representation(
+            m_eager,
+            example_inputs,
+            quantizer,
+            ref_node_occurrence={},
+            non_ref_node_occurrence={}
+        )
+
+    def test_representation_adaptive_avg_pool2d(self):
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(operator_config)
+        m_eager = TestHelperModules.ConvWithAdaptiveAvgPool2d().eval()
+
+        example_inputs = (torch.randn(1, 3, 3, 3),)
 
         self._test_representation(
             m_eager,
