@@ -225,9 +225,6 @@ details.
     :members:
     :inherited-members:
 
-.. autoclass:: PyRRef
-    :members:
-    :inherited-members:
 
 .. toctree::
     :caption: More Information about RRef
