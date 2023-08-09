@@ -24,10 +24,6 @@ from .passes.add_runtime_assertions_for_constraints_pass import (
     InputDim,
     RangeConstraint,
 )
-from .passes.functionalize_side_effectful_ops_pass import (
-    _FunctionalizeSideEffectfulOpsPass,
-    _NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS,
-)
 
 
 __all__ = ["ExportedProgram"]
@@ -385,7 +381,6 @@ class ExportedProgram:
         return transformed_ep
 
     def _check_input_constraints(self, *args):
-        # TODO(zhxchen17) Remove _add_runtime_assertions.
         # TODO(zhxchen17) Don't generate a runtime graph on the fly.
         _assertion_graph = torch.fx.GraphModule({}, torch.fx.Graph())
         for p in self.graph.nodes:
@@ -401,106 +396,6 @@ class ExportedProgram:
         assert _assertion_graph_res is not None
         _assertion_graph = _assertion_graph_res.graph_module
         _assertion_graph(*args)
-
-    def _add_runtime_assertions(
-        self,
-        functionalize: bool,
-    ) -> "ExportedProgram":
-        ep = self.transform(
-            _AddRuntimeAssertionsForConstraintsPass(
-                self.range_constraints,
-                self.equality_constraints,
-            )
-        )
-        # Graph signature update should be part of pass run instead of a
-        # separate step. However this requires augmenting pass infra at fx level
-        # to operate on `ExportedProgram` instead of `fx.GraphModule`.
-        # TODO: Integrate graph signature update into pass run.
-        ep = _fixup_graph_signature(old_ep=self, new_ep=ep)
-        if functionalize:
-            ep = ep.transform(_FunctionalizeSideEffectfulOpsPass())
-            ep = _update_graph_signature_after_assertions_functionalization(ep)
-
-        return ep
-
-
-def _update_graph_signature_after_assertions_functionalization(
-    ep: ExportedProgram,
-) -> ExportedProgram:
-    output_node = next(
-        n for n in ep.graph_module.graph.nodes if n.op == "output"
-    )
-    dep_token = next(
-        (
-            {idx: str(n)}
-            for idx, n in enumerate(output_node.args[0])
-            if n.target
-            in _NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS.values()
-        ),
-        None,
-    )
-
-    return (
-        _update_graph_signature(
-            ep=ep,
-            gs=dataclasses.replace(
-                copy.deepcopy(ep.graph_signature), assertion_dep_token=dep_token
-            ),
-        )
-        if dep_token is not None
-        else ep
-    )
-
-def _fixup_graph_signature(
-    old_ep: ExportedProgram, new_ep: ExportedProgram,
-) -> ExportedProgram:
-    def _get_output_node_names(gm: torch.fx.GraphModule) -> List[FQN]:
-        output_node = next(n for n in gm.graph.nodes if n.op == "output")
-        return [str(arg) for arg in output_node.args[0]]  # type: ignore[misc]
-
-    # Update output names since after adding run time assertions, the names of
-    # outputs could change.
-    # The assumption here is that the pass:
-    # - Won't change graph outputs order semantically so it's possible to create
-    #   map from old to new output names based on position.
-    # - Will keep input names unchanged so no need to update inputs related
-    #   fields (`user_inputs`, `inputs_to_parameters`, `inputs_to_buffers`, ...)
-    # If any pass logic breaks the above assumption, it needs to update the
-    # signature accordingly to maintain the assumption.
-    outputs = _get_output_node_names(old_ep.graph_module)
-    new_outputs = _get_output_node_names(new_ep.graph_module)
-    assert len(outputs) == len(new_outputs)
-    outputs_map = dict(zip(outputs, new_outputs))
-    gs = old_ep.graph_signature
-    # Need to update graph signature fields related to output since after adding
-    # runtime assertions, the output names could change.
-    new_user_outputs = [outputs_map[u] for u in gs.user_outputs]  # type: ignore[index]
-    new_buffers_to_mutate = {
-        outputs_map[u]: b for u, b in gs.buffers_to_mutate.items()  # type: ignore[index]
-    }
-
-    return _update_graph_signature(
-        ep=new_ep,
-        gs=dataclasses.replace(
-            copy.deepcopy(new_ep.graph_signature),
-            user_outputs=new_user_outputs,
-            buffers_to_mutate=new_buffers_to_mutate,
-        ),
-    )
-
-def _update_graph_signature(
-    ep: ExportedProgram, gs: ExportGraphSignature,
-) -> ExportedProgram:
-    gm = copy.deepcopy(ep.graph_module)
-    return ExportedProgram(
-        root=gm,
-        graph=gm.graph,
-        graph_signature=gs,
-        call_spec=copy.deepcopy(ep.call_spec),
-        state_dict=ep.state_dict,
-        range_constraints=copy.deepcopy(ep.range_constraints),
-        equality_constraints=copy.deepcopy(ep.equality_constraints),
-    )
 
 
 def _process_constraints(
