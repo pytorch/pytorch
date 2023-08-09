@@ -12,7 +12,6 @@ from functorch_additional_op_db import additional_op_db
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db
-from torch.testing._internal.common_utils import TEST_WITH_TORCHDYNAMO
 import os
 import unittest
 from torch.testing._internal.common_device_type import toleranceOverride
