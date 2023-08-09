@@ -34,7 +34,7 @@ from .quantizer import (
     SharedQuantizationSpec,
 )
 
-from .xnnpack_quantizer_utils import _is_annotated, _OP_TO_ANNOTATOR
+from .xnnpack_quantizer_utils import _is_annotated, OP_TO_ANNOTATOR
 
 
 __all__ = [
@@ -391,7 +391,7 @@ class XNNPACKQuantizer(Quantizer):
         """
         Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
         """
-        return _OP_TO_ANNOTATOR["conv2d_bn"](gm, quantization_config, filter_fn)
+        return OP_TO_ANNOTATOR["conv2d_bn"](gm, quantization_config, filter_fn)
 
     def _annotate_conv2d_bn_relu(
         self,
@@ -402,7 +402,7 @@ class XNNPACKQuantizer(Quantizer):
         """
         Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
         """
-        return _OP_TO_ANNOTATOR["conv2d_bn_relu"](gm, quantization_config, filter_fn)
+        return OP_TO_ANNOTATOR["conv2d_bn_relu"](gm, quantization_config, filter_fn)
 
     def _annotate_conv2d_relu(
         self,
@@ -410,7 +410,7 @@ class XNNPACKQuantizer(Quantizer):
         quantization_config: QuantizationConfig,
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
-        return _OP_TO_ANNOTATOR["conv2d_relu"](gm, quantization_config, filter_fn)
+        return OP_TO_ANNOTATOR["conv2d_relu"](gm, quantization_config, filter_fn)
 
     def _annotate_conv2d(
         self,
@@ -418,7 +418,7 @@ class XNNPACKQuantizer(Quantizer):
         quantization_config: QuantizationConfig,
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
-        return _OP_TO_ANNOTATOR["conv2d"](gm, quantization_config, filter_fn)
+        return OP_TO_ANNOTATOR["conv2d"](gm, quantization_config, filter_fn)
 
     def _annotate_linear(
         self,
@@ -426,7 +426,7 @@ class XNNPACKQuantizer(Quantizer):
         quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
-        return _OP_TO_ANNOTATOR["linear"](gm, quantization_config, filter_fn)
+        return OP_TO_ANNOTATOR["linear"](gm, quantization_config, filter_fn)
 
     # TODO: move this to BoltNNQuantizer?
     def _annotate_gru_io_only(
@@ -435,7 +435,7 @@ class XNNPACKQuantizer(Quantizer):
         quantization_config: QuantizationConfig,
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
-        return _OP_TO_ANNOTATOR["gru_io_only"](gm, quantization_config, filter_fn)
+        return OP_TO_ANNOTATOR["gru_io_only"](gm, quantization_config, filter_fn)
 
     def _annotate_maxpool2d(
         self,
@@ -443,7 +443,7 @@ class XNNPACKQuantizer(Quantizer):
         quantization_config: QuantizationConfig,
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
-        return _OP_TO_ANNOTATOR["maxpool2d"](gm, quantization_config, filter_fn)
+        return OP_TO_ANNOTATOR["maxpool2d"](gm, quantization_config, filter_fn)
 
     # this should be handled by propagation, TODO: remove
     def _annotate_input_out_obs_sharing_op(
@@ -531,7 +531,7 @@ class XNNPACKQuantizer(Quantizer):
         quantization_config: QuantizationConfig,
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
-        return _OP_TO_ANNOTATOR["add_relu"](gm, quantization_config, filter_fn)
+        return OP_TO_ANNOTATOR["add_relu"](gm, quantization_config, filter_fn)
 
     def _annotate_add(
         self,
@@ -539,7 +539,7 @@ class XNNPACKQuantizer(Quantizer):
         quantization_config: QuantizationConfig,
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
-        return _OP_TO_ANNOTATOR["add"](gm, quantization_config, filter_fn)
+        return OP_TO_ANNOTATOR["add"](gm, quantization_config, filter_fn)
 
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass
