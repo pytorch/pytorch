@@ -326,7 +326,7 @@ class TestSparseSemiStructured(TestCase):
 
             dense_ref = rand_dense_2by4(r, c, dtype, device)
 
-            sparse, meta = sparse_semi_structured_from_dense(dense_ref, compile=False)
+            sparse, meta = sparse_semi_structured_from_dense(dense_ref, compile=True)
 
             # The torch.ops.aten._to_sparse_semi_structured operator
             # uses CUTLASS to perform conversion from given dense
@@ -338,7 +338,7 @@ class TestSparseSemiStructured(TestCase):
             _, meta_ref = torch.ops.aten._to_sparse_semi_structured(dense_ref)
             torch.testing.assert_close(meta, meta_ref, rtol=0, atol=0)
 
-            dense = sparse_semi_structured_to_dense(sparse, meta, compile=False)
+            dense = sparse_semi_structured_to_dense(sparse, meta, compile=True)
             torch.testing.assert_close(dense, dense_ref, rtol=0, atol=0)
 
         shapes = [[32, 128], [32, 256], [64, 128], [64, 256]]
@@ -358,8 +358,8 @@ class TestSparseSemiStructured(TestCase):
 
         dense_inv, dense_val = rand_dense_2by4_all_patterns(r, c, dtype, device)
 
-        sparse, meta = sparse_semi_structured_from_dense(dense_inv, compile=False)
-        dense = sparse_semi_structured_to_dense(sparse, meta, compile=False)
+        sparse, meta = sparse_semi_structured_from_dense(dense_inv, compile=True)
+        dense = sparse_semi_structured_to_dense(sparse, meta, compile=True)
 
         torch.testing.assert_close(dense, dense_val, rtol=0, atol=0)
 
