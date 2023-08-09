@@ -196,7 +196,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self.value_type = value_type or type(value)
         assert type(value) is self.value_type
         if (
-            getattr(self.value, "_is_fsdp_managed_module", False)
+            "_is_fsdp_managed_module" in self.value.__dict__
             and type(self) == UserDefinedObjectVariable
         ):
             raise RuntimeError(f"Cant make fsdp module as UDO {type(self)}")
