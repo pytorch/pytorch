@@ -1627,8 +1627,8 @@ def inductor_randint(
     )
 
 
-@register_lowering(inductor_prims._bucketize, type_promotion_kind=None)
-def _inductor_bucketize(
+@register_lowering(aten.bucketize, type_promotion_kind=None)
+def bucketize(
     input: TensorBox,
     boundaries: TensorBox,
     *,
@@ -1638,7 +1638,7 @@ def _inductor_bucketize(
     assert len(boundaries.get_size()) == 1
 
     if not (is_triton(input) and is_triton(boundaries)):
-        return fallback_handler(inductor_prims._bucketize, add_to_fallback_set=False)(
+        return fallback_handler(aten.bucketize, add_to_fallback_set=False)(
             input, boundaries, out_int32=out_int32, right=right
         )
 
