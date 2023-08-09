@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import copy
 import functools
-import itertools
 
 from typing import Any, Callable, Dict, List, Optional, Set
 
@@ -22,19 +21,16 @@ from torch.ao.quantization.observer import (
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 
 from torch.fx import Node
-from torch.fx.passes.utils.source_matcher_utils import get_source_partitions
 
 from .quantizer import (
     OperatorConfig,
     OperatorPatternType,
-    QuantizationAnnotation,
     QuantizationConfig,
     QuantizationSpec,
     Quantizer,
-    SharedQuantizationSpec,
 )
 
-from .xnnpack_quantizer_utils import _is_annotated, OP_TO_ANNOTATOR
+from .xnnpack_quantizer_utils import OP_TO_ANNOTATOR
 
 
 __all__ = [
@@ -369,9 +365,12 @@ class XNNPACKQuantizer(Quantizer):
     def _annotate_conv2d_patterns(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
+        quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
+        if quantization_config is None:
+            return
+
         if quantization_config.is_qat:
             self._annotate_conv2d_bn_relu(gm, quantization_config, filter_fn)
             self._annotate_conv2d_bn(gm, quantization_config, filter_fn)
@@ -381,7 +380,7 @@ class XNNPACKQuantizer(Quantizer):
     def _annotate_conv2d_bn(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
+        quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         """
@@ -392,7 +391,7 @@ class XNNPACKQuantizer(Quantizer):
     def _annotate_conv2d_bn_relu(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
+        quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         """
@@ -403,7 +402,7 @@ class XNNPACKQuantizer(Quantizer):
     def _annotate_conv2d_relu(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
+        quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         return OP_TO_ANNOTATOR["conv2d_relu"](gm, quantization_config, filter_fn)
@@ -411,7 +410,7 @@ class XNNPACKQuantizer(Quantizer):
     def _annotate_conv2d(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
+        quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         return OP_TO_ANNOTATOR["conv2d"](gm, quantization_config, filter_fn)
@@ -427,16 +426,18 @@ class XNNPACKQuantizer(Quantizer):
     def _annotate_adaptive_avg_pool2d(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
+        quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
-        return _OP_TO_ANNOTATOR["adaptive_avg_pool2d"](gm, quantization_config, filter_fn)
+        return OP_TO_ANNOTATOR["adaptive_avg_pool2d"](
+            gm, quantization_config, filter_fn
+        )
 
     # TODO: move this to BoltNNQuantizer?
     def _annotate_gru_io_only(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
+        quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         return OP_TO_ANNOTATOR["gru_io_only"](gm, quantization_config, filter_fn)
@@ -444,7 +445,7 @@ class XNNPACKQuantizer(Quantizer):
     def _annotate_max_pool2d(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
+        quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         return OP_TO_ANNOTATOR["max_pool2d"](gm, quantization_config, filter_fn)
@@ -452,7 +453,7 @@ class XNNPACKQuantizer(Quantizer):
     def _annotate_add_patterns(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
+        quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         self._annotate_add_relu(gm, quantization_config, filter_fn)
@@ -461,7 +462,7 @@ class XNNPACKQuantizer(Quantizer):
     def _annotate_add_relu(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
+        quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         return OP_TO_ANNOTATOR["add_relu"](gm, quantization_config, filter_fn)
@@ -469,7 +470,7 @@ class XNNPACKQuantizer(Quantizer):
     def _annotate_add(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
+        quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         return OP_TO_ANNOTATOR["add"](gm, quantization_config, filter_fn)

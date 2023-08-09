@@ -421,10 +421,11 @@ def _annotate_max_pool2d(
             _annotated=True,
         )
 
+
 def _annotate_input_out_obs_sharing_op(
     op: Callable,
     gm: torch.fx.GraphModule,
-    quantization_config: QuantizationConfig,
+    quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> None:
     module_partitions = get_source_partitions(gm.graph, [op], filter_fn)
@@ -447,9 +448,7 @@ def _annotate_input_out_obs_sharing_op(
             continue
 
         act_qspec = SharedQuantizationSpec(input_act)
-        io_obs_sharing_node.meta[
-            "quantization_annotation"
-        ] = QuantizationAnnotation(
+        io_obs_sharing_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map={
                 input_act: act_qspec,
             },
@@ -457,9 +456,10 @@ def _annotate_input_out_obs_sharing_op(
             _annotated=True,
         )
 
+
 def _annotate_adaptive_avg_pool2d(
     gm: torch.fx.GraphModule,
-    quantization_config: QuantizationConfig,
+    quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> None:
     _annotate_input_out_obs_sharing_op(
