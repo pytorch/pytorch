@@ -23,7 +23,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import range_expressable_in_32_bits
-from ..scheduler import SchedulerNode
+from ..scheduler import BaseScheduling, SchedulerNode
 from ..utils import (
     cache_on_self,
     get_fused_kernel_name,
@@ -2699,7 +2699,7 @@ class CppKernelProxy(CppKernel):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
 
 
-class CppScheduling:
+class CppScheduling(BaseScheduling):
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.get_kernel_group()
@@ -2872,25 +2872,26 @@ class WorkSharing:
         self.stack.__exit__(exc_type, exc_val, exc_tb)
 
 
-@dataclasses.dataclass
 class LoopLevel:
-    var: sympy.Expr = None
-    size: sympy.Expr = None
-    offset: sympy.Expr = sympy.Integer(0)
-    steps: sympy.Expr = sympy.Integer(1)
-    parallel: int = 0
-    simd_omp: bool = False
-    picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
-    simd_nelements: int = picked_vec_isa.nelements() if picked_vec_isa else 0
-    simd_vec: bool = False
-    collapsed: bool = False
-    reduction_var_map: Dict[str, str] = None
-    parent: "LoopLevel" = None
-    # the next inner level of the loop, empty if it is inner-most
-    # contains >1 LoopLevel if the inner level of loop is split
-    inner: List["LoopLevel"] = dataclasses.field(default_factory=list)
-    # kernel assigned to this loop level, only valid when it is a leaf
-    kernel: CppKernel = None
+    def __init__(self):
+        super().__init__()
+        self.var: sympy.Expr = None
+        self.size: sympy.Expr = None
+        self.offset: sympy.Expr = sympy.Integer(0)
+        self.steps: sympy.Expr = sympy.Integer(1)
+        self.parallel: int = 0
+        self.simd_omp: bool = False
+        self.picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
+        self.simd_nelements: int = self.picked_vec_isa.nelements() if self.picked_vec_isa else 0
+        self.simd_vec: bool = False
+        self.collapsed: bool = False
+        self.reduction_var_map: Dict[str, str] = None
+        self.parent: "LoopLevel" = None
+        # the next inner level of the loop, empty if it is inner-most
+        # contains >1 LoopLevel if the inner level of loop is split
+        self.inner: List["LoopLevel"] = dataclasses.field(default_factory=list)
+        # kernel assigned to this loop level, only valid when it is a leaf
+        self.kernel: CppKernel = None
 
     def get_kernels(self) -> List[CppKernel]:
         """Get all kernel objects under this loop level"""
