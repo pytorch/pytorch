@@ -2392,7 +2392,7 @@ class TestTEFuser(JitTestCase):
             with torch.jit.strict_fusion():
                 return x + x + torch.rand([4]) + 3
 
-        with self.assertRaises(RuntimeError, "Found unfused operators") as error_out:
+        with self.assertRaisesRegex(RuntimeError, "Found unfused operators") as error_out:
             foo_s = torch.jit.script(foo)
             foo_s(torch.rand([4]))
             foo_s(torch.rand([4]))

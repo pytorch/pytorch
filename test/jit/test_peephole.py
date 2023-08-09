@@ -461,7 +461,7 @@ class TestPeephole(JitTestCase):
 
         run_peephole_and_check_const_value(foo.graph, "value=9")
         self.assertEqual(foo(4, 5), 9)
-        with self.assertRaises(NameError):
+        with self.assertRaises(torch.jit.Error):
             foo(2, 4)
 
         @torch.jit.script
