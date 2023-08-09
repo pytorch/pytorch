@@ -703,8 +703,8 @@ class TestCommon(TestCase):
 
             # Validates the op doesn't support out if it claims not to
             if not op.supports_out:
-                with self.assertRaises(NameError):
-                    assert op_out(out=expected) != NotImplemented
+                with self.assertRaises(TypeError):
+                    op_out(out=expected)
                 return
 
             # A wrapper around map that works with single tensors and always
