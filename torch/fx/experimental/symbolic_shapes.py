@@ -2012,39 +2012,8 @@ class ShapeEnv:
             self.validator.add_assertion(expr)
 
     def _check_translation_validate(self) -> None:
-        if not _translation_validation_enabled():
-            return
-
-        result = self.validator.validate()
-
-        if result.success:
-            return
-
-        if result.model is None:
-            reason = "no answer"
-            source_exprs = self.validator._source_exprs
-            failed = ""
-        else:
-            assert result.failed_source_expr is not None
-            reason = "model: %s" % {sym: result.model[sym] for sym in result.model}
-            source_exprs = result.failed_source_expr
-            failed = "Failed "
-
-        def exprs_to_str(exprs):
-            return "\n".join(f"==> {e}" for e in exprs)
-
-        assertions = self.validator._assertions
-        target_exprs = self.validator._target_exprs
-
-        raise RuntimeError(f"""translation validation failed with {reason}.
-Assertions:
-{exprs_to_str(assertions)}
-
-Target Guards:
-{exprs_to_str(target_exprs)}
-
-{failed}Source Guards:
-{exprs_to_str(source_exprs)}""")
+        if _translation_validation_enabled():
+            self.validator.validate()
 
     def create_fx_call_function(
             self,
@@ -2931,7 +2900,10 @@ Target Guards:
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
             # SymInt
-            if vr.lower == -sympy.oo or (unbacked_only and k in self.var_to_val):
+            if (
+                vr.lower < (-sys.maxsize - 1) // 2 or
+                (unbacked_only and k in self.var_to_val)
+            ):
                 new_range_env[k] = vr
                 continue
             # Positive means >= 1
@@ -3005,8 +2977,8 @@ Target Guards:
                 base, divisor = atom.args
                 if isinstance(divisor, FloorDiv):
                     base1, divisor1 = divisor.args
-                    if self.replace(base % divisor) in self.divisible and \
-                            base == base1 and self.replace(base1 % divisor1) in self.divisible:
+                    if self.replace(Mod(base, divisor)) in self.divisible and \
+                            base == base1 and self.replace(Mod(base1, divisor1)) in self.divisible:
                         div_replacements[atom] = divisor1
             expr = expr.xreplace(div_replacements)
             expr = safe_expand(expr)
@@ -3016,7 +2988,7 @@ Target Guards:
             rationals = expr.atoms(sympy.Rational).difference(expr.atoms(sympy.Integer))
             for fd in expr.atoms(FloorDiv):
                 base, divisor = fd.args
-                if self.replace(base % divisor) in self.divisible:
+                if self.replace(Mod(base, divisor)) in self.divisible:
                     div_replacements[fd] = base / divisor
             new_expr = expr.xreplace(div_replacements)
             new_expr = safe_expand(new_expr)
