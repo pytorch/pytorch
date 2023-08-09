@@ -4,7 +4,7 @@
 #include <chrono>
 #include <climits>
 #include <ctime>
-#include <fstream>
+#include <ostream>
 #include <iomanip>
 #include <map>
 #include <set>

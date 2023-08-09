@@ -29,6 +29,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <cstdlib>
 #include <unordered_map>
+#include <iostream>
 
 #include <ATen/ThreadLocalPythonObjects.h>
 #include <torch/csrc/DataLoader.h>
