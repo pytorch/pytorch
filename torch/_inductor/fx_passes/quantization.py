@@ -4,7 +4,7 @@ import operator
 
 import torch
 from ..lowering import lowerings as L, require_channels_last
-from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, Match
+from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
 from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
@@ -442,10 +442,55 @@ def _register_quantization_maxpool2d():
         )
 
 
+def _register_quantized_cat_lowering(
+    pattern,
+    computation_op,
+):
+    @register_lowering_pattern(
+        pattern,
+    )
+    def qcat(match: Match, inputs, dim, **kwargs):
+        # Refer to the implementation
+        # https://github.com/pytorch/pytorch/blob/416bf4e3e7c5f90bbc306e55501881b4f8bde981/torch/_inductor/fx_passes/post_grad.py#L234
+        # the bias, mat1, mat2 are kept order in the inputs.
+        uint8_inputs = [input[0] for input in inputs]
+        return L[computation_op](uint8_inputs, dim)
+
+    return qcat
+
+
+_raw_dequantize_per_tensor_activation_pattern = CallFunction(
+    aten.mul.Tensor,
+    CallFunction(
+        aten.sub.Tensor,
+        CallFunction(
+            prims.convert_element_type.default,
+            Arg(),
+            Arg(),
+        ),
+        Arg(),
+    ),
+    Arg(),
+)
+
+
+def _register_quantization_cat():
+    dequantize_cat_pattern = CallFunction(
+        aten.cat.default,
+        ListOf(_raw_dequantize_per_tensor_activation_pattern),
+        KeywordArg("dim"),
+    )
+    _register_quantized_cat_lowering(
+        generate_pattern_with_output_quant(dequantize_cat_pattern),
+        aten.cat,
+    )
+
+
 def _register_quantization_lowerings():
     _register_quantization_unary_fusion()
     _register_quantization_binary_fusion()
     _register_quantization_maxpool2d()
+    _register_quantization_cat()
 
 
 def _is_valid_dequant_promotion_pattern(match):
