@@ -1,5 +1,4 @@
 import dataclasses
-from copy import deepcopy
 import itertools
 import sympy
 from sympy.logic.boolalg import BooleanAtom, Boolean as SympyBoolean
@@ -567,7 +566,7 @@ def bound_sympy(expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRange
                 lower = 0
             else:
                 lower = -math.inf  # type: ignore[assignment]
-            ranges[s] = ValueRanges(lower, math.inf)  # type: ignore[index]
+            unbounded_ranges[s] = ValueRanges(lower, math.inf)  # type: ignore[index]
         ranges = {**ranges, **unbounded_ranges}
 
     return sympy_interp(SymPyValueRangeAnalysis, ranges, expr)
