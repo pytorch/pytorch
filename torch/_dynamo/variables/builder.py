@@ -5,6 +5,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import itertools
 import logging
 import operator
 import re
