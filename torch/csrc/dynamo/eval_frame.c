@@ -449,7 +449,6 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     // If the hit cache entry is not the head of the linked list,
     // move it to the head
     if (prev != NULL) {
-
         ExtraState* extra = get_extra_state(frame->f_code);
         CacheEntry* old_cache_entry = extra->cache_entry;
         prev->next = e->next;
@@ -471,18 +470,11 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
   return lookup(e->next, frame, e, index + 1);
 }
 
-static long cache_size_helper(CacheEntry* e) {
+static long cache_size(CacheEntry* e) {
   if (e == NULL) {
     return 0;
   }
-  return 1 + cache_size_helper(e->next);
-}
-
-static long cache_size(ExtraState* e) {
-  if (e == NULL) {
-    return 0;
-  }
-  return cache_size_helper(e->cache_entry);
+  return 1 + cache_size(e->next);
 }
 
 inline static PyObject* eval_custom_code(
@@ -748,7 +740,7 @@ static PyObject* _custom_eval_frame(
   }
   // cache miss
 
-  PyObject *frame_state;
+  PyObject *frame_state = NULL;
   if (extra != NULL) {
     frame_state = extra->frame_state;
   }
@@ -759,7 +751,7 @@ static PyObject* _custom_eval_frame(
   // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
   // that gets re-interpreted as a PyObject (which it is NOT!)
   PyObject* result =
-      call_callback(callback, frame, cache_size(extra), frame_state);
+      call_callback(callback, frame, cache_size(cache_entry), frame_state);
   if (result == NULL) {
     // internal exception, returning here will leak the exception into user code
     // this is useful for debugging -- but we dont want it to happen outside of
