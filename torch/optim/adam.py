@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import torch
 from torch import Tensor
@@ -108,6 +108,9 @@ class Adam(Optimizer):
                     max_exp_avg_sqs.append(state['max_exp_avg_sq'])
                 if group['differentiable'] and state['step'].requires_grad:
                     raise RuntimeError('`requires_grad` is not supported for `step` in differentiable mode')
+                # Host lr as a tensor when fused to allow a dynamic learning rate.
+                if group['fused'] and not torch.is_tensor(group['lr']):
+                    group['lr'] = torch.tensor(group['lr'], dtype=torch.float, device=p.device)
                 state_steps.append(state['step'])
 
     @_use_grad_for_differentiable
@@ -548,7 +551,7 @@ def _fused_adam(
     amsgrad: bool,
     beta1: float,
     beta2: float,
-    lr: float,
+    lr: Union[float, Tensor],
     weight_decay: float,
     eps: float,
     maximize: bool,
@@ -561,15 +564,16 @@ def _fused_adam(
     found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
-    for (device, dtype) in grouped_tensors:
-        ((
+    for (device, _), ((
             device_params,
             device_grads,
             device_exp_avgs,
             device_exp_avg_sqs,
             device_max_exp_avg_sqs,
             device_state_steps,
-        ), _) = grouped_tensors[(device, dtype)]
+        ), _) in grouped_tensors.items():
+        if not torch.is_tensor(lr):
+            lr = torch.tensor(lr, device=device, dtype=torch.float)
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
             if device not in grad_scale_dict:
