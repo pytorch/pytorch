@@ -147,7 +147,6 @@ def mps_ops_grad_modifier(ops):
 
     MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
         # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
-        'masked.softmin': [torch.float32],
         'masked.log_softmax': [torch.float32],
 
         # Unsupported Border padding mode, forward pass success as fallback to cpu
