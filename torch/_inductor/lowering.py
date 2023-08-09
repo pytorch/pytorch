@@ -4331,15 +4331,8 @@ def cumsum(x, axis=None, dtype=None):
     ) and dtype is None:
         dtype = torch.int64
 
-    kwargs = _make_scan_inner(
-        x,
-        axis=axis,
-        dtype=dtype,
-    )
-    return ir.Scan.create(
-        **kwargs,
-        scan_op="sum",
-    )
+    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
+    return ir.Scan.create(**kwargs, scan_op="sum")
 
 
 @register_lowering(aten.prod)
