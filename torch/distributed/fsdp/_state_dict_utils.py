@@ -250,6 +250,7 @@ def _common_unshard_post_state_dict_hook(
                 and buffer.device != cpu_device
             ):
                 state_dict[fqn] = buffer.to(cpu_device)
+            # skip upcasting for ignored buffers
             if (
                 hasattr(fsdp_state, "_ignored_buffer_names")
                 and clean_key not in fsdp_state._ignored_buffer_names
