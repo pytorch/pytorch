@@ -54,7 +54,7 @@ class SSNode:
         self.original_user_names = []
         self.original_node = original_node
         self.to_output_node = False
-        # -1 means not assigned
+        # -1 means not assigned. It is important to set it to -1 instead of 0, because 0 is a valid stream id.
         self.stream_id = -1
         self.snode_names = []
         # mark if this node needs to generate a CUDA event
@@ -109,16 +109,22 @@ class CheckPoints:
         if len(self.checkpoints) == 0:
             self.checkpoints["cur_graph"] = self.graph_name
             self.checkpoints[self.graph_name] = {}
+            if "all_graphs" not in self.checkpoints:
+                self.checkpoints["all_graphs"] = []
+            self.checkpoints["all_graphs"].append(self.graph_name)
         else:
             next_graph = None
-            for tmp_graph_name in self.checkpoints:
-                # check if it has key 'done'
-                if not 'done' in self.checkpoints[tmp_graph_name]:
+            if "all_graphs" not in self.checkpoints:
+                self.checkpoints["all_graphs"] = []
+            self.checkpoints["all_graphs"].append(self.graph_name)
+            self.checkpoints["all_graphs"] = list(set(self.checkpoints["all_graphs"]))
+            # check if all graphs are done
+            for tmp_graph_name in self.checkpoints['all_graphs']:
+                if 'done' not in self.checkpoints[tmp_graph_name]:
                     next_graph = tmp_graph_name
                     break
             if next_graph is None:
                 self.checkpoints["finished"] = True
-                raise RuntimeError("All graphs are finished.")
             else:
                 if 'done' in self.checkpoints['cur_graph']:
                     self.checkpoints['cur_graph'] = next_graph
@@ -139,11 +145,13 @@ class CheckPoints:
         if self.graph_name not in self.checkpoints:
             self.checkpoints[self.graph_name] = {}
         self.checkpoints[self.graph_name]["done_nodes"] = list(self.done_nodes)
+        self.checkpoints[self.graph_name]["done_nodes"].sort()
         self.checkpoints[self.graph_name]["this_time_node"] = self.this_time_node.name if self.this_time_node else None
         with open(self.checkpoints_file, "w") as f:
             json.dump(self.checkpoints, f)
 
     def stream_assign(self):
+        self.ss_graph.stream_pool[0] = len(self.ss_graph.ssnodes) + 2
         self.check_graph_status()
         if 'done' in self.checkpoints.get(self.graph_name, {}):
             for node in self.ss_graph.critical_path:
@@ -155,7 +163,6 @@ class CheckPoints:
             return
 
         this_time = None
-        self.ss_graph.stream_pool[0] = len(self.ss_graph.ssnodes) + 2
         for node in self.ss_graph.critical_path:
             if node.name not in self.done_nodes:
                 break
@@ -164,6 +171,7 @@ class CheckPoints:
             return
         
         for node in self.ss_graph.critical_path:
+            node.stream_id = 0
             if node.name in self.done_nodes:
                 self.dig_node(node)
             elif this_time is None:
@@ -597,9 +605,6 @@ def stream_schedule(snodes):
         checkpoints = CheckPoints(debug_path, ssgraph)
         checkpoints.load()
         checkpoints.stream_assign()
-        if checkpoints.checkpoints[ssgraph.graph_name].get("done", False) == True:
-            checkpoints.save()
-            raise RuntimeError("All possible assignments are done.")
         ssgraph.event_assign()
         checkpoints.save()
     else:
