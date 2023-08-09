@@ -223,7 +223,7 @@ details.
 
 .. autoclass:: RRef
     :members:
-
+    :inherited-members:
 
 .. toctree::
     :caption: More Information about RRef
