@@ -1377,6 +1377,7 @@ def _check_and_build_precompiler_headers(extra_cflags,
         # On RHEL/CentOS c++ is a gcc compiler wrapper
         if os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string:
             return True
+        return False
 
     compiler = _get_cxx_compiler()
 
