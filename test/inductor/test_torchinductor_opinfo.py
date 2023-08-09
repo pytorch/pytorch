@@ -415,6 +415,7 @@ inductor_override_kwargs = {
     ("masked.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
     ("nn.functional.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
+    "nn.functional.rrelu": {"assert_equal": False, "check_gradient": False},
     ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
     ("cummax", "cuda", f16): {"atol": 5e-4, "rtol": 0.002},
     ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
