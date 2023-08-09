@@ -384,9 +384,9 @@ inline static void destroy_extra_state(PyCodeObject* code) {
     destroy_cache_entry(extra->cache_entry);
     PyObject* frame_state = extra->frame_state;
     Py_XDECREF(frame_state);
-    set_extra_state(code, NULL);
     free(extra);
   }
+  set_extra_state(code, NULL);
 }
 
 static PyObject* call_guard_fail_hook(
