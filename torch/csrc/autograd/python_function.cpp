@@ -1161,6 +1161,28 @@ PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction__register_post_grad_accumulation_hook_dict(PyObject* _self, PyObject* _var) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(
+      THPVariable_Check(_var), "_register_post_grad_accumulation_hook_dict expected a Tensor");
+  THPVariable* var = reinterpret_cast<THPVariable*>(_var);
+  const auto& tensor = THPVariable_Unpack(var);
+  std::unique_ptr<FunctionPostHook> hook(
+      new PyFunctionPostHook(var->post_grad_accumulation_hooks));
+  auto self = (THPFunction*)_self;
+  auto cdata = self->cdata.lock();
+  TORCH_CHECK(
+      cdata,
+      "Attribute '_register_post_grad_accumulation_hook_dict' is invalid for this instance "
+      "of _C._FunctionBase. Accessing this attribute directly on an instance of "
+      "autograd.Function is a legacy access pattern that is no longer supported. For examples "
+      "on how to use new-style autograd functions, see "
+      "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
+  cdata->add_tensor_post_hook(std::move(hook));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPFunction_register_hook(PyObject* _self, PyObject* hook) {
   HANDLE_TH_ERRORS
   auto self = (THPFunction*)_self;

@@ -159,6 +159,7 @@ class Tensor(torch._C._TensorBase):
                         quantizer_params,
                         self.requires_grad,
                         self._backward_hooks,
+                        self._post_grad_accumulation_hooks,
                     )
                     if type(new_tensor) is not type(self):
                         raise RuntimeError(
@@ -248,6 +249,7 @@ class Tensor(torch._C._TensorBase):
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         backward_hooks: Dict[Any, Any] = OrderedDict()
+        post_grad_accumulation_hooks: Dict[Any, Any] = OrderedDict()
         # Note: Numpy array is chosen to be the rebuild component for XLA, ORT Tensors.
         # We considered a few options:
         # 1. CPU tensor can't be used here.
@@ -326,6 +328,7 @@ class Tensor(torch._C._TensorBase):
                 quantizer_params,
                 self.requires_grad,
                 backward_hooks,
+                post_grad_accumulation_hooks,
             )
             return (torch._utils._rebuild_qtensor, args_qtensor)
         elif self.is_sparse:
@@ -395,7 +398,8 @@ class Tensor(torch._C._TensorBase):
                 self.stride(),
                 self.requires_grad,
                 backward_hooks,
-            )  # previously was self._backward_hooks
+                post_grad_accumulation_hooks,
+            )  # previously was self._backward_hooks, self._post_grad_accumulation_hooks
 
             metadata = torch._utils.get_tensor_metadata(self)
             if metadata:
@@ -419,7 +423,7 @@ class Tensor(torch._C._TensorBase):
             state = (state[3], state[4], state[2])
         # The setting of _backward_hooks is expected to be a no-op.
         # See Note [Don't serialize hooks]
-        self.requires_grad, _, self._backward_hooks = state
+        self.requires_grad, _, self._backward_hooks, self._post_grad_accumulation_hooks = state
 
     def __repr__(self, *, tensor_contents=None):
         if has_torch_function_unary(self):
@@ -537,6 +541,56 @@ class Tensor(torch._C._TensorBase):
                 self.grad_fn._register_hook_dict(self)
         handle = hooks.RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
+        return handle
+
+    def register_post_grad_accumulation_hook(self, hook):
+        r"""Registers a backward hook.
+
+        The hook will be called after the .grad field is set on a Tensor, meaning
+        all gradients have already been accumulated. The hook should have the
+        following signature::
+
+            hook(grad) -> Tensor or None
+
+
+        The hook should not modify its argument, but it can optionally return
+        a new gradient which will be used in place of :attr:`grad`.
+
+        This function returns a handle with a method ``handle.remove()``
+        that removes the hook from the module.
+
+        .. note::
+            See :ref:`backward-hooks-execution` for more information on how when this hook
+            is executed, and how its execution is ordered relative to other hooks.
+
+        Example::
+
+            >>> v = torch.tensor([0., 0., 0.], requires_grad=True)
+            >>> h = v.register_post_grad_accumulation_hook(lambda grad: grad * 2)  # double the gradient
+            >>> v.backward(torch.tensor([1., 2., 3.]))
+            >>> v.grad
+
+             2
+             4
+             6
+            [torch.FloatTensor of size (3,)]
+
+            >>> h.remove()  # removes the hook
+        """
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.register_post_grad_accumulation_hook,
+                                         (self,), self, hook)
+        if not self.requires_grad:
+            raise RuntimeError(
+                "cannot register a hook on a tensor that " "doesn't require gradient"
+            )
+        if self._post_grad_accumulation_hooks is None:
+            self._post_grad_accumulation_hooks = OrderedDict()
+            # WHY IS THIS REGISTERED ON GRAD_FN?
+            if self.grad_fn is not None:
+                self.grad_fn._register_post_grad_accumulation_hook_dict(self)
+        handle = hooks.RemovableHandle(self._post_grad_accumulation_hooks)
+        self._post_grad_accumulation_hooks[handle.id] = hook
         return handle
 
     def reinforce(self, reward):

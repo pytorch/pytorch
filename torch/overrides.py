@@ -1200,6 +1200,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.mT.__get__: lambda self: -1,
         Tensor.mH.__get__: lambda self: -1,
         Tensor._backward_hooks.__get__: lambda self: -1,
+        Tensor._post_grad_accumulation_hooks.__get__: lambda self: -1,
         Tensor._base.__get__: lambda self: -1,
         Tensor._cdata.__get__: lambda self: -1,
         Tensor.grad.__get__: lambda self: -1,

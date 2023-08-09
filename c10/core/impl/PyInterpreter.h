@@ -187,6 +187,7 @@ struct C10_API PyInterpreterVTable {
   virtual void trace_gpu_event_synchronization(uintptr_t event) const = 0;
 
   virtual void reset_backward_hooks(const TensorImpl* self) const = 0;
+  virtual void reset_post_grad_accumulation_hooks(const TensorImpl* self) const = 0;
 };
 
 struct C10_API PyInterpreter {

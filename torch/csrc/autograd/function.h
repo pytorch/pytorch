@@ -497,6 +497,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     tensor_pre_hooks_.emplace_back(std::move(pre_hook));
   }
 
+  void add_tensor_post_hook(std::unique_ptr<FunctionPostHook>&& post_hook) {
+    tensor_post_hooks_.emplace_back(std::move(post_hook));
+  }
+
   void add_retains_grad_hook(
       std::unique_ptr<FunctionPreHook>&& pre_hook,
       int output_idx) {
@@ -526,6 +530,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   std::unordered_map<int, std::unique_ptr<FunctionPreHook>>&
   retains_grad_hooks() noexcept {
     return retains_grad_hooks_;
+  }
+
+  virtual std::vector<std::unique_ptr<FunctionPostHook>>&
+  tensor_post_hooks() noexcept {
+    return tensor_post_hooks_;
   }
 
   // Customization Points for Subclasses
@@ -676,6 +685,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   std::unordered_map<int, std::unique_ptr<FunctionPreHook>> retains_grad_hooks_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
+  // RIGHT NOW tensor_post_hooks_ ARE ONLY USED AS POST_GRAD_ACCUMULATION_HOOKS
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  std::vector<std::unique_ptr<FunctionPostHook>> tensor_post_hooks_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   at::SmallVector<InputMetadata, 2> input_metadata_;
 };

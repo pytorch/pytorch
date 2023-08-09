@@ -303,7 +303,7 @@ def reduce_tensor(tensor):
         ) = storage._share_cuda_()
         tensor_offset = tensor.storage_offset()
         shared_cache[handle] = StorageWeakRef(storage)
-        # _backward_hooks purposely omitted here, see
+        # _backward_hooks, _post_grad_accumulation_hooks purposely omitted here, see
         # Note [Don't serialize hooks]
         return (
             rebuild_cuda_tensor,
@@ -326,7 +326,7 @@ def reduce_tensor(tensor):
             ),
         )
 
-    # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
+    # _backward_hooks, _post_grad_accumulation_hooks purposely omitted here, see Note [Don't serialize hooks]
     metadata = (
         tensor.storage_offset(),
         tensor.size(),

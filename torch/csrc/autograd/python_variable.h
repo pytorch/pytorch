@@ -22,6 +22,9 @@ struct THPVariable {
   // Hooks to be run on backwards pass (corresponds to Python attr
   // '_backwards_hooks', set by 'register_hook')
   PyObject* backward_hooks = nullptr;
+  // corresponds to Python attr `_post_grad_accumulation_hooks`,
+  // set by `register_post_grad_accumulation_hook`
+  PyObject* post_grad_accumulation_hooks = nullptr;
 };
 
 TORCH_PYTHON_API void registerPythonTensorClass(

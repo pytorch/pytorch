@@ -99,6 +99,10 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   void reset_backward_hooks(const TensorImpl* self) const override {
     PANIC(reset_backward_hooks);
   };
+
+  void reset_post_grad_accumulation_hooks(const TensorImpl* self) const override {
+    PANIC(reset_post_grad_accumulation_hooks);
+  };
 };
 
 // Construct this in Global scope instead of within `disarm`

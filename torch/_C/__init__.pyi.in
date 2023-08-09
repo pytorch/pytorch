@@ -1490,6 +1490,7 @@ class _TensorBase(metaclass=_TensorMeta):
     _grad: Optional[Tensor]
     grad: Optional[Tensor]
     _backward_hooks: Optional[Dict[_int, Callable[[Tensor], Optional[Tensor]]]]
+    _post_grad_accumulation_hooks: Optional[Dict[_int, Callable[[Tensor], Optional[Tensor]]]]
     nbytes: _int
     itemsize: _int
     ${tensor_method_hints}

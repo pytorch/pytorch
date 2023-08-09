@@ -80,10 +80,16 @@ def unserializable_hook(f):
 
 def warn_if_has_hooks(tensor):
     if tensor._backward_hooks:
-        for k in tensor._backward_hooks:
-            hook = tensor._backward_hooks[k]
+        for k, hook in tensor._backward_hooks.items():
             if not hasattr(k, "__torch_unserializable__"):
                 warnings.warn("backward hook {} on tensor will not be "
+                              "serialized.  If this is expected, you can "
+                              "decorate the function with @torch.utils.hooks.unserializable_hook "
+                              "to suppress this warning".format(repr(hook)))
+    if tensor._post_grad_accumulation_hooks:
+        for k, hook in tensor._post_grad_accumulation_hooks.items():
+            if not hasattr(k, "__torch_unserializable__"):
+                warnings.warn("post_grad_accumulation hook {} on tensor will not be "
                               "serialized.  If this is expected, you can "
                               "decorate the function with @torch.utils.hooks.unserializable_hook "
                               "to suppress this warning".format(repr(hook)))
