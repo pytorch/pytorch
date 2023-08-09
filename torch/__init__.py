@@ -1919,7 +1919,6 @@ def export(
                 dynamic_dim(x, 0),
                 dynamic_dim(x, 0) <= 5,
             ]
-
     This example means the program requires the dim 0 of input `x` to be less
     than or equal to 5 to be valid. You can inspect the constraints needed and
     then copy this exact function into your code to generated needed
