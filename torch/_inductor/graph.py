@@ -483,9 +483,9 @@ class GraphLowering(torch.fx.Interpreter):
         for user in self.name_to_users[name]:
             user.realize()
 
-    def add_tensor_constant(self, data):
-        def allocate():
-            for name, value in self.constants.items():
+    def add_tensor_constant(self, data, name=None):
+        def allocate(name):
+            for constant_name, value in self.constants.items():
                 if (
                     not data.is_mkldnn
                     and data.size() == value.size()
@@ -494,17 +494,21 @@ class GraphLowering(torch.fx.Interpreter):
                     and data.device == value.device
                     and torch.eq(data, value).all()
                 ):
-                    return name
-            name = f"constant{len(self.constants)}"
+                    return constant_name
+
+            if name is None:
+                name = f"constant{len(self.constants)}"
             self.constants[name] = data
             self.constant_reprs[name] = hashlib.sha256(
                 repr(data).encode("utf-8")
             ).hexdigest()
             return name
 
+        name = allocate(name)
+
         return TensorBox.create(
             ir.ConstantBuffer(
-                allocate(),
+                name,
                 FixedLayout(data.device, data.dtype, *self.static_sizes_strides(data)),
             )
         )
@@ -599,7 +603,7 @@ class GraphLowering(torch.fx.Interpreter):
         value = getattr(self.module, target)
 
         if unsupported_output_tensor(value):
-            return self.add_tensor_constant(value)
+            return self.add_tensor_constant(value, target)
 
         with no_dispatch():
             if value.shape == ():
@@ -610,7 +614,7 @@ class GraphLowering(torch.fx.Interpreter):
 
                 return tensor(value.tolist(), dtype=value.dtype, device=value.device)
 
-        return self.add_tensor_constant(value)
+        return self.add_tensor_constant(value, target)
 
     def call_module(self, target, args, kwargs):
         raise AssertionError()

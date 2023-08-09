@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 import copy
 import functools
-import os
 import re
 import unittest
 from unittest.mock import patch
@@ -33,50 +32,24 @@ class AOTInductorModelRunner:
             output_tensors.append(torch.empty_like(output))
 
         # The exact API is subject to change
-        with torch.no_grad():
-            so_path, exported = torch._export.aot_compile(
-                model,
-                example_inputs,
-            )
-        constants_file_path = f"{os.path.splitext(so_path)[0]}_constants.pt"
+        so_path, exported = torch._export.aot_compile(
+            model,
+            example_inputs,
+        )
+        print(so_path)
 
         # Use a utility function for easier testing
-        source = (
-            """
+        source = """
         #include <torch/csrc/inductor/aot_inductor_model.h>
-        #include <torch/script.h>
 
         torch::aot_inductor::AOTInductorModel model;
 
         void run(
-                const std::vector<at::Tensor>& inputTensors,
-                std::vector<at::Tensor>& outputTensors){
-
-            // Load the list of constant tensors from the constants file
-            std::vector<at::Tensor> constantTensors;
-            try {
-                auto module = torch::jit::load("%s");
-                if (module.hasattr("tensor_list")) {
-                    for (const auto& t : module.attr("tensor_list").toListRef()) {
-                        constantTensors.push_back(t.toTensor());
-                    }
-                }
-            } catch (const std::exception& ex) {
-                std::cerr << "Error loading constant tensors: " << ex.what() << std::endl;
-                return;
-            }
-
-            std::vector<at::Tensor> allInputs;
-
-            // Append the elements of vec1 and vec2 to the non-const vector
-            allInputs.insert(allInputs.end(), inputTensors.begin(), inputTensors.end());
-            allInputs.insert(allInputs.end(), constantTensors.begin(), constantTensors.end());
-
-            model.run(allInputs, outputTensors, at::cuda::getCurrentCUDAStream());
+                const std::vector<at::Tensor>& input_tensors,
+                std::vector<at::Tensor>& output_tensors){
+            model.run(input_tensors, output_tensors, at::cuda::getCurrentCUDAStream());
         }
         """
-            % constants_file_path
-        )
         optimized = torch.utils.cpp_extension.load_inline(
             name="aot_inductor",
             cpp_sources=[source],
@@ -93,12 +66,10 @@ class AOTInductorModelRunner:
         optimized, exported, output_tensors, output_spec = AOTInductorModelRunner.load(
             model, example_inputs, example_outputs
         )
-        param_buffer_values = list(exported.state_dict.values())
         flat_example_inputs = fx_pytree.tree_flatten_spec(
             example_inputs, exported.call_spec.in_spec
         )
-        all_args = (*param_buffer_values, *flat_example_inputs)
-        optimized(all_args, output_tensors)
+        optimized(flat_example_inputs, output_tensors)
         return pytree.tree_unflatten(output_tensors, output_spec)
 
 

@@ -292,7 +292,7 @@ class WrapperCodeGen(CodeGen):
         self.write_header()
         self.write_prefix()
 
-        if not V.graph.cpp_wrapper:
+        if not V.graph.aot_mode:
             for name, hashed in V.graph.constant_reprs.items():
                 # include a hash so our code cache gives different constants different files
                 self.write_constant(name, hashed)
@@ -1002,10 +1002,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
             ), "Expect all constants to be Tensor"
             for idx, constants_key in enumerate(V.graph.constants.keys()):
-                constants_idx = inputs_len + idx
-                self.prefix.writeline(
-                    f"at::Tensor {constants_key} = args[{constants_idx}];"
-                )
+                if V.graph.aot_mode:
+                    self.prefix.writeline(
+                        f"""at::Tensor {constants_key} = constants_info_["{constants_key}"];"""
+                    )
+                else:
+                    constants_idx = inputs_len + idx
+                    self.prefix.writeline(
+                        f"at::Tensor {constants_key} = args[{constants_idx}];"
+                    )
 
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
@@ -1034,7 +1039,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         outputs_info_[0].shape.emplace_back(10, 10, nullptr);
         }
         """
-        num_inputs = len(V.graph.graph_inputs) + len(V.graph.constants)
+        num_inputs = len(V.graph.graph_inputs)
         num_outputs = len(V.graph.graph_outputs)
         self.prefix.splice(
             f"""
@@ -1059,14 +1064,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         f"inputs_info_[{idx}].shape.emplace_back({size}, {size}, nullptr);"
                     )
 
-            # Append constants as inputs to the graph
-            inputs_len = len(V.graph.graph_inputs.keys())
-            for idx, name in enumerate(V.graph.constants.keys()):
-                constants_idx = inputs_len + idx
-                self.prefix.writeline(
-                    f"""inputs_info_[{constants_idx}].name = "{name}";"""
-                )
-
             for idx, output in enumerate(V.graph.graph_outputs):
                 # TODO: handle symbolic expressions later.
                 assert not isinstance(output, sympy.Expr)
@@ -1081,6 +1078,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     self.prefix.writeline(
                         f"outputs_info_[{idx}].shape.emplace_back({size}, {size}, nullptr);"
                     )
+
+            if V.graph.aot_mode:
+                self.prefix.writeline(
+                    "AOTInductorModelContainerSetConstants(constants_info_);"
+                )
 
         self.prefix.writeline("}")
 

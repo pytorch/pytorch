@@ -799,7 +799,7 @@ def compile_fx_aot(
 
     assert isinstance(
         model_, ExportedProgram
-    ), "Input of compile_fx_aot should be from torch.export"
+    ), "Input of compile_fx_aot should be from torch.export. Please call torch._export.aot_compile instead."
 
     config_patches = (
         {"cpp_wrapper": True}
@@ -929,14 +929,9 @@ def compile_fx(
                 "triton.unique_kernel_names": True,
             }
         ), V.set_real_inputs(example_inputs_):
-            fake_inputs = [
-                node.meta["val"]
-                for node in model_.graph.nodes
-                if node.op == "placeholder"
-            ]
             return compile_fx(
                 model_,
-                fake_inputs,
+                example_inputs_,
                 inner_compile=inner_compile_with_cpp_wrapper(inner_compile),
                 decompositions=decompositions,
             )
@@ -1098,7 +1093,11 @@ def compile_fx(
     )
     if _in_aot_compilation:
         with V.set_fake_mode(fake_mode), compiled_autograd.disable():
-            return inference_compiler(model_.graph_module, example_inputs_)
+            # Unlift parameters from the model and remove pytree
+            unlifted_module = model_.module()
+            unlifted_module.graph.set_codegen(torch.fx.CodeGen())
+            unlifted_module.recompile()
+            return inference_compiler(unlifted_module, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(
         tracing_context
