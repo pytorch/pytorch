@@ -5,7 +5,7 @@ import operator
 import sympy
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, List, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Set, Tuple, Type, Union
 
 import torch
 from torch._dynamo.exc import TorchDynamoException
