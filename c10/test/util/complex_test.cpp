@@ -1,5 +1,4 @@
 #ifdef __GNUC__
-#pragma GCC diagnostic ignored "-Wunknown-warning-option"
 #pragma GCC diagnostic ignored "-Wuninitialized"
 #endif
 
