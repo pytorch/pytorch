@@ -551,7 +551,7 @@ def assert_z3_installed_if_tv_set():
 
 class ValidationException(TorchDynamoException):
     def __init__(self, model, assertions, target_exprs, failed_source_exprs):
-        assert translation_validation_enabled()
+        assert _HAS_Z3
 
         def symbolstr(sym) -> str:
             return f"{sym}: {model[sym]}"
