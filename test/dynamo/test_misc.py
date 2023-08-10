@@ -6573,7 +6573,6 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
 
->>>>>>> 960c510ec11... [Dynamo x FSDP][out of stack] GET_YIELD_FROM_ITER, YIELD_FROM
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
