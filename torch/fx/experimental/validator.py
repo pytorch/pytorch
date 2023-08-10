@@ -524,34 +524,6 @@ try:
                     assert r == z3.unsat
                     log.debug("translation validation: success")
 
-
-    class ValidationException(TorchDynamoException):
-        def __init__(
-            self,
-            model,
-            assertions: Iterable[z3.ExprRef],
-            target_exprs: Iterable[z3.ExprRef],
-            failed_source_exprs: Iterable[z3.ExprRef]
-        ) -> None:
-            def symbolstr(sym: z3.ExprRef) -> str:
-                return f"{sym}: {model[sym]}"
-
-            def joinlines(xs: Iterable[Any]) -> str:
-                return "\n".join(f"  ==> {x}" for x in xs)
-
-            model_str = joinlines(map(symbolstr, model))
-            assertions_str = joinlines(map(z3str, assertions))
-            target_exprs_str = joinlines(map(z3str, target_exprs))
-            failed_source_exprs_str = joinlines(map(z3str, failed_source_exprs))
-
-            super().__init__(
-                "translation validation failed.\n\n"
-                "Model:\n" + model_str + "\n\n"
-                "Assertions:\n" + assertions_str + "\n\n"
-                "Target Expressions:\n" + target_exprs_str + "\n\n"
-                "Failed Source Expressions:\n" + failed_source_exprs_str
-            )
-
 except ImportError:
     _HAS_Z3 = False
 else:
@@ -575,6 +547,30 @@ def assert_z3_installed_if_tv_set():
         "translation validation requires Z3 package. Please, either install "
         "z3-solver or disable translation validation."
     )
+
+
+class ValidationException(TorchDynamoException):
+    def __init__(self, model, assertions, target_exprs, failed_source_exprs):
+        assert translation_validation_enabled()
+
+        def symbolstr(sym) -> str:
+            return f"{sym}: {model[sym]}"
+
+        def joinlines(xs) -> str:
+            return "\n".join(f"  ==> {x}" for x in xs)
+
+        model_str = joinlines(map(symbolstr, model))
+        assertions_str = joinlines(map(z3str, assertions))
+        target_exprs_str = joinlines(map(z3str, target_exprs))
+        failed_source_exprs_str = joinlines(map(z3str, failed_source_exprs))
+
+        super().__init__(
+            "translation validation failed.\n\n"
+            "Model:\n" + model_str + "\n\n"
+            "Assertions:\n" + assertions_str + "\n\n"
+            "Target Expressions:\n" + target_exprs_str + "\n\n"
+            "Failed Source Expressions:\n" + failed_source_exprs_str
+        )
 
 # Checks when this module is loaded.
 assert_z3_installed_if_tv_set()
