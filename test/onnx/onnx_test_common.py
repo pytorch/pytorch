@@ -445,6 +445,9 @@ MIN_ONNX_OPSET_VERSION = 9
 # The max onnx opset version to test for
 MAX_ONNX_OPSET_VERSION = _constants.ONNX_MAX_OPSET
 TESTED_OPSETS = range(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION + 1)
+ONNXRT_SUPPORTED_OPSETS = range(
+    MIN_ONNX_OPSET_VERSION, 19
+)  # ORT still doesn't have support for opset 19
 
 # TODO(titaiwang): Change this when more versions are supported
 # The min onnx opset version to test for
