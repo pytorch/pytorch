@@ -381,7 +381,7 @@ inline static void destroy_extra_state(PyCodeObject* code) {
   // freeing the constructed extra state.
   ExtraState* extra = get_extra_state(code);
   if (extra != NULL && extra != SKIP_CODE) {
-    destroy_cache_entry(extra->cache_entry);
+    destroy_cache_entry(extract_cache_entry(extra));
     PyObject* frame_state = extra->frame_state;
     Py_XDECREF(frame_state);
     free(extra);
@@ -450,7 +450,7 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     // move it to the head
     if (prev != NULL) {
         ExtraState* extra = get_extra_state(frame->f_code);
-        CacheEntry* old_cache_entry = extra->cache_entry;
+        CacheEntry* old_cache_entry = extract_cache_entry(extra);
         prev->next = e->next;
         e->next = old_cache_entry;
 
