@@ -1,5 +1,5 @@
 # This backend is maintained by ONNX team. To direct issues
-# to the right people, please tag related GitHub issues with `onnx`.
+# to the right people, please tag related GitHub issues with `module: onnx`.
 #
 # Maintainers' Github IDs: wschin, thiagocrepaldi, BowenBao, abock
 from torch.onnx._internal.onnxruntime import has_onnxruntime, make_aot_ort
