@@ -1,12 +1,13 @@
 import collections
 import itertools
+import logging
 
 import weakref
 from typing import Callable, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
 from torch._functorch.compile_utils import fx_graph_cse
 
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
@@ -18,6 +19,8 @@ aten = torch.ops.aten
 
 aten = torch.ops.aten
 prims = torch.ops.prims
+
+log = logging.getLogger(__name__)
 
 
 def replace_node_with_constant(gm, node, constant):
@@ -228,6 +231,9 @@ def freeze(
     if config.freezing_discard_parameters:
         invalidate_eager_modules()
         discard_traced_gm_params(dynamo_gm)
+
+    log.debug("%s", lazy_format_graph_code("FROZEN GRAPH", aot_autograd_gm))
+
     return aot_autograd_gm, preserved_arg_indices
 
 

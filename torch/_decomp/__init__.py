@@ -186,6 +186,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.addcmul,
             aten.addcmul_,
             aten.addr,
+            aten.affine_grid_generator,
             aten.aminmax,
             aten.arange.default,
             aten.arange.start,
