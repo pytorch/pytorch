@@ -9,7 +9,7 @@ import gzip
 
 import logging
 
-from typing import Callable, Generator, List, Literal, Mapping, Optional, TypeVar, Union
+from typing import Callable, Generator, List, Literal, Mapping, Optional, TypeVar
 
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, sarif, utils
@@ -106,25 +106,40 @@ class Diagnostic:
 
     @contextlib.contextmanager
     def log_section(
-        self, level: int, title: Union[str, formatter.LazyString]
+        self, level: int, message: str, *args, **kwargs
     ) -> Generator[None, None, None]:
         """
-        Context manager for a section of log messages, denoted by a title and increased indentation.
+        Context manager for a section of log messages, denoted by a title message and increased indentation.
+
+        Same api as `logging.Logger.log`.
 
         This context manager logs the given title at the specified log level, increases the current
         section depth for subsequent log messages, and ensures that the section depth is decreased
         again when exiting the context.
 
         Args:
-            level (int): The log level.
-            title (Union[str, formatter.LazyString]): The title of the log section. This can be a string
-                or a `formatter.LazyString`.
+            level: The log level.
+            message: The title message to log.
+            *args: The arguments to the message. Use `LazyString` to defer the
+                expensive evaluation of the arguments until the message is actually logged.
+            **kwargs: The keyword arguments for `logging.Logger.log`.
 
         Yields:
             None: This context manager does not yield any value.
+
+        Example:
+            >>> with DiagnosticContext("DummyContext", "1.0"):
+            ...     rule = infra.Rule("RuleID", "DummyRule", "Rule message")
+            ...     diagnostic = Diagnostic(rule, infra.Level.WARNING)
+            ...     with diagnostic.log_section(logging.INFO, "My Section"):
+            ...         diagnostic.log(logging.INFO, "My Message")
+            ...         with diagnostic.log_section(logging.INFO, "My Subsection"):
+            ...             diagnostic.log(logging.INFO, "My Submessage")
+            ...     diagnostic.additional_messages
+            ['## My Section', 'My Message', '### My Subsection', 'My Submessage']
         """
         self._current_log_section_depth
-        self.log(level, "##%s %s", "#" * self._current_log_section_depth, title)
+        self.log(level, "##%s %s", "#" * self._current_log_section_depth, message)
         self._current_log_section_depth += 1
         try:
             yield
@@ -140,14 +155,13 @@ class Diagnostic:
         Args:
             level: The log level.
             message: The message to log.
-            *args: The arguments to the message. Use `formatter.LazyString` to defer the
+            *args: The arguments to the message. Use `LazyString` to defer the
                 expensive evaluation of the arguments until the message is actually logged.
             **kwargs: The keyword arguments for `logging.Logger.log`.
         """
         self.logger.log(level, message, *args, **kwargs)
         if self.logger.isEnabledFor(level):
             self.additional_messages.append(message % args)
-            self.additional_messages.append("\n")
 
     def debug(self, message: str, *args, **kwargs) -> None:
         """Logs a debug message within the diagnostic. Same api as logging.Logger.debug.
