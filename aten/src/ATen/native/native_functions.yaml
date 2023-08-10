@@ -5787,8 +5787,10 @@
     NestedTensorCPU, NestedTensorCUDA: threshold_backwards_nested
   tags: pointwise
 
-- func: tile(Tensor self, int[] dims) -> Tensor
+- func: tile(Tensor self, SymInt[] dims) -> Tensor
   variants: function, method
+  dispatch:
+    CompositeImplicitAutograd: tile_symint
 
 - func: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   variants: function, method
