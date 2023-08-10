@@ -168,6 +168,19 @@ class CheckPoints:
                 break
         else:
             self.checkpoints[self.graph_name]["done"] = True
+            for node in self.ss_graph.ssnodes:
+                node.stream_id = 0
+            return
+        # the first run generates all stream assignments.
+        if self.checkpoints[self.graph_name].get("stream_assignment", None) is None:
+            self.ss_graph.stream_assign()
+            stream_assignment = {}
+            for node in self.ss_graph.ssnodes:
+                assert node.stream_id != -1, f"stream_id of {node.name} is -1."
+                stream_assignment[node.name] = node.stream_id
+                # reset it to avoid the accuracy testing failure caused by the first  run 
+                node.stream_id = 0
+            self.checkpoints[self.graph_name]["stream_assignment"] = stream_assignment
             return
         
         for node in self.ss_graph.critical_path:
@@ -235,15 +248,19 @@ class CheckPoints:
             elif len(cur_node.predecessors) == 1:
                 predecessor = list(cur_node.predecessors.values())[0]
                 if len(predecessor.successors) == 1:
-                    cur_node.stream_id = self.stream_pool_pop(predecessor)
+                    assert self.checkpoints[self.graph_name]["stream_assignment"][cur_node.name] == self.checkpoints[self.graph_name]["stream_assignment"][predecessor.name], f"stream_id of {cur_node.name} is not equal to its predecessor {predecessor.name}."
+                    cur_node.stream_id = self.checkpoints[self.graph_name]["stream_assignment"][cur_node.name]
+                    self.ss_graph.stream_pool[cur_node.stream_id]+=1
                 else:
                     if assign_all:
-                        cur_node.stream_id = self.stream_pool_pop()
+                        cur_node.stream_id = self.checkpoints[self.graph_name]["stream_assignment"][cur_node.name]
+                        self.ss_graph.stream_pool[cur_node.stream_id]+=1
                     else:
                         cur_node.stream_id = 0
             else:
                 if assign_all:
-                    cur_node.stream_id = self.stream_pool_pop()
+                    cur_node.stream_id = self.checkpoints[self.graph_name]["stream_assignment"][cur_node.name]
+                    self.ss_graph.stream_pool[cur_node.stream_id]+=1
                 else:
                     cur_node.stream_id = 0
         for successor in cur_node.successors.values():
@@ -582,7 +599,7 @@ class SSGraph:
         log.info("=====TorchInductor Stream Scheduler Tree critical path end=====")
         log.info("=====TorchInductor Stream Scheduler Tree stream allocation=====")
         for node in self.ssnodes:
-            assert node.stream_id != -1
+            assert node.stream_id != -1, f"node {node.get_name()} stream_id is -1"
             if node.cuda_event:
                 event_str = "cuda_event True"
             else:
