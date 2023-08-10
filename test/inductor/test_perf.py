@@ -39,6 +39,7 @@ def count_numel(f, *args):
     metrics.reset()
     torch._dynamo.optimize("count_bytes_inductor")(f)(*args)
     print(metrics.nodes_num_elem)
+    print(metrics.node_runtimes)
     return str(metrics.num_bytes_accessed // 4)
 
 
@@ -111,7 +112,7 @@ class EstimateSnodeRuntimeTests(TestCase):
             return torch.nn.functional.conv3d(x, y)
 
         inp = (T(20, 16, 50, 10, 20), T(33, 16, 3, 3, 3))
-        self.assertExpectedInline(count_numel(f, *inp), """777617""")
+        self.assertExpectedInline(count_numel(f, *inp), """7776176""")
 
     def test_mm(self):
         def f(a, b):

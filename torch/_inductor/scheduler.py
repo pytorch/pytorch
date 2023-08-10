@@ -363,25 +363,33 @@ class BaseSchedulerNode:
         self.written = True
 
     def get_estimated_runtime(self, rwbytes: int) -> float:
+        layout = None
+        if not self.node:
+            assert(self.snodes)
+            layout = self.snodes[0].node.get_layout()
+        else:
+            layout = self.node.get_layout()
+
+        if "cuda" != layout.device.type:
+            # default to no reordering based on runtime
+            return 0
+
         from .ir import CollectiveKernel, ComputedBuffer
 
-        # TODO: remove logs
-        print("BaseSchedulerNode::get_estimated_runtime called")
-        print(self.debug_str())
+        # TODO(xmfan): figure out how to get hardware specs, use A100 for now
+        gpu_memory_bandwidth = 1555 * 2**30  # 1555 GBps
+        gpu_flops = 312**12  # 312 TFLOPS
 
-        # TODO(xmfan): figure out how to get hardware specs
-        gpu_memory_bandwidth = 1555 * 2**30  # 1555 GBps for A100
-        gpu_flops = 312**12  # 312 TFLOPS for A100
-
-        from torch.utils.flop_counter import (
-            addmm_flop,
-            baddbmm_flop,
-            bmm_flop,
-            conv_flop,
-            mm_flop,
-        )
 
         def handle_extern_kernel(snode: ExternKernelSchedulerNode):
+            from torch.utils.flop_counter import (
+                addmm_flop,
+                baddbmm_flop,
+                bmm_flop,
+                conv_flop,
+                mm_flop,
+            )
+
             inputs = snode.node.inputs
             input_shapes = [i.get_size() for i in inputs]
             op = getattr(snode.node, "kernel", "")
@@ -395,7 +403,7 @@ class BaseSchedulerNode:
                         x_shape=input_shapes[0],
                         w_shape=input_shapes[1],
                         out_shape=snode.node.get_size(),
-                        transposed=snode.node.kwargs.get('transposed', False),
+                        transposed=snode.node.kwargs.get("transposed", False),
                         _bias=None,
                         _stride=None,
                         _padding=None,

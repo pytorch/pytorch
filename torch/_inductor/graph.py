@@ -945,16 +945,13 @@ class GraphLowering(torch.fx.Interpreter):
 
         total_bytes = 0
         node_counts = []
+        node_runtimes = []
         for node in scheduler.nodes:
-            # TODO: remove logs
-            print(node.debug_str())
             num_bytes = get_read_write_buffers_sizes(node)
-            # temporary code for testing
-            runtime = node.get_estimated_runtime(num_bytes)
-            print(f"estimated runtime: {runtime}")
-            node_counts.append((node, num_bytes // 4))
             total_bytes += num_bytes
-        return total_bytes, node_counts
+            node_counts.append((node, num_bytes // 4))
+            node_runtimes.append((node, node.get_estimated_runtime(num_bytes)))
+        return total_bytes, node_counts, node_runtimes
 
     @dynamo_timed
     def compile_to_module(self):
