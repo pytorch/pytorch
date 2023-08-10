@@ -218,7 +218,7 @@ class _ExecOrderData:
             # current implementation, this should never raise the error.
             assert self.world_size is not None  # mypy
             if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-                # TODO(voz): Don't graph break on this - dynamo hates the i1 != i2
+                # TODO(voz): Don't graph break on this - dynamo hates the n1 != n2
                 # tensor comparison control flow.
                 for (r1, n1), (r2, n2) in itertools.combinations(
                     (
