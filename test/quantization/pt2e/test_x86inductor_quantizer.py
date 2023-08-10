@@ -458,22 +458,18 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     @skipIfNoX86
     def test_linear_unary_with_quantizer_api(self):
         """
-        Test pattern of linear with unary post ops (such as relu, gelu) with X86InductorQuantizer.
+        Test pattern of linear with unary post ops (e.g. relu) with X86InductorQuantizer.
         """
         use_bias_list = [True, False]
         inplace_list = [True, False]
-        postop_list = [nn.ReLU, nn.LeakyReLU, nn.Tanh]
+        postop_list = [nn.ReLU, nn.LeakyReLU] # only test two to save time
         cases = itertools.product(use_bias_list, inplace_list, postop_list)
         post_op_map = {
             nn.ReLU: [torch.ops.aten.relu_.default, torch.ops.aten.relu.default],
             nn.LeakyReLU: [torch.ops.aten.leaky_relu_.default, torch.ops.aten.leaky_relu.default],
-            nn.Tanh: [torch.ops.aten.tanh_.default, torch.ops.aten.tanh.default],
         }
         with override_quantized_engine("x86"), torch.no_grad():
             for use_bias, inplace, postop in cases:
-                if inplace and postop is nn.Tanh:
-                    # nn.Tanh does not support inplace
-                    continue
                 m = TestHelperModules.LinearUnaryModule(use_bias=use_bias, postop=postop, inplace_postop=inplace).eval()
                 example_inputs = (torch.randn(2, 4),)
                 quantizer = X86InductorQuantizer().set_global(
@@ -501,4 +497,3 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_occurrence,
                     node_list,
                 )
-

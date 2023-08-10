@@ -2043,6 +2043,7 @@ if torch._C._has_mkldnn:
         out = x.new_empty(output_shape, dtype=(torch.float32 if fp32_output else None))
         return out
 
+
 # from check_dim_size() in aten/src/ATen/TensorUtils.cpp.
 def check_dim_size(tensor, dim, dim_size, size):
     torch._check(

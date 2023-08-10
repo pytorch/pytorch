@@ -909,11 +909,12 @@ static at::Tensor linear_int8_with_onednn_weight(
     at::Tensor weight_scales,
     at::Tensor weight_zero_points,
     c10::optional<at::Tensor> bias, // plain tensor
-    std::string post_op_name, // e.g. "none", "relu"
-    torch::List<double> post_op_args,
-    bool fp32_output,
     double output_scale,
-    int64_t output_zero_point) {
+    int64_t output_zero_point,
+    bool fp32_output,
+    std::string& post_op_name, // e.g. "none", "relu"
+    torch::List<double>& post_op_args,
+    std::string& post_op_algorithm) {
   using ideep::tensor;
   const int64_t dim = input.dim();
   TORCH_CHECK(input.scalar_type() == c10::ScalarType::Byte,
@@ -1094,17 +1095,18 @@ class QLinearOnednn final {
       Tensor weight_scales,
       Tensor weight_zero_points,
       c10::optional<Tensor> bias,
+      double output_scale,
+      int64_t output_zero_point,
+      bool fp32_output,
       std::string post_op_name,
       torch::List<double> post_op_args,
-      bool fp32_output,
-      double output_scale,
-      int64_t output_zero_point) {
+      std::string post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
     return linear_int8_with_onednn_weight(
         act, act_scale, act_zero_point,
         onednn_weight, weight_scales, weight_zero_points,
-        bias, post_op_name, post_op_args,
-        fp32_output, output_scale, output_zero_point
+        bias, output_scale, output_zero_point, fp32_output,
+        post_op_name, post_op_args, post_op_algorithm
     );
 #endif
     TORCH_CHECK(false, "Unimplemented (int8 linear with packed weight and bias)");
