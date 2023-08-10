@@ -462,7 +462,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """
         use_bias_list = [True, False]
         inplace_list = [True, False]
-        postop_list = [nn.ReLU, nn.LeakyReLU] # only test two to save time
+        postop_list = [nn.ReLU, nn.LeakyReLU]  # only test two to save time
         cases = itertools.product(use_bias_list, inplace_list, postop_list)
         post_op_map = {
             nn.ReLU: [torch.ops.aten.relu_.default, torch.ops.aten.relu.default],
