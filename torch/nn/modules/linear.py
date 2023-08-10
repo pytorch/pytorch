@@ -110,8 +110,8 @@ class Linear(Module):
             bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
             init.uniform_(self.bias, -bound, bound)
 
-    def forward(self, input: Tensor) -> Tensor:
-        return F.linear(input, self.weight, self.bias)
+    def forward(self, input: Tensor) -> Tensor: 
+        return F.linear(input, self.weight, self.bias) if self.bias is None else F.linear(input, self.weight, self.bias.reshape_as(input))
 
     def extra_repr(self) -> str:
         return f'in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None}'
