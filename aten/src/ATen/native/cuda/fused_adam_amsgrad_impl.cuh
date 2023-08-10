@@ -10,7 +10,7 @@ void _fused_adam_amsgrad_cuda_impl_(
     at::TensorList exp_avg_sqs,
     at::TensorList max_exp_avg_sqs,
     at::TensorList state_steps,
-    const double lr,
+    const at::Tensor& lr,
     const double beta1,
     const double beta2,
     const double weight_decay,

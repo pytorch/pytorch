@@ -24,7 +24,7 @@ template <typename scalar_type, typename opmath_t, int depth=4>
 C10_DEVICE __forceinline__ void adam_math(
     scalar_type r_args[depth][kILP],
     const float* step_count,
-    const double lr,
+    const float* lr,
     const double beta1,
     const double beta2,
     const double weight_decay,
@@ -60,7 +60,7 @@ C10_DEVICE __forceinline__ void adam_math(
               grad += param * weight_decay;
               break;
             case ADAM_MODE::ADAMW:
-              param -= lr * weight_decay * param;
+              param -= *lr * weight_decay * param;
               break;
           }
         }
@@ -69,7 +69,7 @@ C10_DEVICE __forceinline__ void adam_math(
         exp_avg = beta1 * exp_avg + (1 - beta1) * grad;
         exp_avg_sq = beta2 * exp_avg_sq + (1 - beta2) * grad * grad;
         const opmath_t bias_correction1 = 1 - at::native::pow_(beta1, *step_count);
-        const opmath_t step_size = lr / bias_correction1;
+        const opmath_t step_size = *lr / bias_correction1;
         const opmath_t bias_correction2 = 1 - at::native::pow_(beta2, *step_count);
         const opmath_t bias_correction2_sqrt = std::sqrt(bias_correction2);
         opmath_t denom;
@@ -111,7 +111,7 @@ struct FusedAdamMathFunctor {
     C10_DEVICE __forceinline__ void operator()(
             int chunk_size,
             FusedOptimizerTensorListMetadata<depth>& tl,
-            const double lr,
+            const float* lr,
             const double beta1,
             const double beta2,
             const double weight_decay,

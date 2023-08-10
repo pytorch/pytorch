@@ -3,7 +3,7 @@ from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt,
                         _stack_if_compiling, _capturable_doc, _differentiable_doc, _foreach_doc,
                         _fused_doc, _maximize_doc, _default_to_fused_or_foreach)
-from typing import List, Optional
+from typing import List, Optional, Tuple, Union
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
 __all__ = ["AdamW", "adamw"]
@@ -13,11 +13,11 @@ class AdamW(Optimizer):
     def __init__(
         self,
         params,
-        lr=1e-3,
-        betas=(0.9, 0.999),
-        eps=1e-8,
-        weight_decay=1e-2,
-        amsgrad=False,
+        lr: Union[float, Tensor]=1e-3,
+        betas: Tuple[float, float]=(0.9, 0.999),
+        eps: float=1e-8,
+        weight_decay: float=1e-2,
+        amsgrad: bool=False,
         *,
         maximize: bool = False,
         foreach: Optional[bool] = None,
@@ -132,8 +132,17 @@ class AdamW(Optimizer):
             exp_avgs.append(state["exp_avg"])
             exp_avg_sqs.append(state["exp_avg_sq"])
 
-            if amsgrad:
+            if group['amsgrad']:
                 max_exp_avg_sqs.append(state["max_exp_avg_sq"])
+            if group['differentiable'] and state['step'].requires_grad:
+                raise RuntimeError('`requires_grad` is not supported for `step` in differentiable mode')
+
+            # Host lr as a tensor when fused to allow a dynamic learning rate
+            # but temporarily disallow tensor lrs for other implementations to avoid host2device syncs
+            if group['fused'] and not torch.is_tensor(group['lr']):
+                group['lr'] = torch.tensor(group['lr'], dtype=torch.float, device=p.device)
+            elif not group['fused'] and torch.is_tensor(group['lr']):
+                group['lr'] = group['lr'].item()
 
             state_steps.append(state["step"])
 
@@ -240,7 +249,7 @@ AdamW.__doc__ = r"""Implements AdamW algorithm.
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
-        lr (float, optional): learning rate (default: 1e-3)
+        lr (float, Tensor, optional): learning rate (default: 1e-3)
         betas (Tuple[float, float], optional): coefficients used for computing
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
@@ -281,7 +290,7 @@ def adamw(
     amsgrad: bool,
     beta1: float,
     beta2: float,
-    lr: float,
+    lr: Union[float, Tensor],
     weight_decay: float,
     eps: float,
     maximize: bool,
@@ -594,7 +603,7 @@ def _fused_adamw(
     amsgrad: bool,
     beta1: float,
     beta2: float,
-    lr: float,
+    lr: Union[float, Tensor],
     weight_decay: float,
     eps: float,
     maximize: bool,
@@ -609,15 +618,18 @@ def _fused_adamw(
     found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
-    for (device, dtype) in grouped_tensors:
-        ((
+    for (device, _), ((
             device_params,
             device_grads,
             device_exp_avgs,
             device_exp_avg_sqs,
             device_max_exp_avg_sqs,
             device_state_steps,
-        ), _) = grouped_tensors[(device, dtype)]
+        ), _) in grouped_tensors.items():
+        if not torch.is_tensor(lr):
+            lr = torch.tensor(lr, device=device, dtype=torch.float)
+        elif lr.device != device:
+            lr = lr.to(device=device)
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
             if device not in grad_scale_dict:
