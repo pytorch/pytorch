@@ -6275,7 +6275,9 @@ class CommonTemplate:
         class Repro(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self._tensor_constant0 = nn.Buffer(torch.randn([], dtype=torch.float32))
+                self.register_buffer(
+                    "_tensor_constant0", torch.randn([], dtype=torch.float32)
+                )
 
             def forward(self, arg0_1, arg1_1):
                 convert_element_type = torch.ops.prims.convert_element_type.default(
@@ -6665,11 +6667,9 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
 
-    def test_inductor_bucketize(self):
+    def test_bucketize(self):
         def fn(input, boundaries, out_int32, right):
-            return torch.ops.prims._inductor_bucketize(
-                input, boundaries, out_int32=out_int32, right=right
-            )
+            return torch.bucketize(input, boundaries, out_int32=out_int32, right=right)
 
         input = torch.rand((64, 64)) * 2 - 1
         boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
@@ -6680,9 +6680,9 @@ class CommonTemplate:
                 right = False
                 self.common(fn, (input, boundaries, out_int32, right), check_lowp=False)
 
-    def test_inductor_bucketize_default_kwargs(self):
+    def test_bucketize_default_kwargs(self):
         def fn(input, offsets):
-            return torch.ops.prims._inductor_bucketize(input, offsets)
+            return torch.bucketize(input, offsets)
 
         input = torch.tensor(
             [-1.0, -0.9, -0.8, -0.5, 0.0, 0.1, 0.2, 0.4, 0.5, 0.6, 0.9, 0.91]
@@ -6691,11 +6691,9 @@ class CommonTemplate:
 
         self.common(fn, (input, offsets), check_lowp=False)
 
-    def test_inductor_bucketize_int(self):
+    def test_bucketize_int(self):
         def fn(input, offsets, out_int32, right):
-            return torch.ops.prims._inductor_bucketize(
-                input, offsets, out_int32=out_int32, right=right
-            )
+            return torch.bucketize(input, offsets, out_int32=out_int32, right=right)
 
         input = torch.randint(0, 102, (64, 64))
         offsets = torch.arange(10, dtype=torch.int32) ** 2 + 1
@@ -6705,11 +6703,11 @@ class CommonTemplate:
                 self.common(fn, (input, offsets, out_int32, right), check_lowp=False)
 
     @patch.object(config.triton, "autotune_pointwise", True)
-    def test_inductor_bucketize_add_autotune(self):
+    def test_bucketize_add_autotune(self):
         # Causes a @pointwise(size_hints) where size_hints is 2D
 
         def fn(input, offsets, add_value):
-            return torch.ops.prims._inductor_bucketize(input, offsets) + add_value
+            return torch.bucketize(input, offsets) + add_value
 
         input = torch.rand((16, 16, 64, 64))
         boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
@@ -6721,9 +6719,9 @@ class CommonTemplate:
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    def test_inductor_bucketize_computed_offsets(self):
+    def test_bucketize_computed_offsets(self):
         def fn(inp, offsets):
-            return torch.ops.prims._inductor_bucketize(inp, offsets + 0.01)
+            return torch.bucketize(inp, offsets + 0.01)
 
         inp = torch.tensor(
             [-1.0, -0.9, -0.8, -0.5, 0.0, 0.1, 0.2, 0.4, 0.5, 0.6, 0.9, 0.91]
