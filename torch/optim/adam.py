@@ -8,15 +8,14 @@ from .optimizer import (Optimizer, params_t, _use_grad_for_differentiable, _get_
                         _maximize_doc)
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
-print("I accept Tensor LRs!")
 class Adam(Optimizer):
     def __init__(self,
                  params: params_t,
-                 lr: Union[float, Tensor]=1e-3,
-                 betas: Tuple[float, float]=(0.9, 0.999),
-                 eps: float =1e-8,
-                 weight_decay: float =0,
-                 amsgrad: bool=False,
+                 lr: Union[float, Tensor] = 1e-3,
+                 betas: Tuple[float, float] = (0.9, 0.999),
+                 eps: float = 1e-8,
+                 weight_decay: float = 0,
+                 amsgrad: bool = False,
                  *,
                  foreach: Optional[bool] = None,
                  maximize: bool = False,
@@ -579,14 +578,12 @@ def _fused_adam(
     found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
-    for (device, _), ((
-            device_params,
-            device_grads,
-            device_exp_avgs,
-            device_exp_avg_sqs,
-            device_max_exp_avg_sqs,
-            device_state_steps,
-        ), _) in grouped_tensors.items():
+    for (device, _), ((device_params,
+                       device_grads,
+                       device_exp_avgs,
+                       device_exp_avg_sqs,
+                       device_max_exp_avg_sqs,
+                       device_state_steps,), _) in grouped_tensors.items():
         if not torch.is_tensor(lr):
             lr = torch.tensor(lr, device=device, dtype=torch.float)
         elif lr.device != device:

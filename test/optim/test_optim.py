@@ -933,6 +933,7 @@ class TestOptim(TestCase):
         return tuple(itertools.product(
             (optim.Adam, optim.AdamW),
             (
+                dict(weight_decay=1., lr=torch.tensor(0.001), amsgrad=False, capturable=True, maximize=True),
                 dict(weight_decay=1., amsgrad=False, capturable=True, maximize=True),
                 dict(weight_decay=1., amsgrad=False, maximize=True),
                 dict(weight_decay=1., amsgrad=True),
