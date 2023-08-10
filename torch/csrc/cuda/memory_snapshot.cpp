@@ -5,8 +5,7 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 
-namespace torch {
-namespace cuda {
+namespace torch::cuda {
 
 using c10::Dict;
 using c10::IValue;
@@ -271,5 +270,4 @@ std::string _memory_snapshot_pickled() {
 
   return write_pickle(result);
 }
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda
