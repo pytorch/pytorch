@@ -63,6 +63,7 @@ tests = [
     test_export.ExportTests,
     test_subgraphs.SubGraphTests,
     test_higher_order_ops.HigherOrderOpTests,
+    test_higher_order_ops.FuncTorchHigherOrderOpTests,
     test_aot_autograd.AotAutogradFallbackTests,
 ]
 for test in tests:
