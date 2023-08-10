@@ -276,16 +276,32 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         # Feed args and kwargs into exporter.
         # Note that exporter should flatten kwargs into positional args the exported model;
         # since ONNX doesn't represent kwargs.
-        export_output = torch.onnx.dynamo_export(
-            ref_model,
-            *ref_input_args,
-            **ref_input_kwargs,
-            export_options=torch.onnx.ExportOptions(
-                op_level_debug=self.op_level_debug,
-                dynamic_shapes=self.dynamic_shapes,
-                diagnostic_sarif_log_path=sarif_log_path,
-            ),
-        )
+        export_error: Optional[torch.onnx.OnnxExporterError] = None
+        try:
+            export_output = torch.onnx.dynamo_export(
+                ref_model,
+                *ref_input_args,
+                **ref_input_kwargs,
+                export_options=torch.onnx.ExportOptions(
+                    op_level_debug=self.op_level_debug,
+                    dynamic_shapes=self.dynamic_shapes,
+                    diagnostic_sarif_log_path=sarif_log_path,
+                ),
+            )
+        except torch.onnx.OnnxExporterError as e:
+            export_error = e
+            export_output = e.export_output
+
+        if verbose:
+            export_output.save_sarif_log(
+                f"test_report_{self._testMethodName}"
+                f"_op_level_debug_{self.op_level_debug}"
+                f"_dynamic_axes_{self.dynamic_shapes}"
+                ".sarif"
+            )
+
+        if export_error is not None:
+            raise export_error
 
         if not skip_dynamic_shapes_check:
             assert_dynamic_shapes(export_output, self.dynamic_shapes)
