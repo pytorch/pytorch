@@ -728,10 +728,10 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
   TensorArg targs[]{{out, "out", 0}, {amax, "amax", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU(__func__, targs);
-  TORCH_CHECK(amax.numel() == 1 && amax.scalar_type() == kFloat);
-  TORCH_CHECK(!scale_a || scale_a->numel() == 1);
-  TORCH_CHECK(!scale_b || scale_b->numel() == 1);
-  TORCH_CHECK(!scale_result || scale_b->numel() == 1);
+  TORCH_CHECK(amax.scalar_type() == kFloat);
+  TORCH_CHECK(!scale_a || (scale_a->numel() == 1 && scale_a->scalar_type() == kFloat));
+  TORCH_CHECK(!scale_b || (scale_b->numel() == 1 && scale_b->scalar_type() == kFloat));
+  TORCH_CHECK(!scale_result || (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat));
 
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
