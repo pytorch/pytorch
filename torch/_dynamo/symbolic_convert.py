@@ -2444,3 +2444,37 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items.append(self.pop())
         # TODO(jansel): figure out why this is needed, it isn't in the docs for YIELD_VALUE
         self.push(ConstantVariable(None))
+
+    def GET_YIELD_FROM_ITER(self, inst):
+        tos = self.stack[-1]
+        if not isinstance(tos, ListIteratorVariable):
+            self.pop()
+            tos = ListIteratorVariable(
+                tos.items,
+                mutable_local=MutableLocal(),
+                **VariableTracker.propagate(tos),
+            )
+            self.push(tos)
+        return self.YIELD_FROM(inst)
+
+    def YIELD_FROM(self, inst):
+        tos = self.stack[-1]
+        if isinstance(tos, ConstantVariable) and tos.value is None:
+            self.pop()
+            return
+        if isinstance(tos, ListIteratorVariable):
+            self.output.guards.update(tos.guards)
+            try:
+                val, next_iter = tos.next_variables()
+                self.replace_all(tos, next_iter)
+                self.push(val)
+                # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
+                self.YIELD_VALUE(inst)
+                self.pop()
+                self.push(next_iter)
+                self.YIELD_FROM(inst)
+            except StopIteration:
+                return
+        else:
+            breakpoint()
+            unimplemented(f"YIELD_FROM {typestr(tos)}")
