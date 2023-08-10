@@ -255,9 +255,9 @@ case "$image" in
     TRITON=yes
     DOCS=yes
     ;;
-    pytorch-linux-focal-py3.8-gcc7-inductor-benchmarks)
+    pytorch-linux-jammy-py3.8-gcc11-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.8
-    GCC_VERSION=7
+    GCC_VERSION=11
     PROTOBUF=yes
     DB=yes
     VISION=yes
