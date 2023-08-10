@@ -123,20 +123,7 @@ class TestDynamoExportAPI(common_utils.TestCase):
 
     def test_save_sarif_log_to_file_with_successful_export(self):
         with common_utils.TemporaryFileName() as path:
-            dynamo_export(SampleModel(), torch.randn(1, 1, 2)).diagnostic_context.dump(
-                path
-            )
-            self.assertTrue(os.path.exists(path))
-
-    def test_save_sarif_log_to_file_with_successful_export_by_setting_path_in_export_options(
-        self,
-    ):
-        with common_utils.TemporaryFileName(suffix=".sarif") as path:
-            dynamo_export(
-                SampleModel(),
-                torch.randn(1, 1, 2),
-                export_options=ExportOptions(diagnostic_sarif_log_path=path),
-            )
+            dynamo_export(SampleModel(), torch.randn(1, 1, 2)).save_sarif_log(path)
             self.assertTrue(os.path.exists(path))
 
     def test_save_sarif_log_to_file_with_failed_export(self):
@@ -147,6 +134,43 @@ class TestDynamoExportAPI(common_utils.TestCase):
         with self.assertRaises(RuntimeError):
             dynamo_export(ModelWithExportError(), torch.randn(1, 1, 2))
         self.assertTrue(os.path.exists(exporter._DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH))
+
+    def test_export_output_accessible_from_exception_when_export_failed(self):
+        class ModelWithExportError(torch.nn.Module):
+            def forward(self, x):
+                raise RuntimeError("Export error")
+
+        with self.assertRaises(torch.onnx.OnnxExporterError) as cm:
+            dynamo_export(ModelWithExportError(), torch.randn(1, 1, 2))
+        self.assertIsInstance(cm.exception, torch.onnx.OnnxExporterError)
+        self.assertIsInstance(cm.exception.export_output, ExportOutput)
+
+    def test_access_export_output_model_proto_raises_when_export_output_is_emitted_from_failed_export(
+        self,
+    ):
+        class ModelWithExportError(torch.nn.Module):
+            def forward(self, x):
+                raise RuntimeError("Export error")
+
+        with self.assertRaises(torch.onnx.OnnxExporterError) as cm:
+            dynamo_export(ModelWithExportError(), torch.randn(1, 1, 2))
+        export_output = cm.exception.export_output
+        with self.assertRaises(RuntimeError):
+            export_output.model_proto
+
+    def test_raise_from_diagnostic_warning_when_diagnostic_option_warning_as_error_is_true(
+        self,
+    ):
+        with self.assertRaises(torch.onnx.OnnxExporterError):
+            dynamo_export(
+                SampleModel(),
+                torch.randn(1, 1, 2),
+                export_options=ExportOptions(
+                    diagnostic_options=torch.onnx.DiagnosticOptions(
+                        warnings_as_errors=True
+                    )
+                ),
+            )
 
     def test_raise_on_invalid_save_argument_type(self):
         with self.assertRaises(roar.BeartypeException):
