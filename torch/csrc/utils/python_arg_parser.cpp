@@ -432,16 +432,7 @@ auto handle_torch_function(
       (char*)(func_name_override ? func_name_override : r.get_func_name().c_str()));
   TORCH_INTERNAL_ASSERT(
       torch_api_function.ptr() != nullptr, "torch API function must exist");
-  py::object ret;
   py::tuple args_ = combine_self_args(self, args);
-  // overloaded_args already all have unique types
-  std::vector<py::object> overloaded_types;
-  overloaded_types.reserve(r.signature.overloaded_args.size());
-  for (auto& arg : r.signature.overloaded_args) {
-    overloaded_types.push_back(
-        py::reinterpret_borrow<py::object>((PyObject*)Py_TYPE(arg.ptr())));
-  }
-  py::tuple py_types = py::cast(overloaded_types);
   return handle_torch_function_no_python_arg_parser(
       r.signature.overloaded_args,
       args_.ptr(),
