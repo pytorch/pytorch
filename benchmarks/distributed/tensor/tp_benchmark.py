@@ -68,16 +68,19 @@ class DummyDTensor(torch.Tensor):
             layout=local_tensor.layout,
             requires_grad=local_tensor.requires_grad,
         )
-        r._local_tensor = local_tensor.detach()
+        r._local_tensor = local_tensor
         return r
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         def unwrap_schema(e: object) -> object:
             return e._local_tensor if isinstance(e, DummyDTensor) else e
+
+        def wrap_schema(e: object) -> object:
+            return DummyDTensor(e) if isinstance(e, torch.Tensor) else e
         args_unwrap = tree_map(unwrap_schema, args)
         kwargs_unwrap = tree_map(unwrap_schema, kwargs)
-        return func(*args_unwrap, **kwargs_unwrap)
+        return tree_map(wrap_schema, func(*args_unwrap, **kwargs_unwrap))
 
 
 
@@ -187,7 +190,7 @@ def run_tp(rank, args):
     t1 = time.perf_counter()
     control_group = t1 - t0
     if rank == 0:
-        print(f"Elapsed time for control group: {control_group:.6f}")
+        print(f"Elapsed time for control upperbound group: {control_group:.6f}")
 
     # create model and move it to GPU with id rank
     model = MLPModel(dim_size).cuda(rank)
