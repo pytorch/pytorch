@@ -334,9 +334,8 @@ def convert_frame_assert(
             return None
 
         if is_generator(code):
-            unimplemented("generator")
+            f"generator {code.co_name}' ({code.co_filename}:{code.co_firstlineno}"
         if exceeds_cache_size_limit(cache_size):
-
             def format_func_info(code):
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
 

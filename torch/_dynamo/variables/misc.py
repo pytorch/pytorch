@@ -5,7 +5,7 @@ import itertools
 import operator
 import sys
 import types
-from typing import Dict, List
+from typing import cast, Dict, List
 
 import torch._C
 import torch._numpy as tnp
@@ -151,6 +151,7 @@ class SuperVariable(VariableTracker):
         ):
             from .builder import VariableBuilder
 
+            args[0] = args[0].add_guard(GuardBuilder.CONSTANT_MATCH)
             key = args[0].as_python_constant()
             return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
                 collections.OrderedDict.__getitem__(self.objvar.value, key)
@@ -875,6 +876,38 @@ class SkipFilesVariable(VariableTracker):
             # args and keywords
             return variables.functions.FunctoolsPartialVariable(
                 fn, args=rest_args, keywords=kwargs, **options
+        elif (
+            self.value is cast
+            and isinstance(args[0], variables.UserDefinedClassVariable)
+            and isinstance(args[1], variables.nn_module.FSDPManagedNNModuleVariable)
+        ):
+            new_obj = cast(args[0].value, args[1].value)
+            args[1].mutable_local = MutableLocal()
+            return tx.replace_all(
+                args[1],
+                variables.nn_module.FSDPManagedNNModuleVariable(
+                    new_obj, args[1].module_key, source=args[1].source
+                ),
+            )
+        elif (
+            self.value is cast
+            and isinstance(args[0], variables.UserDefinedClassVariable)
+            and isinstance(args[1], variables.UserDefinedObjectVariable)
+        ):
+            new_obj = cast(args[0].value, args[1].value)
+            args[1].mutable_local = MutableLocal()
+            return tx.replace_all(args[1], variables.UserDefinedObjectVariable(new_obj))
+        elif (
+            self.value is cast
+            and isinstance(args[0], variables.UserDefinedClassVariable)
+            and isinstance(args[1], variables.NNModuleVariable)
+        ):
+            new_obj = cast(args[0].value, tx.output.nn_modules[args[1].module_key])
+            args[1].mutable_local = MutableLocal()
+            return tx.replace_all(args[1], args[1])
+        elif self.value is cast:
+            unimplemented(
+                f"Cast with {args}",
             )
         elif self.value is itertools.repeat:
             from .builder import SourcelessBuilder
@@ -893,7 +926,7 @@ class SkipFilesVariable(VariableTracker):
             except TypeError:
                 path = f"Builtin {self.value.__name__}"
             unimplemented(
-                f"'call_function {self.value.__qualname__} in skip_files {path}, {self.reason}'"
+                f"call_function {self.value.__qualname__} in skip_files {path} {args}"
             )
 
 

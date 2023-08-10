@@ -1935,3 +1935,5 @@ def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional
 
 from . import _logging
 _logging._init_logs()
+
+import torch._dynamo

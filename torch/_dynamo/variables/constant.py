@@ -188,7 +188,20 @@ class ConstantVariable(VariableTracker):
             assert not kwargs
             search = args[0].as_python_constant()
             result = search in self.value
+<<<<<<< HEAD
             return ConstantVariable.create(result, **options)
+=======
+            return ConstantVariable(result, **options)
+        elif (
+            name == "__contains__"
+            and len(args) == 1
+            or isinstance(args[0], variables.UserDefinedObjectVariable)
+        ):
+            assert not kwargs
+            search = args[0].value
+            result = search in self.value
+            return ConstantVariable(result, **options)
+>>>>>>> 9796ba600ac ([FSDP][WIP] Trace FSDP)
 
         unimplemented(f"const method call {typestr(self.value)}.{name}")
 

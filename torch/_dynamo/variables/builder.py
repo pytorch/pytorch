@@ -247,6 +247,11 @@ class VariableBuilder:
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
+            UserDefinedObjectVariable,
+            FSDPManagedNNModuleVariable,
+            UserDefinedClassVariable,
+            NumpyNdarrayVariable,
+            DeviceMeshVariable,
         ]:
             return True
         return False
@@ -905,7 +910,9 @@ class VariableBuilder:
             and not config.allow_rnn
         ):
             unimplemented("TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")
-        if mutation_guard.is_dynamic_nn_module(value):
+        if mutation_guard.is_dynamic_nn_module(value) and not getattr(
+            value, "_is_fsdp_managed_module", False
+        ):
             # created dynamically, don't specialize on it
             result = UnspecializedNNModuleVariable(
                 value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
@@ -1589,15 +1596,18 @@ def wrap_fx_proxy_cls(
         getattr(torch.distributed, "get_world_size", _missing),
         # This always wants to be in the graph, even if the constraint
         # results in a constant int
+        torch.initial_seed,
         torch._constrain_as_value,
         torch._constrain_as_size,
     ]:
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable.create(example_value, **options)
+    elif isinstance(example_value, int):
+        return ConstantVariable.create(example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
-            + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}"
+            + f"{typestr(example_value)}  {proxy.node.op} {proxy.node.target}"
         )
 
 

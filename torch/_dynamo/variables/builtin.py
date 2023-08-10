@@ -9,6 +9,7 @@ from typing import Dict, List
 
 import torch
 from torch import sym_float, sym_int
+from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from .. import config, polyfill, variables
 from ..allowed_functions import is_allowed
@@ -1149,9 +1150,17 @@ class BuiltinVariable(VariableTracker):
                         return VariableBuilder(tx, source)(example_value).add_options(
                             options
                         )
-                unimplemented("tensor grad")
+                unimplemented(f"tensor grad with source {source}")
             else:
-                unimplemented("tensor grad")
+                from .builder import wrap_fx_proxy
+
+                grad_proxy = obj.as_proxy().grad
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=grad_proxy,
+                    example_value=obj.as_proxy().node.meta["example_value"].grad,
+                    **options,
+                )
         elif isinstance(
             obj,
             (
@@ -1217,10 +1226,35 @@ class BuiltinVariable(VariableTracker):
             and name_var.is_python_constant()
         ):
             tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
+            if isinstance(obj, variables.TensorVariable):
+                from .builder import (
+                    VariableBuilder,
+                    wrap_fx_proxy,
+                    wrap_to_fake_tensor_and_record,
+                )
+
+                if name_var.value == "data":
+                    to_remove = []
+                    for tf in tx.output.tracked_fakes:
+                        if tf.source == obj.source:
+                            to_remove.append(tf)
+                    for tf in to_remove:
+                        tx.output.tracked_fakes.remove(tf)
+
+                    out = wrap_fx_proxy(
+                        tx,
+                        tx.output.create_proxy(
+                            "call_function",
+                            torch._set_data,
+                            *proxy_args_kwargs([obj, val], {}),
+                        ),
+                    )
+                    tx.replace_all(obj, out)
+
             return val.add_options(self, obj, name_var)
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(
-                f"setattr(UserDefinedObjectVariable) {type(obj.value).__setattr__}"
+                f"setattr(UserDefinedObjectVariable) {obj.source} {type(obj.value).__setattr__}"
             )
         elif isinstance(obj, variables.NNModuleVariable):
             if not tx.output.is_root_tracer():
@@ -1385,6 +1419,7 @@ class BuiltinVariable(VariableTracker):
             UserFunctionVariable,
         )
         from .lists import SizeVariable
+        from .nn_module import FSDPManagedNNModuleVariable
         from .tensor import (
             supported_const_comparison_ops,
             supported_tensor_comparison_ops,
@@ -1395,23 +1430,39 @@ class BuiltinVariable(VariableTracker):
         def _unimplemented():
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
 
+        def _resolve_getattr(get_attr_var):
+            assert isinstance(get_attr_var, variables.GetAttrVariable)
+            try:
+                return get_attr_var.call_function(tx, [], {})
+            except Exception as e:
+                _unimplemented()
+
+        if isinstance(left, variables.GetAttrVariable):
+            left = _resolve_getattr(left)
+
+        if isinstance(right, variables.GetAttrVariable):
+            right = _resolve_getattr(right)
+
         if (
             all(
-                isinstance(x, (NNModuleVariable, ConstantVariable))
+                isinstance(
+                    x, (NNModuleVariable, ConstantVariable, FSDPManagedNNModuleVariable)
+                )
                 for x in [left, right]
             )
             and op in supported_const_comparison_ops.values()
         ):
-            left = (
-                tx.output.get_submodule(left.module_key)
-                if isinstance(left, NNModuleVariable)
-                else left.as_python_constant()
-            )
-            right = (
-                tx.output.get_submodule(right.module_key)
-                if isinstance(right, NNModuleVariable)
-                else right.as_python_constant()
-            )
+
+            def _get(element):
+                if isinstance(element, NNModuleVariable):
+                    return tx.output.get_submodule(element.module_key)
+                if isinstance(element, FSDPManagedNNModuleVariable):
+                    return element.value
+                else:
+                    return element.as_python_constant()
+
+            left = _get(left)
+            right = _get(right)
             return ConstantVariable.create(op(left, right))
 
         if isinstance(left, UserFunctionVariable):
@@ -1420,6 +1471,15 @@ class BuiltinVariable(VariableTracker):
             if not isinstance(right, UserFunctionVariable):
                 _unimplemented()
             return ConstantVariable.create(op(left.fn, right.fn))
+
+        if isinstance(left, variables.distributed.ProcessGroupVariable):
+            if op not in supported_const_comparison_ops.values():
+                _unimplemented()
+            if not isinstance(
+                right, (variables.distributed.ProcessGroupVariable, ConstantVariable)
+            ):
+                _unimplemented()
+            return ConstantVariable(op(left.value, right.value))
 
         # Note, we have a rare BaseListVariable subtype mismatch with valid comparison
         # x = torch.randn([3, 3])
@@ -1436,6 +1496,9 @@ class BuiltinVariable(VariableTracker):
             return BaseListVariable.list_compare(tx, op, left, right)
 
         if isinstance(left, SetVariable):
+            if isinstance(right, ConstantVariable) and right.value == None:
+                return ConstantVariable(op(left._underlying_items, right.value))
+
             if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
                 _unimplemented()
             return ConstantVariable.create(

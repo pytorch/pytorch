@@ -575,6 +575,7 @@ class EventVariable(VariableTracker):
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
+        self.device = device
 
     def call_method(
         self,
@@ -606,6 +607,11 @@ class EventVariable(VariableTracker):
 
     def as_proxy(self):
         return self.proxy
+
+    def reconstruct(self, codegen):
+        unimplemented(
+            f"Cannot reconstruct stream {self.source} {self.value} {self.proxy}"
+        )
 
 
 class WithExitFunctionVariable(VariableTracker):

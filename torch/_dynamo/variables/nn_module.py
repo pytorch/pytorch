@@ -6,6 +6,7 @@ from contextlib import contextmanager, nullcontext
 from typing import Dict, List
 
 import torch.nn
+from torch._dynamo.variables.base import VariableTracker
 
 from .. import skipfiles, variables
 from ..allowed_functions import is_allowed
@@ -147,7 +148,7 @@ class NNModuleVariable(VariableTracker):
             GenerationTracker.mark_class_dynamic(type(mod))
         raise RestartAnalysis()
 
-    def _custom_getattr_fallback(self, base, tx, name, options):
+    def _custom_getattr_fallback(self, base, tx, name, source, options):
         """Check for a __getattr__ and handle it specially if it is implemented"""
         if object_has_getattribute(base):
             unimplemented("torch.nn.Module with a custom __getattribute__ defined")
@@ -163,7 +164,6 @@ class NNModuleVariable(VariableTracker):
             from .builder import VariableBuilder
 
             return VariableBuilder(tx, source)(getattr_fn(base, name))
-
         return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
             tx, [variables.ConstantVariable.create(name)], {}
         )
@@ -209,7 +209,7 @@ class NNModuleVariable(VariableTracker):
             except AttributeError:
                 # see if we can fallback to __getattr__, which is not checked by getattr_static
                 result = self._custom_getattr_fallback(
-                    base=base, tx=tx, name=name, options=options
+                    base=base, tx=tx, name=name, source=source, options=options
                 )
                 if result is not None:
                     return result
@@ -241,8 +241,15 @@ class NNModuleVariable(VariableTracker):
             elif is_safe_constant(subobj) or istensor(subobj):
                 # Support possibly common cases of class members
                 return VariableBuilder(tx, NNModuleSource(source))(subobj)
+            elif istype(subobj, types.GetSetDescriptorType):
+                assert source
+                return VariableBuilder(tx, source)(subobj.__get__(base)).add_options(
+                    options
+                )
             else:
-                unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
+                unimplemented(
+                    f"class property {typestr(base)} {typestr(subobj)} {subobj.__class__} {isinstance(subobj, types.GetSetDescriptorType)} {subobj.__get__(base)}"
+                )
 
         return variables.GetAttrVariable(self, name, **options)
 
@@ -613,6 +620,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, **kwargs):
+        if (
+            getattr(value, "_is_fsdp_managed_module", False)
+            and type(self) == UnspecializedNNModuleVariable
+        ):
+            raise RuntimeError(f"Illegal construction {type(self)}")
         if type(value) is torch.jit._script.RecursiveScriptModule:
             raise Unsupported(
                 "ScriptModules aren't supported in UnspecializedNNModuleVariable"

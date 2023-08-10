@@ -355,6 +355,9 @@ def _maybe_init_lazy_module(obj: object) -> None:
 
 
 def is_allowed(obj):
+    if not _is_allowed_distributed(obj):
+        return False
+
     """Is this safe to trace like torch.add ?"""
     _maybe_init_lazy_module(obj)
 

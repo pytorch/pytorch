@@ -185,6 +185,8 @@
   dispatch:
     CompositeExplicitAutograd: sym_constrain_range
 
+- func: _set_data(Tensor(a!) self, Tensor new_data) -> Tensor
+
 - func: sym_constrain_range_for_size(Scalar size, *, int? min=None, int? max=None) -> ()
   dispatch:
     CompositeExplicitAutograd: sym_constrain_range_for_size
