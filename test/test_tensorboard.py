@@ -360,7 +360,7 @@ class TestTensorBoardSummary(BaseTestCase):
             summary.histogram('dummy', [1, 3, 4, 5, 6], 'tensorflow')
 
     def test_empty_input(self):
-        with self.assertRaises(NameError) as e_info:
+        with self.assertRaisesRegex(ValueError, r'^The input has no element\.'):
             summary.histogram('dummy', np.ndarray(0), 'tensorflow')
 
     def test_image_with_boxes(self):
