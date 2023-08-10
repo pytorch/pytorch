@@ -167,7 +167,9 @@ function install_torchrec_and_fbgemm() {
   pip_uninstall fbgemm-gpu-nightly
   pip_install setuptools-git-versioning scikit-build
   # See https://github.com/pytorch/pytorch/issues/106971
-  CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
+  # CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
+  # See https://github.com/pytorch/FBGEMM/pull/1930
+  CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/ezyang/FBGEMM.git@430071f11a72b8ea5fb4adb7d72997ab390085fd#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
 }
 
