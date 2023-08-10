@@ -636,8 +636,6 @@ meta_function_expected_failures = {
     torch.linalg.lstsq : {f64, f32, c128, c64},
 }
 
-meta_function_expected_failures_only_outplace = {}
-
 meta_function_expected_failures_conditional = {
     torch.repeat_interleave : (lambda dtype, *args, **kwargs: not isinstance(kwargs.get("repeats", None), int)),
 }
@@ -707,8 +705,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.kthvalue: {f16},  # aten::kthvalue.values
 }
 
-meta_function_device_expected_failures_only_outplace['cuda'] = {}
-
 meta_function_device_skips['cpu'] = {
     torch.native_batch_norm: {f32, f64},
     torch._native_batch_norm_legit: {f32, f64},
@@ -764,8 +760,6 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
         elif self.dtype in meta_function_device_skips[self.device_type].get(func, set()):
             test_expect = TestExpect.SKIP
         elif self.dtype in meta_function_expected_failures.get(func, set()):
-            test_expect = TestExpect.XFAILURE
-        elif not self.inplace and self.dtype in meta_function_expected_failures_only_outplace.get(func, set()):
             test_expect = TestExpect.XFAILURE
         elif self.dtype in meta_function_device_expected_failures[self.device_type].get(func, set()):
             test_expect = TestExpect.XFAILURE
