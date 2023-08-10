@@ -566,8 +566,8 @@ class ExportOutput:
         export_exception: Optional[Exception] = None,
     ):
         self._model_proto = model_proto
-        self._input_adapter = input_adapter or io_adapter.InputAdapter()
-        self._output_adapter = output_adapter or io_adapter.OutputAdapter()
+        self._input_adapter = input_adapter
+        self._output_adapter = output_adapter
         self._diagnostic_context = diagnostic_context
         self._fake_context = fake_context
         self._export_exception = export_exception
