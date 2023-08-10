@@ -49,11 +49,27 @@ class UvHandle {
   virtual uv_stream_t* as_stream() = 0;
 };
 
-class WriterPayload {
+class WriterPayload : public c10::intrusive_ptr_target {
+  static c10::intrusive_ptr<WriterPayload> reclaim(uv_write_t* request) {
+    /* This method returns a intrusive_ptr that does not increase the refcount.
+     */
+    auto h = (WriterPayload*)uv_req_get_data((uv_req_t*)request);
+    return c10::intrusive_ptr<WriterPayload>::reclaim(h);
+  }
+
+  void registeredInLoop() {
+    /*
+    This refcount increment must be matched by a reclaim call.
+    Call this method after sucessfully scheduling this handle with a loop.
+    */
+    at::raw::intrusive_ptr::incref(this);
+  }
+
   static void write_done(uv_write_t* req, int status) {
     UvHandle* handle = UvHandle::from_uv((uv_handle_t*)req->handle);
-    auto wp = (WriterPayload*)uv_req_get_data((uv_req_t*)req);
-    delete wp;
+    /* Since we're no longer actively used by the event loop, transfer ownership
+     * to this frame. */
+    auto wp = WriterPayload::reclaim(req);
 
     if (status) {
       C10D_INFO(
@@ -66,18 +82,21 @@ class WriterPayload {
   }
 
   std::vector<uint8_t> data;
-  uv_write_t req;
-  uv_buf_t buf;
+  uv_write_t req = {};
+  uv_buf_t buf = {};
   UvHandle* handle;
 
  public:
   WriterPayload(std::vector<uint8_t>&& in_data, UvHandle* handle)
-      : data(in_data), handle(handle) {}
+      : data(std::move(in_data)), handle(handle) {
+    uv_req_set_data((uv_req_t*)&req, this);
+  }
 
-  bool send() {
+  ~WriterPayload() {}
+
+  void send() {
     buf = uv_buf_init((char*)data.data(), data.size());
     int res = uv_write(&req, handle->as_stream(), &buf, 1, write_done);
-    uv_req_set_data((uv_req_t*)&req, this);
 
     if (res) {
       C10D_INFO(
@@ -86,8 +105,11 @@ class WriterPayload {
           uv_err_name(res),
           uv_strerror(res));
       handle->close();
+    } else {
+      /* This object was successfully registered with the event loop, so keep it
+       * alive until it's unregistered. */
+      registeredInLoop();
     }
-    return res == 0;
   }
 };
 
@@ -121,9 +143,8 @@ class StreamWriter {
     data.insert(data.end(), val.data(), val.data() + val.size());
   }
   void send() {
-    auto wd = new WriterPayload(std::move(data), handle);
-    if (!wd->send())
-      delete wd;
+    auto wd = c10::make_intrusive<WriterPayload>(std::move(data), handle);
+    wd->send();
   }
 };
 
@@ -1064,7 +1085,7 @@ std::unique_ptr<BackgroundThread> create_libuv_tcpstore_backend(
   res->init(opts);
   return res;
 #else
-  TORCH_CHECK(false, "Implementation missing");
+  TORCH_CHECK(false, "LibUV TCPStore implementation missing");
 #endif
 }
 
