@@ -232,6 +232,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
     _pg_list = []
     _count = 0
     _ready = False
+    _ready_cond = threading.Condition(_pg_lock)
 
     _coll_lock = threading.Lock()
     _cur_coll_on_pgs = {}
@@ -247,14 +248,14 @@ class ProcessLocalGroup(dist.ProcessGroup):
             cls._count += 1
             if cls._count == pg._world_size:
                 cls._ready = True
+                cls._ready_cond.notify_all()
 
     @classmethod
     def _start_coll(cls, collective, pg):
+        with cls._ready_cond:
+            cls._ready_cond.wait_for(lambda: cls._ready)
+
         with cls._coll_lock:
-            if not cls._ready:
-                raise Exception(
-                    f"world not ready, only {cls._count} PG's registered but world has {pg.size()} ranks"
-                )
             # pg_name is unique, we use that to record the mapping between pg and collective
             if pg.pg_name not in cls._cur_coll_on_pgs:
                 cls._cur_coll_on_pgs[pg.pg_name] = Collective(pg.size(), collective, cls)
