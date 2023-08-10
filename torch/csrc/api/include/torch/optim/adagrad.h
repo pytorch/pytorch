@@ -75,19 +75,6 @@ class TORCH_API Adagrad : public Optimizer {
         "Invalid initial_accumulator_value value: ",
         defaults.initial_accumulator_value());
     TORCH_CHECK(defaults.eps() >= 0, "Invalid epsilon value: ", defaults.eps());
-
-    for (const auto& group : param_groups_) {
-      for (const auto& p : group.params()) {
-        auto state = std::make_unique<AdagradParamState>();
-        state->step(0);
-        state->sum(torch::full_like(
-            p.data(),
-            defaults.initial_accumulator_value(),
-            at::MemoryFormat::Preserve));
-        state_[c10::guts::to_string(p.unsafeGetTensorImpl())] =
-            std::move(state);
-      }
-    }
   }
 
   explicit Adagrad(std::vector<Tensor> params, AdagradOptions defaults = {})
