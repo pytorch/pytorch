@@ -10,6 +10,7 @@ from torch.nn.utils.fusion import fuse_conv_bn_weights
 import copy
 import operator
 from typing import Any, Callable, Dict, Optional, Tuple
+from torch.utils._pytree import LeafSpec
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
@@ -238,3 +239,57 @@ def _replace_dropout_for_eval(m: GraphModule):
         ignore_literals=True,
     )
     m.recompile()
+
+def _replace_literals_with_placeholders(gm):
+    """Replace the literals in the graph with placeholder nodes, so that the literal arguments
+    in the graph can be matched and replaced
+
+    To use this, the pattern and replacement graph should have the exact same number of literal args
+    and they should be used in the exact same order.
+
+    For example:
+    pattern:
+    def forward(self, x):
+        return x + 3
+
+    replacement:
+    def forward(self, x):
+        return x - 3
+
+    after this pass, we'll have:
+    pattern:
+    def forward(self, x, scalar):
+        return x + scalar
+
+    replacement:
+    def forward(self, x, scalar):
+        return x - scalar
+    """
+    last_ph = None
+
+    def _is_literal(arg):
+        if isinstance(arg, (int, float)):
+            return True
+        if isinstance(arg, (tuple, list)):
+            return all(map(_is_literal, arg))
+        return False
+
+    cnt = 0
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            last_ph = node
+            cnt += 1
+            continue
+        with gm.graph.inserting_after(last_ph):
+            new_args = []
+            for arg in node.args:
+                if _is_literal(arg):
+                    new_args.append(gm.graph.placeholder("arg" + str(cnt)))
+                    gm._in_spec.children_specs[0].children_specs.append(LeafSpec())
+                    cnt += 1
+                else:
+                    new_args.append(arg)
+            new_args = tuple(new_args)
+
+        node.args = new_args
+    return gm
