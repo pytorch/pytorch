@@ -509,7 +509,7 @@ auto handle_torch_function_indexing(
  *  entry in overloaded_args for this type with higher precedence than
  *  the superclass.
  *
- *  See torch._overrides._get_overloaded_types_and_args for the equivalent
+ *  See torch._overrides._get_overloaded_args for the equivalent
  *  function in the Python __torch_function__ implementation.
  *
  *  The precedence-determining algorithm implemented in this function is
