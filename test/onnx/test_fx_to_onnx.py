@@ -351,7 +351,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             fake_x = torch.rand(5, 2, 2)
 
             # TODO: Split each scenario on its own test case
-            # Scenario 1: Fake model and fake input WITHOUT fake_context
+            # Scenario 1: Fake model and fake input WITHOUT ExportOptions(fake_context=...)
             with self.assertRaises(torch.onnx.OnnxExporterError):
                 export_options = ExportOptions(fake_context=None)
                 _ = torch.onnx.dynamo_export(
@@ -392,7 +392,8 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             export_output = torch.onnx.dynamo_export(
                 model, **inputs, export_options=export_options
             )
-            assert export_output.model_proto is not None
+            onnx.checker.check_model(export_output.model_proto)
+            onnx.shape_inference.infer_shapes(export_output.model_proto)
 
 
 if __name__ == "__main__":
