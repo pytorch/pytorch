@@ -2,6 +2,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ForeachUtils.h>
+#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -19,6 +20,7 @@
 #include <ATen/ops/_foreach_ceil_native.h>
 #include <ATen/ops/_foreach_clamp_max_native.h>
 #include <ATen/ops/_foreach_clamp_min_native.h>
+#include <ATen/ops/_foreach_clamp_native.h>
 #include <ATen/ops/_foreach_cos_native.h>
 #include <ATen/ops/_foreach_cosh_native.h>
 #include <ATen/ops/_foreach_div_native.h>
@@ -60,6 +62,43 @@
 #endif
 
 namespace at::native {
+
+#define FOREACH_BINARY_OP_TENSOR(OP)                            \
+  void foreach_tensor_##OP##_tensor_kernel_slow_(               \
+      TensorList tensors, const Tensor& scalar) {               \
+    TORCH_CHECK(                                                \
+        scalar.dim() == 0 && scalar.numel() == 1,               \
+        "scalar tensor expected to be 0 dim but it has ",       \
+        scalar.dim(),                                           \
+        " dimensions and ",                                     \
+        scalar.numel(),                                         \
+        " elements.");                                          \
+    check_foreach_api_restrictions(tensors);                    \
+                                                                \
+    for (auto& t : tensors) {                                   \
+      t.OP##_(scalar);                                          \
+    }                                                           \
+  }                                                             \
+                                                                \
+  std::vector<Tensor> foreach_tensor_##OP##_tensor_kernel_slow( \
+      TensorList tensors, const Tensor& scalar) {               \
+    TORCH_CHECK(                                                \
+        scalar.dim() == 0 && scalar.numel() == 1,               \
+        "scalar tensor expected to be 0 dim but it has ",       \
+        scalar.dim(),                                           \
+        " dimensions and ",                                     \
+        scalar.numel(),                                         \
+        " elements.");                                          \
+    check_foreach_api_restrictions(tensors);                    \
+                                                                \
+    std::vector<Tensor> result;                                 \
+    result.reserve(tensors.size());                             \
+    for (const auto& t : tensors) {                             \
+      result.emplace_back(t.OP(scalar));                        \
+    }                                                           \
+                                                                \
+    return result;                                              \
+  }
 
 #define FOREACH_BINARY_OP_SCALAR(OP)                            \
   void foreach_tensor_##OP##_scalar_kernel_slow_(               \
@@ -256,6 +295,8 @@ FOREACH_BINARY_OP_LIST_ALPHA(add);
 FOREACH_BINARY_OP_LIST_ALPHA(sub);
 FOREACH_BINARY_OP_LIST_ALPHA(lerp);
 
+FOREACH_BINARY_OP_TENSOR(mul);
+
 FOREACH_BINARY_OP_SCALAR(add);
 FOREACH_BINARY_OP_SCALAR(sub);
 FOREACH_BINARY_OP_SCALAR(mul);
@@ -367,6 +408,35 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_slow(
     result.emplace_back(at::pow(self, t));
   }
   return result;
+}
+
+std::vector<Tensor> foreach_tensor_clamp_scalar_kernel_slow(
+    TensorList self,
+    const optional<Scalar>& min,
+    const optional<Scalar>& max) {
+  TORCH_CHECK(
+      min.has_value() || max.has_value(),
+      "Either `min` or `max` must be specified");
+  check_foreach_api_restrictions(self);
+  std::vector<Tensor> result;
+  result.reserve(self.size());
+  for (const auto& t : self) {
+    result.emplace_back(t.clamp(min, max));
+  }
+  return result;
+}
+
+void foreach_tensor_clamp_scalar_kernel_slow_(
+    TensorList self,
+    const optional<Scalar>& min,
+    const optional<Scalar>& max) {
+  TORCH_CHECK(
+      min.has_value() || max.has_value(),
+      "Either `min` or `max` must be specified");
+  check_foreach_api_restrictions(self);
+  for (auto& t : self) {
+    t.clamp_(min, max);
+  }
 }
 
 } // namespace at::native
