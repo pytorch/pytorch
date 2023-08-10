@@ -75,7 +75,6 @@ class TestCase(TorchTestCase):
     pass
 
 
-# temporary code structure
 class EstimateSnodeRuntimeTests(TestCase):
     def test_horizontal_reduction_pointwise(self):
         def f(a):

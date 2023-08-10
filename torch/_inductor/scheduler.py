@@ -17,7 +17,14 @@ from . import config, dependencies, ir, metrics
 from .codegen.common import get_scheduling_for_device
 from .dependencies import StarDep, WeakDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, free_symbol_has, has_triton
+from .utils import (
+    cache_on_self,
+    cmp,
+    free_symbol_has,
+    get_dtype_size,
+    has_triton,
+    sympy_product,
+)
 from .virtualized import V
 
 
@@ -362,10 +369,38 @@ class BaseSchedulerNode:
         buffer.writelines(out_lines)
         self.written = True
 
-    def get_estimated_runtime(self, rwbytes: int) -> float:
+    def get_read_write_buffers_sizes(self) -> int:
+        if isinstance(self, NopKernelSchedulerNode):
+            return 0
+        reads = {dep.name for dep in self.read_writes.reads}
+        writes = {dep.name for dep in self.read_writes.writes}
+
+        def is_materialized(buf):
+            buf_uses = {user.node for user in self.scheduler.name_to_node[buf].users}
+            return len(buf_uses - set(self.snodes)) > 0
+
+        if isinstance(self, FusedSchedulerNode):
+            removed_buffers = {dep for dep in writes if not is_materialized(dep)}
+            writes = writes - removed_buffers
+            reads = reads - removed_buffers
+        node_bytes = 0
+        for buf in reads | writes:
+            if buf in V.graph.name_to_buffer:
+                buf = V.graph.name_to_buffer[buf]
+            elif buf in V.graph.graph_inputs:
+                buf = V.graph.graph_inputs[buf]
+            else:
+                continue
+
+            node_bytes += V.graph.sizevars.size_hint(
+                sympy_product(buf.get_size())
+            ) * get_dtype_size(buf.get_dtype())
+        return node_bytes
+
+    def get_estimated_runtime(self) -> float:
         layout = None
         if not self.node:
-            assert(self.snodes)
+            assert self.snodes
             layout = self.snodes[0].node.get_layout()
         else:
             layout = self.node.get_layout()
@@ -379,7 +414,6 @@ class BaseSchedulerNode:
         # TODO(xmfan): figure out how to get hardware specs, use A100 for now
         gpu_memory_bandwidth = 1555 * 2**30  # 1555 GBps
         gpu_flops = 312**12  # 312 TFLOPS
-
 
         def handle_extern_kernel(snode: ExternKernelSchedulerNode):
             from torch.utils.flop_counter import (
@@ -430,7 +464,7 @@ class BaseSchedulerNode:
         elif isinstance(self, FusedSchedulerNode) or isinstance(
             self.node, ComputedBuffer
         ):
-            return rwbytes / gpu_memory_bandwidth
+            return self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
 
         # TODO(xmfan): add support for CollectiveKernel
 
