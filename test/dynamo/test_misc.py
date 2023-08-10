@@ -27,6 +27,7 @@ import torch._dynamo.testing
 import torch.onnx.operators
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
+from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
@@ -44,11 +45,7 @@ from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
 from torch.autograd.profiler import _enable_dynamo_cache_lookup_profiler
-from torch.fx.experimental.symbolic_shapes import (
-    ConstraintViolationError,
-    FloorDiv,
-    Mod,
-)
+from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
@@ -56,7 +53,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_MULTIGPU,
 )
-from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE, TEST_Z3
+from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
@@ -86,6 +83,25 @@ qconfig_dict = {"object_type": [(torch.nn.Linear, uniform_qconfig_8bit)]}
 
 
 class MiscTests(torch._dynamo.test_case.TestCase):
+    def test_get_cache_entry(self):
+        def f(x):
+            return x + 1
+
+        torch.compile(f)(torch.randn(5, 5, 5))
+        entries = _debug_get_cache_entry_list(f.__code__)
+        self.assertTrue(len(entries) > 0)
+
+        def g(x):
+            return x + 2
+
+        entries = _debug_get_cache_entry_list(g.__code__)
+        self.assertTrue(len(entries) == 0)
+
+        try:
+            _debug_get_cache_entry_list(1)
+        except TypeError as e:
+            self.assertIn("expected a code object!", str(e))
+
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
             if flag:
@@ -680,10 +696,32 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         self.assertEqual(opt_fn({"a": v1, "b": v2})[0], -200)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_tensor_dict3(self):
+        def fn(inputs_a, inputs_b):
+            total = torch.zeros(1)
+            input_keys = inputs_a.keys() | inputs_b.keys()
+            for k in input_keys:
+                if k in inputs_a:
+                    total += inputs_a[k]
+                if k in inputs_b:
+                    total += inputs_b[k]
+            return total
+
+        v1 = torch.Tensor([100])
+        v2 = torch.Tensor([200])
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        self.assertEqual(
+            opt_fn({"a": v1, "b": v2}, {"b": v1, "c": v2}),
+            fn({"a": v1, "b": v2}, {"b": v1, "c": v2}),
+        )
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 5)
 
     def test_tensor_dict2(self):
         def fn1(inputs):
@@ -707,9 +745,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn1 = torch._dynamo.optimize(cnts)(fn1)
-        opt_fn2 = torch._dynamo.optimize(cnts)(fn2)
-        opt_fn3 = torch._dynamo.optimize(cnts)(fn3)
+        opt_fn1 = torch._dynamo.optimize(cnts, nopython=True)(fn1)
+        opt_fn2 = torch._dynamo.optimize(cnts, nopython=True)(fn2)
+        opt_fn3 = torch._dynamo.optimize(cnts, nopython=True)(fn3)
         self.assertEqual(opt_fn1({"a": v1, "b": v2})[0], 300)
         self.assertEqual(opt_fn2({"a": v1, "b": v2})[0], 300)
         self.assertEqual(opt_fn3({"a": v1, "b": v2})[0], 300)
@@ -6225,133 +6263,6 @@ def ___make_guard_fn():
         self.assertEqual(comp_out, real_out)
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 9)
-
-    def _prepare_for_translation_validation(self):
-        from torch.fx.experimental.validator import TranslationValidator
-
-        validator = TranslationValidator()
-
-        # SymPy symbols.
-        s0, s1, s2 = sympy.symbols("s0 s1 s2", integer=True)
-
-        # Z3 symbols.
-        [validator.add_var(s, int) for s in (s0, s1, s2)]
-        z0, z1, z2 = (validator.z3var(s) for s in (s0, s1, s2))
-
-        return (s0, s1, s2), (z0, z1, z2), validator
-
-    @unittest.skipIf(not TEST_Z3, "Z3 not installed")
-    def test_sympy_to_z3_translation(self):
-        import z3
-        from torch.fx.experimental.validator import SympyToZ3
-
-        (
-            (s0, s1, s2),
-            (z0, z1, z2),
-            validator,
-        ) = self._prepare_for_translation_validation()
-
-        test_cases = [
-            # Integer constants.
-            (sympy.S.Zero, z3.IntVal(0)),
-            (sympy.S.One, z3.IntVal(1)),
-            (sympy.S.NegativeOne, z3.IntVal(-1)),
-            (sympy.Integer(2), z3.IntVal(2)),
-            (
-                s0,
-                z0,
-            ),
-            # Arithmetic operations.
-            *[
-                (op(s0, s1), op(z0, z1))
-                for op in (
-                    operator.add,
-                    operator.mul,
-                    operator.pow,
-                )
-            ],
-            # Logical operations.
-            *[
-                (sympy_op(s0, s1), z3_op(z0, z1))
-                for sympy_op, z3_op in (
-                    (sympy.Eq, operator.eq),
-                    (sympy.Ne, operator.ne),
-                    (sympy.Lt, operator.lt),
-                    (sympy.Le, operator.le),
-                    (sympy.Gt, operator.gt),
-                    (sympy.Ge, operator.ge),
-                )
-            ],
-            # Other operations.
-            (
-                s0 - s1,
-                z0 + z3.IntVal(-1) * z1,
-            ),
-            (
-                s0 / s1,
-                z3.ToReal(z0) * (z1**-1),
-            ),
-            (FloorDiv(s0, s1), z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1))),
-            (Mod(s0, s1), z0 - z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1)) * z1),
-            (
-                Mod(s2, (s0 / s1)),
-                z2
-                - z3.ToReal(z3.ToInt(z3.ToReal(z2) / (z3.ToReal(z0) * z1**-1)))
-                * (z3.ToReal(z0) * z1**-1),
-            ),
-            (
-                Mod(s2, s0**3),
-                z2 - z3.ToReal(z3.ToInt(z3.ToReal(z2) / z0**3)) * z0**3,
-            ),
-        ]
-
-        toZ3 = SympyToZ3(validator)
-        for sympy_expr, z3_expr in test_cases:
-            result = toZ3.run(sympy_expr)
-            self.assertTrue(
-                z3_expr.eq(result), msg=f"expected: {z3_expr}. Got: {result}"
-            )
-
-    @unittest.skipIf(not TEST_Z3, "Z3 not installed")
-    def test_translation_validation_sat(self):
-        (
-            (s0, s1, s2),
-            (z0, z1, z2),
-            validator,
-        ) = self._prepare_for_translation_validation()
-
-        validator.add_source_expr(z0 > 5)
-        validator.add_source_expr(z1 / 2 > z0)
-
-        # Solutions for target is a subset of the solutions for the source.
-        validator.add_target_expr(s0 > 20)
-        validator.add_target_expr(s1 > s0**2)
-
-        r = validator.validate()
-        self.assertEqual(r.success, True, msg=f"failed with model: {r.model}")
-        self.assertIsNone(r.model)
-        self.assertIsNone(r.failed_source_expr)
-
-    @unittest.skipIf(not TEST_Z3, "Z3 not installed")
-    def test_translation_validation_unsat(self):
-        (
-            (s0, s1, s2),
-            (z0, z1, z2),
-            validator,
-        ) = self._prepare_for_translation_validation()
-
-        validator.add_source_expr(z0 > 5)
-        validator.add_source_expr(z1 / 2 > z0)
-
-        # Solutions for target is NOT a subset of the solutions for the source.
-        validator.add_target_expr(s0 > 20)
-        # This expression is less restrictive than its counterpart.
-        validator.add_target_expr(s1 > s0 + 2)
-
-        r = validator.validate()
-        self.assertEqual(r.success, False, msg=f"failed with model: {r.model}")
-        self.assertIsNotNone(r.model)
-        self.assertIsNotNone(r.failed_source_expr)
 
     def test_simple_set_usage(self):
         def foo(x, y):
