@@ -16,6 +16,7 @@ from unittest.mock import patch
 from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
 
 import torch
+import torch._dynamo.utils as dynamo_utils
 from torch import fx as fx
 
 from torch._dynamo.repro.after_aot import save_graph_repro, wrap_compiler_debug
@@ -401,6 +402,10 @@ def save_args(fn):
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
+        gm = args[0]  # NOTE this is specific to compile_fx_inner
+        if dynamo_utils.count_calls(gm.graph) == 0:
+            return fn(*args, **kwargs)
+
         folder = "/tmp/inductor_saved_args"
         if not os.path.exists(folder):
             os.mkdir(folder)
