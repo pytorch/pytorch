@@ -440,7 +440,7 @@ def aot_compile(
     Returns:
         Path to the generated shared library, and the exported program
     """
-    from torch._inductor.compile_fx import compile_fx_aot
+    from torch._inductor import aot_compile as inductor_aot_compile
     from torch._inductor.decomposition import select_decomp_table
 
     global DECOMP_TABLE
@@ -455,9 +455,9 @@ def aot_compile(
     )
     all_args = (*param_buffer_values, *flat_example_inputs)
 
-    so_path = compile_fx_aot(
+    so_path = inductor_aot_compile(
         ep.graph_module,
         all_args,  # type: ignore[arg-type]
-        config_patches=options,
+        options=options,
     )
     return so_path, ep
