@@ -2,6 +2,9 @@ import functools
 import itertools
 import logging
 import operator
+from typing import List, Optional, Union
+
+from sympy import Expr
 
 import torch
 import torch._inductor as inductor
@@ -146,7 +149,7 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
     )
 )
 def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
-    return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
+    return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)  # type: ignore[attr-defined]
 
 
 @register_graph_pattern(
@@ -222,7 +225,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
     assert dim in (0, 1)
     notdim = 1 - dim
 
-    new_size = None
+    new_size: Optional[Union[List[Expr], List[int]]] = None
     offsets_start = []
     offsets_end = []
 
@@ -239,6 +242,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
         offsets_start.append(new_size[dim] - shape[dim])
         offsets_end.append(new_size[dim])
 
+    assert new_size is not None
     dtype = functools.reduce(
         torch.promote_types, [x.get_dtype() for x in itertools.chain(*inputs)]
     )
