@@ -47,6 +47,10 @@ def from_sym_value_to_torch_dtype(sym_value: SYM_VALUE_TYPE) -> torch.dtype:
     return _SYM_TYPE_TO_TORCH_DTYPE[type(sym_value)]
 
 
+def is_optional_onnx_dtype_str(onnx_type_str: str) -> bool:
+    return onnx_type_str in _OPTIONAL_ONNX_DTYPE_STR
+
+
 def from_torch_dtype_to_onnx_dtype_str(dtype: Union[torch.dtype, type]) -> Set[str]:
     return _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS[dtype]
 
@@ -111,6 +115,12 @@ _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: Dict[
     torch.complex32: {"tensor(float16)"},
     torch.complex64: {"tensor(float)"},
     torch.complex128: {"tensor(double)"},
+}
+
+_OPTIONAL_ONNX_DTYPE_STR: Set[str] = {
+    f"optional({value})"
+    for value_set in _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS.values()
+    for value in value_set
 }
 
 _PYTHON_TYPE_TO_TORCH_DTYPE = {
