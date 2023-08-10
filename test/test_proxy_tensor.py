@@ -1480,29 +1480,12 @@ make_fx_failures = {
     # data-dependent control flow
     skip('item'),
     xfail('cov'),
-    xfail('istft'),
     xfail('nn.functional.gaussian_nll_loss'),
     xfail('tensor_split'),
     xfail('corrcoef'),
     xfail('quantile'),
     xfail('nanquantile'),
     xfail('narrow'),
-
-    # many complex operators incorrect striding, metadata
-    skip('fft.fft', ''),
-    skip('fft.hfft2', ''),
-    skip('fft.hfft', ''),
-    skip('fft.hfftn', ''),
-    skip('fft.ifft', ''),
-    skip('fft.ihfft2', ''),
-    skip('fft.ihfft', ''),
-    skip('fft.ihfftn', ''),
-    skip('fft.irfft2', ''),
-    skip('fft.irfft', ''),
-    skip('fft.irfftn', ''),
-    skip('fft.rfft2', ''),
-    skip('fft.rfft', ''),
-    skip('fft.rfftn', ''),
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
@@ -1524,8 +1507,6 @@ fake_tensor_failures = {
     xfail('repeat_interleave'),
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
-
-    xfail("stft"),
 }
 
 symbolic_tensor_failures = {
@@ -1578,11 +1559,27 @@ symbolic_tensor_failures = {
     xfail('special.modified_bessel_k1', ''),  # aten.special_modified_bessel_k1.default - couldn't find symbolic meta funct...
     xfail('special.scaled_modified_bessel_k0', ''),  # aten.special_scaled_modified_bessel_k0.default - couldn't find symbo...
     xfail('special.scaled_modified_bessel_k1', ''),  # aten.special_scaled_modified_bessel_k1.default - couldn't find symbo...
-    xfail('stft', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode at...
     xfail('take_along_dim', ''),  # dtype of indices should be Long but got Float
-    xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/decomposition
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
+
+    # many complex operators incorrect striding, metadata
+    xfail('fft.fft', ''),
+    xfail('fft.hfft2', ''),
+    xfail('fft.hfft', ''),
+    xfail('fft.hfftn', ''),
+    xfail('fft.ifft', ''),
+    xfail('fft.ihfft2', ''),
+    xfail('fft.ihfft', ''),
+    xfail('fft.ihfftn', ''),
+    xfail('fft.ihfft2', ''),
+    xfail('fft.irfft2', ''),
+    xfail('fft.irfft', ''),
+    xfail('fft.irfftn', ''),
+    xfail('fft.rfft2', ''),
+    xfail('fft.rfft', ''),
+    xfail('fft.rfftn', ''),
+    xfail('stft', '')
 }
 symbolic_tensor_segfaults = {
     skip('nn.functional.batch_norm')  # Segfault??
