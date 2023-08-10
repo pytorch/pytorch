@@ -1532,14 +1532,17 @@ PythonArgs PythonArgParser::raw_parse(
     std::vector<py::handle> overloaded_args;
     signature.parse(self, args, kwargs, parsed_args, overloaded_args, true);
     check_deprecated(signature);
-    return PythonArgs(traceable, signature, parsed_args, std::move(overloaded_args));
+    return PythonArgs(
+        traceable, signature, parsed_args, std::move(overloaded_args));
   }
 
   for (auto& signature : signatures_) {
     std::vector<py::handle> overloaded_args;
-    if (signature.parse(self, args, kwargs, parsed_args, overloaded_args, false)) {
+    if (signature.parse(
+            self, args, kwargs, parsed_args, overloaded_args, false)) {
       check_deprecated(signature);
-      return PythonArgs(traceable, signature, parsed_args, std::move(overloaded_args));
+      return PythonArgs(
+          traceable, signature, parsed_args, std::move(overloaded_args));
     }
   }
 
