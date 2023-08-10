@@ -597,7 +597,6 @@ class FxOnnxInterpreter:
 
         # Dispatch to ONNX op through OpShema. The input argument dtypes are compared to
         # function signature in OpSchema, and find the best matched overload.
-        # TODO(titaiwang): diagnostic rules.
         symbolic_fn = onnxfunction_dispatcher.dispatch(
             node=node,
             onnx_args=onnx_args,

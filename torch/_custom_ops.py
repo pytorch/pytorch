@@ -5,7 +5,7 @@ from torch._custom_op.impl import (
     _find_custom_op,
     get_ctx,
     infer_schema,
-    parse_namespace,
+    parse_qualname,
     validate_namespace,
 )
 
@@ -85,7 +85,7 @@ def custom_op(qualname, func_or_schema=None):
         >>> torch.ops.mylibrary.numpy_sin(x)  # calls numpy_sin_impl_cuda
 
     """
-    ns, name = parse_namespace(qualname)
+    ns, name = parse_qualname(qualname)
     validate_namespace(ns)
 
     def inner(func):
@@ -169,7 +169,7 @@ def impl(qualname, *, device_types=("cpu", "cuda"), func=None):
     """
 
     def inner(func):
-        custom_op = _find_custom_op(qualname)
+        custom_op = _find_custom_op(qualname, also_check_torch_library=True)
         custom_op.impl(device_types, _stacklevel=3)(func)
         return func
 
@@ -250,7 +250,7 @@ def impl_abstract(qualname, *, func=None):
     """
 
     def inner(func):
-        custom_op = _find_custom_op(qualname)
+        custom_op = _find_custom_op(qualname, also_check_torch_library=True)
         custom_op.impl_abstract(_stacklevel=3)(func)
         return func
 
