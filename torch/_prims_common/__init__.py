@@ -83,6 +83,7 @@ Tensor = torch.Tensor
 
 
 torch_function_passthrough = {
+    torch.device,
     torch.Tensor.dim,
     torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
     torch.Tensor.numel,
