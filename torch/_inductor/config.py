@@ -52,13 +52,21 @@ split_cat_fx_passes = True
 group_fusion = False
 
 # enable pattern match with batch fusion (using torch op)
-batch_fusion = False
+batch_fusion = True
 
 # enable reordering pass
 reordering = True
 
-# enable usage of torch._inductor.kernel.mm.tuned_mixed_mm
+# for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
+# enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
+# Autotune will compare perf with normal cast->then->mm option
 use_mixed_mm = False
+
+# for pattern torch.mm(a, b.to(dtype)) with cuda tensors, always use
+# torch._inductor.kernel.mm.tuned_mixed_mm's fused kernel.
+# Autotune will not compare with normal cast->then->mm option.
+# (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
+force_mixed_mm = False
 
 # AOTInductor output path
 # If an absolute path is specified, the generated lib files will be stored under the directory;

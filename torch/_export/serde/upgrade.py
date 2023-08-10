@@ -4,7 +4,7 @@ from typing import Tuple, Dict, Optional, List
 
 import torch
 from torch._export import export
-from torch._export.pass_base import ExportPassBase
+from torch._export.pass_base import _ExportPassBase
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
 from torch._subclasses import FakeTensor
@@ -74,7 +74,7 @@ class GraphModuleOpUpgrader:
     original TorchScript upgrader).
     """
 
-    class UpgraderPass(ExportPassBase):
+    class UpgraderPass(_ExportPassBase):
         def __init__(self, old_target: Target, new_target: Target):
             super().__init__()
             self.old_target = old_target

@@ -203,10 +203,18 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     )
 
 
+def fallback_mixed_mm(mat1, mat2, *, out):
+    return torch.mm(mat1, mat2.to(mat1.dtype), out=out)
+
+
+aten_fallback_mixed_mm = ExternKernelChoice(fallback_mixed_mm, None)
+
+
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
-    # options to tune from
     choices = []
+    if not inductor_config.force_mixed_mm:
+        choices.append(aten_fallback_mixed_mm.bind((mat1, mat2), layout))
     b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
     for config in mm_configs(m, n, k):
         mm_template.maybe_append_choice(
