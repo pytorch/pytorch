@@ -1458,7 +1458,11 @@ class CppVecKernel(CppKernel):
         else:
             line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
         if non_contiguous:
-            tmpbuftype = "float" if is_mask else f"{DTYPE_TO_CPP[dtype]}"
+            tmpbuftype = (
+                "float"
+                if (is_mask and not opt_ctx.is_load_uint8_as_float)
+                else f"{DTYPE_TO_CPP[dtype]}"
+            )
             tmpbufsize = f"{self.tiling_factor}"
             if dtype in DTYPE_LOWP_FP:
                 tmpbufsize += " * 2"
@@ -1471,7 +1475,7 @@ class CppVecKernel(CppKernel):
                 f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++) "
             )
             rhs = f"{var}[{cexpr_index(new_index)}]"
-            if is_mask:
+            if is_mask and not opt_ctx.is_load_uint8_as_float:
                 rhs = f"flag_to_float_scalar({rhs})"
             tmpbufdefine += f"tmpbuf[{inner}] = {rhs};"
             line = f"([&]() {{ {tmpbufdeclare} {tmpbufdefine} return {line}; }})()"
