@@ -190,10 +190,10 @@ def _get_registry(module: nn.Module) -> Dict[str, RegistryItem]:
     Get an ``OrderedDict`` of composable APIs that have been applied to the
     ``module``, indexed by the API name.
     """
-    registry_key = getattr(module, REGISTRY_KEY, None)
-    if registry_key is None:
+    registry = getattr(module, REGISTRY_KEY, None)
+    if registry is None:
         default_registry: Dict[str, RegistryItem] = OrderedDict()
         setattr(module, REGISTRY_KEY, default_registry)
         return default_registry
     else:
-        return registry_key
+        return registry

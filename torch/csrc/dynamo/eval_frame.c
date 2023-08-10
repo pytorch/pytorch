@@ -263,6 +263,14 @@ inline static void enable_eval_frame_default(PyThreadState* tstate) {
 #endif
 }
 
+
+inline static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
+  // Returns the C string name of the current frame.
+  DEBUG_CHECK(PyUnicode_Check(frame->f_code->co_name));
+  return PyUnicode_AsUTF8(frame->f_code->co_name);
+}
+
+
 static inline PyObject* call_callback(
     PyObject* callable,
     THP_EVAL_API_FRAME_OBJECT* _frame,
@@ -368,11 +376,6 @@ inline static PyObject* get_frame_state(PyCodeObject* code) {
 inline static void set_frame_state(PyCodeObject* code, PyObject* extra) {
   // TODO(jansel): would it be faster to bypass this?
   _PyCode_SetExtra((PyObject*)code, dynamic_frame_state_extra_index, extra);
-}
-
-inline static const char* name(THP_EVAL_API_FRAME_OBJECT* frame) {
-  DEBUG_CHECK(PyUnicode_Check(frame->f_code->co_name));
-  return PyUnicode_AsUTF8(frame->f_code->co_name);
 }
 
 static PyObject* call_guard_fail_hook(
@@ -621,14 +624,14 @@ static PyObject* _custom_eval_frame(
   #if IS_PYTHON_3_11_PLUS
   DEBUG_TRACE(
       "begin %s %s %i %i",
-      name(frame),
+      get_frame_name(frame),
       PyUnicode_AsUTF8(frame->f_code->co_filename),
       frame->f_code->co_firstlineno,
       _PyInterpreterFrame_LASTI(frame));
   #else
   DEBUG_TRACE(
       "begin %s %s %i %i %i",
-      name(frame),
+      get_frame_name(frame),
       PyUnicode_AsUTF8(frame->f_code->co_filename),
       frame->f_lineno,
       frame->f_lasti,
@@ -656,13 +659,13 @@ static PyObject* _custom_eval_frame(
     // immediately skip the frame, and (2) even if it did, this would only
     // be profitable if there was tensor code in the unwinding code.  Seems
     // unlikely.
-    DEBUG_TRACE("throw %s", name(frame));
+    DEBUG_TRACE("throw %s", get_frame_name(frame));
     return eval_frame_default(tstate, frame, throw_flag);
   }
 
   CacheEntry* extra = get_cache_entry(frame->f_code);
   if (extra == SKIP_CODE || (callback == Py_False && extra == NULL)) {
-    DEBUG_TRACE("skip %s", name(frame));
+    DEBUG_TRACE("skip %s", get_frame_name(frame));
     return eval_frame_default(tstate, frame, throw_flag);
   }
 
@@ -670,14 +673,14 @@ static PyObject* _custom_eval_frame(
   // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
   // even though we should pass a PyFrameObject.
   if (THP_PyFrame_FastToLocalsWithError(frame) < 0) {
-    DEBUG_TRACE("error %s", name(frame));
+    DEBUG_TRACE("error %s", get_frame_name(frame));
     return NULL;
   }
 
   // A callback of Py_False indicates "run only" mode, the cache is checked, but
   // we never compile.
   if (callback == Py_False) {
-    DEBUG_TRACE("In run only mode %s", name(frame));
+    DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
     PyObject* hook_record = call_profiler_start_hook(guard_profiler_name_str);
     PyObject* maybe_cached_code = lookup(extra, frame, NULL, 0);
     call_profiler_end_hook(hook_record);
@@ -687,12 +690,12 @@ static PyObject* _custom_eval_frame(
       // guard eval failed, keep propagating
       return NULL;
     } else if (maybe_cached_code == Py_None) {
-      DEBUG_TRACE("cache miss %s", name(frame));
+      DEBUG_TRACE("cache miss %s", get_frame_name(frame));
       return eval_frame_default(tstate, frame, throw_flag);
     }
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
-    DEBUG_TRACE("cache hit %s", name(frame));
+    DEBUG_TRACE("cache hit %s", get_frame_name(frame));
     return eval_custom_code(tstate, frame, cached_code, throw_flag);
   }
   DEBUG_CHECK(PyDict_CheckExact(frame->f_locals));
@@ -714,7 +717,7 @@ static PyObject* _custom_eval_frame(
   } else if (maybe_cached_code != Py_None) {
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
-    DEBUG_TRACE("cache hit %s", name(frame));
+    DEBUG_TRACE("cache hit %s", get_frame_name(frame));
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     return eval_custom_code(tstate, frame, cached_code, throw_flag);
@@ -741,7 +744,7 @@ static PyObject* _custom_eval_frame(
     // inside the torch.compile block we won't try to Dynamo anything else.
     return NULL;
   } else if (result != Py_None) {
-    DEBUG_TRACE("create cache %s", name(frame));
+    DEBUG_TRACE("create cache %s", get_frame_name(frame));
     extra = create_cache_entry(extra, result);
     Py_DECREF(result);
     set_cache_entry(frame->f_code, extra);
@@ -749,7 +752,7 @@ static PyObject* _custom_eval_frame(
     eval_frame_callback_set(callback);
     return eval_custom_code(tstate, frame, extra->code, throw_flag);
   } else {
-    DEBUG_TRACE("create skip %s", name(frame));
+    DEBUG_TRACE("create skip %s", get_frame_name(frame));
     Py_DECREF(result);
     destroy_cache_entry(extra);
     set_cache_entry(frame->f_code, SKIP_CODE);
