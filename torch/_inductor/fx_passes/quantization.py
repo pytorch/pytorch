@@ -716,7 +716,7 @@ def _register_qlinear_weight_prepack_pass(pattern, pass_number):
           |
         dequant_per_tensor
           |
-        mm/addmm <- dequant_per_channel <- int8_weight
+        mm/addmm <- t <- dequant_per_channel <- int8_weight
 
         Insert weight prepack node and change the pattern to:
         int8 activation
