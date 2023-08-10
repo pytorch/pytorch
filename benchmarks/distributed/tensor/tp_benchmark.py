@@ -77,7 +77,7 @@ class DummyDTensor(torch.Tensor):
             return e._local_tensor if isinstance(e, DummyDTensor) else e
         args_unwrap = tree_map(unwrap_schema, args)
         kwargs_unwrap = tree_map(unwrap_schema, kwargs)
-        return func(types, *args_unwrap, **kwargs_unwrap)
+        return func(*args_unwrap, **kwargs_unwrap)
 
 
 
