@@ -60,8 +60,6 @@ aten::_copy_from
 aten::_copy_from.out
 aten::_copy_from_and_resize
 aten::_copy_from_and_resize.out
-aten::_cslt_compress
-aten::_cslt_sparse_mm
 aten::_ctc_loss
 aten::_ctc_loss.Tensor
 aten::_ctc_loss.Tensor_out
@@ -1114,9 +1112,6 @@ aten::round.out
 aten::row_indices
 aten::row_indices_copy
 aten::row_indices_copy.out
-aten::rrelu_with_noise
-aten::rrelu_with_noise.out
-aten::rrelu_with_noise_
 aten::rsub.Scalar_out
 aten::rsub.Tensor_out
 aten::scalar_tensor

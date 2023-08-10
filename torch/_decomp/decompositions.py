@@ -289,7 +289,7 @@ def _prelu_kernel_backward(
 
 
 @register_decomposition(aten.rrelu_with_noise)
-@aten.rrelu_with_noise.default.py_impl(DispatchKey.Autograd)
+@aten.rrelu_with_noise.default.py_impl(DispatchKey.AutogradCUDA)
 @pw_cast_for_opmath
 def rrelu_with_noise(
     self: Tensor,
@@ -309,6 +309,20 @@ def rrelu_with_noise(
     else:
         negative_slope = (lower + upper) / 2
         return aten.leaky_relu(self, negative_slope)
+
+
+@register_decomposition(aten.rrelu_with_noise_)
+@aten.rrelu_with_noise_.default.py_impl(DispatchKey.AutogradCUDA)
+@pw_cast_for_opmath
+def rrelu_with_noise_(
+    self: Tensor,
+    noise: Tensor,
+    lower: float,
+    upper: float,
+    training: bool = False,
+    generator: Optional[torch.Generator] = None,
+) -> Tensor:
+    return self.copy_(rrelu_with_noise(self, noise, lower, upper, training, generator))
 
 
 @register_decomposition(aten.rrelu_with_noise_backward)

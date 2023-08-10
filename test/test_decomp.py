@@ -347,6 +347,7 @@ CROSS_REF_BACKWARD_EXCLUDE_SET = {
     # Decomposed backward formula is not as precise
     ("cpu", torch.bfloat16, "nn.functional.hardswish"),
     ("cuda", torch.float16, "nn.functional.cross_entropy"),
+    (None, None, "nn.functional.rrelu"),
 }
 
 all_decomposed = set()
@@ -533,7 +534,7 @@ class TestDecomp(TestCase):
             # (TODO: remove detach from the decomp table?)
             # N.b. Testing in-place ops would need dedicated logic
             in_place = func.name()[-1] == '_'
-            if func not in decomposition_table or func in [
+            ignored_ops = [
                 torch.ops.aten.detach.default,
                 # non-deterministic ops
                 torch.ops.aten.empty.memory_format,
@@ -543,7 +544,14 @@ class TestDecomp(TestCase):
                 torch.ops.aten.new_empty_strided.default,
                 torch.ops.aten.randn.default,
                 torch.ops.aten.native_dropout.default,
-            ] or any_unsupported(args, kwargs) or in_place:
+            ]
+            if (
+                    func not in decomposition_table or
+                    func in ignored_ops or
+                    torch.Tag.nondeterministic_seeded in func.tags or
+                    any_unsupported(args, kwargs) or
+                    in_place
+            ):
                 return func(*args, **kwargs)
 
             self.decomposed.add(func)
