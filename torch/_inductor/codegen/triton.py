@@ -22,6 +22,7 @@ from ..codecache import code_hash, get_path
 from ..dependencies import MemoryDep, StarDep
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
+from ..scheduler import BaseScheduling
 from ..triton_heuristics import AutotuneHint
 from ..utils import (
     DeferredLineBase,
@@ -37,7 +38,6 @@ from ..utils import (
 )
 from ..virtualized import ops, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
-
 from .common import (
     CSEVariable,
     DeferredLine,
@@ -1768,6 +1768,7 @@ class TritonKernel(Kernel):
         triton_meta = {
             "signature": dict(enumerate(map(signature_of, signature))),
             "device": V.graph.scheduler.current_device.index,
+            "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
             "mutated_arg_names": mutated_args,
             "autotune_hints": set(self.autotune_hints),
@@ -1991,7 +1992,7 @@ class TritonKernel(Kernel):
         return TritonCSEVariable(*args, **kwargs)
 
 
-class TritonScheduling:
+class TritonScheduling(BaseScheduling):
     def __init__(self, scheduler):
         self.scheduler = scheduler
 
@@ -2004,13 +2005,10 @@ class TritonScheduling:
         can fuse node1 and node2.  These nodes might already be
         FusedSchedulerNodes.
         """
-        if isinstance(node1, scheduler.ForeachKernelSchedulerNode):
-            return node1.can_fuse(node2)
-
         if isinstance(node1, scheduler.ForeachKernelSchedulerNode) or isinstance(
             node2, scheduler.ForeachKernelSchedulerNode
         ):
-            return False
+            return scheduler.ForeachKernelSchedulerNode.can_fuse(node1, node2)
 
         _, (numel1, rnumel1) = node1.group
         _, (numel2, rnumel2) = node2.group
@@ -2380,11 +2378,12 @@ class TritonScheduling:
         with kernel:
             for node in [template_node, *epilogue_nodes]:
                 node.mark_run()
-            render()  # warmup run to get the args right
+            partial_code = render()
             for node in epilogue_nodes:
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
-        src_code = render()
+        # finalize must be called after adding epilogue above
+        src_code = partial_code.finalize()
         node_schedule = [template_node, *epilogue_nodes]
         kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)

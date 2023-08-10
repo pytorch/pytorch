@@ -997,7 +997,7 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
     # Extra case to replicate off-by-one issue on CUDA
     cases = list(product(starts, ends, nsteps)) + [(0, 7, 50)]
     for start, end, nstep in cases:
-        if dtype == torch.uint8 and end < 0 or start < 0:
+        if dtype == torch.uint8 and (end < 0 or start < 0):
             continue
         yield SampleInput(start, args=(end, nstep), kwargs={"dtype": dtype, "device": device})
 
@@ -3126,10 +3126,6 @@ def sample_inputs_threshold(op_info, device, dtype, requires_grad, **kwargs):
     for x_size in sizes:
         # threshold and values args must be numbers
         yield SampleInput(make_arg(x_size), make_arg(()).item(), make_arg(()).item())
-
-def sample_inputs_argsort(*args, **kwargs):
-    return (sample_input for sample_input in sample_inputs_sort(*args, **kwargs)
-            if "stable" not in sample_input.kwargs)
 
 def sample_inputs_unique(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -8780,6 +8776,15 @@ foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         'zero',
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
+    ),
+
+    ForeachFuncInfo(
+        'sign',
+        dtypes=floating_types_and(torch.bool, torch.bfloat16, torch.half),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
@@ -18292,7 +18297,7 @@ op_db: List[OpInfo] = [
         "argsort",
         dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-        sample_inputs_func=sample_inputs_argsort,
+        sample_inputs_func=sample_inputs_sort,
         supports_out=False,
         supports_autograd=False,
         skips=(

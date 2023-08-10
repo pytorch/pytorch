@@ -465,7 +465,7 @@ void materialize_vulkan(
     std::vector<std::shared_ptr<Result>>& out,
     AppendOnlyList<ExtraFields<EventType::Vulkan>::raw_event_t, BlockSize>&
         raw_events,
-    const std::function<time_t(approx_time_t)> time_converter,
+    const std::function<time_t(approx_time_t)>& time_converter,
     const uint64_t tid,
     const kineto::DeviceAndResource& kineto_info) {
   for (const auto& i : raw_events) {

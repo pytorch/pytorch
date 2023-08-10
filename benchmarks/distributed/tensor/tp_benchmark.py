@@ -37,6 +37,7 @@ from torch.distributed.nn.functional import (
     _all_gather_base,
     all_reduce,
 )
+from torch.utils._pytree import tree_flatten, tree_map
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
@@ -50,6 +51,36 @@ def cleanup():
     dist.destroy_process_group()
 
 
+class DummyDTensor(torch.Tensor):
+    _local_tensor: torch.Tensor
+
+    @staticmethod
+    def __new__(
+        cls,
+        local_tensor: torch.Tensor,
+    ) -> "DummyDTensor":
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+            cls,
+            local_tensor.size(),
+            strides=local_tensor.stride(),
+            dtype=local_tensor.dtype,
+            device=local_tensor.device,
+            layout=local_tensor.layout,
+            requires_grad=local_tensor.requires_grad,
+        )
+        r._local_tensor = local_tensor.detach()
+        return r
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        def unwrap_schema(e: object) -> object:
+            return e._local_tensor if isinstance(e, DummyDTensor) else e
+        args_unwrap = tree_map(unwrap_schema, args)
+        kwargs_unwrap = tree_map(unwrap_schema, kwargs)
+        return func(types, *args_unwrap, **kwargs_unwrap)
+
+
+
 class MLPModel(nn.Module):
     def __init__(self, dim_size):
         super(MLPModel, self).__init__()
@@ -59,6 +90,8 @@ class MLPModel(nn.Module):
 
     def forward(self, x):
         return self.net2(self.relu(self.net1(x)))
+
+
 
 
 @contextlib.contextmanager
@@ -103,6 +136,37 @@ def run_tp(rank, args):
     inp = torch.rand(128, 128).cuda(rank)
     torch.distributed.barrier()
     with maybe_run_profiler(args, "./control/") as torch_profiler:
+        for i in range(args.iter_nums):
+            if args.sequence_parallel:
+                output = torch.empty(inp.size(0) * tp_degree, *inp.size()[1:], device=inp.device)
+                input = _all_gather_base(output, inp)
+            output = model(input)
+            if args.sequence_parallel:
+                output_rs = torch.empty(output.size(0) // tp_degree, *output.size()[1:], device=output.device)
+                output = _reduce_scatter_base(output_rs, output)
+            else:
+                output = all_reduce(output)
+            output.sum().backward()
+            optimizer.step()
+            if args.dump_profiler:
+                torch_profiler.step()
+            if i == 0:
+                t0 = time.perf_counter()
+    torch.distributed.barrier()
+    t1 = time.perf_counter()
+    control_group = t1 - t0
+    if rank == 0:
+        print(f"Elapsed time for control group: {control_group:.6f}")
+
+    # Control group to mimic Megatron.
+    model.net1.weight = torch.nn.Parameter(DummyDTensor(model.net1.weight))
+    model.net1.bias = torch.nn.Parameter(DummyDTensor(model.net1.bias))
+    model.net2.weight = torch.nn.Parameter(DummyDTensor(model.net2.weight))
+    model.net2.bias = torch.nn.Parameter(DummyDTensor(model.net2.bias))
+    optimizer = torch.optim.SGD(model.parameters(), lr=LR)
+    inp = torch.rand(128, 128).cuda(rank)
+    torch.distributed.barrier()
+    with maybe_run_profiler(args, "./control_upper_bound/") as torch_profiler:
         for i in range(args.iter_nums):
             if args.sequence_parallel:
                 output = torch.empty(inp.size(0) * tp_degree, *inp.size()[1:], device=inp.device)

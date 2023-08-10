@@ -24,7 +24,12 @@ import torch
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.testing import expectedFailureCodegenDynamic, rand_strided, same
+from torch._dynamo.testing import (
+    CompileCounterWithBackend,
+    expectedFailureCodegenDynamic,
+    rand_strided,
+    same,
+)
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -46,6 +51,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils.weak import WeakTensorKeyDictionary
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -76,7 +82,7 @@ requires_multigpu = functools.partial(
 skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
-vec_dtypes = [torch.float, torch.bfloat16]
+vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
 libfoo = None
 
@@ -237,6 +243,7 @@ def check_model(
     reference_in_float=True,
     assert_equal=True,
     check_gradient=False,
+    check_has_compiled=True,
 ):
     kwargs = kwargs or {}
     torch._dynamo.reset()
@@ -295,11 +302,12 @@ def check_model(
     torch.manual_seed(0)
     actual = run(*example_inputs, **kwargs)
     # if not called:
-    #     exp = torch._dynamo.explain(run, *example_inputs)
+    #     exp = torch._dynamo.explain(run)(*example_inputs)
     #     print("Explain:", exp[0])
     #     for graph in exp[2]:
     #         print("Graph", graph)
-    assert called, "Ran graph without calling compile_fx"
+    if check_has_compiled:
+        assert called, "Ran graph without calling compile_fx"
     assert type(actual) == type(correct)
 
     correct_flat, correct_spec = tree_flatten(correct)
@@ -399,6 +407,7 @@ def check_model_cuda(
     reference_in_float=True,
     assert_equal=True,
     check_gradient=False,
+    check_has_compiled=True,
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
@@ -421,6 +430,7 @@ def check_model_cuda(
         reference_in_float=reference_in_float,
         assert_equal=assert_equal,
         check_gradient=check_gradient,
+        check_has_compiled=check_has_compiled,
     )
 
     if check_lowp:
@@ -449,6 +459,7 @@ def check_model_cuda(
             reference_in_float=reference_in_float,
             assert_equal=assert_equal,
             check_gradient=check_gradient,
+            check_has_compiled=check_has_compiled,
         )
 
 
@@ -2820,7 +2831,6 @@ class CommonTemplate:
         )
 
     # From yolov3
-    @skipIfRocm
     def test_batch_norm_2d_2(self):
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -4099,7 +4109,7 @@ class CommonTemplate:
         inputs = (rand_strided((8,), (1,), device=self.device),)
         self.assertTrue(same(fn(*inputs), 2 * inputs[0]))
 
-    @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
+    @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_strided_inputs(self):
         @torch._dynamo.optimize("inductor")
@@ -4112,7 +4122,7 @@ class CommonTemplate:
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
-    @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
+    @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_input_mutation1(self):
         def fn(a):
@@ -4951,7 +4961,7 @@ class CommonTemplate:
         def fn(a):
             return torch.nn.functional.dropout(a, 0.55, True)
 
-        for cg in [False, True] if not torch.version.hip else [False]:
+        for cg in [False, True]:
             with patch.object(config.triton, "cudagraphs", cg):
                 torch._dynamo.reset()
 
@@ -5952,9 +5962,7 @@ class CommonTemplate:
         else:
             contexts = [
                 contextlib.nullcontext,
-                lambda: config.patch(
-                    {"triton.cudagraphs": True if not torch.version.hip else False}
-                ),
+                lambda: config.patch({"triton.cudagraphs": True}),
             ]
 
         for context in contexts:
@@ -6191,6 +6199,34 @@ class CommonTemplate:
             [x],
         )
 
+    def test_setitem_with_int_parameter(self):
+        x = torch.zeros(7)
+
+        def fn(n, a):
+            a[n] = -1
+            return a
+
+        cnts = CompileCounterWithBackend("inductor")
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+
+        for n in range(2, x.shape[0]):
+            opt_fn(n, x)
+            self.assertEqual(x[n], -1)
+
+        # If assume_static_by_default is set, the calls above will trigger
+        # 3 function compilation:
+        #   1. assuming 'n' is static (equals 2)
+        #   2. making 'n' dynamic, but with the guard 'end < x.shape[0]'
+        #      (from: torch._inductor.ir.SliceView.create)
+        #   3. when 'n' equals 6 (the above guard is violated)
+        frame_count = 3 if torch._dynamo.config.assume_static_by_default else 2
+        self.assertEqual(cnts.frame_count, frame_count)
+
+        # Negative index triggers new compilation.
+        opt_fn(-x.shape[0], x)
+        self.assertEqual(x[0], -1)
+        self.assertEqual(cnts.frame_count, frame_count + 1)
+
     @config.patch(profiler_mark_wrapper_call=True)
     def test_profiler_mark_wrapper_call(self):
         from torch.profiler import profile
@@ -6229,9 +6265,7 @@ class CommonTemplate:
         class Repro(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer(
-                    "_tensor_constant0", torch.randn([], dtype=torch.float32)
-                )
+                self._tensor_constant0 = nn.Buffer(torch.randn([], dtype=torch.float32))
 
             def forward(self, arg0_1, arg1_1):
                 convert_element_type = torch.ops.prims.convert_element_type.default(
@@ -6665,6 +6699,7 @@ class CommonTemplate:
         """
         Causes a @pointwise(size_hints) where size_hints is 2D
         """
+        torch._inductor.metrics.generated_kernel_count = 0
 
         def fn(input, offsets, add_value):
             return torch.ops.prims._inductor_bucketize(input, offsets) + add_value
@@ -6678,6 +6713,17 @@ class CommonTemplate:
         self.common(fn, (input, boundaries, add_value), check_lowp=False)
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_inductor_bucketize_computed_offsets(self):
+        def fn(inp, offsets):
+            return torch.ops.prims._inductor_bucketize(inp, offsets + 0.01)
+
+        inp = torch.tensor(
+            [-1.0, -0.9, -0.8, -0.5, 0.0, 0.1, 0.2, 0.4, 0.5, 0.6, 0.9, 0.91]
+        )
+        offsets = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9]) - 0.01
+
+        self.common(fn, (inp, offsets), check_lowp=False)
 
     @config.patch(implicit_fallbacks=True)
     def test_custom_op(self):
@@ -6932,6 +6978,46 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse("to(tl.int64)" in code)
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_constant_folding_deallocation(self):
+            import torch._inductor
+
+            def fn():
+                x = torch.empty([100])
+                for _ in range(10):
+                    x = x + 1
+
+                return x
+
+            mod = make_fx(fn)()
+
+            live_tensors = WeakTensorKeyDictionary()
+            max_live_tensors = 0
+
+            class LiveTensors(TorchDispatchMode):
+                def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                    nonlocal live_tensors
+                    nonlocal max_live_tensors
+
+                    kwargs = kwargs if kwargs else {}
+                    for arg in tree_flatten((args, kwargs))[0]:
+                        if isinstance(arg, torch.Tensor):
+                            live_tensors[arg] = True
+
+                    out = func(*args, **kwargs)
+
+                    live_tensors[out] = True
+                    max_live_tensors = max(max_live_tensors, len(live_tensors))
+
+                    return out
+
+            mode = LiveTensors()
+            from torch._inductor.freezing import ConstantFolder
+
+            with mode:
+                ConstantFolder(mod).run()
+
+            self.assertTrue(max_live_tensors == 2)
 
         # See https://github.com/pytorch/pytorch/issues/100348
         def test_inductor_detach_view(self):
