@@ -15,6 +15,9 @@ from typing import (
     Union,
 )
 
+import numpy
+import onnx
+
 import torch
 from torch._subclasses import fake_tensor
 
@@ -148,6 +151,34 @@ _TORCH_DTYPE_TO_ABBREVIATION = {
     torch.int64: "i64",
     torch.bool: "b8",
     torch.uint8: "u8",
+}
+
+_TORCH_DTYPE_TO_NUMPY_DTYPE = {
+    torch.float16: numpy.float16,
+    torch.float32: numpy.float32,
+    torch.float64: numpy.float64,
+    torch.uint8: numpy.uint8,
+    torch.int8: numpy.int8,
+    torch.int16: numpy.int16,
+    torch.int32: numpy.int32,
+    torch.int64: numpy.longlong,
+    torch.bool: numpy.bool_,
+}
+
+_ONNX_TENSOR_ELEMENT_TYPE_TO_TORCH_DTYPE = {
+    onnx.TensorProto.FLOAT: torch.float32,  # type: ignore[attr-defined]
+    onnx.TensorProto.FLOAT16: torch.float16,  # type: ignore[attr-defined]
+    onnx.TensorProto.DOUBLE: torch.float64,  # type: ignore[attr-defined]
+    onnx.TensorProto.BOOL: torch.bool,  # type: ignore[attr-defined]
+    onnx.TensorProto.UINT8: torch.uint8,  # type: ignore[attr-defined]
+    onnx.TensorProto.INT8: torch.int8,  # type: ignore[attr-defined]
+    onnx.TensorProto.INT16: torch.int16,  # type: ignore[attr-defined]
+    onnx.TensorProto.INT32: torch.int32,  # type: ignore[attr-defined]
+    onnx.TensorProto.INT64: torch.int64,  # type: ignore[attr-defined]
+}
+
+_TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE = {
+    value: key for key, value in _ONNX_TENSOR_ELEMENT_TYPE_TO_TORCH_DTYPE.items()
 }
 
 SYM_VALUE_TYPE = Union[torch.SymInt, torch.SymFloat, torch.SymBool]
