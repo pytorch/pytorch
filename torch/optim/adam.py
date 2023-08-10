@@ -8,6 +8,9 @@ from .optimizer import (Optimizer, params_t, _use_grad_for_differentiable, _get_
                         _maximize_doc)
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
+__all__ = ['Adam', 'adam']
+
+
 class Adam(Optimizer):
     def __init__(self,
                  params: params_t,
