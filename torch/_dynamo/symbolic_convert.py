@@ -2476,5 +2476,4 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             except StopIteration:
                 return
         else:
-            breakpoint()
             unimplemented(f"YIELD_FROM {typestr(tos)}")
