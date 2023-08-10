@@ -2477,3 +2477,12 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 return
         else:
             unimplemented(f"YIELD_FROM {typestr(tos)}")
+
+    def SEND(self, inst):
+        tos = self.stack[-1]
+        if isinstance(tos, ConstantVariable) and tos.value is None:
+            self.pop()
+            self.instruction_pointer = self.indexof[inst.target]
+            return
+        else:
+            unimplemented(f"SEND {typestr(tos)}")
