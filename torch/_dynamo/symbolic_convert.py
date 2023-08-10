@@ -2179,10 +2179,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
-    def DELETE_SUBSCR(self, inst):
-        obj, key = self.popn(2)
-        self.call_function(BuiltinVariable(delattr), [obj, key], {})
-
 
 class InliningInstructionTranslator(InstructionTranslatorBase):
     """Trace and inline a called method"""
