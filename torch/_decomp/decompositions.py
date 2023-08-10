@@ -3116,6 +3116,83 @@ def _sum_tensors(ts: Iterable[Tensor]) -> Tensor:
     return reduce(torch.add, ts)
 
 
+def _linspace_from_neg_one(
+    num_steps: int, align_corners: bool, dtype: torch.dtype, device: torch.device
+):
+    if num_steps <= 1:
+        return torch.tensor(0, device=device, dtype=dtype)
+
+    a = ((num_steps - 1) / num_steps) if not align_corners else 1
+    return torch.linspace(-a, a, steps=num_steps, device=device, dtype=dtype)
+
+
+def _make_base_grid_4d(theta: Tensor, h: int, w: int, align_corners: bool):
+    dtype = theta.dtype
+    device = theta.device
+
+    # Using padding and summation generates a single kernel vs using torch.stack where 3 kernels generated
+    # corresponding to each individual tensor: grid_x, grid_y, grid_one
+    grid_x = _linspace_from_neg_one(w, align_corners, dtype, device).view(1, w, 1)
+    grid_y = _linspace_from_neg_one(h, align_corners, dtype, device).view(h, 1, 1)
+    grid_one = torch.ones((1, 1, 1), dtype=dtype, device=device)
+
+    # this is just a temporary hack and we should use torch.stack here once #104480 is merged
+    grid_x = torch.nn.functional.pad(grid_x, pad=(0, 2), mode="constant", value=0)
+    grid_y = torch.nn.functional.pad(grid_y, pad=(1, 1), mode="constant", value=0)
+    grid_one = torch.nn.functional.pad(grid_one, pad=(2, 0), mode="constant", value=0)
+    return grid_x + grid_y + grid_one
+
+
+def _make_base_grid_5d(theta: Tensor, d: int, h: int, w: int, align_corners: bool):
+    dtype = theta.dtype
+    device = theta.device
+
+    grid_x = _linspace_from_neg_one(w, align_corners, dtype, device).view(1, 1, w, 1)
+    grid_y = _linspace_from_neg_one(h, align_corners, dtype, device).view(1, h, 1, 1)
+    grid_z = _linspace_from_neg_one(d, align_corners, dtype, device).view(d, 1, 1, 1)
+    grid_one = torch.ones((1, 1, 1, 1), dtype=dtype, device=device)
+
+    # this is just a temporary hack and we should use torch.stack here once #104480 is merged
+    grid_x = torch.nn.functional.pad(grid_x, pad=(0, 3), mode="constant", value=0)
+    grid_y = torch.nn.functional.pad(grid_y, pad=(1, 2), mode="constant", value=0)
+    grid_z = torch.nn.functional.pad(grid_z, pad=(2, 1), mode="constant", value=0)
+    grid_one = torch.nn.functional.pad(grid_one, pad=(3, 0), mode="constant", value=0)
+    return grid_x + grid_y + grid_z + grid_one
+
+
+def _affine_grid_generator_4d(theta: Tensor, size: List[int], align_corners: bool):
+    n, _, h, w = size
+    base_grid = _make_base_grid_4d(theta, h, w, align_corners=align_corners)
+    # base_grid shape is (h, w, 3) and theta shape is (n, 2, 3)
+    # We do manually a matrix multiplication which is faster than mm()
+    # (h * w, 3, 1) * (n, 1, 3, 2) -> (n, h * w, 2)
+    grid = (base_grid.view(-1, 3, 1) * theta.mT.unsqueeze(1)).sum(-2)
+    return grid.view(n, h, w, 2)
+
+
+def _affine_grid_generator_5d(theta: Tensor, size: List[int], align_corners: bool):
+    n, _, d, h, w = size
+    base_grid = _make_base_grid_5d(theta, d, h, w, align_corners=align_corners)
+    # base_grid shape is (d, h, w, 4) and theta shape is (n, 3, 4)
+    # We do manually a matrix multiplication which is faster than mm()
+    # (d * h * w, 4, 1) * (n, 1, 4, 3) -> (n, h * w, 3)
+    grid = (base_grid.view(-1, 4, 1) * theta.mT.unsqueeze(1)).sum(-2)
+    return grid.view(n, d, h, w, 3)
+
+
+@register_decomposition(aten.affine_grid_generator)
+@pw_cast_for_opmath
+def affine_grid_generator(theta: Tensor, size: List[int], align_corners: bool):
+    torch._check(
+        len(size) in (4, 5),
+        lambda: "affine_grid_generator needs 4d (spatial) or 5d (volumetric) inputs.",
+    )
+    if len(size) == 4:
+        return _affine_grid_generator_4d(theta, size, align_corners=align_corners)
+    else:
+        return _affine_grid_generator_5d(theta, size, align_corners=align_corners)
+
+
 @register_decomposition(aten.grid_sampler_2d)
 @pw_cast_for_opmath
 def grid_sampler_2d(
