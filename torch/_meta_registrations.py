@@ -1984,11 +1984,12 @@ if torch._C._has_mkldnn:
         w_scale,
         w_zp,
         bias,
-        post_op_name,
-        post_op_args,
-        fp32_output,
         output_scale,
         output_zero_point,
+        fp32_output,
+        post_op_name,
+        post_op_args,
+        post_op_algorithm,
     ):
         output_shape = list(x.shape)
         output_shape[-1] = w.shape[0]
