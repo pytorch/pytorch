@@ -556,9 +556,13 @@ class X86InductorQuantizer(Quantizer):
         )
 
         for input_node in input_nodes[1:]:
-            assert isinstance(input_node, Node)
-            assert isinstance(share_qparams_with_input_act0_qspec, QuantizationSpecBase)
-            input_qspec_map[input_node] = share_qparams_with_input_act0_qspec
+            if input_node not in input_qspec_map:
+                # There has the case of cat same nodes: torch.cat([input0, input0], 1)
+                assert isinstance(input_node, Node)
+                assert isinstance(
+                    share_qparams_with_input_act0_qspec, QuantizationSpecBase
+                )
+                input_qspec_map[input_node] = share_qparams_with_input_act0_qspec
 
         cat_node.meta["quantization_annotation"] = _X86InductorQuantizationAnnotation(
             input_qspec_map=input_qspec_map,
