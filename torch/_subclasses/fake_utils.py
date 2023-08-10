@@ -120,7 +120,9 @@ class CrossRefFakeMode(TorchDispatchMode):
                     f"{f_output_alias_each_other} != {r_output_alias_each_other}"
                 )
 
-            for r_out, fake_out in zip(tree_flatten(r)[0], tree_flatten(fake_r)[0]):
+            for idx, (r_out, fake_out) in enumerate(
+                zip(tree_flatten(r)[0], tree_flatten(fake_r)[0])
+            ):
                 r_is_ten = isinstance(r_out, torch.Tensor)
                 assert r_is_ten == isinstance(
                     fake_out, torch.Tensor
@@ -144,7 +146,10 @@ class CrossRefFakeMode(TorchDispatchMode):
                             r_out, fake_out, check_strides=self.check_strides
                         )
                     except Exception as e:
-                        raise RuntimeError(
+                        error_message = (
                             f"{context} mismatched tensor metadata: {e}"
-                        ) from e
+                            if len(r_flat) == 1
+                            else f"{context} mismatched tensor metadata for output[{idx}]: {e}"
+                        )
+                        raise RuntimeError(error_message) from e
         return r
