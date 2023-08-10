@@ -34,7 +34,7 @@ void sym_constrain_range(
 
     TORCH_CHECK(
       max_val >= min_val,
-      "Max range is less than min range. Got min=",
+      "Max must be greater than or equal to min. Got min=",
       min_val,
       " max=",
       max_val

@@ -518,7 +518,7 @@ class TestExport(TestCase):
             constrain_as_value(n)
             return y + n
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Constraining SymFloat or Symbool is nyi"):
+        with self.assertRaisesRegex(torch._dynamo.exc.TorchRuntimeError, "Constraining SymFloat or Symbool is nyi"):
             _ = export(fn, (torch.rand(2, 2), torch.rand(2, 3)))
 
     def test_constrain_size_in_eager(self):
@@ -613,7 +613,7 @@ class TestExport(TestCase):
         )
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
+            torch._dynamo.exc.TorchRuntimeError,
             "Maximum value to constrain_as_size must be greater than 2, but was 1"
         ):
             _ = export(case_3, (torch.tensor(1), torch.randn(4, 5)))

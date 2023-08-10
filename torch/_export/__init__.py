@@ -398,8 +398,6 @@ def export(
 
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))
-        except torch._dynamo.exc.TorchRuntimeError as e:
-            raise UserError(UserErrorType.INVALID_INPUT, str(e))
         except GuardOnDataDependentSymNode as e:
             raise UserError(
                 UserErrorType.ANTI_PATTERN,

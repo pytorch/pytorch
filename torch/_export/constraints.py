@@ -18,7 +18,7 @@ def constrain_as_value(symbol, min: Optional[int] = None, max: Optional[int] = N
 def constrain_as_size(symbol, min: Optional[int] = None, max: Optional[int] = None):
     """
     This indicates that a given int is size-like, and can be used in any context where a size is expected.
-    You will typically use this when reading out unbacked integers from Tensors, e.g., max.item() or lengths.tolist()
+    You will typically use this when reading out integers from Tensors, e.g., max.item() or lengths.tolist()
     which then need to be used as tensor constructors. Providing these assertions to PyTorch can help resolve
       GuardOnDataDependentSymNode errors upon export, since we cannot guard on unbacked SymInts.
 
@@ -30,7 +30,8 @@ def constrain_as_size(symbol, min: Optional[int] = None, max: Optional[int] = No
     which will not work on unbacked SymInts. Assuming that the int is >= 2 allows us to
     report False to these tests. Although this is technically unsound,
     in practice we observe that if your program works for all sizes >= 2,
-    it probably works for zero and one too.
+    it probably works for zero and one too. The reason specifically assume size is >= 2 is because
+    lot of PyTorch code is specialized for 0 and 1 which could result in not general graphs.
     At runtime, we only assert that the user provided min/max values are respected.
 
     To demonstrate in a scenario, suppose you do
