@@ -37,16 +37,48 @@ Other callbacks don't provide exception safety so avoid there.
 // Too small and we'll need multiple buffers for one request
 // Too big and we might taxing malloc
 #define ALLOC_BUFFER_SIZE ((size_t)4000)
-class UvHandle {
+class UvHandle : public c10::intrusive_ptr_target {
  public:
   virtual ~UvHandle() {}
 
-  static UvHandle* from_uv(uv_handle_t* stream) {
-    return (UvHandle*)uv_handle_get_data(stream);
+  c10::intrusive_ptr<UvHandle> iptr() {
+    return c10::intrusive_ptr<UvHandle>::reclaim_copy(this);
   }
 
-  virtual void close() = 0;
-  virtual uv_stream_t* as_stream() = 0;
+  void close() {
+    if (uv_is_closing(unsafeGetHandle())) {
+      return;
+    }
+    uv_close(unsafeGetHandle(), on_close);
+  }
+
+  virtual uv_handle_t* unsafeGetHandle() = 0;
+
+ protected:
+  void handleReady() {
+    /*
+    This method must be called once the handle is ready and registered with the
+    loop.
+
+    Do not call this in the ctor, make_intrusive reset refcounts to one after
+    construction.
+    */
+    uv_handle_set_data(unsafeGetHandle(), this);
+    at::raw::intrusive_ptr::incref(this);
+  }
+
+  virtual void onClose() = 0;
+
+ private:
+  static c10::intrusive_ptr<UvHandle> reclaim(uv_handle_t* handle) {
+    auto h = (UvHandle*)uv_handle_get_data(handle);
+    return c10::intrusive_ptr<UvHandle>::reclaim(h);
+  }
+
+  static void on_close(uv_handle_t* uv_handle) {
+    auto handle = reclaim(uv_handle);
+    handle->onClose();
+  }
 };
 
 class WriterPayload : public c10::intrusive_ptr_target {
@@ -66,10 +98,10 @@ class WriterPayload : public c10::intrusive_ptr_target {
   }
 
   static void write_done(uv_write_t* req, int status) {
-    UvHandle* handle = UvHandle::from_uv((uv_handle_t*)req->handle);
     /* Since we're no longer actively used by the event loop, transfer ownership
      * to this frame. */
     auto wp = WriterPayload::reclaim(req);
+    auto handle = wp->handle;
 
     if (status) {
       C10D_INFO(
@@ -84,10 +116,12 @@ class WriterPayload : public c10::intrusive_ptr_target {
   std::vector<uint8_t> data;
   uv_write_t req = {};
   uv_buf_t buf = {};
-  UvHandle* handle;
+  c10::intrusive_ptr<UvHandle> handle;
 
  public:
-  WriterPayload(std::vector<uint8_t>&& in_data, UvHandle* handle)
+  WriterPayload(
+      std::vector<uint8_t>&& in_data,
+      c10::intrusive_ptr<UvHandle> handle)
       : data(std::move(in_data)), handle(handle) {
     uv_req_set_data((uv_req_t*)&req, this);
   }
@@ -96,7 +130,8 @@ class WriterPayload : public c10::intrusive_ptr_target {
 
   void send() {
     buf = uv_buf_init((char*)data.data(), data.size());
-    int res = uv_write(&req, handle->as_stream(), &buf, 1, write_done);
+    int res = uv_write(
+        &req, (uv_stream_t*)handle->unsafeGetHandle(), &buf, 1, write_done);
 
     if (res) {
       C10D_INFO(
@@ -115,13 +150,13 @@ class WriterPayload : public c10::intrusive_ptr_target {
 
 class StreamWriter {
   std::vector<uint8_t> data;
-  UvHandle* handle;
+  c10::intrusive_ptr<UvHandle> handle;
 
   // must be stack allocated
   void* operator new(size_t);
 
  public:
-  StreamWriter(UvHandle* handle) : handle(handle) {}
+  StreamWriter(c10::intrusive_ptr<UvHandle> handle) : handle(handle) {}
 
   void write1(uint8_t val) {
     data.push_back(val);
@@ -302,14 +337,16 @@ class LibUVStoreDaemon : public BackgroundThread {
   const std::vector<uint8_t>& get(const std::string& key);
   int64_t add(const std::string& key, int64_t addVal);
   bool checkKeys(const std::vector<std::string>& keys);
-  bool waitKeys(const std::vector<std::string>& keys, UvHandle* client);
+  bool waitKeys(
+      const std::vector<std::string>& keys,
+      c10::intrusive_ptr<UvHandle> client);
   int64_t size();
   int64_t deleteKey(const std::string& key);
   void append(const std::string& key, const std::vector<uint8_t>& value);
 
-  void registerClient(UvHandle* client);
-  void unregisterClient(UvHandle* client);
-  void clearClientWaitState(UvHandle* client);
+  void registerClient(c10::intrusive_ptr<UvHandle> client);
+  void unregisterClient(c10::intrusive_ptr<UvHandle> client);
+  void clearClientWaitState(c10::intrusive_ptr<UvHandle> client);
 
   uint16_t get_socket_port(uv_tcp_t* handle);
   void init(const TCPStoreOptions& opts);
@@ -321,13 +358,15 @@ class LibUVStoreDaemon : public BackgroundThread {
  private:
   uv_loop_t loop;
   uv_tcp_t server;
+
   uv_async_t exit_handle;
   std::unordered_map<std::string, std::vector<uint8_t>> tcpStore_;
   // From key -> the list of UvClient waiting on the key
-  std::unordered_map<std::string, std::vector<UvHandle*>> waitingSockets_;
+  std::unordered_map<std::string, std::vector<c10::intrusive_ptr<UvHandle>>>
+      waitingSockets_;
   // From socket -> number of keys awaited
-  std::unordered_map<UvHandle*, size_t> keysAwaited_;
-  std::unordered_set<UvHandle*> clients_;
+  std::unordered_map<c10::intrusive_ptr<UvHandle>, size_t> keysAwaited_;
+  std::unordered_set<c10::intrusive_ptr<UvHandle>> clients_;
   int port_;
 
   static LibUVStoreDaemon& from_uv(uv_handle_t* stream) {
@@ -355,16 +394,20 @@ class UvClient : public UvHandle {
   ChunkedStream stream;
   LibUVStoreDaemon* store;
 
+  static c10::intrusive_ptr<UvClient> borrow(uv_stream_t* handle) {
+    auto h = (UvClient*)uv_handle_get_data((uv_handle_t*)handle);
+    return h->iptr();
+  }
+
   static void read_callback(
       uv_stream_t* client,
       ssize_t nread,
       const uv_buf_t* buf) {
-    UvClient* uv_client = UvClient::from_uv((uv_handle_t*)client);
+    auto uv_client = UvClient::borrow(client);
 
     if (nread < 0) {
       C10D_DEBUG(
-          "Read callback failed. client:{} error: {} ",
-          (void*)uv_client,
+          "Read callback failed. code:{} name:{} desc:{}",
           nread,
           uv_err_name(nread),
           uv_strerror(nread));
@@ -379,11 +422,6 @@ class UvClient : public UvHandle {
         uv_client->close();
       }
     }
-  }
-  static void on_close(uv_handle_t* handle) {
-    UvClient* client = UvClient::from_uv(handle);
-    client->store->unregisterClient(client);
-    delete client;
   }
 
   static void alloc_buffer(
@@ -493,7 +531,7 @@ class UvClient : public UvHandle {
       return false;
 
     auto res = store->compareAndSet(key, currentValue, newValue);
-    StreamWriter sw(this);
+    StreamWriter sw(iptr());
     sw.write_vector(res);
     sw.send();
 
@@ -506,7 +544,7 @@ class UvClient : public UvHandle {
       return false;
 
     auto data = store->get(key);
-    StreamWriter sw(this);
+    StreamWriter sw(iptr());
     sw.write_vector(data);
     sw.send();
     return true;
@@ -522,7 +560,7 @@ class UvClient : public UvHandle {
       return false;
 
     addVal = store->add(key, addVal);
-    StreamWriter sw(this);
+    StreamWriter sw(iptr());
     sw.write_value(addVal);
     sw.send();
 
@@ -546,7 +584,7 @@ class UvClient : public UvHandle {
     }
 
     // Now we have received all the keys
-    StreamWriter sw(this);
+    StreamWriter sw(iptr());
     if (store->checkKeys(keys)) {
       sw.write_value(CheckResponseType::READY);
     } else {
@@ -573,8 +611,8 @@ class UvClient : public UvHandle {
         return false;
     }
 
-    if (store->waitKeys(keys, this)) {
-      StreamWriter sw(this);
+    if (store->waitKeys(keys, iptr())) {
+      StreamWriter sw(iptr());
       sw.write1((uint8_t)WaitResponseType::STOP_WAITING);
       sw.send();
     }
@@ -583,7 +621,7 @@ class UvClient : public UvHandle {
   }
 
   bool parse_getnumkeys_command() {
-    StreamWriter sw(this);
+    StreamWriter sw(iptr());
     sw.write_value<int64_t>(store->size());
     sw.send();
 
@@ -596,7 +634,7 @@ class UvClient : public UvHandle {
       return false;
 
     auto numDeleted = store->deleteKey(key);
-    StreamWriter sw(this);
+    StreamWriter sw(iptr());
     sw.write_value<int64_t>(numDeleted);
     sw.send();
 
@@ -629,7 +667,7 @@ class UvClient : public UvHandle {
         key_count,
         MAX_KEY_COUNT);
 
-    StreamWriter sw(this);
+    StreamWriter sw(iptr());
     for (const auto _ : c10::irange(key_count)) {
       (void)_; // Suppress unused variable warning
       std::string key;
@@ -674,9 +712,9 @@ class UvClient : public UvHandle {
   }
 
   bool parse_cancel_wait_command() {
-    store->clearClientWaitState(this);
+    store->clearClientWaitState(iptr());
 
-    StreamWriter sw(this);
+    StreamWriter sw(iptr());
     sw.write1((uint8_t)WaitResponseType::WAIT_CANCELED);
     sw.send();
 
@@ -686,13 +724,22 @@ class UvClient : public UvHandle {
  public:
   explicit UvClient(uv_loop_t* loop, LibUVStoreDaemon* store) : store(store) {
     uv_tcp_init(loop, &client);
-    uv_handle_set_data((uv_handle_t*)&client, this);
     C10D_DEBUG("Accepted new client: {}\n", (void*)this);
   }
 
+  static c10::intrusive_ptr<UvClient> make(
+      uv_loop_t* loop,
+      LibUVStoreDaemon* store) {
+    auto res = c10::make_intrusive<UvClient>(loop, store);
+    res->handleReady();
+    return res;
+  }
+  c10::intrusive_ptr<UvClient> iptr() {
+    return c10::intrusive_ptr<UvClient>::reclaim_copy(this);
+  }
+
   void startRead() {
-    int res =
-        uv_read_start((uv_stream_t*)as_stream(), alloc_buffer, read_callback);
+    int res = uv_read_start((uv_stream_t*)&client, alloc_buffer, read_callback);
     if (res) {
       C10D_INFO(
           "Failed to setup read callback. client:{} code:{} name:{} desc:{}.",
@@ -704,32 +751,27 @@ class UvClient : public UvHandle {
     }
   }
 
-  static UvClient* from_uv(uv_handle_t* handle) {
-    return (UvClient*)uv_handle_get_data(handle);
+  uv_handle_t* unsafeGetHandle() override {
+    return (uv_handle_t*)&client;
   }
 
-  void close() override {
-    if (!uv_is_closing((uv_handle_t*)&client)) {
-      uv_close((uv_handle_t*)&client, on_close);
-    }
-  }
-
-  uv_stream_t* as_stream() override {
-    return (uv_stream_t*)&client;
+ protected:
+  void onClose() override {
+    store->unregisterClient(iptr());
   }
 };
 
 void LibUVStoreDaemon::onConnect(int status) {
-  UvClient* client = new UvClient(&loop, this);
+  auto client = UvClient::make(&loop, this);
 
   registerClient(client);
-  int res = uv_accept((uv_stream_t*)&server, client->as_stream());
+  int res =
+      uv_accept((uv_stream_t*)&server, (uv_stream_t*)client->unsafeGetHandle());
   if (res == 0) {
     client->startRead();
   } else {
     C10D_INFO(
-        "Failed to accept client. client:{} code:{} name:{} desc:{}.",
-        (void*)client,
+        "Failed to accept client. code:{} name:{} desc:{}.",
         res,
         uv_err_name(res),
         uv_strerror(res));
@@ -926,16 +968,17 @@ void LibUVStoreDaemon::stop() {
   }
 }
 
-void LibUVStoreDaemon::registerClient(UvHandle* client) {
+void LibUVStoreDaemon::registerClient(c10::intrusive_ptr<UvHandle> client) {
   clients_.insert(client);
 }
 
-void LibUVStoreDaemon::unregisterClient(UvHandle* client) {
+void LibUVStoreDaemon::unregisterClient(c10::intrusive_ptr<UvHandle> client) {
   clients_.erase(client);
   clearClientWaitState(client);
 }
 
-void LibUVStoreDaemon::clearClientWaitState(UvHandle* client) {
+void LibUVStoreDaemon::clearClientWaitState(
+    c10::intrusive_ptr<UvHandle> client) {
   if (keysAwaited_.find(client) == keysAwaited_.end()) {
     return;
   }
@@ -1023,7 +1066,7 @@ bool LibUVStoreDaemon::checkKeys(const std::vector<std::string>& keys) {
 
 bool LibUVStoreDaemon::waitKeys(
     const std::vector<std::string>& keys,
-    UvHandle* client) {
+    c10::intrusive_ptr<UvHandle> client) {
   if (checkKeys(keys)) {
     return true;
   }
@@ -1065,9 +1108,9 @@ void LibUVStoreDaemon::append(
 void LibUVStoreDaemon::wakeupWaitingClients(const std::string& key) {
   auto socketsToWait = waitingSockets_.find(key);
   if (socketsToWait != waitingSockets_.end()) {
-    for (UvHandle* client : socketsToWait->second) {
+    for (auto client : socketsToWait->second) {
       if (--keysAwaited_[client] == 0) {
-        StreamWriter sw(client);
+        StreamWriter sw(client->iptr());
         sw.write1((uint8_t)WaitResponseType::STOP_WAITING);
         sw.send();
       }
