@@ -4,7 +4,9 @@ import cProfile
 import functools
 import itertools
 import logging
+import os
 import os.path
+import pickle
 import pstats
 import shutil
 import subprocess
@@ -19,8 +21,9 @@ from torch import fx as fx
 from torch._dynamo.repro.after_aot import save_graph_repro, wrap_compiler_debug
 from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
-from torch.fx.passes.shape_prop import TensorMetadata
+from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
+from torch.utils._pytree import tree_map
 
 from . import config, ir  # noqa: F811, this is needed
 from .scheduler import (
@@ -387,3 +390,62 @@ class DebugFormatter:
 
     def output_code(self, filename):
         shutil.copy(filename, self.filename("output_code.py"))
+
+
+save_args_cnt = itertools.count()
+
+
+def save_args(fn):
+    if not config.save_args:
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        folder = "/tmp/inductor_saved_args"
+        if not os.path.exists(folder):
+            os.mkdir(folder)
+
+        def handle_tensor(x):
+            if isinstance(x, torch.Tensor):
+                return _extract_tensor_metadata(x)
+            else:
+                return x
+
+        args_to_save, kwargs_to_save = tree_map(handle_tensor, (args, kwargs))
+
+        with open(f"{folder}/{fn.__name__}_{next(save_args_cnt)}.pkl", "wb") as f:
+            pickle.dump((args_to_save, kwargs_to_save), f)
+
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def load_args_and_run_compile_fx_inner(path):
+    from torch._inductor.compile_fx import compile_fx_inner
+
+    with open(path, "rb") as f:
+        args, kwargs = pickle.load(f)
+
+    def handle_tensor(x):
+        # TODO don't use TensorMetadata since it has a few drawbacks
+        # 1. pytree will flatten it
+        # 2. it does not store device information.
+        if isinstance(x, TensorMetadata):
+            return torch._dynamo.testing.rand_strided(
+                x.shape,
+                x.stride,
+                x.dtype,
+                torch.device("cuda"),
+            )
+        else:
+            return x
+
+    fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+    with fake_mode, config.patch("save_args", False):
+        # don't call tree_map since TensorMetadata as a namedtuple will be
+        # flattened through.
+        # args, kwargs = tree_map(handle_tensor, (args, kwargs))
+        args = list(args)
+        args[1] = list(map(handle_tensor, args[1]))
+        return compile_fx_inner(*args, **kwargs)

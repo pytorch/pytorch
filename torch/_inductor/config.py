@@ -83,6 +83,8 @@ max_autotune_gemm_backends = os.environ.get(
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
 
+save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
+
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
