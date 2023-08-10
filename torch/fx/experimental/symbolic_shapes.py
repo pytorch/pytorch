@@ -374,6 +374,10 @@ def constrain_range_int(a, *, min, max):
     - During tracing the traced symbol is resolved as a static integer (see
       PR #101655 for more details).
     """
+    if min is None:
+        min = -sympy.oo
+    if max is None:
+        max = sympy.oo
 
     assert not isinstance(a, SymInt)
     if not (min <= a <= max):
