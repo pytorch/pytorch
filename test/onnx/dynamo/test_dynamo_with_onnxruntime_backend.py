@@ -64,6 +64,33 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 for baseline_elem, result_elem in zip(baseline_result, result):
                     torch.testing.assert_close(baseline_elem, result_elem)
 
+    def _test_model_numerically_with_provided_backend_and_default_backend(
+        self,
+        model,
+        dynamo_backend,
+        example_args_collection,
+    ):
+        """Test the model numerically with two ONNXRuntime backends.
+
+        It's useful to test local backend and global backend triggered by
+        backend="onnxrt" at the same time.
+        """
+
+        # Test provided backend.
+        self._test_model_numerically(
+            model,
+            dynamo_backend,
+            example_args_collection,
+        )
+
+        # Test default backend.
+        torch._dynamo.reset()
+        self._test_model_numerically(
+            model,
+            "onnxrt",
+            example_args_collection,
+        )
+
     def _assert_counting_information(
         self,
         ort_backend: OrtBackend,
@@ -111,7 +138,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             z = y.sigmoid()
             return z
 
-        self._test_model_numerically(
+        self._test_model_numerically_with_provided_backend_and_default_backend(
             elementwise_model,
             local_aot_ort,
             example_args_collection,
@@ -143,7 +170,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             z = y * y
             return x, y, z
 
-        self._test_model_numerically(
+        self._test_model_numerically_with_provided_backend_and_default_backend(
             elementwise_model_with_multiple_outputs,
             local_aot_ort,
             example_args_collection,
@@ -176,7 +203,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 tensor_x = torch.sigmoid(tensor_x)
                 return tensor_x
 
-        self._test_model_numerically(
+        self._test_model_numerically_with_provided_backend_and_default_backend(
             MLP(),
             local_aot_ort,
             example_args_collection,
