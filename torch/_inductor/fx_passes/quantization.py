@@ -369,9 +369,7 @@ def _register_quantization_unary_fusion():
             qlinear_pt2e_pattern
         ),
         UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
-            generate_pattern_with_unary(
-                qlinear_pt2e_pattern, aten.relu.default
-            )
+            generate_pattern_with_unary(qlinear_pt2e_pattern, aten.relu.default)
         ),
     }
 
@@ -782,7 +780,7 @@ def _register_qlinear_weight_prepack_pass(pattern, pass_number):
                 True,  # fp32_output
                 "none",  # post op name
                 [],  # post op args
-                "", # post op algorithm
+                "",  # post op algorithm
             )
             new_linear_node = graph.call_function(
                 torch.ops.onednn.qlinear_pointwise.default, args=new_args
@@ -822,9 +820,7 @@ def _generate_dequant_linear_node_pattern(_dequant_per_channel_pattern):
 
 
 def _generate_qlinear_weight_prepack_patterns():
-    return _generate_dequant_linear_node_pattern(
-        dequantize_per_channel_weight_pattern
-    )
+    return _generate_dequant_linear_node_pattern(dequantize_per_channel_weight_pattern)
 
 
 @functools.lru_cache(None)
