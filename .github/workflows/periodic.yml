@@ -19,12 +19,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  parallelnative-linux-focal-py3_8-gcc7-build:
-    name: parallelnative-linux-focal-py3.8-gcc7
+  parallelnative-linux-jammy-py3_8-gcc11-build:
+    name: parallelnative-linux-jammy-py3.8-gcc11
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: parallelnative-linux-focal-py3.8-gcc7
-      docker-image-name: pytorch-linux-focal-py3.8-gcc7
+      build-environment: parallelnative-linux-jammy-py3.8-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.8-gcc11
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
@@ -32,21 +32,21 @@ jobs:
           { config: "default", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
         ]}
 
-  parallelnative-linux-focal-py3_8-gcc7-test:
-    name: parallelnative-linux-focal-py3.8-gcc7
+  parallelnative-linux-jammy-py3_8-gcc11-test:
+    name: parallelnative-linux-jammy-py3.8-gcc11
     uses: ./.github/workflows/_linux-test.yml
-    needs: parallelnative-linux-focal-py3_8-gcc7-build
+    needs: parallelnative-linux-jammy-py3_8-gcc11-build
     with:
-      build-environment: parallelnative-linux-focal-py3.8-gcc7
-      docker-image: ${{ needs.parallelnative-linux-focal-py3_8-gcc7-build.outputs.docker-image }}
-      test-matrix: ${{ needs.parallelnative-linux-focal-py3_8-gcc7-build.outputs.test-matrix }}
+      build-environment: parallelnative-linux-jammy-py3.8-gcc11
+      docker-image: ${{ needs.parallelnative-linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.parallelnative-linux-jammy-py3_8-gcc11-build.outputs.test-matrix }}
 
-  linux-focal-cuda11_8-py3_9-gcc7-build:
-    name: linux-focal-cuda11.8-py3.9-gcc7
+  linux-jammy-cuda11_8-py3_9-gcc11-build:
+    name: linux-jammy-cuda11.8-py3.9-gcc11
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-cuda11.8-py3.9-gcc7
-      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc7
+      build-environment: linux-jammy-cuda11.8-py3.9-gcc11
+      docker-image-name: pytorch-linux-jammy-cuda11.8-cudnn8-py3-gcc11
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
@@ -54,21 +54,21 @@ jobs:
         ]}
       build-with-debug: false
 
-  linux-focal-cuda11_8-py3_9-gcc7-test:
-    name: linux-focal-cuda11.8-py3.9-gcc7
+  linux-jammy-cuda11_8-py3_9-gcc11-test:
+    name: linux-jammy-cuda11.8-py3.9-gcc11
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda11_8-py3_9-gcc7-build
+    needs: linux-jammy-cuda11_8-py3_9-gcc11-build
     with:
-      build-environment: linux-focal-cuda11.8-py3.9-gcc7
-      docker-image: ${{ needs.linux-focal-cuda11_8-py3_9-gcc7-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda11_8-py3_9-gcc7-build.outputs.test-matrix }}
+      build-environment: linux-jammy-cuda11.8-py3.9-gcc11
+      docker-image: ${{ needs.linux-jammy-cuda11_8-py3_9-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda11_8-py3_9-gcc11-build.outputs.test-matrix }}
 
-  linux-focal-cuda11_8-py3_10-gcc7-debug-build:
-    name: linux-focal-cuda11.8-py3.10-gcc7-debug
+  linux-jammy-cuda11_8-py3_10-gcc11-debug-build:
+    name: linux-jammy-cuda11.8-py3.10-gcc11-debug
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-cuda11.8-py3.10-gcc7-debug
-      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc7
+      build-environment: linux-jammy-cuda11.8-py3.10-gcc11-debug
+      docker-image-name: pytorch-linux-jammy-cuda11.8-cudnn8-py3-gcc11
       build-with-debug: true
       test-matrix: |
         { include: [
@@ -79,14 +79,14 @@ jobs:
           { config: "default", shard: 5, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-focal-cuda11_8-py3_10-gcc7-debug-test:
-    name: linux-focal-cuda11.8-py3.10-gcc7-debug
+  linux-jammy-cuda11_8-py3_10-gcc11-debug-test:
+    name: linux-jammy-cuda11.8-py3.10-gcc11-debug
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda11_8-py3_10-gcc7-debug-build
+    needs: linux-jammy-cuda11_8-py3_10-gcc11-debug-build
     with:
-      build-environment: linux-focal-cuda11.8-py3.10-gcc7-debug
-      docker-image: ${{ needs.linux-focal-cuda11_8-py3_10-gcc7-debug-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda11_8-py3_10-gcc7-debug-build.outputs.test-matrix }}
+      build-environment: linux-jammy-cuda11.8-py3.10-gcc11-debug
+      docker-image: ${{ needs.linux-jammy-cuda11_8-py3_10-gcc11-debug-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda11_8-py3_10-gcc11-debug-build.outputs.test-matrix }}
 
   win-vs2019-cuda11_8-py3-build:
     name: win-vs2019-cuda11.8-py3
