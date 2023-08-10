@@ -562,8 +562,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if source:
             return VariableBuilder(tx, source)(subobj).add_options(options)
-        if isinstance(subobj, torch.distributed.fsdp.flat_param.FlatParamHandle):
-            return UserDefinedObjectVariable(subobj, **options)
+        if torch.distributed.is_available():
+            if subobj.__class__.__name__ == "torch.distributed.fsdp.flat_param.FlatParamHandle":
+                return UserDefinedObjectVariable(subobj, **options)
         return variables.GetAttrVariable(self, name, **options)
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":

@@ -1315,7 +1315,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 isinstance(k, TensorVariable) and k.specialized_value is not None
             ), f"Tried to write key {k}"
 
-            result[ConstDictVariable.get_key(k)] = v
+            result[ConstDictVariable.get_key(self, k)] = v
         assert len(result) == len(items) / 2
         self.push(
             ConstDictVariable(result, dict, mutable_local=MutableLocal(), **options)

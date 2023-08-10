@@ -428,16 +428,6 @@ class DequeVariable(CommonListMethodsVariable):
                     **options,
                 ),
             )
-        elif name == "appendleft" and self.mutable_local:
-            assert not kwargs
-            return tx.replace_all(
-                self,
-                DequeVariable(
-                    [args[0]] + list(self.items),
-                    regen_guards=False,
-                    **options,
-                ),
-            )
         elif name == "popleft" and self.mutable_local:
             assert not args
             assert not kwargs
