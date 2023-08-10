@@ -71,7 +71,7 @@ if not (IS_WINDOWS or IS_MACOS):
                 fn=_happy_function, args=(mp_queue,), nprocs=world_size, join=True
             )
 
-            with self.assertRaises(torch_mp.spawn.ProcessExitedException):
+            with self.assertRaises(torch_mp.ProcessExitedException):
                 # torch.multiprocessing.spawn kills all sub-procs
                 # if one of them gets killed
                 torch_mp.spawn(
