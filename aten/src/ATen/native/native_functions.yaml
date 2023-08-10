@@ -10059,6 +10059,21 @@
     CUDA: foreach_tensor_mul_scalarlist_kernel_cuda_
   autogen: _foreach_mul.ScalarList_out
 
+- func: _foreach_mul.Tensor(Tensor[] self, Tensor other) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_mul_tensor_kernel_slow
+    CUDA: foreach_tensor_mul_tensor_kernel_cuda
+
+- func: _foreach_mul_.Tensor(Tensor(a!)[] self, Tensor other) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_mul_tensor_kernel_slow_
+    CUDA: foreach_tensor_mul_tensor_kernel_cuda_
+  autogen: _foreach_mul.Tensor_out
+
 - func: _foreach_div.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
