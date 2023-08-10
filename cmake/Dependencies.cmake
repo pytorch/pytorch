@@ -68,6 +68,14 @@ if(USE_CUDA)
     else()
       caffe2_update_option(USE_TENSORRT OFF)
     endif()
+    find_program(SCCACHE_EXECUTABLE sccache)
+    if(SCCACHE_EXECUTABLE)
+      # Using RSP/--options-file renders output noncacheable by sccache
+      # as they fall under `multiple input files` non-cacheable rule
+      set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES 0)
+      set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_LIBRARIES 0)
+      set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS 0)
+    endif()
   else()
     message(WARNING
       "Not compiling with CUDA. Suppress this warning with "
