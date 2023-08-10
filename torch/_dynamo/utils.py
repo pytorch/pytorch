@@ -463,6 +463,7 @@ def istensor(obj):
     """Check of obj is a tensor"""
     tensor_list = (
         torch.Tensor,
+        torch.nn.Buffer,
         torch.nn.Parameter,
         *config.traceable_tensor_subclasses,
     )
