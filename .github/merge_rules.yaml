@@ -120,6 +120,16 @@
   - Lint
   - pull
 
+- name: ATen
+  patterns:
+  - aten/**
+  approved_by:
+  - nkaretnikov
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Linear Algebra
   patterns:
   - aten/src/ATen/native/cuda/linalg/**
