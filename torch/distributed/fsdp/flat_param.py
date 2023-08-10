@@ -1137,7 +1137,7 @@ class FlatParamHandle:
             # sharded tensor on the compute device to be all-gathered (for
             # sharded strategies) or directly used (for `NO_SHARD`) for
             # computation.
-            flat_param._mp_shard = torch.zeros_like(
+            flat_param._mp_shard = torch.empty_like(
                 flat_param._local_shard,
                 device=self.device,
                 dtype=self._fwd_bwd_param_dtype,
@@ -1152,7 +1152,7 @@ class FlatParamHandle:
                 else flat_param.dtype
             )  # use low precision if parameter mixed precision is enabled
             padded_unsharded_numel = flat_param.numel() * self.world_size
-            flat_param._full_param_padded = torch.zeros(
+            flat_param._full_param_padded = torch.empty(
                 padded_unsharded_numel,
                 device=self.device,
                 dtype=unsharded_param_dtype,
@@ -1163,7 +1163,7 @@ class FlatParamHandle:
             if self._uses_param_mixed_precision:
                 # For parameter mixed precision, we maintain a full precision
                 # padded unsharded tensor for when we force full precision.
-                flat_param._full_prec_full_param_padded = torch.zeros(
+                flat_param._full_prec_full_param_padded = torch.empty(
                     padded_unsharded_numel,
                     device=self.device,
                     dtype=flat_param.dtype,  # full precision
