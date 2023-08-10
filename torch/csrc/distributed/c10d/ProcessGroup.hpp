@@ -663,6 +663,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return devices;
   }
 
+
+  void registerOnCompletionHook(std::function<void(c10::intrusive_ptr<Work>)>&& hook) {
+    getDefaultBackend()->registerOnCompletionHook(std::move(hook));
+  }
+
+  void waitForPendingWorks() {
+    getDefaultBackend()->waitForPendingWorks();
+  }
+
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
@@ -687,6 +697,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       deviceTypeToBackend_;
   std::unordered_map<BackendType, c10::intrusive_ptr<Backend>>
       backendTypeToBackend_;
+
 };
 
 } // namespace c10d

@@ -320,6 +320,24 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), " does not support barrier"));
   }
 
+  virtual void registerOnCompletionHook(std::function<void(c10::intrusive_ptr<Work>)>&& hook) {
+    TORCH_CHECK(
+      false,
+      "Only ProcessGrouppNCCL supports onCompletion hook, but got ",
+      getBackendName(),
+      " backend."
+    );
+  }
+
+  virtual void waitForPendingWorks() {
+    TORCH_CHECK(
+      false,
+      "Only ProcessGrouppNCCL supports waitForPendingWorks, but got ",
+      getBackendName(),
+      " backend."
+    );
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
@@ -332,6 +350,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
   DebugLevel dist_debug_level_;
+
+  std::function<void(c10::intrusive_ptr<Work>)> onCompletionHook_;
 };
 
 } // namespace c10d

@@ -42,6 +42,8 @@ constexpr const char* NCCL_ASYNC_ERROR_HANDLING = "NCCL_ASYNC_ERROR_HANDLING";
 // This variable must be set together with NCCL_ASYNC_ERROR_HANDLING.
 constexpr const char* NCCL_DESYNC_DEBUG = "NCCL_DESYNC_DEBUG";
 
+constexpr const char* NCCL_ENABLE_TIMING = "NCCL_ENABLE_TIMING";
+
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 // NoHandling: do not handle asynchronous NCCL errors
@@ -112,7 +114,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         uint64_t seq,
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt,
-        bool desyncDebug = false);
+        bool desyncDebug = false,
+        bool enableTiming = false);
     // Copy constructor doing partial copy without outputs_. Cleanup thread
     // monitors and removes finished works. However it will deadlock when
     // destructs outputs_ tensors who are view tensors in autograd graph.
@@ -152,6 +155,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Get a Future object that will be marked as completed internally.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
+
+    float getDuration() const override;
 
     // Helper function that sets an exception_ptr on the WorkNCCL object.
     void setException(std::exception_ptr exception_ptr);
@@ -465,6 +470,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // may indicate that there is some sort of collective desynchronization.
   uint64_t getSequenceNumberForGroup() override;
 
+  void registerOnCompletionHook(std::function<void(c10::intrusive_ptr<Work>)>&& hook) override;
+  void waitForPendingWorks() override;
+
   // Tests if the UCC fallback path is available
   bool isUCCAvailable() const;
 
@@ -661,6 +669,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not we should terminate the watchdog and workCleanup threads.
   std::atomic<bool> terminateProcessGroup_;
 
+  // Whether there are hooks pending to be fired
+  // .wait and .notify_* on std::atomic<T> is only available after c++20.
+  // Use a mutex and condition variable to implement it.
+  std::mutex hasPendingHooksMutex_;
+  std::condition_variable hasPendingHooksCV_;
+  std::atomic<bool> hasPendingHooks_;
+
   // Mutex to Guard workMetaList_
   std::mutex workMetaListMutex_;
 
@@ -722,6 +737,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
+
+  // Whether or not to create start CUDAEvent and enable timing for start
+  // and end events. Note that enableTiming_ is always true if desyncDebug_
+  // is set to true.
+  bool enableTiming_;
 
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;

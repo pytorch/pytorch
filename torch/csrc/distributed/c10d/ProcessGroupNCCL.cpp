@@ -314,7 +314,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     uint64_t seq,
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputs,
-    bool desyncDebug)
+    bool desyncDebug,
+    bool enableTiming)
     : Work(rank, opType, profilingTitle, inputs),
       devices_(devices),
       workStartTime_(std::chrono::steady_clock::now()),
@@ -322,12 +323,19 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
-  if (desyncDebug) {
-    ncclStartEvents_ =
-        std::make_shared<std::vector<at::cuda::CUDAEvent>>(devices.size());
+  if (enableTiming) {
+    ncclStartEvents_ = std::make_shared<std::vector<at::cuda::CUDAEvent>>();
+    ncclStartEvents_->reserve(devices.size());
+    for (uint32_t i = 0; i < devices.size(); ++i) {
+      ncclStartEvents_->emplace_back(at::cuda::CUDAEvent(cudaEventDefault));
+    }
   }
-  ncclEndEvents_ =
-      std::make_shared<std::vector<at::cuda::CUDAEvent>>(devices.size());
+  ncclEndEvents_ = std::make_shared<std::vector<at::cuda::CUDAEvent>>();
+  ncclEndEvents_->reserve(devices.size());
+  for (uint32_t i = 0; i < devices.size(); ++i) {
+    ncclEndEvents_->emplace_back(at::cuda::CUDAEvent(
+        enableTiming ? cudaEventDefault : cudaEventDisableTiming));
+  }
   ncclComms_.resize(devices.size());
 }
 
@@ -623,7 +631,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ncclCommCounter_(0),
       traceKeyStart_(getTraceStartKey("NCCL", rank)),
       traceKeyEnd_(getTraceEndKey("NCCL", rank)),
-      terminateProcessGroup_(false) {
+      terminateProcessGroup_(false),
+      hasPendingHooks_(false) {
   TORCH_CHECK(
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
@@ -632,6 +641,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       parseEnvVarIntDefault(NCCL_ASYNC_ERROR_HANDLING, 1 /*TearDown*/));
   desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
       (dist_debug_level_ >= DebugLevel::Detail);
+#ifdef ENABLE_NCCL_ERROR_CHECKING
+  enableTiming_ = parseEnvVarFlag(NCCL_ENABLE_TIMING) || desyncDebug_;
+#endif
   avoidRecordStreams_ = parseEnvVarFlag(TORCH_NCCL_AVOID_RECORD_STREAMS);
 
   if (blockingWait_) {
@@ -675,6 +687,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   LOG(INFO) << "[Rank " << rank_ << "] ProcessGroupNCCL initialization options:"
             << "NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
+            << ", NCCL_ENABLE_TIMING: " << enableTiming_
             << ", NCCL_BLOCKING_WAIT: " << blockingWait_
             << ", TIMEOUT(ms): " << options_->timeout.count()
             << ", USE_HIGH_PRIORITY_STREAM: "
@@ -783,6 +796,38 @@ uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
   return seq_;
 }
 
+void ProcessGroupNCCL::registerOnCompletionHook(
+    std::function<void(c10::intrusive_ptr<Work>)>&& hook) {
+  TORCH_CHECK(
+      enableTiming_,
+      "ProcessGroupNCCL OnCompletion hook requires recording start and end "
+      "events which require setting NCCL_ENABLE_TIMING environment variable. "
+      "This is only available for NCCL version >= 2.4.");
+  onCompletionHook_ = std::move(hook);
+}
+
+// must release GIL when calling this method
+void ProcessGroupNCCL::waitForPendingWorks() {
+  {
+    std::unique_lock<std::mutex> lock(workMetaListMutex_);
+    // busy-poll work vector
+    workMetaListCV_.wait_for(
+        lock,
+        std::chrono::milliseconds(kWatchdogThreadSleepMillis),
+        [&]() -> bool { return workMetaList_.empty(); });
+  }
+
+  {
+    std::unique_lock<std::mutex> lock(hasPendingHooksMutex_);
+    workMetaListCV_.wait_for(
+        lock,
+        std::chrono::milliseconds(kWatchdogThreadSleepMillis),
+        // not polling completedWorkList to avoid acquire two
+        // different locks at the same time.
+        [&]() -> bool { return !hasPendingHooks_.load(); });
+  }
+}
+
 void abortCommsFromMap(
     std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
         ncclCommsMap,
@@ -886,68 +931,122 @@ void ProcessGroupNCCL::logWorkEnd(WorkNCCL& work) {
 
 void ProcessGroupNCCL::workCleanupLoop() {
   bool done = false;
+
+  std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
   while (!done || !terminateProcessGroup_.load()) {
-    std::unique_lock<std::mutex> lock(workMetaListMutex_);
-    // We busy-poll the work vector every kWatchdogThreadSleepMillis
-    // milliseconds as long as the atomic is True.
-    workMetaListCV_.wait_for(
-        lock,
-        std::chrono::milliseconds(kWatchdogThreadSleepMillis),
-        [&]() -> bool { return terminateProcessGroup_.load(); });
+    {
+      std::unique_lock<std::mutex> lock(workMetaListMutex_);
+      // We busy-poll the work vector every kWatchdogThreadSleepMillis
+      // milliseconds as long as the atomic is True.
+      workMetaListCV_.wait_for(
+          lock,
+          std::chrono::milliseconds(kWatchdogThreadSleepMillis),
+          [&]() -> bool { return terminateProcessGroup_.load(); });
 
-    for (auto it = workMetaList_.begin(); it != workMetaList_.end();
-         /* no increment*/) {
-      auto& work = *it;
-      work.checkAndSetException();
-      bool timedOut = work.checkTimeout();
+      hasPendingHooks_.store(onCompletionHook_ && !workMetaList_.empty());
 
-      // If work hits an exception (either an error or timeout)
-      if (work.exception()) {
-        if (SHOULD_CLEAN_UP(asyncErrorHandling_)) {
-          // Abort work and corresponding communicators
-          work.abort();
-          // PG level abort, which would abort all other communicators on this
-          // rank
-          abort();
+      for (auto it = workMetaList_.begin(); it != workMetaList_.end();
+           /* no increment*/) {
+        auto& work = *it;
+        work.checkAndSetException();
+        bool timedOut = work.checkTimeout();
+
+        // If work hits an exception (either an error or timeout)
+        if (work.exception()) {
+          if (SHOULD_CLEAN_UP(asyncErrorHandling_)) {
+            // Abort work and corresponding communicators
+            work.abort();
+            // PG level abort, which would abort all other communicators on this
+            // rank
+            abort();
+          }
+          // Report desync state in case of timeout
+          if (desyncDebug_ && timedOut) {
+            try {
+              auto desyncMsg =
+                  retrieveDesyncReport(store_, "NCCL", rank_, size_);
+              LOG(ERROR) << desyncMsg;
+            } catch (const std::exception& e) {
+              LOG(ERROR) << "Failed to retrieve NCCL_DESYNC_DEBUG report. "
+                         << " Please file an issue. Error: " << e.what();
+            } catch (...) {
+              LOG(ERROR)
+                  << "Failed to rerieve NCCL_DESYNC_DEBUG report with unknown error."
+                  << " Please file an issue.";
+            }
+          }
+          // Throw exception
+          work.handleException(asyncErrorHandling_);
         }
-        // Report desync state in case of timeout
-        if (desyncDebug_ && timedOut) {
-          try {
-            auto desyncMsg = retrieveDesyncReport(store_, "NCCL", rank_, size_);
-            LOG(ERROR) << desyncMsg;
-          } catch (const std::exception& e) {
-            LOG(ERROR) << "Failed to retrieve NCCL_DESYNC_DEBUG report. "
-                       << " Please file an issue. Error: " << e.what();
-          } catch (...) {
-            LOG(ERROR)
-                << "Failed to rerieve NCCL_DESYNC_DEBUG report with unknown error."
-                << " Please file an issue.";
+
+        // Work status logging for desync debug
+        if (desyncDebug_) {
+          if (work.isStarted()) {
+            logWorkStart(work);
+          }
+          if (work.isCompleted()) {
+            logWorkEnd(work);
           }
         }
-        // Throw exception
-        work.handleException(asyncErrorHandling_);
-      }
 
-      // Work status logging for desync debug
-      if (desyncDebug_) {
-        if (work.isStarted()) {
-          logWorkStart(work);
-        }
+        // Clean up completed work
         if (work.isCompleted()) {
-          logWorkEnd(work);
+          if (onCompletionHook_) {
+            // onCompletion hook will consume the work, so keep them alive in a
+            // separate list for now
+            completedWorkList.splice(
+                completedWorkList.begin(), workMetaList_, it++);
+          } else {
+            it = workMetaList_.erase(it);
+          }
+        } else {
+          // Increment the iterator if the current WorkNCCL object is not
+          // completed.
+          ++it;
         }
       }
-
-      // Clean up completed work
-      if (work.isCompleted()) {
-        it = workMetaList_.erase(it);
-      } else {
-        // Increment the iterator if the current WorkNCCL object is not
-        // completed.
-        ++it;
-      }
+      done = workMetaList_.empty();
     }
-    done = workMetaList_.empty();
+    // Python hook will grab GIL. Release workMetaListMutex_ before acquiring
+    // GIL to avoid potential deadlock.
+
+    try {
+      while (!completedWorkList.empty()) {
+        // The work object will be passed to Python side. Wrap it
+        // with an intrusive_ptr so that pybind can safely pass by copy
+        // and own the ptr lifetime.
+        onCompletionHook_(
+            c10::make_intrusive<WorkNCCL>(completedWorkList.back()));
+        completedWorkList.pop_back();
+      }
+    } catch (std::exception& e) {
+      // PythonOnCompletionHook has already extracted Python exception message
+      // and wrapped it with a cpp one. So we no longer need to acquire GIL
+      // here.
+      const auto errorStr = c10::str(
+          "Caught exception while running onCompletion hook for ProcessGroupNCCL: ",
+          e.what(),
+          "Aborting all communicators.");
+
+      if (!completedWorkList.empty()) {
+        // CompletedWorkList is not empty, so it should be the first work in
+        // the queue triggered this exception. Use that work object to handle
+        // the error.
+        completedWorkList.back().setException(
+            std::make_exception_ptr(std::runtime_error(errorStr)));
+        completedWorkList.back().abort();
+        completedWorkList.back().handleException(asyncErrorHandling_);
+      }
+      // Abort all NCCL Communicators on this ProcessGroupNCCL instance.
+      abort();
+    }
+
+    // N.B.: this only guarantees all Work objects inserted before calling
+    // waitForPendingWorks has all been cleaned up. There could be additional
+    // Work items inserted into workMetaList_ while processing hooks. Therefore,
+    // users need to make sure waitForPendingWorks is call after all collectives
+    // they care about has been enqueued.
+    hasPendingHooks_.store(false);
   }
 }
 
@@ -1399,7 +1498,14 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputs) {
   return c10::make_intrusive<ProcessGroupNCCL::WorkNCCL>(
-      devices, rank, opType, seq_, profilingTitle, inputs, desyncDebug_);
+      devices,
+      rank,
+      opType,
+      seq_,
+      profilingTitle,
+      inputs,
+      desyncDebug_,
+      enableTiming_);
 }
 
 std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
@@ -1409,6 +1515,19 @@ std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
     getFuture() {
   return future_;
+}
+
+float ProcessGroupNCCL::WorkNCCL::getDuration() const {
+  TORCH_CHECK(
+      ncclStartEvents_->size() == 1,
+      "getDuration only works for single device per ProcessGroup.");
+  TORCH_CHECK(
+      ncclEndEvents_->size() == 1,
+      "getDuration only works for single device per ProcessGroup.");
+  TORCH_CHECK(
+      (*ncclEndEvents_)[0].query(),
+      "getDuration can only be called after work is succeeded.")
+  return (*ncclStartEvents_)[0].elapsed_time((*ncclEndEvents_)[0]);
 }
 
 void ProcessGroupNCCL::workEnqueue(
@@ -1560,7 +1679,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   at::cuda::OptionalCUDAGuard gpuGuard;
 
   // Start event should only be recorded before the ncclGroupStart()
-  if (desyncDebug_) {
+  if (enableTiming_) {
     for (const auto i : c10::irange(devices.size())) {
       at::cuda::CUDAStream& ncclStream = ncclStreams[i];
       (*work->ncclStartEvents_)[i].record(ncclStream);
@@ -1735,7 +1854,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   at::cuda::OptionalCUDAGuard gpuGuard;
 
   // Start event should only be recorded before the ncclGroupStart()
-  if (desyncDebug_) {
+  if (enableTiming_) {
     for (const auto i : c10::irange(tensors.size())) {
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
       (*work->ncclStartEvents_)[i].record(ncclStream);

@@ -1380,6 +1380,9 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
     if _world.pg_map.get(pg, None) is None:
         raise RuntimeError("Invalid process group specified")
 
+    # prevent Python Interpreter to exit before all hooks are fired
+    pg._wait_for_pending_works()
+
     if group is None or group == GroupMember.WORLD:
         _update_default_pg(None)
         _world.pg_map.clear()

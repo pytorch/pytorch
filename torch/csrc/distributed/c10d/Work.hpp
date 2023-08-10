@@ -107,6 +107,8 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // work. Only NCCL backend is currently supported.
   virtual c10::intrusive_ptr<c10::ivalue::Future> getFuture();
 
+  virtual float getDuration() const;
+
   OpType retrieveOpType();
 
   static c10::intrusive_ptr<Work> create_from_future(
