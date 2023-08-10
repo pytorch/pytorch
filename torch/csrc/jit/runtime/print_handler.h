@@ -2,6 +2,8 @@
 
 #include <torch/csrc/Export.h>
 
+#include <string>
+
 namespace torch {
 namespace jit {
 
