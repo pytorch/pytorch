@@ -131,8 +131,7 @@ Attempting to broadcast a dimension of length 10 at -1! Mismatching argument at 
 
 from user code:
    File "test_logging.py", line N, in dynamo_error_fn
-    output = output.add(torch.ones(10, 10))
-""",  # noqa: B950
+    output = output.add(torch.ones(10, 10))""",  # noqa: B950
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
@@ -176,8 +175,7 @@ LoweringException: AssertionError:
   target: aten.round.default
   args[0]: TensorBox(StorageBox(
     InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
-  ))
-""",
+  ))""",
         )
 
         exitstack.close()
@@ -541,6 +539,28 @@ print("arf")
                    ~~^~~""",
         )
 
+    @make_logging_test(**torch._logging.DEFAULT_LOGGING)
+    def test_default_logging(self, records):
+        def fn(a):
+            if a.sum() < 0:
+                a = torch.sin(a)
+            else:
+                a = torch.cos(a)
+            print("hello")
+            return a + 1
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(torch.ones(10, 10))
+        fn_opt(-torch.ones(10, 5))
+
+        self.assertGreater(len([r for r in records if ".__graph_breaks" in r.name]), 0)
+        self.assertGreater(len([r for r in records if ".__recompiles" in r.name]), 0)
+        self.assertGreater(len([r for r in records if ".symbolic_shapes" in r.name]), 0)
+        self.assertGreater(len([r for r in records if ".__guards" in r.name]), 0)
+        self.assertGreater(
+            len([r for r in records if "return a + 1" in r.getMessage()]), 0
+        )
+
 
 # single record tests
 exclusions = {
@@ -556,6 +576,8 @@ exclusions = {
     "trace_source",
     "trace_call",
     "custom_format_test_artifact",
+    "onnx",
+    "onnx_diagnostics",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
