@@ -404,17 +404,14 @@ void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool left
 
 template <typename scalar_t>
 inline void apply_gels_batched(const Tensor& A, Tensor& B, Tensor& infos) {
-#if defined(ROCM_VERSION) && (ROCM_VERSION >= 50400)
-  // Cannot auto-hipifiy this piece of code, because in other functions
-  // CUBLAS_OP_N must be translated to HIPSOLVER_OP_N
-  auto trans = HIPBLAS_OP_N;
-#else
-#ifdef ROCM_VERSION
-  // Cannot auto-hipifiy this piece of code, because in other functions
-  // CUBLAS_OP_N must be translated to HIPSOLVER_OP_N
-  auto trans = rocblas_operation_none;
-#else
+#if not defined(ROCM_VERSION)
   auto trans = CUBLAS_OP_N;
+#endif
+#if defined(ROCM_VERSION) && ROCM_VERSION >= 50400
+  auto trans = HIPBLAS_OP_N;
+#endif
+#if defined(ROCM_VERSION) && ROCM_VERSION < 50400
+  auto trans = rocblas_operation_none;
 #endif
   auto m = cuda_int_cast(A.size(-2), "m");
   auto n = cuda_int_cast(A.size(-1), "n");
@@ -465,7 +462,6 @@ inline void apply_gels_batched(const Tensor& A, Tensor& B, Tensor& infos) {
 
   // negative info indicates that an argument to gelsBatched call is invalid
   TORCH_INTERNAL_ASSERT(info == 0);
-#endif
 }
 
 // This is a type dispatching helper function for 'apply_gels_batched'
