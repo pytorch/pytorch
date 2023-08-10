@@ -14,11 +14,9 @@ pip_install \
   networkx==2.0 \
   numpy==1.22.4
 
-# Using 1.15dev branch for the following not yet released features and fixes.
-# - Segfault fix for shape inference.
-# - Inliner to workaround ORT segfault.
-pip_install onnx-weekly==1.15.0.dev20230717
-
+# ONNXRuntime should be installed before installing
+# onnx-weekly. Otherwise, onnx-weekly could be
+# overwritten by onnx.
 pip_install \
   onnxruntime==1.15.1 \
   parameterized==0.8.1 \
@@ -26,6 +24,11 @@ pip_install \
   pytest-subtests==0.10.0 \
   tabulate==0.9.0 \
   transformers==4.25.1
+
+# Using 1.15dev branch for the following not yet released features and fixes.
+# - Segfault fix for shape inference.
+# - Inliner to workaround ORT segfault.
+pip_install onnx-weekly==1.15.0.dev20230717
 
 # TODO: change this when onnx-script is on testPypi
 pip_install onnxscript-preview==0.1.0.dev20230801 --no-deps
