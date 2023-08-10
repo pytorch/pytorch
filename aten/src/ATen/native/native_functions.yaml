@@ -10119,6 +10119,25 @@
     CUDA: foreach_tensor_div_scalarlist_kernel_cuda_
   autogen: _foreach_div.ScalarList_out
 
+# TODO(crcrpar): Think of adding overloads for `TensorList`s and `ScalarList`s
+# ref: https://github.com/pytorch/pytorch/issues/106931
+- func: _foreach_clamp(Tensor[] self, Scalar? min=None, Scalar? max=None) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  cpp_no_default_args: ['min']
+  dispatch:
+    CPU: foreach_tensor_clamp_scalar_kernel_slow
+    CUDA: foreach_tensor_clamp_scalar_kernel_cuda
+
+- func: _foreach_clamp_(Tensor(a!)[] self, Scalar? min=None, Scalar? max=None) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  cpp_no_default_args: ['min']
+  dispatch:
+    CPU: foreach_tensor_clamp_scalar_kernel_slow_
+    CUDA: foreach_tensor_clamp_scalar_kernel_cuda_
+  autogen: _foreach_clamp.out
+
 - func: _foreach_clamp_max.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
