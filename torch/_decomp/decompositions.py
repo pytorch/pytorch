@@ -2155,6 +2155,7 @@ def _compute_upsample_nearest_indices(input, output_size, scales):
     # to produce the upsampled output.
     indices = []
     num_spatial_dims = len(output_size)
+    input_dtype = torch.float if input.dtype == torch.uint8 else input.dtype
     for d in range(num_spatial_dims):
         # Math matches aten/src/ATen/native/cpu/UpSampleKernel.cpp
         # Indices are computed as following:
@@ -2162,7 +2163,7 @@ def _compute_upsample_nearest_indices(input, output_size, scales):
         # input_index = floor(output_index * scale)
         # Same as OpenCV INTER_NEAREST
         osize = output_size[d]
-        output_indices = torch.arange(osize, dtype=input.dtype, device=input.device)
+        output_indices = torch.arange(osize, dtype=input_dtype, device=input.device)
         isize = input.shape[-num_spatial_dims + d]
         scale = isize / (isize * scales[d]) if scales[d] is not None else isize / osize
         input_indices = (output_indices * scale).to(torch.int64)
