@@ -41,7 +41,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-py3_8-gcc11-build
     with:
-      build-environment: linux-focal-py3.8-gcc9
+      build-environment: linux-jammy-py3.8-gcc11
       docker-image: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.test-matrix }}
 
