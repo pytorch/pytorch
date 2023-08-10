@@ -1399,7 +1399,6 @@ def create_functionalized_graph(
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
                     # so the compiler will see the input mutation in the graph.
                     assert inpt_new is not inpt_old
-                    assert has_same_metadata(inpt_new, inpt_old)
                     inpt_old.copy_(inpt_new)
 
         return pytree.tree_map(from_fun, f_outs)
@@ -1649,6 +1648,74 @@ def same_dtype_views(view1, view2):
     return True
 
 
+
+# Assumption: x and y are known to share a storage, and we are trying to determine
+# if their memory is actually completely disjoint, based on sizes/strides/storage_offset
+def tensors_definitely_do_not_overlap(x, y):
+    if x is y:
+        return False
+    if x.numel() == 0 or y.numel() == 0:
+        return True
+
+    # Make x always on the left
+    if x.storage_offset() > y.storage_offset():
+        x, y = y, x
+
+    # Short-circuit in the "obvious" overlapping case: both tensors are contiguous
+    if x.is_contiguous() and y.is_contiguous():
+        x_numbytes = x.numel() * x.itemsize
+        if x.storage_offset() + x_numbytes > y.storage_offset():
+            return False
+
+    # expected inputs: two lists of intervals in increasing order. Don't need to have the same length
+    def intervals_intersect(xs, ys):
+        if len(xs) == 0 or len(ys) == 0:
+            return False
+        x_ = xs[0]
+        y_ = ys[0]
+        if max(0, min(x_[1], y_[1]) - max(x_[0], y_[0])) > 0:
+            return True
+        if x_[1] > y_[1]:
+            return intervals_intersect(xs, ys[1:])
+        else:
+            return intervals_intersect(xs[1:], ys)
+
+    # This cases is needed for the shampoo optimizer.
+    # We can compute a list of contiguous intervals and check if any of them intersect
+    if x.dim() == 2 and y.dim() == 2 and x.stride()[1] == 1 and y.stride()[1] == 1:
+        # Simple case first: both inputs have the same outer stride
+        if x.stride(0) == y.stride(0):
+            if x.storage_offset() + x.size(0) > y.storage_offset():
+                return True
+            if y.storage_offset() + y.size(0) > x.stride(0):
+                return True
+
+        # Slightly more complicated case, to account for 2d tensors with different outer strides.
+        # This check takes O(outer_stride) for every pair of tensors!
+        # Compute the (start, end) range of contiguous memory of each region of the tensor
+        x_ranges = [
+            (x.data_ptr() + i * x.stride()[1], x.data_ptr() + i * x.stride()[1] + x.shape[1])
+            for i in range(x.shape[0] - 1)
+        ]
+        y_ranges = [
+            (y.data_ptr() + i * y.stride()[1], y.data_ptr() + i * y.stride()[1] + y.shape[1])
+            for i in range(y.shape[0] - 1)
+        ]
+        if not intervals_intersect(x_ranges, y_ranges):
+            return True
+    return False
+
+def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
+    actual_aliased_indices = set()
+    for j in range(len(aliased_input_indices)):
+        for i in range(j):
+            i_ = aliased_input_indices[i]
+            j_ = aliased_input_indices[j]
+            if not tensors_definitely_do_not_overlap(fwd_inputs[i_], fwd_inputs[j_]):
+                actual_aliased_indices.add(i_)
+                actual_aliased_indices.add(j_)
+    return actual_aliased_indices
+
 # Note [Handling mutations on an input that aliases other inputs]
 # The easiest example to show-case this edge case is here:
 #
@@ -1749,6 +1816,19 @@ def merge_view_inputs(
             for curr_idx in aliased_input_indices:
                 other_args.append(fwd_inputs[curr_idx])
             continue
+
+        # Here, we attempt to do a more complicated check to detect false aliasing
+        # (e.g. if all the tensors have the same storage, but don't actually overlap)
+        # In theory, we could have a large group of tensors that all share storages, where only *some* of them
+        # have overlapping memory.
+        # I don't bother with that case for now: here, we only bail out earlier if we detect that **every** pair
+        # of tensors in the current group that shares a storage is non-overlapping.
+        aliased_input_indices_no_false_sharing = compute_overlapping_inputs(fwd_inputs, aliased_input_indices)
+        if len(aliased_input_indices_no_false_sharing) <= 1:
+            for curr_idx in aliased_input_indices:
+                other_args.append(fwd_inputs[curr_idx])
+            continue
+
         # We detected an input that was mutated, AND aliases with another input.
         # we need to replace this set of aliased inputs with a single synthetic base.
         # For now, I'm banning a bunch of cases. We expect dynamo to properly detect these cases
@@ -2488,8 +2568,12 @@ def create_runtime_wrapper(
                 # We can't just check of original_inpt.storage_size != updated_inpt.storage_size,
                 # Because the original_inpt might be a view of some larger tensor,
                 # and updated_inpt is always densely packed.
-                if not trace_joint and original_inpt.storage().size() != updated_inpt.storage().size():
-                    original_inpt.resize_(updated_inpt.size())
+                if not trace_joint and original_inpt.untyped_storage().size() != updated_inpt.untyped_storage().size():
+                    # It actually isn't enough just to see if the storage sizes are different between old and new inputs.
+                    # If the original input was a slice into some larger storage, the same will not be true for the updated input.
+                    # So before doing the resize_(), we **also** check that functionalization detected a metadata mutation.
+                    if meta.mutates_metadata:
+                        original_inpt.resize_(updated_inpt.size())
                 if meta.mutates_metadata and not meta.mutates_data:
                     if trace_joint:
                         assert isinstance(updated_inpt, TensorAlias)

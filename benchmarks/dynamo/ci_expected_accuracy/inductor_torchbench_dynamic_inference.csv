@@ -9,6 +9,7 @@ basic_gnn_edgecnn,pass,0
 basic_gnn_gcn,pass,6
 basic_gnn_gin,pass,0
 basic_gnn_sage,pass,0
+clip,pass,0
 cm3leon_generate,pass,6
 dcgan,pass,0
 doctr_det_predictor,pass,4
@@ -19,12 +20,11 @@ functorch_dp_cifar10,pass,0
 functorch_maml_omniglot,pass,0
 hf_Albert,pass,0
 hf_Bart,pass,0
-hf_Bert,pass,0
-hf_Bert_large,pass,0
 hf_DistilBert,pass,0
 hf_GPT2,pass,0
 hf_Reformer,pass,26
 hf_T5_large,pass_due_to_skip,0
+hf_Whisper,pass,0
 lennard_jones,pass,0
 llama,fail_accuracy,0
 maml_omniglot,pass,0
@@ -47,6 +47,7 @@ sam,pass,0
 shufflenet_v2_x1_0,pass,0
 soft_actor_critic,pass,0
 squeezenet1_1,pass,0
+stable_diffusion,pass,0
 timm_efficientnet,pass,0
 timm_regnet,pass,0
 timm_resnest,pass,0
