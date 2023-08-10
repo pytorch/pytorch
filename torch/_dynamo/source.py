@@ -80,6 +80,7 @@ def reconstruct_getitem(
 @dataclasses.dataclass(frozen=True)
 class LocalSource(Source):
     local_name: str
+    cell_or_freevar: bool = False
 
     def reconstruct(self, codegen):
         return [codegen.create_load(self.local_name)]
@@ -486,7 +487,13 @@ class ShapeEnvSource(Source):
         return GuardSource.SHAPE_ENV
 
 
-def is_from_local_source(source: Source):
+def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
     if isinstance(source, ChainedSource):
-        return is_from_local_source(source.base)
-    return isinstance(source, LocalSource)
+        return is_from_local_source(
+            source.base, allow_cell_or_freevar=allow_cell_or_freevar
+        )
+    if not isinstance(source, LocalSource):
+        return False
+    if not allow_cell_or_freevar and source.cell_or_freevar:
+        return False
+    return True

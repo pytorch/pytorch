@@ -143,9 +143,19 @@ function install_torchtext() {
 }
 
 function install_torchvision() {
+  local orig_preload
   local commit
   commit=$(get_pinned_commit vision)
+  orig_preload=${LD_PRELOAD}
+  if [ -n "${LD_PRELOAD}" ]; then
+    # Silence dlerror to work-around glibc ASAN bug, see https://sourceware.org/bugzilla/show_bug.cgi?id=27653#c9
+    echo 'char* dlerror(void) { return "";}'|gcc -fpic -shared -o "${HOME}/dlerror.so" -x c -
+    LD_PRELOAD=${orig_preload}:${HOME}/dlerror.so
+  fi
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git@${commit}"
+  if [ -n "${LD_PRELOAD}" ]; then
+    LD_PRELOAD=${orig_preload}
+  fi
 }
 
 function install_numpy_pytorch_interop() {

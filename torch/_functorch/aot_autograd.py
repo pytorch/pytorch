@@ -1649,10 +1649,23 @@ def same_dtype_views(view1, view2):
 
 
 
+# Assumption: x and y are known to share a storage, and we are trying to determine
+# if their memory is actually completely disjoint, based on sizes/strides/storage_offset
 def tensors_definitely_do_not_overlap(x, y):
-    if torch._C._are_definitely_non_overlapping(x, y):
-        # not overlapping (this covers the basic cases that eager mode uses)
+    if x is y:
+        return False
+    if x.numel() == 0 or y.numel() == 0:
         return True
+
+    # Make x always on the left
+    if x.storage_offset() > y.storage_offset():
+        x, y = y, x
+
+    # Short-circuit in the "obvious" overlapping case: both tensors are contiguous
+    if x.is_contiguous() and y.is_contiguous():
+        x_numbytes = x.numel() * x.itemsize
+        if x.storage_offset() + x_numbytes > y.storage_offset():
+            return False
 
     # expected inputs: two lists of intervals in increasing order. Don't need to have the same length
     def intervals_intersect(xs, ys):
@@ -1670,6 +1683,15 @@ def tensors_definitely_do_not_overlap(x, y):
     # This cases is needed for the shampoo optimizer.
     # We can compute a list of contiguous intervals and check if any of them intersect
     if x.dim() == 2 and y.dim() == 2 and x.stride()[1] == 1 and y.stride()[1] == 1:
+        # Simple case first: both inputs have the same outer stride
+        if x.stride(0) == y.stride(0):
+            if x.storage_offset() + x.size(0) > y.storage_offset():
+                return True
+            if y.storage_offset() + y.size(0) > x.stride(0):
+                return True
+
+        # Slightly more complicated case, to account for 2d tensors with different outer strides.
+        # This check takes O(outer_stride) for every pair of tensors!
         # Compute the (start, end) range of contiguous memory of each region of the tensor
         x_ranges = [
             (x.data_ptr() + i * x.stride()[1], x.data_ptr() + i * x.stride()[1] + x.shape[1])

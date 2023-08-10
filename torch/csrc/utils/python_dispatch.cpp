@@ -4,7 +4,6 @@
 #include <ATen/ATen.h>
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/FunctionalTensorWrapper.h>
-#include <ATen/MemoryOverlap.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <ATen/core/dispatch/Dispatcher.h>
@@ -732,14 +731,6 @@ void initDispatchBindings(PyObject* module) {
   m.def("_commit_update", [](const at::Tensor& a) {
     return at::functionalization::impl::commit_update(a);
   });
-  m.def(
-      "_are_definitely_non_overlapping",
-      [](const at::Tensor& a, const at::Tensor& b) {
-        auto overlap = at::get_overlap_status(a, b);
-        if (overlap == at::MemOverlapStatus::No)
-          return true;
-        return false;
-      });
 
   m.def("_are_functorch_transforms_active", []() {
     auto include_set = c10::impl::tls_local_dispatch_key_set().included_;
