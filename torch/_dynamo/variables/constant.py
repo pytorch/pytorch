@@ -109,7 +109,7 @@ class ConstantVariable(VariableTracker):
             ).call_method(tx, name, args, kwargs)
 
         if istype(self.value, list):
-            # empty tuple constant etc
+            # empty list constant etc
             return variables.ListVariable(
                 items=self.unpack_var_sequence(tx), source=self.source, **options
             ).call_method(tx, name, args, kwargs)

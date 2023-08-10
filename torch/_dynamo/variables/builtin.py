@@ -1329,7 +1329,6 @@ class BuiltinVariable(VariableTracker):
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
 
         def _resolve_getattr(get_attr_var):
-            print("Resolving getattr")
             assert isinstance(get_attr_var, variables.GetAttrVariable)
             try:
                 return get_attr_var.call_function(tx, [], {})

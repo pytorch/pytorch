@@ -1,14 +1,16 @@
+from unittest.mock import patch
+
 import torch
+import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from unittest.mock import patch
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
-import torch._dynamo
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fsdp import FSDPTest
+
 
 class FSDPTests(torch._dynamo.test_case.TestCase, FSDPTest):
     @skip_if_lt_x_gpu(2)
@@ -52,4 +54,3 @@ class FSDPTests(torch._dynamo.test_case.TestCase, FSDPTest):
             optim.step()
         self.assertEqual(len(losses), 3)
         self.assertEqual(cnt.frame_count, 1)
-
