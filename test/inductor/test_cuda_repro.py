@@ -829,7 +829,7 @@ class CudaReproTests(TestCase):
         """
 
         def fn(values, offsets):
-            return torch.ops.prims._inductor_bucketize(values, offsets)
+            return torch.bucketize(values, offsets)
 
         values = torch.rand((64, 64), device="cuda")
         offsets = torch.tensor([0.05, 0.1, 0.5, 0.8, 0.85, 0.95], device="cuda")
