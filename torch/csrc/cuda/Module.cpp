@@ -1502,8 +1502,7 @@ PyMethodDef* THCPModule_methods() {
   return _THCPModule_methods;
 }
 
-namespace torch {
-namespace cuda {
+namespace torch::cuda {
 
 namespace shared {
 
@@ -1528,5 +1527,4 @@ void initModule(PyObject* module) {
   registerCudaPluggableAllocator(module);
 }
 
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda
