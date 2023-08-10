@@ -62,7 +62,6 @@ from .passes.add_runtime_assertions_for_constraints_pass import _AddRuntimeAsser
 #
 # result = torch._dynamo.export(
 #     my_model,
-#     *sixtyfour_tensors,
 #     constraints=[
 #         # if you do only dynamic_dim, this is sugar for
 #         # -Inf <= dynamic_dim(blah, 0) <= Inf; we don’t otherwise
@@ -74,6 +73,8 @@ from .passes.add_runtime_assertions_for_constraints_pass import _AddRuntimeAsser
 #         # NB: But we actually truncate ranges to be >= 2, because of
 #         # 0/1 specialization
 #     ]
+# )(
+#     *sixtyfour_tensors,
 # )
 def dynamic_dim(t: torch.Tensor, index: int):
     if not isinstance(t, torch.Tensor):
@@ -109,14 +110,10 @@ def dynamic_dim(t: torch.Tensor, index: int):
 class ExportDynamoConfig:
     """
     Manage Export-specific configurations of Dynamo.
-    TODO add tests to make sure the flags are not outdated
     """
-    capture_scalar_outputs: bool = True
-    capture_dynamic_output_shape_ops: bool = True
-    guard_nn_modules: bool = True
-    dynamic_shapes: bool = True
-    specialize_int: bool = True
     allow_rnn: bool = True
+
+DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
 
 
 DECOMP_TABLE = core_aten_decompositions()
@@ -148,14 +145,15 @@ def export(
     constraints = constraints or []
     kwargs = kwargs or {}
 
-    with torch._dynamo.config.patch(dataclasses.asdict(ExportDynamoConfig())):  # type: ignore[attr-defined]
+    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
         try:
             gm_torch_level, _ = torch._dynamo.export(
                 f,
-                *args,
                 constraints=constraints,
                 assume_static_by_default=True,
                 tracing_mode="symbolic",
+            )(
+                *args,
                 **kwargs,
             )
 
