@@ -20,7 +20,7 @@ pip_install \
 pip_install onnx-weekly==1.15.0.dev20230717
 
 pip_install \
-  onnxruntime==1.15.0 \
+  onnxruntime==1.15.1 \
   parameterized==0.8.1 \
   pytest-cov==4.0.0 \
   pytest-subtests==0.10.0 \
