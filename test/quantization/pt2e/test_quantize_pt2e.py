@@ -1875,14 +1875,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         quantizer.set_global(operator_config)
         example_inputs = (torch.randn(1, 3, 3, 3),)
 
-        with torch.no_grad():
-            self._test_representation(
-                M().eval(),
-                example_inputs,
-                quantizer,
-                ref_node_occurrence={},
-                non_ref_node_occurrence={}
-            )
+        self._test_representation(
+            M().eval(),
+            example_inputs,
+            quantizer,
+            ref_node_occurrence={},
+            non_ref_node_occurrence={}
+        )
 
     def test_representation_add(self):
         class M(torch.nn.Module):
