@@ -352,7 +352,7 @@ def export(
             # so we serialize them here instead of inside dynamo
             gm.meta["inline_constraints"] = {
                 k: v
-                for k, v in fake_mode.shape_env.var_to_range.items()
+                for k, v in fake_mode.shape_env.runtime_var_to_range.items()
                 if re.match(r"^[if]\d+$", str(k))
             }
 
