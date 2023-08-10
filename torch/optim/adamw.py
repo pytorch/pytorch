@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt,
                         _stack_if_compiling, _capturable_doc, _differentiable_doc, _foreach_doc,
-                        _fused_doc, _maximize_doc, _default_to_fused_or_foreach)
+                        _fused_doc, _maximize_doc, _default_to_fused_or_foreach, params_t)
 from typing import List, Optional, Tuple, Union
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
@@ -12,7 +12,7 @@ __all__ = ["AdamW", "adamw"]
 class AdamW(Optimizer):
     def __init__(
         self,
-        params,
+        params: params_t,
         lr: Union[float, Tensor] = 1e-3,
         betas: Tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
