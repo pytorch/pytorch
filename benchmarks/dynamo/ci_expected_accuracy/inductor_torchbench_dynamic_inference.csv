@@ -1,6 +1,6 @@
 name,accuracy,graph_breaks
 BERT_pytorch,pass,0
-Background_Matting,pass,0
+Background_Matting,pass_due_to_skip,0
 LearningToPaint,pass,0
 Super_SloMo,pass,0
 alexnet,pass,0
