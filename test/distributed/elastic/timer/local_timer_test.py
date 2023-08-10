@@ -49,7 +49,7 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
             self.server.stop()
 
         def test_exception_propagation(self):
-            with self.assertRaisesRegex(Exception, "^foobar$"):
+            with self.assertRaisesRegex(Exception, "^Configure timer client before using countdown timers.$"):
                 with timer.expires(after=1):
                     raise Exception("foobar")
 

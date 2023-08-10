@@ -827,12 +827,8 @@ class TestCommon(TestCase):
 
             # Validates the op doesn't support out if it claims not to
             if not op.supports_out:
-                try:
+                with self.assertRaises(TypeError):
                     op_out(out=expected)
-                except Exception as e:
-                    print('%' * 100)
-                    print(type(e))
-                    raise
                 return
 
             # A wrapper around map that works with single tensors and always
