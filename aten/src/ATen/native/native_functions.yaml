@@ -10128,6 +10128,7 @@
   autogen: _foreach_div.ScalarList_out
 
 # TODO(crcrpar): Think of adding overloads for `TensorList`s and `ScalarList`s
+# ref: https://github.com/pytorch/pytorch/issues/106931
 - func: _foreach_clamp(Tensor[] self, Scalar? min=None, Scalar? max=None) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
