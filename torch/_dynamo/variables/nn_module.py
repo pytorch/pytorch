@@ -159,6 +159,11 @@ class NNModuleVariable(VariableTracker):
         if not isinstance(getattr_fn, types.FunctionType):
             unimplemented("torch.nn.Module with a non-function custom __getattr__")
 
+        if getattr(base, "_is_fsdp_managed_module", False):
+            from .builder import VariableBuilder
+
+            return VariableBuilder(tx, source)(getattr_fn(base, name))
+
         return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
             tx, [variables.ConstantVariable.create(name)], {}
         )
@@ -613,6 +618,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 "ScriptModules aren't supported in UnspecializedNNModuleVariable"
                 " becuase their .forward function isn't a static member of their type"
             )
+        if (
+            getattr(value, "_is_fsdp_managed_module", False)
+            and type(self) == UnspecializedNNModuleVariable
+        ):
+            raise RuntimeError(f"Illegal construction {type(self)}")
         if "value_type" in kwargs:
             lazy_value_to_become = getattr(kwargs["value_type"], "cls_to_become", None)
             if type(value) is lazy_value_to_become:
@@ -760,7 +770,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     compilation.
     """
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, module_key, **kwargs):
         source = kwargs.get("source", None)
         assert (
             source is not None
