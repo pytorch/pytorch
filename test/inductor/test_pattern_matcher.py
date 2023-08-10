@@ -190,13 +190,17 @@ class TestPaternMatcher(TestCase):
     @inductor_config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm_epi(self):
         def fn(a, b, c, d):
-            return torch.mm(
-                a,
-                torch.cat((b & 0xF, b >> 4), 1)
-                .reshape(-1, b.shape[1])
-                .to(a.dtype)
-                .sub(8),
-            ) * c + d
+            return (
+                torch.mm(
+                    a,
+                    torch.cat((b & 0xF, b >> 4), 1)
+                    .reshape(-1, b.shape[1])
+                    .to(a.dtype)
+                    .sub(8),
+                )
+                * c
+                + d
+            )
 
         args_list = [
             (
@@ -228,15 +232,15 @@ class TestPaternMatcher(TestCase):
             )
 
         args_list = [
-            (   # cpu
+            (  # cpu
                 torch.randn(8, 8),
                 torch.randint(0, 255, (4, 8), dtype=torch.uint8),
             ),
-            (   # int8
+            (  # int8
                 torch.randn(8, 8, device="cuda"),
                 torch.randint(-128, 127, (4, 8), dtype=torch.int8, device="cuda"),
             ),  # we don't match for int8 since numerics
-        ] # for int8 bitshifts don't match between triton and pytorch
+        ]  # for int8 bitshifts don't match between triton and pytorch
 
         for args in args_list:
             torch._dynamo.reset()
