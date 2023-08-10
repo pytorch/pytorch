@@ -38,7 +38,10 @@ class InverseGamma(TransformedDistribution):
 
     def __init__(self, concentration, rate, validate_args=None):
         base_dist = Gamma(concentration, rate, validate_args=validate_args)
-        super().__init__(base_dist, PowerTransform(-1), validate_args=validate_args)
+        neg_one = -base_dist.rate.new_ones(())
+        super().__init__(
+            base_dist, PowerTransform(neg_one), validate_args=validate_args
+        )
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(InverseGamma, _instance)
