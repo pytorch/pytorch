@@ -714,15 +714,6 @@ Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
   return _int_mm_out_cuda(self, mat2, result);
 }
 
-namespace {
-void check_scaled_mm(const Tensor& self, const Tensor& mat2) {
-  TORCH_CHECK(self.dim() == 2, "self must be a matrix");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
-  TORCH_CHECK(
-      self.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
-      self.sizes()[0], "x", self.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
-}
-}
 std::tuple<Tensor&, Tensor&>
 _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           c10::optional<c10::ScalarType> dtype,
@@ -730,11 +721,17 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           const c10::optional<at::Tensor>& scale_b,
           const c10::optional<at::Tensor>& scale_result,
           Tensor& out, Tensor& amax) {
-  check_scaled_mm(mat1, mat2);
+  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
+  TORCH_CHECK(
+      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
   TensorArg targs[]{{out, "out", 0}, {amax, "amax", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU(__func__, targs);
+  TORCH_CHECK(amax.numel() == 1 && amax.scalar_type() == kFloat);
   TORCH_CHECK(!scale_a || scale_a->numel() == 1);
   TORCH_CHECK(!scale_b || scale_b->numel() == 1);
+  TORCH_CHECK(!scale_result || scale_b->numel() == 1);
 
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
