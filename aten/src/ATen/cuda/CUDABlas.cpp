@@ -197,10 +197,6 @@ static size_t _getWorkspaceSize() {
   static size_t workspace_size = _parseChosenWorkspaceSize();
   return workspace_size;
 }
-
-inline bool isFloat8Type(::c10::ScalarType t) {
-  return t == ::c10::ScalarType::Float8_e5m2 || t == ::c10::ScalarType::Float8_e4m3fn;
-}
 } // anonymous namespace
 
 namespace at::cuda::blas {
