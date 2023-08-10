@@ -1004,7 +1004,7 @@ def get_backend(group: Optional[ProcessGroup] = None) -> str:
     else:
         pg = group
     if _rank_not_in_group(pg):
-        raise ValueError("Invalid process group specified")
+        raise RuntimeError("Invalid process group specified")
     pg_store = _world.pg_map[pg] if pg in _world.pg_map else None
     assert pg_store is not None
     return pg_store[0]
