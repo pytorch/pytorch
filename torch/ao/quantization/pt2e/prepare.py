@@ -8,6 +8,7 @@ from torch.ao.quantization.fx.prepare import (
     _maybe_insert_output_observer_for_node,
     _save_state,
     _is_activation_post_process_node,
+    _get_qspec_for_arg,
 )
 from torch.fx import (
     GraphModule,
@@ -22,6 +23,7 @@ from typing import Dict, Tuple, Union, Any
 from torch.ao.quantization.quantizer import (
     QuantizationAnnotation,
     EdgeOrNode,
+    SharedQuantizationSpec,
 )
 from torch.ao.quantization import ObserverOrFakeQuantize
 
@@ -62,6 +64,9 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     arg_as_output_act_obs_or_fq = _get_output_act_obs_or_fq(arg, named_modules, obs_or_fq_map, is_qat)
     arg_as_output_target_dtype, arg_as_output_target_is_dynamic = _get_dtype_and_is_dynamic(arg_as_output_act_obs_or_fq)
 
+    input_qspec_map = quantization_annotation.input_qspec_map
+    input_arg_qspec = _get_qspec_for_arg(arg, input_qspec_map, named_modules)
+
     if arg_as_input_target_is_dynamic or arg_as_input_target_dtype not in [torch.float, None]:
         if arg_as_input_target_dtype == arg_as_output_target_dtype and \
            arg_as_input_target_is_dynamic == arg_as_output_target_is_dynamic:
@@ -71,7 +76,16 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
             assert isinstance(observed_arg, Node), f"expect observed argument to be a Node, but got: {type(observed_arg)}"
             assert observed_arg in obs_or_fq_map, \
                 f"can't refer to a node that does not have observer/fake_quant inserted yet: {observed_arg}"
-            arg_as_input_act_obs_or_fq = obs_or_fq_map[observed_arg]
+            if isinstance(input_arg_qspec, SharedQuantizationSpec):
+                # if the argument is set to use SharedQuantizationSpec, we will
+                # reset the observer instance to align with the configured edge/node
+                obs_or_fq_name = arg.target
+                setattr(model, obs_or_fq_name, arg_as_input_act_obs_or_fq)
+                named_modules[obs_or_fq_name] = arg_as_input_act_obs_or_fq
+            else:
+                # otherwise reuse the existing obs/fq
+                arg_as_input_act_obs_or_fq = obs_or_fq_map[observed_arg]
+            # we don't need to insert new observer node
             new_arg = arg
             obs_or_fq_map[(observed_arg, node)] = arg_as_input_act_obs_or_fq
         else:
