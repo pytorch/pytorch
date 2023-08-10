@@ -53,6 +53,38 @@ def _get_device_handle(device_type: str = "cuda"):
     return getattr(torch, device_type, None) if device_type != "cpu" else None
 
 
+def init_device_mesh(
+    device_type: str,
+    mesh_dims: List[int],
+    mesh_dim_names: List[str],
+) -> None:
+    """
+    """
+    mesh_world_size = torch.product(torch.tensor(axis_degrees))
+    if mesh_world_size != dist.get_world_size() or mesh_dims.count(-1) != 1:
+        raise RuntimeError(
+            f"The product of `mesh_dims` need to be equal to the world size, but found {mesh_world_size}!"
+
+        )
+
+    # Do we want to enforce this? I feel like we should. Otherwise, users could just init DeviceMesh themselves.
+    if len(mesh_dims) != len(mesh_dim_names):
+        raise RuntimeError(
+            f"Please provide mesh dim names to mesh dims! Found {len(mesh_dims)} instead of {len(mesh_dim_names)}."
+        )
+
+
+    mesh = torch.arange(dist.get_world_size()).view(mesh_dims)
+    device_mesh = DeviceMesh(device_type=device_type, mesh=mesh)
+
+
+
+    return device_mesh
+
+
+
+
+
 class DeviceMesh:
     """
     DeviceMesh represents a mesh of devices, where layout of devices could be
@@ -102,6 +134,7 @@ class DeviceMesh:
         device_type: str,
         mesh: Union[torch.Tensor, "ArrayLike"],
         *,
+        _mesh_dim_names: Optional[List[str]] = None,
         _init_process_groups: bool = True,
         _validate_mesh: bool = True,
     ) -> None:
@@ -111,12 +144,19 @@ class DeviceMesh:
             if isinstance(mesh, torch.Tensor)
             else torch.tensor(mesh, dtype=torch.int)
         )
+        self._mesh_map = self._create_mesh_map(_mesh_dim_names)
         # always try to create default (world) pg, even if it is not initialized
         # already. The world pg is used for device mesh identity (rank) on each
         # process (we need to know if the current global rank is in the mesh or not)
         self._get_or_create_default_group()
         if _init_process_groups:
             self._init_process_groups(_validate_mesh)
+
+    def _create_mesh_map(self, _mesh_dim_names: Optional[List]) -> Dict[str, int]:
+        """
+        Create a map between mesh dimension and mesh dimension names.
+        """
+        self._mesh_map = {mesh_dim_names: mesh_dim for mesh_dim, mesh_dim_names in enumerate(_mesh_dim_names)}
 
     def _get_or_create_default_group(self):
         default_initialized = is_initialized()
