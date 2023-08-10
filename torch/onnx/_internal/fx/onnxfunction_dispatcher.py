@@ -620,7 +620,7 @@ class _OnnxSchemaChecker:
         )
         # NOTE: 1. Check if the input number and attribute names match the
         # OpSchema. If it's not, we know the function is not eligible to be a perfect
-        # match, and even a nearest match.
+        # match, nor a nearest match.
         # We use is_perfect_match to postpone the return value to the end
         # of the function, as we want to log all the mismatch info.
         is_perfect_match = True
