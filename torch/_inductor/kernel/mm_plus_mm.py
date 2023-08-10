@@ -27,6 +27,9 @@ mm_plus_mm_template = TritonTemplate(
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
     K1 = {{size("A", 1)}}
+    if M * N * K1 == 0:
+        # early exit due to zero-size input(s)
+        return
     # K2 = {{size("C", 1)}}
     stride_am = {{stride("A", 0)}}
     stride_ak = {{stride("A", 1)}}
