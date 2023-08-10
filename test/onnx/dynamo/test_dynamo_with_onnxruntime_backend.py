@@ -8,6 +8,7 @@ from typing import Tuple
 
 import torch
 import torch.onnx
+from parameterized import parameterized
 from torch import nn
 
 from torch.onnx._internal.onnxruntime import make_aot_ort, OrtBackend
@@ -64,33 +65,6 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 for baseline_elem, result_elem in zip(baseline_result, result):
                     torch.testing.assert_close(baseline_elem, result_elem)
 
-    def _test_model_numerically_with_provided_backend_and_default_backend(
-        self,
-        model,
-        dynamo_backend,
-        example_args_collection,
-    ):
-        """Test the model numerically with two ONNXRuntime backends.
-
-        It's useful to test local backend and global backend triggered by
-        backend="onnxrt" at the same time.
-        """
-
-        # Test provided backend.
-        self._test_model_numerically(
-            model,
-            dynamo_backend,
-            example_args_collection,
-        )
-
-        # Test default backend.
-        torch._dynamo.reset()
-        self._test_model_numerically(
-            model,
-            "onnxrt",
-            example_args_collection,
-        )
-
     def _assert_counting_information(
         self,
         ort_backend: OrtBackend,
@@ -126,9 +100,13 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         ):
             self.assertEqual(len(onnx_info), expected_number_of_onnx_models)
 
-    def test_elementwise_function_single_output(self):
-        local_aot_ort, local_ort = make_aot_ort(dynamic=True)
-
+    @parameterized.expand(
+        [
+            (True,),
+            (False,),
+        ]
+    )
+    def test_elementwise_function_single_output(self, test_local_backend: bool):
         example_args_collection = tuple(
             (torch.randn(batch, dtype=torch.float32),) for batch in (2, 4, 6, 8, 10)
         )
@@ -138,28 +116,44 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             z = y.sigmoid()
             return z
 
-        self._test_model_numerically_with_provided_backend_and_default_backend(
+        if test_local_backend:
+            local_aot_ort, local_ort = make_aot_ort(dynamic=True)
+        else:
+            # This will use the global ONNXRuntime backend registered
+            # in Dynamo to compile the tested model.
+            local_aot_ort, local_ort = "onnxrt", None
+
+        self._test_model_numerically(
             elementwise_model,
             local_aot_ort,
             example_args_collection,
         )
 
-        self._assert_counting_information(
-            local_ort,
-            # OrtBackend._ort_acclerated_call should have been called 5 times because
-            # we have 5 different batch sizes to test.
-            expected_execution_count=len(example_args_collection),
-            # Since this local_ort only compiled one function,
-            # there should be only one GraphModule in its cached.
-            number_of_cached_graph_modules=1,
-            # Since dynamic shape is enabled, we should only have one ONNX model
-            # to support different batch sizes.
-            number_of_exported_onnx_models_for_all_graph_modules=(1,),
-        )
+        # We can only check local backend's counting information
+        # since global backend's counting information comes from
+        # all compiled models.
+        if test_local_backend:
+            assert local_ort is not None
+            self._assert_counting_information(
+                local_ort,
+                # OrtBackend._ort_acclerated_call should have been called 5 times because
+                # we have 5 different batch sizes to test.
+                expected_execution_count=len(example_args_collection),
+                # Since this local_ort only compiled one function,
+                # there should be only one GraphModule in its cached.
+                number_of_cached_graph_modules=1,
+                # Since dynamic shape is enabled, we should only have one ONNX model
+                # to support different batch sizes.
+                number_of_exported_onnx_models_for_all_graph_modules=(1,),
+            )
 
-    def test_elementwise_function_multiple_output(self):
-        local_aot_ort, local_ort = make_aot_ort(dynamic=True)
-
+    @parameterized.expand(
+        [
+            (True,),
+            (False,),
+        ]
+    )
+    def test_elementwise_function_multiple_output(self, test_local_backend: bool):
         example_args_collection = tuple(
             (torch.randn(batch, dtype=torch.float32),) for batch in (2, 4, 8)
         )
@@ -170,22 +164,33 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             z = y * y
             return x, y, z
 
-        self._test_model_numerically_with_provided_backend_and_default_backend(
+        if test_local_backend:
+            local_aot_ort, local_ort = make_aot_ort(dynamic=True)
+        else:
+            local_aot_ort, local_ort = "onnxrt", None
+
+        self._test_model_numerically(
             elementwise_model_with_multiple_outputs,
             local_aot_ort,
             example_args_collection,
         )
 
-        self._assert_counting_information(
-            local_ort,
-            expected_execution_count=len(example_args_collection),
-            number_of_cached_graph_modules=1,
-            number_of_exported_onnx_models_for_all_graph_modules=(1,),
-        )
+        if test_local_backend:
+            assert local_ort is not None
+            self._assert_counting_information(
+                local_ort,
+                expected_execution_count=len(example_args_collection),
+                number_of_cached_graph_modules=1,
+                number_of_exported_onnx_models_for_all_graph_modules=(1,),
+            )
 
-    def test_mlp_with_local_backend(self):
-        local_aot_ort, local_ort = make_aot_ort(dynamic=True)
-
+    @parameterized.expand(
+        [
+            (True,),
+            (False,),
+        ]
+    )
+    def test_mlp_with_local_backend(self, test_local_backend: bool):
         example_args_collection = tuple(
             (torch.randn(batch, 2, dtype=torch.float32),) for batch in (1, 2, 4, 6, 8)
         )
@@ -203,25 +208,32 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 tensor_x = torch.sigmoid(tensor_x)
                 return tensor_x
 
-        self._test_model_numerically_with_provided_backend_and_default_backend(
+        if test_local_backend:
+            local_aot_ort, local_ort = make_aot_ort(dynamic=True)
+        else:
+            local_aot_ort, local_ort = "onnxrt", None
+
+        self._test_model_numerically(
             MLP(),
             local_aot_ort,
             example_args_collection,
         )
 
-        self._assert_counting_information(
-            local_ort,
-            # OrtBackend._ort_acclerated_call should have been called 5 times because
-            # we have 5 different batch sizes to test.
-            expected_execution_count=len(example_args_collection),
-            # Since this local_ort only compiled one function, there should be only two
-            # GraphModule's in its cached. One for batch sizes 2, 4, 6, 8 and the other
-            # for batch size 1.
-            number_of_cached_graph_modules=2,
-            # Since dynamic shape is enabled, we should only have one ONNX model
-            # to support different batch sizes.
-            number_of_exported_onnx_models_for_all_graph_modules=(1, 1),
-        )
+        if test_local_backend:
+            assert local_ort is not None
+            self._assert_counting_information(
+                local_ort,
+                # OrtBackend._ort_acclerated_call should have been called 5 times because
+                # we have 5 different batch sizes to test.
+                expected_execution_count=len(example_args_collection),
+                # Since this local_ort only compiled one function, there should be only two
+                # GraphModule's in its cached. One for batch sizes 2, 4, 6, 8 and the other
+                # for batch size 1.
+                number_of_cached_graph_modules=2,
+                # Since dynamic shape is enabled, we should only have one ONNX model
+                # to support different batch sizes.
+                number_of_exported_onnx_models_for_all_graph_modules=(1, 1),
+            )
 
 
 if __name__ == "__main__":
