@@ -211,7 +211,10 @@ class X86InductorQuantizer(Quantizer):
     ) -> None:
         """Helper function to annotate the linear node"""
         input_qspec_map = {}
-        assert(linear_node.target in (torch.ops.aten.mm.default, torch.ops.aten.addmm.default))
+        assert linear_node.target in (
+            torch.ops.aten.mm.default,
+            torch.ops.aten.addmm.default,
+        )
         has_bias = linear_node.target is torch.ops.aten.addmm.default
         input_index = 1 if has_bias else 0
         weight_index = input_index + 1
@@ -446,11 +449,13 @@ class X86InductorQuantizer(Quantizer):
         linear_partitions = list(itertools.chain(*linear_partitions.values()))
         for partition in linear_partitions:
             if len(partition.output_nodes) > 1:
-                raise ValueError("Linear partition cannot have more than one output node")
+                raise ValueError(
+                    "Linear partition cannot have more than one output node"
+                )
             linear_node = partition.output_nodes[0]
-            if (
-                linear_node.op != "call_function" or
-                linear_node.target not in (torch.ops.aten.addmm.default, torch.ops.aten.mm.default)
+            if linear_node.op != "call_function" or linear_node.target not in (
+                torch.ops.aten.addmm.default,
+                torch.ops.aten.mm.default,
             ):
                 raise ValueError(f"{linear_node} is not an aten addmm/mm operator")
             # skip annotation if it is already annotated
@@ -476,9 +481,9 @@ class X86InductorQuantizer(Quantizer):
             linear_node, unary_node = self._get_output_nodes_of_partitions(
                 [linear_partition, unary_partition]
             )
-            if (
-                linear_node.op != "call_function" or
-                linear_node.target not in (torch.ops.aten.addmm.default, torch.ops.aten.mm.default)
+            if linear_node.op != "call_function" or linear_node.target not in (
+                torch.ops.aten.addmm.default,
+                torch.ops.aten.mm.default,
             ):
                 continue
             if _is_annotated([unary_node, linear_node]):

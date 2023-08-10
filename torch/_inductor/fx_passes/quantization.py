@@ -727,9 +727,7 @@ def _generate_dequant_linear_node_pattern(_dequant_per_channel_pattern):
 
 
 def _generate_qlinear_weight_prepack_patterns():
-    return _generate_dequant_linear_node_pattern(
-        dequantize_per_channel_weight_pattern
-    )
+    return _generate_dequant_linear_node_pattern(dequantize_per_channel_weight_pattern)
 
 
 @functools.lru_cache(None)
