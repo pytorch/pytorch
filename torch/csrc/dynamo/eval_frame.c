@@ -1,5 +1,6 @@
 #define PY_SSIZE_T_CLEAN
 #include <torch/csrc/dynamo/cpython_defs.h>
+#include <torch/csrc/dynamo/cache.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <opcode.h>
 #include <stdbool.h>
@@ -9,7 +10,7 @@
 #define Py_BUILD_CORE
 #include <internal/pycore_pystate.h>
 
-// These headers were added in 3.11
+// These headers Were added in 3.11
 #if IS_PYTHON_3_11_PLUS
 #include <internal/pycore_frame.h>
 #endif
@@ -76,6 +77,7 @@ static PyObject* THPPyInterpreterFrame_f_back(THPPyInterpreterFrame* self, PyObj
   }
   return (PyObject*)PyFrame_GetBack(self->frame->frame_obj);
 }
+
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {
@@ -293,21 +295,15 @@ static inline PyObject* call_callback(
   return res;
 }
 
-typedef struct cache_entry {
-  // check the guards: lambda: <locals of user function>: bool
-  PyObject* check_fn;
-  // modified user bytecode (protected by check_fn's guards)
-  PyCodeObject* code;
-  // on a cache miss, linked list of next thing to try
-  struct cache_entry* next;
-} CacheEntry;
 
 // An abstraction to encapsulate all the information to be saved on the extra
 // scratch space of the code object. This enables us to reuse the same co_extra
 // field, saving extra allocations.
 typedef struct {
   // Cache entry for the code object
-  CacheEntry* cache_entry;
+  // CacheType cache;
+  // CacheEntry* cache_entry;
+  void* cache;
   // Frame state to detect dynamic shape dims
   PyObject* frame_state;
 } ExtraState;
@@ -342,7 +338,8 @@ static ExtraState* create_extra_state(
   // Creates a new extra state with the given cache_entry and frame_state.
   ExtraState* e = (ExtraState*)malloc(sizeof(ExtraState));
   DEBUG_NULL_CHECK(e);
-  e->cache_entry = cache_entry;
+  // e->cache_entry = cache_entry;
+  e->cache = prepare_cache(cache_entry);
   e->frame_state = frame_state;
   return e;
 }
@@ -363,7 +360,7 @@ inline static CacheEntry* extract_cache_entry(ExtraState* extra) {
   if (extra == NULL) {
     return NULL;
   }
-  return extra->cache_entry;
+  return read_cache(extra->cache);
 }
 
 inline static void create_and_set_extra_state(
@@ -381,7 +378,7 @@ inline static void destroy_extra_state(PyCodeObject* code) {
   // freeing the constructed extra state.
   ExtraState* extra = get_extra_state(code);
   if (extra != NULL && extra != SKIP_CODE) {
-    destroy_cache_entry(extra->cache_entry);
+    destroy_cache_entry(extract_cache_entry(extra));
     PyObject* frame_state = extra->frame_state;
     Py_XDECREF(frame_state);
     free(extra);
@@ -450,12 +447,13 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     // move it to the head
     if (prev != NULL) {
         ExtraState* extra = get_extra_state(frame->f_code);
-        CacheEntry* old_cache_entry = extra->cache_entry;
+        CacheEntry* old_cache_entry = extract_cache_entry(extra);
         prev->next = e->next;
         e->next = old_cache_entry;
 
         // Update the extra state to reflect the updated cache
-        extra->cache_entry = e;
+        extra->cache = prepare_cache(e);
+        // extra->cache_entry = e;
         set_extra_state(frame->f_code, extra);
     }
     return (PyObject*)e->code;
@@ -678,6 +676,7 @@ static PyObject* _custom_eval_frame(
     return eval_frame_default(tstate, frame, throw_flag);
   }
 
+  fprintf(stderr, "Chec %d\n", foo(2));
   ExtraState* extra = get_extra_state(frame->f_code);
   if (extra == SKIP_CODE || (callback == Py_False && extra == NULL)) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
