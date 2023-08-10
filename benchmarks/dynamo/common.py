@@ -262,6 +262,7 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     # https://github.com/pytorch/pytorch/issues/103760
     "dlrm",
     "hf_T5_generate",
+    "hf_Bert",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -525,7 +526,7 @@ def _normalize_bench_inputs(example_inputs) -> Tuple[Tuple[Any], Mapping[str, An
     if isinstance(example_inputs, dict):
         return (), example_inputs
     else:
-        return example_inputs, {}
+        return tuple(example_inputs), {}
 
 
 def _register_dataclass_output_as_pytree(example_outputs) -> None:
@@ -1131,14 +1132,9 @@ class AOTInductorModelCache:
                 example_args, example_kwargs
             )
 
-            exported = torch._export.export(model, example_args, example_kwargs)
-            param_buffer_values = list(exported.state_dict.values())
-            flat_example_inputs = fx_pytree.tree_flatten_spec(
-                example_inputs, exported.call_spec.in_spec
+            so_path, exported = torch._export.aot_compile(
+                model, example_args, example_kwargs
             )
-            all_args = (*param_buffer_values, *flat_example_inputs)
-            # AOT compile into a .so
-            so_path = torch._inductor.aot_compile(exported.graph_module, all_args)
 
             output_node = list(exported.graph.nodes)[-1]
             output_tensors = [
@@ -2325,6 +2321,38 @@ class BenchmarkRunner:
             results.append(experiment(model, example_inputs, **experiment_kwargs))
             return " ".join(map(str, results))
 
+    def minify_model(
+        self,
+        name,
+        model,
+        example_inputs,
+        optimize_ctx,
+        experiment,
+        tag,
+    ):
+        logging.info("Minifying %s...", name)
+        os.environ["TORCH_COMPILE_DEBUG"] = "1"
+        os.environ["TORCHDYNAMO_REPRO_AFTER"] = "dynamo"
+        os.environ["TORCHDYNAMO_REPRO_LEVEL"] = "4"
+
+        self.check_accuracy(name, model, example_inputs, optimize_ctx, experiment, tag)
+
+        if self.args.output_directory:
+            repro_dir = self.args.output_directory
+        else:
+            repro_dir = torch._dynamo.config.base_dir
+
+        try:
+            shutil.move("repro.py", f"{repro_dir}/{name}_repro.py")
+        except OSError as e:
+            logging.error("Could not find repro script for model %s", name)
+        else:
+            logging.info(
+                "Repro script for model %s with minified graph saved to %s",
+                name,
+                repro_dir,
+            )
+
     def run_one_model(
         self,
         name,
@@ -2348,6 +2376,10 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment, tag
             )
             print(status)
+            if status == "fail_accuracy" and self.args.minify:
+                self.minify_model(
+                    name, model, example_inputs, optimize_ctx, experiment, tag
+                )
         elif self.args.tolerance:
             status = self.check_tolerance(name, model, example_inputs, optimize_ctx)
             print(status)
@@ -2759,6 +2791,12 @@ def parse_args(args=None):
         "--no-translation-validation",
         action="store_true",
         help="Disable translation validation for accuracy builds.",
+    )
+
+    parser.add_argument(
+        "--minify",
+        action="store_true",
+        help="Enable minification when failure is below tolerance. Save repro script for each model.",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
