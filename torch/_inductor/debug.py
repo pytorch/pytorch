@@ -17,7 +17,6 @@ from unittest.mock import patch
 from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
 
 import torch
-import torch._dynamo.utils as dynamo_utils
 from torch import fx as fx
 
 from torch._dynamo.repro.after_aot import save_graph_repro, wrap_compiler_debug
@@ -403,67 +402,50 @@ class TensorMetadataHolder:
 save_args_cnt = itertools.count()
 
 
-def save_args_for_compile_fx_inner(fn):
+def save_args_for_compile_fx_inner(*args, **kwargs):
     """
-    This is a decorator applied on the compile_fx_inner function.
-    When config.save_args is True, this function will save the arguments
-    for each compile_fx_inner call to the filesystem. Later on
-    one can replay the compile_fx_inner call with the saved arguments
-    using load_args_and_run_compile_fx_inner.
+    This function is used to save arguments for a compile_fx_inner function call
+    to the file system.  Later on one can replay the compile_fx_inner call
+    with the saved arguments using load_args_and_run_compile_fx_inner.
     """
 
-    assert (
-        fn.__name__ == "compile_fx_inner"
-    ), "This decorator only works for compile_fx_inner right now"
+    folder = "/tmp/inductor_saved_args"
+    if not os.path.exists(folder):
+        os.mkdir(folder)
 
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        if not config.save_args:
-            return fn(*args, **kwargs)
-        gm = args[0]
-        if dynamo_utils.count_calls(gm.graph) == 0:
-            return fn(*args, **kwargs)
+    def handle_tensor(x):
+        """
+        Pickle FakeTensor will result in error:
+        AttributeError: Can't pickle local object 'WeakValueDictionary.__init__.<locals>.remove'
 
-        folder = "/tmp/inductor_saved_args"
-        if not os.path.exists(folder):
-            os.mkdir(folder)
+        Convert all Tensor to metadata. This may also makes pickle faster.
+        """
+        if isinstance(x, torch.Tensor):
+            return TensorMetadataHolder(_extract_tensor_metadata(x), x.device)
+        else:
+            return x
 
-        def handle_tensor(x):
-            """
-            Pickle FakeTensor will result in error:
-            AttributeError: Can't pickle local object 'WeakValueDictionary.__init__.<locals>.remove'
+    args_to_save, kwargs_to_save = tree_map(handle_tensor, (args, kwargs))
 
-            Convert all Tensor to metadata. This may also makes pickle faster.
-            """
-            if isinstance(x, torch.Tensor):
-                return TensorMetadataHolder(_extract_tensor_metadata(x), x.device)
-            else:
-                return x
+    fn_name = "compile_fx_inner"
+    path = f"{folder}/{fn_name}_{next(save_args_cnt)}.pkl"
+    with open(path, "wb") as f:
+        pickle.dump((args_to_save, kwargs_to_save), f)
 
-        args_to_save, kwargs_to_save = tree_map(handle_tensor, (args, kwargs))
-
-        path = f"{folder}/{fn.__name__}_{next(save_args_cnt)}.pkl"
-        with open(path, "wb") as f:
-            pickle.dump((args_to_save, kwargs_to_save), f)
-
-        if log.isEnabledFor(logging.DEBUG):
-            message = f"""
+    if log.isEnabledFor(logging.DEBUG):
+        message = f"""
 Arguments for a compile_fx_inner call is saved to {path}. To replay the call,
 run the following:
 
 from torch._inductor.debug import load_args_and_run_compile_fx_inner
 load_args_and_run_compile_fx_inner({path!r})
-            """
-            # call print rather than log.debug. log.debug will print message
-            # prefix for each line which makes the code snippet harder to be
-            # copied.
-            # Not a big deal since the code is already been guarded by checking
-            # the log level.
-            print(message)
-
-        return fn(*args, **kwargs)
-
-    return wrapper
+        """
+        # call print rather than log.debug. log.debug will print message
+        # prefix for each line which makes the code snippet harder to be
+        # copied.
+        # Not a big deal since the code is already been guarded by checking
+        # the log level.
+        print(message)
 
 
 def load_args_and_run_compile_fx_inner(path):

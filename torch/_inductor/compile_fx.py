@@ -275,7 +275,6 @@ def fake_tensor_prop(
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
 @time_and_log(attr="compilation time (in seconds)")
-@save_args_for_compile_fx_inner
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -290,8 +289,30 @@ def compile_fx_inner(
     user_visible_outputs=frozenset(),
     layout_opt=None,
 ):
+    """
+    Inductor API that compiles a single graph.
+
+    If you change the argument list for this funtion, make sure you
+    also update the call to save_args_for_compile_fx_inner below accordingly.
+    """
     if dynamo_utils.count_calls(gm.graph) == 0:
         return make_boxed_func(gm.forward)
+
+    if config.save_args:
+        save_args_for_compile_fx_inner(
+            gm,
+            example_inputs,
+            cudagraphs=cudagraphs,
+            num_fixed=num_fixed,
+            is_backward=is_backward,
+            graph_id=graph_id,
+            cpp_wrapper=cpp_wrapper,
+            aot_mode=aot_mode,
+            is_inference=is_inference,
+            boxed_forward_device_index=boxed_forward_device_index,
+            user_visible_outputs=user_visible_outputs,
+            layout_opt=layout_opt,
+        )
 
     if cudagraphs is None:
         cudagraphs = BoxedBool(config.triton.cudagraphs)
