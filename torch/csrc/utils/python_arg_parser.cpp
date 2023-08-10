@@ -434,7 +434,7 @@ auto handle_torch_function(
       torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::tuple args_ = combine_self_args(self, args);
   return handle_torch_function_no_python_arg_parser(
-      r.signature.overloaded_args,
+      r.overloaded_args,
       args_.ptr(),
       kwargs,
       r.get_func_name().c_str(),
@@ -1338,6 +1338,7 @@ bool FunctionSignature::parse(
     PyObject* args,
     PyObject* kwargs,
     PyObject* dst[], // NOLINT
+    std::vector<py::handle>& overloaded_args,
     bool raise_exception) {
   Py_ssize_t nargs = args ? PyTuple_GET_SIZE(args) : 0;
   auto remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
@@ -1365,13 +1366,9 @@ bool FunctionSignature::parse(
     return false;
   }
 
-  if (!overloaded_args.empty()) {
-    overloaded_args.clear();
-  }
-
   int i = 0;
   if (self != nullptr && check_has_torch_function(self, /*ignore_mode*/ true)) {
-    append_overloaded_tensor(&this->overloaded_args, self);
+    append_overloaded_tensor(&overloaded_args, self);
   }
   for (auto& param : params) {
     PyObject* obj = nullptr;
@@ -1406,7 +1403,7 @@ bool FunctionSignature::parse(
         missing_args(*this, i);
       }
       return false;
-    } else if (param.check(obj, this->overloaded_args, i, &failed_idx)) {
+    } else if (param.check(obj, overloaded_args, i, &failed_idx)) {
       dst[i++] = obj;
       // XXX: the Variable check is necessary because sizes become tensors when
       // tracer is enabled. This behavior easily leads to ambiguities, and we
@@ -1532,15 +1529,17 @@ PythonArgs PythonArgParser::raw_parse(
     PyObject* parsed_args[]) { // NOLINT
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
-    signature.parse(self, args, kwargs, parsed_args, true);
+    std::vector<py::handle> overloaded_args;
+    signature.parse(self, args, kwargs, parsed_args, overloaded_args, true);
     check_deprecated(signature);
-    return PythonArgs(traceable, signature, parsed_args);
+    return PythonArgs(traceable, signature, parsed_args, std::move(overloaded_args));
   }
 
   for (auto& signature : signatures_) {
-    if (signature.parse(self, args, kwargs, parsed_args, false)) {
+    std::vector<py::handle> overloaded_args;
+    if (signature.parse(self, args, kwargs, parsed_args, overloaded_args, false)) {
       check_deprecated(signature);
-      return PythonArgs(traceable, signature, parsed_args);
+      return PythonArgs(traceable, signature, parsed_args, std::move(overloaded_args));
     }
   }
 
@@ -1566,7 +1565,8 @@ void PythonArgParser::print_error(
 
   if (plausible_idxs.size() == 1) {
     auto& signature = signatures_[plausible_idxs[0]];
-    signature.parse(self, args, kwargs, parsed_args, true);
+    std::vector<py::handle> overloaded_args;
+    signature.parse(self, args, kwargs, parsed_args, overloaded_args, true);
   }
 
   auto options = get_signatures();
