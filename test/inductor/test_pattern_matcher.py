@@ -53,7 +53,16 @@ class TestPaternMatcher(TestCase):
             self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
             self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 3)
 
-    @inductor_config.patch(use_mixed_mm=True)
+    def _test_mixed_impl(self, fn, args, mixed_mm_expected, fallback_mixed_mm_expected):
+        torch._dynamo.reset()
+        counters.clear()
+        ref = fn(*args)
+        test, (code,) = run_and_get_code(torch.compile(fn), *args)
+        torch.testing.assert_close(ref, test)
+        self.assertEqual("mixed_mm" in code, mixed_mm_expected)
+        self.assertEqual("fallback_mixed_mm" in code, fallback_mixed_mm_expected)
+
+    @inductor_config.patch(force_mixed_mm=True)
     def test_mixed_mm(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -71,17 +80,16 @@ class TestPaternMatcher(TestCase):
                 torch.randn(8, 5, device="cuda", dtype=torch.float16),
                 torch.randint(0, 255, (5, 2), dtype=torch.uint8, device="cuda"),
             ),
+            (
+                torch.randn(8, 8, device="cuda", dtype=torch.float32),
+                torch.randn(8, 8, device="cuda", dtype=torch.bfloat16),
+            ),
         ]
 
         for args in args_list:
-            torch._dynamo.reset()
-            counters.clear()
-            ref = fn(*args)
-            test, (code,) = run_and_get_code(torch.compile(fn), *args)
-            torch.testing.assert_close(ref, test)
-            self.assertTrue("mixed_mm" in code)
+            self._test_mixed_impl(fn, args, True, False)
 
-    @inductor_config.patch(use_mixed_mm=True)
+    @inductor_config.patch(force_mixed_mm=True, max_autotune_gemm=True)
     def test_mixed_mm_epi_works(self):
         def fn(a, b, c, d):
             return torch.mm(a, b.to(a.dtype)) * c + d
@@ -108,15 +116,9 @@ class TestPaternMatcher(TestCase):
         ]
 
         for args in args_list:
-            torch._dynamo.reset()
-            counters.clear()
-            ref = fn(*args)
-            test, (code,) = run_and_get_code(torch.compile(fn), *args)
-            torch.testing.assert_close(ref, test)
-            self.assertTrue("mixed_mm" in code)
+            self._test_mixed_impl(fn, args, True, False)
 
-    @inductor_config.patch(use_mixed_mm=False)
-    def test_mixed_mm_gating_works(self):
+    def test_mixed_mm_gating(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
 
@@ -124,12 +126,21 @@ class TestPaternMatcher(TestCase):
             torch.randn(8, 8, device="cuda"),
             torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
         )
-        torch._dynamo.reset()
-        counters.clear()
-        ref = fn(*args)
-        test, (code,) = run_and_get_code(torch.compile(fn), *args)
-        torch.testing.assert_close(ref, test)
-        self.assertFalse("mixed_mm" in code)
+        # will ignore the mixed_mm code (including fallback)
+        with inductor_config.patch({"force_mixed_mm": False, "use_mixed_mm": False}):
+            self._test_mixed_impl(fn, args, False, False)
+
+        # will use fallback_mixed_mm kernel due to no gemm_autotune
+        with inductor_config.patch({"force_mixed_mm": False, "use_mixed_mm": True}):
+            self._test_mixed_impl(fn, args, True, True)
+
+        # will use mixed_mm kernel
+        with inductor_config.patch({"force_mixed_mm": True, "use_mixed_mm": False}):
+            self._test_mixed_impl(fn, args, True, False)
+
+        # shows that use_mixed_mm doesn't do anything if foce_mixed_mm is set
+        with inductor_config.patch({"force_mixed_mm": True, "use_mixed_mm": True}):
+            self._test_mixed_impl(fn, args, True, False)
 
     @inductor_config.patch(use_mixed_mm=True)
     def test_mixed_mm_cpu_works(self):
@@ -140,12 +151,7 @@ class TestPaternMatcher(TestCase):
             torch.randn(8, 8),
             torch.randint(-128, 127, (8, 8), dtype=torch.int8),
         )
-        torch._dynamo.reset()
-        counters.clear()
-        ref = fn(*args)
-        test, (code,) = run_and_get_code(torch.compile(fn), *args)
-        torch.testing.assert_close(ref, test)
-        self.assertFalse("mixed_mm" in code)
+        self._test_mixed_impl(fn, args, False, False)
 
     def test_addmm(self):
         def fn(a, b, c):

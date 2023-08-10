@@ -168,7 +168,8 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
         ),
     ),
     extra_check=(
-        lambda match: config.use_mixed_mm and match.kwargs["mat1"].meta["val"].is_cuda
+        lambda match: (config.use_mixed_mm or config.force_mixed_mm)
+        and getattr(match.kwargs["mat1"].meta.get("val"), "is_cuda", False)
     ),  # needs cuda
 )
 def mixed_mm(match: Match, mat1, mat2, mat2_dtype):

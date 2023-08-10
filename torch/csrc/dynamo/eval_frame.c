@@ -59,6 +59,24 @@ static PyObject* THPPyInterpreterFrame_f_lasti(THPPyInterpreterFrame* self, PyOb
   return PyLong_FromLong(_PyInterpreterFrame_LASTI(self->frame));
 }
 
+static PyObject* THPPyInterpreterFrame_f_lineno(THPPyInterpreterFrame* self, PyObject* _noargs) {
+  if (!self->frame->frame_obj) {
+    return PyLong_FromLong(self->frame->f_code->co_firstlineno);
+  }
+  int lineno = PyFrame_GetLineNumber(self->frame->frame_obj);
+  if (lineno < 0) {
+    Py_RETURN_NONE;
+  }
+  return PyLong_FromLong(lineno);
+}
+
+static PyObject* THPPyInterpreterFrame_f_back(THPPyInterpreterFrame* self, PyObject* _noargs) {
+  if (!self->frame->frame_obj) {
+    Py_RETURN_NONE;
+  }
+  return (PyObject*)PyFrame_GetBack(self->frame->frame_obj);
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {
     {"f_func", (getter)THPPyInterpreterFrame_f_func, NULL, NULL, NULL},
@@ -69,6 +87,8 @@ static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {
     {"frame_obj", (getter)THPPyInterpreterFrame_frame_obj, NULL, NULL, NULL},
     {"previous", (getter)THPPyInterpreterFrame_previous, NULL, NULL, NULL},
     {"f_lasti", (getter)THPPyInterpreterFrame_f_lasti, NULL, NULL, NULL},
+    {"f_lineno", (getter)THPPyInterpreterFrame_f_lineno, NULL, NULL, NULL},
+    {"f_back", (getter)THPPyInterpreterFrame_f_back, NULL, NULL, NULL},
     {NULL}};
 
 static PyTypeObject THPPyInterpreterFrameType = {
@@ -298,6 +318,40 @@ inline static CacheEntry* get_cache_entry(PyCodeObject* code) {
   CacheEntry* extra = NULL;
   _PyCode_GetExtra((PyObject*)code, cache_entry_extra_index, (void*)&extra);
   return extra;
+}
+
+PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
+  PyObject* object;
+  if (!PyArg_ParseTuple(args, "O", &object)) {
+    return NULL;
+  }
+  if (!PyCode_Check(object)) {
+    PyErr_SetString(PyExc_TypeError, "expected a code object!");
+    return NULL;
+  }
+  PyCodeObject* code = (PyCodeObject*)object;
+
+  CacheEntry* current_node = get_cache_entry(code);
+
+  PyObject* outer_list = PyList_New(0);
+  if (!outer_list) {
+    return NULL;  // Return NULL if failed to create list
+  }
+  while (current_node != NULL && current_node != SKIP_CODE) {
+    // Creating a new Python tuple for the check_fn and code of current CacheEntry
+    PyObject* inner_list = PyTuple_Pack(2, current_node->check_fn, current_node->code);
+    int flag = PyList_Append(outer_list, inner_list);  // Add the inner list to the outer list
+    Py_DECREF(inner_list);  // Decrement our own reference
+    if (flag < 0) {
+      Py_DECREF(outer_list);  // Clean up if failed to append
+      return NULL;
+    }
+
+    // Move to the next node in the linked list
+    current_node = current_node->next;
+  }
+  // Return the outer list
+  return outer_list;
 }
 
 inline static void set_cache_entry(PyCodeObject* code, CacheEntry* extra) {
@@ -847,6 +901,7 @@ static PyMethodDef _methods[] = {
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
     {"set_profiler_hooks", set_profiler_hooks, METH_VARARGS, NULL},
     {"clear_profiler_hooks", clear_profiler_hooks, METH_NOARGS, NULL},
+    {"_debug_get_cache_entry_list", _debug_get_cache_entry_list, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
