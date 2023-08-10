@@ -714,23 +714,32 @@ Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
   return _int_mm_out_cuda(self, mat2, result);
 }
 
+// Computes matrix multiply while applying scaling to input and output matrices and computes amax
+// Scales are only applicable when matrices are of Float8 type and assumbed to be equal to 1.0 by default
+// If output matrix type is 16 or 32-bit type, neither scale is applied nor amax is computed
+// Known limitations:
+//  - Only works if mat1 is row-major and mat2 is column-manjor
+//  - Only works if matrices sizes are divisible by 32
 std::tuple<Tensor&, Tensor&>
 _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
-          c10::optional<c10::ScalarType> dtype,
+          c10::optional<c10::ScalarType> out_dtype,
           const c10::optional<at::Tensor>& scale_a,
           const c10::optional<at::Tensor>& scale_b,
           const c10::optional<at::Tensor>& scale_result,
           Tensor& out, Tensor& amax) {
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
+  TORCH_CHECK(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
   TORCH_CHECK(
       mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
   TensorArg targs[]{{out, "out", 0}, {amax, "amax", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU(__func__, targs);
   TORCH_CHECK(amax.scalar_type() == kFloat);
-  TORCH_CHECK(!scale_a || (scale_a->numel() == 1 && scale_a->scalar_type() == kFloat));
-  TORCH_CHECK(!scale_b || (scale_b->numel() == 1 && scale_b->scalar_type() == kFloat));
+  TORCH_CHECK(!scale_a || (scale_a->numel() == 1 && scale_a->scalar_type() == kFloat),
+       "scale_a must be float scalar");
+  TORCH_CHECK(!scale_b || (scale_b->numel() == 1 && scale_b->scalar_type() == kFloat),
+       "scale_b must be a float scalar");
   TORCH_CHECK(!scale_result || (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat));
 
   IntArrayRef mat1_sizes = mat1.sizes();
@@ -768,14 +777,14 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 
 std::tuple<Tensor, Tensor>
 _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
-          c10::optional<c10::ScalarType> dtype,
+          c10::optional<c10::ScalarType> out_dtype,
           const c10::optional<at::Tensor>& scale_a,
           const c10::optional<at::Tensor>& scale_b,
           const c10::optional<at::Tensor>& scale_result) {
-  const auto out_dtype = dtype.value_or(mat_a.scalar_type());
-  Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype));
+  const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
+  Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
   Tensor amax = at::empty({0}, mat_a.options().dtype(ScalarType::Float));
-  return _scaled_mm_out_cuda(mat_a, mat_b, dtype, scale_a, scale_b, scale_result, out ,amax);
+  return _scaled_mm_out_cuda(mat_a, mat_b, out_dtype, scale_a, scale_b, scale_result, out ,amax);
 }
 
 } // namespace at::native

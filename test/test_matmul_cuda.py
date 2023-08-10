@@ -178,18 +178,19 @@ class TestMatmulCuda(TestCase):
 @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
 @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "FP8 is only supported on H100+")
 class TestFP8MatmulCuda(TestCase):
-    def _test_tautological_mm(self, device:str = "cuda",
-                              x_dtype:torch.dtype = torch.float8_e4m3fn,
-                              y_dtype:torch.dtype = torch.float8_e4m3fn, size:int = 16) -> None:
-        x_fp8=torch.rand(size, size, device=device).to(x_dtype)
-        y_fp8=torch.eye(size, device=device).to(y_dtype).t()
+    def _test_tautological_mm(self, device: str = "cuda",
+                              x_dtype: torch.dtype = torch.float8_e4m3fn,
+                              y_dtype: torch.dtype = torch.float8_e4m3fn,
+                              size: int = 16) -> None:
+        x_fp8 = torch.rand(size, size, device=device).to(x_dtype)
+        y_fp8 = torch.eye(size, device=device).to(y_dtype).t()
         out_fp32 = torch.mm(x_fp8.to(torch.float), y_fp8.to(torch.float))
-        amax_fp32 =out_fp32.amax()
+        amax_fp32 = out_fp32.amax()
         (out_fp8, amax_fp8) = torch._scaled_mm(x_fp8, y_fp8)
         self.assertEqual(amax_fp32, amax_fp8.to(torch.float))
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
-    def test_float8_e4m3fn(self, device):
+    def test_float8_e4m3fn(self, device) -> None:
         self._test_tautological_mm(device, torch.float8_e4m3fn, torch.float8_e4m3fn, 16)
         self._test_tautological_mm(device, torch.float8_e4m3fn, torch.float8_e5m2, 32)
         self._test_tautological_mm(device, torch.float8_e5m2, torch.float8_e4m3fn, 48)
