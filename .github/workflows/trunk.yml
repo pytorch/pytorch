@@ -18,12 +18,12 @@ concurrency:
 
 jobs:
   # Build PyTorch with BUILD_CAFFE2=ON
-  caffe2-linux-focal-py3_8-gcc7-build:
-    name: caffe2-linux-focal-py3.8-gcc7
+  caffe2-linux-jammy-py3_8-gcc11-build:
+    name: caffe2-linux-jammy-py3.8-gcc11
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: caffe2-linux-focal-py3.8-gcc7
-      docker-image-name: pytorch-linux-focal-py3.8-gcc7
+      build-environment: caffe2-linux-jammy-py3.8-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.8-gcc11
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
