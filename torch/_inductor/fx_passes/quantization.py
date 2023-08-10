@@ -624,7 +624,7 @@ def _register_qlinear_weight_prepack_pass(pattern, pass_number):
           |
         dequant_per_tensor
           |
-        mm/addmm <- dequant_per_channel <- int8_weight
+        mm/addmm <- t <- dequant_per_channel <- int8_weight
 
         Insert weight prepack node and change the pattern to:
         int8 activation
@@ -683,11 +683,12 @@ def _register_qlinear_weight_prepack_pass(pattern, pass_number):
                 w_scale,
                 w_zp,
                 bias,
-                "none",  # post op name
-                [],  # post op args
-                True,  # fp32_output
                 1.0,  # output_scale
                 0,  # output_zero_point
+                True,  # fp32_output
+                "none",  # post op name
+                [],  # post op args
+                "",  # post op algorithm
             )
             new_linear_node = graph.call_function(
                 torch.ops.onednn.qlinear_pointwise.default, args=new_args

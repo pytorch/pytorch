@@ -224,6 +224,7 @@ class X86InductorQuantizer(Quantizer):
         input_qspec_map[input_node] = get_input_act_qspec(quantization_config)
 
         t_node = linear_node.args[weight_index]
+        assert isinstance(t_node, Node)
         weight_node = t_node.args[0]
         assert isinstance(weight_node, Node)
         quantization_annotation = weight_node.meta.get(
@@ -471,7 +472,7 @@ class X86InductorQuantizer(Quantizer):
             torch.nn.LeakyReLU,
             torch.nn.Tanh,
         ]
-        fused_partitions = []
+        fused_partitions: List[tuple] = []
         for postop in postop_list:
             fused_partitions = fused_partitions + find_sequential_partitions(
                 gm, [torch.nn.Linear, postop]
