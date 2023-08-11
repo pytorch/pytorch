@@ -2449,13 +2449,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         tos = self.stack[-1]
         if not isinstance(tos, ListIteratorVariable):
             self.pop()
-            assert tos.has_unpack_var_sequence(self)
-            tos = ListIteratorVariable(
-                tos.items,
-                mutable_local=MutableLocal(),
-                **VariableTracker.propagate(tos),
-            )
-            self.push(tos)
+            res = BuiltinVariable(iter).call_function(self, [tos], {})
+            self.push(res)
         return self.YIELD_FROM(inst)
 
     def YIELD_FROM(self, inst):
@@ -2464,7 +2459,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             if isinstance(tos, ConstantVariable) and tos.value is None:
                 self.pop()
                 return
-
             if isinstance(tos, ListIteratorVariable):
                 self.output.guards.update(tos.guards)
                 try:
