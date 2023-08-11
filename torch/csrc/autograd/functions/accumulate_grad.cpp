@@ -57,7 +57,14 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
       1 + !post_hooks().empty() /* num_expected_refs */,
       [&grad](at::Tensor&& grad_update) { grad = std::move(grad_update); });
 
-  return variable_list();
+  // Probably call the post_grad_hooks here
+  // Right now this totally is a hook on tensors and not grads...does it really make a diff though?
+  auto tensors = variable_list();
+  for (const auto& hook : tensor_post_grad_hooks()) {
+    tensors = (*hook)(tensors);
+  }
+
+  return tensors;
 }
 
 void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
