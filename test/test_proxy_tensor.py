@@ -10,10 +10,9 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_methods_invocations import op_db, skip, xfail, skipOps
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
 from torch._decomp import decomposition_table
-from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.symbolic_shapes import (
     sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
-    guard_int, GuardOnDataDependentSymNode
+    constrain_range, guard_int, GuardOnDataDependentSymNode
 )
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
@@ -1042,7 +1041,7 @@ def forward(self, a_1):
     def test_item_to_constructor(self):
         def f(a):
             r = a.item()
-            constrain_as_size(r)
+            constrain_range(r, min=2)
             return torch.empty(r)
 
         r = str(make_fx(f, tracing_mode="symbolic")(torch.randint(5, (1,))).code).strip()
@@ -1050,7 +1049,6 @@ def forward(self, a_1):
             r, """\
 def forward(self, a_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(a_1);  a_1 = None
-    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense, min = None, max = None)
     empty = torch.ops.aten.empty.memory_format([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     return empty"""  # noqa: B950
         )
@@ -1129,7 +1127,7 @@ def forward(self, crop_camera_1, mask_1):
                 for s in p.shape:
                     guard_int(s)
             x = x[mask]
-            constrain_as_value(x.shape[0], min=1)
+            constrain_range(x.shape[0], min=1)
             for p in params.values():
                 p.grad = None
             return torch.func.functional_call(mod, {**params, **buffers}, (x,)).sum()
