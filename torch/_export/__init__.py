@@ -14,10 +14,10 @@ import torch._dynamo
 import torch.fx
 import torch.fx._pytree as fx_pytree
 
+from torch.compiler import Constraint
 import torch.utils._pytree as pytree
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.eval_frame import Constraint
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._export.exported_program import ModuleCallEntry, ModuleCallSignature
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass

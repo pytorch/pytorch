@@ -1,5 +1,8 @@
 import torch
+
 from typing import List
+
+from .constraint import Constraint
 
 __all__ = [
     "compile",
@@ -8,6 +11,7 @@ __all__ = [
     "allow_in_graph",
     "list_backends",
     "disable",
+    "Constraint",
 ]
 
 def compile(*args, **kwargs):

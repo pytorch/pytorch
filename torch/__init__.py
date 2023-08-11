@@ -1772,12 +1772,14 @@ if not _running_with_deploy():
 
 # TODO(ycao): Move ExportedProgram, Constraint, dynamic_dim etc to torch.compiler namespace
 
+from torch.compiler import Constraint
+
 def export(
     f: Callable,
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
-    constraints: Optional[List["torch._dynamo.eval_frame.Constraint"]] = None,
+    constraints: Optional[List[Constraint]] = None,
 ) -> "torch._export.exported_program.ExportedProgram":  # type: ignore[name-defined]
     """
     `torch.export()` is a one-shot process for capturing a computation graph from
@@ -1960,6 +1962,10 @@ def export(
         to define `Constraint` objects that specify the dynamics and the possible
         range of shapes. See torch._export.dynamic_dim() docstring for examples on
         how to use it.
+
+    Returns:
+        An ExportedProgram containing the traced callable.
+
     """
 
     from torch._export import export
