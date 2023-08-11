@@ -7,7 +7,7 @@ from torch.library import impl, Library
 quant_lib = Library("quant", "DEF")
 
 quant_lib.define(
-    "choose_qparams.tensor(Tensor input, int quant_min, int quant_max, "
+    "choose_qparams(Tensor input, int quant_min, int quant_max, "
     "float eps, ScalarType dtype) -> (Tensor, Tensor)"
 )
 
