@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import List
+from typing import Any, Dict, List
 
 
 class TestPrioritizations:
@@ -17,11 +17,12 @@ class TestPrioritizations:
     ]  # When we don't know if the test is relevant to the PR or not
     # future cateories could include 'definitely not relevant' and 'probably not relevant'
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.highly_relevant = []
         self.probably_relevant = []
         self.unranked_relevance = []
 
+    @staticmethod
     def _merge_tests(
         current_tests: List[str], new_tests: List[str], exclude_tests: List[str]
     ) -> List[str]:
@@ -37,7 +38,7 @@ class TestPrioritizations:
 
         return current_tests
 
-    def integrate_priorities(self, other: "TestPrioritizations"):
+    def integrate_priorities(self, other: "TestPrioritizations") -> None:
         """
         Integrates priorities from another TestPrioritizations object.
 
@@ -72,14 +73,14 @@ class HeuristicInterface:
     description: str
 
     @abstractmethod
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Dict[str, Any]) -> None:
         pass
 
     @abstractmethod
     def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:
         pass
 
-    def __str__(self):
+    def __str__(self) -> str:
         # returns the concrete class's name, and optionally any constructor arguments params
 
         return self.__class__.__name__
