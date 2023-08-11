@@ -18,7 +18,8 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch::cuda {
+namespace torch {
+namespace cuda {
 using namespace at;
 using namespace torch::autograd;
 
@@ -502,4 +503,5 @@ at::Tensor gather(
   return _gather_out_impl(tensors, result, dim);
 }
 
-} // namespace torch::cuda
+} // namespace cuda
+} // namespace torch

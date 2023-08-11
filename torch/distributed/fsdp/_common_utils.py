@@ -111,8 +111,6 @@ class _FSDPState(_State):
         # FSDP/fully_shard.
         self._ignored_modules: Set[nn.Module] = set()
         self._ignored_params: Set[nn.Parameter] = set()
-        # Buffer names are cleaned (without wrapper prefixes)
-        self._ignored_buffer_names: Set[str] = set()
         self.process_group: Optional[dist.ProcessGroup] = None
         self.rank: int = -1
         self.world_size: int = -1
@@ -392,16 +390,12 @@ def _apply_to_modules(
                         submodule_name == "_fsdp_wrapped_module"
                         or submodule_name == "_dmp_wrapped_module"
                     ):
-                        if (
-                            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
-                        ):
-                            # TODO(voz): Don't graph break on this
-                            warnings.warn(
-                                "An unexpected prefix is detected. This case "
-                                " should only happen when using DMP with FSDP. "
-                                f"prefix = {prefix}, "
-                                f"submodule_name = {submodule_name}"
-                            )
+                        warnings.warn(
+                            "An unexpected prefix is detected. This case "
+                            " should only happen when using DMP with FSDP. "
+                            f"prefix = {prefix}, "
+                            f"submodule_name = {submodule_name}"
+                        )
                         new_prefix = prefix
                     elif submodule_name == "module":
                         warnings.warn(
@@ -515,12 +509,7 @@ def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.Stream) -> No
     # FIXME record_stream doesn't work with non-cuda tensors
     if tensor.device.type not in ["cuda", torch._C._get_privateuse1_backend_name()]:
         return
-
-    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-        # Don't no dispatch under torch compile like this
-        with no_dispatch():
-            tensor.record_stream(stream)
-    else:
+    with no_dispatch():
         tensor.record_stream(stream)
 
 

@@ -221,9 +221,8 @@ other workers, and calling the appropriate functions to retrieve or modify their
 parameters during training. See :ref:`remote-reference-protocol` for more
 details.
 
-.. autoclass:: PyRRef(RRef)
+.. autoclass:: RRef
     :members:
-    :inherited-members:
 
 
 .. toctree::

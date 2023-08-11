@@ -7489,44 +7489,6 @@ def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
                 align_corners=align_corners,
             )
 
-def reference_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
-
-    batch_size = 2
-    num_channels = 3
-    height = 345
-    width = 456
-    modes = ("bilinear", "nearest", "bicubic")
-    align_cornerss = (False, True)
-    padding_modes = ('zeros', 'border', 'reflection')
-
-    # Create an affine transformation matrix
-    a = torch.deg2rad(torch.tensor(45.0))
-    ca, sa = torch.cos(a), torch.sin(a)  # rotation angles
-    s1, s2 = 1.23, 1.34  # scales
-
-    theta = torch.tensor([[
-        [ca / s1, sa, 0.0],
-        [-sa, ca / s2, 0.0],
-    ]], dtype=dtype, device=device)
-    theta = theta.expand(batch_size, 2, 3).contiguous()
-
-    x = torch.arange(batch_size * num_channels * height * width, device=device)
-    x = x.reshape(batch_size, num_channels, height, width).to(torch.uint8)
-    x = x.to(dtype=dtype)
-    x.requires_grad_(requires_grad)
-
-    for mode, padding_mode, align_corners in itertools.product(modes, padding_modes, align_cornerss):
-        grid = torch.nn.functional.affine_grid(
-            theta, size=(batch_size, num_channels, height, width), align_corners=align_corners
-        )
-        yield SampleInput(
-            x,
-            grid,
-            mode,
-            padding_mode,
-            align_corners,
-        )
-
 def sample_inputs_grid_sampler_2d(op_info, device, dtype, requires_grad, **kwargs):
     # We get better tests if we change the range of the values to something like [-2,2]
     # because for grid (second tensor argument) the "useful" range is [-1,1] and this way
@@ -8552,46 +8514,6 @@ class foreach_lerp_sample_func(foreach_inputs_sample_func):
         raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
 
 
-class foreach_clamp_sample_func(foreach_inputs_sample_func):
-
-    def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
-        num_input_tensors_specified = "num_input_tensors" in kwargs
-        num_input_tensors = kwargs.pop("num_input_tensors") if num_input_tensors_specified else foreach_num_tensors
-        assert isinstance(num_input_tensors, list)
-        _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
-        _foreach_inputs_kwargs["requires_grad"] = requires_grad
-
-        # zero_size tensor
-        if dtype == torch.float32 and (not num_input_tensors_specified) and ("cuda" in device):
-            zero_size_foreach_inputs_kwargs = copy.deepcopy(_foreach_inputs_kwargs)
-            zero_size_foreach_inputs_kwargs["zero_size"] = True
-            input = sample_inputs_foreach(None, device, dtype, NUM_SIZE0_TENSORS, **zero_size_foreach_inputs_kwargs)
-            args = np.random.uniform(size=(2,)).tolist()
-            kwargs = {
-                "zero_size": True,
-                "disable_fastpath": dtype in integral_types_and(torch.bool),
-            }
-            yield SampleInput(input, *args, **kwargs)
-
-        for num_tensors, args in product(
-            num_input_tensors,
-            (
-                (-1, 1),
-                (-1, None),
-                (None, 1),
-                (3, 1),
-            ),
-        ):
-            _foreach_inputs_kwargs["zero_size"] = False
-            input = sample_inputs_foreach(
-                None, device, dtype, num_tensors, **_foreach_inputs_kwargs)
-            kwargs = {
-                "zero_size": False,
-                "disable_fastpath": dtype in integral_types_and(torch.bool),
-            }
-            yield SampleInput(input, *args, **kwargs)
-
-
 class foreach_pointwise_sample_func(foreach_inputs_sample_func):
 
     def __init__(
@@ -8922,15 +8844,6 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
-        supports_autograd=True,
-        supports_forward_ad=True,
-    ),
-    ForeachFuncInfo(
-        "clamp",
-        dtypes=all_types_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
-        supports_alpha_param=False,
-        sample_inputs_func=foreach_clamp_sample_func(2, True, True),
         supports_autograd=True,
         supports_forward_ad=True,
     ),
@@ -17884,7 +17797,6 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16),
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sample,
-        reference_inputs_func=reference_inputs_grid_sample,
         supports_gradgrad=False,
         gradcheck_nondet_tol=1e-15),
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d

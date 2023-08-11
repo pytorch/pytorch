@@ -1,7 +1,11 @@
 #pragma once
 
-namespace torch::cuda::python {
+namespace torch {
+namespace cuda {
+namespace python {
 
 void initCommMethods(PyObject* module);
 
-} // namespace torch::cuda::python
+}
+} // namespace cuda
+} // namespace torch

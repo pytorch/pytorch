@@ -214,12 +214,6 @@ def exception_handler(e, code, frame=None, export=False):
     augment_exc_message(e, export=export)
 
 
-def is_recompilation(cache_size):
-    # cache_size here refers to the number of total cached entries on the code
-    # object.
-    return cache_size >= 1
-
-
 FRAME_COUNTER = 0
 
 
@@ -243,7 +237,7 @@ def convert_frame_assert(
 
         code = frame.f_code
 
-        if is_recompilation(cache_size) and (
+        if code in input_codes and (
             recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
         ):
             if is_guard_failure_reporting_enabled():

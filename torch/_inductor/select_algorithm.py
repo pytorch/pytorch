@@ -8,7 +8,7 @@ import textwrap
 import time
 from io import StringIO
 
-from typing import Any, Dict, List, Type, Union
+from typing import Any, List
 from unittest.mock import patch
 
 import sympy
@@ -32,7 +32,7 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 # correctness checks struggle with fp16/tf32
-VERIFY: Dict[str, Any] = dict()
+VERIFY = False  # dict(atol=1, rtol=0.05)
 PRINT_AUTOTUNE = True
 DEBUG = False
 
@@ -257,7 +257,7 @@ class TritonTemplateKernel(TritonKernel):
             input_node.freeze_layout()
             epilogue_args.append(input_node.make_loader()(index_symbols))
 
-        V.ops.store(  # type: ignore[attr-defined]
+        V.ops.store(
             self.output_node.get_name(),
             output_index,
             self.epilogue_fn(*epilogue_args),
@@ -316,7 +316,6 @@ class TritonTemplateKernel(TritonKernel):
         *,
         copy_shape=None,
         dense_indexing=False,
-        override_mask=None,
     ):
         """
         Override the default indexing to use our custom mask and force
@@ -384,7 +383,7 @@ def _jinja2_env():
 
 class TritonTemplate:
     index_counter = itertools.count()
-    all_templates: Dict[str, "TritonTemplate"] = dict()
+    all_templates = dict()
 
     @staticmethod
     def _template_from_string(source):
@@ -692,7 +691,7 @@ class ExternKernelCaller(ChoiceCaller):
         else:
             algo = self.to_callable()
             out_new = algo(*args)
-            torch._C._dynamo.guards.assert_size_stride(  # type: ignore[attr-defined]
+            torch._C._dynamo.guards.assert_size_stride(
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
@@ -718,7 +717,6 @@ class ExternKernelCaller(ChoiceCaller):
         )
 
     def output_node(self):
-        cls: Union[Type[ir.ExternKernelOut], Type[ir.ExternKernelAlloc]]
         if self.has_out_variant:
             cls = ir.ExternKernelOut
         else:
@@ -889,7 +887,7 @@ class AlgorithmSelectorCache(PersistentCache):
             lines += ["]", f"out = {tensor_repr(out)}", ""]
             return "\n".join(lines)
 
-        benchmark.debug_str = debug_str  # type: ignore[attr-defined]
+        benchmark.debug_str = debug_str
         return benchmark
 
     @staticmethod

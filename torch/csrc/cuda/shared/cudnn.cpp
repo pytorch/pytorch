@@ -74,7 +74,9 @@ size_t getVersionInt() {
 } // namespace
 #endif
 
-namespace torch::cuda::shared {
+namespace torch {
+namespace cuda {
+namespace shared {
 
 void initCudnnBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -99,5 +101,7 @@ void initCudnnBindings(PyObject* module) {
   cudnn.def("getVersionInt", getVersionInt);
 }
 
-} // namespace torch::cuda::shared
+} // namespace shared
+} // namespace cuda
+} // namespace torch
 #endif
