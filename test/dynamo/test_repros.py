@@ -2919,7 +2919,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         def forward_with_cond_scale(x, t, cond_scale, self_cond, other1, other2):
             return x.sin() + t + cond_scale + self_cond + other1 + other2
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             d1 = dict(other1=5)
             d2 = dict(other2=4)
@@ -2929,7 +2928,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 "addition": d2.get("other2") + d1.get("does_not_exist", 1)
             }
 
-        self.assertTrue(same(fn(torch.ones(4)), torch.ones(4).sin() + 15))
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        self.assertTrue(same(fn(torch.ones(4)), compiled_fn(torch.ones(4))))
 
     def test_graph_break_unsupported_fake(self):
         counter = torch._dynamo.testing.CompileCounter()
