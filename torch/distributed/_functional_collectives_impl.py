@@ -4,7 +4,7 @@ import weakref
 import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
-from typing import List, cast, Optional
+from typing import List, cast
 
 """
 Moved eager kernel implementations to a separate file partly for readability and partly as it is currently
