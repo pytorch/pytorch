@@ -1103,7 +1103,7 @@ class deviceCountAtLeast:
 
         return multi_fn
 
-# Only runs the test on the native device type (currently CPU, CUDA, Meta)
+# Only runs the test on the native device type (currently CPU, CUDA, Meta and PRIVATEUSE1)
 def onlyNativeDeviceTypes(fn):
     @wraps(fn)
     def only_fn(self, *args, **kwargs):
@@ -1229,6 +1229,11 @@ class dtypesIfMPS(dtypes):
     def __init__(self, *args):
         super().__init__(*args, device_type='mps')
 
+class dtypesIfPRIVATEUSE1(dtypes):
+
+    def __init__(self, *args):
+        super().__init__(*args, device_type=torch._C._get_privateuse1_backend_name())
+
 def onlyCPU(fn):
     return onlyOn('cpu')(fn)
 
@@ -1247,6 +1252,17 @@ def onlyPRIVATEUSE1(fn):
         reason = f"Skip as torch has no module of {device_type}"
         return unittest.skip(reason)(fn)
     return onlyOn(device_type)(fn)
+
+def onlyCUDAAndPRIVATEUSE1(fn):
+    @wraps(fn)
+    def only_fn(self, *args, **kwargs):
+        if self.device_type not in ('cuda', torch._C._get_privateuse1_backend_name()):
+            reason = f"onlyCUDAAndPRIVATEUSE1: doesn't run on {self.device_type}"
+            raise unittest.SkipTest(reason)
+
+        return fn(self, *args, **kwargs)
+
+    return only_fn
 
 def disablecuDNN(fn):
 
