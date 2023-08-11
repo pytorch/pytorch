@@ -27,39 +27,23 @@ from contextlib import contextmanager
 from functools import lru_cache, wraps
 from typing import Any, Dict, Optional, Tuple, Union
 
+import numpy as np
+
 import torch._logging
+import torch._numpy as tnp
 from torch._guards import detect_fake_mode  # noqa: F401
 from . import config
 
-try:
-    import numpy as np
 
-    HAS_NUMPY = True
-except ModuleNotFoundError:
-    np = None  # type: ignore[assignment]
-    HAS_NUMPY = False
+# NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
+NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
 
-try:
-    import torch_np
-
-    HAS_NUMPY_TORCH_INTEROP = True
-except ModuleNotFoundError:
-    torch_np = None
-    HAS_NUMPY_TORCH_INTEROP = False
-
-# NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TORCH_NP_MODULE` are in sync.
-NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random) if HAS_NUMPY else tuple()
-
-NP_TO_TORCH_NP_MODULE = (
-    {
-        np: torch_np,
-        np.fft: torch_np.fft,
-        np.linalg: torch_np.linalg,
-        np.random: torch_np.random,
-    }
-    if HAS_NUMPY_TORCH_INTEROP
-    else {}
-)
+NP_TO_TNP_MODULE = {
+    np: tnp,
+    np.fft: tnp.fft,
+    np.linalg: tnp.linalg,
+    np.random: tnp.random,
+}
 
 import importlib
 
@@ -420,43 +404,34 @@ def is_typing(value):
 
 
 def is_numpy_int_type(value):
-    if HAS_NUMPY:
-        return istype(
-            value,
-            (
-                np.int8,
-                np.int16,
-                np.int32,
-                np.int64,
-                np.uint8,
-                np.uint16,
-                np.uint32,
-                np.uint64,
-            ),
-        )
-    else:
-        return False
+    return istype(
+        value,
+        (
+            np.int8,
+            np.int16,
+            np.int32,
+            np.int64,
+            np.uint8,
+            np.uint16,
+            np.uint32,
+            np.uint64,
+        ),
+    )
 
 
 def is_numpy_float_type(value):
-    if HAS_NUMPY:
-        return istype(
-            value,
-            (
-                np.float16,
-                np.float32,
-                np.float64,
-            ),
-        )
-    else:
-        return False
+    return istype(
+        value,
+        (
+            np.float16,
+            np.float32,
+            np.float64,
+        ),
+    )
 
 
 def is_numpy_ndarray(value):
-    if HAS_NUMPY:
-        return istype(value, np.ndarray)
-    else:
-        return False
+    return istype(value, np.ndarray)
 
 
 def istensor(obj):
@@ -1656,8 +1631,8 @@ def nnmodule_has_hooks(
 
 
 def to_numpy_helper(value):
-    """Convert tensor and torch_np.ndarray to numpy.ndarray."""
-    if isinstance(value, torch_np.ndarray):
+    """Convert tensor and tnp.ndarray to numpy.ndarray."""
+    if isinstance(value, tnp.ndarray):
         return to_numpy_helper(value.tensor)
     elif isinstance(value, torch.Tensor):
         return value.cpu().numpy()
@@ -1668,8 +1643,10 @@ def to_numpy_helper(value):
 
 
 def numpy_to_tensor(value):
-    """Convert torch_np.ndarray to tensor, leave other types intact. If a list/tuple, loop through it to convert."""
-    if isinstance(value, torch_np.ndarray):
+    """Convert tnp.ndarray to tensor, leave other types intact. If a list/tuple, loop through it to convert."""
+    if isinstance(value, np.ndarray):
+        return torch.as_tensor(value)
+    if isinstance(value, tnp.ndarray):
         return value.tensor
     elif isinstance(value, (tuple, list)):
         return type(value)(numpy_to_tensor(obj) for obj in value)
@@ -1691,16 +1668,16 @@ class numpy_to_tensor_wrapper:
 
 
 def numpy_attr_wrapper(obj, name):
-    if isinstance(obj, torch_np.ndarray):
+    if isinstance(obj, tnp.ndarray):
         out = getattr(obj, name)
         return numpy_to_tensor(out)
     elif isinstance(obj, torch.Tensor):
-        out = getattr(torch_np.ndarray(obj), name)
+        out = getattr(tnp.ndarray(obj), name)
         return numpy_to_tensor(out)
 
 
 class numpy_method_wrapper:
-    """Convert obj from torch.Tensor to torch_np.ndarray and call method. Then convert result back to torch.Tensor."""
+    """Convert obj from torch.Tensor to tnp.ndarray and call method. Then convert result back to torch.Tensor."""
 
     def __init__(self, method: str):
         self.method = method
@@ -1712,7 +1689,7 @@ class numpy_method_wrapper:
     def __call__(self, *args, **kwargs):
         obj = args[0]
         if isinstance(obj, torch.Tensor):
-            obj = torch_np.ndarray(obj)
+            obj = tnp.ndarray(obj)
         method_callable = getattr(obj, self.method)
         out = method_callable(*args[1:], **kwargs)
         return numpy_to_tensor(out)
