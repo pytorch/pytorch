@@ -36,6 +36,7 @@ PyObject* THPGenerator_initDefaultGenerator(at::Generator cdata) {
     throw python_error();
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
   self_->cdata = std::move(cdata);
+  self_->weakreflist = NULL;
   return self.release();
 }
 
@@ -44,6 +45,9 @@ static void THPGenerator_dealloc(PyObject* _self) {
   if (self->cdata.defined()) {
     self->cdata.set_pyobj(nullptr);
     self->cdata.~Generator();
+  }
+  if (self->weakreflist != NULL) {
+    PyObject_ClearWeakRefs(_self);
   }
   Py_TYPE(_self)->tp_free(_self);
 }
@@ -79,6 +83,11 @@ static PyObject* THPGenerator_pynew(
         c10::DeviceTypeName(device.type()),
         " is not supported for torch.Generator() api.");
   }
+  self->weakreflist = NULL;
+
+  static py::handle _generator_registry = py::module::import("torch").attr("random").attr("_generator_registry");
+  _generator_registry.attr("add")(py::cast<py::object>((PyObject*)self.get()));
+
   return (PyObject*)self.release();
   END_HANDLE_TH_ERRORS
 }
@@ -254,7 +263,7 @@ PyTypeObject THPGeneratorType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
+    offsetof(THPGenerator, weakreflist), /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THPGenerator_methods, /* tp_methods */
@@ -310,6 +319,7 @@ PyObject* THPGenerator_NewWithVar(PyTypeObject* type, Generator gen) {
   if (obj) {
     auto g = (THPGenerator*)obj;
     new (&g->cdata) Generator(std::move(gen));
+    g->weakreflist = NULL;
     set_pyobj(g->cdata, obj);
   }
   return obj;
