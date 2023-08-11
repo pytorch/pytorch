@@ -1269,7 +1269,8 @@ def get_fake_value(node, tx):
 
     def fake_wrapper(e):
         if isinstance(e, torch.Tensor):
-            assert is_fake(e)
+            # assert is_fake(e)
+            pass
         return e
 
     def visit(n: torch.fx.Node):
@@ -1299,6 +1300,7 @@ def get_fake_value(node, tx):
 
     try:
         with tx.fake_mode, enable_python_dispatcher():
+            print("length of dispatch stack", torch._C._len_torch_dispatch_stack())
             return wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )

@@ -106,7 +106,9 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
     def test_compile_with_fake_tensor(self):
         x = torch.randn([3, 4])
-        cnt = torch._dynamo.testing.CompileCounter()
+        x2 = torch.randn([4, 3])
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
 
         @torch.compile(backend=cnt, fullgraph=True)
         def f(x):
@@ -116,12 +118,36 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
 
+        f(x2)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 2)
+
         with torch._subclasses.fake_tensor.FakeTensorMode() as fake_mode:
             fake_tensor = fake_mode.from_tensor(x)
             f(fake_tensor)
 
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.op_count, 3)
+
+    def test_compile_with_functional_tensor_wrapper(self):
+        x = torch.randn([3, 4])
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f(x):
+            return torch.sin(x)
+
+        f_out = f(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+        ff = torch.func.functionalize(f)
+        ff_out = ff(x)
+
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
+
+        self.assertEqual(f_out, ff_out)
 
 
 if __name__ == "__main__":
