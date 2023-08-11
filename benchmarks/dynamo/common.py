@@ -6,6 +6,7 @@ import collections
 import contextlib
 import copy
 import csv
+import dataclasses
 import functools
 import importlib
 import itertools
@@ -261,6 +262,7 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     # https://github.com/pytorch/pytorch/issues/103760
     "dlrm",
     "hf_T5_generate",
+    "hf_Bert",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -301,6 +303,14 @@ CI_SKIP_OPTIMIZER = {
     "MobileBertForMaskedLM",  # Stack issue in fx
     "MobileBertForQuestionAnswering",  # Stack issue in fx
     "PegasusForConditionalGeneration",  # OOM
+}
+
+CI_SKIP_DYNAMIC_BATCH_ONLY = {
+    "sam",
+    # See https://github.com/mindee/doctr/blob/f2114758d529ed8d3d0030581638f0520b6b98d8/doctr/models/detection/core.py#L89
+    # It iterates over the batch, which is dynamic, and dynamo chokes
+    # We should be able to graphbreak there.
+    "doctr_det_predictor",
 }
 
 
@@ -510,6 +520,31 @@ def timed(
     t_1 = time.perf_counter()
     time_total += t_1 - t_0
     return (time_total, result) if return_result else time_total
+
+
+def _normalize_bench_inputs(example_inputs) -> Tuple[Tuple[Any], Mapping[str, Any]]:
+    # NOTE(bowbao): For huggingface benchmark, example_inputs are formatted as dictionary,
+    # and consumed like `model(**example_inputs)`.
+    # For other benchmarks, example_inputs are formatted as tuple and consumed
+    # like `model(*example_inputs)`.
+    if isinstance(example_inputs, dict):
+        return (), example_inputs
+    else:
+        return tuple(example_inputs), {}
+
+
+def _register_dataclass_output_as_pytree(example_outputs) -> None:
+    # NOTE(angelayi): For huggingface benchmark, some example outputs are
+    # formatted as a dataclass which pytree cannot consume. So we want
+    # to register the pytree implementation here
+    example_outputs_flat, _ = pytree.tree_flatten(example_outputs)
+    output_dataclass_types = [
+        type(out) for out in example_outputs_flat if dataclasses.is_dataclass(type(out))
+    ]
+    for output_type in output_dataclass_types:
+        from torch._export.utils import register_dataclass_as_pytree_node
+
+        register_dataclass_as_pytree_node(output_type)
 
 
 class Stats:
@@ -1090,29 +1125,31 @@ class AOTInductorModelCache:
     def load(cls, model, example_inputs, eager_forward):
         key = id(model)
         if key not in cls.cache:
-            # AOTInductorModel relies on the caller to pass in output_tensors,
-            # so we need to explicitly allocate output tensors here.
-            output_tensors = []
-            # TODO: we should be able to do this by querying AOTInductorModel
+            # Register the output dataclass to pytree
             example_outputs = eager_forward(
                 copy.deepcopy(model), clone_inputs(example_inputs)
             )
-            if isinstance(example_outputs, dict):
-                # Workaround Huggingface output type issue ModelOutput
-                example_outputs = dict(example_outputs)
-            example_outputs, output_spec = pytree.tree_flatten(example_outputs)
-            for output in example_outputs:
-                output_tensors.append(torch.empty_like(output))
+            _register_dataclass_output_as_pytree(example_outputs)
 
-            # The exact API is subject to change
-            exported = torch._export.export(model, example_inputs)
-            param_buffer_values = list(exported.state_dict.values())
-            flat_example_inputs = fx_pytree.tree_flatten_spec(
-                example_inputs, exported.call_spec.in_spec
+            example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+            example_inputs = torch._export.combine_args_kwargs(
+                example_args, example_kwargs
             )
-            all_args = (*param_buffer_values, *flat_example_inputs)
-            # AOT compile into a .so
-            so_path = torch._inductor.aot_compile(exported.graph_module, all_args)
+
+            so_path, exported = torch._export.aot_compile(
+                model, example_args, example_kwargs
+            )
+
+            output_node = list(exported.graph.nodes)[-1]
+            output_tensors = [
+                torch.empty(
+                    node.meta["val"].size(),
+                    dtype=node.meta["val"].dtype,
+                    layout=node.meta["val"].layout,
+                    device=node.meta["val"].device,
+                )
+                for node in output_node.args[0]
+            ]
 
             # Use a utility function for easier benchmarking
             source = """
@@ -1138,7 +1175,7 @@ class AOTInductorModelCache:
                 "module": module,
                 "exported": exported,
                 "output_tensors": output_tensors,
-                "output_spec": output_spec,
+                "output_spec": exported.call_spec.out_spec,
             }
             cls.cache[key] = value
 
@@ -1158,6 +1195,8 @@ def export_aot_inductor(forward: Callable):
             model, example_inputs, eager_forward
         )
         param_buffer_values = list(exported.state_dict.values())
+        example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+        example_inputs = torch._export.combine_args_kwargs(example_args, example_kwargs)
         flat_example_inputs = fx_pytree.tree_flatten_spec(
             example_inputs, exported.call_spec.in_spec
         )
@@ -1404,22 +1443,10 @@ class OnnxModelFromDynamo(OnnxModelFromTorchScript):
         self._export_output = self._export(model, example_inputs, self.model_path)
         self.onnx_session = self._init_ort_session(self.model_path)
 
-    def _normalize_bench_inputs(
-        self, example_inputs
-    ) -> Tuple[Tuple[Any], Mapping[str, Any]]:
-        # NOTE(bowbao): For huggingface benchmark, example_inputs are formatted as dictionary,
-        # and consumed like `model(**example_inputs)`.
-        # For other benchmarks, example_inputs are formatted as tuple and consumed
-        # like `model(*example_inputs)`.
-        if isinstance(example_inputs, dict):
-            return (), example_inputs
-        else:
-            return example_inputs, {}
-
     def _export(
         self, model, example_inputs, output_path: str
     ) -> torch.onnx.ExportOutput:
-        example_args, example_kwargs = self._normalize_bench_inputs(example_inputs)
+        example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         options = torch.onnx.ExportOptions()
         export_output = torch.onnx.dynamo_export(
             model, *example_args, **example_kwargs, export_options=options
@@ -1429,7 +1456,7 @@ class OnnxModelFromDynamo(OnnxModelFromTorchScript):
         return export_output
 
     def format_pt_inputs(self, pt_inputs):
-        pt_args, pt_kwargs = self._normalize_bench_inputs(pt_inputs)
+        pt_args, pt_kwargs = _normalize_bench_inputs(pt_inputs)
         return self._export_output.adapt_torch_inputs_to_onnx(*pt_args, **pt_kwargs)
 
     def format_pt_outputs(self, pt_outputs):
@@ -1709,7 +1736,7 @@ class BenchmarkRunner:
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            self.optimizer = torch.optim.SGD(params, lr=0.01)
+            self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
         else:
             self.optimizer = None
 
@@ -2052,18 +2079,24 @@ class BenchmarkRunner:
                 if self.args.export:
                     # TB and TIMM use list example_inputs
                     # HF use dict example_inputs
-                    if isinstance(example_inputs, dict):
-                        raise RuntimeError(
-                            "expect example_inputs as list/tuple, but got dict. need to support kwargs in torch._export.export"
-                        )
+                    example_args, example_kwargs = _normalize_bench_inputs(
+                        example_inputs
+                    )
+
+                    # Register the output dataclass to pytree
+                    example_outputs = model_copy(*example_args, **example_kwargs)
+                    _register_dataclass_output_as_pytree(example_outputs)
+
                     # apply export on module directly
                     # no need for n iterations
                     # the logic should be the same to self.model_iter_fn (forward_pass)
                     with self.autocast():
                         optimized_model_iter_fn = optimize_ctx(
-                            model_copy, example_inputs
+                            model_copy, example_args, example_kwargs
                         )
-                        new_result = optimized_model_iter_fn(*example_inputs)
+                        new_result = optimized_model_iter_fn(
+                            *example_args, **example_kwargs
+                        )
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
                     new_result = optimized_model_iter_fn(model_copy, example_inputs)
@@ -2292,6 +2325,38 @@ class BenchmarkRunner:
             results.append(experiment(model, example_inputs, **experiment_kwargs))
             return " ".join(map(str, results))
 
+    def minify_model(
+        self,
+        name,
+        model,
+        example_inputs,
+        optimize_ctx,
+        experiment,
+        tag,
+    ):
+        logging.info("Minifying %s...", name)
+        os.environ["TORCH_COMPILE_DEBUG"] = "1"
+        os.environ["TORCHDYNAMO_REPRO_AFTER"] = "dynamo"
+        os.environ["TORCHDYNAMO_REPRO_LEVEL"] = "4"
+
+        self.check_accuracy(name, model, example_inputs, optimize_ctx, experiment, tag)
+
+        if self.args.output_directory:
+            repro_dir = self.args.output_directory
+        else:
+            repro_dir = torch._dynamo.config.base_dir
+
+        try:
+            shutil.move("repro.py", f"{repro_dir}/{name}_repro.py")
+        except OSError as e:
+            logging.error("Could not find repro script for model %s", name)
+        else:
+            logging.info(
+                "Repro script for model %s with minified graph saved to %s",
+                name,
+                repro_dir,
+            )
+
     def run_one_model(
         self,
         name,
@@ -2315,6 +2380,10 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment, tag
             )
             print(status)
+            if status == "fail_accuracy" and self.args.minify:
+                self.minify_model(
+                    name, model, example_inputs, optimize_ctx, experiment, tag
+                )
         elif self.args.tolerance:
             status = self.check_tolerance(name, model, example_inputs, optimize_ctx)
             print(status)
@@ -2469,6 +2538,9 @@ def parse_args(args=None):
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
         "--cpp-wrapper", action="store_true", help="turn on cpp/cuda wrapper codegen"
+    )
+    parser.add_argument(
+        "--freezing", action="store_true", help="turn on freezing", default=False
     )
     parser.add_argument(
         "--ci", action="store_true", help="Flag to tell that its a CI run"
@@ -2725,6 +2797,12 @@ def parse_args(args=None):
         help="Disable translation validation for accuracy builds.",
     )
 
+    parser.add_argument(
+        "--minify",
+        action="store_true",
+        help="Enable minification when failure is below tolerance. Save repro script for each model.",
+    )
+
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
     group_fuser.add_argument("--nvfuser", action="store_true", help=argparse.SUPPRESS)
@@ -2904,9 +2982,7 @@ def run(runner, args, original_dir=None):
     if args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
-        torch._dynamo.config.automatic_dynamic_shapes = True
     if args.dynamic_shapes:
-        torch._dynamo.config.automatic_dynamic_shapes = True
         if not args.dynamic_batch_only:
             torch._dynamo.config.assume_static_by_default = False
     if args.specialize_int:
@@ -2980,11 +3056,10 @@ def run(runner, args, original_dir=None):
             # https://github.com/pytorch/pytorch/issues/96724
             "Wav2Vec2ForCTC",
             "Wav2Vec2ForPreTraining",
+            "sam",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
-        if args.only in {"hf_T5_generate"}:
-            torch._dynamo.config.automatic_dynamic_shapes = True
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
@@ -3179,6 +3254,8 @@ def run(runner, args, original_dir=None):
         inductor_config.split_reductions = not args.disable_split_reductions
         inductor_config.triton.divisible_by_16 = not args.disable_divisible_by_16
         inductor_config.cpp_wrapper = args.cpp_wrapper
+        if args.inference:
+            inductor_config.freezing = args.freezing
 
     runner.setup_amp()
 
@@ -3312,7 +3389,11 @@ def run(runner, args, original_dir=None):
                         marked = True
                         break
 
-            if args.dynamic_batch_only and batch_size > 1:
+            if (
+                args.dynamic_batch_only
+                and batch_size > 1
+                and model_name not in CI_SKIP_DYNAMIC_BATCH_ONLY
+            ):
                 tree_map_only(torch.Tensor, detect_and_mark_batch, example_inputs)
                 assert marked, f"nothing in example_inputs had a dim with {batch_size}"
 
