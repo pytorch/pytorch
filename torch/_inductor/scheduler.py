@@ -419,7 +419,7 @@ class BaseSchedulerNode:
         # TODO(xmfan): figure out how to get hardware specs
         try:
             gpu_memory_bandwidth = get_dram_gbps()
-            gpu_flops = get_device_flops()
+            gpu_flops = get_device_flops(dtype)
         except Exception:
             return 0
 
