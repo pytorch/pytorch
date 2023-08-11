@@ -181,7 +181,7 @@ def hardtanh_backward(
 
 @register_decomposition(aten.hardshrink_backward)
 def hardshrink_backward(grad_out: Tensor, self: Tensor, lambd: float):
-    return torch.where(torch.abs(a) >= lambd, 0.0, grad_out)
+    return torch.where(torch.abs(self) >= lambd, 0.0, grad_out)
 
 
 @register_decomposition(aten.hardswish)
