@@ -272,6 +272,9 @@ test_dynamo_shard() {
       export/test_db \
       functorch/test_dims \
       functorch/test_aotdispatch \
+      # TODO - ongoing effort to integrate torch.compile and vmap. Remove when
+      # the work completes
+      functorch/test_vmap \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty
