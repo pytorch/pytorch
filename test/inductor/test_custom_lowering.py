@@ -18,7 +18,11 @@ class TestCustomLowering(TorchTestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls.test_inductor_ops = torch.library.Library("test_inductor_ops", "DEF")
-        cls.impl_cuda = torch.library.Library("test_inductor_ops", "IMPL", "CUDA")
+        cls.impl_cuda = (
+            torch.library.Library("test_inductor_ops", "IMPL", "CUDA")
+            if HAS_CUDA
+            else None
+        )
         cls.impl_meta = torch.library.Library("test_inductor_ops", "IMPL", "Meta")
         cls._register_jagged_to_padded_dense()
 
@@ -89,7 +93,8 @@ class TestCustomLowering(TorchTestCase):
         )(j2pd_lowering)
 
         cls.impl_meta.impl("jagged_to_padded_dense", j2pd_meta)
-        cls.impl_cuda.impl("jagged_to_padded_dense", j2pd_cuda)
+        if HAS_CUDA:
+            cls.impl_cuda.impl("jagged_to_padded_dense", j2pd_cuda)
 
     @unittest.skipIf(not "HAS_CUDA", "CUDA needed")
     def test_jagged_to_padded_dense_sanity_cuda(self):
