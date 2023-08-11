@@ -106,6 +106,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
     def test_compile_with_fake_tensor(self):
         x = torch.randn([3, 4])
+        x2 = torch.randn([4, 3])
         cnt = torch._dynamo.testing.CompileCounter()
 
         @torch.compile(backend=cnt, fullgraph=True)
@@ -116,12 +117,16 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
 
+        f(x2)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 2)
+
         with torch._subclasses.fake_tensor.FakeTensorMode() as fake_mode:
             fake_tensor = fake_mode.from_tensor(x)
             f(fake_tensor)
 
-        self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, 2)
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.op_count, 3)
 
 
 if __name__ == "__main__":
