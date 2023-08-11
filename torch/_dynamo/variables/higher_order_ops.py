@@ -902,6 +902,19 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+def _unpack(tx, item):
+    from . import NNModuleVariable, TensorVariable
+
+    if isinstance(item, TensorVariable):
+        return item.as_proxy().node.meta["example_value"].contiguous()
+    if not isinstance(item, NNModuleVariable) and item.has_unpack_var_sequence(tx):
+        r_items = []
+        for sub_item in item.unpack_var_sequence(tx):
+            r_items.append(_unpack(tx, sub_item))
+        return item.python_type()(r_items)
+    raise RuntimeError("Unsupported autograd w/ grad return type.")
+
+
 class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -959,8 +972,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             *(arg.as_proxy() for arg in args),
             *(arg for arg in body_lifted_freevars.keys()),
         )
-        r = body_r.as_proxy().node.meta["example_value"]
-        example_value = r
+        example_value = _unpack(tx, body_r)
 
         _, p_kwargs = proxy_args_kwargs([], kwargs)
 

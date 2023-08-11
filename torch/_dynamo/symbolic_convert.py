@@ -29,7 +29,6 @@ from . import (
     exc,
     logging as torchdynamo_logging,
     side_effects,
-    skipfiles,
     variables,
 )
 from .allowed_functions import is_allowed, is_builtin_constant
@@ -2188,7 +2187,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 unimplemented(f"inlining disallowed: {func.get_function()}")
         except NotImplementedError:
             pass  # closures
-
 
     @staticmethod
     def inline_call_(

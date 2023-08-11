@@ -7,7 +7,7 @@ from typing import Dict, List
 
 import torch.nn
 
-from .. import skipfiles, variables
+from .. import variables
 from ..allowed_functions import is_allowed
 from ..exc import RestartAnalysis, unimplemented, Unsupported
 from ..guards import GuardBuilder

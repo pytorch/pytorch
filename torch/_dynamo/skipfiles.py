@@ -35,7 +35,7 @@ import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
 
-from . import comptime, config, external_utils
+from . import comptime, external_utils
 
 """
 A note on skipfiles:
