@@ -1,9 +1,10 @@
-import subprocess
-from typing import List, Dict, cast
-from warnings import warn
-import os
 import json
+import os
 from collections import defaultdict
+from typing import Any, cast, Dict, List
+from warnings import warn
+
+from tools.stats.import_test_stats import TEST_FILE_RATINGS_FILE
 
 from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface,
@@ -14,11 +15,10 @@ from tools.testing.target_determination.heuristics.utils import (
     query_changed_files,
     REPO_ROOT,
 )
-from tools.stats.import_test_stats import TEST_FILE_RATINGS_FILE
 
 
 class CorrelatedWithHistoricalFailures(HeuristicInterface):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Dict[str, Any]):
         super().__init__(**kwargs)
 
     def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:

@@ -11,18 +11,25 @@ try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
 
-    from tools.testing.target_determination.heuristics.previously_failed_in_pr import _get_previously_failing_tests
-    from tools.testing.target_determination.determinator import get_test_prioritizations, TestPrioritizations
+    from tools.testing.target_determination.determinator import (
+        get_test_prioritizations,
+        TestPrioritizations,
+    )
+    from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
+        _get_previously_failing_tests,
+    )
 
 except ModuleNotFoundError:
     print("Can't import required modules, exiting")
     exit(1)
+
 
 def mocked_file(contents: Dict[Any, Any]) -> io.IOBase:
     file_object = io.StringIO()
     json.dump(contents, file_object)
     file_object.seek(0)
     return file_object
+
 
 class TestParsePrevTests(unittest.TestCase):
     @mock.patch("pathlib.Path.exists", return_value=False)
@@ -70,7 +77,8 @@ class TestParsePrevTests(unittest.TestCase):
         return_value={"test2", "test4"},
     )
     @mock.patch(
-        "tools.testing.target_determination.heuristics.correlated_with_historical_failures._get_file_rating_tests", return_value=["test1"]
+        "tools.testing.target_determination.heuristics.correlated_with_historical_failures._get_file_rating_tests",
+        return_value=["test1"],
     )
     def test_get_reordered_tests(
         self,
@@ -87,9 +95,18 @@ class TestParsePrevTests(unittest.TestCase):
 
         test_prioritizations = get_test_prioritizations(tests)
 
-        self.assertListEqual(expected_prioritizations.highly_relevant, test_prioritizations.highly_relevant)
-        self.assertListEqual(expected_prioritizations.probably_relevant, test_prioritizations.probably_relevant)
-        self.assertListEqual(expected_prioritizations.unranked_relevance, test_prioritizations.unranked_relevance)
+        self.assertListEqual(
+            expected_prioritizations.highly_relevant,
+            test_prioritizations.highly_relevant,
+        )
+        self.assertListEqual(
+            expected_prioritizations.probably_relevant,
+            test_prioritizations.probably_relevant,
+        )
+        self.assertListEqual(
+            expected_prioritizations.unranked_relevance,
+            test_prioritizations.unranked_relevance,
+        )
 
 
 if __name__ == "__main__":

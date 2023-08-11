@@ -1,7 +1,7 @@
-from typing import List, Set, Dict
-from warnings import warn
 import json
 from pathlib import Path
+from typing import Any, Dict, List, Set
+from warnings import warn
 
 from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface,
@@ -13,7 +13,7 @@ from tools.testing.target_determination.heuristics.utils import (
 
 
 class PreviouslyFailedInPR(HeuristicInterface):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Dict[str, Any]):
         super().__init__(**kwargs)
 
     def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:

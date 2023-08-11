@@ -1,4 +1,4 @@
-from typing import List, Set
+from typing import Any, Dict, List, Set
 from warnings import warn
 
 from tools.testing.target_determination.heuristics.interface import (
@@ -12,7 +12,7 @@ from tools.testing.target_determination.heuristics.utils import (
 
 
 class EditedByPR(HeuristicInterface):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Dict[str, Any]):
         super().__init__(**kwargs)
 
     def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:

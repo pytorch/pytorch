@@ -1,7 +1,7 @@
-import subprocess
 import os
-from typing import List, Set
+import subprocess
 from pathlib import Path
+from typing import List, Set
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 
