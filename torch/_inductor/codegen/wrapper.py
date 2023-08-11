@@ -492,14 +492,6 @@ class WrapperCodeGen(CodeGen):
                 else:
                     if predecessor.stream_id != tmp_ssnode.stream_id and not predecessor.is_nop_node:
                         dependent_buffers.add(predecessor)
-            # for nodes directly point to nop node, need to add event dependency too
-            for name in tmp_ssnode.successors:
-                successor = tmp_ssnode.successors[name]
-                if successor.is_nop_node:
-                    for prepredecessor in successor.predecessors.values():
-                        if prepredecessor.stream_id != successor.stream_id:
-                            # add the dependency of the nop node
-                            dependent_buffers.add(successor)
             for buffer in dependent_buffers:
                 if V.graph.cpp_wrapper:
                     kernel_IndentedBuffer.writeline(f"cudaStreamWaitEvent(stream{tmp_ssnode.stream_id}, event_{buffer.get_name()}, 0);")
