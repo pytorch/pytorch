@@ -192,6 +192,7 @@ def _get_registry(module: nn.Module) -> Dict[str, RegistryItem]:
     """
     registry = getattr(module, REGISTRY_KEY, None)
     if registry is None:
+        # https://github.com/pytorch/pytorch/issues/107054
         default_registry: Dict[str, RegistryItem] = OrderedDict()
         setattr(module, REGISTRY_KEY, default_registry)
         return default_registry

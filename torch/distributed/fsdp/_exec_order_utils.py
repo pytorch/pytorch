@@ -220,6 +220,7 @@ class _ExecOrderData:
             if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
                 # TODO(voz): Don't graph break on this - dynamo hates the n1 != n2
                 # tensor comparison control flow.
+                # https://github.com/pytorch/pytorch/issues/107055
                 for (r1, n1), (r2, n2) in itertools.combinations(
                     (
                         (rank, world_num_valid_indices[rank])
@@ -245,6 +246,7 @@ class _ExecOrderData:
             if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
                 # TODO(voz): Don't graph break on this - dynamo hates the i1 != i2
                 # tensor comparison control flow.
+                # https://github.com/pytorch/pytorch/issues/107055
                 for (r1, i1), (r2, i2) in itertools.combinations(
                     (
                         (
