@@ -54,6 +54,7 @@ ARG CMAKE_VARS
 WORKDIR /opt/pytorch
 COPY --from=conda /opt/conda /opt/conda
 COPY --from=submodule-update /opt/pytorch /opt/pytorch
+RUN make triton
 RUN --mount=type=cache,target=/opt/ccache \
     export eval ${CMAKE_VARS} && \
     TORCH_CUDA_ARCH_LIST="3.5 5.2 6.0 6.1 7.0+PTX 8.0" TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
@@ -66,8 +67,8 @@ ARG CUDA_VERSION=11.7
 ARG CUDA_CHANNEL=nvidia
 ARG INSTALL_CHANNEL=pytorch-nightly
 # Automatically set by buildx
-RUN /opt/conda/bin/conda update -y conda
-RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION}
+# Note conda needs to be pinned to 23.5.2 see: https://github.com/pytorch/pytorch/issues/106470
+RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION} conda=23.5.2
 ARG TARGETPLATFORM
 
 # On arm64 we can only install wheel packages.
