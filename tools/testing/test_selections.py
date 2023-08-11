@@ -17,7 +17,7 @@ from tools.stats.import_test_stats import (
     get_test_file_ratings,
     TEST_FILE_RATINGS_FILE,
 )
-from tools.stats.upload_stats_lib import emit_metric
+from tools.stats.upload_metrics import emit_metric
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 

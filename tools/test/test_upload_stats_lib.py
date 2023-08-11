@@ -4,7 +4,7 @@ import unittest
 from typing import Any, Dict
 from unittest import mock
 
-from tools.stats.upload_stats_lib import emit_metric
+from tools.stats.upload_metrics import emit_metric
 
 # default values
 REPO = "some/repo"
