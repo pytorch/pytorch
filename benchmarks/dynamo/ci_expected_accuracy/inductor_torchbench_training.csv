@@ -1,4 +1,5 @@
 name,accuracy,graph_breaks
+torchrec_dlrm,pass,8
 BERT_pytorch,pass,8
 LearningToPaint,pass,8
 Super_SloMo,pass,8
