@@ -160,12 +160,12 @@ function install_torchvision() {
 
 function install_torchrec_and_fbgemm() {
   local torchrec_commit
-  local fbgemm_commit
   torchrec_commit=$(get_pinned_commit torchrec)
-  fbgemm_commit=$(get_pinned_commit fbgemm)
+  # local fbgemm_commit
+  # fbgemm_commit=$(get_pinned_commit fbgemm)
   pip_uninstall torchrec-nightly
   pip_uninstall fbgemm-gpu-nightly
-  pip_install setuptools-git-versioning scikit-build
+  pip_install setuptools-git-versioning scikit-build pyre-extensions
   # See https://github.com/pytorch/pytorch/issues/106971
   # CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
   # See https://github.com/pytorch/FBGEMM/pull/1930
