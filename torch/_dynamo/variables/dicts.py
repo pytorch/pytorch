@@ -206,7 +206,7 @@ class ConstDictVariable(VariableTracker):
         elif name == "copy":
             assert not (args or kwargs)
             return ConstDictVariable(
-                {k: v for k, v in val.items()},
+                dict(val),
                 dict,
                 **options,
             )
