@@ -1,38 +1,21 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-import time
-from statistics import mean
 from unittest.mock import patch
-from typing import no_type_check
 
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.cuda import Event
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TEST_WITH_DEV_DBG_ASAN,
-    
-)
+from torch.distributed.fsdp import BackwardPrefetch, FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._runtime_utils import (
     _get_handle_to_prefetch,
     _get_training_state,
 )
-from torch.distributed.fsdp._common_utils import (
-    _FSDPState,
-)
+from torch.distributed.fsdp.flat_param import HandleTrainingState
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
-from torch.distributed.fsdp import (
-    BackwardPrefetch
-)
-from torch.distributed.fsdp.flat_param import (
-    HandleTrainingState,
-    FlatParamHandle,
-)
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 NUM_ITERS = 1
 BACKWARD_PREFETCH_OPTIONS = [
@@ -64,7 +47,9 @@ class TestBackwardPrefetch(FSDPTest):
         orig_get_handle_to_prefetch = _get_handle_to_prefetch
 
         torch.manual_seed(0)
-        policy = ModuleWrapPolicy({nn.TransformerEncoderLayer, nn.TransformerDecoderLayer})
+        policy = ModuleWrapPolicy(
+            {nn.TransformerEncoderLayer, nn.TransformerDecoderLayer}
+        )
         model = FSDP(
             nn.Transformer(d_model=1024, nhead=8, device="cuda"),
             device_id=torch.cuda.current_device(),
@@ -79,13 +64,16 @@ class TestBackwardPrefetch(FSDPTest):
         src = torch.randn((10, 1, 1024), device="cuda")
         tgt = torch.randn((20, 1, 1024), device="cuda")
 
-        # monkey patch 
+        # monkey patch
         none_handle_count = 0
         func_call_count = 0
+
         def patched_get_handle_to_prefetch(*args, **kwargs):
             handle = orig_get_handle_to_prefetch(*args, **kwargs)
 
-            assert len(args) == 2, "expect _get_handle_to_prefetch(state, current_handle)"
+            assert (
+                len(args) == 2
+            ), "expect _get_handle_to_prefetch(state, current_handle)"
             state = args[0]
             current_handle = args[1]
             training_state = _get_training_state(current_handle)
@@ -103,10 +91,11 @@ class TestBackwardPrefetch(FSDPTest):
                 func_call_count += 1
             return handle
 
-        # training Run one dummy iteration to trigger the execution order validation
-        # all-gathers
+        # track num of calls to _get_handle_to_prefetch
+        # track num of non-None prefetch handles
         with patch(
-            "torch.distributed.fsdp._runtime_utils._get_handle_to_prefetch", patched_get_handle_to_prefetch
+            "torch.distributed.fsdp._runtime_utils._get_handle_to_prefetch",
+            patched_get_handle_to_prefetch,
         ):
             for _ in range(NUM_ITERS):
                 optim.zero_grad()
@@ -114,19 +103,26 @@ class TestBackwardPrefetch(FSDPTest):
                 loss.backward()
                 optim.step()
         if backward_prefetch is None:
-            self.assertTrue(func_call_count == 0, f"_get_handle_to_prefetch: {func_call_count}")
-        elif backward_prefetch in [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST]:
-            self.assertTrue(func_call_count > 0 and none_handle_count > 0, f"_get_handle_to_prefetch: {func_call_count} non-None handles: {none_handle_count}")
-        
+            self.assertTrue(
+                func_call_count == 0, f"_get_handle_to_prefetch: {func_call_count}"
+            )
+        elif backward_prefetch in [
+            BackwardPrefetch.BACKWARD_PRE,
+            BackwardPrefetch.BACKWARD_POST,
+        ]:
+            self.assertTrue(
+                func_call_count > 0 and none_handle_count > 0,
+                f"_get_handle_to_prefetch: {func_call_count} non-None handles: {none_handle_count}",
+            )
 
     @skip_if_lt_x_gpu(2)
     def test_backward_prefetch_pre(self):
         self._dist_train(BackwardPrefetch.BACKWARD_PRE)
-    
+
     @skip_if_lt_x_gpu(2)
     def test_backward_prefetch_post(self):
         self._dist_train(BackwardPrefetch.BACKWARD_POST)
-    
+
     @skip_if_lt_x_gpu(2)
     def test_backward_prefetch_disabled(self):
         self._dist_train(None)
