@@ -19,6 +19,7 @@ from .sizevars import SimplifyIndexing
 from .utils import cache_on_self, cmp, free_symbol_has, has_triton
 from .virtualized import V
 
+
 log = logging.getLogger(__name__)
 
 
@@ -1434,7 +1435,7 @@ class Scheduler:
         for name in names_to_remove:
             if name in V.kernel.args.inplace_buffers:
                 buf = V.kernel.args.inplace_buffers[name]
-                if buf == "REMOVED":
+                if isinstance(buf, str) and buf.startswith("REMOVED"):
                     continue
                 remove = all(n in names_to_remove for n in buf.other_names)
                 if remove:
@@ -1453,7 +1454,10 @@ class Scheduler:
 
     def remove_inplace_buffer(self, name):
         log.debug("removing_inplace_buffer(%r)", name)
-        V.kernel.args.inplace_buffers[name] = "REMOVED"
+        inner_name = V.kernel.args.inplace_buffers[name].inner_name
+        V.kernel.args.inplace_buffers[name] = inner_name.replace(
+            "in_out_ptr", "REMOVED"
+        )
         V.graph.removed_buffers.add(name)
 
     def flush(self):
