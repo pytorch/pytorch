@@ -2449,6 +2449,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         tos = self.stack[-1]
         if not isinstance(tos, ListIteratorVariable):
             self.pop()
+            assert tos.has_unpack_var_sequence(self)
             tos = ListIteratorVariable(
                 tos.items,
                 mutable_local=MutableLocal(),
@@ -2458,31 +2459,43 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         return self.YIELD_FROM(inst)
 
     def YIELD_FROM(self, inst):
-        tos = self.stack[-1]
-        if isinstance(tos, ConstantVariable) and tos.value is None:
-            self.pop()
-            return
-        if isinstance(tos, ListIteratorVariable):
-            self.output.guards.update(tos.guards)
-            try:
-                val, next_iter = tos.next_variables()
-                self.replace_all(tos, next_iter)
-                self.push(val)
-                # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
-                self.YIELD_VALUE(inst)
+        while True:
+            tos = self.stack[-1]
+            if isinstance(tos, ConstantVariable) and tos.value is None:
                 self.pop()
-                self.push(next_iter)
-                self.YIELD_FROM(inst)
-            except StopIteration:
                 return
-        else:
-            unimplemented(f"YIELD_FROM {typestr(tos)}")
+
+            if isinstance(tos, ListIteratorVariable):
+                self.output.guards.update(tos.guards)
+                try:
+                    val, next_iter = tos.next_variables()
+                    self.replace_all(tos, next_iter)
+                    self.push(val)
+                    # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
+                    self.YIELD_VALUE(inst)
+                    self.pop()
+                    self.push(next_iter)
+                except StopIteration:
+                    return
+            else:
+                unimplemented(f"YIELD_FROM {typestr(tos)}")
 
     def SEND(self, inst):
+        assert len(self.stack) >= 2
+        val = self.pop()
         tos = self.stack[-1]
-        if isinstance(tos, ConstantVariable) and tos.value is None:
-            self.pop()
-            self.instruction_pointer = self.indexof[inst.target]
-            return
+        if isinstance(tos, ListIteratorVariable):
+            subgen = tos
+            if isinstance(val, ConstantVariable) and val.value is None:
+                self.push(val)
+                self.instruction_pointer = self.indexof[inst.target]
+            else:
+                # invoke send
+                # This will graph break for now - "send" is not supported as we don't have full
+                # generator support - but this is sound to invoke, it will bubble up to the base VariableTracker.
+                # Once we have better VTs for generator, this will work properly.
+                result = tos.call_method(self, "send", val)
+                self.push(val)
+                self.instruction_pointer = self.indexof[inst.target]
         else:
             unimplemented(f"SEND {typestr(tos)}")
