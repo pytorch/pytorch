@@ -782,23 +782,25 @@ class ExportOutput:
                 serializer.serialize(self, destination)
 
     @_beartype.beartype
-    def save_sarif_log(self, destination: str) -> None:
-        """Saves the SARIF log to ``destination``.
+    def save_diagnostics(self, destination: str) -> None:
+        """Saves the export diagnostics as a SARIF log to the specified destination path.
 
         Args:
-            destination: The destination to save the SARIF log. It must have a `.sarif` extension.
+            destination: The destination to save the diagnostics SARIF log.
+                It must have a `.sarif` extension.
+
+        Raises:
+            ValueError: If the destination path does not end with `.sarif` extension.
         """
         if not destination.endswith(".sarif"):
-            message = (
-                f"'destination' must have a .sarif extension, " f"got {destination}"
-            )
+            message = f"'destination' must have a .sarif extension, got {destination}"
             log.fatal(message)
             raise ValueError(message)
 
         self.diagnostic_context.dump(destination)
 
     @classmethod
-    def from_export_failure(
+    def _from_failure(
         cls,
         export_exception: Exception,
         diagnostic_context: diagnostics.DiagnosticContext,
@@ -1084,16 +1086,14 @@ def dynamo_export(
         sarif_report_path = _DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH
         resolved_export_options.diagnostic_context.dump(sarif_report_path)
         message = (
-            f"Failed to export the model to ONNX. Generating SARIF report at {sarif_report_path}. "
-            f"SARIF is a standard format for the output of static analysis tools. "
-            f"SARIF log can be loaded in VS Code SARIF viewer extension, "
-            f"or SARIF web viewer(https://microsoft.github.io/sarif-web-component/)."
+            "Failed to export the model to ONNX. Generating SARIF report at {sarif_report_path}. "
+            "SARIF is a standard format for the output of static analysis tools. "
+            "SARIF log can be loaded in VS Code SARIF viewer extension, "
+            "or SARIF web viewer(https://microsoft.github.io/sarif-web-component/)."
             f"Please report a bug on PyTorch Github: {_PYTORCH_GITHUB_ISSUES_URL}"
         )
         raise OnnxExporterError(
-            ExportOutput.from_export_failure(
-                e, resolved_export_options.diagnostic_context
-            ),
+            ExportOutput._from_failure(e, resolved_export_options.diagnostic_context),
             message,
         ) from e
 

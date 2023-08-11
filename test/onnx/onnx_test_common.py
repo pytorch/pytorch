@@ -281,7 +281,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             export_output = e.export_output
 
         if verbose:
-            export_output.save_sarif_log(
+            export_output.save_diagnostics(
                 f"test_report_{self._testMethodName}"
                 f"_op_level_debug_{self.op_level_debug}"
                 f"_dynamic_axes_{self.dynamic_shapes}"
