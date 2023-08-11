@@ -1,6 +1,5 @@
 # Owner(s): ["module: onnx"]
 import io
-import logging
 import os
 
 import onnx
@@ -31,7 +30,7 @@ class TestExportOptionsAPI(common_utils.TestCase):
         with self.assertRaises(expected_exception_type):
             ExportOptions(dynamic_shapes=2)  # type: ignore[arg-type]
         with self.assertRaises(expected_exception_type):
-            ExportOptions(logger="DEBUG")  # type: ignore[arg-type]
+            ExportOptions(diagnostic_options="DEBUG")  # type: ignore[arg-type]
         with self.assertRaises(expected_exception_type):
             ResolvedExportOptions(options=12)  # type: ignore[arg-type]
 
@@ -47,15 +46,6 @@ class TestExportOptionsAPI(common_utils.TestCase):
         options = ResolvedExportOptions(ExportOptions(dynamic_shapes=False))
         self.assertFalse(options.dynamic_shapes)
 
-    def test_logger_default(self):
-        options = ResolvedExportOptions(None)
-        self.assertEqual(options.logger, logging.getLogger().getChild("torch.onnx"))
-
-    def test_logger_explicit(self):
-        options = ResolvedExportOptions(ExportOptions(logger=logging.getLogger()))
-        self.assertEqual(options.logger, logging.getLogger())
-        self.assertNotEqual(options.logger, logging.getLogger().getChild("torch.onnx"))
-
 
 class TestDynamoExportAPI(common_utils.TestCase):
     def test_default_export(self):
@@ -69,7 +59,6 @@ class TestDynamoExportAPI(common_utils.TestCase):
                 SampleModel(),
                 torch.randn(1, 1, 2),
                 export_options=ExportOptions(
-                    logger=logging.getLogger(),
                     dynamic_shapes=True,
                 ),
             ),
@@ -122,7 +111,7 @@ class TestDynamoExportAPI(common_utils.TestCase):
                 self.assertEqual(fp.read(), expected_buffer)
 
     def test_save_sarif_log_to_file_with_successful_export(self):
-        with common_utils.TemporaryFileName() as path:
+        with common_utils.TemporaryFileName(suffix=".sarif") as path:
             dynamo_export(SampleModel(), torch.randn(1, 1, 2)).save_sarif_log(path)
             self.assertTrue(os.path.exists(path))
 

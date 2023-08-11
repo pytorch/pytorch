@@ -138,8 +138,16 @@ class Diagnostic:
             ...     diagnostic.additional_messages
             ['## My Section', 'My Message', '### My Subsection', 'My Submessage']
         """
-        self._current_log_section_depth
-        self.log(level, "##%s %s", "#" * self._current_log_section_depth, message)
+        if self.logger.isEnabledFor(level):
+            indented_format_message = (
+                f"##{'#' * self._current_log_section_depth } {message}"
+            )
+            self.log(
+                level,
+                indented_format_message,
+                *args,
+                **kwargs,
+            )
         self._current_log_section_depth += 1
         try:
             yield
@@ -152,6 +160,15 @@ class Diagnostic:
         If logger is not enabled for the given level, the message will not be logged.
         Otherwise, the message will be logged and also added to the diagnostic's additional_messages.
 
+        The default setting for `DiagnosticOptions.verbosity_level` is `logging.INFO`. Based on this default,
+        the log level recommendations are as follows. If you've set a different default verbosity level in your
+        application, please adjust accordingly:
+
+        - logging.ERROR: Log any events leading to application failure.
+        - logging.WARNING: Log events that might result in application issues or failures, although not guaranteed.
+        - logging.INFO: Log general useful information, ensuring minimal performance overhead.
+        - logging.DEBUG: Log detailed debug information, which might affect performance when logged.
+
         Args:
             level: The log level.
             message: The message to log.
@@ -159,9 +176,10 @@ class Diagnostic:
                 expensive evaluation of the arguments until the message is actually logged.
             **kwargs: The keyword arguments for `logging.Logger.log`.
         """
-        self.logger.log(level, message, *args, **kwargs)
         if self.logger.isEnabledFor(level):
-            self.additional_messages.append(message % args)
+            formatted_message = message % args
+            self.logger.log(level, formatted_message, **kwargs)
+            self.additional_messages.append(formatted_message)
 
     def debug(self, message: str, *args, **kwargs) -> None:
         """Logs a debug message within the diagnostic. Same api as logging.Logger.debug.
@@ -199,11 +217,6 @@ class Diagnostic:
         self.source_exception = exception
         with self.log_section(level, "Exception log"):
             self.log(level, "%s", formatter.lazy_format_exception(exception))
-
-    def with_source_exception(self: _Diagnostic, exception: Exception) -> _Diagnostic:
-        """Adds the source exception to the diagnostic."""
-        self.source_exception = exception
-        return self
 
     def record_python_call_stack(self, frames_to_skip: int) -> infra.Stack:
         """Records the current Python call stack."""

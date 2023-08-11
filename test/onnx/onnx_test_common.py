@@ -262,17 +262,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             ref_input_args = input_args
             ref_input_kwargs = input_kwargs
 
-        sarif_log_path = (
-            (
-                f"test_report_{self._testMethodName}"
-                f"_op_level_debug_{self.op_level_debug}"
-                f"_dynamic_axes_{self.dynamic_shapes}"
-                ".sarif"
-            )
-            if verbose
-            else None
-        )
-
         # Feed args and kwargs into exporter.
         # Note that exporter should flatten kwargs into positional args the exported model;
         # since ONNX doesn't represent kwargs.
@@ -285,7 +274,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 export_options=torch.onnx.ExportOptions(
                     op_level_debug=self.op_level_debug,
                     dynamic_shapes=self.dynamic_shapes,
-                    diagnostic_sarif_log_path=sarif_log_path,
                 ),
             )
         except torch.onnx.OnnxExporterError as e:

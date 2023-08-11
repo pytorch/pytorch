@@ -917,7 +917,7 @@ class Exporter:
                 self.options.fx_tracer.input_adapter,
                 self.options.fx_tracer.output_adapter,
                 self.options.diagnostic_context,
-                self.options.fake_context,
+                fake_context=self.options.fake_context,
             )
 
     def _assert_fake_tensor_mode(self):
@@ -936,7 +936,7 @@ class Exporter:
         if (
             has_any_fake_tensor or has_any_fake_param_or_buffer
         ) and not self.options.fake_context:
-            raise RuntimeError(
+            return RuntimeError(
                 "Cannot export a model with fake inputs/weights without enabling fake mode.",
             )
         has_any_non_fake_tensors = pytree.tree_any(
