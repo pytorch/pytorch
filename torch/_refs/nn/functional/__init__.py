@@ -447,6 +447,7 @@ def softplus(
 
 
 @aten.hardshrink.default.py_impl(DispatchKey.Autograd)
+@register_decomposition(aten.hardshrink)
 @out_wrapper()
 def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     # Formula for reference,
