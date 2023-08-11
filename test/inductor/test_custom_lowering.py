@@ -28,19 +28,20 @@ class TestCustomLowering(TorchTestCase):
     def _register_jagged_to_padded_dense(cls):
         # Approximation of fbgemm.jagged_to_padded_dense_forward
         cls.test_inductor_ops.define(
-            "jagged_to_padded_dense(Tensor input, Tensor offsets, SymInt max_seq_len) -> Tensor"
+            "jagged_to_padded_dense(Tensor input, Tensor offsets, SymInt max_seq_len, Scalar pad_value) -> Tensor"
         )
 
-        def j2pd_meta(inp, offsets, max_seq_len):
+        def j2pd_meta(inp, offsets, max_seq_len, pad_value):
             return torch.empty(
                 (offsets.shape[0] - 1, max_seq_len, inp.shape[1]),
                 device=inp.device,
                 dtype=inp.dtype,
             )
 
-        def j2pd_cuda(inp, offsets, max_seq_len):
-            res = torch.zeros(
+        def j2pd_cuda(inp, offsets, max_seq_len, pad_value):
+            res = torch.full(
                 (offsets.shape[0] - 1, max_seq_len, inp.shape[1]),
+                pad_value,
                 device=inp.device,
                 dtype=inp.dtype,
             )
@@ -49,7 +50,7 @@ class TestCustomLowering(TorchTestCase):
                     res[b][r] = inp[offsets[b] + r]
             return res
 
-        def j2pd_lowering(inp, offsets, max_seq_len):
+        def j2pd_lowering(inp, offsets, max_seq_len, pad_value):
             offsets_loader = offsets.make_loader()
             inp_loader = inp.make_loader()
             jagged_len = inp.get_size()[0]
@@ -71,7 +72,7 @@ class TestCustomLowering(TorchTestCase):
                         end_idx,
                     ),
                     lambda: inp_loader([jagged_idx, emb_idx]),
-                    0.0,
+                    pad_value,
                 )
 
             return Pointwise.create(
@@ -91,7 +92,7 @@ class TestCustomLowering(TorchTestCase):
     def test_jagged_to_padded_dense_sanity(self):
         def fn(inp, offsets, max_seq_len):
             return torch.ops.test_inductor_ops.jagged_to_padded_dense(
-                inp, offsets, max_seq_len
+                inp, offsets, max_seq_len, 60.0
             )
 
         inp = torch.rand((9, 96), device="cuda")
@@ -119,7 +120,7 @@ class TestCustomLowering(TorchTestCase):
         def fn(inp, offsets, max_seq_len):
             inp = torch.bmm(inp, torch.ones((1, 96, 1), device="cuda")).view((0, 1))
             return torch.ops.test_inductor_ops.jagged_to_padded_dense(
-                inp, offsets, max_seq_len
+                inp, offsets, max_seq_len, 60.0
             )
 
         inp = torch.rand((1, 0, 96), device="cuda")
