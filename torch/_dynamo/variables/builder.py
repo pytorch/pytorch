@@ -1259,9 +1259,6 @@ def wrap_fx_proxy_cls(
             kwargs["source"] = options["source"]
             example_value = replace_leaf_with_fake_tensor_and_record(example_value, tx=tx, **kwargs)
             print("after replacing, we got exmaple_value:", example_value)
-            # example_value = wrap_to_fake_tensor_and_record(
-            #     example_value, tx=tx, **kwargs
-            # )
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
