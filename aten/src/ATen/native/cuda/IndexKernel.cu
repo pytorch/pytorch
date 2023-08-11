@@ -54,8 +54,8 @@ static void launch_kernel(const int64_t N, const func_t& f) {
 template <typename func_t>
 void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, const IntArrayRef index_stride, const func_t& f) {
   const auto num_indices = index_size.size();
-  AT_ASSERT(static_cast<size_t>(num_indices) == index_stride.size());
-  AT_ASSERT(num_indices == iter.ntensors() - 2);
+  AT_ASSERT(num_indices == index_stride.size());
+  AT_ASSERT(static_cast<int64_t>(num_indices) == iter.ntensors() - 2);
 
   if (iter.numel() == 0) {
     return;
@@ -71,7 +71,7 @@ void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, co
   auto sizes = at::detail::Array<int64_t, MAX_DIMS>(0);
   auto strides = at::detail::Array<int64_t, MAX_DIMS>(0);
   auto index_ptrs = at::detail::Array<char*, MAX_DIMS>(nullptr);
-  for (int i = 0; i < num_indices; i++) {
+  for (unsigned i = 0; i < num_indices; i++) {
     sizes[i] = index_size[i];
     strides[i] = index_stride[i];
     index_ptrs[i] = (char*)iter.data_ptr(i + 2);

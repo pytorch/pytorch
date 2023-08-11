@@ -9,7 +9,6 @@
 #include <c10/core/SymInt.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/TensorSubclassLikeUtils.h>
-#include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -61,13 +60,13 @@ static inline Tensor _flatten_nd_linear(const Tensor& input, const Tensor& weigh
     const auto input_sizes = input.sym_sizes();
     // can't use -1 in reshape because it errors when a dimension is 0
     c10::SymInt flattened_dim = 1;
-    for (size_t i = 0, ndim = input_sizes.size(); i < ndim - 1; ++i) {
+    for (int64_t i = 0, ndim = input_sizes.size(); i < ndim - 1; ++i) {
       flattened_dim = flattened_dim * input_sizes[i];
     }
     auto inp_reshape = input.reshape_symint({flattened_dim, input_sizes.at(input_sizes.size() -1)});
     const auto result = at::addmm(bias, inp_reshape, weight.t());
     auto new_size = input_sizes.slice(0, input_sizes.size() - 1);
-    std::vector<SymInt> sizes_vec(new_size.begin(), new_size.end());
+    c10::SymDimVector sizes_vec(new_size.begin(), new_size.end());
     sizes_vec.push_back(result.sym_size(1));
     return result.view_symint(sizes_vec);
 }

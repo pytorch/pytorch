@@ -505,7 +505,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     auto s = Vec(1) - n;
 
     // get interpolation weights for each neighbor
-    // e.g., for the nw corder, the weight is `dist_to_south * dist_to_east`.
+    // e.g., for the nw corner, the weight is `dist_to_south * dist_to_east`.
     auto nw = s * e;
     auto ne = s * w;
     auto sw = n * e;

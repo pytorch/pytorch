@@ -1293,6 +1293,14 @@ class FlatParamHandle:
                 unsharded_flat_param.dtype != self._fwd_bwd_param_dtype,
                 f"Expects full precision but got {self._fwd_bwd_param_dtype}",
             )
+            # For no-reshard-after-forward strategies, `_full_param_padded` may
+            # still be allocated from a previous forward. As we are forcing
+            # full precision here, the full-precision unsharded copy may be
+            # modified, invalidating the existing low-precision unsharded copy,
+            # so we should free it here to ensure a new all-gather for the next
+            # forward/backward computation to persist the modifications.
+            if flat_param._full_param_padded.untyped_storage().size() > 0:
+                _free_storage(flat_param._full_param_padded)
         else:
             unsharded_flat_param = flat_param._full_param_padded  # type: ignore[attr-defined]
         return unsharded_flat_param
