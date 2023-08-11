@@ -22,7 +22,6 @@ from torch.testing._internal.common_cuda import SM80OrLater, PLATFORM_SUPPORTS_F
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch._dynamo.testing import rand_strided
 from torch.testing import FileCheck
-from torch import nn
 import unittest
 import torch._prims as prims
 import contextlib
@@ -499,22 +498,6 @@ class FakeTensorTest(TestCase):
                 self.assertEqual(output.shape, (L, N, D * H_out))
                 self.assertEqual(h_n.shape, (D * num_layers, N, H_out))
                 self.assertEqual(c_n.shape, (D * num_layers, N, hidden_size))
-
-    @skipIfRocm
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_fallback_memory_prop(self):
-        m = nn.Conv2d(16, 33, 3, stride=2, device="cuda", dtype=torch.half)
-        m = m.to(memory_format=torch.channels_last)
-        mode = FakeTensorMode()
-        # TODO: module.to() doesn't work because it assigns .data, which is ignored
-        with torch._subclasses.fake_tensor.FakeCopyMode(mode):
-            mod_copied = copy.deepcopy(m)
-
-        with mode:
-            input = torch.rand(20, 16, 50, 100, dtype=torch.half, device="cuda").to(memory_format=torch.channels_last)
-            out = mod_copied(input)
-            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-            self.checkType(out, "cuda", [20, 33, 24, 49])
 
     def test_data_dependent_operator(self):
         with FakeTensorMode(allow_fallback_kernels=False):

@@ -25,39 +25,6 @@ import sympy
 import torch
 from torch import sym_float, sym_int, sym_max
 
-try:
-    try:
-        from nvfuser import DataType  # type: ignore[import, attr-defined]
-    except ImportError:
-        from nvfuser._C import DataType  # type: ignore[import]
-
-    _torch_dtype_to_nvfuser_dtype_map = {
-        torch.cdouble: DataType.ComplexDouble,
-        torch.cfloat: DataType.ComplexFloat,
-        torch.double: DataType.Double,
-        torch.float: DataType.Float,
-        torch.half: DataType.Half,
-        torch.bfloat16: DataType.BFloat16,
-        torch.long: DataType.Int,
-        torch.int: DataType.Int32,
-        torch.uint8: DataType.Int32,
-        torch.bool: DataType.Bool,
-        # Python scalars
-        complex: DataType.ComplexDouble,
-        float: DataType.Double,
-        int: DataType.Int,
-        bool: DataType.Bool,
-    }
-except ImportError:
-    _torch_dtype_to_nvfuser_dtype_map = {}
-
-
-def getnvFuserDtype(dtype: Union[torch.dtype, NumberTypeType]):
-    """
-    Translates from torch.dtype to nvFuser's DataType enum
-    """
-    return _torch_dtype_to_nvfuser_dtype_map[dtype]
-
 
 ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
@@ -83,6 +50,7 @@ Tensor = torch.Tensor
 
 
 torch_function_passthrough = {
+    torch.device,
     torch.Tensor.dim,
     torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
     torch.Tensor.numel,

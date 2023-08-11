@@ -84,39 +84,6 @@ def sarif_to_json(attr_cls_obj: _SarifClass, indent: Optional[str] = " ") -> str
 
 
 @_beartype.beartype
-def pretty_print_title(
-    title: str, width: int = 80, fill_char: str = "=", print_output: bool = True
-) -> str:
-    """Pretty prints title in below format:
-
-    ==================== title ====================
-    """
-    msg = f" {title} ".center(width, fill_char)
-    if print_output:
-        print(msg)
-    return msg
-
-
-@_beartype.beartype
-def pretty_print_item_title(
-    title: str, fill_char: str = "=", print_output: bool = True
-) -> str:
-    """Pretty prints title in below format:
-
-    title
-    =====
-    """
-    msg_list = []
-    msg_list.append(title)
-    msg_list.append(fill_char * len(title))
-
-    msg = "\n".join(msg_list)
-    if print_output:
-        print(msg)
-    return msg
-
-
-@_beartype.beartype
 def format_argument(obj: Any) -> str:
     return f"{type(obj)}"
 
