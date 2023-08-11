@@ -3798,7 +3798,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # linalg_svd returns a tuple of three tensors, (U, S, Vh).
         # Given the same input, it may return different tensors,
         # because svd isn't unique. To test that the svd is correct, we multiply
-        # U @ diag(S) @ Vh and check that that the output from vmap matches the
+        # U @ diag(S) @ Vh and check that the output from vmap matches the
         # output from a for-loop.
         def compute_A(out):
             U, S, Vh = out
@@ -3820,7 +3820,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # Given the same input, it may return different tensors,
         # because the eig decomposition isn't unique.
         # To test that eigh is correct, we multiply
-        # Q @ diag(L) @ Qh and check that that the output from vmap matches the
+        # Q @ diag(L) @ Qh and check that the output from vmap matches the
         # output from a for-loop.
         def compute_A(out):
             L, Q = out
