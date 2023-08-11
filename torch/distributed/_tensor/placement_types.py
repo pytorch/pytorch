@@ -515,4 +515,4 @@ class DTensorSpec:
                     )
                 placements[m] = Shard(i)
 
-        return cls(mesh, tuple(placements), tensor_meta=tensor_meta)  # type: ignore[arg-type]
+        return cls(mesh, tuple(placements), tensor_meta=tensor_meta)

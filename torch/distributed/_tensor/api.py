@@ -85,7 +85,7 @@ class _FromTorchTensor(torch.autograd.Function):
         ctx,  # pyre-ignore[2]: Parameter must be annotated.
         input: torch.Tensor,
         device_mesh: DeviceMesh,
-        placements: Tuple[Placement],
+        placements: Tuple[Placement, ...],
         run_check: bool,
     ) -> "DTensor":
         ctx.previous_placement = placements
@@ -488,7 +488,7 @@ def distribute_tensor(
     return DTensor(
         local_tensor.detach(),
         device_mesh,
-        tuple(placements),  # type: ignore[arg-type]
+        tuple(placements),
         shape=tensor.size(),
         dtype=tensor.dtype,
         requires_grad=tensor.requires_grad,
