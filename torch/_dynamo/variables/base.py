@@ -160,6 +160,9 @@ class VariableTracker(metaclass=HasPostInit):
         iterations = 0
         while stack:
             if iterations > 1000:
+                if isinstance(value, VariableTracker):
+                    print("KEYS", dict(value.__dict__).keys())
+                    print(value._nonvar_fields)
                 raise RuntimeError(f"DEBUGGING ASSERT ONLY WILL REMOVE FOR LAND - Failed! {value}")
             iterations += 1
             curr_val, processed = stack.pop()
@@ -175,6 +178,7 @@ class VariableTracker(metaclass=HasPostInit):
                         updated_dict = dict(curr_val.__dict__)
                         for key in updated_dict.keys():
                             if key not in curr_val._nonvar_fields:
+                                print("Handling key", key)
                                 updated_dict[key] = results[id(updated_dict[key])]
                         result = fn(curr_val.clone(**updated_dict))
                         if update_contains is False:
