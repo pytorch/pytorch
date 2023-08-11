@@ -1,27 +1,26 @@
+import collections
 import itertools
+import logging
 
-import unittest
 import weakref
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import torch
-import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
-from torch._dynamo.utils import detect_fake_mode, dynamo_timed
+from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
 from torch._functorch.compile_utils import fx_graph_cse
 
-from torch._inductor.compile_fx import fake_tensor_prop
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
 from torch._inductor.fx_passes.post_grad import view_to_reshape
-from torch.ao.quantization._pt2e.utils import _fuse_conv_bn_
-from torch.fx.experimental.proxy_tensor import make_fx
+
 from . import config
-from .decomposition import select_decomp_table
 
 aten = torch.ops.aten
 
 aten = torch.ops.aten
 prims = torch.ops.prims
+
+log = logging.getLogger(__name__)
 
 
 def replace_node_with_constant(gm, node, constant):
@@ -58,7 +57,6 @@ def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
     """
     params = [node for node in gm.graph.nodes if node.op == "placeholder"]
     fake_inp_nodes = params[: len(params)]
-    g = gm.graph
     preserved_arg_indices = []
     aliased_input_args = [
         out_info.base_idx
@@ -66,7 +64,7 @@ def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
         if out_info.base_idx is not None
     ]
     for i, (real_input, node) in enumerate(zip(flat_params, fake_inp_nodes)):
-        if i in fw_metadata.mutated_inp_indices or aliased_input_args:
+        if i in fw_metadata.mutated_inp_indices or i in aliased_input_args:
             preserved_arg_indices.append(i)
             continue
         replace_node_with_constant(gm, node, real_input)
@@ -77,12 +75,27 @@ def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
     return preserved_arg_indices
 
 
+def return_true(*args, **kwargs):
+    return True
+
+
 class ConstantFolder(torch.fx.Interpreter):
-    def __init__(self, gm, skip_constructors=False):
+    def __init__(
+        self,
+        gm,
+        skip_constructors=False,
+        insertable_tensor_check: Optional[Callable[[torch.Tensor], bool]] = None,
+    ):
         super().__init__(gm)
         self.node_replacements = {}
+        self.replaced_uses = collections.Counter()
         self.unknown_value = object()
         self.skip_constructors = skip_constructors
+        self.insertable_tensor_check = (
+            insertable_tensor_check
+            if insertable_tensor_check is not None
+            else return_true
+        )
 
     def run_node(self, node):
         aten = torch.ops.aten
@@ -92,6 +105,7 @@ class ConstantFolder(torch.fx.Interpreter):
             return super().run_node(node)
 
         flattened_inputs = pytree.tree_flatten((args, kwargs))[0]
+
         if self.unknown_value in flattened_inputs:
             return self.unknown_value
 
@@ -121,9 +135,23 @@ class ConstantFolder(torch.fx.Interpreter):
 
         out = super().run_node(node)
 
-        # TODO - remove constant from node_replacement when it has no uses
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
+            if not self.insertable_tensor_check(out):
+                return out
+
             self.node_replacements[node] = out
+
+            flattened_node_inps = pytree.tree_flatten((node.args, node.kwargs))[0]
+
+            for n in flattened_node_inps:
+                if not isinstance(n, torch.fx.Node):
+                    continue
+
+                self.replaced_uses[n] += 1
+
+            for to_delete in self.user_to_last_uses.get(node, []):
+                if self.replaced_uses[to_delete] == len(to_delete.users):
+                    self.node_replacements.pop(to_delete, None)
 
         return out
 
@@ -157,32 +185,6 @@ def constant_fold(gm):
     gm.recompile()
 
 
-@torch.utils._python_dispatch._disable_current_modes()
-def fuse_conv_bn(gm):
-    return _fuse_conv_bn_(gm)
-
-
-def decompose_unfused_batchnorms(gm, example_inputs, preserved_arg_indices):
-    if not any(
-        node.target is aten._native_batch_norm_legit_no_training.default
-        for node in gm.graph.nodes
-    ):
-        return gm
-
-    fake_mode = detect_fake_mode(example_inputs)
-
-    # constant params will be real tensors, not fake
-    # TODO: fake_mode should should enable py dispatcher if its symbolic ?
-    with unittest.mock.patch.object(
-        fake_mode, "allow_non_fake_inputs", True
-    ), fake_mode:
-        args = [e for i, e in enumerate(example_inputs) if i in preserved_arg_indices]
-        with fx_traceback.preserve_node_meta():
-            gm = make_fx(gm, select_decomp_table())(*args)
-
-    return gm
-
-
 def freeze(
     dynamo_gm: torch.fx.GraphModule,
     aot_autograd_gm: torch.fx.GraphModule,
@@ -203,6 +205,11 @@ def freeze(
         Tuple[torch.fx.GraphModule, List[int]]: A tuple containing the frozen GraphModule and a list of indices
         of the inputs that were preserved (not turned into constants).
     """
+    # We have convert conv's weight to channels last which may meet error for .view
+    # when doing fake_tensor_prop. So we need to convert view to reshape first.
+    # See the details in fx_codegen_and_compile of compile_fx.py.
+    view_to_reshape(aot_autograd_gm)
+
     fw_metadata = torch._guards.TracingContext.get().fw_metadata
     params_flat = torch._guards.TracingContext.get().params_flat
     assert fw_metadata is not None and params_flat is not None
@@ -211,35 +218,22 @@ def freeze(
         aot_autograd_gm, params_flat, fw_metadata
     )
 
-    constant_fold(aot_autograd_gm)
-
-    fuse_conv_bn(aot_autograd_gm)
-    # now, decomp batch norm if we were unable to fuse it
-    aot_autograd_gm = decompose_unfused_batchnorms(
-        aot_autograd_gm, example_inputs, preserved_arg_indices
-    )
     # TODO - further restrict cse ? right now needed to dedup aliasing ops
     cse_graph = fx_graph_cse(aot_autograd_gm.graph)
     aot_autograd_gm.graph = cse_graph
     aot_autograd_gm.recompile()
 
-    # We have convert conv's weight to channels last which may meet error for .view
-    # when doing fake_tensor_prop. So we need to convert view to reshape first.
-    # See the details in fx_codegen_and_compile of compile_fx.py.
-    view_to_reshape(aot_autograd_gm)
-    # Make sure meta['val'] is properly setup(weight conversion
-    # or decompose_unfused_batchnorms lost meta['val']).
     aot_example_inputs = [example_inputs[ind] for ind in preserved_arg_indices]
-    fake_tensor_prop(aot_autograd_gm, aot_example_inputs, True)
-    freezing_passes(aot_autograd_gm)
+    freezing_passes(aot_autograd_gm, aot_example_inputs)
 
-    # TODO - apply legalization in pattern matcher
-    torch.fx.passes.tools_common.legalize_graph(aot_autograd_gm)
     constant_fold(aot_autograd_gm)
     # invalidate nn Modules
     if config.freezing_discard_parameters:
         invalidate_eager_modules()
         discard_traced_gm_params(dynamo_gm)
+
+    log.debug("%s", lazy_format_graph_code("FROZEN GRAPH", aot_autograd_gm))
+
     return aot_autograd_gm, preserved_arg_indices
 
 
@@ -334,6 +328,31 @@ def enforce_output_layout(gm):
     gm.recompile()
 
 
+def enforce_as_strided_input_layout(gm):
+    """
+    Make sure the as_strided node's input's layout does not change due to compiler
+    optimizations, because the as_strided strides info depends on input tensor stride info.
+    """
+
+    as_strided_ops = [
+        torch.ops.aten.as_strided.default,
+        torch.ops.aten.as_strided_.default,
+        torch.ops.aten.as_strided_scatter.default,
+    ]
+    strided_nodes = [n for n in gm.graph.nodes if n.target in as_strided_ops]
+    for n in strided_nodes:
+        with gm.graph.inserting_before(n):
+            # add a node to enforce eager layout
+            ft = n.args[0].meta["val"]
+            new_node = gm.graph.call_function(
+                prims.inductor_force_stride_order.default, (n.args[0], ft.stride())
+            )
+            n.replace_input_with(n.args[0], new_node)
+
+    gm.graph.lint()
+    gm.recompile()
+
+
 @dynamo_timed
 def convert_conv_weights_to_channels_last(gm):
     """
@@ -359,4 +378,5 @@ def convert_conv_weights_to_channels_last(gm):
             )
             conv.replace_input_with(weight_node, new_node)
 
+    enforce_as_strided_input_layout(gm)
     enforce_output_layout(gm)

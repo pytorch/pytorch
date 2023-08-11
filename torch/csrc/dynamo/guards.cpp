@@ -1,4 +1,5 @@
 #define PY_SSIZE_T_CLEAN
+#include <c10/util/flat_hash_map.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/extension.h>
@@ -75,7 +76,7 @@ class TensorCheck {
   std::string check_verbose(
       const LocalState& state,
       const at::Tensor& v,
-      std::string tensor_name) {
+      const std::string& tensor_name) {
     std::stringstream fail_reason;
     fail_reason << "tensor '" << tensor_name << "' ";
     if (dispatch_key_ != state.apply(v.key_set()).raw_repr()) {
@@ -253,6 +254,7 @@ static int TensorGuards_init(
   auto len = PyTuple_GET_SIZE(args);
   checks.reserve(len);
   LocalState state;
+
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
     if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
@@ -292,10 +294,21 @@ PyObject* TensorGuards_check(TensorGuards* self, PyObject* args) {
   }
 
   LocalState state;
-
+  // Note - all the tensors that make it to guards must be unique. Dynamo
+  // builder handles guarding for positive aliases (X is Y). However, we do not
+  // create guards for negative alias (X is not Y) as that is an N^2
+  // relationship. Instead, we rely on the uniqueness upstream to verify, at
+  // check_fn time (this function).
+  ska::flat_hash_map<PyObject*, std::nullptr_t> unique_tensors;
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
+
     if (Py_TYPE(item) != checks[i].pytype) {
+      Py_RETURN_FALSE;
+    }
+    auto insertion = unique_tensors.insert({item, nullptr});
+    if (!insertion.second) {
+      // Violates uniqueness
       Py_RETURN_FALSE;
     }
     if (!checks[i].check(state, THPVariable_Unpack(item))) {
@@ -355,6 +368,7 @@ PyObject* TensorGuards_check_verbose(
   }
 
   LocalState state;
+  ska::flat_hash_map<PyObject*, std::nullptr_t> unique_tensors;
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
     if (Py_TYPE(item) != checks[i].pytype) {
@@ -367,6 +381,15 @@ PyObject* TensorGuards_check_verbose(
       } else {
         fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
       }
+      return Py_BuildValue("s", fail_reason.str().c_str());
+    }
+
+    auto insertion = unique_tensors.insert({item, nullptr});
+    if (!insertion.second) {
+      std::stringstream fail_reason;
+      fail_reason << "Duplicate tensor found where not expected! ";
+      fail_reason << tensor_check_names[i]
+                  << "should not alias to anything, but is aliased";
       return Py_BuildValue("s", fail_reason.str().c_str());
     }
     std::string fail_reason = checks[i].check_verbose(
