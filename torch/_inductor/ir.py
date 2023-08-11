@@ -2579,6 +2579,7 @@ class ConcatKernel(NopKernel):
             inputs=[],
         )
         kernel = StorageBox(concat_kernel)
+        input_names = []
         for i in range(len(inputs)):
             kernel.data.inputs.append(
                 cls.realize_into(
@@ -2586,6 +2587,9 @@ class ConcatKernel(NopKernel):
                     SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
                 )
             )
+            input_names.append(inputs[i].get_name())
+        if inputs[0].get_device().type == "cuda":
+            V.graph.register_list(input_names)
         kernel.data.name = V.graph.register_buffer(kernel.data)
         kernel.data.inputs = cls.unwrap_storage(kernel.data.inputs)
 
