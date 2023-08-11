@@ -1096,13 +1096,17 @@ class TritonKernel(Kernel):
 
         expand_str = None
 
-        if need_dense and not have_dense:
-            expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
-            index_str = f"tl.broadcast_to({index_str}, {expand_str})"
-            mask_vars = dense_mask_vars
-        elif not have_loop_vars and copy_shape:
-            index_str = f"tl.broadcast_to({index_str}, {copy_shape}.shape)"
-            mask_vars = dense_mask_vars
+        if not isinstance(index, sympy.Integer):
+            # If index is a sympy.Integer, we'll "broadcast" it with tl.full later.
+            if need_dense and not have_dense:
+                expand_str = (
+                    f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
+                )
+                index_str = f"tl.broadcast_to({index_str}, {expand_str})"
+                mask_vars = dense_mask_vars
+            elif not have_loop_vars and copy_shape:
+                index_str = f"tl.broadcast_to({index_str}, {copy_shape}.shape)"
+                mask_vars = dense_mask_vars
 
         if override_mask:
             mask_vars = {override_mask}
