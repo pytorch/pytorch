@@ -30,8 +30,8 @@ def get_test_prioritizations(tests: List[str]) -> TestPrioritizations:
             new_rankings.probably_relevant
         )
         print(
-            rf"Heuristic {heuristic} identified {num_tests_found} tests \
-              to prioritize \({(num_tests_found / len(tests)):.2%}%)"
+            f"Heuristic {heuristic} identified {num_tests_found} tests \
+              to prioritize ({(num_tests_found / len(tests)):.2%}%)"
         )
 
         if num_tests_found:
