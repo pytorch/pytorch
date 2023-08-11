@@ -359,7 +359,7 @@ class SubgraphMatcher:
         if before != after:
             logger.info("Filtered out %s matches because they are not fully contained", before - after)
 
-        # filter out the matches that that forms a cycle if the subgraph is fused
+        # filter out the matches that form a cycle if the subgraph is fused
         valid_matches = []
         for match in matches:
             matched_compute_nodes = \
