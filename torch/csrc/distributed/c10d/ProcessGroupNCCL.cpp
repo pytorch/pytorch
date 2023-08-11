@@ -811,20 +811,18 @@ void ProcessGroupNCCL::waitForPendingWorks() {
   {
     std::unique_lock<std::mutex> lock(workMetaListMutex_);
     // busy-poll work vector
-    workMetaListCV_.wait_for(
-        lock,
-        std::chrono::milliseconds(kWatchdogThreadSleepMillis),
-        [&]() -> bool { return workMetaList_.empty(); });
+    while (!workMetaList_.empty()) {
+      workMetaListCV_.wait_for(
+          lock,
+          std::chrono::milliseconds(kWatchdogThreadSleepMillis),
+          [&]() -> bool { return workMetaList_.empty(); });
+    }
   }
 
   {
-    std::unique_lock<std::mutex> lock(hasPendingHooksMutex_);
-    workMetaListCV_.wait_for(
-        lock,
-        std::chrono::milliseconds(kWatchdogThreadSleepMillis),
-        // not polling completedWorkList to avoid acquire two
-        // different locks at the same time.
-        [&]() -> bool { return !hasPendingHooks_.load(); });
+    while (hasPendingHooks_.load()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
   }
 }
 

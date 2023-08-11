@@ -670,10 +670,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::atomic<bool> terminateProcessGroup_;
 
   // Whether there are hooks pending to be fired
-  // .wait and .notify_* on std::atomic<T> is only available after c++20.
-  // Use a mutex and condition variable to implement it.
-  std::mutex hasPendingHooksMutex_;
-  std::condition_variable hasPendingHooksCV_;
   std::atomic<bool> hasPendingHooks_;
 
   // Mutex to Guard workMetaList_
