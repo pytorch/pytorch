@@ -83,6 +83,11 @@ def functional_assert_async_msg_decomp(tensor, msg):
     return
 
 
+@register_decomposition([aten.sym_constrain_range_for_size.default])
+def sym_constrain_range_for_size(symbol, *, min=None, max=None):
+    return
+
+
 @register_decomposition([aten.clamp])
 @pw_cast_for_opmath
 def clamp(x, min=None, max=None):
