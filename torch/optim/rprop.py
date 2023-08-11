@@ -153,7 +153,7 @@ Rprop.__doc__ = r"""Implements the resilient backpropagation algorithm.
     For further details regarding the algorithm we refer to the paper
     `A Direct Adaptive Method for Faster Backpropagation Learning: The RPROP Algorithm
     <http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.21.1417>`_.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -163,11 +163,11 @@ Rprop.__doc__ = r"""Implements the resilient backpropagation algorithm.
             (default: (0.5, 1.2))
         step_sizes (Tuple[float, float], optional): a pair of minimal and
             maximal allowed step sizes (default: (1e-6, 50))
-        {foreach}
-        {maximize}
-        {differentiable}
+        {_foreach_doc}
+        {_maximize_doc}
+        {_differentiable_doc}
 
-    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
+    """
 
 def rprop(
     params: List[Tensor],
@@ -293,11 +293,21 @@ def _multi_tensor_rprop(
         grouped_params = _view_complex_as_real(grouped_params)
         grouped_step_sizes = _view_complex_as_real(grouped_step_sizes)
 
-        if maximize:
-            grouped_grads = torch._foreach_neg(grouped_grads)
-
         signs = torch._foreach_mul(grouped_grads, grouped_prevs)
-        signs = [s.sign() for s in signs]
+        if maximize:
+            torch._foreach_neg_(signs)
+
+        # At the end of the step, grouped_prevs will contain the current grads, so we reuse
+        # grouped_prevs memory instead of creating a new buffer, but, for clarity, we reassign
+        # to keep referring to the buffer as grouped_grads.
+        for i in range(len(grouped_prevs)):
+            if maximize:
+                grouped_prevs[i].copy_(grouped_grads[i] * -1)
+            else:
+                grouped_prevs[i].copy_(grouped_grads[i])
+        grouped_grads = grouped_prevs
+
+        torch._foreach_sign_(signs)
         for sign in signs:
             sign[sign.gt(0)] = etaplus
             sign[sign.lt(0)] = etaminus
@@ -305,19 +315,21 @@ def _multi_tensor_rprop(
 
         # update stepsizes with step size updates
         torch._foreach_mul_(grouped_step_sizes, signs)
-        for step_size in grouped_step_sizes:
-            step_size.clamp_(step_size_min, step_size_max)
+        torch._foreach_clamp_(grouped_step_sizes, step_size_min, step_size_max)
 
         # for dir<0, dfdx=0
         # for dir>=0 dfdx=dfdx
         grouped_grads = list(grouped_grads)
         for i in range(len(grouped_grads)):
-            grouped_grads[i] = grouped_grads[i].clone(memory_format=torch.preserve_format)
             grouped_grads[i][signs[i].eq(etaminus)] = 0
+
+        # explicitly del signs as it's not used after here to save memory
+        del signs
 
         # update parameters
         grad_signs = [grad.sign() for grad in grouped_grads]
         torch._foreach_addcmul_(grouped_params, grad_signs, grouped_step_sizes, value=-1)
 
-        for i in range(len(grouped_prevs)):
-            grouped_prevs[i].copy_(grouped_grads[i])
+        # Logically, you may expect grouped_prevs to get updated to grouped_grads, but that's
+        # basically already happened since we've been using grouped_prevs' memory to store
+        # updated grouped_grads!

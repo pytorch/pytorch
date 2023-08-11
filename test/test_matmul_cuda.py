@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["module: linear algebra"]
 
 import unittest
@@ -122,7 +121,6 @@ class TestMatmulCuda(TestCase):
                 self.assertEqual(out, torch.matmul(X, A.transpose(1, 0)) + B)
 
     @onlyCUDA
-    @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
     @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1e-5)})
     @dtypes(*([torch.float32, torch.float16] +
@@ -133,7 +131,7 @@ class TestMatmulCuda(TestCase):
          (2, 1000, 1000, 1000),
          (1, 10000, 1000, 10000),
          (1, 10000, 10000, 10000)],
-        name_fn=lambda batch_size, N, M, P: "{}_{}_{}_{}".format(batch_size, N, M, P),
+        name_fn=lambda batch_size, N, M, P: f"{batch_size}_{N}_{M}_{P}",
     )
     def test_cublas_baddbmm_large_input(self, device, batch_size, N, M, P, dtype):
         cpu_dtype = dtype
