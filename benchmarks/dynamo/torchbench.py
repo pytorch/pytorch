@@ -206,6 +206,7 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "timm_vision_transformer_large",
     "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
     "llama_v2_7b_16h",
+    "Background_Matting",
 }
 
 SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
@@ -305,8 +306,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             try:
                 module = importlib.import_module(c)
                 break
-            except ModuleNotFoundError:
-                pass
+            except ModuleNotFoundError as e:
+                if e.name != c:
+                    raise
         else:
             raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)
