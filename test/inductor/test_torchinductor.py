@@ -7220,6 +7220,23 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        def test_numpy_on_cuda(self):
+            x = np.arange(10, dtype=np.float32)
+
+            @torch.compile
+            def fn(x):
+                return np.sin(x)
+
+            def fn_cuda(x):
+                with torch.device("cuda"):
+                    return fn(x)
+
+            r = fn_cuda(x)
+            code = run_and_get_triton_code(fn_cuda, x)
+            self.assertIn("tl.sin", code)
+            self.assertEqual(type(r), np.ndarray)
+            self.assertEqual(r, np.sin(x))
+
         # Disable constant propagation, so we isolate value range analysis
         @patch.object(config, "constant_and_index_propagation", False)
         @patch.object(config, "joint_graph_constant_folding", False)
