@@ -1,6 +1,7 @@
 #include <ATen/ThreadLocalState.h>
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
+#include <utility>
 
 namespace c10d {
 
@@ -104,7 +105,7 @@ c10::intrusive_ptr<c10::ivalue::Future> Work::getFuture() {
 void Work::finish(std::exception_ptr exception) {
   std::unique_lock<std::mutex> lock(mutex_);
   completed_ = true;
-  exception_ = exception;
+  exception_ = std::move(exception);
   if (recordFunctionEndCallback_) {
     recordFunctionEndCallback_();
     recordFunctionEndCallback_ = nullptr;
@@ -116,7 +117,7 @@ void Work::finish(std::exception_ptr exception) {
 void Work::finishAndThrow(std::exception_ptr exception) {
   std::unique_lock<std::mutex> lock(mutex_);
   completed_ = true;
-  exception_ = exception;
+  exception_ = std::move(exception);
   if (recordFunctionEndCallback_) {
     recordFunctionEndCallback_();
     recordFunctionEndCallback_ = nullptr;
@@ -129,9 +130,9 @@ void Work::finishAndThrow(std::exception_ptr exception) {
 class FutureWrappingWork : public Work {
  public:
   FutureWrappingWork(c10::intrusive_ptr<c10::ivalue::Future> fut)
-      : Work(), _fut(fut) {}
+      : Work(), _fut(std::move(fut)) {}
 
-  ~FutureWrappingWork() {}
+  ~FutureWrappingWork() override = default;
 
   bool isCompleted() override {
     return _fut->completed();
@@ -175,7 +176,7 @@ class FutureWrappingWork : public Work {
 };
 
 c10::intrusive_ptr<Work> Work::create_from_future(
-    c10::intrusive_ptr<c10::ivalue::Future> future) {
+    const c10::intrusive_ptr<c10::ivalue::Future>& future) {
   return c10::make_intrusive<FutureWrappingWork>(future);
 }
 

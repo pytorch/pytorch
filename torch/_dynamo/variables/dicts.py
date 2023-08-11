@@ -2,47 +2,70 @@ import collections
 import dataclasses
 import functools
 import inspect
-from typing import Dict, List
+from typing import Any, Dict, List, Tuple
 
 import torch
+import torch.fx
+from torch.fx import _pytree as fx_pytree
+
+from torch.utils import _pytree as pytree
 
 from .. import variables
-from ..bytecode_transformation import create_instruction
+from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource, GlobalWeakRefSource
-from ..utils import global_key_name
+from ..utils import global_key_name, istensor
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .tensor import TensorVariable
 
 
 class ConstDictVariable(VariableTracker):
-    def __init__(self, items, user_cls, **kwargs):
-        super(ConstDictVariable, self).__init__(**kwargs)
+    def __init__(self, items, user_cls, recursively_contains=None, **kwargs):
+        super().__init__(recursively_contains=recursively_contains, **kwargs)
+
+        self.guards.update(VariableTracker.propagate(items.values())["guards"])
         self.items = items
         self.user_cls = user_cls
 
     def as_proxy(self):
         return {k: v.as_proxy() for k, v in self.items.items()}
 
+    def as_python_constant(self):
+        return {k: v.as_python_constant() for k, v in self.items.items()}
+
     def python_type(self):
         return self.user_cls
 
     def reconstruct(self, codegen):
-        for key, value in self.items.items():
-            if isinstance(key, torch.nn.Parameter):
-                codegen.extend_output(
-                    [
-                        codegen.create_load_global(global_key_name(key), add=True),
-                        create_instruction("CALL_FUNCTION", 0),
-                    ]
+        # instructions to load collections.OrderedDict if necessary
+        if self.user_cls is collections.OrderedDict:
+            codegen.extend_output(
+                [
+                    codegen.create_load_python_module(collections, True),
+                    codegen.create_load_attr("OrderedDict"),
+                ]
+            )
+        # instructions to build the dict keys and values
+        for key in self.items.keys():
+            if istensor(key):
+                codegen.append_output(
+                    codegen.create_load_global(global_key_name(key), True, add=True)
                 )
+                codegen.extend_output(create_call_function(0, False))
             else:
                 codegen.append_output(codegen.create_load_const(key))
             codegen(self.items[key])
-
-        return [create_instruction("BUILD_MAP", len(self.items))]
+        # BUILD_MAP and calling collections.OrderedDict if necessary
+        if self.user_cls is collections.OrderedDict:
+            return [
+                create_instruction("BUILD_MAP", arg=len(self.items)),
+                *create_call_function(1, False),
+            ]
+        # BUILD_MAP only if user_cls is dict
+        else:
+            return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
     def getitem_const(self, arg: VariableTracker):
         return self.items[ConstDictVariable.get_key(arg)].add_options(self, arg)
@@ -54,7 +77,7 @@ class ConstDictVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ConstantVariable, TupleVariable
+        from . import ConstantVariable, SetVariable, TupleVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         val = self.items
@@ -67,7 +90,7 @@ class ConstDictVariable(VariableTracker):
             return TupleVariable(
                 [
                     TupleVariable(
-                        [
+                        items=[
                             ConstDictVariable._key_to_var(
                                 tx,
                                 k,
@@ -83,8 +106,9 @@ class ConstDictVariable(VariableTracker):
             )
         elif name == "keys":
             assert not (args or kwargs)
-            return TupleVariable(
-                [
+            return SetVariable(
+                tx=tx,
+                items=[
                     ConstDictVariable._key_to_var(
                         tx,
                         k,
@@ -92,6 +116,7 @@ class ConstDictVariable(VariableTracker):
                     )
                     for k in val.keys()
                 ],
+                mutable_local=MutableLocal(),
                 **options,
             )
 
@@ -110,11 +135,21 @@ class ConstDictVariable(VariableTracker):
             assert not kwargs and len(args) == 2
             k = ConstDictVariable.get_key(args[0])
 
-            if isinstance(k, torch.nn.Parameter):
+            if istensor(k):
                 tx.store_dict_key(global_key_name(k), k)
             newval = collections.OrderedDict(val)
             newval[k] = args[1]
-            return tx.replace_all(self, self.modifed(newval, **options))
+
+            new_rec_contains = self.recursively_contains.union(
+                args[1].recursively_contains
+            )
+            if args[1].mutable_local is not None:
+                new_rec_contains.add(args[1].mutable_local)
+
+            return tx.replace_all(
+                self,
+                self.modifed(newval, new_rec_contains, **options),
+            )
         elif (
             name in ("pop", "get")
             and args
@@ -132,7 +167,7 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = collections.OrderedDict(val)
             result = newval.pop(ConstDictVariable.get_key(args[0]))
-            tx.replace_all(self, self.modifed(newval, **options))
+            tx.replace_all(self, self.modifed(newval, None, **options))
             return result.add_options(options)
         elif (
             name == "update"
@@ -142,7 +177,12 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = collections.OrderedDict(val)
             newval.update(args[0].items)
-            result = self.modifed(newval, **options)
+            new_rec_contains = self.recursively_contains.union(
+                args[0].recursively_contains
+            )
+            result = self.modifed(
+                newval, recursively_contains=new_rec_contains, **options
+            )
             return tx.replace_all(self, result)
         elif (
             name in ("get", "__getattr__")
@@ -161,9 +201,11 @@ class ConstDictVariable(VariableTracker):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def modifed(self, items, **options):
+    def modifed(self, items, recursively_contains, **options):
         """a copy of self with different items"""
-        return self.clone(items=items, **options)
+        return self.clone(
+            items=items, recursively_contains=recursively_contains, **options
+        )
 
     def unpack_var_sequence(self, tx):
         options = VariableTracker.propagate([self])
@@ -173,8 +215,8 @@ class ConstDictVariable(VariableTracker):
 
     @classmethod
     def get_key(cls, arg: VariableTracker):
-        if isinstance(arg, TensorVariable) and arg.parameter_value is not None:
-            return arg.parameter_value
+        if isinstance(arg, TensorVariable) and arg.specialized_value is not None:
+            return arg.specialized_value
         else:
             return arg.as_python_constant()
 
@@ -183,14 +225,16 @@ class ConstDictVariable(VariableTracker):
         return (
             key.is_python_constant()
             or isinstance(key, TensorVariable)
-            and key.parameter_value is not None
+            and key.specialized_value is not None
+            or isinstance(key, ConstantVariable)
+            and key.python_type() is torch.dtype
         )
 
     @classmethod
     def _key_to_var(cls, tx, key, **options):
         from .builder import VariableBuilder
 
-        if isinstance(key, torch.nn.Parameter):
+        if istensor(key):
             return VariableBuilder(tx, GlobalWeakRefSource(global_key_name(key)))(key)
         else:
             assert ConstantVariable.is_literal(key)
@@ -199,9 +243,23 @@ class ConstDictVariable(VariableTracker):
 
 class DefaultDictVariable(ConstDictVariable):
     def __init__(self, items, user_cls, default_factory=None, **kwargs):
-        super(DefaultDictVariable, self).__init__(items, user_cls, **kwargs)
+        super().__init__(items, user_cls, **kwargs)
         assert user_cls is collections.defaultdict
         self.default_factory = default_factory
+
+    def is_python_constant(self):
+        # Return false for unsupported defaults. This ensures that a bad handler
+        # path is not taken in BuiltinVariable for getitem.
+        if self.default_factory not in [list, tuple, dict] and not self.items:
+            return False
+        return super().is_python_constant()
+
+    @staticmethod
+    def is_supported_arg(arg):
+        if isinstance(arg, variables.BuiltinVariable):
+            return arg.fn in [list, tuple, dict]
+        else:
+            return isinstance(arg, variables.functions.BaseUserFunctionVariable)
 
     def call_method(
         self,
@@ -210,8 +268,6 @@ class DefaultDictVariable(ConstDictVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ListVariable, TupleVariable
-
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if name == "__getitem__":
@@ -223,23 +279,19 @@ class DefaultDictVariable(ConstDictVariable):
                 if self.default_factory is None:
                     raise KeyError(f"{k}")
                 else:
-                    if isinstance(k, torch.nn.Parameter):
+                    if istensor(k):
                         tx.store_dict_key(global_key_name(k), k)
                     new_val = collections.OrderedDict(self.items)
-                    if self.default_factory is list:
-                        default_var = ListVariable([], mutable_local=MutableLocal())
-                    elif self.default_factory is tuple:
-                        default_var = TupleVariable([], mutable_local=MutableLocal())
-                    elif self.default_factory is dict:
-                        default_var = ConstDictVariable(
-                            {}, dict, mutable_local=MutableLocal()
-                        )
-                    else:
-                        unimplemented(
-                            f"defaultdict with default_factory = {self.default_factory}"
-                        )
+                    default_var = self.default_factory.call_function(tx, [], {})
                     new_val[k] = default_var
-                    tx.replace_all(self, self.modifed(new_val, **options))
+                    new_rec_contains = self.recursively_contains.union(
+                        default_var.recursively_contains
+                    )
+                    if default_var.mutable_local is not None:
+                        new_rec_contains.add(default_var.mutable_local)
+                    tx.replace_all(
+                        self, self.modifed(new_val, new_rec_contains, **options)
+                    )
                     return default_var
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -329,7 +381,7 @@ class DataClassVariable(ConstDictVariable):
         )
 
     def __init__(self, items, user_cls, **options):
-        super(DataClassVariable, self).__init__(items, user_cls, **options)
+        super().__init__(items, user_cls, **options)
         assert self.is_matching_cls(user_cls)
 
     def as_proxy(self):
@@ -340,10 +392,7 @@ class DataClassVariable(ConstDictVariable):
         keys = tuple(self.items.keys())
         for key in keys:
             codegen(self.items[key])
-        return [
-            codegen.create_load_const(keys),
-            create_instruction("CALL_FUNCTION_KW", len(keys)),
-        ]
+        return codegen.create_call_function_kw(len(keys), keys, True)
 
     def call_method(
         self,
@@ -369,7 +418,7 @@ class DataClassVariable(ConstDictVariable):
             return variables.TupleVariable(list(self.items.values()), **options)
         elif name == "__setattr__":
             name = "__setitem__"
-        return super(DataClassVariable, self).call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         if name in self.items:
@@ -381,7 +430,7 @@ class DataClassVariable(ConstDictVariable):
             if name in defaults:
                 assert variables.ConstantVariable.is_literal(defaults[name])
                 return variables.ConstantVariable(defaults[name]).add_options(self)
-        super(DataClassVariable, self).var_getattr(tx, name)
+        super().var_getattr(tx, name)
 
 
 class HFPretrainedConfigVariable(VariableTracker):
@@ -403,7 +452,7 @@ class HFPretrainedConfigVariable(VariableTracker):
         return cls.is_matching_cls(type(obj))
 
     def __init__(self, obj, **kwargs):
-        super(HFPretrainedConfigVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.obj = obj
         assert self.is_matching_cls(type(obj))
 
@@ -411,3 +460,45 @@ class HFPretrainedConfigVariable(VariableTracker):
         from . import ConstantVariable
 
         return ConstantVariable(getattr(self.obj, name))
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        return variables.ConstantVariable(hasattr(self.obj, name)).add_options(self)
+
+
+def _dictvariable_flatten(d: ConstDictVariable) -> Tuple[List[Any], pytree.Context]:
+    if d.python_type() is not dict:
+        # Note - ConstDictVariable can contain different kinds of dicts.
+        # However, flattening for those must differ and so cannot share the same registration as even if we
+        # consult the underlying python_type() to guide our flattening, that data will need to be propagated
+        # to unflatten. We do not have a good mechanism of doing this today, so we find it easier to treat this
+        # as unimplemented for now.
+
+        # TODO - Add support for flattening a ConstDictVariable with any underlying user_cls
+        unimplemented(f"Unsupported flattening of {d.python_type()}")
+    return list(d.items.values()), list(d.items.keys())
+
+
+def _dictvariable_unflatten(
+    values: List[Any], context: pytree.Context
+) -> ConstDictVariable:
+    assert all(isinstance(x, VariableTracker) for x in values)
+
+    # Guard propagation happens in the ConstDictVariable constructor
+    return ConstDictVariable(
+        dict(zip(context, values)), user_cls=dict, mutable_local=MutableLocal()
+    )
+
+
+def _register_dynamo_dict_to_tree_spec():
+    pytree._register_pytree_node(
+        ConstDictVariable,
+        _dictvariable_flatten,
+        _dictvariable_unflatten,
+        pytree._dict_to_str,
+        pytree._maybe_str_to_dict,
+    )
+
+    fx_pytree.register_pytree_flatten_spec(
+        ConstDictVariable,
+        _dictvariable_flatten,
+    )

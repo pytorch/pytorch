@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
@@ -13,6 +14,7 @@
 
 #include <c10/util/irange.h>
 
+#include <utility>
 #include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -33,8 +35,6 @@
 #include <ATen/ops/_linalg_svd_meta.h>
 #include <ATen/ops/_linalg_svd_native.h>
 #include <ATen/ops/_lu_with_info_native.h>
-#include <ATen/ops/_symeig_helper.h>
-#include <ATen/ops/_symeig_helper_native.h>
 #include <ATen/ops/all.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/cat.h>
@@ -109,8 +109,6 @@
 #include <ATen/ops/resize_as_native.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/svd_native.h>
-#include <ATen/ops/symeig.h>
-#include <ATen/ops/symeig_native.h>
 #include <ATen/ops/triangular_solve_meta.h>
 #include <ATen/ops/triangular_solve_native.h>
 #include <ATen/ops/tril.h>
@@ -287,12 +285,6 @@ extern "C" void zunmqr_(char *side, char *trans, int *m, int *n, int *k, std::co
 extern "C" void cunmqr_(char *side, char *trans, int *m, int *n, int *k, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *c, int *ldc, std::complex<float> *work, int *lwork, int *info);
 extern "C" void dormqr_(char *side, char *trans, int *m, int *n, int *k, double *a, int *lda, double *tau, double *c, int *ldc, double *work, int *lwork, int *info);
 extern "C" void sormqr_(char *side, char *trans, int *m, int *n, int *k, float *a, int *lda, float *tau, float *c, int *ldc, float *work, int *lwork, int *info);
-
-// syev
-extern "C" void zheev_(char *jobz, char *uplo, int *n, std::complex<double> *a, int *lda, double *w, std::complex<double> *work, int *lwork, double *rwork, int *info);
-extern "C" void cheev_(char *jobz, char *uplo, int *n, std::complex<float> *a, int *lda, float *w, std::complex<float> *work, int *lwork, float *rwork, int *info);
-extern "C" void dsyev_(char *jobz, char *uplo, int *n, double *a, int *lda, double *w, double *work, int *lwork, int *info);
-extern "C" void ssyev_(char *jobz, char *uplo, int *n, float *a, int *lda, float *w, float *work, int *lwork, int *info);
 
 // syevd
 extern "C" void zheevd_(char *jobz, char *uplo, int *n, std::complex<double> *a, int *lda, double *w, std::complex<double> *work, int *lwork, double *rwork, int *lrwork, int *iwork, int *liwork, int *info);
@@ -909,24 +901,6 @@ template<> void lapackOrmqr<float>(char side, char trans, int m, int n, int k, f
   sormqr_(&side, &trans, &m, &n, &k, a, &lda, tau, c, &ldc, work, &lwork, info);
 }
 
-template<> void lapackSymeig<c10::complex<double>, double>(char jobz, char uplo, int n, c10::complex<double> *a, int lda, double *w, c10::complex<double> *work, int lwork, double *rwork, int *info) {
-  zheev_(&jobz, &uplo, &n, reinterpret_cast<std::complex<double>*>(a), &lda, w, reinterpret_cast<std::complex<double>*>(work), &lwork, rwork, info);
-}
-
-template<> void lapackSymeig<c10::complex<float>, float>(char jobz, char uplo, int n, c10::complex<float> *a, int lda, float *w, c10::complex<float> *work, int lwork, float *rwork, int *info) {
-  cheev_(&jobz, &uplo, &n, reinterpret_cast<std::complex<float>*>(a), &lda, w, reinterpret_cast<std::complex<float>*>(work), &lwork, rwork, info);
-}
-
-template<> void lapackSymeig<double>(char jobz, char uplo, int n, double *a, int lda, double *w, double *work, int lwork, double* rwork, int *info) {
-  (void)rwork;  // unused
-  dsyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
-}
-
-template<> void lapackSymeig<float>(char jobz, char uplo, int n, float *a, int lda, float *w, float *work, int lwork, float* rwork, int *info) {
-  (void)rwork;  // unused
-  ssyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
-}
-
 template<> void lapackSyevd<c10::complex<double>, double>(char jobz, char uplo, int n, c10::complex<double> *a, int lda, double *w, c10::complex<double> *work, int lwork, double *rwork, int lrwork, int *iwork, int liwork, int *info) {
   zheevd_(&jobz, &uplo, &n, reinterpret_cast<std::complex<double>*>(a), &lda, w, reinterpret_cast<std::complex<double>*>(work), &lwork, rwork, &lrwork, iwork, &liwork, info);
 }
@@ -951,7 +925,7 @@ template<> void lapackEig<double>(char jobvl, char jobvr, int n, double *a, int 
   // lapack [sd]geev wants to separate output arrays: wr and wi for the real
   // and imaginary parts
   double *wr = w;
-  double *wi = w + n;
+  double *wi = w ? w + n : nullptr;
   (void)rwork; // unused
   dgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
@@ -960,7 +934,7 @@ template<> void lapackEig<float>(char jobvl, char jobvr, int n, float *a, int ld
   // lapack [sd]geev wants to separate output arrays: wr and wi for the real
   // and imaginary parts
   float *wr = w;
-  float *wi = w + n;
+  float *wi = w ? w  + n : nullptr;
   (void)rwork; // unused
   sgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
@@ -1606,7 +1580,7 @@ void _linalg_check_errors(
 // Without it, this function can lead to composite compliance problems, which
 // may lead to bugs in functorch, where a Tensor Subclass that doesn't
 // require grad may wrap a Tensor subclass that requires grad.
-bool _may_require_fw_or_bw_grad(const Tensor& input) {
+static bool _may_require_fw_or_bw_grad(const Tensor& input) {
   return ((at::GradMode::is_enabled() && input.requires_grad())
           || input._fw_grad(/*level */ 0).defined()
           || isTensorSubclassLike(input));
@@ -1724,7 +1698,7 @@ Tensor cholesky(const Tensor &self, bool upper) {
     "and\n"
     "U = torch.cholesky(A, upper=True)\n",
     "should be replaced with\n",
-    "U = torch.linalg.cholesky(A).mH().\n"
+    "U = torch.linalg.cholesky(A).mH\n"
     "This transform will produce equivalent results for all valid (symmetric positive definite) inputs."
   );
   if (self.numel() == 0) {
@@ -1759,7 +1733,7 @@ Tensor& cholesky_out(const Tensor &self, bool upper, Tensor &result) {
     "and\n"
     "U = torch.cholesky(A, upper=True)\n",
     "should be replaced with\n",
-    "U = torch.linalg.cholesky(A).mH().\n"
+    "U = torch.linalg.cholesky(A).mH\n"
     "This transform will produce equivalent results for all valid (symmetric positive definite) inputs."
   );
   checkSameDevice("cholesky", result, self);
@@ -1827,7 +1801,7 @@ Tensor& linalg_cholesky_out(const Tensor& A, bool upper, Tensor& L) {
 
 DEFINE_DISPATCH(cholesky_inverse_stub);
 
-Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& input, bool upper) {
+static Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& input, bool upper) {
   TORCH_INTERNAL_ASSERT(input.dim() >= 2);
   TORCH_INTERNAL_ASSERT(input.size(-1) == input.size(-2));
 
@@ -2374,7 +2348,7 @@ std::tuple<Tensor, Tensor> geqrf(const Tensor& input) {
   Tensor QR = at::empty({0}, input.options());
   Tensor tau = at::empty({0}, input.options());
   std::tie(QR, tau) = at::geqrf_outf(input, QR, tau);
-  return std::make_tuple(QR, tau);
+  return std::make_tuple(std::move(QR), std::move(tau));
 }
 
 /*
@@ -2487,7 +2461,7 @@ DEFINE_DISPATCH(orgqr_stub);
 
   For further details, please see the LAPACK/MAGMA documentation.
 */
-Tensor& householder_product_out_helper(const Tensor& input, const Tensor& tau, Tensor& result) {
+static Tensor& householder_product_out_helper(const Tensor& input, const Tensor& tau, Tensor& result) {
   TORCH_INTERNAL_ASSERT(input.dim() >= 2);
   TORCH_INTERNAL_ASSERT(input.size(-2) >= input.size(-1));
   TORCH_INTERNAL_ASSERT(input.size(-1) >= tau.size(-1));
@@ -2606,7 +2580,7 @@ Tensor orgqr(const Tensor& input, const Tensor& tau) {
 
 DEFINE_DISPATCH(ormqr_stub);
 
-void ormqr_out_helper(const Tensor& input, const Tensor& tau, const Tensor& other, const Tensor& result, bool left, bool transpose) {
+static void ormqr_out_helper(const Tensor& input, const Tensor& tau, const Tensor& other, const Tensor& result, bool left, bool transpose) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other.dim() >= 2);
 
@@ -2814,134 +2788,6 @@ Tensor& linalg_eigvalsh_out(const Tensor& A, c10::string_view uplo, Tensor& L) {
   return L;
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-template <typename scalar_t>
-static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool upper, int* infos) {
-#if !AT_BUILD_WITH_LAPACK()
-  AT_ERROR("symeig: LAPACK library not found in compilation");
-#else
-  using value_t = typename c10::scalar_value_type<scalar_t>::type;
-  auto self_data = self.data_ptr<scalar_t>();
-  auto eigvals_data = eigvals.data_ptr<value_t>();
-  auto self_matrix_stride = matrixStride(self);
-  auto eigvals_stride = eigvals.size(-1);
-  auto batch_size = batchCount(self);
-  auto n = self.size(-1);
-
-  char uplo = upper ? 'U' : 'L';
-  char jobz = eigenvectors ? 'V' : 'N';
-
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int info;
-  // Run once, first to get the optimum work size.
-  // Since we deal with batches of matrices with the same dimensions, doing this outside
-  // the loop saves (batch_size - 1) workspace queries which would provide the same result
-  // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
-  int lwork = -1;
-  scalar_t wkopt;
-
-  Tensor rwork;
-  value_t* rwork_data = nullptr;
-  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
-    int64_t lrwork = std::max(int64_t(1), 3 * n - 2);
-    ScalarType dtype = toRealValueType(typeMetaToScalarType(self.dtype()));
-    rwork = at::empty({lrwork}, self.options().dtype(dtype));
-    rwork_data = rwork.data_ptr<value_t>();
-  }
-
-  lapackSymeig<scalar_t, value_t>(jobz, uplo, n, self_data, n, eigvals_data, &wkopt, lwork, rwork_data, &info);
-  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
-  Tensor work = at::empty({lwork}, self.options());
-
-  for (const auto i : c10::irange(batch_size)) {
-    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    value_t* eigvals_working_ptr = &eigvals_data[i * eigvals_stride];
-
-    // now compute the eigenvalues and the eigenvectors (optionally)
-    lapackSymeig<scalar_t, value_t>(jobz, uplo, n, self_working_ptr, n, eigvals_working_ptr, work.data_ptr<scalar_t>(), lwork, rwork_data, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
-    }
-  }
-#endif
-}
-
-std::tuple<Tensor, Tensor> _symeig_helper_cpu(const Tensor& self, bool eigenvectors, bool upper) {
-  auto infos = at::zeros({batchCount(self)}, self.options().dtype(kInt));
-
-  auto self_sizes = self.sizes().vec();
-  self_sizes.pop_back();
-  ScalarType dtype = toRealValueType(typeMetaToScalarType(self.dtype()));
-  auto eigvals = at::empty(self_sizes, self.options().dtype(dtype));
-
-  if (self.numel() == 0) {
-    return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
-  }
-
-  auto self_working_copy = cloneBatchedColumnMajor(self);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "symeig_cpu", [&]{
-    apply_symeig<scalar_t>(self_working_copy, eigvals, eigenvectors, upper, infos.data_ptr<int>());
-  });
-
-  at::_linalg_check_errors(infos, "symeig", self.dim() == 2);
-  if (eigenvectors) {
-    return std::tuple<Tensor, Tensor>(eigvals, self_working_copy);
-  } else {
-    return std::tuple<Tensor, Tensor>(eigvals, at::empty({0}, self.options()));
-  }
-}
-
-std::tuple<Tensor, Tensor> symeig(const Tensor& self, bool eigenvectors, bool upper) {
-  TORCH_WARN_ONCE(
-    "torch.symeig is deprecated in favor of torch.linalg.eigh and will be removed in a future ",
-    "PyTorch release.\n",
-    "The default behavior has changed from using the upper triangular portion of the matrix by default ",
-    "to using the lower triangular portion.\n",
-    "L, _ = torch.symeig(A, upper=upper)\n",
-    "should be replaced with\n",
-    "L = torch.linalg.eigvalsh(A, UPLO='U' if upper else 'L')\n",
-    "and\n",
-    "L, V = torch.symeig(A, eigenvectors=True)\n"
-    "should be replaced with\n",
-    "L, V = torch.linalg.eigh(A, UPLO='U' if upper else 'L')"
-  );
-  squareCheckInputs(self, "linalg.symeig");
-  return at::_symeig_helper(self, eigenvectors, upper);
-}
-
-std::tuple<Tensor&, Tensor&> symeig_out(const Tensor& self, bool eigenvectors, bool upper, Tensor& vals, Tensor& vecs) {
-  TORCH_WARN_ONCE(
-    "torch.symeig is deprecated in favor of torch.linalg.eigh and will be removed in a future ",
-    "PyTorch release.\n",
-    "The default behavior has changed from using the upper triangular portion of the matrix by default ",
-    "to using the lower triangular portion.\n",
-    "L, _ = torch.symeig(A, upper=upper)\n",
-    "should be replaced with\n",
-    "L = torch.linalg.eigvalsh(A, UPLO='U' if upper else 'L')\n",
-    "and\n",
-    "L, V = torch.symeig(A, eigenvectors=True)\n"
-    "should be replaced with\n",
-    "L, V = torch.linalg.eigh(A, UPLO='U' if upper else 'L')"
-  );
-  checkSameDevice("symeig", vals, self, "eigenvalues");
-  checkSameDevice("symeig", vecs, self, "eigenvectors");
-  checkLinalgCompatibleDtype("symeig", vecs, self, "eigenvectors");
-  // eigenvalues are always real-valued here
-  ScalarType real_dtype = toRealValueType(self.scalar_type());
-  checkLinalgCompatibleDtype("symeig", vals.scalar_type(), real_dtype, "eigenvalues");
-
-  Tensor vals_tmp, vecs_tmp;
-  std::tie(vals_tmp, vecs_tmp) = at::symeig(self, eigenvectors, upper);
-
-  at::native::resize_output(vals, vals_tmp.sizes());
-  at::native::resize_output(vecs, vecs_tmp.sizes());
-  vals.copy_(vals_tmp);
-  vecs.copy_(vecs_tmp);
-  return std::tuple<Tensor&, Tensor&>(vals, vecs);
-}
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // This function returns complex-valued eigenvectors that is obtained from LAPACK GEEV's real-valued output
@@ -3003,7 +2849,7 @@ static Tensor& linalg_eig_make_complex_eigenvectors(Tensor& complex_vectors, con
 
 DEFINE_DISPATCH(linalg_eig_stub);
 
-std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& values, Tensor& vectors, Tensor& infos, bool compute_eigenvectors) {
+static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& values, Tensor& vectors, Tensor& infos, bool compute_eigenvectors) {
   // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
   // therefore we create all intermediate tensors on CPU
   auto options = input.options().device(at::kCPU);
@@ -3427,7 +3273,7 @@ std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compu
   //     "U, S, V = torch.svd(A, some=some, compute_uv=True) (default)\n",
   //     "should be replaced with\n",
   //     "U, S, Vh = torch.linalg.svd(A, full_matrices=not some)\n",
-  //     "V = Vh.mH()\n",
+  //     "V = Vh.mH\n",
   //     "and\n",
   //     "_, S, _ = torch.svd(A, some=some, compute_uv=False)\n",
   //     "should be replaced with\n",
@@ -3839,7 +3685,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
   Tensor singular_values = at::empty({0}, input.options().dtype(toRealValueType(input.scalar_type())));
   std::tie(solution, residuals, rank, singular_values) =
       at::linalg_lstsq_outf(input, other, rcond, driver, solution, residuals, rank, singular_values);
-  return std::make_tuple(solution, residuals, rank, singular_values);
+  return std::make_tuple(std::move(solution), std::move(residuals), std::move(rank), std::move(singular_values));
 }
 
 DEFINE_DISPATCH(ldl_factor_stub);
@@ -4071,7 +3917,7 @@ Tensor& linalg_solve_triangular_out(
   // and X = B after the algortihm. We just anotate that A is conjugated later on
   // The solution will be written into out_f, so it'll be conjugated already
 
-  Tensor A_f = A_;  // The A that will go into fortran
+  Tensor A_f = std::move(A_);  // The A that will go into fortran
 
   bool A_is_conj = A_f.is_conj() != out_f.is_conj();
   bool A_is_neg = A_f.is_neg() != out_f.is_neg();
@@ -4166,9 +4012,9 @@ Tensor linalg_solve_triangular(
   return out;
 }
 
-Tensor linalg_vander(
+Tensor linalg_vander_symint(
     const Tensor& x,
-    c10::optional<int64_t> N) {
+    c10::optional<c10::SymInt> N) {
   auto t = x.scalar_type();
   TORCH_CHECK(t == ScalarType::Float ||
               t == ScalarType::Double ||
@@ -4178,16 +4024,16 @@ Tensor linalg_vander(
               "linalg.vander supports floating point, complex, and integer tensors, but got ", t);
   const auto x_ = x.dim() == 0 ? x.unsqueeze(-1) : x;
 
-  auto shape = x_.sizes().vec();
+  auto shape = x_.sym_sizes().vec();
   const auto n = N.value_or(shape.back());
   TORCH_CHECK(n > 1, "N must be greater than 1.");
 
   // Append cumprod of the oher 0...n-1 powers
   shape.push_back(n - 1);
-  auto result = at::cumprod(x_.unsqueeze(-1).expand(shape), -1);
+  auto result = at::cumprod(x_.unsqueeze(-1).expand_symint(shape), -1);
   // The row of ones
   shape.back() = 1LL;
-  auto ones =  result.new_ones(shape);
-  return at::cat({ones, result}, /*dim=*/ -1);
+  auto ones =  result.new_ones_symint(shape);
+  return at::cat({std::move(ones), std::move(result)}, /*dim=*/ -1);
 }
 }}  // namespace at::native

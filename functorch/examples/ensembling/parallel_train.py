@@ -1,9 +1,10 @@
 import argparse
 import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from functorch import make_functional, grad_and_value, vmap, combine_state_for_ensemble
+from torch.func import functional_call, grad_and_value, stack_module_state, vmap
 
 # Adapted from http://willwhitney.com/parallel-training-jax.html , which is a
 # tutorial on Model Ensembling with JAX by Will Whitney.
@@ -33,15 +34,21 @@ DEVICE = args.device
 # Step 1: Make some spirals
 
 
-def make_spirals(n_samples, noise_std=0., rotations=1.):
+def make_spirals(n_samples, noise_std=0.0, rotations=1.0):
     ts = torch.linspace(0, 1, n_samples, device=DEVICE)
-    rs = ts ** 0.5
+    rs = ts**0.5
     thetas = rs * rotations * 2 * math.pi
     signs = torch.randint(0, 2, (n_samples,), device=DEVICE) * 2 - 1
     labels = (signs > 0).to(torch.long).to(DEVICE)
 
-    xs = rs * signs * torch.cos(thetas) + torch.randn(n_samples, device=DEVICE) * noise_std
-    ys = rs * signs * torch.sin(thetas) + torch.randn(n_samples, device=DEVICE) * noise_std
+    xs = (
+        rs * signs * torch.cos(thetas)
+        + torch.randn(n_samples, device=DEVICE) * noise_std
+    )
+    ys = (
+        rs * signs * torch.sin(thetas)
+        + torch.randn(n_samples, device=DEVICE) * noise_std
+    )
     points = torch.stack([xs, ys], dim=1)
     return points, labels
 
@@ -68,16 +75,12 @@ class MLPClassifier(nn.Module):
 
 
 loss_fn = nn.NLLLoss()
-
-# Step 3: Make the model functional(!!) and define a training function.
-# NB: this mechanism doesn't exist in PyTorch today, but we want it to:
-# https://github.com/pytorch/pytorch/issues/49171
-func_model, weights = make_functional(MLPClassifier().to(DEVICE))
+model = MLPClassifier().to(DEVICE)
 
 
 def train_step_fn(weights, batch, targets, lr=0.2):
     def compute_loss(weights, batch, targets):
-        output = func_model(weights, batch)
+        output = functional_call(model, weights, batch)
         loss = loss_fn(output, targets)
         return loss
 
@@ -85,10 +88,10 @@ def train_step_fn(weights, batch, targets, lr=0.2):
 
     # NB: PyTorch is missing a "functional optimizer API" (possibly coming soon)
     # so we are going to re-implement SGD here.
-    new_weights = []
+    new_weights = {}
     with torch.no_grad():
-        for grad_weight, weight in zip(grad_weights, weights):
-            new_weights.append(weight - grad_weight * lr)
+        for key in grad_weights:
+            new_weights[key] = weights[key] - grad_weights[key] * lr
 
     return loss, new_weights
 
@@ -98,7 +101,7 @@ def train_step_fn(weights, batch, targets, lr=0.2):
 def step4():
     global weights
     for i in range(2000):
-        loss, weights = train_step_fn(weights, points, labels)
+        loss, weights = train_step_fn(dict(model.named_parameters()), points, labels)
         if i % 100 == 0:
             print(loss)
 
@@ -111,8 +114,9 @@ step4()
 
 def init_fn(num_models):
     models = [MLPClassifier().to(DEVICE) for _ in range(num_models)]
-    _, params, _ = combine_state_for_ensemble(models)
+    params, _ = stack_module_state(models)
     return params
+
 
 # Step 6: Now, can we try multiple models at the same time?
 # The answer is: yes! `loss` is a 2-tuple, and we can see that the value keeps

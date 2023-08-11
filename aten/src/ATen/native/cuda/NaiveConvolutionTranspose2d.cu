@@ -23,8 +23,7 @@
 #include <ATen/ops/slow_conv_transpose2d_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 static inline void slow_conv_transpose2d_shape_check(
@@ -239,18 +238,18 @@ void slow_conv_transpose2d_out_cuda_template(
               m,
               k,
               1,
-              input_n.data_ptr<scalar_t>(),
+              input_n.const_data_ptr<scalar_t>(),
               n,
-              weight_.data_ptr<scalar_t>(),
+              weight_.const_data_ptr<scalar_t>(),
               m,
               0,
-              columns_.data_ptr<scalar_t>(),
+              columns_.mutable_data_ptr<scalar_t>(),
               n);
 
           // Unpack columns back into input:
           col2im<scalar_t, accscalar_t>(
               at::cuda::getCurrentCUDAStream(),
-              columns_.data_ptr<scalar_t>(),
+              columns_.const_data_ptr<scalar_t>(),
               n_output_plane,
               output_height,
               output_width,
@@ -264,7 +263,7 @@ void slow_conv_transpose2d_out_cuda_template(
               stride_width,
               dilation_height,
               dilation_width,
-              output_n.data_ptr<scalar_t>());
+              output_n.mutable_data_ptr<scalar_t>());
 
           // Do Bias after:
           // M,N,K are dims of matrix A and B
@@ -283,12 +282,12 @@ void slow_conv_transpose2d_out_cuda_template(
                 m_,
                 k_,
                 1,
-                ones_.data_ptr<scalar_t>(),
+                ones_.const_data_ptr<scalar_t>(),
                 k_,
-                bias_.data_ptr<scalar_t>(),
+                bias_.const_data_ptr<scalar_t>(),
                 k_,
                 1,
-                output_n.data_ptr<scalar_t>(),
+                output_n.mutable_data_ptr<scalar_t>(),
                 n_);
           }
         }
@@ -427,7 +426,7 @@ static void slow_conv_transpose2d_backward_out_cuda_template(
           if (need_columns) {
             im2col<scalar_t>(
                 at::cuda::getCurrentCUDAStream(),
-                grad_output_n.data_ptr<scalar_t>(),
+                grad_output_n.const_data_ptr<scalar_t>(),
                 n_output_plane,
                 output_height,
                 output_width,
@@ -441,7 +440,7 @@ static void slow_conv_transpose2d_backward_out_cuda_template(
                 stride_width,
                 dilation_height,
                 dilation_width,
-                grad_columns.data_ptr<scalar_t>());
+                grad_columns.mutable_data_ptr<scalar_t>());
           }
 
           // M,N,K are dims of matrix A and B
@@ -452,8 +451,8 @@ static void slow_conv_transpose2d_backward_out_cuda_template(
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
-          auto gemm_in_ptr = need_columns ? grad_columns.data_ptr<scalar_t>()
-              : grad_output_n.data_ptr<scalar_t>();
+          auto gemm_in_ptr = need_columns ? grad_columns.const_data_ptr<scalar_t>()
+              : grad_output_n.const_data_ptr<scalar_t>();
           at::cuda::blas::gemm<scalar_t>(
               'n',
               'n',
@@ -463,10 +462,10 @@ static void slow_conv_transpose2d_backward_out_cuda_template(
               1,
               gemm_in_ptr,
               n,
-              weight.data_ptr<scalar_t>(),
+              weight.const_data_ptr<scalar_t>(),
               k,
               0,
-              grad_input_n.data_ptr<scalar_t>(),
+              grad_input_n.mutable_data_ptr<scalar_t>(),
               n);
         }
 
@@ -624,7 +623,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
               // Extract columns:
               im2col<scalar_t>(
                   at::cuda::getCurrentCUDAStream(),
-                  grad_output_n.data_ptr<scalar_t>(),
+                  grad_output_n.const_data_ptr<scalar_t>(),
                   n_output_plane,
                   output_height,
                   output_width,
@@ -638,7 +637,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
                   stride_width,
                   dilation_height,
                   dilation_width,
-                  columns.data_ptr<scalar_t>());
+                  columns.mutable_data_ptr<scalar_t>());
             }
 
             // M,N,K are dims of matrix A and B
@@ -649,8 +648,8 @@ void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
 
             // Do GEMM (note: this is a bit confusing because gemm assumes
             // column-major matrices)
-            auto gemm_in_ptr = need_columns ? columns.data_ptr<scalar_t>()
-                : grad_output_n.data_ptr<scalar_t>();
+            auto gemm_in_ptr = need_columns ? columns.const_data_ptr<scalar_t>()
+                : grad_output_n.const_data_ptr<scalar_t>();
             at::cuda::blas::gemm<scalar_t>(
                 't',
                 'n',
@@ -660,10 +659,10 @@ void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
                 scale,
                 gemm_in_ptr,
                 k,
-                input_n.data_ptr<scalar_t>(),
+                input_n.const_data_ptr<scalar_t>(),
                 k,
                 1,
-                grad_weight.data_ptr<scalar_t>(),
+                grad_weight.mutable_data_ptr<scalar_t>(),
                 n);
           }
         }
@@ -831,5 +830,4 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cuda(
 
 REGISTER_CUDA_DISPATCH(slow_conv_transpose2d_backward_stub, &slow_conv_transpose2d_backward_cuda);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

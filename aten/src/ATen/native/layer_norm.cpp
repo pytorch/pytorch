@@ -1,24 +1,34 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/layer_norm.h>
 
-#include <ATen/AccumulateType.h>
-#include <ATen/ATen.h>
-#include <ATen/Config.h>
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/irange.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/layer_norm_native.h>
+#include <ATen/ops/native_batch_norm.h>
+#include <ATen/ops/native_layer_norm.h>
+#include <ATen/ops/native_layer_norm_backward_native.h>
+#include <ATen/ops/native_layer_norm_native.h>
+#include <ATen/ops/zeros_like_native.h>
+#endif
 
 #include <array>
-#include <functional>
-#include <numeric>
 #include <tuple>
 #include <vector>
 
 namespace at {
 namespace native {
 
-void layer_norm_with_mean_rstd_out(
+static void layer_norm_with_mean_rstd_out(
     at::Tensor& out,
     at::Tensor& mean,
     at::Tensor& rstd,
@@ -69,6 +79,10 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
+  bool mixed_type = is_mixed_type(input, weight, bias);
+  if (mixed_type) {
+    check_mixed_data_type(input, weight, bias);
+  }
 
   auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto M = M_N.first;
@@ -84,8 +98,9 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
       c10::nullopt /* device */,
       c10::nullopt /* pin_memory */,
       at::MemoryFormat::Contiguous);
-  Tensor mean = at::empty({M}, X->options());
-  Tensor rstd = at::empty({M}, X->options());
+  const auto dtype = param_scalar_type(input, mixed_type);
+  Tensor mean = at::empty({M}, X->options().dtype(dtype));
+  Tensor rstd = at::empty({M}, X->options().dtype(dtype));
 
   layer_norm_with_mean_rstd_out(Y, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
@@ -166,9 +181,9 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
-Tensor layer_norm(
+Tensor layer_norm_symint(
     const Tensor& input,
-    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    c10::SymIntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enable, deprecated */) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -177,8 +192,7 @@ Tensor layer_norm(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-
-  return std::get<0>(at::native_layer_norm(input, normalized_shape, weight, bias, eps));
+  return std::get<0>(at::native_layer_norm_symint(input, normalized_shape, weight, bias, eps));
 }
 
 DEFINE_DISPATCH(LayerNormKernel);

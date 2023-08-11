@@ -7,8 +7,7 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 void complex_kernel_cuda(TensorIterator& iter) {
@@ -34,5 +33,4 @@ void polar_kernel_cuda(TensorIterator& iter) {
 REGISTER_DISPATCH(complex_stub, &complex_kernel_cuda);
 REGISTER_DISPATCH(polar_stub, &polar_kernel_cuda);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

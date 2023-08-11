@@ -1,18 +1,71 @@
 import collections
+from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from .. import variables
+from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
 from ..source import AttrSource, Source
 from ..utils import dict_values, identity, istype, odict_values
 
 
-class MutableLocal:
+class MutableLocalSource(Enum):
+    """
+    If the VariableTracker.mutable_local represents a Variable that:
+    - already existed that Dynamo began tracking while introspection (Existing)
+    - is a new variable that is created during Dynamo introspection (Local)
+    """
+
+    Existing = 0
+    Local = 1
+
+
+class MutableLocalBase:
+    """
+    Base class for Variable.mutable_local
+    """
+
+    def __init__(self, typ: MutableLocalSource):
+        # In HigherOrderOperator tracing, we need to distinguish
+        # between MutableLocals inside the HigherOrderOperator and
+        # ones outside it. For example, it is not safe to mutate
+        # `a` in the following example because it was constructed
+        # in a different scope.
+        #
+        # def f(x):
+        #     a = 1
+        #     def g(x):
+        #         nonlocal a
+        #         a = 2
+        #         return x
+        #     return wrap(g, x) + a
+        #
+        # We use self.scope to distinguish this.
+        # scope == 0: The object was an existing variable
+        # scope == 1: The object was created while Dynamo
+        #             was introspecting a function
+        #             (and no HigherOrderOps were involved)
+        # scope >= 2: The object was created through
+        #             Dynamo introspection of a HigherOrderOp.
+        #             The exact number corresponds to the level
+        #             of nested HigherOrderOps.
+        if typ is MutableLocalSource.Existing:
+            self.scope = 0
+        elif typ is MutableLocalSource.Local:
+            self.scope = current_scope_id()
+        else:
+            unimplemented(f"Unsupported MutableLocalSource: {typ}")
+
+
+class MutableLocal(MutableLocalBase):
     """
     Marker used to indicate this (list, iter, etc) was constructed in
     local scope and can be mutated safely in analysis without leaking
     state.
     """
+
+    def __init__(self):
+        super().__init__(MutableLocalSource.Local)
 
     def __hash__(self):
         return id(self)
@@ -21,7 +74,31 @@ class MutableLocal:
         return self is other
 
 
-class VariableTracker:
+def _is_top_level_scope(scope_id):
+    return scope_id == 1
+
+
+def is_side_effect_safe(m: MutableLocalBase):
+    scope_id = current_scope_id()
+
+    # In the top-level scope (if no HigherOrderOperators are involved),
+    # we are allowed to modify variables created in this scope as well
+    # as existing variables.
+    if _is_top_level_scope(scope_id):
+        return True
+    # Otherwise, only allow local mutation of variables created in the current scope
+    return m.scope == scope_id
+
+
+# metaclass to call post_init
+class HasPostInit(type):
+    def __call__(cls, *args, **kwargs):
+        obj = type.__call__(cls, *args, **kwargs)
+        obj.__post_init__(*args, **kwargs)
+        return obj
+
+
+class VariableTracker(metaclass=HasPostInit):
     """
     Base class for tracked locals and stack values
 
@@ -41,13 +118,6 @@ class VariableTracker:
             if type(var) in (list, tuple, dict_values, odict_values):
                 for i in var:
                     visit(i)
-            elif isinstance(var, variables.BaseListVariable):
-                guards.update(var.guards)
-                for i in var.items:
-                    visit(i)
-            elif isinstance(var, variables.ConstDictVariable):
-                guards.update(var.guards)
-                visit(var.items.values())
             else:
                 assert isinstance(var, VariableTracker), typestr(var)
                 guards.update(var.guards)
@@ -70,7 +140,12 @@ class VariableTracker:
 
     @classmethod
     def apply(
-        cls, fn: Callable[["VariableTracker"], "VariableTracker"], value, cache=None
+        cls,
+        fn: Callable[["VariableTracker"], "VariableTracker"],
+        value,
+        cache=None,
+        skip_fn=lambda _: False,  # Whether we should skip applying to this var
+        update_contains=False,
     ):
         """
         Walk this object and call fn on all the VariableTracker
@@ -84,21 +159,34 @@ class VariableTracker:
             return cache[idx][0]
 
         if isinstance(value, VariableTracker):
-            updated_dict = dict(value.__dict__)
-            for key in updated_dict.keys():
-                if key not in value._nonvar_fields:
-                    updated_dict[key] = cls.apply(fn, updated_dict[key], cache)
-            result = fn(value.clone(**updated_dict))
+            if not skip_fn(value):
+                updated_dict = dict(value.__dict__)
+                for key in updated_dict.keys():
+                    if key not in value._nonvar_fields:
+                        updated_dict[key] = cls.apply(
+                            fn, updated_dict[key], cache, skip_fn
+                        )
+                result = fn(value.clone(**updated_dict))
+                if update_contains is False:
+                    result._update_contains()
+            else:
+                result = fn(value)
+
         elif istype(value, list):
-            result = [cls.apply(fn, v, cache) for v in value]
+            result = [cls.apply(fn, v, cache, skip_fn, update_contains) for v in value]
         elif istype(value, tuple):
-            result = tuple(cls.apply(fn, v, cache) for v in value)
+            result = tuple(
+                cls.apply(fn, v, cache, skip_fn, update_contains) for v in value
+            )
         elif istype(value, collections.OrderedDict):
             result = collections.OrderedDict(
-                cls.apply(fn, v, cache) for v in value.items()
+                cls.apply(fn, v, cache, skip_fn, update_contains) for v in value.items()
             )
         elif istype(value, dict):
-            result = {k: cls.apply(fn, v, cache) for k, v in list(value.items())}
+            result = {
+                k: cls.apply(fn, v, cache, skip_fn, update_contains)
+                for k, v in list(value.items())
+            }
         else:
             result = value
 
@@ -175,6 +263,7 @@ class VariableTracker:
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
         options = VariableTracker.propagate(self)
+
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
             raise NotImplementedError()
@@ -209,7 +298,7 @@ class VariableTracker:
         unimplemented(f"num_parameters: {self}")
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        unimplemented(f"hasattr: {self}")
+        unimplemented(f"hasattr: {repr(self)}")
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -244,11 +333,45 @@ class VariableTracker:
         guards: Optional[Set] = None,
         source: Source = None,
         mutable_local: MutableLocal = None,
+        recursively_contains: Optional[Set] = None,
     ):
-        super(VariableTracker, self).__init__()
+        super().__init__()
         self.guards = guards or set()
         self.source = source
         self.mutable_local = mutable_local
+        self.recursively_contains = (
+            recursively_contains  # provides hint to replace_all when replacing vars
+        )
+
+    def __post_init__(self, *args, **kwargs):
+        if self.recursively_contains is None:
+            self.recursively_contains = set()
+
+            VariableTracker.apply(
+                self._aggregate_mutables, self, skip_fn=lambda var: var is not self
+            )
+
+        assert None not in self.recursively_contains
+
+    def _aggregate_mutables(self, var):
+        self.recursively_contains.update(var.recursively_contains)
+        if var.mutable_local is not None:
+            self.recursively_contains.add(var.mutable_local)
+
+        return var
+
+    # This is used to forcely update self.recursively_contains
+    def _update_contains(self):
+        self.recursively_contains = set()
+
+        VariableTracker.apply(
+            self._aggregate_mutables,
+            self,
+            skip_fn=lambda var: var is not self,
+            update_contains=True,
+        )
+
+        assert None not in self.recursively_contains
 
 
 def typestr(*objs):

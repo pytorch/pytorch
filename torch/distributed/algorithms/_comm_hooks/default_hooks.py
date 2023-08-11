@@ -1,9 +1,10 @@
 import functools
 import torch
 import torch.distributed as dist
+from typing import Optional
 
 
-class DefaultState(object):
+class DefaultState:
     r"""
     Stores state needed to perform the default communication algorithm
     within a communication hook.
@@ -34,7 +35,8 @@ class DefaultState(object):
         )
         self.gradient_postdivide_factor = self.world_size / self.gradient_predivide_factor
 
-    def _get_gradient_predivide_factor(self, world_size: int) -> float:
+    @staticmethod
+    def _get_gradient_predivide_factor(world_size: int) -> float:
         factor: int = 1
         while world_size % factor == 0 and world_size / factor > factor:
             factor *= 2
@@ -108,7 +110,7 @@ def reduce_scatter_hook(state: DefaultState, grad: torch.Tensor, output: torch.T
     # Average grad by pre-division factor.
     if state.gradient_predivide_factor > 1:
         grad.div_(state.gradient_predivide_factor)
-    dist._reduce_scatter_base(
+    dist.reduce_scatter_tensor(
         output, grad, group=state.process_group
     )
     # Average grad's shard by post-division factor.
@@ -116,16 +118,18 @@ def reduce_scatter_hook(state: DefaultState, grad: torch.Tensor, output: torch.T
         output.div_(state.gradient_postdivide_factor)
 
 def _low_precision_hook(prec: torch.dtype, state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor):
-    grad.data = grad.data.to(prec)
+    if grad.dtype != prec:
+        grad.data = grad.data.to(prec)
     if output is not None:
-        output.data = output.data.to(prec)
+        if output.dtype != prec:
+            output.data = output.data.to(prec)
         reduce_scatter_hook(state, grad, output)
         _decompress(state, output)
     else:
         allreduce_hook(state, grad)
         _decompress(state, grad)
 
-def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor = None):
+def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: Optional[torch.Tensor] = None):
     r"""
     This FSDP communication hook implements a simple gradient compression
     approach that casts ``grad`` to half-precision floating-point format (``torch.float16``).
@@ -142,7 +146,7 @@ def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: tor
     fp16_hook = functools.partial(_low_precision_hook, torch.float16)
     return fp16_hook(state, grad, output)
 
-def bf16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor = None):
+def bf16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: Optional[torch.Tensor] = None):
     r"""
     This FSDP communication hook implements a simple gradient compression
     approach that casts ``grad`` to half-precision floating-point format (``torch.float16``).

@@ -1,31 +1,31 @@
-from .._src.python_key import pythonkey_decompose
-from .._src.fx_minifier import minifier
-from .._src.aot_autograd import (
+from torch._functorch import config
+from torch._functorch.aot_autograd import (
     aot_function,
     aot_module,
+    aot_module_simplified,
     compiled_function,
     compiled_module,
-    aot_module_simplified,
-    get_graph_being_compiled,
-    get_aot_graph_name,
     get_aot_compilation_context,
+    get_aot_graph_name,
+    get_graph_being_compiled,
+    make_boxed_compiler,
     make_boxed_func,
-    make_boxed_compiler
 )
-from .._src.compilers import (
-    ts_compile,
-    draw_graph_compile,
-    nop,
-    nnc_jit,
-    memory_efficient_fusion,
+from torch._functorch.compilers import (
     debug_compile,
+    default_decompositions,
+    draw_graph_compile,
+    memory_efficient_fusion,
+    nnc_jit,
+    nop,
     print_compile,
-    default_decompositions
+    ts_compile,
 )
-from .._src.partitioners import (
-    min_cut_rematerialization_partition,
+from torch._functorch.fx_minifier import minifier
+from torch._functorch.partitioners import (
     default_partition,
     draw_graph,
     draw_joint_graph,
+    min_cut_rematerialization_partition,
 )
-from .._src import config
+from torch._functorch.python_key import pythonkey_decompose

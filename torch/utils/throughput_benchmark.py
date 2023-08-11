@@ -18,13 +18,13 @@ def format_time(time_us=None, time_ms=None, time_s=None):
             raise AssertionError("Shouldn't reach here :)")
 
     if time_us >= US_IN_SECOND:
-        return '{:.3f}s'.format(time_us / US_IN_SECOND)
+        return f'{time_us / US_IN_SECOND:.3f}s'
     if time_us >= US_IN_MS:
-        return '{:.3f}ms'.format(time_us / US_IN_MS)
-    return '{:.3f}us'.format(time_us)
+        return f'{time_us / US_IN_MS:.3f}ms'
+    return f'{time_us:.3f}us'
 
 
-class ExecutionStats(object):
+class ExecutionStats:
     def __init__(self, c_stats, benchmark_config):
         self._c_stats = c_stats
         self.benchmark_config = benchmark_config
@@ -52,13 +52,13 @@ class ExecutionStats(object):
     def __str__(self):
         return '\n'.join([
             "Average latency per example: " + format_time(time_ms=self.latency_avg_ms),
-            "Total number of iterations: {}".format(self.num_iters),
-            "Total number of iterations per second (across all threads): {:.2f}".format(self.iters_per_second),
+            f"Total number of iterations: {self.num_iters}",
+            f"Total number of iterations per second (across all threads): {self.iters_per_second:.2f}",
             "Total time: " + format_time(time_s=self.total_time_seconds)
         ])
 
 
-class ThroughputBenchmark(object):
+class ThroughputBenchmark:
     '''
     This class is a wrapper around a c++ component throughput_benchmark::ThroughputBenchmark
     responsible for executing a PyTorch module (nn.Module or ScriptModule)

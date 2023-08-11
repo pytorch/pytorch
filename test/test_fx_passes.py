@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import operator
 import logging
+import sys
 
 import torch
 from torch.fx._symbolic_trace import symbolic_trace
@@ -42,6 +43,22 @@ class TestModule(torch.nn.Module):
         relu = add_6.relu()
 
         return add_4, add_6, relu
+
+class TestDeepModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(4, 4)
+
+    def forward(self, a, b, c):
+        o = a + b
+        o = o + 1.0
+
+        # testing to avoid DFS uses in passes. Since Python has max recursion depth.
+        for _ in range(sys.getrecursionlimit() + 1):
+            o = o - c
+
+        return o
+
 
 class TestPartitionFunctions:
     @staticmethod
@@ -182,46 +199,100 @@ class TestPartitionFunctions:
         c1 = a1 + c
         return b1 + c1
 
+    @staticmethod
+    def forward14(a, b, c):
+        a0, a1 = torch.ops.aten.std_mean(a)
+        out = a0 + 1.0
+        return out
+
+    @staticmethod
+    def forward15(a, b, c):
+        a0 = torch.ops.aten.view(a, [2, 2])
+        a1 = torch.ops.aten.permute(a0, [1, 0])
+        a2 = a1 + 1.0
+        a3 = torch.ops.aten.permute(a2, [1, 0])
+        a4 = a3 + 1.0
+        a5 = torch.ops.aten.permute(a4, [1, 0])
+        return torch.ops.aten.permute(a5, [1, 0])
+
+    @staticmethod
+    def forward16(a, b, c):
+        a0 = a - 1.0
+        a1 = torch.ops.aten.view(a0, [2, 2])
+        a2 = torch.ops.aten.permute(a1, [1, 0])
+        a3 = a2 + 1.0
+        a4 = torch.ops.aten.permute(a3, [1, 0])
+        a5 = a4 + 1.0
+        a6 = torch.ops.aten.permute(a5, [1, 0])
+        a7 = torch.ops.aten.permute(a6, [1, 0])
+        return a7 - 1.0
+
+    @staticmethod
+    def forward17(a, b, c, d, e, f):
+        a0 = a + b
+        a1 = c + d
+        a2 = e + f
+        return a0, a1, a2
+
 # A mock OperatorSupport class, where only operator.add is supported
 class MockOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-        return node.op == "call_function" and node.target in {operator.add, operator.getitem}
-
+        return (node.op == "call_function" and
+                node.target in {operator.add, operator.getitem,
+                                torch.ops.aten.view,
+                                torch.ops.aten.permute,
+                                torch.ops.aten.std_mean})
 
 @instantiate_parametrized_tests
 class TestFXGraphPasses(JitTestCase):
 
-    @parametrize("fn, expected_partition", [
-        (TestPartitionFunctions.forward1, [["add_7", "add_6"], ["add_5", "add_4", "add_3"], ["add_2", "add_1", "add"]]),
-        (TestPartitionFunctions.forward2, [["add_3", "add_2"], ["add_1", "add"]]),
+    @parametrize("fn, expected_partition, bookend_non_compute_pass", [
+        (TestPartitionFunctions.forward1, [["add_7", "add_6"], ["add_5", "add_4", "add_3"], ["add_2", "add_1", "add"]], False),
+        (TestPartitionFunctions.forward2, [["add_3", "add_2"], ["add_1", "add"]], False),
 
         # 1 horizontal fusion with common producer
-        (TestPartitionFunctions.forward3, [["add_2", "add_1", "add"]]),
-        (TestPartitionFunctions.forward4, [["add_2", "add_1", "add"]]),
+        (TestPartitionFunctions.forward3, [["add_2", "add_1", "add"]], False),
+        (TestPartitionFunctions.forward4, [["add_2", "add_1", "add"]], False),
 
         # 2 branches cases
-        (TestPartitionFunctions.forward5, [["add_1", "add"]]),
-        (TestPartitionFunctions.forward6, [["add"]]),
-        (TestPartitionFunctions.forward7, [["add_3", "add_2", "add", "add_1"]]),
-        (TestPartitionFunctions.forward8, [["add_3", "add_2", "add", "add_1"]]),
+        (TestPartitionFunctions.forward5, [["add_1", "add"]], False),
+        (TestPartitionFunctions.forward6, [["add"]], False),
+        (TestPartitionFunctions.forward7, [["add_3", "add_2", "add", "add_1"]], False),
+        (TestPartitionFunctions.forward8, [["add_3", "add_2", "add", "add_1"]], False),
 
         # 3 branch cases
-        (TestPartitionFunctions.forward9, [['add_3', 'add_2', 'add_1', 'add']]),
-        (TestPartitionFunctions.forward10, [['add_3', 'add_2', 'add', 'add_1']]),
-        (TestPartitionFunctions.forward11, [['add_1'], ['add']]),
+        (TestPartitionFunctions.forward9, [['add_3', 'add_2', 'add_1', 'add']], False),
+        (TestPartitionFunctions.forward10, [['add_3', 'add_2', 'add', 'add_1']], False),
+        (TestPartitionFunctions.forward11, [['add_1'], ['add']], False),
 
         # 4 not necessarily the only partition, just to verify that there's no cyclic dependency after partition
-        (TestPartitionFunctions.forward12, [["add_2"], ["add_3", "add_4", "add_1"], ["add"]]),
+        (TestPartitionFunctions.forward12, [["add_2", "add_3", "add_4"], ["add", "add_1"]], False),
 
         # 5 getitem special case
-        (TestPartitionFunctions.forward13, [["add_2", "add_1", "add"]]),
+        (TestPartitionFunctions.forward13, [["add_2", "add_1", "add"]], False),
+        (TestPartitionFunctions.forward14, [["add", "std_mean", "getitem", "getitem_1"]], False),
+
+        # 6 bookend non_compute pass
+        (TestPartitionFunctions.forward15, [["permute_1", "add_1", "add"]], True),
+        (TestPartitionFunctions.forward15, [['add_1', 'add', 'permute_1', 'view', 'permute_2', 'permute_3', 'permute']], False),
+        (TestPartitionFunctions.forward16, [["permute_1", "add_1", "add"]], True),
+        (TestPartitionFunctions.forward16, [['add_1', 'add', 'permute_1', 'view', 'permute_2', 'permute_3', 'permute']], False),
     ])
-    def test_partitioner(self, fn, expected_partition):
+    def test_partitioner(self, fn, expected_partition, bookend_non_compute_pass):
         traced = symbolic_trace(fn)
 
+        non_compute_ops = []
+        if bookend_non_compute_pass:
+            non_compute_ops = ["torch.ops.aten.view", "torch.ops.aten.permute"]
+
         supported_ops = MockOperatorSupport()
-        partitioner = CapabilityBasedPartitioner(traced, supported_ops, allows_single_node_partition=True)
+        partitioner = CapabilityBasedPartitioner(traced,
+                                                 supported_ops,
+                                                 allows_single_node_partition=True,
+                                                 non_compute_ops=non_compute_ops)
         partitions = partitioner.propose_partitions()
+        if bookend_non_compute_pass:
+            partitioner.remove_bookend_non_compute_ops(partitions)
 
         partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
         assert len(partitions_name) == len(expected_partition)
@@ -234,6 +305,30 @@ class TestFXGraphPasses(JitTestCase):
 
         expected = fn(a, b, c)
         result = fused_graph(a, b, c)
+        torch.testing.assert_close(expected, result)
+
+    @parametrize("fn, expected_partition", [
+        (TestPartitionFunctions.forward17, [['add', 'add_1', 'add_2']]),
+    ])
+    def test_partitioner_independent_output(self, fn, expected_partition):
+        traced = symbolic_trace(fn)
+
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(traced,
+                                                 supported_ops,
+                                                 allows_single_node_partition=True)
+        partitions = partitioner.propose_partitions()
+        partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
+        assert len(partitions_name) == len(expected_partition)
+        for i in range(len(partitions_name)):
+            assert set(partitions_name[i]) == set(expected_partition[i])
+
+        fused_graph = partitioner.fuse_partitions(partitions)
+
+        a, b, c, d, e, f = torch.rand(4), torch.rand(4), torch.rand(4), torch.rand(4), torch.rand(4), torch.rand(4)
+
+        expected = fn(a, b, c, d, e, f)
+        result = fused_graph(a, b, c, d, e, f)
         torch.testing.assert_close(expected, result)
 
     @parametrize("partition", [
@@ -287,6 +382,16 @@ class TestFXGraphPasses(JitTestCase):
 
         with self.assertRaises(Exception):
             fuse_by_partitions(gm, partitions)
+
+    def test_fuser_pass_deep_model(self):
+        m = TestDeepModule()
+        traced = symbolic_trace(m)
+
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(traced,
+                                                 supported_ops,
+                                                 allows_single_node_partition=True)
+        partitions = partitioner.propose_partitions()
 
 @dataclass
 class TestCase:

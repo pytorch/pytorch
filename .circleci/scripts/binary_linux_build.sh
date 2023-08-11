@@ -11,7 +11,7 @@ NUM_CPUS=$(( $(nproc) - 2 ))
 # Defaults here for **binary** linux builds so they can be changed in one place
 export MAX_JOBS=${MAX_JOBS:-$(( ${NUM_CPUS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${NUM_CPUS} ))}
 
-if [[ "${DESIRED_CUDA}" =~ cu11[0-9] ]]; then
+if [[ "${DESIRED_CUDA}" =~ cu1[1-2][0-9] ]]; then
   export BUILD_SPLIT_CUDA="ON"
 fi
 

@@ -51,7 +51,8 @@ Features described in this documentation are classified by release status:
    torch::deploy <deploy>
 
 .. toctree::
-   :maxdepth: 1
+   :glob:
+   :maxdepth: 2
    :caption: Python API
 
    torch
@@ -63,15 +64,22 @@ Features described in this documentation are classified by release status:
    torch.amp <amp>
    torch.autograd <autograd>
    torch.library <library>
+   cpu
    cuda
+   mps
    torch.backends <backends>
+   export
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
    torch.distributed.fsdp <fsdp>
    torch.distributed.optim <distributed.optim>
+   torch.distributed.tensor.parallel <distributed.tensor.parallel>
+   torch.distributed.checkpoint <distributed.checkpoint>
    torch.distributions <distributions>
+   torch.compiler <torch.compiler>
    torch.fft <fft>
+   torch.func <func>
    futures
    fx
    torch.hub <hub>
@@ -85,6 +93,7 @@ Features described in this documentation are classified by release status:
    profiler
    nn.init
    onnx
+   onnx_diagnostics
    optim
    complex_numbers
    ddp_comm_hooks
@@ -97,6 +106,7 @@ Features described in this documentation are classified by release status:
    sparse
    storage
    torch.testing <testing>
+   torch.utils <utils>
    torch.utils.benchmark <benchmark_utils>
    torch.utils.bottleneck <bottleneck>
    torch.utils.checkpoint <checkpoint>
@@ -111,6 +121,7 @@ Features described in this documentation are classified by release status:
    named_tensor
    name_inference
    torch.__config__ <config_mod>
+   logging
 
 .. toctree::
    :maxdepth: 1
@@ -122,7 +133,7 @@ Features described in this documentation are classified by release status:
    TorchServe <https://pytorch.org/serve>
    torchtext <https://pytorch.org/text/stable>
    torchvision <https://pytorch.org/vision/stable>
-   PyTorch on XLA Devices <http://pytorch.org/xla/>
+   PyTorch on XLA Devices <https://pytorch.org/xla/>
 
 Indices and tables
 ==================

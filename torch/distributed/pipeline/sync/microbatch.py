@@ -20,7 +20,7 @@ TensorOrTensors = Union[Tensor, Tensors]
 Function = Callable[[TensorOrTensors], Union[List[Any], Tensor]]
 
 
-class NoChunk(object):
+class NoChunk:
     """
     Wrapper for a Tensor in :meth:`Pipe.forward` indicating that the tensor
     should not be chunked on the batch dimension and instead be replicated
@@ -60,7 +60,7 @@ class Batch:
 
     @property
     def values(self):
-        """Retreives the underlying values for the batch"""
+        """Retrieves the underlying values for the batch"""
         return self._values
 
     def find_tensor_idx(self):
@@ -143,7 +143,7 @@ class Batch:
         self._values = value
 
     def _setitem_by_slice(self, index: slice, value) -> None:
-        if not (index.start is index.stop is index.step is None):
+        if not (index.start is index.stop is index.step is None):  # noqa: E714
             raise NotImplementedError("only slice [:] supported")
 
         if not self.atomic:

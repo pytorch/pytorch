@@ -160,14 +160,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     inputs.reserve(n);
     for (const auto i : c10::irange(n)) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
-      if (at::kVulkan == deviceType_) {
-        inputs.push_back(
-            atIValue.isTensor() ? at::IValue{atIValue.toTensor().vulkan()}
-                                : std::move(atIValue));
-      } else {
-        TORCH_CHECK(at::kCPU == deviceType_);
-        inputs.push_back(std::move(atIValue));
-      }
+      inputs.push_back(std::move(atIValue));
     }
 
     auto output = [&]() {
@@ -189,14 +182,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     inputs.reserve(n);
     for (const auto i : c10::irange(n)) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
-      if (at::kVulkan == deviceType_) {
-        inputs.push_back(
-            atIValue.isTensor() ? at::IValue{atIValue.toTensor().vulkan()}
-                                : std::move(atIValue));
-      } else {
-        TORCH_CHECK(at::kCPU == deviceType_);
-        inputs.push_back(std::move(atIValue));
-      }
+      inputs.push_back(std::move(atIValue));
     }
     if (auto method = module_.find_method(methodName)) {
       auto output = [&]() {

@@ -3,6 +3,12 @@
 #define FORMAT $format
 
 /*
+ * TILE_SIZE = (2, 2, 1)
+ * WEIGHT_STORAGE = TEXTURE_3D
+ * BIAS_STORAGE = TEXTURE_3D
+ */
+
+/*
  * Output Image
  */
 layout(set = 0, binding = 0, rgba8ui) uniform PRECISION restrict writeonly uimage3D uOutput;
@@ -54,7 +60,7 @@ vec4 dequantize(vec4 tex, float scale, int zero_point) {
  * Quantizes a float texel based on a scale and zero point.
  */
 uvec4 quantize(vec4 tex, float scale, int zero_point) {
-  return uvec4(tex / scale + zero_point);
+  return uvec4(roundEven(tex / scale) + zero_point);
 }
 
 /*

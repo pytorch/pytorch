@@ -1,28 +1,38 @@
 from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
+from .ctx_manager import (
+    ContextWrappingVariable,
+    CUDAStreamContextVariable,
+    CUDAStreamVariable,
+    DeterministicAlgorithmsVariable,
+    DisabledSavedTensorsHooksVariable,
+    GradModeVariable,
+    WithExitFunctionVariable,
+)
 from .dicts import ConstDictVariable, DataClassVariable, DefaultDictVariable
 from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
+from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
+    SetVariable,
     SliceVariable,
     TupleVariable,
 )
 from .misc import (
+    AutogradFunctionContextVariable,
     AutogradFunctionVariable,
-    BlackHoleVariable,
     ClosureVariable,
-    ContextWrappingVariable,
+    DeletedVariable,
     GetAttrVariable,
-    GradModeVariable,
     InspectSignatureVariable,
     LambdaVariable,
     NewCellVariable,
@@ -31,22 +41,22 @@ from .misc import (
     PythonModuleVariable,
     SuperVariable,
     UnknownVariable,
-    WithExitFunctionVariable,
 )
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .tensor import (
     FakeItemVariable,
+    NumpyNdarrayVariable,
+    SymNodeVariable,
     TensorVariable,
-    UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
 from .torch import TorchVariable
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [
+    "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
     "BaseListVariable",
-    "BlackHoleVariable",
     "BuiltinVariable",
     "ClosureVariable",
     "ConstantVariable",
@@ -54,6 +64,8 @@ __all__ = [
     "ContextWrappingVariable",
     "DataClassVariable",
     "DefaultDictVariable",
+    "DeletedVariable",
+    "DeterministicAlgorithmsVariable",
     "EnumVariable",
     "FakeItemVariable",
     "GetAttrVariable",
@@ -62,11 +74,12 @@ __all__ = [
     "LambdaVariable",
     "ListIteratorVariable",
     "ListVariable",
+    "NNModuleVariable",
     "NamedTupleVariable",
     "NestedUserFunctionVariable",
     "NewCellVariable",
     "NewGlobalVariable",
-    "NNModuleVariable",
+    "NumpyNdarrayVariable",
     "NumpyVariable",
     "PythonModuleVariable",
     "RangeVariable",
@@ -77,7 +90,6 @@ __all__ = [
     "TupleVariable",
     "UnknownVariable",
     "UnspecializedNNModuleVariable",
-    "UnspecializedNumpyVariable",
     "UnspecializedPythonVariable",
     "UserDefinedClassVariable",
     "UserDefinedObjectVariable",

@@ -18,8 +18,7 @@
 #include <ATen/ops/avg_pool2d_backward_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 __device__ inline int min(int a, int b) {
@@ -291,8 +290,8 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cuda)
       [&] {
         using accscalar_t = acc_type<scalar_t, true>;
 
-        scalar_t *output_data = output.data_ptr<scalar_t>();
-        scalar_t *input_data = input.data_ptr<scalar_t>();
+        scalar_t *output_data = output.mutable_data_ptr<scalar_t>();
+        const scalar_t *input_data = input.const_data_ptr<scalar_t>();
 
         switch (memory_format){
           case MemoryFormat::ChannelsLast: {
@@ -411,8 +410,8 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
     [&] {
       using accscalar_t = acc_type<scalar_t, true>;
 
-      scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-      scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+      const scalar_t *gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
+      scalar_t *gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
 
       switch (memory_format) {
         case MemoryFormat::ChannelsLast: {
@@ -456,5 +455,4 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
   );
 }
 
-} // at::native
-} // at
+} // namespace at::native

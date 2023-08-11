@@ -5,7 +5,6 @@ import shutil
 import unittest
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 
@@ -26,20 +25,24 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.config, "replay_record_enabled", True
             )
         )
+        torch._logging.set_logs(graph_breaks=True, dynamo=logging.ERROR)
+        # Most of the tests are checking to see if errors got logged, so we
+        # ask for errors to be suppressed
         cls._exit_stack.enter_context(
-            unittest.mock.patch.object(torch._dynamo.config, "print_graph_breaks", True)
+            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", True)
         )
         cls._exit_stack.enter_context(
             unittest.mock.patch.object(
                 torch._dynamo.config,
-                "replay_record_dir_name",
-                "/tmp/torch._dynamo_error_records/",
+                "debug_dir_root",
+                "/tmp/_torchdynamo_debug_/",
             )
         )
 
     @classmethod
     def tearDownClass(cls):
-        shutil.rmtree(torch._dynamo.config.replay_record_dir_name, ignore_errors=True)
+        shutil.rmtree(torch._dynamo.config.debug_dir_root, ignore_errors=True)
+        torch._logging.set_logs()
         cls._exit_stack.close()
 
     def check_replay(self, fn, *args, exp_exc_name=None):

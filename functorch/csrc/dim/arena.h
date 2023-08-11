@@ -222,10 +222,13 @@ struct Arena {
         }
         int to_allocate = sizeof(T)*n;
         int to_allocate_rounded = ALIGNMENT * ((to_allocate - 1) / ALIGNMENT + 1);
-        T* result = (T*) &buffer_[allocated_];
+        auto prev_allocated = allocated_;
         allocated_ += to_allocate_rounded;
-        AT_ASSERT(allocated_ <= ARENA_MAX_SIZE);
-        return result;
+        if (C10_UNLIKELY_OR_CONST(allocated_ > ARENA_MAX_SIZE)) {
+            overflow_.emplace_back(new char[to_allocate]);
+            return (T*) &overflow_.back()[0];
+        }
+        return (T*) (buffer_ + prev_allocated);
     }
     TensorRef autorelease(at::Tensor s) {
         auto ref = TensorRef(s);
@@ -233,7 +236,7 @@ struct Arena {
         ar_tensors_.append(*this, ref);
         return ref;
     }
-    py::handle autorelease(py::object obj) {
+    mpy::handle autorelease(mpy::object obj) {
         ar_objects_.append(*this, obj);
         obj.release();
         return ar_objects_.back();
@@ -242,15 +245,16 @@ struct Arena {
         for(TensorRef t: ar_tensors_) {
             c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>::reclaim(t->unsafeGetTensorImpl());
         }
-        for(py::handle h: ar_objects_) {
-            py::object::steal(h);
+        for(mpy::handle h: ar_objects_) {
+            mpy::object::steal(h);
         }
     }
 private:
     int64_t allocated_;
     char buffer_[ARENA_MAX_SIZE];
     Slice<TensorRef> ar_tensors_;
-    Slice<py::handle> ar_objects_;
+    Slice<mpy::handle> ar_objects_;
+    std::vector<std::unique_ptr<char[]>> overflow_;
 };
 
 template<typename T>

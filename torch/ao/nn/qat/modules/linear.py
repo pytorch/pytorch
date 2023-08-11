@@ -8,6 +8,10 @@ from torch.nn.utils.parametrize import (
     transfer_parametrizations_and_params,
 )
 
+__all__ = [
+    "Linear"
+]
+
 class Linear(nn.Linear):
     r"""
     A linear module attached with FakeQuantize modules for weight,

@@ -12,10 +12,10 @@ try:
         TestCase,
         TestSuite,
     )
-except ImportError:
+except ImportError as e:
     raise ImportError(
         "junitparser not found, please install with 'pip install junitparser'"
-    )
+    ) from e
 
 try:
     import rich

@@ -5,8 +5,8 @@ import torch.ao.nn.quantized.dynamic as nnqd
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.intrinsic.qat as nniqat
 import torch.ao.nn.qat as nnqat
-import torch.nn.intrinsic as nni
-import torch.nn.intrinsic.quantized as nniq
+import torch.ao.nn.intrinsic as nni
+import torch.ao.nn.intrinsic.quantized as nniq
 toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
@@ -50,15 +50,11 @@ def get_qlstm_weight(mod: nn.Module) -> List[torch.Tensor]:
 
 def get_conv_mod_weight(mod: nn.Module) -> torch.Tensor:
     if (
-        isinstance(mod, nn.Conv1d) or
-        isinstance(mod, nn.Conv2d) or
-        isinstance(mod, nn.Conv3d)
+        isinstance(mod, (nn.Conv1d, nn.Conv2d, nn.Conv3d))
     ):
         return mod.weight.detach()
     elif (
-        isinstance(mod, nni.ConvReLU1d) or
-        isinstance(mod, nni.ConvReLU2d) or
-        isinstance(mod, nni.ConvReLU3d)
+        isinstance(mod, (nni.ConvReLU1d, nni.ConvReLU2d, nni.ConvReLU3d))
     ):
         return mod[0].weight.detach()
     else:
@@ -82,7 +78,7 @@ def get_lstm_mod_weights(mod: nn.Module) -> List[torch.Tensor]:
                 res.append(param_value)
         return res
     else:
-        assert isinstance(mod, nnqd.LSTM), f"type {type(res)} not handled yet"
+        assert isinstance(mod, nnqd.LSTM), f"type {type(mod)} not handled yet"
         res = []
         for weight_value in mod._all_weight_values:
             res.append(weight_value.param.__getstate__()[0][4][0].__getstate__()[0][0])

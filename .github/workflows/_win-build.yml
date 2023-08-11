@@ -33,7 +33,7 @@ on:
 
     outputs:
       test-matrix:
-        value: ${{ inputs.test-matrix }}
+        value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
 
 env:
@@ -43,12 +43,42 @@ jobs:
   build:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, windows.4xlarge]
+    runs-on: [self-hosted, windows.4xlarge.nonephemeral]
     timeout-minutes: 240
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
     steps:
+      # Duplicated in win-test because this MUST go before a checkout
+      - name: Enable git symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
+
+      - name: Clean up leftover processes on non-ephemeral Windows runner
+        uses: pytorch/test-infra/.github/actions/cleanup-runner@main
+
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+          instructions: |
+            To forward remote desktop on your local machine ssh as follows:
+              ssh -L 3389:localhost:3389 %%username%%@%%hostname%%
+            And then change password using `passwd` command.
+
+            To start build locally, change working folder to \actions-runner\_work\pytorch\pytorch,
+            Activate miniconda and Visual Studio environment, by running:
+              call C:\Jenkins\Miniconda3\Scripts\activate.bat C:\Jenkins\Miniconda3
+              call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
 
@@ -57,14 +87,9 @@ jobs:
         with:
           cuda-version: ${{ inputs.cuda-version }}
 
-      - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Parse ref
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: python3 .github/scripts/parse_ref.py
 
       - name: Get workflow job id
         id: get-job-id
@@ -103,11 +128,11 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
-          TORCH_CUDA_ARCH_LIST: "7.0"
+          TORCH_CUDA_ARCH_LIST: "8.6"
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
-          .jenkins/pytorch/win-build.sh
+          .ci/pytorch/win-build.sh
 
       # Upload to github so that people can click and download artifacts
       - name: Upload artifacts to s3

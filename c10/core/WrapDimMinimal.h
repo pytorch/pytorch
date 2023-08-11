@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/core/SymInt.h>
-#include <c10/util/Exception.h>
 
 namespace c10 {
 
@@ -24,7 +23,8 @@ T _maybe_wrap_dim(T dim, T dim_post_expr, bool wrap_scalar = true) {
     return dim;
   }
   // Check edge-cases out-of-line (wrapping scalars and out-of-bounds errors)
-  return c10::detail::maybe_wrap_dim_slow<T>(dim, dim_post_expr, wrap_scalar);
+  return c10::detail::maybe_wrap_dim_slow<T>(
+      std::move(dim), std::move(dim_post_expr), wrap_scalar);
 }
 
 inline int64_t maybe_wrap_dim(
@@ -38,7 +38,7 @@ inline c10::SymInt maybe_wrap_dim(
     c10::SymInt dim,
     c10::SymInt dim_post_expr,
     bool wrap_scalar = true) {
-  return _maybe_wrap_dim(dim, dim_post_expr, wrap_scalar);
+  return _maybe_wrap_dim(std::move(dim), std::move(dim_post_expr), wrap_scalar);
 }
 
 } // namespace c10

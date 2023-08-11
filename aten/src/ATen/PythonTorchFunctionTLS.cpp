@@ -6,25 +6,13 @@ namespace impl {
 
 static thread_local PythonTorchFunctionTLS pythonTorchFunctionState;
 
-void PythonTorchFunctionTLS::set_mode(std::shared_ptr<c10::SafePyObject> mode) {
-  pythonTorchFunctionState.mode_ = std::move(mode);
-}
-
-const std::shared_ptr<c10::SafePyObject>& PythonTorchFunctionTLS::get_mode() {
-  return pythonTorchFunctionState.mode_;
-}
-
-void PythonTorchFunctionTLS::swap_mode(std::shared_ptr<c10::SafePyObject>& mode) {
-  pythonTorchFunctionState.mode_.swap(mode);
-}
-
 void PythonTorchFunctionTLS::push_onto_stack(std::shared_ptr<SafePyObject> mode) {
   pythonTorchFunctionState.stack_.push_back(std::move(mode));
 }
 
 const std::shared_ptr<SafePyObject> PythonTorchFunctionTLS::pop_stack() {
-  TORCH_CHECK(pythonTorchFunctionState.stack_.size() > 0, "trying to pop from empty mode stack");
-  const auto out = pythonTorchFunctionState.stack_.back();
+  TORCH_CHECK(!pythonTorchFunctionState.stack_.empty(), "trying to pop from empty mode stack");
+  auto out = pythonTorchFunctionState.stack_.back();
   pythonTorchFunctionState.stack_.pop_back();
   return out;
 }
@@ -38,12 +26,12 @@ int64_t PythonTorchFunctionTLS::stack_len() {
   return pythonTorchFunctionState.stack_.size();
 }
 
-void PythonTorchFunctionTLS::set_disabled(bool disabled) {
-  pythonTorchFunctionState.disabled_ = disabled;
+void PythonTorchFunctionTLS::set_disabled_state(TorchFunctionDisabledState disabled_state) {
+  pythonTorchFunctionState.disabled_state_ = disabled_state;
 }
 
-bool PythonTorchFunctionTLS::is_disabled() {
-  return pythonTorchFunctionState.disabled_;
+TorchFunctionDisabledState PythonTorchFunctionTLS::get_disabled_state() {
+  return pythonTorchFunctionState.disabled_state_;
 }
 
 void PythonTorchFunctionTLS::set_state(const PythonTorchFunctionTLS& state) {
@@ -54,8 +42,9 @@ const PythonTorchFunctionTLS& PythonTorchFunctionTLS::get_state() {
   return pythonTorchFunctionState;
 }
 
-bool function_mode_enabled() {
-  return static_cast<bool>(PythonTorchFunctionTLS::get_mode());
+bool torch_function_mode_enabled() {
+  return PythonTorchFunctionTLS::get_disabled_state() != TorchFunctionDisabledState::ALL_DISABLED &&
+         PythonTorchFunctionTLS::stack_len() > 0;
 }
 
 } // namespace impl

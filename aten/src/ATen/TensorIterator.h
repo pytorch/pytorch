@@ -132,6 +132,10 @@ struct TORCH_API OperandInfo {
 
   C10_ALWAYS_INLINE ~OperandInfo() = default;
 
+  /// The data pointer. This may be different from tensor->data_ptr() if the
+  /// iterator is split.
+  void* data = nullptr;
+
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
   StrideVector stride_bytes;
 
@@ -159,10 +163,6 @@ struct TORCH_API OperandInfo {
   TensorOptions options() const {
     return TensorOptions(target_dtype).device(device);
   }
-
-  /// The data pointer. This may be different from tensor->data_ptr() if the
-  /// iterator is split.
-  void* data = nullptr;
 
   bool is_output = false;
 
@@ -309,7 +309,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   Device device(int arg = 0) const {
     return operands_[arg].device.value();
   }
-  DeviceType device_type(int arg = 0) const {
+  c10::DeviceType device_type(int arg = 0) const {
     return device(arg).type();
   }
   int64_t element_size(int arg) const {
@@ -370,6 +370,23 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   T scalar_value(int arg) {
     auto& op = operands_[arg];
     return c10::fetch_and_cast<T>(op.tensor_base().scalar_type(), op.data);
+  }
+
+  /// Return scalar value from original_tensor_base if it is defined. When
+  /// common_dtype is Half, casting scalar input to common_dtype might overflow.
+  /// If the scalar is aleady given in the type of Half, then return scalar
+  /// value from tensor_base.
+  template <typename T>
+  T original_scalar_value(int arg) {
+    auto& original_tensor_base = operands_[arg].original_tensor_base();
+    if (original_tensor_base.defined()) {
+      TORCH_INTERNAL_ASSERT(
+          original_tensor_base.scalar_type() != common_dtype());
+      return c10::fetch_and_cast<T>(
+          original_tensor_base.scalar_type(), original_tensor_base.data_ptr());
+    } else {
+      return scalar_value<T>(arg);
+    }
   }
 
  private:
@@ -659,9 +676,12 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   /// in operands_).
   int num_outputs_ = 0;
 
-  /// Whether or not all operands have the same shape.  Having all the same
-  /// shape affects whether or not the iterator is eligible for fast setup.
+  /// Whether or not all operands have the same shape and are 1d+. Having all
+  /// the same shape affects whether or not the iterator is eligible for fast
+  /// setup.
   bool all_ops_same_shape_ = false;
+  /// Whether or not all operands are 0d, this affects type promotion
+  bool all_ops_are_scalars_ = false;
 
   /// The "computation" dtype of TensorIterator, specifying what the dtype
   /// we will do the internal computation in TensorIterator.  Typically,
@@ -735,7 +755,7 @@ class TORCH_API TensorIteratorConfig final {
   friend struct TensorIteratorBase;
   friend struct TensorIterator;
 
-  TensorIteratorConfig() {}
+  TensorIteratorConfig() = default;
 
   C10_DISABLE_COPY_AND_ASSIGN(TensorIteratorConfig);
 
@@ -933,7 +953,7 @@ class TORCH_API TensorIteratorConfig final {
 /// the original TensorIterator.
 struct TORCH_API SplitUntil32Bit {
   struct TORCH_API iterator {
-    iterator(){};
+    iterator() = default;
     iterator(const TensorIteratorBase& iter);
     iterator(iterator&&) = default;
 

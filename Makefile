@@ -31,3 +31,7 @@ lint:
 
 quicklint:
 	lintrunner
+
+triton:
+	$(PIP) uninstall -y triton
+	@./scripts/install_triton_wheel.sh

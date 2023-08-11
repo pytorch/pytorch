@@ -80,7 +80,7 @@ bool isZerodimCPUTensor(std::shared_ptr<TensorType> tensor_type) {
 bool propWithNoDevice(Node* n) {
   // Propagate if we can verify that all input devices match,
   // except CPU zerodim, which any other type can overwrite
-  int input_num = 0;
+  size_t input_num = 0;
 
   for (; input_num < n->inputs().size(); input_num++) {
     if (n->inputs()[input_num]->type()->cast<TensorType>()) {
@@ -124,7 +124,7 @@ bool defaultDeviceProp(Node* n) {
     return false;
   }
   auto arguments = schema->arguments();
-  for (int i = 0; i < arguments.size(); i++) {
+  for (size_t i = 0; i < arguments.size(); i++) {
     Argument& argument = arguments[i];
     if (DeviceObjType::get()->isSubtypeOf(argument.type())) {
       // Optional args are filled in by torchscript with default val

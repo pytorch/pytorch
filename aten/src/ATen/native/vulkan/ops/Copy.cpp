@@ -1,5 +1,7 @@
+#include <ATen/ATen.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/native/vulkan/ops/Utils.h>
+#include <ATen/vulkan/Context.h>
 
 namespace at {
 namespace native {
@@ -17,10 +19,17 @@ void memcpy_to_mapping(const Tensor& src, api::MemoryMap& dst_mapping) {
     memcpy_to_mapping_impl<c10::Half>(src, dst_mapping);
   } else if (src.dtype() == c10::kQUInt8) {
     memcpy_to_mapping_impl<c10::quint8>(src, dst_mapping);
+  } else if (src.dtype() == c10::kQInt8) {
+    memcpy_to_mapping_impl<c10::qint8>(src, dst_mapping);
+  } else if (src.dtype() == c10::kQInt32) {
+    memcpy_to_mapping_impl<c10::qint32>(src, dst_mapping);
+  } else if (src.dtype() == c10::kBool) {
+    memcpy_to_mapping_uint8(src, dst_mapping);
   } else {
     TORCH_CHECK(
         false,
-        "Invalid Data Type: expected c10::QUint8, at::kHalf or at::Float but got ",
+        "Invalid Data Type: expected c10::kQInt32, c10::kQInt8, c10::kQUInt8,",
+        " c10::kBool, at::kHalf, or at::Float but got ",
         src.dtype());
   }
 }
@@ -32,10 +41,17 @@ void memcpy_from_mapping(api::MemoryMap& src_mapping, Tensor& dst) {
     memcpy_from_mapping_impl<c10::Half>(src_mapping, dst);
   } else if (dst.dtype() == c10::kQUInt8) {
     memcpy_from_mapping_impl<c10::quint8>(src_mapping, dst);
+  } else if (dst.dtype() == c10::kQInt8) {
+    memcpy_from_mapping_impl<c10::qint8>(src_mapping, dst);
+  } else if (dst.dtype() == c10::kQInt32) {
+    memcpy_from_mapping_impl<c10::qint32>(src_mapping, dst);
+  } else if (dst.dtype() == c10::kBool) {
+    memcpy_from_mapping_bool(src_mapping, dst);
   } else {
     TORCH_CHECK(
         false,
-        "Invalid Data Type: expected c10::QUint8, at::kHalf or Float but got ",
+        "Invalid Data Type: expected c10::kQInt32, c10::kQInt8, c10::kQUInt8,",
+        " c10::kBool, at::kHalf or at::Float but got ",
         dst.dtype());
   }
 }
@@ -52,7 +68,7 @@ void transfer_cpu_to_vulkan(const Tensor& src, vTensor& v_dst) {
   // a 16 bit format will be used for at::kFloat.
   Tensor src_nc4hw = utils::nchw_to_nc4hw(src).to(v_dst.texture_dtype());
 
-  api::StorageBuffer staging(context, v_dst.texture_dtype(), v_dst.numcells());
+  api::StorageBuffer staging(context, v_dst.texture_dtype(), v_dst.gpu_numel());
   // Copy data into the staging buffer
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
@@ -71,7 +87,7 @@ void transfer_vulkan_to_cpu(vTensor& v_src, Tensor& dst) {
   // Temporary tensor to receive copied NC4HW data
   at::Tensor dst_tmp = utils::create_staging_tensor(v_src);
 
-  api::StorageBuffer staging(context, v_src.texture_dtype(), v_src.numcells());
+  api::StorageBuffer staging(context, v_src.texture_dtype(), v_src.gpu_numel());
 
   api::VulkanFence fence = context->fences().get_fence();
 
@@ -102,8 +118,7 @@ void transfer_vulkan_to_cpu(vTensor& v_src, Tensor& dst) {
 
   context->fences().return_fence(fence);
 
-  dst =
-      utils::nc4hw_to_nchw(dst_tmp, v_src.sizes()).to(v_src.options().dtype());
+  dst = utils::nc4hw_to_nchw(dst_tmp, v_src.sizes()).to(v_src.dtype());
 }
 
 void transfer_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
@@ -135,13 +150,16 @@ void transfer_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
 void pack_cpu_to_vulkan(const Tensor& src, vTensor& dst) {
   api::Context* const context = api::context();
 
+  // Ensure that src is contiguous in its memory format
+  Tensor src_contig = src.contiguous(src.suggest_memory_format());
+
   // Note that the float data type has been enforced for the storage buffer
   // below. The reason for this is that the nchw_to_image and image_to_nchw
   // shaders which perform the transfer to/from an image texture expect a buffer
   // of floats as input. GLSL/Vulkan does not natively support 16 bit arithmetic
   // types, so for now storage buffers created for compute shaders must define
   // floats as their base data type.
-  api::StorageBuffer staging(context, at::kFloat, dst.numcells());
+  api::StorageBuffer staging(context, at::kFloat, dst.gpu_numel());
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
@@ -150,20 +168,23 @@ void pack_cpu_to_vulkan(const Tensor& src, vTensor& dst) {
     // buffer as input (note that at::kFloat is used to create the StorageBuffer
     // above).
     if (src.dtype() == at::kHalf) {
-      memcpy_to_mapping(src.to(at::kFloat), mapping);
+      memcpy_to_mapping(src_contig.to(at::kFloat), mapping);
     } else {
-      memcpy_to_mapping(src, mapping);
+      memcpy_to_mapping(src_contig, mapping);
     }
   }
   utils::pack_staging_to_vtensor(staging.buffer(), dst);
 }
 
 void pack_vulkan_to_cpu(vTensor& src, Tensor& dst) {
+  TORCH_CHECK(
+      !src.is_quantized(),
+      "Copy of vulkan quantized tensors to cpu is currently disabled!");
   api::Context* const context = api::context();
 
   // Refer to the comment in pack_cpu_to_vulkan for why at::kFloat is specified
   // for the storage buffer below.
-  api::StorageBuffer staging(context, at::kFloat, src.numcells());
+  api::StorageBuffer staging(context, at::kFloat, src.gpu_numel());
 
   api::VulkanFence fence = context->fences().get_fence();
 
@@ -244,6 +265,61 @@ Tensor& copy_(Tensor& dst, const Tensor& src) {
 
   return dst;
 }
+
+vTensor to_vulkan(at::Tensor& src, const api::StorageType storage_type) {
+  TORCH_CHECK(
+      src.device().type() == at::kCPU,
+      "Vulkan to_vulkan(): input tensor must be a CPU tensor!")
+
+  vTensor v_ret{
+      api::context(),
+      src.sizes(),
+      src.scalar_type(),
+      storage_type,
+      src.suggest_memory_format(),
+  };
+
+  ops::pack_cpu_to_vulkan(src, v_ret);
+
+  return v_ret;
+}
+
+at::Tensor from_vulkan(vTensor& v_src) {
+  at::TensorOptions opt(at::kCPU);
+  opt = opt.dtype(v_src.dtype());
+
+  c10::MemoryFormat v_src_memory_format;
+
+  switch (v_src.gpu_memory_layout()) {
+    case api::GPUMemoryLayout::TENSOR_WIDTH_PACKED:
+      v_src_memory_format = c10::MemoryFormat::Contiguous;
+      break;
+    case api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED:
+      v_src_memory_format = c10::MemoryFormat::ChannelsLast;
+      break;
+    default:
+      TORCH_CHECK(false, "No corresponding memory format");
+  }
+
+  at::Tensor ret = at::empty(v_src.sizes(), opt).to(v_src_memory_format);
+  ops::pack_vulkan_to_cpu(v_src, ret);
+  return ret;
+}
+
+//
+// VulkanImpl
+//
+
+struct VulkanImpl final : public at::vulkan::VulkanImplInterface {
+  bool is_vulkan_available() const override {
+    return api::available();
+  }
+
+  Tensor& vulkan_copy_(Tensor& self, const Tensor& src) const override {
+    return vulkan::ops::copy_(self, src);
+  }
+};
+static at::vulkan::VulkanImplRegistrar g_vulkan_impl(new VulkanImpl());
 
 } // namespace ops
 } // namespace vulkan

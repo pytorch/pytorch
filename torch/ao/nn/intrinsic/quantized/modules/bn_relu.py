@@ -4,6 +4,10 @@ import torch.ao.nn.intrinsic
 import torch.ao.nn.intrinsic.qat
 import torch.ao.nn.quantized as nnq
 
+__all__ = [
+    "BNReLU2d",
+    "BNReLU3d"
+]
 
 class BNReLU2d(nnq.BatchNorm2d):
     r"""
@@ -18,7 +22,7 @@ class BNReLU2d(nnq.BatchNorm2d):
     _FLOAT_MODULE = torch.ao.nn.intrinsic.BNReLU2d
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None):
-        super(BNReLU2d, self).__init__(num_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
+        super().__init__(num_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -35,7 +39,7 @@ class BNReLU2d(nnq.BatchNorm2d):
     @classmethod
     def from_float(cls, mod):
         # TODO: Add qat support for BNReLU2d
-        return super(BNReLU2d, cls).from_float(mod)
+        return super().from_float(mod)
 
     @classmethod
     def from_reference(cls, bn_relu, output_scale, output_zero_point):
@@ -54,7 +58,7 @@ class BNReLU3d(nnq.BatchNorm3d):
     _FLOAT_MODULE = torch.ao.nn.intrinsic.BNReLU3d
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None):
-        super(BNReLU3d, self).__init__(num_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
+        super().__init__(num_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -71,7 +75,7 @@ class BNReLU3d(nnq.BatchNorm3d):
     @classmethod
     def from_float(cls, mod):
         # TODO: Add qat support for BNReLU3d
-        return super(BNReLU3d, cls).from_float(mod)
+        return super().from_float(mod)
 
     @classmethod
     def from_reference(cls, bn_relu, output_scale, output_zero_point):

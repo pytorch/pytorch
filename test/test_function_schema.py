@@ -21,6 +21,37 @@ class TestFunctionSchema(TestCase):
         schema_without_out = parse_schema('any.not_out(Tensor self, Tensor b) -> Tensor')
         self.assertFalse(schema_without_out.arguments[-1].is_out)
 
+    def test_hash_schema(self):
+        schema1 = parse_schema('any.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)')
+        schema2 = parse_schema('any.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)')
+        self.assertEqual(hash(schema1), hash(schema2))
+
+        schema3 = parse_schema('any.not_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)')
+        self.assertNotEqual(hash(schema2), hash(schema3))
+
+        schema4 = parse_schema('foo(Tensor self, *, int a, Tensor(a!) out) -> Tensor(a!)')
+        self.assertNotEqual(hash(schema2), hash(schema4))
+
+        # schemas with different default value, or different kw-only arg, should have different hash
+        default_val_schema0 = parse_schema('foo(Tensor self, int a = 2) -> Tensor(a!)')
+        default_val_schema1 = parse_schema('foo(Tensor self, int a = 3) -> Tensor(a!)')
+        default_val_schema2 = parse_schema('foo(Tensor self, *, int a = 2) -> Tensor(a!)')
+        self.assertNotEqual(hash(default_val_schema0), hash(default_val_schema1))
+        self.assertNotEqual(hash(default_val_schema0), hash(default_val_schema2))
+
+        # schema with different alias annotation should have different hash
+        alias_schema = parse_schema('foo(Tensor(a!) self, int a = 2) -> Tensor(a!)')
+        self.assertNotEqual(hash(default_val_schema0), hash(alias_schema))
+        alias_schema2 = parse_schema('foo(Tensor(b!) self, int a = 2) -> Tensor(a!)')
+        self.assertNotEqual(hash(alias_schema), hash(alias_schema2))
+
+        # schema with different alias infos
+        alias_schema3 = parse_schema('foo(Tensor self, *, int a, int b=1, Tensor(a!) out, Tensor(b!) b) -> Tensor(a!)')
+        alias_schema4 = parse_schema('foo(Tensor self, *, int a, int b=1, Tensor(a!) out, Tensor(b!) b) -> Tensor(b!)')
+        alias_schema5 = parse_schema('foo(Tensor self, *, int a, int b=1, Tensor(b!) out, Tensor(a!) b) -> Tensor(a!)')
+        self.assertNotEqual(hash(alias_schema3), hash(alias_schema4))
+        self.assertNotEqual(hash(alias_schema3), hash(alias_schema5))
+
     def test_backward_compatible_structure(self):
         old_schema = parse_schema('any.over(Tensor self, *, Tensor b) -> Tensor')
         # BC: A new schema without changes.
@@ -202,6 +233,16 @@ class TestFunctionSchema(TestCase):
         self.assertEqual(schema.arguments[2].type.str(), "int?")
         # fake type of Device? is Device?
         self.assertEqual(schema.arguments[3].type.str(), "Device?")
+        # print real types in FunctionSchema
+        self.assertEqual(str(schema), schema_str)
+
+    def test_sym_int_argument_properly_parsed(self):
+        schema_str = 'sym_size.int(Tensor self, int dim) -> SymInt'
+        schema = parse_schema(schema_str)
+        # fake type of SymInt is int
+        self.assertEqual(schema.returns[-1].type.str(), "int")
+        # real type of SymInt is SymInt
+        self.assertEqual(schema.returns[-1].real_type.str(), "SymInt")
         # print real types in FunctionSchema
         self.assertEqual(str(schema), schema_str)
 

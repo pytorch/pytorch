@@ -22,6 +22,10 @@ holds the data as an untyped array of bytes.
 Every strided :class:`torch.Tensor` contains a :class:`torch.TypedStorage`,
 which stores all of the data that the :class:`torch.Tensor` views.
 
+.. warning::
+  All storage classes except for :class:`torch.UntypedStorage` will be removed
+  in the future, and :class:`torch.UntypedStorage` will be used in all cases.
+
 .. autoclass:: torch.TypedStorage
    :members:
    :undoc-members:

@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <utility>
 
-namespace at { namespace cuda {
+namespace at::cuda {
 
 /*
 * CUDAEvents are movable not copyable wrappers around CUDA's events.
@@ -28,8 +28,8 @@ namespace at { namespace cuda {
 struct TORCH_CUDA_CPP_API CUDAEvent {
   // Constructors
   // Default value for `flags` is specified below - it's cudaEventDisableTiming
-  CUDAEvent() {}
-  CUDAEvent(unsigned int flags) : flags_{flags} {}
+  CUDAEvent() noexcept = default;
+  CUDAEvent(unsigned int flags) noexcept : flags_{flags} {}
 
   CUDAEvent(
       DeviceIndex device_index, const cudaIpcEventHandle_t* handle) {
@@ -58,9 +58,11 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
   CUDAEvent(const CUDAEvent&) = delete;
   CUDAEvent& operator=(const CUDAEvent&) = delete;
 
-  CUDAEvent(CUDAEvent&& other) { moveHelper(std::move(other)); }
-  CUDAEvent& operator=(CUDAEvent&& other) {
-    moveHelper(std::move(other));
+  CUDAEvent(CUDAEvent&& other) noexcept { moveHelper(std::move(other)); }
+  CUDAEvent& operator=(CUDAEvent&& other) noexcept {
+    if (this != &other) {
+      moveHelper(std::move(other));
+    }
     return *this;
   }
 
@@ -96,7 +98,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
       C10_CUDA_CHECK(err);
     } else {
       // ignore and clear the error if not ready
-      cudaGetLastError();
+      (void)cudaGetLastError();
     }
 
     return false;
@@ -203,5 +205,4 @@ private:
   }
 };
 
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda

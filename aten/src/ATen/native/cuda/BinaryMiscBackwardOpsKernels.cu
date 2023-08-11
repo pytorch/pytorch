@@ -13,10 +13,9 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
-namespace at {
-namespace native {
+namespace at::native {
 
-const char sigmoid_backward_name[] = "sigmoid_backward";
+CONSTEXPR_EXCEPT_WIN_CUDA char sigmoid_backward_name[] = "sigmoid_backward";
 void sigmoid_backward_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.dtype();
   if(isComplexType(dtype)) {
@@ -87,7 +86,7 @@ void logit_backward_kernel_cuda(TensorIteratorBase& iter, const Scalar& eps_scal
       });
 }
 
-const char tanh_backward_name[] = "tanh_backward";
+CONSTEXPR_EXCEPT_WIN_CUDA char tanh_backward_name[] = "tanh_backward";
 void tanh_backward_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.dtype();
   if(isComplexType(dtype)) {
@@ -129,5 +128,4 @@ REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel_cuda);
 REGISTER_DISPATCH(logit_backward_stub, &logit_backward_kernel_cuda);
 REGISTER_DISPATCH(tanh_backward_stub, &tanh_backward_kernel_cuda);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

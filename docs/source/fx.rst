@@ -36,7 +36,7 @@ What is an FX transform? Essentially, it's a function that looks like this.
         # Step 3: Construct a Module to return
         return torch.fx.GraphModule(m, graph)
 
-Your transform will take in an :class:`torch.nn.Module`, acquire a :class:`Graph`
+Your transform will take in a :class:`torch.nn.Module`, acquire a :class:`Graph`
 from it, do some modifications, and return a new
 :class:`torch.nn.Module`. You should think of the :class:`torch.nn.Module` that your FX
 transform returns as identical to a regular :class:`torch.nn.Module` -- you can pass it to another
@@ -209,7 +209,7 @@ can be found below.
         node.replace_all_uses_with(new_node)
 
 For simple transformations that only consist of substitutions, you can also
-make use of the `subgraph rewriter. <https://github.com/pytorch/pytorch/blob/master/torch/fx/subgraph_rewriter.py>`__
+make use of the `subgraph rewriter. <https://github.com/pytorch/pytorch/blob/main/torch/fx/subgraph_rewriter.py>`__
 
 Subgraph Rewriting With replace_pattern()
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -230,7 +230,7 @@ Graph Manipulation Examples
 -  `Conv/Batch Norm
    fusion <https://github.com/pytorch/pytorch/blob/40cbf342d3c000712da92cfafeaca651b3e0bd3e/torch/fx/experimental/optimization.py#L50>`__
 -  `replace_pattern: Basic usage <https://github.com/pytorch/examples/blob/master/fx/subgraph_rewriter_basic_use.py>`__
--  `Quantization <https://pytorch.org/docs/master/quantization.html#prototype-fx-graph-mode-quantization>`__
+-  `Quantization <https://pytorch.org/docs/main/quantization.html#prototype-fx-graph-mode-quantization>`__
 -  `Invert Transformation <https://github.com/pytorch/examples/blob/master/fx/invert.py>`__
 
 Proxy/Retracing
@@ -633,9 +633,9 @@ examine our traced module:
     # This print-out returns:
     """
     graph():
-        %x : [#users=1] = placeholder[target=x]
-        %y : [#users=1] = placeholder[target=y]
-        %add : [#users=1] = call_function[target=operator.add](args = (%x, %y), kwargs = {})
+        %x : [num_users=1] = placeholder[target=x]
+        %y : [num_users=1] = placeholder[target=y]
+        %add : [num_users=1] = call_function[target=operator.add](args = (%x, %y), kwargs = {})
         return add
     """
 
@@ -1039,7 +1039,7 @@ Miscellanea
         traced.eval()
 
         x = torch.randn(5, 3)
-        torch.testing.assert_allclose(traced(x), x)
+        torch.testing.assert_close(traced(x), x)
         """
         AssertionError: Tensor-likes are not close!
 
@@ -1071,7 +1071,7 @@ Miscellanea
         traced.eval()
 
         x = torch.randn(5, 3)
-        torch.testing.assert_allclose(traced(x), x)
+        torch.testing.assert_close(traced(x), x)
 
   - Because of this difference, consider marking modules that interact with the ``training`` flag dynamically as leaf modules.
 

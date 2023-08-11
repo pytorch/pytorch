@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Utils.h>
 #include <ATen/core/functional.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
@@ -20,10 +21,14 @@
 #include <torch/version.h>
 #include <atomic>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wnewline-eof")
 #include <onnx/checker.h>
+C10_DIAGNOSTIC_POP()
 #include <onnx/onnx_pb.h>
 #include <onnx/proto_utils.h>
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
 #include <onnx/shape_inference/implementation.h>
+C10_DIAGNOSTIC_POP()
 
 #include <fstream>
 #include <memory>
@@ -32,8 +37,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void writeArchiveAndTensors(
     const std::string& archive_name,
@@ -57,7 +61,7 @@ namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
 const static int kInvalidOpsetVersion = -1;
-const static int kMainOpsetVersion = 17;
+const static int kMainOpsetVersion = 19;
 // Based on OP_SET_ID_VERSION_MAP in
 // https://github.com/onnx/onnx/blob/master/onnx/helper.py.
 constexpr static std::array<int64_t, kMainOpsetVersion + 1>
@@ -80,6 +84,8 @@ constexpr static std::array<int64_t, kMainOpsetVersion + 1>
         8, // opset 15
         8, // opset 16
         8, // opset 17
+        8, // opset 18
+        9, // opset 19
 };
 
 std::string getNodeStackTraceString(const Node* n) {
@@ -222,7 +228,7 @@ class GraphEncoder {
       const std::string& onnx_file_path,
       const NodeAttrNameMap& node_attr_to_name = {});
 
-  onnx::ModelProto get_model_proto() {
+  std::shared_ptr<onnx::ModelProto> get_model_proto() {
     return model_proto_;
   }
 
@@ -374,7 +380,7 @@ class GraphEncoder {
       bool assign_dim_param = true);
 
   SymbolDimMap symbol_dim_map_;
-  onnx::ModelProto model_proto_;
+  std::shared_ptr<onnx::ModelProto> model_proto_;
   size_t num_blocks_;
   size_t num_op_nodes_;
   size_t num_external_data_;
@@ -425,6 +431,10 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
       return onnx::TensorProto_DataType_INT32;
     case at::kBFloat16:
       return onnx::TensorProto_DataType_BFLOAT16;
+    case at::kFloat8_e4m3fn:
+      return onnx::TensorProto_DataType_FLOAT8E4M3FN;
+    case at::kFloat8_e5m2:
+      return onnx::TensorProto_DataType_FLOAT8E5M2;
     default:
       TORCH_CHECK(
           false,
@@ -486,7 +496,8 @@ GraphEncoder::GraphEncoder(
     bool use_external_data_format,
     const std::string& onnx_file_path,
     const NodeAttrNameMap& node_attr_to_name)
-    : num_blocks_(0),
+    : model_proto_(std::make_shared<onnx::ModelProto>()),
+      num_blocks_(0),
       num_op_nodes_(0),
       num_external_data_(0),
       operator_export_type_(operator_export_type),
@@ -497,23 +508,23 @@ GraphEncoder::GraphEncoder(
       custom_opsets_(custom_opsets),
       graph_(graph),
       node_attr_to_name_(node_attr_to_name) {
-  model_proto_.set_producer_name("pytorch");
+  model_proto_->set_producer_name("pytorch");
   TORCH_CHECK(
       onnx_opset_version > 0 &&
-          onnx_opset_version < kOpsetVersionToIRVersion.size() &&
+          static_cast<size_t>(onnx_opset_version) <
+              kOpsetVersionToIRVersion.size() &&
           kOpsetVersionToIRVersion[onnx_opset_version] != kInvalidOpsetVersion,
       "Unsupported onnx_opset_version: ",
       onnx_opset_version);
 
-  model_proto_.set_ir_version(kOpsetVersionToIRVersion[onnx_opset_version]);
-  model_proto_.set_producer_version(TORCH_VERSION);
-
+  model_proto_->set_ir_version(kOpsetVersionToIRVersion[onnx_opset_version]);
+  model_proto_->set_producer_version(TORCH_VERSION);
   validateGraph(graph, operator_export_type);
 
   // If graph proto size exceed maximum protobuf size of 2GB, set
   // use_external_data_format to true.
   if (!use_external_data_format &&
-      GetGraphProtoSize(model_proto_.mutable_graph(), graph, initializers) >
+      GetGraphProtoSize(model_proto_->mutable_graph(), graph, initializers) >
           INT_MAX) {
     GRAPH_DEBUG(
         "Exporting model exceed maximum protobuf size of 2GB. Storing model parameters in external data files");
@@ -531,12 +542,12 @@ GraphEncoder::GraphEncoder(
         "be written to the same directory. Please specify the output file name.");
   }
 
-  auto* imp = model_proto_.add_opset_import();
+  auto* imp = model_proto_->add_opset_import();
   // This is the version of ONNX operator set we are targeting
   imp->set_version(onnx_opset_version);
 
   EncodeGraph(
-      model_proto_.mutable_graph(),
+      model_proto_->mutable_graph(),
       graph,
       initializers,
       dynamic_axes,
@@ -546,7 +557,7 @@ GraphEncoder::GraphEncoder(
       onnx_file_path);
 
   for (const std::string& domain : domains_) {
-    auto* opset = model_proto_.add_opset_import();
+    auto* opset = model_proto_->add_opset_import();
     opset->set_domain(domain);
     //  Check if domain version is registered. If not, set to version 1
     auto it = custom_opsets.find(domain);
@@ -729,7 +740,7 @@ void GraphEncoder::EncodeBlock(
     bool add_node_names,
     bool use_external_data_format,
     const std::string& onnx_file_path) {
-  AT_ASSERT(graph_proto != nullptr);
+  TORCH_INTERNAL_ASSERT(graph_proto != nullptr);
   std::string block_name = "torch_jit";
   if (num_blocks_) {
     block_name += std::to_string(num_blocks_);
@@ -773,7 +784,7 @@ void GraphEncoder::EncodeBlock(
       continue;
     }
     if (node->kind() == ::c10::Symbol::onnx("LocalFunctionDef")) {
-      auto* func_proto = model_proto_.add_functions();
+      auto* func_proto = model_proto_->add_functions();
       EncodeLocalFunction(
           graph_proto,
           func_proto,
@@ -806,7 +817,7 @@ void GraphEncoder::AddInitializersIntoGraphProto(
     const std::map<std::string, at::Tensor>& initializers,
     bool use_external_data_format,
     const std::string& onnx_file_path) {
-  AT_ASSERT(block->inputs().size() >= initializers.size());
+  TORCH_INTERNAL_ASSERT(block->inputs().size() >= initializers.size());
   for (auto input : block->inputs()) {
     auto name_tensor_pair = initializers.find(input->debugName());
     if (name_tensor_pair == initializers.end()) {
@@ -827,32 +838,26 @@ unsigned long long int GraphEncoder::GetGraphProtoSize(
     onnx::GraphProto* graph_proto,
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers) {
-  unsigned long long int sizes = 0;
+  onnx::GraphProto graph_proto_copy = onnx::GraphProto(*graph_proto);
+  unsigned long long int size = graph_proto_copy.ByteSizeLong();
   for (auto input : graph->inputs()) {
     auto name_tensor_pair = initializers.find(input->debugName());
     if (name_tensor_pair == initializers.end()) {
       continue;
     }
-    onnx::GraphProto* graph_proto_copy = new onnx::GraphProto(*graph_proto);
-    auto tensor_proto = graph_proto_copy->add_initializer();
-    const at::Tensor tensor = name_tensor_pair->second;
+    auto tensor_proto = graph_proto_copy.add_initializer();
+    const at::Tensor& tensor = name_tensor_pair->second;
     for (auto d : tensor.sizes()) {
       tensor_proto->add_dims(d);
     }
     tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.scalar_type()));
-    at::Tensor t;
-    if (tensor.is_quantized()) {
-      t = tensor.contiguous();
-    } else {
-      t = tensor.contiguous().cpu();
-    }
-    tensor_proto->set_raw_data(std::string(
-        static_cast<char*>(t.data_ptr()), t.element_size() * t.numel()));
-    sizes += tensor_proto->ByteSizeLong();
-    delete graph_proto_copy;
-    graph_proto_copy = nullptr;
+
+    // Don't actually copy the buffer into tensor_proto since that is expensive.
+    // All we actually need is its size.
+    size += tensor_proto->ByteSizeLong();
+    size += tensor.element_size() * tensor.numel();
   }
-  return sizes;
+  return size;
 }
 
 void GraphEncoder::EncodeNode(
@@ -888,7 +893,7 @@ void GraphEncoder::EncodeNode(
     node_proto->set_domain(domain);
   }
   if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
-    AT_ASSERT(
+    TORCH_INTERNAL_ASSERT(
         !node->kind().is_aten() && !node->kind().is_prim() &&
         !node->kind().is_attr());
   }
@@ -923,7 +928,7 @@ void GraphEncoder::EncodeNode(
         node_proto, node, attr_name, use_external_data_format, onnx_file_path);
   }
   if (node->kind() == ::c10::onnx::Loop) {
-    AT_ASSERT(node->blocks().size() == 1);
+    TORCH_INTERNAL_ASSERT(node->blocks().size() == 1);
 
     auto body = node_proto->add_attribute();
     body->set_name("body");
@@ -940,7 +945,7 @@ void GraphEncoder::EncodeNode(
         onnx_file_path);
   }
   if (node->kind() == ::c10::onnx::If) {
-    AT_ASSERT(node->blocks().size() == 2);
+    TORCH_INTERNAL_ASSERT(node->blocks().size() == 2);
 
     auto then_branch = node_proto->add_attribute();
     then_branch->set_name("then_branch");
@@ -978,7 +983,7 @@ void GraphEncoder::AddAttribute(
     const std::string& ref_attr_name,
     const AttributeKind attr_kind) {
   auto attr = node_proto->add_attribute();
-  AT_ASSERT(name.is_attr());
+  TORCH_INTERNAL_ASSERT(name.is_attr());
   attr->set_name(name.toUnqualString());
   attr->set_ref_attr_name(ref_attr_name);
   attr->set_type(ATenAttributeKindToOnnxAttributeType(attr_kind, name));
@@ -1009,7 +1014,7 @@ void GraphEncoder::AddAttribute(
   };
 
   auto attr = node_proto->add_attribute();
-  AT_ASSERT(name.is_attr());
+  TORCH_INTERNAL_ASSERT(name.is_attr());
   attr->set_name(name.toUnqualString());
   attr->set_type(
       ATenAttributeKindToOnnxAttributeType(node->kindOf(name), name));
@@ -1236,7 +1241,7 @@ void GraphEncoder::EncodeTensor(
   // or use_external_data_format should be true, not both at the same time. They
   // can both be false at the same time (for ONNX export for regular model
   // size).
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       !((defer_weight_export_ && external_ref) && use_external_data_format));
   // Add a buffer to the raw_data_export_map for the caller to dump into an
   // external data store. If external_ref is not specified, we instead dump
@@ -1244,18 +1249,19 @@ void GraphEncoder::EncodeTensor(
   if (defer_weight_export_ && external_ref) {
     // For now, we use the name of the tensor as the external lookup name to
     // avoid ONNX protobuf changes.
-    AT_ASSERT(external_ref.value() == tensor_proto->name());
-    AT_ASSERT(raw_data_export_map_.count(external_ref.value()) == 0);
+    TORCH_INTERNAL_ASSERT(external_ref.value() == tensor_proto->name());
+    TORCH_INTERNAL_ASSERT(
+        raw_data_export_map_.count(external_ref.value()) == 0);
     raw_data_export_map_[external_ref.value()] = t;
     tensor_proto->set_raw_data("__EXTERNAL");
   } else {
-    AT_ASSERT(t.is_contiguous());
+    TORCH_INTERNAL_ASSERT(t.is_contiguous());
     size_t tensorSize = static_cast<size_t>(c10::multiply_integers(
         std::begin(tensor.sizes()), std::end(tensor.sizes())));
     if (use_external_data_format &&
         tensorSize > ParamSizeThresholdForExternalStorage) {
-      AT_ASSERT(!onnx_file_path.empty());
-      AT_ASSERT(tensor_proto->has_name());
+      TORCH_INTERNAL_ASSERT(!onnx_file_path.empty());
+      TORCH_INTERNAL_ASSERT(tensor_proto->has_name());
       auto tensorName = GetExternalFileName(tensor_proto->name());
       CreateExternalFile(t, tensorName, onnx_file_path);
       onnx::StringStringEntryProto* location =
@@ -1321,9 +1327,9 @@ std::string pretty_print_onnx(
       false,
       std::string());
   if (google_printer) {
-    return graph_encoder.get_model_proto().DebugString();
+    return graph_encoder.get_model_proto()->DebugString();
   }
-  return prettyPrint(graph_encoder.get_model_proto());
+  return prettyPrint(*graph_encoder.get_model_proto());
 }
 
 std::tuple<
@@ -1362,10 +1368,9 @@ export_onnx(
       use_external_data_format,
       onnx_file_path,
       node_attr_to_name);
-  GRAPH_DEBUG("onnx proto:", prettyPrint(graph_encoder.get_model_proto()));
+  GRAPH_DEBUG("onnx proto:", prettyPrint(*graph_encoder.get_model_proto()));
   return std::make_tuple(
-      std::make_shared<::ONNX_NAMESPACE::ModelProto>(
-          graph_encoder.get_model_proto()),
+      graph_encoder.get_model_proto(),
       graph_encoder.get_raw_data_export_map(),
       graph_encoder.get_symbol_dim_param_map(),
       graph_encoder.get_use_external_data_format(),
@@ -1377,18 +1382,37 @@ std::string serialize_model_proto_to_string(
   return model_proto->SerializeAsString();
 }
 
-void check_onnx_proto(const std::string& proto_string, bool full_check) {
+void check_onnx_proto(const std::string& proto_string) {
   onnx::ModelProto model;
   if (!ParseProtoFromBytes(&model, proto_string.c_str(), proto_string.size())) {
     throw std::runtime_error("Invalid ONNX proto string.");
     return;
   }
+  // 1. baseline check
+  // These two checks prevent broken graph being generated
+  // And errors out exporting if that happens.
   onnx::checker::check_model(model);
-
-  if (full_check) {
-    onnx::shape_inference::InferShapes(model);
+  onnx::shape_inference::InferShapes(model);
+  // 2. full check
+  // apply strict mode shape type inference check which examines
+  // whether it's a valid ONNX graph or not. As for some users, they
+  // don't need a fully valid ONNX graph to run their model, we simply
+  // add this information as warning message if it fails.
+  try {
+    auto* schema_registry = onnx::OpSchemaRegistry::Instance();
+    onnx::ShapeInferenceOptions options{
+        /*check_type=*/true,
+        /*error_mode=*/true};
+    onnx::shape_inference::InferShapes(model, schema_registry, options);
+  } catch (const onnx::InferenceError& ex) {
+    TORCH_WARN(
+        "The exported ONNX model failed ONNX shape inference. "
+        "The model will not be executable by the ONNX Runtime. "
+        "If this is unintended and you believe there is a bug, "
+        "please report an issue at https://github.com/pytorch/pytorch/issues. "
+        "Error reported by strict ONNX shape inference: ",
+        ex.what());
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

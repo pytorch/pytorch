@@ -1,91 +1,20 @@
-import sys
+from typing import Any, Optional
+
 import torch
-import functools
-import inspect
-from typing import Any, Callable, TypeVar, cast
 
-__all__ = ['no_grad', 'enable_grad', 'set_grad_enabled',
-           'inference_mode', 'set_multithreading_enabled']
+from torch.utils._contextlib import _DecoratorContextManager
 
-
-# Used for annotating the decorator usage of 'no_grad' and 'enable_grad'.
-# See https://mypy.readthedocs.io/en/latest/generics.html#declaring-decorators
-FuncType = Callable[..., Any]
-F = TypeVar('F', bound=FuncType)
-
-
-class _DecoratorContextManager:
-    """Allow a context manager to be used as a decorator"""
-
-    def __call__(self, func: F) -> F:
-        if inspect.isgeneratorfunction(func):
-            return self._wrap_generator(func)
-
-        @functools.wraps(func)
-        def decorate_context(*args, **kwargs):
-            with self.clone():
-                return func(*args, **kwargs)
-        return cast(F, decorate_context)
-
-    def _wrap_generator(self, func):
-        """Wrap each generator invocation with the context manager"""
-        @functools.wraps(func)
-        def generator_context(*args, **kwargs):
-            gen = func(*args, **kwargs)
-
-            # Generators are suspended and unsuspended at `yield`, hence we
-            # make sure the grad mode is properly set every time the execution
-            # flow returns into the wrapped generator and restored when it
-            # returns through our `yield` to our caller (see PR #49017).
-            try:
-                # Issuing `None` to a generator fires it up
-                with self.clone():
-                    response = gen.send(None)
-
-                while True:
-                    try:
-                        # Forward the response to our caller and get its next request
-                        request = yield response
-
-                    except GeneratorExit:
-                        # Inform the still active generator about its imminent closure
-                        with self.clone():
-                            gen.close()
-                        raise
-
-                    except BaseException:
-                        # Propagate the exception thrown at us by the caller
-                        with self.clone():
-                            response = gen.throw(*sys.exc_info())
-
-                    else:
-                        # Pass the last request to the generator and get its response
-                        with self.clone():
-                            response = gen.send(request)
-
-            # We let the exceptions raised above by the generator's `.throw` or
-            # `.send` methods bubble up to our caller, except for StopIteration
-            except StopIteration as e:
-                # The generator informed us that it is done: take whatever its
-                # returned value (if any) was and indicate that we're done too
-                # by returning it (see docs for python's return-statement).
-                return e.value
-
-        return generator_context
-
-    def __enter__(self) -> None:
-        raise NotImplementedError
-
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-        raise NotImplementedError
-
-    def clone(self):
-        # override this method if your children class takes __init__ parameters
-        return self.__class__()
+__all__ = [
+    "no_grad",
+    "enable_grad",
+    "set_grad_enabled",
+    "inference_mode",
+    "set_multithreading_enabled",
+]
 
 
 class no_grad(_DecoratorContextManager):
-    r"""Context-manager that disabled gradient calculation.
+    r"""Context-manager that disables gradient calculation.
 
     Disabling gradient calculation is useful for inference, when you are sure
     that you will not call :meth:`Tensor.backward()`. It will reduce memory
@@ -93,6 +22,9 @@ class no_grad(_DecoratorContextManager):
 
     In this mode, the result of every computation will have
     `requires_grad=False`, even when the inputs have `requires_grad=True`.
+    There is an exception! All factory functions, or functions that create
+    a new Tensor and take a requires_grad kwarg, will NOT be affected by
+    this mode.
 
     This context manager is thread local; it will not affect computation
     in other threads.
@@ -113,7 +45,7 @@ class no_grad(_DecoratorContextManager):
         >>> # xdoctest: +SKIP
         >>> x = torch.tensor([1.], requires_grad=True)
         >>> with torch.no_grad():
-        ...   y = x * 2
+        ...     y = x * 2
         >>> y.requires_grad
         False
         >>> @torch.no_grad()
@@ -122,7 +54,13 @@ class no_grad(_DecoratorContextManager):
         >>> z = doubler(x)
         >>> z.requires_grad
         False
+        >>> # factory function exception
+        >>> with torch.no_grad():
+        ...     a = torch.nn.Parameter(torch.rand(10))
+        >>> a.requires_grad
+        True
     """
+
     def __init__(self) -> None:
         if not torch._jit_internal.is_scripting():
             super().__init__()
@@ -159,8 +97,8 @@ class enable_grad(_DecoratorContextManager):
         >>> # xdoctest: +SKIP
         >>> x = torch.tensor([1.], requires_grad=True)
         >>> with torch.no_grad():
-        ...   with torch.enable_grad():
-        ...     y = x * 2
+        ...     with torch.enable_grad():
+        ...         y = x * 2
         >>> y.requires_grad
         True
         >>> y.backward()
@@ -175,6 +113,7 @@ class enable_grad(_DecoratorContextManager):
         True
 
     """
+
     def __enter__(self) -> None:
         self.prev = torch.is_grad_enabled()
         torch._C._set_grad_enabled(True)
@@ -210,7 +149,7 @@ class set_grad_enabled(_DecoratorContextManager):
         >>> x = torch.tensor([1.], requires_grad=True)
         >>> is_train = False
         >>> with torch.set_grad_enabled(is_train):
-        ...   y = x * 2
+        ...     y = x * 2
         >>> y.requires_grad
         False
         >>> _ = torch.set_grad_enabled(True)
@@ -235,7 +174,7 @@ class set_grad_enabled(_DecoratorContextManager):
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
 
-    def clone(self):
+    def clone(self) -> "set_grad_enabled":
         return self.__class__(self.mode)
 
 
@@ -263,10 +202,11 @@ class inference_mode(_DecoratorContextManager):
         mode (bool): Flag whether to enable or disable inference mode
 
     Example::
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> import torch
         >>> x = torch.ones(1, 2, 3, requires_grad=True)
         >>> with torch.inference_mode():
-        ...   y = x * x
+        ...     y = x * x
         >>> y.requires_grad
         False
         >>> # xdoctest: +SKIP("want string isnt quite right")
@@ -276,27 +216,28 @@ class inference_mode(_DecoratorContextManager):
         RuntimeError: Inference tensors do not track version counter.
         >>> @torch.inference_mode()
         ... def func(x):
-        ...   return x * x
+        ...     return x * x
         >>> out = func(x)
         >>> out.requires_grad
         False
 
     """
-    def __init__(self, mode=True):
+
+    def __init__(self, mode: bool = True) -> None:
         if not torch._jit_internal.is_scripting():
             super().__init__()
-        # Holds a python binding to a RAII guard that can enable or disable
-        # inference mode
-        self._inference_mode_raii_guard = None
+        # Holds a context manager that can enable or disable inference mode
+        self._inference_mode_raii_context: Optional[torch._C._InferenceMode] = None
         self.mode = mode
 
-    def __enter__(self):
-        self._inference_mode_raii_guard = torch._C._InferenceMode(self.mode)
+    def __enter__(self) -> None:
+        self._inference_mode_context = torch._C._InferenceMode(self.mode)
+        self._inference_mode_context.__enter__()
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-        del self._inference_mode_raii_guard
+        self._inference_mode_context.__exit__(exc_type, exc_value, traceback)
 
-    def clone(self):
+    def clone(self) -> "inference_mode":
         return self.__class__(self.mode)
 
 
@@ -319,14 +260,86 @@ class set_multithreading_enabled(_DecoratorContextManager):
     """
 
     def __init__(self, mode: bool) -> None:
+        self.prev = torch._C._is_multithreading_enabled()
+        torch._C._set_multithreading_enabled(mode)
         self.mode = mode
-        self.multithreadeding_enabled_guard = torch._C._MultithreadingEnabled(mode)
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        torch._C._set_multithreading_enabled(self.prev)
+
+    def clone(self) -> "set_multithreading_enabled":
+        return self.__class__(self.mode)
+
+
+class _force_original_view_tracking(_DecoratorContextManager):
+    r"""Context-manager that sets whether or not to always enable view-replay in autograd.
+
+    ``set_view_replay_enabled`` will enable or disable view-replay based on its argument :attr:`mode`.
+    It can be used as a context-manager or as a function.
+
+    This context manager is thread local; it will not affect computation
+    in other threads.
+
+    When a tensor view is mutated, the autograd engine needs to decide whether or not
+    to regenerate the "updated view" by either replaying the chain of views from the updated base,
+    or with a single call to as_strided.
+
+    If set_view_replay_enabled is set to True, then autograd will always use view replay.
+    Otherwise, it will fall back to its existing logic.
+
+    Args:
+        mode (bool): Flag whether to enable view-replay (``True``), or disable
+                     (``False``).
+
+    """
+
+    def __init__(self, mode: bool) -> None:
+        self.prev = torch._C._is_view_replay_enabled()
+        torch._C._set_view_replay_enabled(mode)
+        self.mode = mode
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        torch._C._set_view_replay_enabled(self.prev)
+
+    def clone(self):
+        return self.__class__(self.mode)
+
+
+class _unsafe_preserve_version_counter(_DecoratorContextManager):
+    r"""DO NOT USE THIS UNLESS YOU KNOW EXACTLY WHAT YOU'RE DOING!
+
+    This context manager can lead to arbitrary silent-correctness issues in any other part of your code
+    (even the ones not touched directly by the context manager)!
+
+    Ordinarily, autograd will track mutations to tensors by incrementing it's `._version` attribute.
+    This is generally important for correctness, as for example, mutating a tensor that autograd has saved
+    for the backwards pass can result in incorrect gradients, and autograd uses the version counter to detect
+    and error out in this situation.
+
+    However, there are rare instances where it might be useful to hide mutations from autograd. For example:
+    if a tensor is very large, and you'd like to free its memory by storing it elsewhere, and re-populate
+    the tensor right before it is needed by autograd.
+
+    Args:
+        tensor (torch.Tensor): the tensor in question, that you would like to preserve the version counter of.
+
+    .. note::
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
+
+    """
+
+    def __init__(self, tensor: torch.Tensor) -> None:
+        self.tensor = tensor
+        self.prev_version = tensor._version
 
     def __enter__(self) -> None:
         pass
 
     def __exit__(self, *args) -> None:
-        del self.multithreadeding_enabled_guard
-
-    def clone(self):
-        return self.__class__(self.mode)
+        torch._C._autograd._unsafe_set_version_counter(self.tensor, self.prev_version)

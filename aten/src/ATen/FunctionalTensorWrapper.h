@@ -71,6 +71,9 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   void set_level(int64_t level) {
     level_ = level;
   }
+  bool has_metadata_mutation() const {
+    return has_metadata_mutation_;
+  };
 
   // Sync's the underlying tensor with its alias, if it's out of date. This
   // involves two steps: 1) Apply any pending updates/mutations to the alias 2)
@@ -100,6 +103,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // used to determine if it's up-to-date with its alias. The act of syncing a
   // tensor will set a tensor's generation equal to its alias's generation.
   bool is_up_to_date() const;
+  // Freezes the storage of this tensor, preventing subsequent mutations
+  void freeze_storage() const;
   // Every FunctionalTensorWrapper contains a vector<ViewMeta> objects
   // describing the series of view ops that ran to generate the current tensor
   // from the base tensor. This method is used by inplace-view ops like
@@ -143,7 +148,10 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   int64_t numel_custom() const override;
   bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
   c10::SymIntArrayRef sym_sizes_custom() const override;
+  c10::SymInt sym_size_custom(int64_t d) const override;
   c10::SymIntArrayRef sym_strides_custom() const override;
+  c10::SymInt sym_storage_offset_custom() const override;
+  c10::Device device_custom() const override;
 
  private:
   const char* tensorimpl_type_name() const override;
@@ -164,6 +172,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // change the value tensor that it points to over time.
   Tensor value_;
   int64_t level_;
+  bool has_metadata_mutation_ = false;
 
   size_t generation_ = 0;
   std::vector<at::functionalization::ViewMeta> view_metas_;
@@ -195,6 +204,8 @@ TORCH_API c10::List<c10::optional<Tensor>> to_functional_tensor(
     const c10::List<c10::optional<Tensor>>& t_list);
 TORCH_API std::vector<Tensor> to_functional_tensor(ITensorListRef t_list);
 
+TORCH_API void freeze_functional_tensor(const Tensor& tensor);
+
 TORCH_API Tensor
 from_functional_tensor(const Tensor& tensor, bool assert_functional = true);
 TORCH_API c10::optional<Tensor> from_functional_tensor(
@@ -206,7 +217,7 @@ TORCH_API std::vector<Tensor> from_functional_tensor(ITensorListRef t_list);
 
 TORCH_API void sync(const at::Tensor& t);
 TORCH_API void sync(const c10::optional<Tensor>& t);
-TORCH_API void sync(const c10::List<c10::optional<Tensor>> t_list);
+TORCH_API void sync(const c10::List<c10::optional<Tensor>>& t_list);
 TORCH_API void sync(ITensorListRef t_list);
 
 TORCH_API void replace_(const Tensor& functional_tensor, const Tensor& other);
@@ -216,6 +227,15 @@ TORCH_API void replace_(
 
 TORCH_API void commit_update(const Tensor& functional_tensor);
 TORCH_API void commit_update(ITensorListRef functional_tensor);
+
+// These two methods are XLA-specific logic and are no-ops
+// for the normal functionalization flow.
+TORCH_API void propagate_xla_data(
+    const Tensor& functional_tensor,
+    const Tensor& other);
+TORCH_API void propagate_xla_data(
+    const ITensorListRef functional_tensor,
+    ITensorListRef other);
 
 Tensor create_functional_tensor_with_view_meta(
     const Tensor& view_to_wrap,
@@ -241,8 +261,8 @@ TORCH_API void setFunctionalizationReapplyViewsTLS(bool reapply_views);
 
 class TORCH_API FunctionalizationReapplyViewsGuard {
  public:
-  FunctionalizationReapplyViewsGuard(bool reapply_views) {
-    prev_ = getFunctionalizationReapplyViewsTLS();
+  FunctionalizationReapplyViewsGuard(bool reapply_views)
+      : prev_(getFunctionalizationReapplyViewsTLS()) {
     setFunctionalizationReapplyViewsTLS(reapply_views);
   }
 

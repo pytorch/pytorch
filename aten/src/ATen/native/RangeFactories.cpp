@@ -1,12 +1,22 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/RangeFactories.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/Parallel.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
 #include <c10/util/irange.h>
 #include <cmath>
 #include <limits>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange_native.h>
+#include <ATen/ops/linspace_native.h>
+#include <ATen/ops/logspace_native.h>
+#include <ATen/ops/range_native.h>
+#endif
 
 namespace at { namespace native {
 
@@ -168,8 +178,7 @@ Tensor& arange_out(const Scalar& start, const Scalar& end, const Scalar& step, T
     // we dont want.
     // the corner-case we do want to take into account is int64_t, which has higher precision than double
     double size_d;
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (std::is_same<scalar_t, int64_t>::value) {
+    if constexpr (std::is_same_v<scalar_t, int64_t>) {
       int64_t sgn = (xstep > 0) - (xstep < 0);
       size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
     } else {

@@ -24,8 +24,11 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
 
     Args:
         data (Tensor): parameter tensor.
-        requires_grad (bool, optional): if the parameter requires gradient. See
-            :ref:`locally-disable-grad-doc` for more details. Default: `True`
+        requires_grad (bool, optional): if the parameter requires gradient. Note that
+            the torch.no_grad() context does NOT affect the default behavior of
+            Parameter creation--the Parameter will still have `requires_grad=True` in
+            :class:`~no_grad` mode. See :ref:`locally-disable-grad-doc` for more
+            details. Default: `True`
     """
     def __new__(cls, data=None, requires_grad=True):
         if data is None:
@@ -57,13 +60,22 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
             return result
 
     def __repr__(self):
-        return 'Parameter containing:\n' + super(Parameter, self).__repr__()
+        return 'Parameter containing:\n' + super().__repr__()
 
     def __reduce_ex__(self, proto):
+        state = torch._utils._get_obj_state(self)
+
         # See Note [Don't serialize hooks]
+        hooks = OrderedDict()
+        if not state:
+            return (
+                torch._utils._rebuild_parameter,
+                (self.data, self.requires_grad, hooks)
+            )
+
         return (
-            torch._utils._rebuild_parameter,
-            (self.data, self.requires_grad, OrderedDict())
+            torch._utils._rebuild_parameter_with_state,
+            (self.data, self.requires_grad, hooks, state)
         )
 
     __torch_function__ = _disabled_torch_function_impl
@@ -156,7 +168,7 @@ def is_lazy(param):
 class UninitializedParameter(UninitializedTensorMixin, Parameter):
     r"""A parameter that is not initialized.
 
-    Unitialized Parameters are a a special case of :class:`torch.nn.Parameter`
+    Uninitialized Parameters are a a special case of :class:`torch.nn.Parameter`
     where the shape of the data is still unknown.
 
     Unlike a :class:`torch.nn.Parameter`, uninitialized parameters
@@ -187,7 +199,7 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
 class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
     r"""A buffer that is not initialized.
 
-    Unitialized Buffer is a a special case of :class:`torch.Tensor`
+    Uninitialized Buffer is a a special case of :class:`torch.Tensor`
     where the shape of the data is still unknown.
 
     Unlike a :class:`torch.Tensor`, uninitialized parameters

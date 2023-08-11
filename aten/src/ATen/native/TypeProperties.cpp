@@ -1,12 +1,30 @@
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/native/TypeProperties.h>
-#include <type_traits>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_has_compatible_shallow_copy_type_native.h>
+#include <ATen/ops/_is_zerotensor_native.h>
+#include <ATen/ops/can_cast_native.h>
+#include <ATen/ops/is_complex_native.h>
+#include <ATen/ops/is_conj_native.h>
+#include <ATen/ops/is_distributed_native.h>
+#include <ATen/ops/is_floating_point_native.h>
+#include <ATen/ops/is_inference_native.h>
+#include <ATen/ops/is_neg_native.h>
+#include <ATen/ops/is_signed_native.h>
+#include <ATen/ops/promote_types_native.h>
+#include <ATen/ops/result_type.h>
+#include <ATen/ops/result_type_native.h>
+#include <ATen/ops/type_as_native.h>
+#endif
 
 namespace at { namespace native {
 
-bool is_cuda(const Tensor& self) {
+static bool is_cuda(const Tensor& self) {
   return self.is_cuda();
 }
 
@@ -42,15 +60,15 @@ bool is_neg(const Tensor& self) {
   return self.is_neg();
 }
 
-bool is_sparse(const Tensor& self) {
+static bool is_sparse(const Tensor& self) {
   return self.is_sparse();
 }
 
-bool is_sparse_csr(const Tensor& self) {
+static bool is_sparse_csr(const Tensor& self) {
   return self.is_sparse_csr();
 }
 
-bool is_quantized(const Tensor& self) {
+static bool is_quantized(const Tensor& self) {
   return self.is_quantized();
 }
 
@@ -149,9 +167,10 @@ ScalarType result_type(ITensorListRef tensors) {
 }
 
 ScalarType result_type(const Tensor &tensor, const Tensor &other) {
-  // NOLINTNEXTLINE(performance-move-const-arg)
-  std::vector<Tensor> tensors{std::move(tensor), std::move(other)};
-  return native::result_type(tensors);
+  ResultTypeState state = {};
+  state = update_result_type_state(tensor, state);
+  state = update_result_type_state(other, state);
+  return result_type(state);
 }
 
 ScalarType result_type(const Tensor &tensor, const Scalar& other) {

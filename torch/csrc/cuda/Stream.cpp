@@ -22,13 +22,29 @@ static PyObject* THCPStream_pynew(
   const auto current_device = c10::cuda::current_device();
 
   int priority = 0;
-  uint64_t cdata = 0;
+  int64_t stream_id = 0;
+  int64_t device_index = 0;
+  int64_t device_type = 0;
   uint64_t stream_ptr = 0;
 
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  static char* kwlist[] = {"priority", "_cdata", "stream_ptr", nullptr};
+  constexpr const char* kwlist[] = {
+      "priority",
+      "stream_id",
+      "device_index",
+      "device_type",
+      "stream_ptr",
+      nullptr};
   if (!PyArg_ParseTupleAndKeywords(
-          args, kwargs, "|iKK", kwlist, &priority, &cdata, &stream_ptr)) {
+          args,
+          kwargs,
+          "|iLLLK",
+          const_cast<char**>(kwlist),
+          &priority,
+          &stream_id,
+          &device_index,
+          &device_type,
+          &stream_ptr)) {
     return nullptr;
   }
 
@@ -41,17 +57,18 @@ static PyObject* THCPStream_pynew(
     TORCH_CHECK(
         priority == 0, "Priority was explicitly set for a external stream")
   }
-
-  at::cuda::CUDAStream stream = cdata ? at::cuda::CUDAStream::unpack(cdata)
+  at::cuda::CUDAStream stream = (stream_id || device_index || device_type)
+      ? at::cuda::CUDAStream::unpack3(
+            stream_id, device_index, static_cast<c10::DeviceType>(device_type))
       : stream_ptr
       ? at::cuda::getStreamFromExternal(
             reinterpret_cast<cudaStream_t>(stream_ptr), current_device)
-      : at::cuda::getStreamFromPool(
-            /* isHighPriority */ priority < 0 ? true : false);
+      : at::cuda::getStreamFromPool(priority);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   THCPStream* self = (THCPStream*)ptr.get();
-  self->cdata = stream.pack();
+  self->stream_id = static_cast<int64_t>(stream.id());
+  self->device_index = static_cast<int64_t>(stream.device_index());
+  self->device_type = static_cast<int64_t>(stream.device_type());
   new (&self->cuda_stream) at::cuda::CUDAStream(stream);
 
   return (PyObject*)ptr.release();
@@ -85,9 +102,7 @@ static PyObject* THCPStream_priority_range(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int least_priority, greatest_priority;
-  std::tie(least_priority, greatest_priority) =
+  auto [least_priority, greatest_priority] =
       at::cuda::CUDAStream::priority_range();
   return Py_BuildValue("(ii)", least_priority, greatest_priority);
   END_HANDLE_TH_ERRORS

@@ -4,8 +4,7 @@ import unittest
 
 import torch
 
-from torch.testing import \
-    (floating_types, floating_types_and, all_types_and_complex_and)
+from torch.testing._internal.common_dtype import floating_types, floating_types_and, all_types_and_complex_and
 from torch.testing._internal.common_utils import make_tensor
 from torch.testing._internal.common_methods_invocations import OpInfo, SampleInput, DecorateInfo
 
@@ -446,7 +445,8 @@ additional_op_db.extend([
            sample_inputs_func=sample_inputs_conversion,
            skips=(
                # autograd tests don't handle operators that change dtype
-               DecorateInfo(unittest.expectedFailure, 'TestGradients'),
+               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients'),
+               DecorateInfo(unittest.expectedFailure, 'TestBwdGradients'),
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # RuntimeError: attribute lookup is not defined on builtin
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -512,7 +512,8 @@ additional_op_db.extend([
            sample_inputs_func=sample_inputs_conversion,
            skips=(
                # autograd tests don't handle operators that change dtype
-               DecorateInfo(unittest.expectedFailure, 'TestGradients'),
+               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients'),
+               DecorateInfo(unittest.expectedFailure, 'TestBwdGradients'),
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # RuntimeError: attribute lookup is not defined on builtin
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -525,7 +526,8 @@ additional_op_db.extend([
            sample_inputs_func=sample_inputs_conversion,
            skips=(
                # autograd tests don't handle operators that change dtype
-               DecorateInfo(unittest.expectedFailure, 'TestGradients'),
+               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients'),
+               DecorateInfo(unittest.expectedFailure, 'TestBwdGradients'),
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # RuntimeError: attribute lookup is not defined on builtin
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),

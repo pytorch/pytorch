@@ -21,6 +21,7 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/Optional.h>
@@ -64,6 +65,7 @@ struct Node;
 namespace at {
 
 class OptionalTensorRef;
+class TensorRef;
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
 using ITensorList = c10::IListRef<Tensor>;
@@ -95,6 +97,7 @@ class TORCH_API Tensor: public TensorBase {
   explicit Tensor(unsafe_borrow_t, const TensorBase& rhs): TensorBase(unsafe_borrow_t{}, rhs) {}
   friend MaybeOwnedTraits<Tensor>;
   friend OptionalTensorRef;
+  friend TensorRef;
 
  public:
   Tensor() = default;
@@ -124,11 +127,17 @@ class TORCH_API Tensor: public TensorBase {
   Tensor conj() const {
     if (!this->is_complex()) {
       return *this;
-    } else {
-      if (this->is_sparse()) {
+    }
+
+    switch (this->layout()) {
+      case at::kSparse:
+      case at::kSparseCsr:
+      case at::kSparseCsc:
+      case at::kSparseBsr:
+      case at::kSparseBsc:
         return this->conj_physical();
-      }
-      return this->_conj();
+      default:
+        return this->_conj();
     }
   }
 
@@ -190,7 +199,7 @@ class TORCH_API Tensor: public TensorBase {
     impl_ = x.getIntrusivePtr();
     return *this;
   }
-  Tensor& operator=(TensorBase&& x) & {
+  Tensor& operator=(TensorBase&& x) & noexcept {
     impl_ = x.unsafeReleaseIntrusivePtr();
     return *this;
   }
@@ -198,11 +207,11 @@ class TORCH_API Tensor: public TensorBase {
   Tensor& operator=(const Tensor &x) & {
     return operator=(static_cast<const TensorBase&>(x));
   }
-  Tensor& operator=(Tensor &&x) & {
+  Tensor& operator=(Tensor &&x) & noexcept {
     return operator=(static_cast<TensorBase&&>(x));
   }
 
-  Tensor& operator=(Scalar v) && {
+  Tensor& operator=(const Scalar &v) && {
     return fill_(v);
   }
   Tensor& operator=(const Tensor &rhs) && {
@@ -260,25 +269,25 @@ class TORCH_API Tensor: public TensorBase {
   Tensor& operator+=(const Tensor & other) {
     return add_(other);
   }
-  Tensor& operator+=(Scalar other) {
+  Tensor& operator+=(const Scalar & other) {
     return add_(other);
   }
   Tensor& operator-=(const Tensor & other) {
     return sub_(other);
   }
-  Tensor& operator-=(Scalar other) {
+  Tensor& operator-=(const Scalar & other) {
     return sub_(other);
   }
   Tensor& operator*=(const Tensor & other) {
     return mul_(other);
   }
-  Tensor& operator*=(Scalar other) {
+  Tensor& operator*=(const Scalar & other) {
     return mul_(other);
   }
   Tensor& operator/=(const Tensor & other) {
     return div_(other);
   }
-  Tensor& operator/=(Scalar other) {
+  Tensor& operator/=(const Scalar & other) {
     return div_(other);
   }
   Tensor& operator&=(const Tensor & other) {
@@ -290,13 +299,13 @@ class TORCH_API Tensor: public TensorBase {
   Tensor& operator^=(const Tensor & other) {
     return bitwise_xor_(other);
   }
-  Tensor operator[](Scalar index) const {
+  Tensor operator[](const Scalar & index) const {
     if (!index.isIntegral(false)) {
       TORCH_CHECK_INDEX(false, "Can only index tensors with integral scalars");
     }
     return this->operator[](index.toLong());
   }
-  Tensor operator[](Tensor index) const {
+  Tensor operator[](const Tensor & index) const {
     // These properties are checked in the Scalar constructor, but we already
     // check them here to provide more useful diagnostics for the user.
     if (!index.defined()) {
@@ -322,32 +331,32 @@ class TORCH_API Tensor: public TensorBase {
   Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, const Scalar& v);
 
   Tensor cpu() const {
-    return to(options().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
   }
 
   // TODO: The Python version also accepts arguments
   Tensor cuda() const {
-    return to(options().device(DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor hip() const {
-    return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor ve() const {
-    return to(options().device(DeviceType::VE), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::VE), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor vulkan() const {
-    return to(options().device(DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor metal() const {
-    return to(options().device(DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor meta() const {
-    return to(options().device(DeviceType::Meta), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::Meta), /*non_blocking*/ false, /*copy*/ false);
   }
 
   // ~~~~~ Autograd API ~~~~~

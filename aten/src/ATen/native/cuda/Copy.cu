@@ -19,8 +19,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void neg_kernel_cuda(TensorIteratorBase &iter);
 void conj_kernel_cuda(TensorIteratorBase &iter);
@@ -32,8 +31,8 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-        kHalf, kBool, kBFloat16, kComplexHalf, dtype, "copy_", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(
+        kHalf, kBool, kBFloat16, kComplexHalf, kFloat8_e4m3fn, kFloat8_e5m2, dtype, "copy_", [&] {
           gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
   }
@@ -94,26 +93,12 @@ void copy_device_to_device(TensorIterator& iter,
       // Due to bizarre cuda driver intricacies, copies of
       // cudaMallocAsynced memory between devices that aren't
       // peer-to-peer-capable need "cudaMemcpyPeerAsync".
-#ifdef USE_ROCM
-      bool using_cudaMallocAsync = false;
-#else
-      bool using_cudaMallocAsync = (CUDACachingAllocator::allocatorBackend() ==
-                                    CUDACachingAllocator::AllocatorBackend::CUDAMALLOCASYNC);
-#endif
-      bool needs_MemcpyPeer = (src_device != dst_device &&
-                               using_cudaMallocAsync &&
-                               !p2p_enabled);
-      if (needs_MemcpyPeer) {
-        AT_CUDA_CHECK(cudaMemcpyPeerAsync(
-            dst, dst_device.index(),
-            src, src_device.index(),
-            size, copy_stream));
-      } else {
-        AT_CUDA_CHECK(cudaMemcpyAsync(
-            dst, src, size,
-            cudaMemcpyDeviceToDevice,
-            copy_stream));
-      }
+      // So we let the allocator implement the correct call
+      // (either cudaMemcpyAsync or cudaMemcpyPeerAsync)
+      AT_CUDA_CHECK(CUDACachingAllocator::memcpyAsync(
+        dst, dst_device.index(),
+        src, src_device.index(),
+        size, copy_stream, p2p_enabled));
     }
   } else {
     if (same_neg) {
@@ -284,5 +269,4 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
 
 REGISTER_DISPATCH(copy_stub, &copy_kernel_cuda);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

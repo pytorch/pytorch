@@ -10,7 +10,7 @@ from tools.stats.upload_stats_lib import (
     download_gha_artifacts,
     download_s3_artifacts,
     unzip,
-    upload_to_s3,
+    upload_workflow_stats_to_s3,
 )
 
 
@@ -32,12 +32,16 @@ def parse_xml_report(
     """Convert a test report xml file into a JSON-serializable list of test cases."""
     print(f"Parsing {tag}s for test report: {report}")
 
-    job_id = get_job_id(report)
-    print(f"Found job id: {job_id}")
+    try:
+        job_id = get_job_id(report)
+        print(f"Found job id: {job_id}")
+    except Exception:
+        job_id = None
+        print("Failed to find job id")
+
+    test_cases: List[Dict[str, Any]] = []
 
     root = ET.parse(report)
-
-    test_cases = []
     for test_case in root.iter(tag):
         case = process_xml_element(test_case)
         case["workflow_id"] = workflow_id
@@ -118,10 +122,12 @@ def process_xml_element(element: ET.Element) -> Dict[str, Any]:
 
 
 def get_pytest_parallel_times() -> Dict[Any, Any]:
-    pytest_parallel_times = {}
+    pytest_parallel_times: Dict[Any, Any] = {}
     for report in Path(".").glob("**/python-pytest/**/*.xml"):
         invoking_file = report.parent.name
+
         root = ET.parse(report)
+
         assert len(list(root.iter("testsuite"))) == 1
         for test_suite in root.iter("testsuite"):
             pytest_parallel_times[
@@ -293,6 +299,11 @@ if __name__ == "__main__":
         help="Head branch of the workflow",
     )
     parser.add_argument(
+        "--head-repository",
+        required=True,
+        help="Head repository of the workflow",
+    )
+    parser.add_argument(
         "--circleci",
         action="store_true",
         help="If this is being run through circleci",
@@ -310,7 +321,7 @@ if __name__ == "__main__":
             args.workflow_run_id, args.workflow_run_attempt
         )
 
-    # Flush stdout so that any errors in rockset upload show up last in the logs.
+    # Flush stdout so that any errors in Rockset upload show up last in the logs.
     sys.stdout.flush()
 
     # For PRs, only upload a summary of test_runs. This helps lower the
@@ -320,22 +331,37 @@ if __name__ == "__main__":
         test_case_summary, pytest_parallel_times
     )
 
-    upload_to_s3(
+    upload_workflow_stats_to_s3(
         args.workflow_run_id,
         args.workflow_run_attempt,
         "test_run_summary",
         test_case_summary,
     )
 
-    upload_to_s3(
+    upload_workflow_stats_to_s3(
         args.workflow_run_id,
         args.workflow_run_attempt,
         "invoking_file_times",
         invoking_file_times,
     )
 
-    if args.head_branch == "master":
-        # For master jobs, upload everytihng.
-        upload_to_s3(
+    # Separate out the failed test cases.
+    # Uploading everything is too data intensive most of the time,
+    # but these will be just a tiny fraction.
+    failed_tests_cases = []
+    for test_case in test_cases:
+        if "rerun" in test_case or "failure" in test_case or "error" in test_case:
+            failed_tests_cases.append(test_case)
+
+    upload_workflow_stats_to_s3(
+        args.workflow_run_id,
+        args.workflow_run_attempt,
+        "failed_test_runs",
+        failed_tests_cases,
+    )
+
+    if args.head_branch == "main" and args.head_repository == "pytorch/pytorch":
+        # For jobs on main branch, upload everything.
+        upload_workflow_stats_to_s3(
             args.workflow_run_id, args.workflow_run_attempt, "test_run", test_cases
         )

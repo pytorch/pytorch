@@ -1,9 +1,10 @@
 from torch.distributions import constraints
-from torch.distributions.transforms import ExpTransform
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
+from torch.distributions.transforms import ExpTransform
 
-__all__ = ['LogNormal']
+__all__ = ["LogNormal"]
+
 
 class LogNormal(TransformedDistribution):
     r"""
@@ -24,17 +25,17 @@ class LogNormal(TransformedDistribution):
         loc (float or Tensor): mean of log of distribution
         scale (float or Tensor): standard deviation of log of the distribution
     """
-    arg_constraints = {'loc': constraints.real, 'scale': constraints.positive}
+    arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
     support = constraints.positive
     has_rsample = True
 
     def __init__(self, loc, scale, validate_args=None):
         base_dist = Normal(loc, scale, validate_args=validate_args)
-        super(LogNormal, self).__init__(base_dist, ExpTransform(), validate_args=validate_args)
+        super().__init__(base_dist, ExpTransform(), validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(LogNormal, _instance)
-        return super(LogNormal, self).expand(batch_shape, _instance=new)
+        return super().expand(batch_shape, _instance=new)
 
     @property
     def loc(self):
@@ -54,7 +55,8 @@ class LogNormal(TransformedDistribution):
 
     @property
     def variance(self):
-        return (self.scale.pow(2).exp() - 1) * (2 * self.loc + self.scale.pow(2)).exp()
+        scale_sq = self.scale.pow(2)
+        return scale_sq.expm1() * (2 * self.loc + scale_sq).exp()
 
     def entropy(self):
         return self.base_dist.entropy() + self.loc

@@ -21,7 +21,7 @@ namespace c10 {
  * See below for how to register this kernel with PyTorch.
  */
 struct TORCH_API OperatorKernel : public c10::intrusive_ptr_target {
-  virtual ~OperatorKernel() = default;
+  ~OperatorKernel() override = default;
 };
 
 }  // namespace c10

@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 #include <stack>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -29,7 +30,7 @@ struct QuantOpParams {
   c10::QScheme qscheme{c10::kPerTensorAffine};
   std::vector<Value*> qparams;
   // This is only so that insertQuantizationOps can be templatized
-  // and subsequntly significant portion of that code can be reused.
+  // and subsequently significant portion of that code can be reused.
   std::string back() const {
     return "AttributeDoesNotExist";
   }
@@ -257,19 +258,6 @@ at::ScalarType getObserverDtype(Module& module, Value* v) {
   return at::ScalarType::Undefined;
 }
 
-at::ScalarType getObserverComputeDtype(Module& module, Value* v) {
-  auto observer_name = findObserverName(v);
-  if (observer_name.has_value()) {
-    auto observer_module = module.attr(observer_name.value()).toModule();
-    if (observer_module.hasattr("compute_dtype")) {
-      at::ScalarType scalar_type =
-          observer_module.attr("compute_dtype").toScalarType();
-      return scalar_type;
-    }
-  }
-  return at::ScalarType::Undefined;
-}
-
 c10::optional<std::string> getEmbeddingBagObsName(
     script::Module& module,
     Node* n) {
@@ -278,7 +266,7 @@ c10::optional<std::string> getEmbeddingBagObsName(
   auto observer_module = module.attr(findObserverName(v).value()).toModule();
   if (observer_module.hasattr("custom_op")) {
     auto op_name = observer_module.attr("custom_op").toStringRef();
-    return isPlaceholderObserver(observer) ? op_name : "";
+    return isPlaceholderObserver(observer) ? std::move(op_name) : "";
   }
   return c10::nullopt;
 }
@@ -480,12 +468,8 @@ void insertQuantizationOps(
       dequant = insertFP16CastOps(g, observer_out);
     } else if (!isWeight(module, observer_out)) {
       auto observer_dtype = getObserverDtype(module, observer_out);
-      auto observer_compute_dtype =
-          getObserverComputeDtype(module, observer_out);
       if (observer_dtype == at::ScalarType::QUInt8 ||
-          observer_dtype == at::ScalarType::QInt8 ||
-          observer_compute_dtype == at::ScalarType::QUInt8 ||
-          observer_compute_dtype == at::ScalarType::QInt8) {
+          observer_dtype == at::ScalarType::QInt8) {
         // For activation tensors we insert choose_qparams, quant, dequant ops.
         Value* dtype = g->insertGetAttr(self, qparams.back());
         std::tie(choose_qparams, quant, dequant) =
@@ -520,7 +504,7 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
   const Graph& dynamic_quant_graph = *dynamic_quant_pattern.pattern_graph;
 
   const auto& matches = findPatternMatches(dynamic_quant_graph, *graph);
-  if (matches.size() == 0) {
+  if (matches.empty()) {
     return;
   }
 
@@ -539,8 +523,8 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
     Node* matched_quantize = match.nodes_map.at(pattern_quant);
     Node* matched_choose_qparam = match.nodes_map.at(pattern_choose_qparam);
     if (matched_dequantize->output()->uses().size() > 1) {
-      nodes_to_rewrite.emplace_back(std::make_tuple(
-          matched_choose_qparam, matched_quantize, matched_dequantize));
+      nodes_to_rewrite.emplace_back(
+          matched_choose_qparam, matched_quantize, matched_dequantize);
     }
   }
   for (const auto& nodes : nodes_to_rewrite) {
@@ -730,7 +714,7 @@ class InsertQuantDeQuantHelper {
 
   // In order to propagate quantization ops through the ops that doesn't
   // require observation, we'll first inline the graph, and call the
-  // PropgateQuantizationOps pass
+  // PropagateQuantizationOps pass
   void propagateQuantizationOps(Module& module);
 
   // Used for dynamic quantization to selectively run the weight observers.
@@ -1092,13 +1076,13 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   auto scalar_type = observer_module.attr("dtype");
   if (isPlaceholderObserver(n->input(0))) {
     // get compute_dtype for dynamic quantization
-    if (observer_module.hasattr("compute_dtype")) {
-      qparams.push_back(
-          std::make_pair(kScalarType, observer_module.attr("compute_dtype")));
+    if (observer_module.hasattr("is_dynamic") &&
+        observer_module.attr("is_dynamic").toBool()) {
+      qparams.emplace_back(kScalarType, observer_module.attr("dtype"));
     }
-    return std::make_tuple(qscheme, qparams);
+    return std::make_tuple(qscheme, std::move(qparams));
   } else if (scalar_type == at::ScalarType::Half) {
-    return std::make_tuple(qscheme, qparams);
+    return std::make_tuple(qscheme, std::move(qparams));
   }
   auto calculate_qparams = observer_module.get_method("calculate_qparams");
   IValue result = calculate_qparams(std::vector<IValue>());
@@ -1115,16 +1099,15 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   qscheme = observer_module.attr("qscheme").toQScheme();
   if (isPerChannel(qscheme)) {
     auto axis = observer_module.attr("ch_axis");
-    qparams.push_back(std::make_pair("_scale", scale));
-    qparams.push_back(std::make_pair("_zero_point", zero_point));
-    qparams.push_back(std::make_pair("_axis", axis.toInt()));
+    qparams.emplace_back("_scale", scale);
+    qparams.emplace_back("_zero_point", zero_point);
+    qparams.emplace_back("_axis", axis.toInt());
   } else {
-    qparams.push_back(std::make_pair("_scale", scale.item<double>()));
-    qparams.push_back(
-        std::make_pair("_zero_point", zero_point.item<int64_t>()));
+    qparams.emplace_back("_scale", scale.item<double>());
+    qparams.emplace_back("_zero_point", zero_point.item<int64_t>());
   }
-  qparams.push_back(std::make_pair(kScalarType, scalar_type));
-  return std::make_tuple(qscheme, qparams);
+  qparams.emplace_back(kScalarType, scalar_type);
+  return std::make_tuple(qscheme, std::move(qparams));
 }
 
 ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
@@ -1153,7 +1136,7 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
           m = getInvokedModuleOpt(module, n, graph->inputs()[0]);
         }
         if (m) {
-          invoked_methods.push_back({*m, module_method_name});
+          invoked_methods.emplace_back(*m, module_method_name);
         }
       }
 
@@ -1267,7 +1250,7 @@ void removeDequantizeFromInputs(const std::unordered_set<Value*>& inputs) {
 // output
 c10::optional<std::vector<Value*>> getDequantizedInputs(Value* output) {
   auto inputs = getPassThroughInputs(output);
-  if (inputs.size() > 0) {
+  if (!inputs.empty()) {
     // note that we don't need to recursively check for prim::If
     // here because if all inputs of a prim::If is dequantized
     // the dequantize will be factored out before we get to this
@@ -1295,7 +1278,7 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
       for (Block* subblock : n->blocks()) {
         propagateQuantizationOps(subblock);
       }
-      if (n->outputs().size() == 0) {
+      if (n->outputs().empty()) {
         continue;
       }
       if (n->outputs().size() > 1) {
@@ -1359,7 +1342,7 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
       }
       // 2. remove the dequantize ops from inputs
       removeDequantizeFromInputs(dequantized_inputs);
-      // 3. insert dequantize op for outpus
+      // 3. insert dequantize op for outputs
       for (auto* output : outputs_to_dequantize) {
         insertDeQuantForAllUse(output->owningGraph(), output, output);
       }
@@ -1447,7 +1430,7 @@ void InsertQuantDeQuantHelper::run(
       auto qparam_map = std::get<1>(tp);
       // We check the size here because for some observers (like
       // PlaceholderObserver) the qparams might be empty.
-      if (qparam_map.size() > 0) {
+      if (!qparam_map.empty()) {
         TORCH_INTERNAL_ASSERT(
             qparam_name_map_for_node_.count(n),
             "Expected to have a qparam_name_map for node:",
@@ -1554,7 +1537,7 @@ Node* insertQuantDequantNodes<QuantOpParams>(
 void checkCalculateQParamsResultTypes(const Node* out) {
   TORCH_CHECK(
       out->outputs().size() == 2,
-      "cacluate_qparams should produce output of size 2 (scale, zero_point).");
+      "calculate_qparams should produce output of size 2 (scale, zero_point).");
   Value* scale = out->output(0);
   Value* zp = out->output(1);
   TORCH_CHECK(

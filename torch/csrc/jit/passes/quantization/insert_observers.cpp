@@ -16,6 +16,7 @@
 #include <regex>
 #include <stack>
 #include <string>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -62,7 +63,7 @@ void fillQConfigMap(
 
   for (const NameModule& s : module.named_children()) {
     std::string child_key;
-    if (key == "") {
+    if (key.empty()) {
       child_key = s.name;
     } else {
       child_key = key + "." + s.name;
@@ -93,7 +94,8 @@ class ModuleCloneHelper {
       bool inplace = false) {
     std::unordered_map<TypePtr, QConfigTypePtrMap> type_remap;
     IValue::HashAliasedIValueMap memo;
-    return clone_impl(module, module_qconfig_map, type_remap, inplace, memo);
+    return clone_impl(
+        module, module_qconfig_map, type_remap, inplace, std::move(memo));
   }
 
  private:
@@ -174,7 +176,7 @@ class ModuleCloneHelper {
         auto getstate_method = r.find_method("__getstate__");
         TORCH_INTERNAL_ASSERT(getstate_method, "expect __getstate__");
         auto state = (*getstate_method)(Stack{});
-        (*setstate_method)(Stack{state});
+        (*setstate_method)(Stack{std::move(state)});
       }
     }
     return r;
@@ -271,14 +273,15 @@ class ModuleCloneHelper {
     graph->inputs()[0]->setType(target.type());
     // we only support %self being Module in the arguments of function
     auto schema_type_remap_fn = [&](TypePtr type_ptr) {
-      return type_remap_fn(type_ptr, module_qconfig_map.at(source._ivalue()));
+      return type_remap_fn(
+          std::move(type_ptr), module_qconfig_map.at(source._ivalue()));
     };
     auto schema =
         method.getSchema().cloneWithRemappedTypes(schema_type_remap_fn);
     const auto this_method_name =
         c10::QualifiedName(*target.type()->name(), method.name());
     auto copied = target._ivalue()->compilation_unit()->create_function(
-        this_method_name, graph);
+        this_method_name, std::move(graph));
     target.type()->addMethod(copied);
     copied->setSchema(std::move(schema));
   }
@@ -313,7 +316,7 @@ class InsertObserversHelper {
    * observe/quantize a value a not, we don't want to observe a value multiple
    * times.
    *
-   * arguemnt: is_entry_point means whether the current method is the forward
+   * argument: is_entry_point means whether the current method is the forward
    * method of the top level module.
    *
    * Since we want to insert observers in the call site instead of in the called
@@ -401,7 +404,7 @@ class InsertObserversHelper {
   // to return an observer configured for a value, if it is needed.
   c10::optional<Module> getObserverFor(Value* v);
 
-  // Uses the state created by fillPassThroughValueMap to propage observed
+  // Uses the state created by fillPassThroughValueMap to propagage observed
   // property which should pass through from inputs to outputs.
   void propagateObservedProperty(
       Value* output,
@@ -929,7 +932,7 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
       if (n->kind() == prim::CallMethod) {
         auto m_opt = getInvokedModuleOpt(module, n, graph->inputs()[0]);
         if (m_opt.has_value()) {
-          invoked_methods.push_back(std::make_pair(*m_opt, n->s(attr::name)));
+          invoked_methods.emplace_back(*m_opt, n->s(attr::name));
         }
       }
 
@@ -956,7 +959,7 @@ void InsertObserversHelper::insertObserverFor(
     observer_name = "_observer_" + c10::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
-  observer_name_and_modules.push_back(std::make_pair(observer_name, observer));
+  observer_name_and_modules.emplace_back(observer_name, observer);
 
   auto* g = v->owningGraph();
   // Get handle of observer module
@@ -1005,11 +1008,14 @@ void InsertObserversHelper::insertObserverResetMinMax(
         *(module.type()->name()), reset_observer_method_name_);
     auto reset_observer_fn =
         module._ivalue()->compilation_unit()->create_function(
-            method_name, reset_observer_graph);
+            method_name, std::move(reset_observer_graph));
     auto self_arg = c10::Argument("self", module.type());
     auto output_arg = c10::Argument("none", output_node->output()->type());
     auto schema = c10::FunctionSchema(
-        reset_observer_method_name_, "", {self_arg}, {output_arg});
+        reset_observer_method_name_,
+        "",
+        {std::move(self_arg)},
+        {std::move(output_arg)});
     reset_observer_fn->setSchema(std::move(schema));
     module.type()->addMethod(reset_observer_fn);
   }
@@ -1403,7 +1409,7 @@ InsertObserversHelper::insertObserversFor(
     }
 
     for (auto* v : block->outputs()) {
-      // we need explictly skip the values that are already observed
+      // we need explicitly skip the values that are already observed
       // this might happen in subblocks for `if` since
       // these subblock has access to all values before the `if` node
       if (!isObserved(v, block_observed_values)) {
@@ -1556,7 +1562,7 @@ InsertObserversHelper::insertObserversFor(
             subblock_output_observe_state.push_back(
                 isObserved(output, block_observed_values));
           }
-          if (aggregated_output_observe_state.size() > 0) {
+          if (!aggregated_output_observe_state.empty()) {
             TORCH_CHECK(
                 aggregated_output_observe_state ==
                     subblock_output_observe_state,
@@ -1700,7 +1706,7 @@ Module InsertObserversForOnDevicePTQ(
   // you will have multiple getattrs for the same attribute and thus potentially
   // multiple observers observing the same value. This will also lead to
   // increased size of the packed param struct. I dont expect this to be a
-  // commong pattern but something to be aware fo Note that current quant
+  // common pattern but something to be aware fo Note that current quant
   // workflow does not prevent this anyway since during inset quant dequant
   // things are inlined anyway
   helper.fillBoundaryValueMap(cloned_module, observer_method_name);

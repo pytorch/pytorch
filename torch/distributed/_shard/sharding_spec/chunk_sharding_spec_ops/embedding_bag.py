@@ -1,15 +1,13 @@
-# coding=utf-8
 
 from typing import cast, List
 
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import ReduceOp
-from torch.distributed._shard.replicated_tensor import ReplicatedTensor
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
-from torch.distributed.nn.functional import all_gather, all_reduce, reduce_scatter
+from torch.distributed.nn.functional import all_gather, reduce_scatter
 
 from ._common import (
     _all_gather_base_input,
@@ -60,7 +58,7 @@ def sharded_embedding_bag(types, args, kwargs, pg):
                [4, 1, 2, 4, 4, 4],
                [4, 0, 4, 4, 4, 4],
                [4, 4, 4, 4, 4, 1]])
-    3. If ``max_norm`` is specified, the extra row gurantee that the mask ID will
+    3. If ``max_norm`` is specified, the extra row guarantees that the mask ID will
        not affect the behavior of weigh re-norm.
     4. The example above only happens in one rank and each rank does a very similar thing.
        For "Mean" mode we need to divide by either column size (2D) or the interval length
@@ -157,7 +155,7 @@ def _validate_embedding_bag_param(args, kwargs):
 
     Args:
         input: list of ID used for lookup and aggregation.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         kwargs: same as normal EmbeddingBag.
 
     Return: None.
@@ -258,7 +256,7 @@ def _handle_col_wise_sharding(
     Args:
         input: list of ID used for lookup and aggregation.
         world_size: number of ranks.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         local_shard: col-wise shared local weight used for lookup.
         offsets: list of start positions of each bag for 1D input.
         per_sample_weights: weights for weighted sum mode.
@@ -332,7 +330,7 @@ def _handle_row_wise_sharding(
     Args:
         input: list of ID used for lookup and aggregation.
         world_size: number of ranks.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         local_shard: row-wise shared local weight used for lookup.
         offsets: list of start positions of each bag for 1D input.
         per_sample_weights: weights for weighted sum mode.
@@ -353,28 +351,25 @@ def _handle_row_wise_sharding(
     Returns:
         gathered_output: final result of lookup and aggregation.
     """
-    if not isinstance(input, ReplicatedTensor):
-        if input.dim() > 1 and per_sample_weights is None:
-            # allgather the inputs first for non Replicated Tensor.
-            gather_inp = _all_gather_base_input(input, pg)
-        else:
-            (
-                gathered_inputs,
-                gathered_per_sample_weights,
-                gathered_offsets,
-            ) = _all_gather_embedding_bag_input(input, per_sample_weights, offsets, pg)
-            cat_dim = 0 if input.dim() != 1 else -1
-            gather_inp = torch.cat(gathered_inputs, dim=cat_dim)
-            if per_sample_weights is not None:
-                per_sample_weights = torch.cat(gathered_per_sample_weights, dim=cat_dim)
-            offset_add = 0 if input.dim() > 1 else input.size(0)
-            if offsets is not None:
-                offsets_list = torch.cat(
-                    [gathered_offsets[i] + (offset_add * i) for i in range(pg.size())],
-                    dim=cat_dim,
-                )
+    if input.dim() > 1 and per_sample_weights is None:
+        # allgather the inputs first for non Replicated Tensor.
+        gather_inp = _all_gather_base_input(input, pg)
     else:
-        gather_inp = input
+        (
+            gathered_inputs,
+            gathered_per_sample_weights,
+            gathered_offsets,
+        ) = _all_gather_embedding_bag_input(input, per_sample_weights, offsets, pg)
+        cat_dim = 0 if input.dim() != 1 else -1
+        gather_inp = torch.cat(gathered_inputs, dim=cat_dim)
+        if per_sample_weights is not None:
+            per_sample_weights = torch.cat(gathered_per_sample_weights, dim=cat_dim)
+        offset_add = 0 if input.dim() > 1 else input.size(0)
+        if offsets is not None:
+            offsets_list = torch.cat(
+                [gathered_offsets[i] + (offset_add * i) for i in range(pg.size())],
+                dim=cat_dim,
+            )
 
     # Mask the input according to sharding spec.
     lookup_input, padding_local, padding_row = _handle_row_wise_mask(
@@ -409,17 +404,14 @@ def _handle_row_wise_sharding(
     )
 
     op = ReduceOp.SUM if mode != "max" else ReduceOp.MAX
-    # TODO: Make the result a PartialTensor and move the the logic below there.
-    if isinstance(input, ReplicatedTensor):
-        result = all_reduce(result, op=op, group=pg)
-    else:
-        local_shards = result.chunk(pg.size())
-        result = reduce_scatter(
-            torch.empty_like(local_shards[0]),
-            list(local_shards),
-            op=op,
-            group=pg,
-        )
+    # TODO: Make the result a PartialTensor and move the logic below there.
+    local_shards = result.chunk(pg.size())
+    result = reduce_scatter(
+        torch.empty_like(local_shards[0]),
+        list(local_shards),
+        op=op,
+        group=pg,
+    )
 
     # For Mean, we cannot do the division until very end because the sum of means
     # not equal to the mean of sum. (Divisor is different)
@@ -454,7 +446,7 @@ def _all_gather_embedding_bag_input(input, per_sample_weights, offsets, pg):
 
     Args:
         input: tensor to be applied op on.
-        per_sampe_weights: weights for weighted sum mode.
+        per_sample_weights: weights for weighted sum mode.
         offsets: when input is 1D. offsets determines the starting
             index position of each bag (sequence) in input.
         pg: process group.

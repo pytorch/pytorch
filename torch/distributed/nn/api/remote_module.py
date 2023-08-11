@@ -64,10 +64,15 @@ _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
     "_backward_pre_hooks",
     "_is_full_backward_hook",
     "_forward_hooks",
+    "_forward_hooks_with_kwargs",
+    "_forward_hooks_always_called",
     "_forward_pre_hooks",
+    "_forward_pre_hooks_with_kwargs",
     "_state_dict_hooks",
+    "_state_dict_pre_hooks",
     "_load_state_dict_pre_hooks",
     "_load_state_dict_post_hooks",
+    "_state_dict_pre_hooks",
     "_modules",
     # The two attributes below are generated methods, not available at pickling time.
     "forward_async",
@@ -110,7 +115,7 @@ def _param_rrefs(module_rref, recurse) -> List[rpc.RRef[Parameter]]:
 
 
 def _raise_not_supported(name: str) -> None:
-    raise ValueError("Method ``{}`` not supported for RemoteModule".format(name))
+    raise ValueError(f"Method ``{name}`` not supported for RemoteModule")
 
 
 class _RemoteModule(nn.Module):
@@ -118,14 +123,14 @@ class _RemoteModule(nn.Module):
     def __new__(cls, *args, **kwargs):
         # Use __new__ for logging purposes.
         torch._C._log_api_usage_once("torch.distributed.nn.api.remote_module")
-        return super(_RemoteModule, cls).__new__(cls)
+        return super().__new__(cls)
 
     def __init__(
         self,
         remote_device: str,
         module_cls: Type[nn.Module],
-        args: Tuple = None,
-        kwargs: Dict[str, Any] = None,
+        args: Optional[Tuple] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
         _module_interface_cls: Any = None,
     ):
         """
@@ -133,7 +138,7 @@ class _RemoteModule(nn.Module):
         It creates a user-specified module on a specified remote node.
         It behaves like a regular ``nn.Module`` except that the ``forward`` method is
         executed on the remote node.
-        It takes care of autograd recording to ensure the backward pass propogates
+        It takes care of autograd recording to ensure the backward pass propagates
         gradients back to the corresponding remote module.
         It can be shared across processors using `RPC framework <https://pytorch.org/docs/stable/rpc.html>`__,
         without incurring any overheads of copying the actual module,
@@ -223,7 +228,7 @@ class _RemoteModule(nn.Module):
 
         enable_moving_cpu_tensors_to_cuda = self._prepare_init(remote_device)
 
-        # Default arguments preperation.
+        # Default arguments preparation.
         args = args if args is not None else ()
         kwargs = kwargs if kwargs is not None else {}
 
@@ -278,7 +283,7 @@ class _RemoteModule(nn.Module):
     def remote_parameters(self, recurse: bool = True) -> List[rpc.RRef[Parameter]]:
         """
         Returns a list of :class:`~torch.distributed.rpc.RRef` pointing to the
-        remote module's parameters. This can typically be used in conjuction
+        remote module's parameters. This can typically be used in conjunction
         with :class:`~torch.distributed.optim.DistributedOptimizer`.
 
         Args:
@@ -353,7 +358,7 @@ class _RemoteModule(nn.Module):
     def bfloat16(self: T) -> T:  # type: ignore[return]
         _raise_not_supported(self.bfloat16.__name__)
 
-    def to(self, *args, **kwargs) -> T:  # type: ignore[return]
+    def to(self, *args, **kwargs) -> T:  # type: ignore[misc, return, type-var]
         _raise_not_supported(self.to.__name__)
 
     def register_backward_hook(  # type: ignore[return]
@@ -361,10 +366,26 @@ class _RemoteModule(nn.Module):
     ) -> RemovableHandle:
         _raise_not_supported(self.register_backward_hook.__name__)
 
-    def register_forward_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:  # type: ignore[return]
+    def register_forward_pre_hook(  # type: ignore[return]
+        self,
+        hook: Union[
+            Callable[[T, Tuple[Any, ...]], Optional[Any]],
+            Callable[[T, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Any, Dict[str, Any]]]],
+        ],
+        prepend: bool = False,
+        with_kwargs: bool = False,
+    ) -> RemovableHandle:
         _raise_not_supported(self.register_forward_pre_hook.__name__)
 
-    def register_forward_hook(self, hook: Callable[..., None]) -> RemovableHandle:  # type: ignore[return]
+    def register_forward_hook(  # type: ignore[return, override]
+        self,
+        hook: Union[
+            Callable[[T, Tuple[Any, ...], Any], Optional[Any]],
+            Callable[[T, Tuple[Any, ...], Dict[str, Any], Any], Optional[Any]],
+        ],
+        prepend: bool = False,
+        with_kwargs: bool = False,
+    ) -> RemovableHandle:
         _raise_not_supported(self.register_forward_hook.__name__)
 
     def state_dict(self, *args, **kwargs):
@@ -374,6 +395,7 @@ class _RemoteModule(nn.Module):
         self,
         state_dict: Mapping[str, Any],
         strict: bool = True,
+        assign: bool = False,
     ):
         _raise_not_supported(self.load_state_dict.__name__)
 
@@ -383,7 +405,10 @@ class _RemoteModule(nn.Module):
         )
 
     def named_parameters(  # type: ignore[return]
-        self, prefix: str = "", recurse: bool = True
+        self,
+        prefix: str = "",
+        recurse: bool = True,
+        remove_duplicate: bool = True
     ) -> Iterator[Tuple[str, Parameter]]:
         _raise_not_supported(self.named_parameters.__name__)
 
@@ -424,7 +449,7 @@ class _RemoteModule(nn.Module):
     def requires_grad_(self: T, requires_grad: bool = True) -> T:  # type: ignore[return]
         _raise_not_supported(self.requires_grad_.__name__)
 
-    def zero_grad(self, set_to_none: bool = False) -> None:
+    def zero_grad(self, set_to_none: bool = True) -> None:
         _raise_not_supported(self.zero_grad.__name__)
 
     def share_memory(self: T) -> T:  # type: ignore[return]
@@ -435,7 +460,7 @@ class _RemoteModule(nn.Module):
 
     def _prepare_init(self, remote_device_str: str) -> bool:
         """
-        Prepares the initializaiton and returns whether to enable automatically moving CPU tensors to CUDA devices.
+        Prepares the initialization and returns whether to enable automatically moving CPU tensors to CUDA devices.
         """
         # Sanity check.
         assert rpc._is_current_rpc_agent_set(), "RemoteModule only works in RPC."
@@ -493,7 +518,7 @@ class _RemoteModule(nn.Module):
     ):
         """
         Besides the constructor, a RemoteModule instance can also be initialized given a module RRef.
-        This alternate initiailization method can be particularly useful if we want to create multiple
+        This alternate initialization method can be particularly useful if we want to create multiple
         RemoteModule instances that share the same underlying module and reduce memory consumption.
 
         Moreover, this also provides a workaround for passing script RemoteModule over RPC,
@@ -587,7 +612,7 @@ class RemoteModule(_RemoteModule):
         It creates a user-specified module on a specified remote node.
         It behaves like a regular ``nn.Module`` except that the ``forward`` method is
         executed on the remote node.
-        It takes care of autograd recording to ensure the backward pass propogates
+        It takes care of autograd recording to ensure the backward pass propagates
         gradients back to the corresponding remote module.
 
         It generates two methods ``forward_async`` and ``forward`` based on the
@@ -660,8 +685,8 @@ class RemoteModule(_RemoteModule):
         self,
         remote_device: str,
         module_cls: Type[nn.Module],
-        args: Tuple = None,
-        kwargs: Dict[str, Any] = None,
+        args: Optional[Tuple] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(remote_device, module_cls, args, kwargs)
 
@@ -722,7 +747,7 @@ def _recursive_script_module_receiver(
     recursive_script_module_serialized,
 ):
     """
-    Deserializes a RecursiveScirptModule that does not contain a script RemoteModule.
+    Deserializes a RecursiveScriptModule that does not contain a script RemoteModule.
     """
     f = io.BytesIO(recursive_script_module_serialized)
     m = torch.jit.load(f)
@@ -731,7 +756,7 @@ def _recursive_script_module_receiver(
 
 def _recursive_script_module_reducer(recursive_script_module):
     """
-    Serializes a RecursiveScirptModule that does not contain a script RemoteModule,
+    Serializes a RecursiveScriptModule that does not contain a script RemoteModule,
     and raises an error otherwise.
     """
     if hasattr(recursive_script_module._c, "module_rref"):

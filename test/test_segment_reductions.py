@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     gradcheck,
     parametrize,
-
+    skipIfRocm,
 )
 
 
@@ -75,7 +75,7 @@ class TestSegmentReductions(TestCase):
                 segment_reduce_kwargs['lengths'] = lengths
             else:
                 segment_reduce_kwargs['offsets'] = offsets
-            actual_result = torch.segment_reduce(
+            actual_result = torch._segment_reduce(
                 data=data,
                 reduce=reduction,
                 **segment_reduce_kwargs
@@ -108,7 +108,7 @@ class TestSegmentReductions(TestCase):
                 )
                 self.assertTrue(
                     gradcheck(
-                        lambda x: torch.segment_reduce(
+                        lambda x: torch._segment_reduce(
                             data=x,
                             reduce=reduction,
                             **segment_reduce_kwargs
@@ -174,6 +174,64 @@ class TestSegmentReductions(TestCase):
                             length_type,
                         )
 
+    @dtypes(
+        *product(
+            (torch.half, torch.bfloat16, torch.float, torch.double),
+            (torch.int, torch.int64),
+        )
+    )
+    def test_simple_zero_length(self, device, dtypes):
+        val_dtype, length_type = dtypes
+        lengths = [0, 0]
+        data = torch.ones(0)
+
+        for reduction in reductions:
+            for initial in [0, None]:
+                check_backward = True if initial is not None else False
+                initial_value = initial
+                default_value = get_default_value(initial_value, reduction)
+                if reduction == "max":
+                    expected_result = [default_value, default_value]
+                    expected_grad = []
+                elif reduction == "mean":
+                    expected_result = [default_value, default_value]
+                    expected_grad = []
+                elif reduction == "min":
+                    if initial is not None:
+                        initial_value = 1000  # some high number
+                        default_value = get_default_value(initial_value, reduction)
+                    expected_result = [default_value, default_value]
+                    expected_grad = []
+                elif reduction == "sum":
+                    expected_result = [default_value, default_value]
+                    expected_grad = []
+                elif reduction == "prod":
+                    if initial is not None:
+                        initial_value = 2  # 0 initial_value will zero out everything for prod
+                        default_value = get_default_value(initial_value, reduction)
+                        expected_result = [default_value, default_value]
+                        expected_grad = []
+                    else:
+                        expected_result = [default_value, default_value]
+                        expected_grad = []
+                for axis in [0]:
+                    for unsafe in [True, False]:
+                        self._test_common(
+                            reduction,
+                            device,
+                            val_dtype,
+                            unsafe,
+                            axis,
+                            initial_value,
+                            data,
+                            lengths,
+                            expected_result,
+                            expected_grad,
+                            check_backward,
+                            length_type,
+                        )
+
+    @skipIfRocm
     @dtypes(
         *product(
             (torch.half, torch.bfloat16, torch.float, torch.double),
@@ -385,7 +443,7 @@ class TestSegmentReductions(TestCase):
             lengths = torch.diff(indptr, dim=dim)
             expected = torch.tensor(test[reduce], dtype=val_dtype, device=device)
 
-            actual_result = torch.segment_reduce(
+            actual_result = torch._segment_reduce(
                 data=data,
                 reduce=reduce,
                 lengths=lengths,
@@ -395,7 +453,7 @@ class TestSegmentReductions(TestCase):
             self.assertEqual(actual_result, expected)
 
             # test offsets
-            actual_result = torch.segment_reduce(
+            actual_result = torch._segment_reduce(
                 data=data,
                 reduce=reduce,
                 offsets=indptr,
@@ -419,7 +477,7 @@ class TestSegmentReductions(TestCase):
                         segment_reduce_kwargs[mode] = lengths
                     elif mode == 'offsets':
                         segment_reduce_kwargs[mode] = indptr
-                    return torch.segment_reduce(*segment_reduce_args, **segment_reduce_kwargs)
+                    return torch._segment_reduce(*segment_reduce_args, **segment_reduce_kwargs)
                 self.assertTrue(gradcheck(partial(fn, mode='lengths'), (data.clone().detach().requires_grad_(True))))
                 self.assertTrue(gradcheck(partial(fn, mode='offsets'), (data.clone().detach().requires_grad_(True))))
 
@@ -502,13 +560,13 @@ class TestSegmentReductions(TestCase):
 
         # test for error on 1-D lenghts
         with self.assertRaisesRegex(RuntimeError, "Expected all rows of lengths along axis"):
-            torch.segment_reduce(data, 'sum', lengths=lengths, axis=0, unsafe=False)
+            torch._segment_reduce(data, 'sum', lengths=lengths, axis=0, unsafe=False)
 
         # test for error on multi-D lengths
         nd_lengths = torch.tensor([[0, 3, 3, 0], [2, 3, 0, 0]], dtype=length_type, device=device)
         nd_data = torch.arange(12, dtype=torch.float, device=device).reshape(2, 6)
         with self.assertRaisesRegex(RuntimeError, "Expected all rows of lengths along axis"):
-            torch.segment_reduce(nd_data, 'sum', lengths=nd_lengths, axis=1, unsafe=False)
+            torch._segment_reduce(nd_data, 'sum', lengths=nd_lengths, axis=1, unsafe=False)
 
 
 

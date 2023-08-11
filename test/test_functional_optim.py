@@ -22,7 +22,7 @@ class MyModule(torch.nn.Module):
         return self.lin2(F.relu(self.lin1(t1)))
 
 # dummy class to showcase custom optimizer registration with functional wrapper
-class MyDummyFnOptimizer(object):
+class MyDummyFnOptimizer:
     def __init__(
         self,
         params: List[Tensor],
@@ -34,15 +34,15 @@ class MyDummyFnOptimizer(object):
     ):
 
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
+            raise ValueError(f"Invalid beta parameter at index 0: {betas[0]}")
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
+            raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
         if not 0.0 < weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
         self.defaults = {
             "lr": lr,

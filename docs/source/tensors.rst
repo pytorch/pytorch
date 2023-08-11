@@ -199,6 +199,8 @@ Tensor class reference
     Tensor.ndim
     Tensor.real
     Tensor.imag
+    Tensor.nbytes
+    Tensor.itemsize
 
     Tensor.abs
     Tensor.abs_
@@ -620,9 +622,11 @@ Tensor class reference
     Tensor.asinh_
     Tensor.arcsinh
     Tensor.arcsinh_
+    Tensor.shape
     Tensor.size
     Tensor.slogdet
     Tensor.slice_scatter
+    Tensor.softmax
     Tensor.sort
     Tensor.split
     Tensor.sparse_mask
@@ -636,6 +640,7 @@ Tensor class reference
     Tensor.std
     Tensor.stft
     Tensor.storage
+    Tensor.untyped_storage
     Tensor.storage_offset
     Tensor.storage_type
     Tensor.stride
@@ -648,7 +653,6 @@ Tensor class reference
     Tensor.svd
     Tensor.swapaxes
     Tensor.swapdims
-    Tensor.symeig
     Tensor.t
     Tensor.t_
     Tensor.tensor_split

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.ao.pruning.sparsifier.utils import module_to_fqn, fqn_to_module
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 SUPPORTED_MODULES = {
     nn.Embedding,
@@ -28,7 +28,7 @@ def _fetch_all_embeddings(model):
 def post_training_sparse_quantize(model,
                                   data_sparsifier_class,
                                   sparsify_first=True,
-                                  select_embeddings: List[nn.Module] = None,
+                                  select_embeddings: Optional[List[nn.Module]] = None,
                                   **sparse_config):
     """Takes in a model and applies sparsification and quantization to only embeddings & embeddingbags.
     The quantization step can happen before or after sparsification depending on the `sparsify_first` argument.
@@ -85,16 +85,16 @@ def post_training_sparse_quantize(model,
         for _, emb_module in embedding_modules:
             emb_module.qconfig = torch.ao.quantization.float_qparams_weight_only_qconfig
 
-        torch.quantization.prepare(model, inplace=True)
-        torch.quantization.convert(model, inplace=True)
+        torch.ao.quantization.prepare(model, inplace=True)
+        torch.ao.quantization.convert(model, inplace=True)
 
     else:
         # quantize
         for _, emb_module in embedding_modules:
             emb_module.qconfig = torch.ao.quantization.float_qparams_weight_only_qconfig
 
-        torch.quantization.prepare(model, inplace=True)
-        torch.quantization.convert(model, inplace=True)
+        torch.ao.quantization.prepare(model, inplace=True)
+        torch.ao.quantization.convert(model, inplace=True)
 
         # retrieve scale & zero_points
         quantize_params: Dict[str, Dict] = {'scales': {}, 'zero_points': {},

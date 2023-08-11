@@ -83,7 +83,7 @@ def _polynomial_value(poly, x, zero_power, transition):
 
       x (Tensor): the value (possible batched) to evalate the polynomial `poly` at.
 
-      zero_power (Tensor): the represenation of `x^0`. It is application-specific.
+      zero_power (Tensor): the representation of `x^0`. It is application-specific.
 
       transition (Callable): the function that accepts some intermediate result `int_val`,
                              the `x` and a specific polynomial coefficient
@@ -273,7 +273,6 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         ortho_fparams: Optional[Dict[str, float]] = None,
         ortho_bparams: Optional[Dict[str, bool]] = None,
     ) -> Tuple[Tensor, Tensor]:
-
         # makes sure that input is contiguous for efficiency.
         # Note: autograd does not support dense gradients for sparse input yet.
         A = A.contiguous() if (not A.is_sparse) else A
@@ -360,7 +359,6 @@ def lobpcg(
     ortho_fparams: Optional[Dict[str, float]] = None,
     ortho_bparams: Optional[Dict[str, bool]] = None,
 ) -> Tuple[Tensor, Tensor]:
-
     """Find the k largest (or smallest) eigenvalues and the corresponding
     eigenvectors of a symmetric positive definite generalized
     eigenvalue problem using matrix-free LOBPCG methods.
@@ -399,7 +397,7 @@ def lobpcg(
       A (Tensor): the input tensor of size :math:`(*, m, m)`
 
       B (Tensor, optional): the input tensor of size :math:`(*, m,
-                  m)`. When not specified, `B` is interpereted as
+                  m)`. When not specified, `B` is interpreted as
                   identity matrix.
 
       X (tensor, optional): the input tensor of size :math:`(*, m, n)`
@@ -598,7 +596,6 @@ def _lobpcg(
     ortho_fparams: Optional[Dict[str, float]] = None,
     ortho_bparams: Optional[Dict[str, bool]] = None,
 ) -> Tuple[Tensor, Tensor]:
-
     # A must be square:
     assert A.shape[-2] == A.shape[-1], A.shape
     if B is not None:
@@ -692,7 +689,7 @@ def _lobpcg(
     return worker.E[:k], worker.X[:, :k]
 
 
-class LOBPCG(object):
+class LOBPCG:
     """Worker class of LOBPCG methods."""
 
     def __init__(
@@ -707,7 +704,6 @@ class LOBPCG(object):
         method: str,
         tracker: None,
     ) -> None:
-
         # constant parameters
         self.A = A
         self.B = B
@@ -732,18 +728,18 @@ class LOBPCG(object):
 
     def __str__(self):
         lines = ["LOPBCG:"]
-        lines += ["  iparams={}".format(self.iparams)]
-        lines += ["  fparams={}".format(self.fparams)]
-        lines += ["  bparams={}".format(self.bparams)]
-        lines += ["  ivars={}".format(self.ivars)]
-        lines += ["  fvars={}".format(self.fvars)]
-        lines += ["  bvars={}".format(self.bvars)]
-        lines += ["  tvars={}".format(self.tvars)]
-        lines += ["  A={}".format(self.A)]
-        lines += ["  B={}".format(self.B)]
-        lines += ["  iK={}".format(self.iK)]
-        lines += ["  X={}".format(self.X)]
-        lines += ["  E={}".format(self.E)]
+        lines += [f"  iparams={self.iparams}"]
+        lines += [f"  fparams={self.fparams}"]
+        lines += [f"  bparams={self.bparams}"]
+        lines += [f"  ivars={self.ivars}"]
+        lines += [f"  fvars={self.fvars}"]
+        lines += [f"  bvars={self.bvars}"]
+        lines += [f"  tvars={self.tvars}"]
+        lines += [f"  A={self.A}"]
+        lines += [f"  B={self.B}"]
+        lines += [f"  iK={self.iK}"]
+        lines += [f"  X={self.X}"]
+        lines += [f"  E={self.E}"]
         r = ""
         for line in lines:
             r += line + "\n"
@@ -800,10 +796,9 @@ class LOBPCG(object):
                 # strict ordering of eigenpairs
                 break
             count += 1
-        assert count >= prev_count, (
-            "the number of converged eigenpairs "
-            "(was {}, got {}) cannot decrease".format(prev_count, count)
-        )
+        assert (
+            count >= prev_count
+        ), f"the number of converged eigenpairs (was {prev_count}, got {count}) cannot decrease"
         self.ivars["converged_count"] = count
         self.tvars["rerr"] = rerr
         return count
@@ -833,7 +828,6 @@ class LOBPCG(object):
             self.call_tracker()
 
         while not self.stop_iteration():
-
             self.update()
 
             if not torch.jit.is_scripting() and self.tracker is not None:
@@ -1138,7 +1132,7 @@ class LOBPCG(object):
                 R_norm = torch.norm(R)
                 # https://github.com/pytorch/pytorch/issues/33810 workaround:
                 rerr = float(R_norm) * float(BU_norm * U_norm) ** -1
-                vkey = "ortho_UBUmI_rerr[{}, {}]".format(i, j)
+                vkey = f"ortho_UBUmI_rerr[{i}, {j}]"
                 self.fvars[vkey] = rerr
                 if rerr < tau_ortho:
                     break
@@ -1146,7 +1140,7 @@ class LOBPCG(object):
             VBU_norm = torch.norm(VBU)
             U_norm = torch.norm(U)
             rerr = float(VBU_norm) * float(BV_norm * U_norm) ** -1
-            vkey = "ortho_VBU_rerr[{}]".format(i)
+            vkey = f"ortho_VBU_rerr[{i}]"
             self.fvars[vkey] = rerr
             if rerr < tau_ortho:
                 break

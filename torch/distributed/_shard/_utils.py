@@ -2,6 +2,8 @@ import torch
 from torch.distributed._shard.metadata import ShardMetadata
 from typing import Sequence
 
+DEPRECATE_MSG = "Please use DTensor instead and we are deprecating ShardedTensor."
+
 def narrow_tensor_by_index(tensor: torch.Tensor, offsets: Sequence[int], sizes: Sequence[int]) -> torch.Tensor:
     """
     Narrow the tensor according to ``offsets`` and ``sizes``.

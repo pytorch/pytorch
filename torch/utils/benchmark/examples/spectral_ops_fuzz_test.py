@@ -27,7 +27,7 @@ def run_benchmark(name: str, function: object, dtype: torch.dtype, seed: int, de
     results = []
     for tensors, tensor_params, params in spectral_fuzzer.take(samples):
         shape = [params['k0'], params['k1'], params['k2']][:params['ndim']]
-        str_shape = ' x '.join(["{:<4}".format(s) for s in shape])
+        str_shape = ' x '.join([f"{s:<4}" for s in shape])
         sub_label = f"{str_shape} {'' if tensor_params['x']['is_contiguous'] else '(discontiguous)'}"
         for dim in _dim_options(params['ndim']):
             for nthreads in (1, 4, 16) if not cuda else (1,):
@@ -87,7 +87,7 @@ if __name__ == '__main__':
     parser.add_argument('--bench', type=str, choices=BENCHMARK_NAMES, nargs='+', default=BENCHMARK_NAMES)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--samples', type=int, default=10)
-    parser.add_argument('--probability_regular', type=float, default=1.0)
+    parser.add_argument('--probability-regular', '--probability_regular', type=float, default=1.0)
     parser.add_argument('-o', '--output', type=str)
     args = parser.parse_args()
 

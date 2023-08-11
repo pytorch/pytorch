@@ -18,10 +18,9 @@
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/complex.h>
 
-namespace at {
-    namespace native {
+namespace at::native {
         namespace {
-            const char scaled_modified_bessel_k1_name[] = "scaled_modified_bessel_k1_forward";
+            CONSTEXPR_EXCEPT_WIN_CUDA char scaled_modified_bessel_k1_name[] = "scaled_modified_bessel_k1_forward";
 
             void scaled_modified_bessel_k1_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()
@@ -39,5 +38,4 @@ namespace at {
         }
 
         REGISTER_DISPATCH(special_scaled_modified_bessel_k1_stub, &scaled_modified_bessel_k1_kernel_cuda);
-    } // namespace native
-} // namespace at
+} // namespace at::native

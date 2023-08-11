@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <typeinfo>
+#include <utility>
 
 namespace at {
 
@@ -82,7 +83,7 @@ QTensorImpl* get_qtensorimpl(const TensorBase& self) {
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
-int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::ScalarType t) {
+static int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::ScalarType t) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t element_per_byte;
   switch(t) {
@@ -96,7 +97,7 @@ int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::S
       element_per_byte = 1;
   }
   // zero dim tensor
-  if (sizes.size() == 0) {
+  if (sizes.empty()) {
     return c10::multiply_integers(sizes) * dtype_itemsize;
   }
   // Consider most inner dim as cols
@@ -177,7 +178,7 @@ Tensor PerTensorAffineQuantizer::quantize(const Tensor& rtensor) {
   return qtensor;
 }
 
-void per_tensor_affine_dequantize_impl(
+static void per_tensor_affine_dequantize_impl(
     Tensor& rtensor,
     const Tensor& qtensor,
     const double scale,
@@ -227,7 +228,7 @@ Tensor PerChannelAffineQuantizer::quantize(const Tensor& rtensor) {
   return qtensor;
 }
 
-void per_channel_affine_dequantize_impl(
+static void per_channel_affine_dequantize_impl(
     Tensor& rtensor,
     const Tensor& qtensor,
     const Tensor& scale,
@@ -277,7 +278,7 @@ Tensor PerChannelAffineFloatQParamsQuantizer::quantize(const Tensor& rtensor) {
   return qtensor;
 }
 
-void per_channel_affine_float_q_params_dequantize_impl(
+static void per_channel_affine_float_q_params_dequantize_impl(
     Tensor& rtensor,
     const Tensor& qtensor,
     const Tensor& scale,
@@ -377,7 +378,7 @@ Tensor from_blob_quantized_per_tensor_affine(
       data,
       sizes,
       strides,
-      deleter,
+      std::move(deleter),
       scale,
       zeroPoint,
       options);

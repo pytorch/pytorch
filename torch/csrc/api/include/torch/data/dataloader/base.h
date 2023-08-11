@@ -36,7 +36,6 @@ class DataLoaderBase {
   DataLoaderBase(
       DataLoaderOptions options,
       std::unique_ptr<Dataset> main_thread_dataset = nullptr)
-      // NOLINTNEXTLINE(performance-move-const-arg)
       : options_(std::move(options)),
         main_thread_dataset_(std::move(main_thread_dataset)),
         sequencer_(new_sequencer()) {}
@@ -127,7 +126,6 @@ class DataLoaderBase {
     Result(optional<Batch>&& b, size_t sqn)
         : Sequenced(sqn), batch(std::move(b)) {}
     Result(std::exception_ptr exception, size_t sqn)
-        // NOLINTNEXTLINE(performance-move-const-arg)
         : Sequenced(sqn), exception(std::move(exception)) {}
     optional<Batch> batch;
     std::exception_ptr exception;

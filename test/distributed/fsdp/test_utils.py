@@ -2,24 +2,23 @@
 
 import random
 import sys
-from typing import List
 import unittest
 from collections import OrderedDict
+from dataclasses import dataclass
+from typing import List
 
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp._utils import _apply_to_tensors
-from torch.distributed.utils import _replace_by_prefix
+from torch.distributed.utils import _apply_to_tensors, _replace_by_prefix
 from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
-    TestCase,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     subtest,
+    TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
 )
-from dataclasses import dataclass
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -60,13 +59,11 @@ class TestUtils(TestCase):
             some_float: float
             some_tensor: List[torch.Tensor]
 
-
-
         # create a mixed bag of data.
         data = [1, "str"]
         data.append({"key1": get_a_tensor(), "key2": {1: get_a_tensor()}, "key3": 3})
-        data.insert(0, set(["x", get_a_tensor(), get_a_tensor()]))
-        data.append(([1], get_a_tensor(), (1), [get_a_tensor()], set((1, 2))))
+        data.insert(0, {"x", get_a_tensor(), get_a_tensor()})
+        data.append(([1], get_a_tensor(), (1), [get_a_tensor()], {1, 2}))
         data.append({"abc": SomeDataClass("some_key", 1.0, [get_a_tensor()])})
         od = OrderedDict()
         od["k"] = "value"
@@ -99,7 +96,6 @@ class TestUtils(TestCase):
         }
         _replace_by_prefix(state_dict, "module.layer.", "layer.")
         assert state_dict == original_state_dict
-
 
     def test_packed_sequence(self):
         """Test to ensure RNN packed sequences are modified correctly."""

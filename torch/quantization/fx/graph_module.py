@@ -7,11 +7,11 @@ appropriate files under `torch/ao/quantization/fx/`, while adding an import stat
 here.
 """
 from torch.ao.quantization.fx.graph_module import (
-    GraphModule,
+    _is_observed_module,
+    _is_observed_standalone_module,
     FusedGraphModule,
+    GraphModule,
     ObservedGraphModule,
-    is_observed_module,
     ObservedStandaloneGraphModule,
-    is_observed_standalone_module,
-    QuantizedGraphModule
+    QuantizedGraphModule,
 )

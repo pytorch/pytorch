@@ -83,14 +83,14 @@ def _map_mt_args_kwargs(args, kwargs, map_fn):
     for a in args:
         impl_args.append(_helper(a, map_fn))
     impl_kwargs = {}
-    for k, v in kwargs.items():
+    for k in kwargs.keys():
         impl_kwargs[k] = _helper(a, map_fn)
     return impl_args, impl_kwargs
 
 
 def _wrap_result(result_data, result_mask):
     if isinstance(result_data, list):
-        return list(_wrap_result(r, m) for (r, m) in zip(result_data, result_mask))
+        return [_wrap_result(r, m) for (r, m) in zip(result_data, result_mask)]
     if isinstance(result_data, tuple):
         return tuple(_wrap_result(r, m) for (r, m) in zip(result_data, result_mask))
     if torch.is_tensor(result_data):
@@ -109,7 +109,7 @@ def _masked_tensor_str(data, mask, formatter):
             for d in data
         ]
         max_len = max(
-            map(lambda x: 8 if x[1] else len(x[0]), zip(formatted_elements, ~mask))
+            8 if x[1] else len(x[0]) for x in zip(formatted_elements, ~mask)
         )
         return (
             "["
@@ -153,6 +153,10 @@ class MaskedTensor(torch.Tensor):
         kwargs["requires_grad"] = requires_grad
         kwargs["dispatch_sizes_strides_policy"] = "strides"
         kwargs["dispatch_layout"] = True
+        warnings.warn(("The PyTorch API of MaskedTensors is in prototype stage "
+                       "and will change in the near future. Please open a Github issue "
+                       "for features requests and see our documentation on the torch.masked "
+                       "module for further information about the project."), UserWarning)
         if data.requires_grad:
             warnings.warn("It is not recommended to create a MaskedTensor with a tensor that requires_grad. "
                           "To avoid this, you can use data.clone().detach()", UserWarning)
@@ -266,7 +270,7 @@ class MaskedTensor(torch.Tensor):
 
         if not all(issubclass(cls, t) for t in types):
             return NotImplemented
-        with torch._C.DisableTorchFunction():
+        with torch._C.DisableTorchFunctionSubclass():
             ret = func(*args, **kwargs)
             if func in get_default_nowrap_functions():
                 return ret

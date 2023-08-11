@@ -2,7 +2,6 @@ from enum import Enum
 from functools import partial
 
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel
 
 from . import (
     debugging_hooks as debugging,
@@ -87,7 +86,7 @@ class DDPCommHookType(Enum):
 
 
 def register_ddp_comm_hook(
-    comm_hook_type: DDPCommHookType, model: DistributedDataParallel, state=None
+    comm_hook_type: DDPCommHookType, model, state=None
 ):
     """
     Registers the hooks of ``torch.distributed.algorithms.ddp_comm_hooks``

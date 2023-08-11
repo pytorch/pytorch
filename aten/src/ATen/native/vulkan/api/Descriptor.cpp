@@ -41,20 +41,14 @@ DescriptorSet& DescriptorSet::operator=(DescriptorSet&& other) noexcept {
 DescriptorSet& DescriptorSet::bind(
     const uint32_t idx,
     const VulkanBuffer& buffer) {
-  add_binding(DescriptorSet::ResourceBinding{
-      idx, // binding_idx
-      shader_layout_signature_[idx], // descriptor_type
-      false, // is_image
-      {
-          // resource_info
-          .buffer_info =
-              {
-                  buffer.handle(), // buffer
-                  buffer.mem_offset(), // offset
-                  buffer.mem_range(), // range
-              },
-      },
-  });
+  DescriptorSet::ResourceBinding binder;
+  binder.binding_idx = idx; // binding_idx
+  binder.descriptor_type = shader_layout_signature_[idx]; // descriptor_type
+  binder.is_image = false; // is_image
+  binder.resource_info.buffer_info.buffer = buffer.handle(); // buffer
+  binder.resource_info.buffer_info.offset = buffer.mem_offset(); // offset
+  binder.resource_info.buffer_info.range = buffer.mem_range(); // range
+  add_binding(std::move(binder));
 
   return *this;
 }
@@ -67,20 +61,14 @@ DescriptorSet& DescriptorSet::bind(
     binding_layout = VK_IMAGE_LAYOUT_GENERAL;
   }
 
-  add_binding(DescriptorSet::ResourceBinding{
-      idx, // binding_idx
-      shader_layout_signature_[idx], // descriptor_type
-      true, // is_image
-      {
-          // resource_info
-          .image_info =
-              {
-                  image.sampler(), // buffer
-                  image.image_view(), // imageView
-                  binding_layout, // imageLayout
-              },
-      },
-  });
+  DescriptorSet::ResourceBinding binder;
+  binder.binding_idx = idx; // binding_idx
+  binder.descriptor_type = shader_layout_signature_[idx]; // descriptor_type
+  binder.is_image = true; // is_image
+  binder.resource_info.image_info.sampler = image.sampler(); // buffer
+  binder.resource_info.image_info.imageView = image.image_view(); // imageView
+  binder.resource_info.image_info.imageLayout = binding_layout; // imageLayout
+  add_binding(std::move(binder));
 
   return *this;
 }

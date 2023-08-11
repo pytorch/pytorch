@@ -9,7 +9,7 @@
 #include <ATen/native/ReduceOps.h>
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -139,4 +139,4 @@ void unpack_pivots_cuda_kernel(TensorIterator& iter, const int64_t dim_size, con
 
 REGISTER_DISPATCH(unpack_pivots_stub, &unpack_pivots_cuda_kernel);
 REGISTER_DISPATCH(addr_stub, &addr_kernel_cuda);
-}}
+} // namespace at::native

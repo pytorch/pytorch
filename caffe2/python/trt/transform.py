@@ -29,8 +29,8 @@ def _get_output_shapes(output_value_infos):
 def check_gpu_():
     try:
         C.get_cuda_version()
-    except Exception as _:
-       raise Exception("TensorRT related functions require CUDA support")
+    except Exception as e:
+        raise Exception("TensorRT related functions require CUDA support") from e
 
 def convert_onnx_model_to_trt_op(onnx_model,
         max_batch_size=64,

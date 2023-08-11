@@ -11,34 +11,33 @@ import subprocess
 import glob
 
 import torch.testing._internal.common_utils as common
+from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_CUDA
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
-from torch.testing._internal.common_utils import gradcheck, skipIfSlowGradcheckEnv
+from torch.testing._internal.common_utils import gradcheck
+import torch.multiprocessing as mp
 
 
-TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
-TEST_CUDNN = False
-TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
-if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
-    CUDNN_HEADER_EXISTS = os.path.isfile(os.path.join(CUDA_HOME, "include/cudnn.h"))
-    TEST_CUDNN = (
-        TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
-    )
+TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
+TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
+TEST_MPS = torch.backends.mps.is_available()
 IS_WINDOWS = sys.platform == "win32"
 
 
 def remove_build_path():
-    if sys.platform == "win32":
-        print("Not wiping extensions build folder because Windows")
-        return
     default_build_root = torch.utils.cpp_extension.get_default_build_root()
     if os.path.exists(default_build_root):
-        shutil.rmtree(default_build_root)
+        if IS_WINDOWS:
+            # rmtree returns permission error: [WinError 5] Access is denied
+            # on Windows, this is a word-around
+            subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
+        else:
+            shutil.rmtree(default_build_root)
+
 
 # There's only one test that runs gracheck, run slow mode manually
-@skipIfSlowGradcheckEnv
 class TestCppExtensionJIT(common.TestCase):
     """Tests just-in-time cpp extensions.
     Don't confuse this with the PyTorch JIT (aka TorchScript).
@@ -113,6 +112,26 @@ class TestCppExtensionJIT(common.TestCase):
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
+    @unittest.skipIf(not TEST_MPS, "MPS not found")
+    def test_mps_extension(self):
+        module = torch.utils.cpp_extension.load(
+            name="torch_test_mps_extension",
+            sources=[
+                "cpp_extensions/mps_extension.mm",
+            ],
+            verbose=True,
+            keep_intermediates=False,
+        )
+
+        tensor_length = 100000
+        x = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
+        y = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
+
+        cpu_output = module.get_cpu_add_output(x, y)
+        mps_output = module.get_mps_add_output(x.to("mps"), y.to("mps"))
+
+        self.assertEqual(cpu_output, mps_output.to("cpu"))
+
     def _run_jit_cuda_archflags(self, flags, expected):
         # Compile an extension with given `flags`
         def _check_cuobjdump_output(expected_values, is_ptx=False):
@@ -146,16 +165,30 @@ class TestCppExtensionJIT(common.TestCase):
         old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
         try:
             os.environ['TORCH_CUDA_ARCH_LIST'] = flags
-            torch.utils.cpp_extension.load(
-                name="cudaext_archflags",
-                sources=[
+
+            params = {
+                "name": "cudaext_archflags",
+                "sources": [
                     "cpp_extensions/cuda_extension.cpp",
                     "cpp_extensions/cuda_extension.cu",
                 ],
-                extra_cuda_cflags=["-O2"],
-                verbose=True,
-                build_directory=temp_dir,
-            )
+                "extra_cuda_cflags": ["-O2"],
+                "verbose": True,
+                "build_directory": temp_dir,
+            }
+
+            if IS_WINDOWS:
+                p = mp.Process(target=torch.utils.cpp_extension.load, kwargs=params)
+
+                # Compile and load the test CUDA arch in a different Python process to avoid
+                # polluting the current one and causes test_jit_cuda_extension to fail on
+                # Windows. There is no clear way to unload a module after it has been imported
+                # and torch.utils.cpp_extension.load builds and loads the module in one go.
+                # See https://github.com/pytorch/pytorch/issues/61655 for more details
+                p.start()
+                p.join()
+            else:
+                torch.utils.cpp_extension.load(**params)
 
             # Expected output for --list-elf:
             #   ELF file    1: cudaext_archflags.1.sm_61.cubin
@@ -167,7 +200,9 @@ class TestCppExtensionJIT(common.TestCase):
                 _check_cuobjdump_output(expected[1], is_ptx=True)
         finally:
             if IS_WINDOWS:
-                print("Not wiping extensions build folder because Windows")
+                # rmtree returns permission error: [WinError 5] Access is denied
+                # on Windows, this is a word-around
+                subprocess.run(["rm", "-rf", temp_dir], stdout=subprocess.PIPE)
             else:
                 shutil.rmtree(temp_dir)
 
@@ -190,20 +225,23 @@ class TestCppExtensionJIT(common.TestCase):
         # expected values is length-2 tuple: (list of ELF, list of PTX)
         # note: there should not be more than one PTX value
         archflags = {
-            '': (['{}{}'.format(capability[0], capability[1]) for capability in capabilities], None),
+            '': ([f'{capability[0]}{capability[1]}' for capability in capabilities], None),
             "Maxwell+Tegra;6.1": (['53', '61'], None),
-            "Pascal 3.5": (['35', '60', '61'], None),
             "Volta": (['70'], ['70']),
         }
         if int(torch.version.cuda.split('.')[0]) >= 10:
             # CUDA 9 only supports compute capability <= 7.2
             archflags["7.5+PTX"] = (['75'], ['75'])
             archflags["5.0;6.0+PTX;7.0;7.5"] = (['50', '60', '70', '75'], ['60'])
+        if int(torch.version.cuda.split('.')[0]) < 12:
+            # CUDA 12 drops compute capability < 5.0
+            archflags["Pascal 3.5"] = (['35', '60', '61'], None)
 
         for flags, expected in archflags.items():
             self._run_jit_cuda_archflags(flags, expected)
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
+    @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
     def test_jit_cudnn_extension(self):
         # implementation of CuDNN ReLU
         if IS_WINDOWS:
@@ -511,7 +549,7 @@ class TestCppExtensionJIT(common.TestCase):
         # Create a torch.nn.Module which uses the C++ module as a submodule.
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.x = torch.nn.Parameter(torch.tensor(1.0))
                 self.net = extension.Net(3, 5)
 
@@ -564,7 +602,7 @@ class TestCppExtensionJIT(common.TestCase):
         # Try calling zero_grad()
         net.zero_grad()
         for p in net.parameters():
-            self.assertEqual(p.grad, torch.zeros_like(p))
+            assert p.grad is None, "zero_grad defaults to setting grads to None"
 
         # Test train(), eval(), training (a property)
         self.assertTrue(net.training)
@@ -868,6 +906,21 @@ class TestCppExtensionJIT(common.TestCase):
         for fast_mode in (True, False):
             gradcheck(torch.ops.my.add, [a, b], eps=1e-2, fast_mode=fast_mode)
 
+    def test_custom_functorch_error(self):
+        # Test that a custom C++ Function raises an error under functorch transforms
+        identity_m = torch.utils.cpp_extension.load(
+            name="identity",
+            sources=["cpp_extensions/identity.cpp"],
+        )
+
+        t = torch.randn(3, requires_grad=True)
+
+        msg = r"cannot use C\+\+ torch::autograd::Function with functorch"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.func.vmap(identity_m.identity)(t)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.func.grad(identity_m.identity)(t)
 
 if __name__ == "__main__":
     common.run_tests()

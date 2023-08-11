@@ -4,8 +4,7 @@
 #include <torch/csrc/jit/frontend/tree.h>
 #include <torch/csrc/utils/memory.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Avoid storing objects with destructor in thread_local for mobile build.
 #ifndef C10_MOBILE
@@ -47,9 +46,9 @@ ErrorReport::CallStack::CallStack(
 ErrorReport::CallStack::~CallStack() {}
 #endif // C10_MOBILE
 
-std::string get_stacked_errors(const std::vector<Call>& error_stack) {
+static std::string get_stacked_errors(const std::vector<Call>& error_stack) {
   std::stringstream msg;
-  if (error_stack.size() > 0) {
+  if (!error_stack.empty()) {
     for (auto it = error_stack.rbegin(); it != error_stack.rend() - 1; ++it) {
       auto callee = it + 1;
 
@@ -82,5 +81,4 @@ const char* ErrorReport::what() const noexcept {
   return the_message.c_str();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

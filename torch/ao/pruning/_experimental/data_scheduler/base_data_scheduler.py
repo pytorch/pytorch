@@ -8,7 +8,7 @@ from ..data_sparsifier import BaseDataSparsifier
 __all__ = ['BaseDataScheduler']
 
 
-class BaseDataScheduler(object):
+class BaseDataScheduler:
     r"""
     The BaseDataScheduler is the abstract scheduler class specifically for the
     BaseDataSparsifier class. This class controls a specific hyperparameter of
@@ -90,10 +90,10 @@ class BaseDataScheduler(object):
 
         Example:
             >>> def get_schedule_param(self):
-            ...    new_param = {}
-            ...    for name in self.sparsifier.data_groups.keys():
+            ...     new_param = {}
+            ...     for name in self.sparsifier.data_groups.keys():
             ...         new_param[name] = self.sparsifier.data_groups[name][self.schedule_param] * 0.5
-            ...    return new_param
+            ...     return new_param
 
         When the step() function is called, the value in self.sparsifier.data_groups[name][self.schedule_param]
         would be halved
@@ -103,8 +103,8 @@ class BaseDataScheduler(object):
     def __repr__(self):
         format_string = self.__class__.__name__ + ' ('
         format_string += '\n'
-        format_string += 'Data Sparsifier {0}\n'.format(self.data_sparsifier)
-        format_string += '    {0}: {1}\n'.format(self.schedule_param, self.base_param)
+        format_string += f'Data Sparsifier {self.data_sparsifier}\n'
+        format_string += f'    {self.schedule_param}: {self.base_param}\n'
         format_string += ')'
         return format_string
 
@@ -149,7 +149,7 @@ class BaseDataScheduler(object):
             elif self.data_sparsifier._step_count < 1:  # type: ignore[attr-defined]
                 warnings.warn("Detected call of `scheduler.step()` before `data_sparsifier.step()`. "
                               "You have to make sure you run the data_sparsifier.step() BEFORE any "
-                              "calls to the scheduer.step().", UserWarning)
+                              "calls to the scheduler.step().", UserWarning)
         self._step_count += 1
 
         class _enable_get_sp_call:

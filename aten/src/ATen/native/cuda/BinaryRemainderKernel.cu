@@ -11,7 +11,7 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
-namespace at { namespace native {
+namespace at::native {
 
 void remainder_kernel_cuda(TensorIteratorBase& iter) {
   if (isIntegralType(iter.common_dtype(), /*includeBool*/ false)) {
@@ -58,4 +58,4 @@ void fmod_kernel_cuda(TensorIteratorBase& iter) {
 REGISTER_DISPATCH(remainder_stub, &remainder_kernel_cuda);
 REGISTER_DISPATCH(fmod_stub, &fmod_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

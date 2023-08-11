@@ -6,7 +6,7 @@
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 using conv_depthwise2d_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
@@ -44,6 +44,13 @@ using mkldnn_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tens
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, int64_t, std::array<bool,3>);
 DECLARE_DISPATCH(mkldnn_convolution_backward_fn, mkldnn_convolution_backward_stub);
+using mkldnn_convolution_transpose_fn = Tensor(*)(const Tensor&, const Tensor&, const c10::optional<Tensor>&,
+    IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t);
+DECLARE_DISPATCH(mkldnn_convolution_transpose_fn, mkldnn_convolution_transpose_stub);
+using mkldnn_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
+    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
+    at::IntArrayRef, at::IntArrayRef, int64_t, std::array<bool,3>);
+DECLARE_DISPATCH(mkldnn_convolution_transpose_backward_fn, mkldnn_convolution_transpose_backward_stub);
 using slow_conv_dilated2d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, std::array<bool, 3>);
@@ -66,11 +73,11 @@ namespace {
 }
 
 static inline bool cudnnv8_enabled_check_debug() {
-  static bool cudnnv8_flag = c10::utils::check_env("TORCH_CUDNN_V8_API_ENABLED") == true;
+  static bool cudnnv8_flag = c10::utils::check_env("TORCH_CUDNN_V8_API_DISABLED") != true;
   static bool cudnnv8_debug = c10::utils::check_env("TORCH_CUDNN_V8_API_DEBUG") == true;
   static uint8_t cudnnv8_debugcount = 0;
   if (cudnnv8_debug == 1 && cudnnv8_debugcount < 10) {
-    TORCH_WARN("TORCH_CUDNN_V8_DEBUG ON, V8_FLAG: ", cudnnv8_flag, " TORCH_CUDNN_USE_HEURISTIC_MODE B: ", cudnnv8_heuristic_mode_b);
+    TORCH_WARN("TORCH_CUDNN_V8_DEBUG ON, V8 ON: ", cudnnv8_flag, " TORCH_CUDNN_USE_HEURISTIC_MODE B: ", cudnnv8_heuristic_mode_b);
     cudnnv8_debugcount++;
   }
   return cudnnv8_flag == 1;
@@ -80,40 +87,7 @@ static inline bool cudnnv8_use_heur_mode_b() {
   return cudnnv8_heuristic_mode_b;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-struct ConvParams {
-  std::vector<int64_t> stride;
-  std::vector<int64_t> padding;
-  std::vector<int64_t> dilation;
-  bool transposed;
-  std::vector<int64_t> output_padding;
-  int groups;
-  bool benchmark;
-  bool deterministic;
-  bool cudnn_enabled;
-  bool allow_tf32;
-
-  bool is_strided() const;
-  bool is_dilated() const;
-  bool is_padded() const;
-  bool is_output_padding_neg() const;
-  bool is_output_padding_big() const;
-  bool is_padding_neg() const;
-  bool is_stride_nonpos() const;
-  void view1d_as_2d();
-  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight, const c10::optional<at::Tensor>& bias) const;
-  bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
-  bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
-  bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
-  bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const;
-  bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const;
-  bool use_nnpack(const at::Tensor& input, const at::Tensor& weight) const;
-  bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight,
-                   const at::OptionalIntArrayRef bias_sizes_opt) const;
-  bool use_mps(const at::Tensor& input, const at::Tensor& weight) const;
-  bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
-};
-
+// Keep in sync with py::enum_ in Module.cpp
 enum class ConvBackend {
   CudaDepthwise2d,
   CudaDepthwise3d,
@@ -124,6 +98,7 @@ enum class ConvBackend {
   MiopenDepthwise,
   MiopenTranspose,
   Mkldnn,
+  MkldnnTranspose,
   MkldnnEmpty,
   NnpackSpatial,
   Overrideable,
@@ -139,33 +114,16 @@ enum class ConvBackend {
   MpsTranspose,
 };
 
-// Function to select the convolution backend based on the inputs and params.
-// This overload is used within the convolution internals but not exposed to python.
-// NB: The forward pass provides a bias tensor while the backward pass provides
-// a bool indicating whether the bias is defined. This is done to save memory by
-// avoiding saving the full bias tensor for backward.
-TORCH_API ConvBackend _select_conv_backend(
-    const Tensor& input,
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias_opt,
-    const at::OptionalIntArrayRef bias_sizes_opt,
-    const bool need_backward,
-    const ConvParams& params);
-
-// For BC reasons, have a copy that does not require bias_opt
-TORCH_API ConvBackend select_conv_backend(
-    const Tensor& input,
-    const Tensor& weight,
-    const at::OptionalIntArrayRef bias_sizes_opt,
-    const bool need_backward,
-    const ConvParams& params);
-
 // Overload for selecting the convolution backend from the full set of convolution inputs.
 // This overload is exposed to python for testing, etc.
 TORCH_API ConvBackend select_conv_backend(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
-    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
-    bool transposed, IntArrayRef output_padding, int64_t groups);
+    IntArrayRef stride, SymIntArrayRef padding, IntArrayRef dilation,
+    bool transposed, SymIntArrayRef output_padding, int64_t groups, const at::OptionalSymIntArrayRef bias_sizes_opt);
+
+TORCH_API at::MemoryFormat _determine_backend_memory_format(const Tensor& input,
+    const Tensor& weight,
+    const ConvBackend backend);
 
 // ---------------------------------------------------------------------
 //
@@ -250,15 +208,16 @@ static void convolution_shape_check(
 // as conv_output_size loses information; this is why conv_input_size
 // takes an extra output_padding argument to resolve the ambiguity.
 
-static inline std::vector<int64_t> conv_output_size(
-    IntArrayRef input_size, IntArrayRef weight_size,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()
+template <typename T>
+static inline std::vector<T> _conv_output_size(
+    ArrayRef<T> input_size, ArrayRef<T> weight_size,
+    ArrayRef<T> padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()
 ) {
   // ASSERT(input_size.size() > 2)
   // ASSERT(input_size.size() == weight_size.size())
-  bool has_dilation = dilation.size() > 0;
+  bool has_dilation = !dilation.empty();
   auto dim = input_size.size();
-  std::vector<int64_t> output_size(dim);
+  std::vector<T> output_size(dim);
   output_size[0] = input_size[input_batch_size_dim];
   output_size[1] = weight_size[weight_output_channels_dim];
   for (const auto d : c10::irange(2, dim)) {
@@ -269,38 +228,82 @@ static inline std::vector<int64_t> conv_output_size(
   return output_size;
 }
 
-static inline std::vector<int64_t> conv_input_size(
-    IntArrayRef output_size, IntArrayRef weight_size,
-    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
+static inline std::vector<int64_t> conv_output_size(
+    IntArrayRef input_size, IntArrayRef weight_size,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()
+) {
+  return _conv_output_size(input_size, weight_size, padding, stride, dilation);
+}
+
+static inline std::vector<c10::SymInt> conv_output_size(
+    SymIntArrayRef input_size, SymIntArrayRef weight_size,
+    SymIntArrayRef padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()
+) {
+  return _conv_output_size(input_size, weight_size, padding, stride, dilation);
+}
+
+template <typename T>
+std::vector<T> _conv_input_size(
+    ArrayRef<T> output_size, ArrayRef<T> weight_size,
+    ArrayRef<T> padding, ArrayRef<T> output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
 ) {
   // ASSERT(output_size.size() > 2)
   // ASSERT(output_size.size() == weight_size.size())
   auto dim = output_size.size();
-  std::vector<int64_t> input_size(dim);
+  std::vector<T> input_size(dim);
   input_size[0] = output_size[output_batch_size_dim];
   input_size[1] = weight_size[weight_input_channels_dim] * groups;
   for (const auto d : c10::irange(2, dim)) {
-    int kernel = dilation[d - 2] * (weight_size[d] - 1) + 1;
-    input_size[d] = (output_size[d] - 1) * stride[d - 2] - (2 * padding[d - 2]) +
+    auto kernel = (weight_size[d] - 1) * dilation[d - 2] + 1;
+    input_size[d] = (output_size[d] - 1) * stride[d - 2] - (padding[d - 2] * 2) +
                      kernel + output_padding[d - 2];
   }
   return input_size;
+}
+
+static inline std::vector<c10::SymInt> conv_input_size(
+    SymIntArrayRef output_size, SymIntArrayRef weight_size,
+    SymIntArrayRef padding, SymIntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
+) {
+  return _conv_input_size(output_size, weight_size, padding, output_padding, stride, dilation, groups);
+}
+
+static inline std::vector<int64_t> conv_input_size(
+    IntArrayRef output_size, IntArrayRef weight_size,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
+) {
+  return _conv_input_size(output_size, weight_size, padding, output_padding, stride, dilation, groups);
+}
+
+template <typename T>
+std::vector<T> _conv_weight_size(
+    ArrayRef<T> input_size, ArrayRef<T> output_size,
+    ArrayRef<T> padding, ArrayRef<T> output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
+) {
+  auto dim = input_size.size();
+  std::vector<T> weight_size(dim);
+  weight_size[0] = output_size[1];
+  weight_size[1] = input_size[1] / groups;
+  for (const auto d : c10::irange(2, dim)) {
+    auto kernel = input_size[d] - (output_size[d] - 1) * stride[d - 2]
+               + padding[d - 2] * 2 - output_padding[d - 2];
+    weight_size[d] = (kernel - 1) / dilation[d - 2] + 1;
+  }
+  return weight_size;
+}
+
+static inline std::vector<c10::SymInt> conv_weight_size(
+    SymIntArrayRef input_size, SymIntArrayRef output_size,
+    SymIntArrayRef padding, SymIntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
+) {
+  return _conv_weight_size(input_size, output_size, padding, output_padding, stride, dilation, groups);
 }
 
 static inline std::vector<int64_t> conv_weight_size(
     IntArrayRef input_size, IntArrayRef output_size,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
 ) {
-  auto dim = input_size.size();
-  std::vector<int64_t> weight_size(dim);
-  weight_size[0] = output_size[1];
-  weight_size[1] = input_size[1] / groups;
-  for (const auto d : c10::irange(2, dim)) {
-    int kernel = input_size[d] - (output_size[d] - 1) * stride[d - 2]
-               + 2 * padding[d - 2] - output_padding[d - 2];
-    weight_size[d] = (kernel - 1) / dilation[d - 2] + 1;
-  }
-  return weight_size;
+  return _conv_weight_size(input_size, output_size, padding, output_padding, stride, dilation, groups);
 }
 
 static inline Tensor reshape_bias(int64_t dim, const Tensor& bias) {
@@ -340,8 +343,12 @@ static inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor
   return at::MemoryFormat::Contiguous;
 }
 
-static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+// controls whether emptyCache will be called following cudnn conv benchmarking
+TORCH_API void _cudnn_set_conv_benchmark_empty_cache(bool enable);
+TORCH_API bool _cudnn_get_conv_benchmark_empty_cache();
 
+
+static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
   // disable NHWC for float64 input.
   if (!at::detail::getCUDAHooks().compiledWithMIOpen() ||
       input.scalar_type() == at::kDouble ||
@@ -349,20 +356,13 @@ static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const 
     return false;
   }
 
-  bool can_use_miopen_channels_last_2d = false;
-#if defined(USE_ROCM) && (ROCM_VERSION >= 40300)
-  // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
-  // See #64427
-  static c10::optional<bool> PYTORCH_MIOPEN_SUGGEST_NHWC = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC");
-
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
 
-  can_use_miopen_channels_last_2d = PYTORCH_MIOPEN_SUGGEST_NHWC &&  *PYTORCH_MIOPEN_SUGGEST_NHWC && (
-            ( (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-            (weight_memory_format == at::MemoryFormat::ChannelsLast) )
-        );
-#endif
+  bool can_use_miopen_channels_last_2d = (
+    (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
+    (weight_memory_format == at::MemoryFormat::ChannelsLast)
+  );
 
   bool can_use_miopen_channels_last_3d = false;
 
@@ -407,4 +407,4 @@ static inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at
   return can_use_thnn_channels_last_2d;
 }
 
-}} // namespace at::native
+} // namespace at::native

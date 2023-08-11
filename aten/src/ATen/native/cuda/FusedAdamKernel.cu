@@ -6,7 +6,7 @@
 #include <c10/util/Exception.h>
 
 
-namespace at { namespace native {
+namespace at::native {
 
 // note(crcrpar): To observe the CI rules, i.e. 20 minutes per file to compile, defensively split instantiations into _impl files.
 // this is only for CUDA 11.3 for which it took about 20 minutes and 28 minutes in my workstation and CI, respectively.
@@ -33,13 +33,13 @@ void _fused_adam_kernel_cuda_(
     TORCH_CHECK(
         at::native::check_fast_path_restrictions({params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs}),
         "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout");
-    _fused_adam_cuda_impl_(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, lr, beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale, found_inf);
+    _fused_adam_amsgrad_cuda_impl_(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, lr, beta1, beta2, weight_decay, eps, maximize, grad_scale, found_inf);
   } else {
     TORCH_CHECK(
         at::native::check_fast_path_restrictions({params, grads, exp_avgs, exp_avg_sqs}),
         "params, grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and layout");
-    _fused_adam_cuda_impl_(params, grads, exp_avgs, exp_avg_sqs, state_steps, lr, beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale, found_inf);
+    _fused_adam_cuda_impl_(params, grads, exp_avgs, exp_avg_sqs, state_steps, lr, beta1, beta2, weight_decay, eps, maximize, grad_scale, found_inf);
   }
 }
 
-}} // namespace at::native
+} // namespace at::native

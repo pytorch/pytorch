@@ -20,14 +20,15 @@ from torch.utils.data.datapipes.iter.filelister import (
     FileListerIterDataPipe as FileLister,
 )
 from torch.utils.data.datapipes.iter.fileopener import (
-    FileLoaderIterDataPipe as FileLoader,
     FileOpenerIterDataPipe as FileOpener,
 )
 from torch.utils.data.datapipes.iter.grouping import (
     BatcherIterDataPipe as Batcher,
     GrouperIterDataPipe as Grouper,
-    ShardingFilterIterDataPipe as ShardingFilter,
     UnBatcherIterDataPipe as UnBatcher,
+)
+from torch.utils.data.datapipes.iter.sharding import (
+    ShardingFilterIterDataPipe as ShardingFilter,
 )
 from torch.utils.data.datapipes.iter.routeddecoder import (
     RoutedDecoderIterDataPipe as RoutedDecoder,
@@ -44,7 +45,6 @@ __all__ = ['Batcher',
            'Concater',
            'Demultiplexer',
            'FileLister',
-           'FileLoader',
            'FileOpener',
            'Filter',
            'Forker',

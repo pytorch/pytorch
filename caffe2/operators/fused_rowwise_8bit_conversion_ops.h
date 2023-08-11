@@ -32,8 +32,6 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(FloatToFused8BitRowwiseQuantizedOp)
 
   bool RunOnDevice() override {
-    CAFFE_ENFORCE(IS_LITTLE_ENDIAN, "Unsupported endianness");
-
     const auto& input = Input(DATA_FLOAT);
 
     CAFFE_ENFORCE_GT(input.dim(), 0, "Input's dimension must be at least 1");
@@ -119,8 +117,6 @@ class Fused8BitRowwiseQuantizedToFloatOp : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(Fused8BitRowwiseQuantizedToFloatOp)
 
   bool RunOnDevice() override {
-    CAFFE_ENFORCE(IS_LITTLE_ENDIAN, "Unsupported endianness");
-
     const auto& input = Input(DATA_FUSED_SCALE_BIAS_INT8);
 
     CAFFE_ENFORCE_GT(input.dim(), 0, "Input's dimension must be at least 1");

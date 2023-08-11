@@ -4,10 +4,9 @@ import numpy as np
 import copy
 from caffe2.python import workspace
 from caffe2.python.core import InferOpBlobDevicesAsDict
-from future.utils import viewitems
 
 
-class DeviceChecker(object):
+class DeviceChecker:
     """A device checker in Python to check consistency across multiple devices.
 
     This is not the most efficient way to check devices, as the Python interface
@@ -88,7 +87,7 @@ class DeviceChecker(object):
         blobs_to_check = [b for b in blobs_to_check if b not in ignore]
         workspace.SwitchWorkspace("_device_check_", True)
         for device_option in self._device_options:
-            for name, arr in viewitems(inputs):
+            for name, arr in inputs.items():
                 # print 'feeding', name
                 workspace.FeedBlob(name, arr, device_option)
             for op in net.op:

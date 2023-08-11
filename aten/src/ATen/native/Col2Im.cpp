@@ -144,7 +144,6 @@ static void col2im_out_cpu_template(
   int64_t n_output_plane = n_input_plane / (kernel_width * kernel_height);
 
   output.resize_({batch_size, n_output_plane, output_height, output_width});
-  output.zero_();
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf,
       input.scalar_type(), "col2im_out_cpu", [&] {
@@ -165,7 +164,7 @@ static void col2im_out_cpu_template(
           output_n = output.select(0, elt);
 
           col2im<scalar_t>(
-              input_n.data_ptr<scalar_t>(),
+              input_n.const_data_ptr<scalar_t>(),
               n_output_plane,
               output_height,
               output_width,
@@ -179,7 +178,7 @@ static void col2im_out_cpu_template(
               stride_width,
               dilation_height,
               dilation_width,
-              output_n.data_ptr<scalar_t>());
+              output_n.mutable_data_ptr<scalar_t>());
         }
 
         if (!batched_input) {

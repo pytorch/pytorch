@@ -13,6 +13,7 @@
 #include <ATen/native/EmbeddingBag.h>
 #include <ATen/native/Fill.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
@@ -2430,25 +2431,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::addbmm, aten_addbmm, [](Node* n) -> SROperator {
   return nullptr;
 });
 
-REGISTER_OPERATOR_FUNCTOR(aten::diag, aten_diag, [](Node* n) -> SROperator {
-  if (n->matches(
-          torch::schema("aten::diag(Tensor self, int diagonal=0) -> Tensor"))) {
-    return [](ProcessedNode* p_node) {
-      const auto& self = p_node->Input(0).toTensor();
-      const auto diagonal = p_node->Input(1).toInt();
-      if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::diag(self, diagonal);
-        return;
-      }
-      auto& out = p_node->Output(0).toTensor();
-      fastResizeToZero(out);
-      at::native::diag_cpu_out(self, diagonal, out);
-    };
-  }
-  LogAndDumpSchema(n);
-  return nullptr;
-});
-
 REGISTER_OPERATOR_FUNCTOR(aten::cross, aten_cross, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
           "aten::cross(Tensor self, Tensor other, int? dim=None) -> Tensor"))) {
@@ -3023,13 +3005,12 @@ REGISTER_OPERATOR_FUNCTOR(aten::histc, aten_histc, [](Node* n) -> SROperator {
       const auto min = p_node->Input(2).toScalar();
       const auto max = p_node->Input(3).toScalar();
       if (p_node->Output(0).isNone()) {
-        p_node->Output(0) =
-            at::native::histogram_histc_cpu(self, bins, min, max);
+        p_node->Output(0) = at::native::histogram_histc(self, bins, min, max);
         return;
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::native::histogram_histc_cpu_out(self, bins, min, max, out);
+      at::native::histogram_histc_out(self, bins, min, max, out);
     };
   }
   LogAndDumpSchema(n);
@@ -3425,96 +3406,6 @@ REGISTER_OPERATOR_FUNCTOR(
       LogAndDumpSchema(n);
       return nullptr;
     });
-
-REGISTER_OPERATOR_FUNCTOR(aten::nll_loss, aten_nll_loss, [](Node* n) -> SROperator {
-  if (n->matches(torch::schema(
-          "aten::nll_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor"))) {
-    return [](ProcessedNode* p_node) {
-      const auto& self = p_node->Input(0).toTensor();
-      const auto& target = p_node->Input(1).toTensor();
-      const auto weight = p_node->Input(2).toOptional<at::Tensor>();
-      const auto reduction = p_node->Input(3).toInt();
-      const auto ignore_index = p_node->Input(4).toInt();
-      if (p_node->Output(0).isNone()) {
-        p_node->Output(0) =
-            at::native::nll_loss(self, target, weight, reduction, ignore_index);
-        return;
-      }
-      auto& out = p_node->Output(0).toTensor();
-      fastResizeToZero(out);
-      at::native::nll_loss_out(
-          self, target, weight, reduction, ignore_index, out);
-    };
-  }
-  LogAndDumpSchema(n);
-  return nullptr;
-});
-
-REGISTER_OPERATOR_FUNCTOR(
-    aten::nll_loss_backward,
-    aten_nll_loss_backward,
-    [](Node* n) -> SROperator {
-      if (n->matches(torch::schema(
-              "aten::nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor"))) {
-        return [](ProcessedNode* p_node) {
-          const auto& grad_output = p_node->Input(0).toTensor();
-          const auto& self = p_node->Input(1).toTensor();
-          const auto& target = p_node->Input(2).toTensor();
-          const auto weight = p_node->Input(3).toOptional<at::Tensor>();
-          const auto reduction = p_node->Input(4).toInt();
-          const auto ignore_index = p_node->Input(5).toInt();
-          const auto& total_weight = p_node->Input(6).toTensor();
-          if (p_node->Output(0).isNone()) {
-            p_node->Output(0) = at::cpu::nll_loss_backward(
-                grad_output,
-                self,
-                target,
-                weight,
-                reduction,
-                ignore_index,
-                total_weight);
-            return;
-          }
-          auto& grad_input = p_node->Output(0).toTensor();
-          fastResizeToZero(grad_input);
-          at::cpu::nll_loss_backward_out(
-              grad_input,
-              grad_output,
-              self,
-              target,
-              weight,
-              reduction,
-              ignore_index,
-              total_weight);
-        };
-      }
-      LogAndDumpSchema(n);
-      return nullptr;
-    });
-
-REGISTER_OPERATOR_FUNCTOR(aten::nll_loss2d, aten_nll_loss2d, [](Node* n) -> SROperator {
-  if (n->matches(torch::schema(
-          "aten::nll_loss2d(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor"))) {
-    return [](ProcessedNode* p_node) {
-      const auto& self = p_node->Input(0).toTensor();
-      const auto& target = p_node->Input(1).toTensor();
-      const auto weight = p_node->Input(2).toOptional<at::Tensor>();
-      const auto reduction = p_node->Input(3).toInt();
-      const auto ignore_index = p_node->Input(4).toInt();
-      if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::nll_loss2d(
-            self, target, weight, reduction, ignore_index);
-        return;
-      }
-      auto& out = p_node->Output(0).toTensor();
-      fastResizeToZero(out);
-      at::native::nll_loss2d_out(
-          self, target, weight, reduction, ignore_index, out);
-    };
-  }
-  LogAndDumpSchema(n);
-  return nullptr;
-});
 
 REGISTER_OPERATOR_FUNCTOR(
     aten::soft_margin_loss,
@@ -4575,19 +4466,19 @@ REGISTER_OPERATOR_FUNCTOR(
 
 REGISTER_OPERATOR_FUNCTOR(aten::fft_fft, aten_fft_fft, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
-          "aten::fft_fft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
+          "aten::fft_fft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& self = p_node->Input(0).toTensor();
-      const auto n = p_node->Input(1).toOptional<int64_t>();
+      const auto n = p_node->Input(1).toOptional<c10::SymInt>();
       const auto dim = p_node->Input(2).toInt();
       const auto norm = p_node->Input(3).toOptional<c10::string_view>();
       if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::fft_fft(self, n, dim, norm);
+        p_node->Output(0) = at::native::fft_fft_symint(self, n, dim, norm);
         return;
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::native::fft_fft_out(self, n, dim, norm, out);
+      at::native::fft_fft_symint_out(self, n, dim, norm, out);
     };
   }
   LogAndDumpSchema(n);
@@ -4596,19 +4487,19 @@ REGISTER_OPERATOR_FUNCTOR(aten::fft_fft, aten_fft_fft, [](Node* n) -> SROperator
 
 REGISTER_OPERATOR_FUNCTOR(aten::fft_ifft, aten_fft_ifft, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
-          "aten::fft_ifft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
+          "aten::fft_ifft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& self = p_node->Input(0).toTensor();
-      const auto n = p_node->Input(1).toOptional<int64_t>();
+      const auto n = p_node->Input(1).toOptional<c10::SymInt>();
       const auto dim = p_node->Input(2).toInt();
       const auto norm = p_node->Input(3).toOptional<c10::string_view>();
       if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::fft_ifft(self, n, dim, norm);
+        p_node->Output(0) = at::native::fft_ifft_symint(self, n, dim, norm);
         return;
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::native::fft_ifft_out(self, n, dim, norm, out);
+      at::native::fft_ifft_symint_out(self, n, dim, norm, out);
     };
   }
   LogAndDumpSchema(n);
@@ -4617,19 +4508,19 @@ REGISTER_OPERATOR_FUNCTOR(aten::fft_ifft, aten_fft_ifft, [](Node* n) -> SROperat
 
 REGISTER_OPERATOR_FUNCTOR(aten::fft_rfft, aten_fft_rfft, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
-          "aten::fft_rfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
+          "aten::fft_rfft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& self = p_node->Input(0).toTensor();
-      const auto n = p_node->Input(1).toOptional<int64_t>();
+      const auto n = p_node->Input(1).toOptional<c10::SymInt>();
       const auto dim = p_node->Input(2).toInt();
       const auto norm = p_node->Input(3).toOptional<c10::string_view>();
       if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::fft_rfft(self, n, dim, norm);
+        p_node->Output(0) = at::native::fft_rfft_symint(self, n, dim, norm);
         return;
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::native::fft_rfft_out(self, n, dim, norm, out);
+      at::native::fft_rfft_symint_out(self, n, dim, norm, out);
     };
   }
   LogAndDumpSchema(n);
@@ -4638,19 +4529,19 @@ REGISTER_OPERATOR_FUNCTOR(aten::fft_rfft, aten_fft_rfft, [](Node* n) -> SROperat
 
 REGISTER_OPERATOR_FUNCTOR(aten::fft_irfft, aten_fft_irfft, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
-          "aten::fft_irfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
+          "aten::fft_irfft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& self = p_node->Input(0).toTensor();
-      const auto n = p_node->Input(1).toOptional<int64_t>();
+      const auto n = p_node->Input(1).toOptional<c10::SymInt>();
       const auto dim = p_node->Input(2).toInt();
       const auto norm = p_node->Input(3).toOptional<c10::string_view>();
       if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::fft_irfft(self, n, dim, norm);
+        p_node->Output(0) = at::native::fft_irfft_symint(self, n, dim, norm);
         return;
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::native::fft_irfft_out(self, n, dim, norm, out);
+      at::native::fft_irfft_symint_out(self, n, dim, norm, out);
     };
   }
   LogAndDumpSchema(n);
@@ -4659,19 +4550,19 @@ REGISTER_OPERATOR_FUNCTOR(aten::fft_irfft, aten_fft_irfft, [](Node* n) -> SROper
 
 REGISTER_OPERATOR_FUNCTOR(aten::fft_hfft, aten_fft_hfft, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
-          "aten::fft_hfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
+          "aten::fft_hfft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& self = p_node->Input(0).toTensor();
-      const auto n = p_node->Input(1).toOptional<int64_t>();
+      const auto n = p_node->Input(1).toOptional<c10::SymInt>();
       const auto dim = p_node->Input(2).toInt();
       const auto norm = p_node->Input(3).toOptional<c10::string_view>();
       if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::fft_hfft(self, n, dim, norm);
+        p_node->Output(0) = at::native::fft_hfft_symint(self, n, dim, norm);
         return;
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::native::fft_hfft_out(self, n, dim, norm, out);
+      at::native::fft_hfft_symint_out(self, n, dim, norm, out);
     };
   }
   LogAndDumpSchema(n);
@@ -4680,19 +4571,19 @@ REGISTER_OPERATOR_FUNCTOR(aten::fft_hfft, aten_fft_hfft, [](Node* n) -> SROperat
 
 REGISTER_OPERATOR_FUNCTOR(aten::fft_ihfft, aten_fft_ihfft, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
-          "aten::fft_ihfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
+          "aten::fft_ihfft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& self = p_node->Input(0).toTensor();
-      const auto n = p_node->Input(1).toOptional<int64_t>();
+      const auto n = p_node->Input(1).toOptional<c10::SymInt>();
       const auto dim = p_node->Input(2).toInt();
       const auto norm = p_node->Input(3).toOptional<c10::string_view>();
       if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::fft_ihfft(self, n, dim, norm);
+        p_node->Output(0) = at::native::fft_ihfft_symint(self, n, dim, norm);
         return;
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::native::fft_ihfft_out(self, n, dim, norm, out);
+      at::native::fft_ihfft_symint_out(self, n, dim, norm, out);
     };
   }
   LogAndDumpSchema(n);

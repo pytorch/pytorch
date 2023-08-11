@@ -19,8 +19,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -164,7 +163,7 @@ void Module::to(at::Device device, bool non_blocking) {
   to_impl(device, /*dtype=*/c10::nullopt, non_blocking);
 }
 
-void module_state_to(
+static void module_state_to(
     const autograd::Variable& variable,
     const c10::optional<at::Device>& device,
     const c10::optional<at::ScalarType>& dtype,
@@ -313,8 +312,8 @@ Module Module::copy() const {
   return Module(_ivalue()->copy());
 }
 
-Module Module::deepcopy() const {
-  return Module(_ivalue()->deepcopy());
+Module Module::deepcopy(c10::optional<at::Device> device) const {
+  return Module(_ivalue()->deepcopy(device));
 }
 
 Module Module::clone(bool inplace) const {
@@ -472,7 +471,7 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
 
 Module freeze(
     const Module& module,
-    c10::optional<std::vector<std::string>> preserved_attrs,
+    const c10::optional<std::vector<std::string>>& preserved_attrs,
     bool optimize_numerics) {
   TORCH_CHECK(
       !module.hasattr("training") || !module.is_training(),
@@ -625,8 +624,7 @@ void Module::dump(
             << std::endl;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
 
 namespace c10 {
 

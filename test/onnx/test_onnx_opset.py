@@ -4,6 +4,7 @@ import io
 import itertools
 
 import onnx
+import pytorch_test_common
 
 import torch
 import torch.onnx
@@ -70,7 +71,7 @@ def check_onnx_opsets_operator(
         check_onnx_opset_operator(model, ops[opset_version], opset_version)
 
 
-class TestONNXOpset(common_utils.TestCase):
+class TestONNXOpset(pytorch_test_common.ExportTestCase):
     def test_opset_fallback(self):
         class MyModule(Module):
             def forward(self, x):
@@ -169,9 +170,6 @@ class TestONNXOpset(common_utils.TestCase):
 
     def test_upsample(self):
         class MyModule(Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 size = [v * 2 for v in x.size()[2:]]
                 size = [int(i) for i in size]
@@ -200,9 +198,6 @@ class TestONNXOpset(common_utils.TestCase):
 
     def test_cast_constant(self):
         class MyModule(Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 return x - 1
 
@@ -255,11 +250,11 @@ class TestONNXOpset(common_utils.TestCase):
             {"op_name": "Constant"},
             {"op_name": "Gather", "attributes": [{"name": "axis", "i": 0, "type": 2}]},
             {"op_name": "Constant"},
+            {"op_name": "Constant"},
             {
                 "op_name": "Unsqueeze",
                 "attributes": [{"name": "axes", "i": 0, "type": 7}],
             },
-            {"op_name": "Constant"},
             {"op_name": "Constant"},
             {"op_name": "Slice", "attributes": []},
         ]
@@ -499,7 +494,6 @@ class TestONNXOpset(common_utils.TestCase):
             ("zeros", "border", "reflection"),
             (True, False),
         ):
-
             args = (
                 torch.randn(n, c, h_in, w_in),  # x
                 torch.randn(n, h_out, w_out, 2),  # grid,
@@ -521,6 +515,23 @@ class TestONNXOpset(common_utils.TestCase):
                 opset_versions=[16],
                 training=torch.onnx.TrainingMode.EVAL,
             )
+
+    def test_flatten(self):
+        class MyModule(Module):
+            def forward(self, x):
+                return torch.flatten(x)
+
+        module = MyModule()
+
+        ops_0d = [{"op_name": "Constant"}, {"op_name": "Reshape"}]
+        ops_1d = [{"op_name": "Identity"}]
+        for shape in ([], [3]):
+            x = torch.randn(shape)
+            for opset_version in [9, 10]:
+                ops = {opset_version: (ops_0d if len(shape) == 0 else ops_1d)}
+                check_onnx_opsets_operator(
+                    module, x, ops, opset_versions=[opset_version]
+                )
 
 
 if __name__ == "__main__":

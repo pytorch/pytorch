@@ -2,6 +2,10 @@ import torch
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.ao.nn.intrinsic as nni
 
+__all__ = [
+    "LinearReLU"
+]
+
 class LinearReLU(nnqd.Linear):
     r"""
     A LinearReLU module fused from Linear and ReLU modules that can be used
@@ -15,9 +19,9 @@ class LinearReLU(nnqd.Linear):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> m = nn.intrinsic.quantized.dynamic.LinearReLU(20, 30)
         >>> input = torch.randn(128, 20)
-        >>> # xdoctest: +SKIP
         >>> output = m(input)
         >>> print(output.size())
         torch.Size([128, 30])
@@ -44,7 +48,7 @@ class LinearReLU(nnqd.Linear):
 
     @classmethod
     def from_float(cls, mod):
-        return super(LinearReLU, cls).from_float(mod)
+        return super().from_float(mod)
 
     @classmethod
     def from_reference(cls, ref_qlinear_relu):

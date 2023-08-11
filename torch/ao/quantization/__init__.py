@@ -12,6 +12,12 @@ from .quantization_mappings import *  # type: ignore[no-redef]
 from .quantize import *  # noqa: F403
 from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
+from typing import Union, List, Callable, Tuple, Optional
+from torch import Tensor
+import torch
+
+ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
+ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
 
 __all__ = [
     "DeQuantStub",
@@ -27,6 +33,7 @@ __all__ = [
     "MovingAveragePerChannelMinMaxObserver",
     "NoopObserver",
     "ObserverBase",
+    "ObserverOrFakeQuantize",
     "Pattern",
     "PerChannelMinMaxObserver",
     "PlaceholderObserver",
@@ -40,11 +47,7 @@ __all__ = [
     "RecordingObserver",
     "ReuseInputObserver",
     "UniformQuantizationObserverBase",
-    "activation_is_memoryless",
-    "add_module_to_qconfig_obs_ctr",
-    "add_observer_",
     "add_quant_dequant",
-    "assert_valid_qconfig",
     "convert",
     "convert_dynamic_jit",
     "convert_jit",
@@ -112,17 +115,11 @@ __all__ = [
     "get_embedding_static_quant_module_mappings",
     "get_fuser_method",
     "get_fuser_method_new",
-    "get_observer_dict",
     "get_observer_state_dict",
     "get_quantized_operator",
     "get_static_quant_module_class",
-    "get_unique_devices_",
-    "get_valid_patterns",
-    "is_activation_post_process",
-    "is_reuse_input_qconfig",
     "load_observer_state_dict",
     "no_observer_set",
-    "obs_or_fq_ctr_equals",
     "per_channel_weight_observer_range_neg_127_to_127",
     "prepare",
     "prepare_dynamic_jit",
@@ -130,19 +127,13 @@ __all__ = [
     "prepare_qat",
     "propagate_qconfig_",
     "qconfig_equals",
-    "quant_type_to_str",
     "quantize",
     "quantize_dynamic",
     "quantize_dynamic_jit",
     "quantize_jit",
     "quantize_qat",
-    "register_activation_post_process_hook",
-    "reverse2",
-    "reverse3",
-    "reverse_sequential_wrapper2",
     "script_qconfig",
     "script_qconfig_dict",
-    "sequential_wrapper2",
     "swap_module",
     "weight_observer_range_neg_127_to_127",
 ]
@@ -154,3 +145,29 @@ def default_eval_fn(model, calib_data):
     """
     for data, target in calib_data:
         model(data)
+
+class _DerivedObserverOrFakeQuantize(ObserverBase):
+    r""" This observer is used to describe an observer whose quantization parameters
+    are derived from other observers
+    """
+    def __init__(
+        self,
+        dtype: torch.dtype,
+        obs_or_fqs: List[ObserverOrFakeQuantize],
+        derive_qparams_fn: Callable[[List[ObserverOrFakeQuantize]], Tuple[Tensor, Tensor]],
+        quant_min: Optional[int]=None,
+        quant_max: Optional[int]=None,
+        qscheme: Optional[torch.qscheme]=None,
+    ):
+        super().__init__(dtype)
+        self.obs_or_fqs = obs_or_fqs
+        self.derive_qparams_fn = derive_qparams_fn
+        self.quant_min = quant_min
+        self.quant_max = quant_max
+        self.qscheme = qscheme
+
+    def forward(self, x: Tensor) -> Tensor:
+        return x
+
+    def calculate_qparams(self):
+        return self.derive_qparams_fn(self.obs_or_fqs)

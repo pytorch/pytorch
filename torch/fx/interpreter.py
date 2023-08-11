@@ -4,10 +4,13 @@ from .node import Argument, Node, Target, map_arg, map_aggregate
 from .proxy import Proxy
 from ._symbolic_trace import Tracer
 from ._compatibility import compatibility
+from . import config
 import torch.fx.traceback as fx_traceback
+import torch
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import inspect
 from contextlib import contextmanager
+from torch.hub import tqdm
 
 __all__ = ['Interpreter', 'Transformer']
 
@@ -57,7 +60,7 @@ class Interpreter:
             gm = torch.fx.symbolic_trace(fn)
             input = torch.randn(3, 4)
             result = NegSigmSwapInterpreter(gm).run(input)
-            torch.testing.assert_allclose(result, torch.neg(input).sigmoid())
+            torch.testing.assert_close(result, torch.neg(input).sigmoid())
 
     Args:
         module (GraphModule): The module to be executed
@@ -72,8 +75,9 @@ class Interpreter:
         self.module = module
         self.submodules = dict(self.module.named_modules())
         self.env : Dict[Node, Any] = {}
-
+        self.name = "Interpreter"
         self.garbage_collect_values = garbage_collect_values
+        self.extra_traceback = True
 
         if self.garbage_collect_values:
             # Run through reverse nodes and record the first instance of a use
@@ -109,7 +113,7 @@ class Interpreter:
         Returns:
             Any: The value returned from executing the Module
         """
-        self.env = initial_env if initial_env else {}
+        self.env = initial_env if initial_env is not None else {}
 
         # Positional function args are consumed left-to-right by
         # `placeholder` nodes. Use an iterator to keep track of
@@ -117,8 +121,12 @@ class Interpreter:
         if enable_io_processing:
             args = self.module.graph.process_inputs(*args)
         self.args_iter : Iterator[Any] = iter(args)
+        pbar = tqdm(total=len(self.module.graph.nodes),
+                    desc=f"{self.name}: {str(list(self.module.graph.nodes)) if config.verbose_progress else ''}",
+                    initial=0, position=0, leave=True, disable=config.disable_progress, delay=0)
 
         for node in self.module.graph.nodes:
+            pbar.update(1)
             if node in self.env:
                 # Short circuit if we have this value. This could
                 # be used, for example, for partial evaluation
@@ -129,12 +137,13 @@ class Interpreter:
             try:
                 self.env[node] = self.run_node(node)
             except Exception as e:
-                msg = f"While executing {node.format_node()}"
-                msg = '{}\n\n{}'.format(e.args[0], msg) if e.args else str(msg)
-                msg += f"\nOriginal traceback:\n{node.stack_trace}"
-                e.args = (msg,) + e.args[1:]
-                if isinstance(e, KeyError):
-                    raise RuntimeError(*e.args)
+                if self.extra_traceback:
+                    msg = f"While executing {node.format_node()}"
+                    msg = f'{e.args[0]}\n\n{msg}' if e.args else str(msg)
+                    msg += f"\nOriginal traceback:\n{node.stack_trace}"
+                    e.args = (msg,) + e.args[1:]
+                    if isinstance(e, KeyError):
+                        raise RuntimeError(*e.args) from e
                 raise
 
             if self.garbage_collect_values:
@@ -145,9 +154,24 @@ class Interpreter:
                 output_val = self.env[node]
                 return self.module.graph.process_outputs(output_val) if enable_io_processing else output_val
 
+    @compatibility(is_backward_compatible=True)
+    def boxed_run(self, args_list):
+        """
+        Run `module` via interpretation and return the result.  This uses the "boxed"
+        calling convention, where you pass a list of arguments, which will be cleared
+        by the interpreter.  This ensures that input tensors are promptly deallocated.
+        """
+        args_iter = iter(args_list)
+        env = {}
+        for n in self.module.graph.nodes:
+            if n.op == "placeholder":
+                env[n] = next(args_iter)
+        args_list.clear()
+        return self.run(initial_env=env)
+
     @contextmanager
     def _set_current_node(self, node):
-        with fx_traceback.append_stack_trace(node.stack_trace):
+        with fx_traceback.set_current_meta(node):
             yield
 
     @compatibility(is_backward_compatible=True)
@@ -164,7 +188,7 @@ class Interpreter:
         Returns:
             Any: The result of executing ``n``
         """
-        with fx_traceback.append_stack_trace(n.stack_trace):
+        with self._set_current_node(n):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             assert isinstance(args, tuple)
             assert isinstance(kwargs, dict)
@@ -201,7 +225,7 @@ class Interpreter:
                 if len(args) > 0:
                     return args[0]
                 else:
-                    raise RuntimeError(f'Expected positional argument for parameter {target}, but one was not passed in!')
+                    raise RuntimeError(f'Expected positional argument for parameter {target}, but one was not passed in!') from si
 
     @compatibility(is_backward_compatible=True)
     def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
@@ -395,7 +419,7 @@ class Transformer(Interpreter):
 
             transformed : torch.nn.Module = NegSigmSwapXformer(gm).transform()
             input = torch.randn(3, 4)
-            torch.testing.assert_allclose(transformed(input), torch.neg(input).sigmoid())
+            torch.testing.assert_close(transformed(input), torch.neg(input).sigmoid())
 
     Args:
         module (GraphModule): The ``Module`` to be transformed.
@@ -411,6 +435,7 @@ class Transformer(Interpreter):
             def __init__(self, graph: Graph):
                 super().__init__()
                 self.graph = graph
+                self.tensor_attrs: Dict[torch.Tensor, str] = {}  # type: ignore[assignment]
 
             def is_leaf_module(self, _, __) -> bool:
                 return True
@@ -451,7 +476,7 @@ class Transformer(Interpreter):
             kwargs (Dict): Dict of keyword arguments for this invocation
         """
         assert isinstance(target, str)
-        return Proxy(self.new_graph.get_attr(target), self.tracer)
+        return self.tracer.create_proxy("get_attr", target, args, kwargs)
 
     @compatibility(is_backward_compatible=True)
     def call_module(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
@@ -471,7 +496,7 @@ class Transformer(Interpreter):
         Transform ``self.module`` and return the transformed
         ``GraphModule``.
         """
-        with fx_traceback.override_stack_trace():
+        with fx_traceback.preserve_node_meta():
             result = super().run(enable_io_processing=False)
         if result is not None:
             def strip_proxy(a : Union[Argument, Proxy]) -> Any:

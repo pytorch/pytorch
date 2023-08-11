@@ -23,13 +23,11 @@
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 std::string buildErrorMessage(const std::string& s) {
   static const std::string generic_error_message =
-      "This error occured in the fuser. You can turn off the fuser with "
+      "This error occurred in the fuser. You can turn off the fuser with "
       "torch.jit.enable_fusion(False).";
   if (s.empty()) {
     return generic_error_message;
@@ -66,7 +64,7 @@ bool fallbackAllowed() {
   return true;
 }
 
-bool fallbackEnforced() {
+static bool fallbackEnforced() {
   static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
   if (tensorexpr::getTEGenerateBlockCode()) {
     return false;
@@ -80,7 +78,7 @@ bool fallbackEnforced() {
   return false;
 }
 
-int64_t randomTransformsRequested() {
+static int64_t randomTransformsRequested() {
   const char* enable_c_str =
       std::getenv("PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED");
   if (!enable_c_str) {
@@ -89,7 +87,8 @@ int64_t randomTransformsRequested() {
   return std::stoi(std::string(enable_c_str));
 }
 
-bool dontUseLLVMFlag() {
+#ifdef TORCH_ENABLE_LLVM
+static bool dontUseLLVMFlag() {
   static const char* enable_c_str =
       std::getenv("PYTORCH_TENSOREXPR_DONT_USE_LLVM");
   if (!enable_c_str) {
@@ -97,6 +96,7 @@ bool dontUseLLVMFlag() {
   }
   return std::string(enable_c_str) == "1";
 }
+#endif
 
 int& getTECudaPointwiseLoopLevels() {
   return te_cuda_pointwise_loop_levels;
@@ -144,7 +144,8 @@ c10::optional<at::Device> pickDeviceType(
   return device;
 }
 
-c10::optional<at::Device> pickDeviceType(const std::shared_ptr<Graph>& graph) {
+static c10::optional<at::Device> pickDeviceType(
+    const std::shared_ptr<Graph>& graph) {
   c10::optional<at::Device> device = c10::nullopt;
   for (auto const& node : graph->nodes()) {
     for (auto const& input : node->inputs()) {
@@ -179,7 +180,7 @@ c10::optional<at::Device> pickDeviceType(const std::shared_ptr<Graph>& graph) {
 
 // If v is a Tensor with concretely-known sizes and dtype, return them, else
 // nullopt.
-c10::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
+static c10::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
   auto const& it = v->type()->cast<TensorType>();
 
   c10::ScalarType dtype = c10::ScalarType::Float;
@@ -202,7 +203,7 @@ c10::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
   }
   return TensorInfo{*concrete_sizes, dtype};
 }
-std::vector<int64_t> _pair_int(IValue v) {
+static std::vector<int64_t> _pair_int(IValue v) {
   if (v.isIntList()) {
     return v.toIntVector();
   } else {
@@ -234,7 +235,7 @@ bool isContiguous(const torch::jit::Value* v, at::MemoryFormat memory_format) {
   return *strides == TensorType::contiguousStridesOf(*sizes, memory_format);
 }
 
-size_t get_conv_groups_index(const torch::jit::Node* node) {
+static size_t get_conv_groups_index(const torch::jit::Node* node) {
   switch (node->kind()) {
     case aten::conv2d:
       return 6;
@@ -388,9 +389,7 @@ bool matmulIsSupported(const torch::jit::Node* node) {
   return true;
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
 
 static at::ScalarType tensorType(BufPtr b) {
   return static_cast<at::ScalarType>(b->dtype().scalar_type());
@@ -436,7 +435,7 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
     for (auto el : v->node()->inputs()) {
       vec.push_back(toArg(el));
     }
-    if (vec.size() == 0) {
+    if (vec.empty()) {
       return BufList(); // Return arbitrarily typed vector
     } else if (c10::get_if<BufHandle>(&vec[0])) {
       return convertVecArgValue<BufHandle>(vec);
@@ -529,7 +528,7 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(
   throw malformed_input(msg);
 }
 
-c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
+static c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
   if (v->type()->kind() == TypeKind::TensorType) {
     auto tt = v->type()->cast<TensorType>();
     if (tt->scalarType()) {
@@ -539,7 +538,7 @@ c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
   return tryScalarTypeFromJitType(*v->type());
 }
 
-bool constZeroDimTensorAsScalarArg(
+static bool constZeroDimTensorAsScalarArg(
     const Value* v,
     std::vector<ArgValue>& args) {
   if (v->node()->kind() != prim::Constant || !v->type()->cast<TensorType>()) {
@@ -547,7 +546,7 @@ bool constZeroDimTensorAsScalarArg(
   }
 
   const auto t = toIValue(v)->toTensor();
-  if (t.sizes().size() != 0) {
+  if (!t.sizes().empty()) {
     return false;
   }
 
@@ -648,7 +647,7 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
 }
 
 // True if all the loops in this vector have equal bounds.
-bool loopBoundsAllEqual(const std::vector<ForPtr>& loops) {
+static bool loopBoundsAllEqual(const std::vector<ForPtr>& loops) {
   if (loops.size() <= 1) {
     return true;
   }
@@ -669,7 +668,7 @@ bool loopBoundsAllEqual(const std::vector<ForPtr>& loops) {
 // on matching bounds exists to avoid inserting conditionals on the loop
 // indices where none would be needed, which would significantly complicate
 // vectorization.
-void fuseAllLoops(StmtPtr st) {
+static void fuseAllLoops(StmtPtr st) {
   auto block = to<tensorexpr::Block>(st);
   if (block == nullptr) {
     return;
@@ -679,7 +678,7 @@ void fuseAllLoops(StmtPtr st) {
   std::vector<ForPtr> outer_loops;
   for (const auto& stmt : *block) {
     auto loop = to<For>(stmt);
-    auto hasReduction = NodeFinder<ReduceOp>::find(stmt).size() != 0;
+    auto hasReduction = !NodeFinder<ReduceOp>::find(stmt).empty();
     if (!loop || hasReduction) {
       all_outer_loops.push_back(outer_loops);
       outer_loops.clear();
@@ -709,7 +708,7 @@ void fuseAllLoops(StmtPtr st) {
 }
 
 // Compute the trip count of a loop if it is a constant.
-c10::optional<int64_t> tripCount(ForPtr loop) {
+static c10::optional<int64_t> tripCount(ForPtr loop) {
   auto tc = IRSimplifier::simplify(
       cast<int64_t>(ExprHandle(loop->stop()) - ExprHandle(loop->start())));
   if (auto val = to<LongImm>(tc.node())) {
@@ -801,7 +800,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
         "After random transform:\n", std::to_string(l.root_stmt()), "\n");
   }
 
-  bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
+  bool hasReduction = !NodeFinder<ReduceOp>::find(l.root_stmt()).empty();
 
   // For Block codegen we create a map of tensor dims before
   // inlining. Like GPU codegen we need to inline. But the order
@@ -845,7 +844,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   }
 
   if (backendType == kCudaCodeGen) {
-    for (auto buf : bufOutputs_) {
+    for (const auto& buf : bufOutputs_) {
       std::vector<ForPtr> loops = l.getLoopStmtsFor(buf);
       if (loops.empty()) {
         // This happens when Buf is 0-dim
@@ -893,7 +892,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   }
 
   if (backendType == kBlockCodeGen) {
-    for (auto buf : bufOutputs_) {
+    for (const auto& buf : bufOutputs_) {
       const int default_fp16_blocksize = 16;
       const int default_uint8_blocksize = 32;
       int blockSize = default_fp16_blocksize;
@@ -1093,7 +1092,7 @@ std::vector<ExprHandle> TensorExprKernel::getInputStrides(
         generated_strides++;
       }
     }
-    for (int i = 0; i < rank; i++) {
+    for (int i = 0; i < static_cast<int>(rank); i++) {
       if (stride_input[i] == torch::jit::StrideInput::S_TRAN_CONT &&
           stride_set[i - 1]) {
         inputTensorStrides[i] =
@@ -1250,7 +1249,7 @@ std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {
   return idx;
 }
 
-bool denseAndNonOverlapping(
+static bool denseAndNonOverlapping(
     at::ArrayRef<int64_t> sizes,
     at::ArrayRef<int64_t> strides) {
   return (strides == at::infer_dense_strides(sizes, strides));
@@ -1294,8 +1293,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
         std::vector<ExprHandle> new_axes(
             sorted_stride_indices_descending.size());
         for (size_t stride_index : sorted_stride_indices_descending) {
-          auto size = sizes[stride_index];
-          auto stride = strides[stride_index];
+          const auto& stride = strides[stride_index];
           auto index = absolute_position / ExprHandle(stride);
           // XXX, in symbolic output ordering, we do not the arbitrary
           // ordering of strides as in usual output ordering, just
@@ -1314,7 +1312,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
   TORCH_INTERNAL_ASSERT(
       bufs_.count(v),
       buildErrorMessage(
-          "Ouput tensor has no corresponding bufs in the fuser."));
+          "Output tensor has no corresponding bufs in the fuser."));
   BufPtr buf = bufs_.at(v);
   TORCH_INTERNAL_ASSERT(buf != nullptr);
   TORCH_INTERNAL_ASSERT(tt != nullptr);
@@ -1351,7 +1349,7 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
   TORCH_INTERNAL_ASSERT(
       bufs_.count(v),
       buildErrorMessage(
-          "Ouput tensor has no corresponding bufs in the fuser."));
+          "Output tensor has no corresponding bufs in the fuser."));
   BufPtr buf = bufs_.at(v);
 
   // No shape info is present in the graph
@@ -1446,7 +1444,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
   std::vector<ExprHandle> te_sizes;
   te_sizes.reserve(sizes.size());
   for (auto s : sizes) {
-    te_sizes.push_back(s);
+    te_sizes.emplace_back(s);
   }
   BufPtr buf = alloc<Buf>(
       "const_" + sanitizeName(v->debugName()),
@@ -1465,8 +1463,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
 std::vector<BufPtr> TensorExprKernel::preAllocIntermediateBufs(
     const std::vector<BufPtr>& interm_bufs) {
   std::vector<BufPtr> remaining_interm_bufs;
-  std::vector<std::pair<BufPtr, void*>> allocated_bufs;
-  for (auto buf : interm_bufs) {
+  for (const auto& buf : interm_bufs) {
     // Check if buf shape is static and compute its size if static.
     bool is_static = true;
     size_t size =
@@ -1506,7 +1503,7 @@ BlockPtr TensorExprKernel::bindAllInputs() {
     //
     // TODO: Check if the tensors with symbolic shapes are contiguous.
     TORCH_CHECK(
-        nInputs_ > symbolic_shape_inputs_.size(),
+        nInputs_ > static_cast<int64_t>(symbolic_shape_inputs_.size()),
         "Symbolic dims not provided as inputs to the graph");
 
     // First, process the symbolic input params and create a new variable for
@@ -1516,7 +1513,9 @@ BlockPtr TensorExprKernel::bindAllInputs() {
     // create for the symbolic input params.
     symbolic_shape_args.reserve(symbolic_shape_inputs_.size());
 
-    for (size_t i = symbolic_shape_inputs_start_pos; i < nInputs_; ++i) {
+    for (size_t i = symbolic_shape_inputs_start_pos;
+         i < static_cast<size_t>(nInputs_);
+         ++i) {
       auto input = graph_->inputs()[i];
       if (input->type()->kind() != TypeKind::IntType) {
         throw std::runtime_error(
@@ -1580,12 +1579,12 @@ BlockPtr TensorExprKernel::bindAllInputs() {
 
 void TensorExprKernel::deduceMemoryLayoutPolicy() {
   // If the tensor is channels-last contiguous, the preferred memory layout
-  // propagation policy is to use channes-last. Otherwise, the preferred policy
+  // propagation policy is to use channels-last. Otherwise, the preferred policy
   // is to use contiguous.
   auto _prefer_symbolic_mem =
       [](const torch::jit::Value* val,
          const std::vector<torch::jit::StrideInput>& stride_desc_vec) {
-        TORCH_INTERNAL_ASSERT(stride_desc_vec.size() > 0);
+        TORCH_INTERNAL_ASSERT(!stride_desc_vec.empty());
         // Has symbolic stride information
         auto cur_stride_desc = stride_desc_vec[0];
         return (cur_stride_desc ==
@@ -1626,7 +1625,7 @@ void TensorExprKernel::deduceMemoryLayoutPolicy() {
   // std::all_of returns true if the range is empty. But we prefer to keep
   // the original memory layout propagation policy for this case. So we
   // check whether the range is empty.
-  auto prefer_channels_last = (graph_io_tensors.size() > 0);
+  auto prefer_channels_last = (!graph_io_tensors.empty());
   for (auto el : graph_io_tensors) {
     auto is_complete = el->isCompleteTensor();
     auto is_symbolic = symbolic_strides_.count(el);
@@ -1654,7 +1653,7 @@ void TensorExprKernel::optimizeOwningGraph() {
   GRAPH_DUMP("TensorExprKernel graph (Before graph optimization):", graph_);
 
   // We may manipulate output pointers in graph manipulation. So we store the
-  // orignal outputs for symbolic strides information synchronization
+  // original outputs for symbolic strides information synchronization
   auto _orignal_graph_outputs = graph_->outputs().vec();
 
   // Get the graph device information first. The graph optimization
@@ -1838,7 +1837,7 @@ void TensorExprKernel::compile() {
   BackendType backendType = inferBackendTypeFromDevice(device_);
   stmt_ = transformLoops(backendType, block);
 
-  for (auto c : constants_) {
+  for (const auto& c : constants_) {
     bufferArgs_.emplace_back(BufHandle(c.buf));
   }
 
@@ -2016,7 +2015,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     }
   }
 
-  for (auto c : constants_) {
+  for (const auto& c : constants_) {
     runArgs.emplace_back(c.ptr);
   }
 
@@ -2060,7 +2059,7 @@ void TensorExprKernel::runFast(
   args.insert(args.end(), outputs.begin(), outputs.end());
 
   // TODO: we can consider preallocating and pre-filling the args vector.
-  for (auto c : constants_) {
+  for (const auto& c : constants_) {
     args.push_back(c.ptr);
   }
 
@@ -2110,7 +2109,8 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) const {
       args.emplace_back(&stride_values[idx]);
     }
 
-    TORCH_INTERNAL_ASSERT(nOutputs_ == bufOutputs_.size());
+    TORCH_INTERNAL_ASSERT(
+        nOutputs_ == static_cast<int64_t>(bufOutputs_.size()));
     for (size_t i = 0, e = bufOutputs_.size(); i < e; ++i) {
       auto& out = stack_outputs[i].toTensor();
       // This has only been tested on CPUs.

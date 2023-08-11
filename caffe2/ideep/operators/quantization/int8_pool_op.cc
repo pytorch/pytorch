@@ -25,7 +25,7 @@ class IDEEPInt8PoolOp final : public IDEEPConvPoolOpBase {
     if (operator_def.type().substr(0, 11) == "Int8MaxPool") {
       algo_ = ialgo::pooling_max;
     } else if (operator_def.type().substr(0, 15) == "Int8AveragePool") {
-      algo_ = ialgo::pooling_avg;
+      algo_ = ialgo::pooling_avg_exclude_padding;
     } else {
       LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
     }

@@ -3,7 +3,7 @@ import torch
 
 class Module(torch.nn.Module):
     def __init__(self):
-        super(Module, self).__init__()
+        super().__init__()
         self.conv = torch.nn.Conv2d(1, 10, 5, 1)
 
     def forward(self, x):

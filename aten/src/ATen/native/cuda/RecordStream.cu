@@ -8,8 +8,9 @@
 #include <ATen/ops/record_stream_native.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 void record_stream_cuda(Tensor& self, c10::Stream stream) {
-  c10::cuda::CUDACachingAllocator::recordStream(self.storage().data_ptr(), at::cuda::CUDAStream::unpack(stream.pack()));
+  struct c10::StreamData3 data = stream.pack3();
+  c10::cuda::CUDACachingAllocator::recordStream(self.storage().data_ptr(), at::cuda::CUDAStream::unpack3(data.stream_id, data.device_index, data.device_type));
 }
-}}  // namespace at::native
+}  // namespace at::native

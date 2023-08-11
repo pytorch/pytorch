@@ -20,8 +20,7 @@ template <>
 struct pybind11::detail::type_caster<torch::jit::tensorexpr::ArgValue>
     : public type_caster_base<torch::jit::tensorexpr::ArgValue> {};
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 using namespace torch::jit::tensorexpr;
 
 ArgValue convertPyToArgValue(py::handle inp) {
@@ -39,7 +38,7 @@ ArgValue convertPyToArgValue(py::handle inp) {
     return ArgNone();
   } else if (py::isinstance<py::list>(inp)) {
     auto l = py::cast<py::list>(inp);
-    if (l.size() == 0) {
+    if (l.empty()) {
       return std::vector<BufHandle>();
     } else if (py::isinstance<py::int_>(l[0])) {
       return py::cast<IntList>(inp);
@@ -829,6 +828,7 @@ void initTensorExprBindings(PyObject* module) {
           [](CodeGen& self, const py::sequence& values) {
             std::vector<CodeGen::CallArg> value_ptrs;
             value_ptrs.reserve(py::len(values));
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
             for (const auto& value : values) {
               if (py::isinstance<py::int_>(value)) {
                 value_ptrs.emplace_back(value.cast<int64_t>());
@@ -836,6 +836,35 @@ void initTensorExprBindings(PyObject* module) {
                 value_ptrs.emplace_back(value.cast<at::Tensor>().data_ptr());
               }
             }
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+            if (py::len(values) != self.buffer_args().size()) {
+              throw malformed_input("bad args in CodeGen.call function");
+            }
+            for (size_t i = 0; i < py::len(values); i++) {
+              const auto& value = values[i];
+              const auto& bufArg = self.buffer_args()[i];
+              if (py::isinstance<py::int_>(value)) {
+                if (!bufArg.isVar()) {
+                  throw malformed_input(
+                      "Integer variable expected in CodeGen.call function");
+                }
+                switch (bufArg.dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name)                    \
+  case ScalarType::Name: {                       \
+    value_ptrs.emplace_back(value.cast<Type>()); \
+    break;                                       \
+  }
+                  AT_FORALL_INT_TYPES(TYPE_CASE);
+                  default:
+                    throw unsupported_dtype();
+                }
+              } else {
+                value_ptrs.emplace_back(value.cast<at::Tensor>().data_ptr());
+              }
+            }
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
             self.call(value_ptrs);
           })
       .def(
@@ -921,5 +950,5 @@ void initTensorExprBindings(PyObject* module) {
   });
 #endif
 }
-} // namespace jit
-} // namespace torch
+
+} // namespace torch::jit

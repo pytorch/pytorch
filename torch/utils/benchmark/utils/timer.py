@@ -13,7 +13,7 @@ from torch.utils.benchmark.utils.valgrind_wrapper import timer_interface as valg
 __all__ = ["Timer", "timer", "Language"]
 
 
-if torch.has_cuda and torch.cuda.is_available():
+if torch.backends.cuda.is_built() and torch.cuda.is_available():
     def timer() -> float:
         torch.cuda.synchronize()
         return timeit.default_timer()
@@ -64,7 +64,7 @@ class CPPTimer:
         return self._timeit_module.timeit(number)
 
 
-class Timer(object):
+class Timer:
     """Helper class for measuring execution time of PyTorch statements.
 
     For a full tutorial on how to use this class, see:
@@ -159,14 +159,14 @@ class Timer(object):
 
         env:
             This tag indicates that otherwise identical tasks were run in
-            different environments, and are therefore not equivilent, for
+            different environments, and are therefore not equivalent, for
             instance when A/B testing a change to a kernel. `Compare` will
             treat Measurements with different `env` specification as distinct
             when merging replicate runs.
 
         num_threads:
             The size of the PyTorch threadpool when executing `stmt`. Single
-            threaded performace is important as both a key inference workload
+            threaded performance is important as both a key inference workload
             and a good indicator of intrinsic algorithmic efficiency, so the
             default is set to one. This is in contrast to the default PyTorch
             threadpool size which tries to utilize all cores.
@@ -377,7 +377,7 @@ class Timer(object):
 
             2) A large block size better amortizes the cost of `timer`
                invocation, and results in a less biased measurement. This is
-               important because CUDA syncronization time is non-trivial
+               important because CUDA synchronization time is non-trivial
                (order single to low double digit microseconds) and would
                otherwise bias the measurement.
 

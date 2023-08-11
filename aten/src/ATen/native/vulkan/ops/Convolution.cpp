@@ -15,6 +15,7 @@
 #else
 #include <ATen/ops/pad.h>
 #include <ATen/ops/permute.h>
+#include <ATen/ops/quantize_per_tensor.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -125,7 +126,7 @@ at::Tensor rearrange_weights_dw(const Tensor& weight_in) {
   // reshape to stack the resulting batches vertically
   weight = weight.permute({1, 0, 2, 3}).reshape({4, N4 * C, H * W});
 
-  return weight;
+  return weight.contiguous();
 }
 
 /*
@@ -228,7 +229,7 @@ at::Tensor rearrange_weights_2d(const Tensor& weight_in, bool tconv) {
   // Collapse the outermost dim so that each group of 4 is stacked vertically
   weight = weight.permute({1, 0, 2, 3}).reshape({4, N4 * H, C_aligned * W});
 
-  return weight;
+  return weight.contiguous();
 }
 
 /*
@@ -272,14 +273,14 @@ at::Tensor rearrange_bias(
   bias = bias.reshape({L4, 4}).permute({1, 0});
   bias = bias.reshape({4, 1, L4});
 
-  return bias;
+  return bias.contiguous();
 }
 
 //
 // Shader and Workgroup size determination
 //
 
-static api::ShaderSource get_shader(
+static api::ShaderInfo get_shader(
     const IntArrayRef kernel_size,
     const IntArrayRef stride,
     const IntArrayRef padding,
@@ -287,7 +288,7 @@ static api::ShaderSource get_shader(
     const Conv2dMethod method,
     const bool transposed,
     const bool quantized) {
-  api::ShaderSource shader;
+  api::ShaderInfo shader;
 
   if (quantized) {
     if (transposed) {
@@ -297,17 +298,16 @@ static api::ShaderSource get_shader(
     switch (method) {
       case Conv2dSlidingWindow:
         shader = VK_KERNEL(quantized_conv2d);
-        return shader;
+        break;
       case Conv2dDepthwise:
         shader = VK_KERNEL(quantized_conv2d_dw);
-        return shader;
+        break;
       case Conv2dPointwise:
         shader = VK_KERNEL(quantized_conv2d_pw_2x2);
-        // Set explicitly for now. In the future, this will be set automatically
-        // by shader codegen.
-        shader.out_tile_size = {2u, 2u, 1u};
-        return shader;
+        break;
+        // todo fail for quantized transposed conv
     }
+    return shader;
   }
 
   if (transposed) {
@@ -317,18 +317,26 @@ static api::ShaderSource get_shader(
 
   switch (method) {
     case Conv2dSlidingWindow:
-      shader = VK_KERNEL(conv2d);
-      return shader;
+      shader = VK_LOOKUP_KERNEL(conv2d);
+      break;
     case Conv2dDepthwise:
       shader = VK_KERNEL(conv2d_dw);
-      return shader;
+      if (kernel_size.size() == 4 && kernel_size[2] == 3 &&
+          kernel_size[3] == 3) {
+        // 1x1 refers to the output tile size
+        shader = VK_KERNEL(conv2d_dw_3x3);
+      }
+      if (kernel_size.size() == 4 && kernel_size[2] == 5 &&
+          kernel_size[3] == 5) {
+        // 1x1 refers to the output tile size
+        shader = VK_KERNEL(conv2d_dw_5x5);
+      }
+      break;
     case Conv2dPointwise:
-      shader = VK_KERNEL(conv2d_pw_2x2);
-      // Set explicitly for now. In the future, this will be set automatically
-      // by shader codegen.
-      shader.out_tile_size = {2u, 2u, 1u};
-      return shader;
+      shader = VK_LOOKUP_KERNEL(conv2d_pw);
+      break;
   }
+  return shader;
 }
 
 //
@@ -350,7 +358,7 @@ struct Params final {
 
 void record_op(
     api::Context* const context,
-    api::ShaderSource& compute_shader,
+    api::ShaderInfo& compute_shader,
     vTensor& v_output,
     const vTensor& v_input,
     const vTensor& v_weight,
@@ -423,7 +431,7 @@ struct QParams final {
 
 void record_quantized_op(
     api::Context* const context,
-    api::ShaderSource& compute_shader,
+    api::ShaderInfo& compute_shader,
     vTensor& v_output,
     const vTensor& v_input,
     const vTensor& v_weight,
@@ -520,8 +528,8 @@ vTensor pack_weights(
   vTensor v_weight{
       api::context(),
       weight_rearranged.sizes(),
-      quantized ? StorageType::TEXTURE_3D : StorageType::TEXTURE_2D,
-      weight_arg.options(),
+      weight_arg.scalar_type(),
+      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
   };
 
   if (quantized) {
@@ -545,14 +553,14 @@ vTensor pack_biases(
   vTensor v_bias{
       api::context(),
       bias_rearranged.sizes(),
-      quantized ? StorageType::TEXTURE_3D : StorageType::TEXTURE_2D,
-      weight.options(),
+      bias_rearranged.scalar_type(),
+      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
   };
 
-  if (quantized) {
+  if (quantized && bias->scalar_type() != c10::kFloat) {
     v_bias.set_is_quantized();
-    v_bias.set_scale(weight.q_scale());
-    v_bias.set_zero_point(weight.q_zero_point());
+    v_bias.set_scale(bias_rearranged.q_scale());
+    v_bias.set_zero_point(bias_rearranged.q_zero_point());
   }
 
   pack_cpu_to_vulkan(bias_rearranged, v_bias);
@@ -612,7 +620,9 @@ bool weight_valid(const Tensor& weight, const bool quantized) {
       weight.device().type() != c10::DeviceType::Vulkan) {
     return false;
   }
-  if (quantized && weight.scalar_type() != c10::kQUInt8) {
+  if (quantized &&
+      (weight.scalar_type() != c10::kQUInt8 &&
+       weight.scalar_type() != c10::kQInt8)) {
     return false;
   }
 
@@ -985,7 +995,7 @@ c10::intrusive_ptr<Conv2dPackedContext> create_qconv2d_context(
       dilation,
       /* transposed = */ false,
       /* quantized = */ true,
-      /* output_padding_arg = */ {},
+      /* output_padding_arg = */ {0},
       groups,
       output_min,
       output_max));
@@ -1003,11 +1013,22 @@ Tensor run_conv2d_context_impl(
   const vTensor& v_input = convert(input_arg);
 
   // Extract everything from the PackedContext
-  const vTensor& v_weight = convert(
-      conv_context->get_val(Conv2dPackedContext::Packed::Weight).toTensor());
+  const Tensor weight =
+      conv_context->get_val(Conv2dPackedContext::Packed::Weight).toTensor();
+  const vTensor& v_weight = convert(weight);
 
-  const vTensor& v_bias = convert(
-      conv_context->get_val(Conv2dPackedContext::Packed::Bias).toTensor());
+  const auto quantized =
+      conv_context->get_val(Conv2dPackedContext::Packed::isQuantized).toBool();
+
+  Tensor bias =
+      conv_context->get_val(Conv2dPackedContext::Packed::Bias).toTensor();
+  if (quantized && bias.scalar_type() == c10::kFloat) {
+    bias = at::quantize_per_tensor(
+        bias, v_weight.get_scale() * v_input.get_scale(), 0, c10::kQInt32);
+    conv_context->set_val(Conv2dPackedContext::Packed::Bias, bias);
+  }
+
+  const vTensor& v_bias = convert(bias);
 
   const auto overlay_region =
       conv_context->get_val(Conv2dPackedContext::Packed::OverlayRegion)
@@ -1026,8 +1047,6 @@ Tensor run_conv2d_context_impl(
 
   const auto transposed =
       conv_context->get_val(Conv2dPackedContext::Packed::isTransposed).toBool();
-  const auto quantized =
-      conv_context->get_val(Conv2dPackedContext::Packed::isQuantized).toBool();
 
   const float output_min = safe_downcast<float>(
       conv_context->get_val(Conv2dPackedContext::Packed::OutputMin).toDouble());
@@ -1061,7 +1080,7 @@ Tensor run_conv2d_context_impl(
   vTensor v_output{
       context,
       output_size,
-      input_arg.options(),
+      input_arg.scalar_type(),
   };
 
   if (quantized) {

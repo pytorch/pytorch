@@ -40,6 +40,7 @@ jobs:
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - docs_type: cpp
@@ -48,8 +49,9 @@ jobs:
             # to the next available tier of 12xlarge. So much memory just to generate cpp
             # doc
             runner: linux.12xlarge
-            # Nightly cpp docs take about 150m to finish, and the number is stable
-            timeout-minutes: 180
+            # TODO: Nightly cpp docs take longer and longer to finish (more than 3h now)
+            # Let's try to figure out how this can be improved
+            timeout-minutes: 240
           - docs_type: python
             runner: linux.2xlarge
             # It takes less than 30m to finish python docs unless there are issues
@@ -58,23 +60,37 @@ jobs:
             runner: linux.2xlarge
             # It takes less than 15m to finish functorch docs unless there are issues
             timeout-minutes: 15
+    # Set a fixed name for this job instead of using the current matrix-generated name, i.e. build-docs (cpp, linux.12xlarge, 180)
+    # The current name requires updating the Rockset last docs push query from test-infra every time the matrix is updated
+    name: build-docs-${{ matrix.docs_type }}-${{ inputs.push }}
     steps:
-      # [see note: pytorch repo ref]
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+          instructions: |
+            All builds are done inside the container, to start an interactive session run:
+              docker exec -it $(docker container ps --format '{{.ID}}') bash
+            To start Python docs build type:
+              cd docs && make html && make coverage
+
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-image-name: ${{ inputs.docker-image }}
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: ${{ inputs.docker-image }}
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
@@ -86,6 +102,8 @@ jobs:
         env:
           GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
         run: |
+          # sometimes .netrc exists as a directory even though this is the temp folder
+          rm -rf "${RUNNER_TEMP}/.netrc"
           # set credentials for https pushing
           echo "machine github.com" > "${RUNNER_TEMP}/.netrc"
           echo "login pytorchbot" >> "${RUNNER_TEMP}/.netrc"
@@ -95,7 +113,10 @@ jobs:
         timeout-minutes: ${{ matrix.timeout-minutes }}
         id: build-docs
         env:
-          WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
+          # After https://github.com/pytorch/pytorch/pull/88373, pull workflow can now be run periodically,
+          # so using a schedule event to determine if the docs should be pushed or not doesn't hold true
+          # anymore
+          WITH_PUSH: ${{ inputs.push }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           DOCS_TYPE: ${{ matrix.docs_type }}
           RUN_DOXYGEN: ${{ inputs.run-doxygen }}
@@ -106,7 +127,7 @@ jobs:
           if [[ "${GITHUB_REF}" =~ ^refs/tags/v([0-9]+\.[0-9]+)\.* ]]; then
             target="${BASH_REMATCH[1]}"
           else
-            target="master"
+            target="main"
           fi
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -128,7 +149,7 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" bash -c "sudo chown -R jenkins . && pip install $(echo dist/*.whl)[opt-einsum] && ./.circleci/scripts/${DOCS_TYPE}_doc_push_script.sh"
+          docker exec -t "${container_name}" bash -c "sudo chown -R jenkins . && pip install $(echo dist/*.whl)[opt-einsum] && ./.ci/pytorch/${DOCS_TYPE}_doc_push_script.sh"
 
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
@@ -141,8 +162,8 @@ jobs:
           retention-days: 14
           s3-bucket: doc-previews
           if-no-files-found: error
-          path: pytorch.github.io/docs/master/
-          s3-prefix: pytorch/${{ github.event.pull_request.number }}
+          path: pytorch.github.io/docs/main/
+          s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}
 
       - name: Upload C++ Docs Preview
         uses: seemethere/upload-artifact-s3@v5
@@ -152,7 +173,7 @@ jobs:
           if-no-files-found: error
           s3-bucket: doc-previews
           path: cppdocs/
-          s3-prefix: pytorch/${{ github.event.pull_request.number }}/cppdocs
+          s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs
 
       - name: Upload functorch Docs Preview
         uses: seemethere/upload-artifact-s3@v5
@@ -162,4 +183,8 @@ jobs:
           s3-bucket: doc-previews
           if-no-files-found: error
           path: functorch_ghpages/nightly/
-          s3-prefix: pytorch/${{ github.event.pull_request.number }}/functorchdocs
+          s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/functorchdocs
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()

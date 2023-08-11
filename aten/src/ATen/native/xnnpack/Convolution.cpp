@@ -2,16 +2,15 @@
 
 #include <vector>
 
-#include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/Factory.h>
 #include <ATen/native/utils/ParamUtils.h>
+#include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/xnnpack/Convolution.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
+namespace at::native::xnnpack {
 namespace internal {
 namespace convolution2d {
 
@@ -236,6 +235,7 @@ ContextConv2D create(
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags
+      nullptr,                                                        // xnn_caches_t
       &convolution_op);                                               // operator
   } else {
     for (const auto i : c10::irange(4)) {
@@ -264,6 +264,7 @@ ContextConv2D create(
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags
+      nullptr,                                                        // xnn_caches_t
       &convolution_op);                                               // operator
   }
 
@@ -493,9 +494,6 @@ Tensor convolution2d(
       ContextConv2D::kMax);
 }
 
-} // namespace xnnpack
-
-} // namespace native
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

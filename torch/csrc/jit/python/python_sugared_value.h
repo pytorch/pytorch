@@ -139,7 +139,7 @@ struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
-    if (args.size() || kwargs.size()) {
+    if (!args.empty() || !kwargs.empty()) {
       throw ErrorReport(loc)
           << name_ << " method does not accept any arguments";
     }
@@ -242,7 +242,10 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
 };
 
 bool isNamedTupleClass(const py::object& obj);
-TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc);
+TypePtr registerNamedTuple(
+    const py::object& obj,
+    const SourceRange& loc,
+    const ResolutionCallback& rcb);
 
 void recurseThroughNestedModules(
     const SourceRange& loc,
@@ -258,11 +261,10 @@ struct VISIBILITY_HIDDEN SugaredDict : public SugaredValue {
   explicit SugaredDict(
       std::shared_ptr<ModuleValue> self,
       std::shared_ptr<SugaredTupleValue> keys,
-      std::shared_ptr<SugaredTupleValue> modules) {
-    self_ = std::move(self);
-    keys_ = std::move(keys);
-    modules_ = std::move(modules);
-  }
+      std::shared_ptr<SugaredTupleValue> modules)
+      : self_(std::move(self)),
+        keys_(std::move(keys)),
+        modules_(std::move(modules)) {}
 
   std::string kind() const override {
     return "ModuleDict";

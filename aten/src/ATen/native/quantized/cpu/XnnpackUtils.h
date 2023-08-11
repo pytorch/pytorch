@@ -99,6 +99,7 @@ enum xnn_status xnnp_create_convolution2d_nhwc(
         op_min,         /* int8_t output_min                    */
         op_max,         /* int8_t output_max                    */
         flags,          /* uint32_t flags                       */
+        nullptr,        /* xnn_caches_t caches                  */
         op);            /* xnn_operator_t* deconvolution_op_out */
 
   }
@@ -130,6 +131,7 @@ enum xnn_status xnnp_create_convolution2d_nhwc(
         op_min,         /* int8_t output_min                  */
         op_max,         /* int8_t output_max                  */
         flags,          /* uint32_t flags                     */
+        nullptr,        /* xnn_caches_t caches                */
         op);            /* xnn_operator_t* convolution_op_out */
   } else { /* per_channel */
     return xnn_create_convolution2d_nhwc_qc8(
@@ -158,6 +160,7 @@ enum xnn_status xnnp_create_convolution2d_nhwc(
         op_min,         /* int8_t output_min                  */
         op_max,         /* int8_t output_max                  */
         flags,          /* uint32_t flags                     */
+        nullptr,        /* xnn_caches_t caches                */
         op);            /* xnn_operator_t* convolution_op_out */
   }
 }
@@ -254,6 +257,7 @@ enum xnn_status xnnp_create_fully_connected_nc(
       output_min,              /* int8_t output_min                      */
       output_max,              /* int8_t output_max                      */
       flags,                   /* uint32_t flags                         */
+      nullptr,                 /* xnn_caches_t caches                    */
       fully_connected_op_out); /* xnn_operator_t* fully_connected_op_out */
 }
 

@@ -28,8 +28,8 @@ def skip_init(module_cls, *args, **kwargs):
 
     Example::
 
-        >>> import torch
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> import torch
         >>> m = torch.nn.utils.skip_init(torch.nn.Linear, 5, 1)
         >>> m.weight
         Parameter containing:
@@ -43,7 +43,7 @@ def skip_init(module_cls, *args, **kwargs):
 
     """
     if not issubclass(module_cls, torch.nn.Module):
-        raise RuntimeError('Expected a Module; got {}'.format(module_cls))
+        raise RuntimeError(f'Expected a Module; got {module_cls}')
     if 'device' not in inspect.signature(module_cls).parameters:
         raise RuntimeError('Module must support a \'device\' arg to skip initialization')
 

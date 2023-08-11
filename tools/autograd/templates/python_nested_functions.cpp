@@ -4,7 +4,7 @@
 #include "torch/csrc/Device.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
-#include "torch/csrc/autograd/python_special_functions.h"
+#include "torch/csrc/autograd/python_nested_functions.h"
 #include "torch/csrc/autograd/python_return_types.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
@@ -47,6 +47,7 @@ namespace torch { namespace autograd {
 ${py_forwards}
 
 static PyMethodDef nested_functions[] = {
+  {NULL, NULL, 0, NULL},
   ${py_method_defs}
   {NULL}
 };
@@ -54,6 +55,7 @@ static PyMethodDef nested_functions[] = {
 static PyObject* THPNestedVariableFunctionsModule = NULL;
 
 void initNestedFunctions(PyObject* module) {
+  nested_functions[0] = get_nested_functions_manual()[0];
   static struct PyModuleDef def = {
      PyModuleDef_HEAD_INIT,
      "torch._C._nested",

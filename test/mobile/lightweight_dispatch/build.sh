@@ -1,5 +1,5 @@
 #!/bin/bash
-# This script should be called from .jenkins/pytorch/build.sh. Assuming we are at pytorch source root directory.
+# This script should be called from .ci/pytorch/build.sh. Assuming we are at pytorch source root directory.
 
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't

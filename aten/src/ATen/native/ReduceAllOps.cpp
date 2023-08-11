@@ -1,8 +1,21 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/ReduceAllOps.h>
 #include <ATen/native/Resize.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_aminmax_native.h>
+#include <ATen/ops/aminmax.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/max.h>
+#include <ATen/ops/max_native.h>
+#include <ATen/ops/min.h>
+#include <ATen/ops/min_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -19,9 +32,16 @@ Tensor min(const Tensor &self) {
 }
 
 Tensor& min_unary_out(const Tensor &self, Tensor& out) {
-  Tensor tmp_output = at::min(self);
-  at::native::resize_output(out, tmp_output.sizes());
-  out.copy_(tmp_output);
+  // First check if the devices match (CPU vs GPU)
+  TORCH_CHECK(self.device() == out.device());
+
+  TORCH_CHECK(canCast(
+      typeMetaToScalarType(self.dtype()),
+      typeMetaToScalarType(out.dtype())));
+
+  at::native::resize_output(out, {});
+
+  min_all_stub(self.device().type(), out, self.contiguous());
   return out;
 }
 

@@ -57,18 +57,17 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
   auto stream = at::cuda::getCurrentCUDAStream();
   using scalar_t = typename function_traits<func_t>::result_type;
   if (N <= std::numeric_limits<int>::max()) {
-    elementwise_kernel_with_index<int><<<grid, num_threads(), 0, stream>>>(N, f, output.data_ptr<scalar_t>());
+    elementwise_kernel_with_index<int><<<grid, num_threads(), 0, stream>>>(N, f, output.mutable_data_ptr<scalar_t>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
-    elementwise_kernel_with_index<int64_t><<<grid, num_threads(), 0, stream>>>(N, f, output.data_ptr<scalar_t>());
+    elementwise_kernel_with_index<int64_t><<<grid, num_threads(), 0, stream>>>(N, f, output.mutable_data_ptr<scalar_t>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
 }  // namespace
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps, Tensor& result) {
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
@@ -233,7 +232,7 @@ Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& st
     // we dont want.
     // the corner-case we do want to take into account is int64_t, which has higher precision than double
     double size_d;
-    if (std::is_same<scalar_t, int64_t>::value) {
+    if constexpr (std::is_same_v<scalar_t, int64_t>) {
       int64_t sgn = (xstep > 0) - (xstep < 0);
       size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
     } else {
@@ -272,4 +271,4 @@ Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& st
   return result;
 }
 
-}} // namespace at::native
+} // namespace at::native

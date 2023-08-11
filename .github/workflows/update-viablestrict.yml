@@ -11,36 +11,38 @@ concurrency:
 
 jobs:
   do_update_viablestrict:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-20.04
+    environment: mergebot
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
           token: ${{ secrets.MERGEBOT_TOKEN }}
 
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.8
+          python-version: '3.8'
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
-            **/.circleci/docker/requirements-ci.txt
+            **/.ci/docker/requirements-ci.txt
             **/.github/requirements-gha-cache.txt
 
       - name: Install Python Packages
         run: |
-          pip3 install rockset==0.8.10
+          pip3 install rockset==1.0.3
           pip3 install boto3==1.19.12
-          pip3 install six==1.16.0
 
       - name: Get latest viable commit
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
         run: |
           output=$(python3 .github/scripts/fetch_latest_green_commit.py)
-          echo "::set-output name=latest_viable_sha::$output"
+          echo "latest_viable_sha=$output" >> "${GITHUB_OUTPUT}"
         id: get-latest-commit
 
       - name: Push SHA to viable/strict branch

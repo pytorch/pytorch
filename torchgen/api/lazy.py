@@ -355,7 +355,7 @@ class LazyIrSchema:
         positional_args: List[LazyArgument] = []
         for arg_field in ["pre_self_positional", "self_arg", "post_self_positional"]:
             if arg_field == "self_arg" and func.arguments.self_arg is not None:
-                arg = getattr(func.arguments, "self_arg").argument
+                arg = func.arguments.self_arg.argument
                 positional_args.append(
                     LazyArgument(arg, self.properties, symint=symint)
                 )
@@ -382,7 +382,9 @@ class LazyIrSchema:
                         assert (
                             self.generator_arg is None
                         ), "We expect there is only one generator arg"
-                        self.generator_arg = NamedCType(arg.name, arg.type)
+                        self.generator_arg = NamedCType(
+                            arg.name, arg.type  # type:ignore[arg-type]
+                        )
                 keyword_args.extend(
                     LazyArgument(arg, self.properties, symint=symint)
                     for arg in curr_args

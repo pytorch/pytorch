@@ -24,7 +24,7 @@ namespace at {
 struct TORCH_API HIPHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
-  virtual ~HIPHooksInterface() {}
+  virtual ~HIPHooksInterface() = default;
 
   // Initialize the HIP library state
   virtual void initHIP() const {
@@ -60,7 +60,7 @@ struct TORCH_API HIPHooksInterface {
 // for the "..." in a variadic macro"
 struct TORCH_API HIPHooksArgs {};
 
-C10_DECLARE_REGISTRY(HIPHooksRegistry, HIPHooksInterface, HIPHooksArgs);
+TORCH_DECLARE_REGISTRY(HIPHooksRegistry, HIPHooksInterface, HIPHooksArgs);
 #define REGISTER_HIP_HOOKS(clsname) \
   C10_REGISTER_CLASS(HIPHooksRegistry, clsname, clsname)
 

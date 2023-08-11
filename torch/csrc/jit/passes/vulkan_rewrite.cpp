@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
@@ -17,6 +18,24 @@ namespace torch {
 namespace jit {
 
 namespace {
+
+void insertPrePackedBatchNormOp(std::shared_ptr<Graph>& graph) {
+  std::string batchnorm_pattern = R"(
+    graph(%input, %weight, %bias, %mean, %var, %training, %momentum, %eps, %cudnn_enable):
+        %r = aten::batch_norm(%input, %weight, %bias, %mean, %var, %training, %momentum, %eps, %cudnn_enable)
+        return (%r))";
+  std::string prepacked_ops_pattern = R"(
+    graph(%input, %weight, %bias, %mean, %var, %training, %momentum, %eps, %cudnn_enable):
+        %op_context : __torch__.torch.classes.vulkan.BatchNormPackedContext = vulkan_prepack::create_batchnorm_context(
+            %weight, %bias, %mean, %var, %training, %momentum, %eps, %cudnn_enable)
+        %res = vulkan_prepack::run_batchnorm_context(%input, %op_context)
+        return (%res))";
+
+  SubgraphRewriter batchnorm_rewriter;
+  batchnorm_rewriter.RegisterRewritePattern(
+      batchnorm_pattern, prepacked_ops_pattern);
+  batchnorm_rewriter.runOnGraph(graph);
+}
 
 void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
   // fuse decomposed linear into aten::linear
@@ -80,6 +99,123 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   transpose_rewriter.RegisterRewritePattern(
       conv_2d_transpose_pattern, prepacked_ops_conv2d_transpose_pattern);
   transpose_rewriter.runOnGraph(graph);
+}
+
+void transferInputOutputBackends(std::shared_ptr<Graph>& graph) {
+  // Move inputs to Vulkan backend
+  for (Value* input : graph->inputs()) {
+    NamedValue named_input = NamedValue("", input);
+    if (named_input.type()->kind() == TypeKind::TensorType &&
+        !input->uses().empty()) {
+      // find the insertion point
+      WithInsertPoint ip(input->uses()[0].user->prev());
+      Value* replaced_input = graph->insert(
+          Symbol::fromQualString("aten::to"), {named_input, "vulkan"});
+      // replace the input
+      input->replaceAllUsesAfterNodeWith(
+          replaced_input->node(), replaced_input);
+    }
+  }
+
+  // Move outputs to CPU backend
+  at::ArrayRef<Value*>&& outputs = graph->outputs();
+  for (size_t i = 0; i < outputs.size(); i++) {
+    Value* output = outputs[i];
+    NamedValue named_output = NamedValue("", output);
+    if (named_output.type()->kind() == TypeKind::TensorType) {
+      // find the insertion point
+      WithInsertPoint ip(output->node()->next());
+      Value* replaced_output = graph->insert(
+          Symbol::fromQualString("aten::to"), {named_output, "cpu"});
+      // replace the output
+      graph->block()->replaceOutput(i, replaced_output);
+    }
+  }
+
+  SubgraphRewriter rewriter;
+  rewriter.runOnGraph(graph);
+}
+
+void transferInputOutputBackends(script::Module& module) {
+  std::shared_ptr<Graph> graph = module.get_methods()[0].graph();
+  transferInputOutputBackends(graph);
+}
+
+void eliminateDeadCode(script::Module& module) {
+  for (auto& method : module.get_methods()) {
+    EliminateDeadCode(method.graph());
+  }
+}
+
+void rewriteQuantizedOps(std::shared_ptr<Graph>& graph) {
+  // quantized::add
+  std::string quantized_add_pattern = R"(
+    graph(%a_quant, %b_quant, %r_scale, %r_zero_point) :
+      %res = quantized::add(%a_quant, %b_quant, %r_scale, %r_zero_point)
+      return (%res) )";
+  std::string vk_quantized_add_pattern = R"(
+    graph(%a_quant, %b_quant, %r_scale, %r_zero_point) :
+      %res = vulkan_quantized::add(%a_quant, %b_quant, %r_scale, %r_zero_point)
+      return (%res) )";
+
+  torch::jit::SubgraphRewriter quantized_add_rewriter;
+  quantized_add_rewriter.RegisterRewritePattern(
+      quantized_add_pattern, vk_quantized_add_pattern);
+  quantized_add_rewriter.runOnGraph(graph);
+
+  // quantized::mul
+  std::string quantized_mul_pattern = R"(
+    graph(%a_quant, %b_quant, %r_scale, %r_zero_point) :
+      %res = quantized::mul(%a_quant, %b_quant, %r_scale, %r_zero_point)
+      return (%res) )";
+  std::string vk_quantized_mul_pattern = R"(
+    graph(%a_quant, %b_quant, %r_scale, %r_zero_point) :
+      %res = vulkan_quantized::mul(%a_quant, %b_quant, %r_scale, %r_zero_point)
+      return (%res) )";
+
+  torch::jit::SubgraphRewriter quantized_mul_rewriter;
+  quantized_mul_rewriter.RegisterRewritePattern(
+      quantized_mul_pattern, vk_quantized_mul_pattern);
+  quantized_mul_rewriter.runOnGraph(graph);
+
+  // quantized::conv2d
+  std::string quantized_conv2d_pattern = R"(
+    graph(%a_quant, %packed_params, %r_scale, %r_zero_point) :
+      %res = quantized::conv2d(%a_quant, %packed_params, %r_scale, %r_zero_point)
+      return (%res) )";
+  std::string vk_quantized_conv2d_pattern = R"(
+    graph(%a_quant, %packed_params, %r_scale, %r_zero_point):
+      %output_min_max : None = prim::Constant()
+      %vk_packed_params : __torch__.torch.classes.vulkan.Conv2dPackedContext = vulkan_quantized_prepack::convert_qconv2d_context(
+        %packed_params, %output_min_max, %output_min_max)
+      %res = vulkan_prepack::run_qconv2d_context(
+        %a_quant, %r_scale, %r_zero_point, %vk_packed_params)
+      return (%res) )";
+
+  torch::jit::SubgraphRewriter quantized_conv2d_rewriter;
+  quantized_conv2d_rewriter.RegisterRewritePattern(
+      quantized_conv2d_pattern, vk_quantized_conv2d_pattern);
+  quantized_conv2d_rewriter.runOnGraph(graph);
+
+  // quantized::conv2d_relu
+  std::string quantized_conv2d_relu_pattern = R"(
+    graph(%a_quant, %packed_params, %r_scale, %r_zero_point) :
+      %res = quantized::conv2d_relu(%a_quant, %packed_params, %r_scale, %r_zero_point)
+      return (%res) )";
+  std::string vk_quantized_conv2d_relu_pattern = R"(
+    graph(%a_quant, %packed_params, %r_scale, %r_zero_point):
+      %output_min: float = prim::Constant[value=0.0]()
+      %output_max: None = prim::Constant()
+      %vk_packed_params : __torch__.torch.classes.vulkan.Conv2dPackedContext = vulkan_quantized_prepack::convert_qconv2d_context(
+        %packed_params, %output_min, %output_max)
+      %res = vulkan_prepack::run_qconv2d_context(
+        %a_quant, %r_scale, %r_zero_point, %vk_packed_params)
+      return (%res) )";
+
+  torch::jit::SubgraphRewriter quantized_conv2d_relu_rewriter;
+  quantized_conv2d_relu_rewriter.RegisterRewritePattern(
+      quantized_conv2d_relu_pattern, vk_quantized_conv2d_relu_pattern);
+  quantized_conv2d_relu_rewriter.runOnGraph(graph);
 }
 
 void insertPrePackedGruOp(std::shared_ptr<Graph>& graph) {
@@ -217,8 +353,10 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
 void vulkanInsertPrePackedOps(std::shared_ptr<Graph>& graph) {
   insertPrePackedLinearOp(graph);
   insertPrePackedConv2dOp(graph);
+  rewriteQuantizedOps(graph);
   insertPrePackedGruOp(graph);
   insertPrePackedLstmOp(graph);
+  insertPrePackedBatchNormOp(graph);
 }
 
 void vulkanInsertPrePackedOps(script::Module& module) {
@@ -245,42 +383,59 @@ void vulkanFoldPrePackingOps(script::Module& m) {
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::create_tconv2d_context")) ||
         (n->kind() ==
+         Symbol::fromQualString("vulkan_prepack::create_qconv2d_context")) ||
+        (n->kind() ==
+         Symbol::fromQualString(
+             "vulkan_quantized_prepack::convert_qconv2d_context")) ||
+        (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::create_linear_context")) ||
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::create_gru_context")) ||
         (n->kind() ==
-         Symbol::fromQualString("vulkan_prepack::create_lstm_context")));
+         Symbol::fromQualString("vulkan_prepack::create_lstm_context")) ||
+        (n->kind() ==
+         Symbol::fromQualString("vulkan_prepack::create_batchnorm_context")));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
 
-void vulkanRemoveMutation(script::Module& module) {
+static void vulkanRemoveMutation(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   RemoveTensorMutation(graph);
 }
 
-void vulkanRunCanonicalOptimizations(script::Module& module) {
+static void vulkanRunCanonicalOptimizations(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   for (const auto& method : module.get_methods()) {
-    auto graph = method.graph();
-    runOptimization(graph, false /* no loop unrolling */);
+    auto method_graph = method.graph();
+    runOptimization(method_graph, false /* no loop unrolling */);
   }
 }
 
 script::Module vulkanOptimizeForMobile(
     const script::Module& m,
+    const std::set<MobileOptimizerType>& optimization_blocklist,
     const std::vector<std::string>& preserved_methods) {
   auto cloned_module = m.clone();
   cloned_module.eval();
   cloned_module = FoldConvBatchNorm(cloned_module);
-  vulkanInsertPrePackedOps(cloned_module);
   cloned_module = freeze_module(cloned_module, preserved_methods);
+  vulkanInsertPrePackedOps(cloned_module);
   vulkanFusePrePackedConvWithClamp(cloned_module);
   vulkanFoldPrePackingOps(cloned_module);
   removeDropout(cloned_module);
   vulkanRemoveMutation(cloned_module);
+
+  if (!optimization_blocklist.count(
+          MobileOptimizerType::VULKAN_AUTOMATIC_GPU_TRANSFER)) {
+    transferInputOutputBackends(cloned_module);
+    cloned_module.register_attribute(
+        "requires_backend_transfers", BoolType::get(), false);
+  }
+
   // remove duplicated constants
   vulkanRunCanonicalOptimizations(cloned_module);
+  eliminateDeadCode(cloned_module);
 
   cloned_module.register_attribute(
       "optimized_for_vulkan", BoolType::get(), true);

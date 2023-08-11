@@ -1,6 +1,8 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <chrono>
 #include <list>
 #include <sstream>
+#include <utility>
 
 namespace c10 {
 
@@ -8,6 +10,12 @@ bool show_dispatch_trace() {
     static char const* temp = getenv("TORCH_SHOW_DISPATCH_TRACE");
     return temp != nullptr;
 }
+
+static thread_local int64_t dispatch_trace_nesting_value_;
+
+void dispatch_trace_nesting_incr() { ++dispatch_trace_nesting_value_; }
+void dispatch_trace_nesting_decr() { --dispatch_trace_nesting_value_; }
+int64_t dispatch_trace_nesting_value() { return dispatch_trace_nesting_value_; }
 
 namespace detail {
 
@@ -44,9 +52,14 @@ Dispatcher::Dispatcher()
 , operatorLookupTable_()
 , backendFallbackKernels_()
 , listeners_(std::make_unique<detail::RegistrationListenerList>())
-, mutex_() {}
+, cond_var_()
+, guard_(std::make_shared<Guard>())
+{}
 
-Dispatcher::~Dispatcher() = default;
+Dispatcher::~Dispatcher() {
+  std::lock_guard<std::mutex> lock(guard_->mutex);
+  guard_->alive.store(false);
+}
 
 C10_EXPORT Dispatcher& Dispatcher::realSingleton() {
   static Dispatcher _singleton;
@@ -61,6 +74,41 @@ c10::optional<OperatorHandle> Dispatcher::findOp(const OperatorName& overload_na
     }
     return found->second;
   });
+}
+
+// NB: If you add more waitFor* implementations, you also have to add
+// appropriate notify_all() calls to the relevant register calls
+
+void Dispatcher::waitForDef(const FunctionSchema& schema) {
+  using namespace std::chrono_literals;
+  std::unique_lock<std::mutex> lock(guard_->mutex);
+  bool r = cond_var_.wait_for(lock, 2s, [&]{
+    return findOp(schema.operator_name()) != c10::nullopt;
+  });
+  TORCH_INTERNAL_ASSERT(r,
+    "Expected main interpreter to define ", schema.operator_name(),
+    ", but this didn't happen within timeout.  Are you trying to load "
+    "different models in the same torchdeploy/multipy instance?  You "
+    "must warmup each interpreter identically, e.g., import all "
+    "the same dependencies.");
+}
+
+void Dispatcher::waitForImpl(const OperatorName& op_name, c10::optional<c10::DispatchKey> maybe_dk) {
+  using namespace std::chrono_literals;
+  std::unique_lock<std::mutex> lock(guard_->mutex);
+  auto dk = maybe_dk.value_or(DispatchKey::CompositeImplicitAutograd);
+  auto op = findOrRegisterName_(op_name);
+  bool r = cond_var_.wait_for(lock, 2s, [&]{
+    // NB: this is slightly unsound for overrides, but overrides are
+    // funny business anyway
+    return op.hasKernelForDispatchKey(dk);
+  });
+  TORCH_INTERNAL_ASSERT(r,
+    "Expected main interpreter to implement ", dk, " for ", op_name,
+    ", but this didn't happen within timeout.  Are you trying to load "
+    "different models in the same torchdeploy/multipy instance?  You "
+    "must warmup each interpreter identically, e.g., import all "
+    "the same dependencies.");
 }
 
 c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overload_name) {
@@ -127,7 +175,7 @@ OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
 OperatorHandle::~OperatorHandle() = default;
 
 RegistrationHandleRAII Dispatcher::registerLibrary(std::string ns, std::string debug) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(guard_->mutex);
   auto found = libraries_.find(ns);
   TORCH_CHECK(
     found == libraries_.end(),
@@ -141,20 +189,23 @@ RegistrationHandleRAII Dispatcher::registerLibrary(std::string ns, std::string d
     found->second, "; latest registration was ", debug
   );
   libraries_.emplace(ns, std::move(debug));
-  return RegistrationHandleRAII([this, ns] {
+  return RegistrationHandleRAII([guard = this->guard_, this, ns] {
+    std::lock_guard<std::mutex> lock(guard->mutex);
+    if (!guard->alive.load()) {
+      return;
+    }
     deregisterLibrary_(ns);
   });
 }
 
 void Dispatcher::deregisterLibrary_(const std::string& ns) {
   // we need a lock to avoid concurrent writes
-  std::lock_guard<std::mutex> lock(mutex_);
   libraries_.erase(ns);
 }
 
 RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::string debug, std::vector<at::Tag> tags) {
   // we need a lock to avoid concurrent writes
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(guard_->mutex);
 
   OperatorName op_name = schema.operator_name();
   auto op = findOrRegisterName_(op_name);
@@ -162,22 +213,28 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::strin
   TORCH_CHECK(op.operatorDef_->def_count == 0, "Tried to register an operator (", schema, ") with the same name and overload name multiple times.",
                                                     " Each overload's schema should only be registered with a single call to def().",
                                                     " Duplicate registration: ", debug, ". Original registration: ", op.operatorDef_->op.debug());
-  op.operatorDef_->op.registerSchema(std::move(schema), std::move(debug), tags);
+  op.operatorDef_->op.registerSchema(std::move(schema), std::move(debug), std::move(tags));
   listeners_->callOnOperatorRegistered(op);
 
   // NB: do not increment the counts until AFTER error checking
   ++op.operatorDef_->def_count;
   ++op.operatorDef_->def_and_impl_count;
 
-  return RegistrationHandleRAII([this, op, op_name] {
+  cond_var_.notify_all();
+
+  return RegistrationHandleRAII([guard = this->guard_, this, op, op_name] {
+    // we need a lock to avoid concurrent writes
+    std::lock_guard<std::mutex> lock(guard->mutex);
+    if (!guard->alive.load()) {
+      return;
+    }
     deregisterDef_(op, op_name);
   });
 }
 
-void Dispatcher::deregisterDef_(const OperatorHandle& op, const OperatorName& op_name) {
-  // we need a lock to avoid concurrent writes
-  std::lock_guard<std::mutex> lock(mutex_);
-
+void Dispatcher::deregisterDef_(
+    const OperatorHandle& op,
+    const OperatorName& op_name) {
   TORCH_INTERNAL_ASSERT(op.schema().operator_name() == op_name);
 
   // reduce def_count and actually deregister if no references left
@@ -205,7 +262,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
   std::unique_ptr<FunctionSchema> inferred_function_schema,
   std::string debug
 ) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(guard_->mutex);
 
   auto op = findOrRegisterName_(op_name);
 
@@ -213,7 +270,6 @@ RegistrationHandleRAII Dispatcher::registerImpl(
     *this,
     dispatch_key,
     std::move(kernel),
-    // NOLINTNEXTLINE(performance-move-const-arg)
     std::move(cpp_signature),
     std::move(inferred_function_schema),
     std::move(debug)
@@ -221,14 +277,18 @@ RegistrationHandleRAII Dispatcher::registerImpl(
 
   ++op.operatorDef_->def_and_impl_count;
 
-  return RegistrationHandleRAII([this, op, op_name, dispatch_key, handle] {
+  cond_var_.notify_all();
+
+  return RegistrationHandleRAII([guard = this->guard_, this, op, op_name, dispatch_key, handle] {
+    std::lock_guard<std::mutex> lock(guard->mutex);
+    if (!guard->alive.load()) {
+      return;
+    }
     deregisterImpl_(op, op_name, dispatch_key, handle);
   });
 }
 
 void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, impl::OperatorEntry::AnnotatedKernelContainerIterator handle) {
-  std::lock_guard<std::mutex> lock(mutex_);
-
   op.operatorDef_->op.deregisterKernel_(*this, dispatch_key, handle);
 
   TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
@@ -240,17 +300,24 @@ void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& o
 }
 
 RegistrationHandleRAII Dispatcher::registerName(OperatorName op_name) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(guard_->mutex);
   auto op = findOrRegisterName_(op_name);
   ++op.operatorDef_->def_and_impl_count;
+
   return RegistrationHandleRAII(
-      [this, op, op_name] { deregisterName_(op, op_name); });
+      [guard = this->guard_, this, op, op_name] {
+        std::lock_guard<std::mutex> lock(guard->mutex);
+        if (!guard->alive.load()) {
+          return;
+        }
+        deregisterName_(op, op_name);
+      }
+  );
 }
 
 void Dispatcher::deregisterName_(
     const OperatorHandle& op,
     const OperatorName& op_name) {
-  std::lock_guard<std::mutex> lock(mutex_);
   TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
   TORCH_INTERNAL_ASSERT(op.operatorDef_->def_and_impl_count > 0);
   --op.operatorDef_->def_and_impl_count;
@@ -270,7 +337,7 @@ void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) 
 }
 
 RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, KernelFunction kernel, std::string debug) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(guard_->mutex);
 
   auto idx = getDispatchTableIndexForDispatchKey(dispatchKey);
   TORCH_CHECK(idx >= 0 && static_cast<uint64_t>(idx) < backendFallbackKernels_.size(), "idx=", idx);
@@ -280,21 +347,23 @@ RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, Ker
     backendFallbackKernels_[idx].debug, ", new registration ", debug
   );
   // NB: inferred function schema is always nullptr for fallbacks, as fallbacks
-  // cannot be unobxed
+  // cannot be unboxed
   backendFallbackKernels_[idx] = impl::AnnotatedKernel(std::move(kernel), nullptr, std::move(debug));
 
   for (auto& op : operators_) {
     op.op.updateFallback(*this, dispatchKey);
   }
 
-  return RegistrationHandleRAII([this, dispatchKey] {
+  return RegistrationHandleRAII([guard = this->guard_, this, dispatchKey] {
+    std::lock_guard<std::mutex> lock(guard->mutex);
+    if (!guard->alive.load()) {
+      return;
+    }
     deregisterFallback_(dispatchKey);
   });
 }
 
 void Dispatcher::deregisterFallback_(DispatchKey dispatchKey) {
-  std::lock_guard<std::mutex> lock(mutex_);
-
   auto idx = getDispatchTableIndexForDispatchKey(dispatchKey);
   backendFallbackKernels_[idx] = {};
 
@@ -305,7 +374,7 @@ void Dispatcher::deregisterFallback_(DispatchKey dispatchKey) {
 
 
 RegistrationHandleRAII Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(guard_->mutex);
 
   for (auto iter = operators_.begin(); iter != operators_.end(); ++iter) {
     if (iter->def_count > 0) {
@@ -314,8 +383,11 @@ RegistrationHandleRAII Dispatcher::addRegistrationListener(std::unique_ptr<OpReg
   }
 
   auto removeListener = listeners_->addListener(std::move(listener));
-  return RegistrationHandleRAII([this, removeListener] {
-      std::lock_guard<std::mutex> lock(mutex_);
+  return RegistrationHandleRAII([guard = this->guard_, this, removeListener] {
+      std::lock_guard<std::mutex> lock(guard_->mutex);
+      if (!guard->alive.load()) {
+        return;
+      }
       removeListener();
   });
 }
@@ -354,7 +426,7 @@ std::vector<OperatorName> Dispatcher::getRegistrationsForDispatchKey(c10::option
 int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey) {
   int64_t seq_num = -1;
   // Setting sequence number in the Autograd case to associate
-  // the forward range with the coresponding Autograd's node
+  // the forward range with the corresponding Autograd's node
   if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
     seq_num = at::sequence_number::peek();
   }
@@ -367,7 +439,7 @@ void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction
 
 void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey) {
   // Setting sequence number in the Autograd case to associate
-  // the forward range with the coresponding Autograd's node
+  // the forward range with the corresponding Autograd's node
   guard.before(schema_ref, sequenceNumberForRunningRecordFunction(dispatchKey));
 }
 

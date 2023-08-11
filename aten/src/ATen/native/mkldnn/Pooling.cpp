@@ -181,13 +181,6 @@ Tensor mkldnn_avg_pool3d_backward(
   TORCH_CHECK(false, "mkldnn_avg_pool3d_backward: ATen not compiled with MKLDNN support");
 }
 
-Tensor& mkldnn_adaptive_avg_pool2d_backward_out(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& input) {
-  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_backward_out: ATen not compiled with MKLDNN support");
-}
-
 Tensor mkldnn_adaptive_avg_pool2d_backward(
     const Tensor& grad_output,
     const Tensor& input) {
@@ -518,7 +511,7 @@ Tensor mkldnn_adaptive_avg_pool2d(
       /*padding*/ {0, 0},
       /*dilation*/ {1, 1},
       /*ceil_mode*/ false,
-      /*algo*/ ideep::algorithm::pooling_avg);
+      /*algo*/ ideep::algorithm::pooling_avg_exclude_padding);
 }
 
 Tensor& mkldnn_adaptive_avg_pool2d_out_stub(const Tensor& input,
@@ -671,14 +664,7 @@ Tensor mkldnn_adaptive_avg_pool2d_backward(
       /*padding*/ {0, 0},
       /*dilation*/{1, 1},
       false,
-      /*algo*/ ideep::algorithm::pooling_avg);
-}
-
-Tensor& mkldnn_adaptive_avg_pool2d_backward_out(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& input) {
-  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_backward_out: in-place mkldnn operations are not supported yet");
+      /*algo*/ ideep::algorithm::pooling_avg_exclude_padding);
 }
 
 } // namespace native

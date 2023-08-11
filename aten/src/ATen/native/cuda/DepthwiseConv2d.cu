@@ -18,8 +18,7 @@
 #include <ATen/ops/_conv_depthwise2d_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 using at::cuda::detail::CUDA_NUM_THREADS;
 using at::cuda::detail::GET_BLOCKS;
@@ -236,7 +235,6 @@ __global__ void conv_depthwise2d_grad_weight_kernel(
       }
     }
   }
-  __syncthreads();
 
   // At this point each thread in the block has a local gradient, which we need to
   // accumulate prior to writing the global value
@@ -634,5 +632,4 @@ std::tuple<Tensor, Tensor> conv_depthwise2d_backward_cuda(
 
 REGISTER_CUDA_DISPATCH(conv_depthwise2d_backward_stub, &conv_depthwise2d_backward_cuda);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

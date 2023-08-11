@@ -6,13 +6,11 @@
 namespace at {
 namespace impl {
 
-struct TORCH_API PythonTorchFunctionTLS {
-  static void set_disabled(bool);
-  static bool is_disabled();
+enum TorchFunctionDisabledState { ENABLED, SUBCLASSES_DISABLED, ALL_DISABLED };
 
-  static void set_mode(std::shared_ptr<c10::SafePyObject>);
-  static const std::shared_ptr<c10::SafePyObject>& get_mode();
-  static void swap_mode(std::shared_ptr<c10::SafePyObject>&);
+struct TORCH_API PythonTorchFunctionTLS {
+  static void set_disabled_state(TorchFunctionDisabledState disabled_state_);
+  static TorchFunctionDisabledState get_disabled_state();
 
   static void push_onto_stack(std::shared_ptr<SafePyObject> mode);
   static const std::shared_ptr<SafePyObject> pop_stack();
@@ -24,18 +22,15 @@ struct TORCH_API PythonTorchFunctionTLS {
 
  private:
   // The mode TLS is split into
-  //   - disabled_, which says whether or not to disable all torch function
-  //   modes
-  //   - mode_, which is the C++ mode, that can only be the mode handling mode
-  //   or null
+  //   - disabled_state, which says which part of torch function are disabled
   //   - stack_, which is a vector of modes representing the stack of user
   //   defined modes
-  bool disabled_;
-  std::shared_ptr<c10::SafePyObject> mode_ = nullptr;
+  TorchFunctionDisabledState disabled_state_ =
+      TorchFunctionDisabledState::ENABLED;
   std::vector<std::shared_ptr<c10::SafePyObject>> stack_;
 };
 
-TORCH_API bool function_mode_enabled();
+TORCH_API bool torch_function_mode_enabled();
 
 } // namespace impl
 } // namespace at

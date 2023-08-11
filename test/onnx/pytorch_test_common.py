@@ -1,13 +1,20 @@
 # Owner(s): ["module: onnx"]
+from __future__ import annotations
 
 import functools
 import os
+import random
 import sys
 import unittest
 from typing import Optional
 
+import numpy as np
+import packaging.version
+
 import torch
 from torch.autograd import function
+from torch.onnx._internal import diagnostics
+from torch.testing._internal import common_utils
 
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(-1, pytorch_test_dir)
@@ -42,6 +49,12 @@ skipIfTravis = _skipper(lambda: os.getenv("TRAVIS"), "Skip In Travis")
 skipIfNoBFloat16Cuda = _skipper(
     lambda: not torch.cuda.is_bf16_supported(), "BFloat16 CUDA is not available"
 )
+
+skipIfQuantizationBackendQNNPack = _skipper(
+    lambda: torch.backends.quantized.engine == "qnnpack",
+    "Not compatible with QNNPack quantization backend",
+)
+
 
 # skips tests for all versions below min_opset_version.
 # if exporting the op is only supported after a specific version,
@@ -150,6 +163,112 @@ def skipScriptTest(skip_before_opset_version: Optional[int] = None, reason: str 
     return skip_dec
 
 
+# NOTE: This decorator is currently unused, but we may want to use it in the future when
+# we have more tests that are not supported in released ORT.
+def skip_min_ort_version(reason: str, version: str, dynamic_only: bool = False):
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if (
+                packaging.version.parse(self.ort_version).release
+                < packaging.version.parse(version).release
+            ):
+                if dynamic_only and not self.dynamic_shapes:
+                    return func(self, *args, **kwargs)
+
+                raise unittest.SkipTest(
+                    f"ONNX Runtime version: {version} is older than required version {version}. "
+                    f"Reason: {reason}."
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
+def skip_dynamic_fx_test(reason: str):
+    """Skip dynamic exporting test.
+
+    Args:
+        reason: The reason for skipping dynamic exporting test.
+
+    Returns:
+        A decorator for skipping dynamic exporting test.
+    """
+
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if self.dynamic_shapes:
+                raise unittest.SkipTest(
+                    f"Skip verify dynamic shapes test for FX. {reason}"
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
+def skip_op_level_debug_test(reason: str):
+    """Skip tests with op_level_debug enabled.
+
+    Args:
+        reason: The reason for skipping tests with op_level_debug enabled.
+
+    Returns:
+        A decorator for skipping tests with op_level_debug enabled.
+    """
+
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if self.op_level_debug:
+                raise unittest.SkipTest(
+                    f"Skip test with op_level_debug enabled. {reason}"
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
+def skip_in_ci(reason: str):
+    """Skip test in CI.
+
+    Args:
+        reason: The reason for skipping test in CI.
+
+    Returns:
+        A decorator for skipping test in CI.
+    """
+
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if os.getenv("CI"):
+                raise unittest.SkipTest(f"Skip test in CI. {reason}")
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
+def xfail(reason: str):
+    """Expect failure.
+
+    Args:
+        reason: The reason for expected failure.
+
+    Returns:
+        A decorator for expecting test failure.
+    """
+    return unittest.expectedFailure
+
+
 # skips tests for opset_versions listed in unsupported_opset_versions.
 # if the caffe2 test cannot be run for a specific version, add this wrapper
 # (for example, an op was modified but the change is not supported in caffe2)
@@ -188,3 +307,24 @@ def skipDtypeChecking(func):
 
 def flatten(x):
     return tuple(function._iter_filter(lambda o: isinstance(o, torch.Tensor))(x))
+
+
+def set_rng_seed(seed):
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+
+
+class ExportTestCase(common_utils.TestCase):
+    """Test case for ONNX export.
+
+    Any test case that tests functionalities under torch.onnx should inherit from this class.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # TODO(#88264): Flaky test failures after changing seed.
+        set_rng_seed(0)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(0)
+        diagnostics.engine.clear()

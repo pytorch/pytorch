@@ -92,7 +92,7 @@ def variadic_signature_matches(types, full_signature):
     return all(variadic_signature_matches_iter(types, full_signature))
 
 
-class Dispatcher(object):
+class Dispatcher:
     """ Dispatch methods based on type signature
     Use ``dispatch`` to add implementations
     Examples
@@ -121,6 +121,7 @@ class Dispatcher(object):
 
     def register(self, *types, **kwargs):
         """ register dispatcher with new implementation
+        >>> # xdoctest: +SKIP
         >>> f = Dispatcher('f')
         >>> @f.register(int)
         ... def inc(x):
@@ -172,6 +173,7 @@ class Dispatcher(object):
 
     def add(self, signature, func):
         """ Add new types/method pair to dispatcher
+        >>> # xdoctest: +SKIP
         >>> D = Dispatcher('add')
         >>> D.add((int, int), lambda x, y: x + y)
         >>> D.add((float, float), lambda x, y: x + y)
@@ -203,10 +205,9 @@ class Dispatcher(object):
             if not isinstance(typ, (type, list)):
                 str_sig = ', '.join(c.__name__ if isinstance(c, type)
                                     else str(c) for c in signature)
-                raise TypeError("Tried to dispatch on non-type: %s\n"
-                                "In signature: <%s>\n"
-                                "In function: %s" %
-                                (typ, str_sig, self.name))
+                raise TypeError("Tried to dispatch on non-type: {}\n"
+                                "In signature: <{}>\n"
+                                "In function: {}".format(typ, str_sig, self.name))
 
             # handle variadic signatures
             if isinstance(typ, list):
@@ -251,17 +252,16 @@ class Dispatcher(object):
         types = tuple([type(arg) for arg in args])
         try:
             func = self._cache[types]
-        except KeyError:
+        except KeyError as e:
             func = self.dispatch(*types)
             if not func:
                 raise NotImplementedError(
-                    'Could not find signature for %s: <%s>' %
-                    (self.name, str_signature(types)))
+                    f'Could not find signature for {self.name}: <{str_signature(types)}>') from e
             self._cache[types] = func
         try:
             return func(*args, **kwargs)
 
-        except MDNotImplementedError:
+        except MDNotImplementedError as e:
             funcs = self.dispatch_iter(*types)
             next(funcs)  # burn first
             for func in funcs:
@@ -272,15 +272,15 @@ class Dispatcher(object):
 
             raise NotImplementedError(
                 "Matching functions for "
-                "%s: <%s> found, but none completed successfully" % (
-                    self.name, str_signature(types),),)
+                "{}: <{}> found, but none completed successfully".format(
+                    self.name, str_signature(types),),) from e
 
     def __str__(self):
-        return "<dispatched %s>" % self.name
+        return f"<dispatched {self.name}>"
     __repr__ = __str__
 
     def dispatch(self, *types):
-        """Deterimine appropriate implementation for this type signature
+        """Determine appropriate implementation for this type signature
         This method is internal.  Users should call this object as a function.
         Implementation resolution occurs within the ``__call__`` method.
         >>> # xdoctest: +SKIP
@@ -318,7 +318,7 @@ class Dispatcher(object):
                     yield result
 
     def resolve(self, types):
-        """ Deterimine appropriate implementation for this type signature
+        """ Determine appropriate implementation for this type signature
         .. deprecated:: 0.4.4
             Use ``dispatch(*types)`` instead
         """
@@ -339,7 +339,7 @@ class Dispatcher(object):
 
     @property
     def __doc__(self):
-        docs = ["Multiply dispatched method: %s" % self.name]
+        docs = [f"Multiply dispatched method: {self.name}"]
 
         if self.doc:
             docs.append(self.doc)
@@ -348,7 +348,7 @@ class Dispatcher(object):
         for sig in self.ordering[::-1]:
             func = self.funcs[sig]
             if func.__doc__:
-                s = 'Inputs: <%s>\n' % str_signature(sig)
+                s = f'Inputs: <{str_signature(sig)}>\n'
                 s += '-' * len(s) + '\n'
                 s += func.__doc__.strip()
                 docs.append(s)
@@ -379,7 +379,7 @@ class Dispatcher(object):
 
 
 def source(func):
-    s = 'File: %s\n\n' % inspect.getsourcefile(func)
+    s = f'File: {inspect.getsourcefile(func)}\n\n'
     s = s + inspect.getsource(func)
     return s
 
@@ -406,8 +406,7 @@ class MethodDispatcher(Dispatcher):
         types = tuple([type(arg) for arg in args])
         func = self.dispatch(*types)
         if not func:
-            raise NotImplementedError('Could not find signature for %s: <%s>' %
-                                      (self.name, str_signature(types)))
+            raise NotImplementedError(f'Could not find signature for {self.name}: <{str_signature(types)}>')
         return func(self.obj, *args, **kwargs)
 
 
@@ -421,12 +420,12 @@ def str_signature(sig):
 
 def warning_text(name, amb):
     """ The text for ambiguity warnings """
-    text = "\nAmbiguities exist in dispatched function %s\n\n" % (name)
+    text = f"\nAmbiguities exist in dispatched function {name}\n\n"
     text += "The following signatures may result in ambiguous behavior:\n"
     for pair in amb:
         text += "\t" + \
                 ', '.join('[' + str_signature(s) + ']' for s in pair) + "\n"
     text += "\n\nConsider making the following additions:\n\n"
     text += '\n\n'.join(['@dispatch(' + str_signature(super_signature(s))
-                         + ')\ndef %s(...)' % name for s in amb])
+                         + f')\ndef {name}(...)' for s in amb])
     return text

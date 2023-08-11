@@ -20,7 +20,7 @@ This benchmark depends on PyTorch.
 
 For any environments you are interested in, pass the corresponding arguments to `python launcher.py`.
 
-```python launcher.py --world_size="10,20" --master_addr="127.0.0.1" --master_port="29501 --batch="True" --state_size="10-20-10" --nlayers="5" --out_features="10" --output_file_path="benchmark_report.json"```
+```python launcher.py --world-size="10,20" --master-addr="127.0.0.1" --master-port="29501 --batch="True" --state-size="10-20-10" --nlayers="5" --out-features="10" --output-file-path="benchmark_report.json"```
 
 Example Output:
 

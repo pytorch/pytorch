@@ -186,6 +186,12 @@ template <> inline std::string typeName<at::Half>(){
 template <> inline std::string typeName<at::BFloat16>(){
     return "at::BFloat16";
 }
+template <> inline std::string typeName<at::Float8_e5m2>(){
+    return "at::Float8_e5m2";
+}
+template <> inline std::string typeName<at::Float8_e4m3fn>(){
+    return "at::Float8_e4m3fn";
+}
 
 #define TYPE_NAME_CASE(ctype, scalartype)                    \
   case ScalarType::scalartype:  return typeName<ctype>();
@@ -197,5 +203,7 @@ inline std::string typeName(ScalarType t) {
     }
 }
 #undef TYPE_NAME_CASE
+
+TORCH_CUDA_CPP_API void initializeCudaContext();
 
 }}}  // namespace at::cuda::jit

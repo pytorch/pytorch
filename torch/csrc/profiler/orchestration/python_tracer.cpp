@@ -9,7 +9,7 @@ MakeFn make_fn;
 
 struct NoOpPythonTracer : public PythonTracerBase {
   NoOpPythonTracer() = default;
-  ~NoOpPythonTracer() = default;
+  ~NoOpPythonTracer() override = default;
 
   void stop() override {}
   std::vector<std::shared_ptr<Result>> getEvents(

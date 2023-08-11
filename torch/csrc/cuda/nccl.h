@@ -2,7 +2,6 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/Optional.h>
 
 #include <cstddef>
@@ -19,9 +18,7 @@
 #define HAS_NCCL_BF16_DATATYPE 0
 #endif
 
-namespace torch {
-namespace cuda {
-namespace nccl {
+namespace torch::cuda::nccl {
 
 /* The following are copied from <nccl.h> and redefined in torch::cuda::nccl
  * namespace */
@@ -47,7 +44,8 @@ enum class ncclResult {
   InternalError = 3,
   InvalidArgument = 4,
   InvalidUsage = 5,
-  NumResults = 6
+  NumResults = 6,
+  InProgress = 7
 };
 
 /* Reduction operation selector */
@@ -78,7 +76,10 @@ enum class ncclDataType {
 // manages group and lock lifetimes.
 struct AutoNcclGroup {
   AutoNcclGroup();
+  AutoNcclGroup(std::vector<ncclComm_t>& comms, bool comm_nonblocking);
   ~AutoNcclGroup() noexcept(false);
+  std::vector<ncclComm_t> comms_;
+  bool comm_nonblocking_;
 };
 
 // NOTE: this is exposed only so that python_nccl.cpp can some of these helpers.
@@ -213,6 +214,4 @@ TORCH_CUDA_CPP_API void recv(
     ncclComm_t comm,
     at::cuda::CUDAStream stream,
     int src);
-} // namespace nccl
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda::nccl

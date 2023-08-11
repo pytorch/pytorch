@@ -277,7 +277,7 @@ at::Tensor LazyNativeFunctions::empty_symint(
     c10::optional<bool> pin_memory,
     c10::optional<at::MemoryFormat> memory_format) {
   // TODO: support this directly
-  auto size = c10::asIntArrayRefSlow(sym_size);
+  auto size = C10_AS_INTARRAYREF_SLOW(sym_size);
   const auto device_type = torch::lazy::getBackend()->EagerFallbackDeviceType();
   at::TensorOptions options = at::TensorOptions()
                                   .device(c10::Device(device_type))
@@ -309,8 +309,8 @@ at::Tensor LazyNativeFunctions::empty_strided_symint(
   TORCH_LAZY_FN_COUNTER("lazy::");
   at::Tensor t =
       empty_symint(sym_size, dtype, layout, device, pin_memory, c10::nullopt);
-  auto size = c10::asIntArrayRefSlow(sym_size);
-  auto stride = c10::asIntArrayRefSlow(sym_stride);
+  auto size = C10_AS_INTARRAYREF_SLOW(sym_size);
+  auto stride = C10_AS_INTARRAYREF_SLOW(sym_stride);
   return t.as_strided(size, stride, /*storage_offset=*/0);
 }
 
@@ -470,7 +470,7 @@ at::Tensor LazyNativeFunctions::select_backward_symint(
     const at::Tensor& grad_output,
     c10::SymIntArrayRef input_sizes,
     int64_t dim,
-    int64_t index) {
+    c10::SymInt index) {
   return at::functionalization::functionalize_aten_op_symint<ATEN_OP(
       select_backward)>::call(grad_output, input_sizes, dim, index);
 }
@@ -522,6 +522,15 @@ at::Tensor& LazyNativeFunctions::logsumexp_out(
   return out;
 }
 
+at::Tensor LazyNativeFunctions::diag_embed(
+    const at::Tensor& self,
+    int64_t offset,
+    int64_t dim1,
+    int64_t dim2) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(
+      diag_embed)>::call(self, offset, dim1, dim2);
+}
+
 at::Tensor LazyNativeFunctions::diagonal_backward_symint(
     const at::Tensor& grad_output,
     at::SymIntArrayRef input_sizes,
@@ -557,8 +566,6 @@ std::tuple<Tensor, Tensor, Tensor> LazyNativeFunctions::native_group_norm(
   return at::native::math_group_norm(
       input, weight, bias, N, C, HxW, group, eps);
 }
-
-void InitializeAtenBindings() {}
 
 } // namespace lazy
 } // namespace torch

@@ -2,125 +2,95 @@ import functools
 import logging
 import math
 import numbers
+import typing
 
 import torch
 import torch._decomp as decomp
-from torch import Tensor
-from torch._decomp import get_decompositions
-from torch._prims_common import is_boolean_dtype, is_integer_dtype
+import torch.ao.quantization.fx._decomposed
+from torch._decomp import core_aten_decompositions, get_decompositions
+from torch._decomp.decompositions import pw_cast_for_opmath
+from torch._decomp.decompositions_for_rng import extra_random_decomps
 
 from . import config
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
-log = logging.getLogger(__name__)
+prims = torch.ops.prims
+quantized_decomposed = torch.ops.quantized_decomposed
 
-decompositions = get_decompositions(
+inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
-        aten.addcmul,
-        aten.avg_pool2d_backward,
-        aten.binary_cross_entropy_with_logits,
-        aten.clamp_max,
-        aten.clamp_min,
-        aten.col2im,
-        aten.cudnn_batch_norm,
-        aten.cudnn_batch_norm_backward,
-        aten.detach,
-        aten.dot,
-        aten.elu,
-        aten.elu_backward,
-        aten._embedding_bag,
-        aten.embedding_dense_backward,
-        aten.expand_as,
-        aten.eye,
+        aten.arange,
+        aten.bitwise_and_,
+        aten.bitwise_or_,
+        aten.clamp_min_,
+        aten.dist,
+        aten.empty_like,
         aten.flip,
-        aten._fused_moving_avg_obs_fq_helper,
         aten.gelu,
-        aten.gelu_backward,
-        aten.glu_backward,
-        aten.grid_sampler_2d,
-        aten.hardsigmoid,
-        aten.hardsigmoid_backward,
-        aten.hardswish,
-        aten.hardswish_backward,
         aten.hardtanh,
-        aten.hardtanh_backward,
-        aten.im2col,
-        aten.index_add,
-        aten.index_add_,
         aten.index_select,
-        aten.l1_loss,
+        aten.lcm,
         aten.leaky_relu,
-        aten.leaky_relu_backward,
         aten.linalg_vector_norm,
-        aten.logit,
-        aten.logit_backward,
         aten._log_softmax,
-        aten._log_softmax_backward_data,
-        aten.logsumexp.default,
         aten.max_pool2d_with_indices_backward,
-        aten.mse_loss,
-        aten.mse_loss_backward,
-        aten.mv,
-        aten.narrow,
+        aten._native_batch_norm_legit,
+        aten._native_batch_norm_legit_functional,
+        aten._native_batch_norm_legit_no_training,
         aten.native_batch_norm,
-        aten.native_batch_norm_backward,
-        aten.native_dropout_backward,
         aten.native_group_norm,
-        aten.native_group_norm_backward,
         aten.native_layer_norm,
-        aten.native_layer_norm_backward,
-        aten.new_empty,
-        aten.new_full,
-        aten.new_ones,
-        aten.nll_loss_backward,
-        aten.nll_loss_forward,
-        aten.norm,
-        aten.reflection_pad2d_backward,
-        aten._reshape_alias,
-        aten.select_backward,
-        aten.select_scatter,
-        aten.sigmoid_backward,
-        aten.silu_backward,
-        aten.slice_backward,
-        aten.sgn,
-        aten.std_mean.correction,
         aten._softmax,
-        aten._softmax_backward_data,
-        aten.stack,
-        aten.t,
-        aten.tanh_backward,
-        aten.threshold_backward,
-        aten.transpose.int,
-        aten.tril.default,
+        aten.sin_,
+        aten.sqrt_,
+        aten.std,
+        aten.std_mean,
+        aten._to_copy,
+        aten.tril_indices,
+        aten.triu_indices,
+        aten.unsafe_split,
         aten.upsample_bilinear2d.vec,
-        aten.upsample_nearest2d_backward,
-        aten.softplus,
-        aten.softplus_backward,
     ]
 )
+decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 
 
 def register_decomposition(ops):
     for op in [ops] if callable(ops) else ops:
         if op in decompositions:
-            log.warning(f"duplicate decomp: {ops}")
-    return decomp.register_decomposition(ops, decompositions, disable_meta=True)
+            log.warning("duplicate decomp: %s", ops)
+    return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition(aten._unsafe_view.default)
+def _unsafe_view(self, size):
+    # this makes pattern matching easier
+    return self.view(size)
+
+
+# TODO: for now, inductor doesn't handle asserts
+# because the condition is symbool -> tensor in the graph.
+@register_decomposition([aten._assert_async.msg])
+def assert_async_msg_decomp(tensor, msg):
+    return
+
+
+# Following `assert_async_msg_decomp` and implement as non-op.
+@register_decomposition([aten._functional_assert_async.msg])
+def functional_assert_async_msg_decomp(tensor, msg):
+    return
 
 
 @register_decomposition([aten.clamp])
+@pw_cast_for_opmath
 def clamp(x, min=None, max=None):
     if min is not None:
-        x = torch.maximum(x, torch.tensor(min, dtype=x.dtype, device=x.device))
+        x = x.clamp_min(min)
     if max is not None:
-        x = torch.minimum(x, torch.tensor(max, dtype=x.dtype, device=x.device))
+        x = x.clamp_max(max)
     return x
-
-
-@register_decomposition([aten.tanh])
-def tanh(x):
-    return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
 
 
 # TorchInductor-only decomposition. It should not be taken to core.
@@ -130,22 +100,49 @@ def floordiv(a, b):
     return aten.div.Tensor_mode(a, b, rounding_mode="floor")
 
 
-@register_decomposition([aten.addmm])
-def addmm(input, mat1, mat2, *, beta=1, alpha=1):
-    if config.triton.mm != "aten":
-        out = torch.mm(mat1, mat2)
-        if not isinstance(alpha, numbers.Number) or alpha != 1:
-            out = out * alpha
-        if not isinstance(beta, numbers.Number) or beta != 1:
-            input = input * beta
-        return input + out
-    else:
-        return NotImplemented  # go directly to lowering
+# Not really sure how to put this into the main library.  PrimTorch wants
+# empty_permuted to go to the prim, and typically users don't really want
+# to decompose to empty_strided (but inductor is OK with it, because we are
+# cool with strides and everything goes to empty_strided)
+@register_decomposition([aten.empty_permuted.default])
+def empty_permuted(size, physical_layout, **kwargs):
+    perm = [0] * len(size)
+    for p, l in enumerate(physical_layout):
+        perm[l] = p
+    return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
 
 
-@register_decomposition([aten.rsqrt])
-def rsqrt(x):
-    return torch.reciprocal(torch.sqrt(x))
+@register_decomposition([aten.convolution_backward])
+def convolution_backward(
+    grad_output,
+    input,
+    weight,
+    bias_sizes,
+    stride,
+    padding,
+    dilation,
+    transposed,
+    output_padding,
+    groups,
+    output_mask,
+):
+    if not output_mask[2] or grad_output.device.type != "cuda":
+        return NotImplemented
+    grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
+    grad_inp, grad_weight, _ = aten.convolution_backward(
+        grad_output,
+        input,
+        weight,
+        bias_sizes,
+        stride,
+        padding,
+        dilation,
+        transposed,
+        output_padding,
+        groups,
+        [output_mask[0], output_mask[1], False],
+    )
+    return (grad_inp, grad_weight, grad_bias)
 
 
 @register_decomposition([aten.log2])
@@ -159,108 +156,14 @@ def round_dec(x, decimals=0):
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
 
 
-@register_decomposition([aten.special_erf, aten.erf])
-def special_erf(x):
-    # TODO(jansel): this might be crazy slow.  Triton doesn't have the
-    #               cuda ::erf() builtin.  I've made a feature request for this,
-    #               so it may be coming soon.
-
-    # from https://www.johndcook.com/blog/2009/01/19/stand-alone-error-function-erf/
-    a1 = 0.254829592
-    a2 = -0.284496736
-    a3 = 1.421413741
-    a4 = -1.453152027
-    a5 = 1.061405429
-    p = 0.3275911
-
-    sign = torch.sign(x)
-    x = torch.abs(x)
-
-    # A & S 7.1.26
-    t = 1.0 / (1.0 + p * x)
-    y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * torch.exp(-x * x)
-
-    return sign * y
-
-
-@register_decomposition([aten.rsub.Tensor, aten.rsub.Scalar])
-def rsub(a, b):
-    if isinstance(b, numbers.Number):
-        b = torch.tensor(b, dtype=a.dtype, device=a.device)
-    return b - a
-
-
-@register_decomposition([aten.masked_fill])
-def masked_fill(value, mask, other):
-    if isinstance(other, numbers.Number):
-        other = torch.tensor(other, dtype=value.dtype, device=value.device)
-    assert other.numel() == 1 and other.ndim == 0
-    if other.device != value.device and other.numel() == 1:
-        other = other.to(value.device)
-    if other.dtype != value.dtype:
-        # TODO: error out on improper complex conversions
-        other = other.to(value.dtype)
-    return torch.where(mask, other, value)
-
-
-@register_decomposition([aten.nan_to_num])
-def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
-    if is_boolean_dtype(x.dtype) or is_integer_dtype(x.dtype):
-        return x
-
-    if nan is None:
-        nan = 0.0
-    if posinf is None:
-        posinf = torch.finfo(x.dtype).max
-    if neginf is None:
-        neginf = torch.finfo(x.dtype).min
-    nan, posinf, neginf = (
-        torch.tensor(v, dtype=x.dtype, device=x.device) for v in (nan, posinf, neginf)
-    )
-    x = torch.where(x != x, nan, x)
-    x = torch.where(x == float("inf"), posinf, x)
-    x = torch.where(x == float("-inf"), neginf, x)
-    return x
-
-
 @register_decomposition([aten.all.default])
 def all(input):
     return torch.logical_not(torch.any(torch.logical_not(input)))
 
 
 @register_decomposition([aten.all.dim])
-def all_dim(input, dim, keeepdim=False):
-    return torch.logical_not(torch.any(torch.logical_not(input), dim, keeepdim))
-
-
-@register_decomposition(aten.hardswish_)
-def hardswish_(x):
-    return x.copy_(aten.hardswish(x))
-
-
-@register_decomposition(aten.hardtanh_)
-def hardtanh_(x, min_val=-1, max_val=1):
-    return x.copy_(aten.hardtanh(x, min_val, max_val))
-
-
-@register_decomposition(aten.leaky_relu_)
-def leaky_relu_(x, negative_slope=0.01):
-    return x.copy_(aten.leaky_relu(x, negative_slope))
-
-
-@register_decomposition(aten.silu_)
-def silu_(x):
-    return x.copy_(aten.silu(x))
-
-
-@register_decomposition(aten.masked_fill_)
-def masked_fill_(x, mask, value):
-    return x.copy_(aten.masked_fill(x, mask, value))
-
-
-@register_decomposition([aten.log1p])
-def log1p(x):
-    return torch.log(x + 1)
+def all_dim(input, dim, keepdim=False):
+    return torch.logical_not(torch.any(torch.logical_not(input), dim, keepdim))
 
 
 @register_decomposition([aten.baddbmm])
@@ -268,9 +171,34 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     result = torch.bmm(batch1, batch2)
     if not isinstance(alpha, numbers.Number) or alpha != 1:
         result = result * alpha
+    if beta == 0:
+        return result
     if not isinstance(beta, numbers.Number) or beta != 1:
         self = self * beta
     return self + result
+
+
+@register_decomposition([aten.cat.default])
+def cat(tensors, dim=0):
+    if len(tensors) == 1:
+        return tensors[0].clone()
+    return NotImplemented
+
+
+@register_decomposition([aten.angle])
+def angle(x):
+    if x.is_complex():
+        return torch.where(
+            torch.isnan(x.real), float("nan"), torch.atan2(x.imag, x.real)
+        )
+    else:
+        # when x is real number
+        #   if x >= 0, return 0
+        #   if x < 0, return pi
+        #   if x is nan, return nan
+        ret = torch.where(x < 0, math.pi, 0.0)
+        nan = torch.where(torch.isnan(x), float("nan"), 0.0)
+        return ret + nan
 
 
 @register_decomposition([aten.conj_physical])
@@ -284,37 +212,225 @@ def lift(self):
     return self
 
 
-@register_decomposition([aten.fill.Scalar])
-def fill_scalar(self, value):
-    return torch.full_like(self, value)
-
-
-@register_decomposition([aten.fill.Tensor])
-def fill_tensor(self, value: Tensor):
-    assert value.dim() == 0, "aten.fill.Tensor only supports 0-dimension value tensor"
-    return torch.full_like(self, value.item())
-
-
 @register_decomposition([aten.bernoulli.default])
 def bernoulli(self, *, generator=None):
     assert generator is None
     return torch.rand_like(self, dtype=torch.float32) < self
 
 
-"""
-Some decomps result in differences from eager related to randomness.
-We put these decomps in a separate table `extra_random_decomps` to allow
-turning them on and off via `config.fallback_random`.
-"""
-extra_random_decomps = get_decompositions([aten.native_dropout])
-register_extra_random_decomp = functools.partial(
-    decomp.register_decomposition, registry=extra_random_decomps, disable_meta=True
-)
+@register_decomposition([aten.fmin, prims.fmin])
+def fmin(self, other):
+    return torch.where(torch.isnan(other) | (other > self), self, other)
 
 
-@register_extra_random_decomp([aten.bernoulli_])
-def bernoulli_(self, p=0.5):
-    return self.copy_(torch.rand_like(self) < p)
+@register_decomposition([aten.fmax, prims.fmax])
+def fmax(self, other):
+    return torch.where(torch.isnan(other) | (other < self), self, other)
+
+
+@register_decomposition([aten.narrow_copy])
+def narrow_copy(self, dim, start, length):
+    return torch.narrow(self, dim, start, length).clone()
+
+
+@register_decomposition([aten.expand_copy])
+def expand_copy(self, size, *, implicit=False):
+    return aten.expand(self, size, implicit=implicit).clone()
+
+
+@register_decomposition([aten.view_copy.default])
+def view_copy_default(self, size):
+    return aten.view(self, size).clone()
+
+
+@register_decomposition([aten.view_copy.dtype])
+def view_copy_dtype(self, dtype):
+    return self.to(dtype).clone()
+
+
+@register_decomposition(aten.rand_like)
+def rand_like(self, *, dtype=None, device=None, **kwargs):
+    return torch.rand(
+        [*self.size()],
+        dtype=dtype or self.dtype,
+        device=device or self.device,
+        **kwargs,
+    )
+
+
+@register_decomposition(aten.randn_like)
+def randn_like(self, *, dtype=None, device=None, **kwargs):
+    return torch.randn(
+        [*self.size()],
+        dtype=dtype or self.dtype,
+        device=device or self.device,
+        **kwargs,
+    )
+
+
+@register_decomposition(aten.full_like)
+def full_like(
+    self,
+    fill_value,
+    *,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=False,
+    requires_grad=False,
+    memory_format=torch.preserve_format,
+):
+    return torch.full(
+        [*self.size()],
+        fill_value,
+        dtype=dtype or self.dtype,
+        layout=layout or self.layout,
+        device=device or self.device,
+        requires_grad=requires_grad or self.requires_grad,
+    )
+
+
+@register_decomposition(aten.randint_like.default)
+def randint_like(self, high, *, dtype=None, device=None, **kwargs):
+    return aten.randint.low(
+        0,
+        high,
+        [*self.size()],
+        dtype=dtype or self.dtype,
+        device=device or self.device,
+        **kwargs,
+    )
+
+
+@register_decomposition(aten.randint_like.low_dtype)
+def randint_like_low(self, low, high, *, dtype=None, device=None, **kwargs):
+    return aten.randint.low(
+        low,
+        high,
+        [*self.size()],
+        dtype=dtype or self.dtype,
+        device=device or self.device,
+        **kwargs,
+    )
+
+
+@register_decomposition(aten.randint.default)
+def randint(high, size, **kwargs):
+    return aten.randint.low(0, high, size, **kwargs)
+
+
+# The difference between quantize_per_tensor.default and quantize_per_tensor.tensor is
+# scale and zero_point is scalar or scalar tensor
+@register_decomposition(quantized_decomposed.quantize_per_tensor.default)
+def quantize_per_tensor_default_decomp_impl(
+    input: torch.Tensor,
+    scale: float,
+    zero_point: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    inv_scale = 1.0 / scale
+    return torch.clamp(
+        torch.round(input * inv_scale) + zero_point, quant_min, quant_max
+    ).to(dtype)
+
+
+# The difference between dequantize_per_tensor.default and dequantize_per_tensor.tensor is
+# scale and zero_point is scalar or scalar tensor
+@register_decomposition(quantized_decomposed.dequantize_per_tensor.default)
+def dequantize_per_tensor_default_decomp_impl(
+    input: torch.Tensor,
+    scale: float,
+    zero_point: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    return (input.to(torch.float32) - zero_point) * scale
+
+
+@register_decomposition(quantized_decomposed.quantize_per_tensor.tensor)
+def quantize_per_tensor_tensor_decomp_impl(
+    input: torch.Tensor,
+    scale: torch.Tensor,
+    zero_point: torch.Tensor,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    inv_scale = 1.0 / scale
+    return torch.clamp(
+        torch.round(input * inv_scale) + zero_point, quant_min, quant_max
+    ).to(dtype)
+
+
+@register_decomposition(quantized_decomposed.dequantize_per_tensor.tensor)
+def dequantize_per_tensor_tensor_decomp_impl(
+    input: torch.Tensor,
+    scale: torch.Tensor,
+    zero_point: torch.Tensor,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    return (input.to(torch.float32) - zero_point) * scale
+
+
+@register_decomposition(aten._foreach_addcmul.Scalar)
+def _foreach_addcmul_scalar(self, left_tensors, right_tensors, scalar=1):
+    return aten._foreach_add.List(
+        self, aten._foreach_mul.List(left_tensors, right_tensors), alpha=scalar
+    )
+
+
+@register_decomposition(aten._foreach_addcdiv.Scalar)
+def _foreach_addcdiv_scalar(self, left_tensors, right_tensors, scalar=1):
+    return aten._foreach_add.List(
+        self, aten._foreach_div.List(left_tensors, right_tensors), alpha=scalar
+    )
+
+
+@register_decomposition(aten._foreach_lerp.Scalar)
+def _foreach_lerp_scalar(start_tensors, end_tensors, weight):
+    return aten._foreach_add.List(
+        start_tensors,
+        aten._foreach_mul.Scalar(
+            aten._foreach_sub.List(end_tensors, start_tensors), weight
+        ),
+    )
+
+
+@aten.miopen_batch_norm.default.py_impl(torch._C.DispatchKey.Autograd)
+@register_decomposition(aten.miopen_batch_norm)
+def miopen_batch_norm(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    bias: typing.Optional[torch.Tensor],
+    running_mean: typing.Optional[torch.Tensor],
+    running_var: typing.Optional[torch.Tensor],
+    training: bool,
+    exponential_average_factor: float,
+    epsilon: float,
+):
+    a, b, c = aten.native_batch_norm(
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        training,
+        exponential_average_factor,
+        epsilon,
+    )
+
+    if training:
+        return (a, b, c)
+    return (
+        a,
+        weight.new_zeros((0,)),
+        weight.new_zeros((0,)),
+    )
 
 
 @functools.lru_cache(None)

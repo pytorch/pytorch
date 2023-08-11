@@ -4,6 +4,7 @@
 #include <ATen/cuda/detail/PhiloxCudaStateRaw.cuh>
 #include <ATen/Context.h>
 #include <limits>
+#include <atomic>
 
 namespace at {
 /**
@@ -94,6 +95,8 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   // CUDAGeneratorImpl methods
   std::shared_ptr<CUDAGeneratorImpl> clone() const;
   void set_current_seed(uint64_t seed) override;
+  void set_offset(uint64_t offset) override;
+  uint64_t get_offset() const override;
   uint64_t current_seed() const override;
   uint64_t seed() override;
   void set_state(const c10::TensorImpl& new_state) override;
@@ -104,11 +107,15 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   uint64_t capture_epilogue();
   PhiloxCudaState philox_cuda_state(uint64_t increment);
 
+  bool reset_rnn_state() {
+    return !no_reset_rnn_state_.test_and_set();
+  }
+
   // Temporarily accommodates call sites that use philox_engine_inputs.
   // Allows incremental refactor of call sites to use philox_cuda_state.
   std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment);
 
-  static DeviceType device_type();
+  static c10::DeviceType device_type();
 
 private:
   CUDAGeneratorImpl* clone_impl() const override;
@@ -118,15 +125,14 @@ private:
   int64_t* offset_extragraph_{};
   uint32_t offset_intragraph_ = 0;
   bool graph_expects_this_gen_ = false;
+  std::atomic_flag no_reset_rnn_state_;
 };
 
-namespace cuda {
-namespace detail {
+namespace cuda::detail {
 
 TORCH_CUDA_CPP_API const Generator& getDefaultCUDAGenerator(
     DeviceIndex device_index = -1);
 TORCH_CUDA_CPP_API Generator createCUDAGenerator(DeviceIndex device_index = -1);
 
-} // namespace detail
-} // namespace cuda
+} // namespace cuda::detail
 } // namespace at

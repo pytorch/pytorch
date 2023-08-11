@@ -67,7 +67,8 @@ from torchgen.model import (
     Type,
     Variant,
 )
-from torchgen.utils import FileManager, split_name_params, YamlLoader
+from torchgen.utils import FileManager, split_name_params
+from torchgen.yaml_utils import YamlLoader
 
 from .gen_trace_type import should_trace
 
@@ -88,6 +89,10 @@ _SKIP_PYTHON_BINDINGS = [
     "is_sparse_csr",
     "size",
     "stride",
+    "sym_size",
+    "sym_stride",
+    "sym_storage_offset",
+    "sym_numel",
     ".*_backward",
     ".*_backward_(out|input|weight|bias)",
     ".*_forward",
@@ -117,13 +122,15 @@ _SKIP_PYTHON_BINDINGS = [
     "_cholesky.*",
     "_triangular_solve.*",
     "_qr.*",
-    "_symeig.*",
     "_svd.*",
     "slice",
     "item",
     "_local_scalar_dense",
     "to",
     "_to_copy",
+    "_to_copy_out",
+    "_reshape_copy",
+    "_reshape_copy_out",
     "copy_sparse_to_sparse_",
     "copy_",
     "numpy_T",
@@ -152,15 +159,16 @@ _SKIP_PYTHON_BINDINGS = [
     "fill.Scalar",  # only used by the functionalization pass
     "lift.*",
     "normal_functional",  # only used by the functionalization pas
-    "_nested_tensor_strides",  # don't want to expose this to python
-    "_nested_tensor_offsets",  # don't want to expose this to python
     "_nested_view_from_buffer",  # View only version of _nested_from_buffer. This will force users to only use the "safe" version.
     "_nested_view_from_buffer_copy",
+    "_nested_view_from_buffer_copy_out",
+    "nbytes",
+    "itemsize",
 ]
 
-SKIP_PYTHON_BINDINGS = list(
-    map(lambda pattern: re.compile(rf"^{pattern}$"), _SKIP_PYTHON_BINDINGS)
-)
+SKIP_PYTHON_BINDINGS = [
+    re.compile(rf"^{pattern}$") for pattern in _SKIP_PYTHON_BINDINGS
+]
 
 # These function signatures are not exposed to Python. Note that this signature
 # list does not support regex.
@@ -178,9 +186,14 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
 
 @with_native_function
 def should_generate_py_binding(f: NativeFunction) -> bool:
-    # So far, all NativeFunctions that are entirely code-generated do not get python bindings.
-    if "generated" in f.tags:
+    # NativeFunctions that are entirely code-generated should not get python bindings
+    # because these codegen implementations are often inefficient. A handful of
+    # view_copy style ops were exposed accidentally when they were handwritten and now
+    # that we are moving them to codegen for bc reasons we need to keep them exposed in
+    # python.
+    if "generated" in f.tags and "view_copy" not in f.tags:
         return False
+
     name = cpp.name(f.func)
     for skip_regex in SKIP_PYTHON_BINDINGS:
         if skip_regex.match(name):
@@ -190,7 +203,6 @@ def should_generate_py_binding(f: NativeFunction) -> bool:
     for pattern in SKIP_PYTHON_BINDINGS_SIGNATURES:
         if pattern == signature:
             return False
-
     return True
 
 
@@ -353,7 +365,9 @@ def gen(
     def gen_tags_enum() -> Dict[str, str]:
         return {
             "enum_of_valid_tags": (
-                "".join([f'\n.value("{tag}", at::Tag::{tag})' for tag in valid_tags])
+                "".join(
+                    [f'\n.value("{tag}", at::Tag::{tag})' for tag in sorted(valid_tags)]
+                )
             )
         }
 
@@ -539,7 +553,7 @@ def load_deprecated_signatures(
     # find matching original signatures for each deprecated signature
     results: List[PythonSignatureNativeFunctionPair] = []
 
-    with open(deprecated_yaml_path, "r") as f:
+    with open(deprecated_yaml_path) as f:
         deprecated_defs = yaml.load(f, Loader=YamlLoader)
 
     for deprecated in deprecated_defs:
@@ -859,7 +873,7 @@ def method_impl(
         name=name,
         pycname=pycname,
         method_header=method_header,
-        max_args=max(map(lambda o: o.signature.arguments_count(), overloads)),
+        max_args=max(o.signature.arguments_count() for o in overloads),
         signatures=signatures,
         traceable=traceable,
         check_has_torch_function=gen_has_torch_function_check(
@@ -1004,24 +1018,20 @@ def method_def(
     """
     pycname = get_pycname(name)
 
+    if name.dunder_method:
+        # PyMethodDef entry for binary op, throws not implemented error
+        pycname = f"TypeError_to_NotImplemented_<{pycname}>"
+
     if is_noarg(overloads):
-        pyfunc_cast = ""
         flags = "METH_NOARGS" if method else "METH_VARARGS | METH_KEYWORDS"
     else:
-        pyfunc_cast = "castPyCFunctionWithKeywords"
+        pycname = f"castPyCFunctionWithKeywords({pycname})"
         flags = "METH_VARARGS | METH_KEYWORDS"
 
     if module == "torch":
         flags += " | METH_STATIC"
 
-    if name.dunder_method:
-        # PyMethodDef entry for binary op, throws not implemented error
-        return f"""\
-{{"{name}", {pyfunc_cast}(TypeError_to_NotImplemented_<{pycname}>), {flags}, NULL}},"""
-    else:
-        # PyMethodDef entry
-        return f"""\
-{{"{name}", {pyfunc_cast}({pycname}), {flags}, NULL}},"""
+    return f'{{"{name}", {pycname}, {flags}, NULL}},'
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -1211,7 +1221,7 @@ def sort_overloads(
                 del larger_than[j]
                 sorted_ids.append(j)
 
-    return list(map(lambda x: grouped_overloads[x], sorted_ids))
+    return [grouped_overloads[x] for x in sorted_ids]
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -1245,10 +1255,7 @@ def emit_single_dispatch(
         # dispatch lambda signature
         name = cpp.name(f.func)
         lambda_formals = ", ".join(
-            map(
-                lambda a: f"{a.type_str} {a.name}",
-                dispatch_lambda_args(ps, f, symint=symint),
-            )
+            f"{a.type_str} {a.name}" for a in dispatch_lambda_args(ps, f, symint=symint)
         )
         lambda_return = dispatch_lambda_return_str(f)
 

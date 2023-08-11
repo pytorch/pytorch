@@ -30,11 +30,14 @@
 #define __ubsan_ignore_undefined__ __attribute__((no_sanitize("undefined")))
 #define __ubsan_ignore_signed_int_overflow__ \
   __attribute__((no_sanitize("signed-integer-overflow")))
+#define __ubsan_ignore_pointer_overflow__ \
+  __attribute__((no_sanitize("pointer-overflow")))
 #define __ubsan_ignore_function__ __attribute__((no_sanitize("function")))
 #else
 #define __ubsan_ignore_float_divide_by_zero__
 #define __ubsan_ignore_undefined__
 #define __ubsan_ignore_signed_int_overflow__
+#define __ubsan_ignore_pointer_overflow__
 #define __ubsan_ignore_function__
 #endif
 
@@ -133,6 +136,10 @@
 #else
 #define C10_UNUSED __attribute__((__unused__))
 #endif //_MSC_VER
+
+#if !defined(__has_attribute)
+#define __has_attribute(x) 0
+#endif
 
 // Direct port of LLVM_ATTRIBUTE_USED.
 #if __has_attribute(used)
@@ -255,13 +262,13 @@ using namespace c10::hip;
 // constants from
 // (https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#features-and-technical-specifications)
 // The maximum number of threads per multiprocessor is 1024 for Turing
-// architecture (7.5), 1536 for Geforce Ampere (8.6), and 2048 for all other
-// architectures. You'll get warnings if you exceed these constants. Hence, the
-// following macros adjust the input values from the user to resolve potential
-// warnings.
+// architecture (7.5), 1536 for Geforce Ampere (8.6)/Jetson Orin (8.7), and
+// 2048 for all other architectures. You'll get warnings if you exceed these
+// constants. Hence, the following macros adjust the input values from the user
+// to resolve potential warnings.
 #if __CUDA_ARCH__ == 750
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
-#elif __CUDA_ARCH__ == 860
+#elif __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870 || __CUDA_ARCH__ == 890
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1536;
 #else
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
@@ -326,9 +333,8 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
-#if defined(__ANDROID__) || defined(__APPLE__) ||  \
-    (defined(USE_ROCM) && ROCM_VERSION < 40100) || \
-    (defined(USE_ROCM) && defined(ROCM_DISABLE_GPU_ASSERTS))
+#if defined(__ANDROID__) || defined(__APPLE__) || \
+    (defined(USE_ROCM) && ROCM_VERSION < 40100)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #define SYCL_KERNEL_ASSERT(cond)
@@ -347,8 +353,8 @@ __host__ __device__
 #endif // __CUDA_ARCH__
     void
     _wassert(wchar_t const* _Message, wchar_t const* _File, unsigned _Line);
-}
 #endif // __SYCL_DEVICE_ONLY__
+}
 #endif // NDEBUG
 #define CUDA_KERNEL_ASSERT(cond)                                                                 \
   if (C10_UNLIKELY(!(cond))) {                                                                   \
@@ -368,7 +374,9 @@ extern SYCL_EXTERNAL void __assert_fail(
     unsigned int line,
     const char* func);
 #else // __SYCL_DEVICE_ONLY__
-#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)))
+#if (                                                                       \
+    defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)) && \
+    !defined(TORCH_DISABLE_GPU_ASSERTS))
 // CUDA supports __assert_fail function which are common for both device
 // and host side code.
 __host__ __device__
@@ -383,10 +391,10 @@ __host__ __device__
         const char* assertion,
         const char* file,
         unsigned int line,
-        const char* function) throw() __attribute__((__noreturn__));
+        const char* function) noexcept __attribute__((__noreturn__));
 
 #if (defined(__HIP_ARCH__) || defined(__HIP__)) && \
-    !defined(ROCM_DISABLE_GPU_ASSERTS)
+    !defined(TORCH_DISABLE_GPU_ASSERTS)
 // ROCm supports __assert_fail only as a device side function.
 __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
     const char* assertion,
@@ -433,19 +441,10 @@ __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
 // Warning: __has_trivial_copy for GCC may not always detect the non-POD
 // correctly. For example, T = std::unique_ptr may evaluate to true and be
 // treated as POD. This can cause unexpected behavior.
-#if defined(__GNUG__) && __GNUC__ < 5
+#if defined(__GNUG__) && __GNUC__ < 5 && !defined(__clang__)
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
-#endif
-
-#if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
-    __GNUC__ < 6
-#define CONSTEXPR_EXCEPT_GCC5
-#define IS_NOT_GCC5_CONSTEXPR 0
-#else
-#define CONSTEXPR_EXCEPT_GCC5 constexpr
-#define IS_NOT_GCC5_CONSTEXPR 1
 #endif
 
 #if defined(__CUDA_ARCH__)
@@ -520,9 +519,10 @@ __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
 #endif
 #endif // HAS_DEMANGLE
 
-#ifdef __clang__
 #define _C10_PRAGMA__(string) _Pragma(#string)
 #define _C10_PRAGMA_(string) _C10_PRAGMA__(string)
+
+#ifdef __clang__
 #define C10_CLANG_DIAGNOSTIC_PUSH() _Pragma("clang diagnostic push")
 #define C10_CLANG_DIAGNOSTIC_POP() _Pragma("clang diagnostic pop")
 #define C10_CLANG_DIAGNOSTIC_IGNORE(flag) \
@@ -533,6 +533,31 @@ __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
 #define C10_CLANG_DIAGNOSTIC_POP()
 #define C10_CLANG_DIAGNOSTIC_IGNORE(flag)
 #define C10_CLANG_HAS_WARNING(flag) 0
+#endif
+
+#ifdef __clang__
+
+#define C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(warning)         \
+  _C10_PRAGMA_(clang diagnostic push)                               \
+  _C10_PRAGMA_(clang diagnostic ignored "-Wunknown-warning-option") \
+  _C10_PRAGMA_(clang diagnostic ignored warning)
+
+#define C10_DIAGNOSTIC_POP() _C10_PRAGMA_(clang diagnostic pop)
+
+#elif __GNUC__
+
+#define C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(warning) \
+  _C10_PRAGMA_(GCC diagnostic push)                         \
+  _C10_PRAGMA_(GCC diagnostic ignored "-Wpragmas")          \
+  _C10_PRAGMA_(GCC diagnostic ignored warning)
+
+#define C10_DIAGNOSTIC_POP() _C10_PRAGMA_(GCC diagnostic pop)
+
+#else
+
+#define C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(warning)
+#define C10_DIAGNOSTIC_POP()
+
 #endif
 
 #endif // C10_MACROS_MACROS_H_

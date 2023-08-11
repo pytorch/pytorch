@@ -56,7 +56,7 @@ def _getattr_qual(obj, name, default=_NOTHING):
             raise
 
 
-class DecorateInfo(object):
+class DecorateInfo:
     """Describes which test, or type of tests, should be wrapped in the given
     decorators when testing an operator. Any test that matches all provided
     arguments will be decorated. The decorators will only be applied if the
@@ -97,13 +97,19 @@ class DecorateInfo(object):
             for dtype in self.dtypes:
                 assert isinstance(dtype, torch.dtype)
 
-    def is_active(self, cls_name, test_name, device_type, dtype):
+    def is_active(self, cls_name, test_name, device_type, dtype, param_kwargs):
         return (
             self.active_if
             and (self.cls_name is None or self.cls_name == cls_name)
             and (self.test_name is None or self.test_name == test_name)
             and (self.device_type is None or self.device_type == device_type)
             and (self.dtypes is None or dtype in self.dtypes)
+            # Support callables over kwargs to determine if the decorator is active.
+            and (
+                self.active_if(param_kwargs)
+                if isinstance(self.active_if, Callable)
+                else self.active_if
+            )
         )
 
 
@@ -111,7 +117,7 @@ class DecorateInfo(object):
 # Note: historically the 'input' kwarg had to be a Tensor or TensorList, but we are trying
 #   to support scalar inputs, too. Some tests still depend on 'input' being a Tensor
 #   or TensorList, however.
-class SampleInput(object):
+class SampleInput:
     """Represents sample inputs to a function."""
 
     __slots__ = [
@@ -145,7 +151,7 @@ class SampleInput(object):
                 not var_args and not var_kwargs
             ), """
 A SampleInput can be constructed "naturally" with *args and **kwargs or by
-explicitly setting the "args" and "kwargs" paremeters, but the two
+explicitly setting the "args" and "kwargs" parameters, but the two
 methods of construction cannot be mixed!"""
         elif len(var_args) or len(var_kwargs):
             assert (
@@ -303,7 +309,7 @@ cannot specify additional metadata in keyword arguments"""
 NumericsFilter = collections.namedtuple("NumericsFilter", ["condition", "safe_val"])
 
 
-class ErrorInput(object):
+class ErrorInput:
     """
     A SampleInput that will cause the operation to throw an error plus information
     about the resulting error.
@@ -317,7 +323,7 @@ class ErrorInput(object):
         self.error_regex = error_regex
 
 
-class AliasInfo(object):
+class AliasInfo:
     """Class holds alias information. For example, torch.abs ->
     torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
     """
@@ -609,9 +615,10 @@ class AliasInfo(object):
 #   the great majority of PyTorch's (public) operators.
 #
 
+
 # Classes and methods for the operator database
 @dataclass
-class OpInfo(object):
+class OpInfo:
     """Operator information and helper functions for acquiring it."""
 
     # the string name of the function
@@ -677,6 +684,9 @@ class OpInfo(object):
 
     # function to generate inputs that will throw errors
     error_inputs_func: Callable = None
+
+    # function to generate sparse (coo, csr, csc, bsr, bsc) inputs that will throw errors
+    error_inputs_sparse_func: Callable = None
 
     # function to generate sample inputs with sparse coo layouts
     sample_inputs_sparse_coo_func: Callable = None
@@ -809,8 +819,9 @@ class OpInfo(object):
 
     # the following metadata relates to sparse support and is used in test_sparse.py
 
-    # whether the op supports sparse inputs
-    supports_sparse: bool = False
+    # whether the op supports sparse coo inputs, defaults to False
+    # TODO: rename supports_sparse to supports_sparse_coo
+    supports_sparse: bool = None
 
     # only run tracing tests
     supports_scripting: bool = True
@@ -818,16 +829,17 @@ class OpInfo(object):
     # if the operator can be traced
     supports_tracing: bool = True
 
-    # the following metadata relates to sparse csr support and is used in test_sparse_csr.py
+    # the following metadata relates to sparse compressed support and
+    # is used in test_sparse_csr.py and test_sparse.py
 
-    # whether the op supports sparse csr inputs
-    supports_sparse_csr: bool = False
-    # whether the op supports sparse csc inputs
-    supports_sparse_csc: bool = False
-    # whether the op supports sparse bsr inputs
-    supports_sparse_bsr: bool = False
-    # whether the op supports sparse bsc inputs
-    supports_sparse_bsc: bool = False
+    # whether the op supports sparse csr inputs, defaults to False
+    supports_sparse_csr: bool = None
+    # whether the op supports sparse csc inputs, defaults to False
+    supports_sparse_csc: bool = None
+    # whether the op supports sparse bsr inputs, defaults to False
+    supports_sparse_bsr: bool = None
+    # whether the op supports sparse bsc inputs, defaults to False
+    supports_sparse_bsc: bool = None
 
     # the following metadata relates to complex support and is checked in test_ops.py
 
@@ -847,9 +859,7 @@ class OpInfo(object):
     def __post_init__(self):
         self._original_opinfo_args = asdict(self).copy()
 
-        assert self.dtypes is not None, "OpInfo for {0} has no dtypes!".format(
-            self.name
-        )
+        assert self.dtypes is not None, f"OpInfo for {self.name} has no dtypes!"
 
         dtypes_args = (self.dtypes, self.dtypesIfCUDA, self.dtypesIfROCM)
 
@@ -862,10 +872,7 @@ class OpInfo(object):
 
         # Attribute to verify dynamic_dtypes are used.
         self.dynamic_dtypes = any(
-            map(
-                lambda dtypes: isinstance(dtypes, utils._dynamic_dispatch_dtypes),
-                dtypes_args,
-            )
+            isinstance(dtypes, utils._dynamic_dispatch_dtypes) for dtypes in dtypes_args
         )
 
         if self.dynamic_dtypes:
@@ -956,6 +963,33 @@ class OpInfo(object):
                 self.inplace_operator_variant = None
 
         self.decorators = (*self.decorators, *self.skips)
+
+        # Specifying sample inputs function without specifying the
+        # corresponding layout support implies the layout support:
+        if self.supports_sparse is None:
+            self.supports_sparse = self.sample_inputs_sparse_coo_func is not None
+        if self.sample_inputs_sparse_coo_func is None:
+            self.sample_inputs_sparse_coo_func = self._sample_inputs_unspecified
+
+        if self.supports_sparse_csr is None:
+            self.supports_sparse_csr = self.sample_inputs_sparse_csr_func is not None
+        if self.sample_inputs_sparse_csr_func is None:
+            self.sample_inputs_sparse_csr_func = self._sample_inputs_unspecified
+
+        if self.supports_sparse_csc is None:
+            self.supports_sparse_csc = self.sample_inputs_sparse_csc_func is not None
+        if self.sample_inputs_sparse_csc_func is None:
+            self.sample_inputs_sparse_csc_func = self._sample_inputs_unspecified
+
+        if self.supports_sparse_bsr is None:
+            self.supports_sparse_bsr = self.sample_inputs_sparse_bsr_func is not None
+        if self.sample_inputs_sparse_bsr_func is None:
+            self.sample_inputs_sparse_bsr_func = self._sample_inputs_unspecified
+
+        if self.supports_sparse_bsc is None:
+            self.supports_sparse_bsc = self.sample_inputs_sparse_bsc_func is not None
+        if self.sample_inputs_sparse_bsc_func is None:
+            self.sample_inputs_sparse_bsc_func = self._sample_inputs_unspecified
 
         # We run the sampling functions without tracking the gradiends of the creation of inputs
         self.sample_inputs_func = torch.no_grad()(self.sample_inputs_func)
@@ -1161,6 +1195,59 @@ class OpInfo(object):
         """
         return self.error_inputs_func(self, device, **kwargs)
 
+    def error_inputs_sparse(self, device, layout, **kwargs):
+        """
+        Returns an iterable of ErrorInputs that contain sparse sample
+        inputs with a specified layout.
+        """
+        if not self.supports_sparse_layout(layout):
+            raise unittest.SkipTest("unsupported sparse layout")
+        return self.error_inputs_sparse_func(self, device, layout, **kwargs)
+
+    def supports_sparse_layout(self, layout):
+        """Return True if OpInfo supports the specified sparse layout."""
+        layout_name = str(layout).split(".")[-1]
+        # map torch.sparse_coo to OpInfo.supports_sparse:
+        layout_name = layout_name.replace("_coo", "")
+        return getattr(self, f"supports_{layout_name}")
+
+    def sample_inputs_sparse(
+        self, layout, device, dtype, requires_grad=False, **kwargs
+    ):
+        """Returns an iterable of SampleInputs that contain inputs with a
+        specified sparse layout.
+        """
+        layout_name = str(layout).split(".")[-1]
+        sample_inputs_mth = getattr(self, "sample_inputs_" + layout_name)
+
+        def non_empty_sampler(op, generator):
+            found_sample = False
+            for sample in generator:
+                found_sample = True
+                yield sample
+            if not found_sample:
+                raise unittest.SkipTest("NO SAMPLES!")
+
+        return non_empty_sampler(
+            self,
+            sample_inputs_mth(device, dtype, requires_grad=requires_grad, **kwargs),
+        )
+
+    def _sample_inputs_unspecified(self, *args, **kwargs):
+        """Raises an NotImplemented exception in a OpInfo instance creation
+        that specifies supports_sparse(|_csr|_csc|_bsr|_bsc)=True
+        without specifying the corresponding sample function as
+        sample_inputs_sparse_(coo|csr|csc|bsr|bsc)_func.
+
+        To avoid this, either define the corresponding sample function,
+        or re-map unsupported samples to error inputs in an appropiate
+
+          opinfo/definitions/sparse.py:_validate_sample_input_sparse_<op>
+
+        function.
+        """
+        raise NotImplementedError("no sample function specified")
+
     def sample_inputs_sparse_coo(self, device, dtype, requires_grad=False, **kwargs):
         """Returns an iterable of SampleInputs that contain inputs with sparse
         coo layout.
@@ -1201,12 +1288,14 @@ class OpInfo(object):
             self, device, dtype, requires_grad, **kwargs
         )
 
-    def get_decorators(self, test_class, test_name, device, dtype):
+    def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
         """Returns the decorators targeting the given test."""
         result = []
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
-                if decorator.is_active(test_class, test_name, device, dtype):
+                if decorator.is_active(
+                    test_class, test_name, device, dtype, param_kwargs
+                ):
                     result.extend(decorator.decorators)
             else:
                 result.append(decorator)
@@ -1252,7 +1341,7 @@ class OpInfo(object):
             if self.variant_test_name
             else ""
         )
-        return "{}{}".format(self.name.replace(".", "_"), variant)
+        return f"{self.name.replace('.', '_')}{variant}"
 
 
 def _generate_reduction_inputs(device, dtype, requires_grad, **kwargs):
@@ -1530,6 +1619,7 @@ def make_error_inputs_elementwise_binary(error_inputs_func):
 
 # The following functions and classes are for testing elementwise binary operators.
 
+
 # Returns a generator of pairs of contiguous tensors on the requested device
 #   and with the requested dtype.
 #
@@ -1640,7 +1730,7 @@ def generate_elementwise_binary_small_value_tensors(
         complex_vals = product(_float_vals, _float_vals)
         # Note the use of list is required here or the map generator will be
         #  emptied by the following product and it won't produce the desired cross-product
-        complex_vals = list(map(lambda x: complex(*x), complex_vals))
+        complex_vals = [complex(*x) for x in complex_vals]
         prod = product(complex_vals, complex_vals)
     elif dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
         prod = product(_int_vals, _int_vals)
@@ -1680,7 +1770,7 @@ def generate_elementwise_binary_large_value_tensors(
         complex_vals = product(_large_float_vals, _large_float_vals)
         # Note the use of list is required here or the map generator will be
         #  emptied by the following product and it won't produce the desired cross-product
-        complex_vals = list(map(lambda x: complex(*x), complex_vals))
+        complex_vals = [complex(*x) for x in complex_vals]
         prod = product(complex_vals, complex_vals)
     elif dtype in (torch.int16, torch.int32, torch.int64):
         prod = product(_large_int_vals, _large_int_vals)
@@ -1711,7 +1801,7 @@ def generate_elementwise_binary_extremal_value_tensors(
         complex_vals = product(_float_extremals, _float_extremals)
         # Note the use of list is required here or the map generator will be
         #  emptied by the following product and it won't produce the desired cross-product
-        complex_vals = list(map(lambda x: complex(*x), complex_vals))
+        complex_vals = [complex(*x) for x in complex_vals]
         prod = product(complex_vals, complex_vals)
     else:
         raise ValueError("Unsupported dtype!")
@@ -1732,11 +1822,11 @@ def generate_elementwise_binary_extremal_value_tensors(
     lhs = make_tensor(
         (128, 128), device=device, dtype=dtype, requires_grad=requires_grad
     )
-    lhs.flatten()[::3] = nan
+    lhs.view(-1)[::3] = nan
     rhs = make_tensor(
         (128, 128), device=device, dtype=dtype, requires_grad=requires_grad
     )
-    rhs.flatten()[::3] = nan
+    rhs.view(-1)[::3] = nan
 
     yield SampleInput(lhs, args=(rhs,))
 
@@ -1808,7 +1898,7 @@ def generate_elementwise_binary_with_scalar_samples(
         yield SampleInput(lhs_scalar, args=(rhs_scalar,))
 
 
-# Returns a generator of pairs of contiguous tensors and 0d tensos and scalars and type promotion
+# Returns a generator of pairs of contiguous tensors and 0d tensors and scalars and type promotion
 def generate_elementwise_binary_with_scalar_and_type_promotion_samples(
     op, *, device, dtype, requires_grad=False
 ):
@@ -1978,7 +2068,6 @@ class BinaryUfuncInfo(OpInfo):
         supports_two_python_scalars=False,  # Whether the operator allows scalar x scalar inputs
         **kwargs,
     ):
-
         self._original_binary_ufunc_args = locals().copy()
 
         # Elementwise binary operations perform the equivalent of test_numpy_refs
@@ -1992,7 +2081,7 @@ class BinaryUfuncInfo(OpInfo):
             ),
         )
         kwargs["skips"] = kwargs.get("skips", tuple()) + common_skips
-        super(BinaryUfuncInfo, self).__init__(
+        super().__init__(
             name,
             sample_inputs_func=sample_inputs_func,
             reference_inputs_func=reference_inputs_func,
@@ -2034,8 +2123,9 @@ def sample_inputs_elementwise_unary(
     _L = S if kwargs.get("small_inputs_only", False) else L
 
     low, high = op_info.domain
-    low = low if low is None else low + op_info._domain_eps
-    high = high if high is None else high - op_info._domain_eps
+    is_floating = dtype.is_floating_point or dtype.is_complex
+    low = low if low is None or not is_floating else low + op_info._domain_eps
+    high = high if high is None or not is_floating else high - op_info._domain_eps
     if (
         op_info.supports_sparse_csr
         or op_info.supports_sparse_csc
@@ -2080,8 +2170,9 @@ def _replace_values_in_tensor(tensor, condition, safe_value):
 # Helper to create a unary elementwise tensor with valid inputs
 def _make_unary_elementwise_tensor(shape, *, op, dtype, **kwargs):
     low, high = op.domain
-    low = low if low is None else low + op._domain_eps
-    high = high if high is None else high - op._domain_eps
+    is_floating = dtype.is_floating_point or dtype.is_complex
+    low = low if low is None or not is_floating else low + op._domain_eps
+    high = high if high is None or not is_floating else high - op._domain_eps
 
     a = make_tensor(shape, low=low, high=high, dtype=dtype, **kwargs)
 
@@ -2100,8 +2191,9 @@ def _filter_unary_elementwise_tensor(a, *, op):
         return a
 
     low, high = op.domain
-    low = low if low is None else low + op._domain_eps
-    high = high if high is None else high - op._domain_eps
+    is_floating = a.dtype.is_floating_point or a.dtype.is_complex
+    low = low if low is None or not is_floating else low + op._domain_eps
+    high = high if high is None or not is_floating else high - op._domain_eps
 
     if a.dtype is torch.uint8 and low is not None:
         low = max(low, 0)
@@ -2125,7 +2217,6 @@ def _filter_unary_elementwise_tensor(a, *, op):
 
 
 def generate_elementwise_unary_tensors(op, *, device, dtype, requires_grad, **kwargs):
-
     # Special-cases bool
     if dtype is torch.bool:
         tensors = (
@@ -2196,10 +2287,6 @@ def generate_elementwise_unary_extremal_value_tensors(
 def generate_elementwise_unary_noncontiguous_tensors(
     op, *, device, dtype, requires_grad=False
 ):
-    low, high = op.domain
-    low = low if low is None else low + op._domain_eps
-    high = high if high is None else high - op._domain_eps
-
     make_arg = partial(
         _make_unary_elementwise_tensor,
         op=op,
@@ -2472,7 +2559,6 @@ class SpectralFuncInfo(OpInfo):
         decorators=None,
         **kwargs,
     ):
-
         self._original_spectral_func_args = dict(locals()).copy()
         self._original_spectral_func_args.update(kwargs)
 
@@ -2511,7 +2597,7 @@ class ShapeFuncInfo(OpInfo):
         sample_inputs_func=None,
         **kwargs,
     ):
-        super(ShapeFuncInfo, self).__init__(
+        super().__init__(
             name,
             dtypes=dtypes,
             dtypesIfCUDA=dtypesIfCUDA,
@@ -2523,17 +2609,43 @@ class ShapeFuncInfo(OpInfo):
 
 
 def sample_inputs_foreach(
-    self, device, dtype, N, *, noncontiguous=False, same_size=False, low=None, high=None
+    self,
+    device,
+    dtype,
+    N,
+    *,
+    noncontiguous=False,
+    same_size=False,
+    low=None,
+    high=None,
+    zero_size: bool,
+    requires_grad: bool,
 ):
+    if zero_size:
+        return [torch.empty(0, dtype=dtype, device=device) for _ in range(N)]
     if same_size:
         return [
-            make_tensor((N, N), dtype=dtype, device=device, noncontiguous=noncontiguous)
+            make_tensor(
+                (N, N),
+                dtype=dtype,
+                device=device,
+                noncontiguous=noncontiguous,
+                low=low,
+                high=high,
+                requires_grad=requires_grad,
+            )
             for _ in range(N)
         ]
     else:
         return [
             make_tensor(
-                (N - i, N - i), dtype=dtype, device=device, noncontiguous=noncontiguous
+                (N - i, N - i),
+                dtype=dtype,
+                device=device,
+                noncontiguous=noncontiguous,
+                low=low,
+                high=high,
+                requires_grad=requires_grad,
             )
             for i in range(N)
         ]
@@ -2563,31 +2675,55 @@ class ForeachFuncInfo(OpInfo):
         dtypesIfROCM=None,
         supports_alpha_param=False,
         sample_inputs_func=sample_inputs_foreach,
+        supports_autograd=False,
+        supports_scalar_self_arg=False,
+        supports_forward_ad=False,
+        backward_requires_result=False,
         **kwargs,
     ):
-        super().__init__(
-            "_foreach_" + name,
-            dtypes=dtypes,
-            dtypesIfCUDA=dtypesIfCUDA,
-            dtypesIfROCM=dtypesIfROCM,
-            sample_inputs_func=sample_inputs_func,
-            **kwargs,
-        )
-
         (
             foreach_method,
             foreach_method_inplace,
             torch_ref_method,
             torch_ref_inplace,
         ) = get_foreach_method_names(name)
-        self.method_variant = foreach_method
-        self.inplace_variant = foreach_method_inplace
-        self.ref = torch_ref_method
+        if name == "zero":
+            # note(crcrpar): `foreach_method` for `"zero"` is `None` but `None` would call
+            # `_getattr_qual` in `OpInfo.__post_init__` which should fail since `_foreach_zero`
+            # is not defined at the moment. Thus to skip the qualification, set a similar torch
+            # function.
+            assert foreach_method is None
+            foreach_method = torch.zero_
+        super().__init__(
+            name="_foreach_" + name,
+            op=foreach_method,
+            ref=torch_ref_method,
+            method_variant=foreach_method,
+            inplace_variant=foreach_method_inplace,
+            dtypes=dtypes,
+            dtypesIfCUDA=dtypesIfCUDA,
+            dtypesIfROCM=dtypesIfROCM,
+            sample_inputs_func=sample_inputs_func,
+            supports_autograd=supports_autograd,
+            supports_forward_ad=supports_forward_ad,
+            **kwargs,
+        )
+        self.supports_scalar_self_arg = supports_scalar_self_arg
+
         self.ref_inplace = torch_ref_inplace
         self.supports_alpha_param = supports_alpha_param
+        self.backward_requires_result = backward_requires_result
 
         if name == "norm":
             self.ref = torch.linalg.vector_norm
+        elif name == "minimum":
+            # because minimum ref does not support inplace or scalar
+            self.ref = torch.clamp_max
+            self.ref_inplace = torch.Tensor.clamp_max_
+        elif name == "maximum":
+            # because maximum ref does not support inplace or scalar
+            self.ref = torch.clamp_min
+            self.ref_inplace = torch.Tensor.clamp_min_
 
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
@@ -2682,5 +2818,5 @@ def clone_sample(sample, **kwargs):
     return SampleInput(
         clone_tensor(sample.input),
         args=tuple(map(clone_tensor, sample.args)),
-        kwargs=dict(((k, clone_tensor(v)) for k, v in sample_kwargs.items())),
+        kwargs={k: clone_tensor(v) for k, v in sample_kwargs.items()},
     )

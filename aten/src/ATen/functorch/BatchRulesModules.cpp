@@ -8,9 +8,11 @@
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
+#include <utility>
+
 namespace at { namespace functorch {
 
-static Tensor getStepTensor(const Tensor& indices, c10::SymInt bdim_size, c10::SymInt num_embeddings) {
+static Tensor getStepTensor(const Tensor& indices, const c10::SymInt& bdim_size, const c10::SymInt& num_embeddings) {
   // [batch_size, 1, 1, 1, ..., 1]
   c10::SymDimVector view_shape(indices.dim(), 1);
   view_shape[0] = bdim_size;
@@ -18,19 +20,19 @@ static Tensor getStepTensor(const Tensor& indices, c10::SymInt bdim_size, c10::S
   return range.view_symint(view_shape);
 }
 
-std::tuple<Tensor,optional<int64_t>> embedding_batch_rule(
+static std::tuple<Tensor,optional<int64_t>> embedding_batch_rule(
     const Tensor& weight, optional<int64_t> weight_bdim,
     const Tensor& indices, optional<int64_t> indices_bdim,
-    int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
+    c10::SymInt padding_idx, bool scale_grad_by_freq, bool sparse) {
   if (!weight_bdim && indices_bdim) {
     // B*, ED -> B*D
-    const auto result = at::embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse);
-    return std::make_tuple(result, indices_bdim);
+    auto result = at::embedding_symint(weight, indices, std::move(padding_idx), scale_grad_by_freq, sparse);
+    return std::make_tuple(std::move(result), indices_bdim);
   } else if (weight_bdim && !indices_bdim) {
     // *, BED -> *, E(BD) -> *(BD) -> *BD
     const auto batch_size = weight.size(*weight_bdim);
     const auto weight_ = reshape_dim_into(*weight_bdim, /*embedding_dim*/1, weight);
-    auto result = at::embedding(weight_, indices, padding_idx, scale_grad_by_freq, sparse);
+    auto result = at::embedding_symint(weight_, indices, std::move(padding_idx), scale_grad_by_freq, sparse);
     result = reshape_dim_outof(-1, batch_size, result);
     return std::make_tuple(result, result.dim() - 2);
   }
@@ -44,24 +46,24 @@ std::tuple<Tensor,optional<int64_t>> embedding_batch_rule(
 
   const auto range = getStepTensor(indices, batch_size, num_embeddings);
   indices_ = indices_ + range;
-  const auto result = at::embedding(weight_, indices_, padding_idx, scale_grad_by_freq, sparse);
-  return std::make_tuple(result, 0);
+  auto result = at::embedding_symint(weight_, indices_, std::move(padding_idx), scale_grad_by_freq, sparse);
+  return std::make_tuple(std::move(result), 0);
 }
 
-std::tuple<Tensor,optional<int64_t>>
+static std::tuple<Tensor,optional<int64_t>>
 embedding_dense_backward_batch_rule(
     const Tensor& grad_, optional<int64_t> grad_bdim,
     const Tensor& indices_, optional<int64_t> indices_bdim,
-    c10::SymInt num_weights, int64_t padding_idx, bool scale_grad_by_freq) {
+    c10::SymInt num_weights, c10::SymInt padding_idx, bool scale_grad_by_freq) {
   Tensor grad = grad_;
   Tensor indices = indices_;
   if (!indices_bdim && grad_bdim) {
     const auto bdim_size = grad.sym_size(*grad_bdim);
     grad = reshape_dim_into(*grad_bdim, -1, grad);
     auto result = at::embedding_dense_backward_symint(
-        grad, indices, num_weights, padding_idx, scale_grad_by_freq);
+        grad, indices, std::move(num_weights), std::move(padding_idx), scale_grad_by_freq);
     result = reshape_dim_outof_symint(1, bdim_size, result);
-    return std::make_tuple(result, 1);
+    return std::make_tuple(std::move(result), 1);
   }
   const auto bdim_size = indices.size(*indices_bdim);
   indices = moveBatchDimToFront(indices, indices_bdim);
@@ -74,9 +76,9 @@ embedding_dense_backward_batch_rule(
   // Fill in the padding. We can't do it in the embedding_dense_backward call
   // because we need to fill in multiple rows!
   if (padding_idx >= 0) {
-    result.select(1, padding_idx).fill_(0);
+    result.select_symint(1, std::move(padding_idx)).fill_(0);
   }
-  return std::make_tuple(result, 0);
+  return std::make_tuple(std::move(result), 0);
 }
 
 /**
@@ -114,26 +116,26 @@ grid_sample_batch_rule(const Tensor& input, optional<int64_t> input_bdim, const 
     auto new_input = reshape_dim_into(*input_bdim, 1, input);
     auto out = Func(new_input, grid, std::forward<ExtraArgs>(extra_args)...);
     out = reshape_dim_outof(1, input.sizes()[*input_bdim], out);
-    result = std::make_tuple(out, 1);
+    result = std::make_tuple(std::move(out), 1);
   } else if (!input_bdim && grid_bdim) {
     // grid of N(BH)W2 -> NC(BH)W or grid of N(BD)HBW3 -> NC(BD)HW
     auto new_grid = reshape_dim_into(*grid_bdim, 1, grid);
     auto out = Func(input, new_grid, std::forward<ExtraArgs>(extra_args)...);
     out = reshape_dim_outof(2, grid.sizes()[*grid_bdim], out);
-    result = std::make_tuple(out, 2);
+    result = std::make_tuple(std::move(out), 2);
   } else if (input_bdim && grid_bdim) {
     auto new_input = reshape_dim_into(*input_bdim, 0, input);
     auto new_grid = reshape_dim_into(*grid_bdim, 0, grid);
     auto out = Func(new_input, new_grid, std::forward<ExtraArgs>(extra_args)...);
     out = reshape_dim_outof(0, input.sizes()[*grid_bdim], out);
-    result = std::make_tuple(out, 0);
+    result = std::make_tuple(std::move(out), 0);
   } else {
     result = std::make_tuple(Func(input, grid, std::forward<ExtraArgs>(extra_args)...), nullopt);
   }
   return result;
 }
 
-std::tuple<Tensor, Tensor, Tensor, int64_t>
+static std::tuple<Tensor, Tensor, Tensor, int64_t>
 grid_sample_backward_helper_in(
     const Tensor& grad_output, optional<int64_t> grad_output_bdim,
     const Tensor& input, optional<int64_t> input_bdim,
@@ -154,10 +156,10 @@ grid_sample_backward_helper_in(
   grid_ = ensure_has_bdim(grid_, grid_bdim.has_value(), batch_size);
   grid_ = reshape_dim_into(0, 0, grid_);
 
-  return std::make_tuple(grad_output_, input_, grid_, batch_size);
+  return std::make_tuple(std::move(grad_output_), std::move(input_), std::move(grid_), batch_size);
 }
 
-std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>>
+static std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>>
 grid_sample_backward_helper_out(
     const std::tuple<Tensor, Tensor> & bw_out,
     optional<int64_t> grad_input_out_bdim,
@@ -213,47 +215,8 @@ cudnn_grid_sample_backward_batch_rule(
   return grid_sample_backward_helper_out(bw_out, 0, 0, bdim_size);
 }
 
-std::tuple<Tensor, optional<int64_t>> cross_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim,
-    const Tensor& other, optional<int64_t> other_bdim,
-    const optional<int64_t> dim) {
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto other_ = moveBatchDimToFront(other, other_bdim);
-
-  if (other_bdim.has_value() && !self_bdim.has_value()) {
-    self_ = self_.expand_as(other_);
-  }
-  if (self_bdim.has_value() && !other_bdim.has_value()) {
-    other_ = other_.expand_as(self_);
-  }
-  auto new_dim = dim;
-  if (dim.has_value()) {
-    auto t = (self_bdim.has_value()) ? self_ : other_;
-    bool flag = (self_bdim.has_value()) ? true : other_bdim.has_value();
-    new_dim = getPhysicalDim(t, flag, *dim);
-  } else {
-    // if batch size is 3 we have to avoid that bdim is used as cross' dim argument
-    // according to cross API:
-    // > If dim is not given, it defaults to the first dimension found with the size 3
-    // we have to skip batch dim and find another dim with size 3
-    auto bs = (self_bdim.has_value()) ? self_.size(0) : (other_bdim.has_value()) ? other_.size(0) : -1;
-    if (bs == 3) {
-      auto t = (self_bdim.has_value()) ? self_ : other_;
-      int64_t idx = 1;
-      for (auto it = t.sizes().begin() + 1; it < t.sizes().end(); ++it, ++idx) {
-        if (*it == 3) {
-          new_dim = idx;
-          break;
-        }
-      }
-    }
-  }
-  optional<int64_t> out_dim = (self_bdim.has_value() || other_bdim.has_value()) ? 0 : (optional<int64_t>) nullopt;
-  return std::make_tuple(at::cross(self_, other_, new_dim), out_dim);
-}
-
 // TODO: replace with targetable functionalization
-Tensor one_hot_decomposition_hack(const Tensor &self, int64_t num_classes) {
+static Tensor one_hot_decomposition_hack(const Tensor &self, int64_t num_classes) {
     TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
     auto shape = self.sizes().vec();
 
@@ -295,10 +258,10 @@ template <typename F, F Func, typename A, typename B, typename C, typename... T>
 struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
   static std::tuple<Tensor,optional<int64_t>> apply(
       const Tensor& grad_output, optional<int64_t> grad_output_bdim,
-      OptionalSymIntArrayRef output_size, c10::SymIntArrayRef input_size,
+      c10::SymIntArrayRef output_size, c10::SymIntArrayRef input_size,
       T... extra_args) {
     auto grad_output_ = reshape_dim_into(*grad_output_bdim, 0, grad_output);
-    TORCH_INTERNAL_ASSERT(input_size.size() > 0);
+    TORCH_INTERNAL_ASSERT(!input_size.empty());
 
     // input_size is wrong so we correct it
     c10::SymDimVector physical_input_size(input_size.begin(), input_size.end());
@@ -375,11 +338,11 @@ struct CudnnGridSampleBackwardBatchRuleHelper {
 #define CUDNN_GRID_SAMPLE_BW_BATCH_RULE(fn)\
     CudnnGridSampleBackwardBatchRuleHelper<decltype(&ATEN_FN(fn)), &ATEN_FN(fn)>::apply
 
-#define UPSAMPLE_BACKWARD(op, overload) VMAP_SUPPORT2(op, overload, SINGLE_ARG(\
+#define UPSAMPLE_BACKWARD(op) VMAP_SUPPORT(op, SINGLE_ARG(\
     UpsampleBackwardBatchRuleHelper<\
-      decltype(&ATEN_FN2(op, overload)),\
-      &ATEN_FN2(op, overload),\
-      c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
+      decltype(&ATEN_FN(op)),\
+      &ATEN_FN(op),\
+      c10::guts::function_traits<decltype(ATEN_FN(op))>::parameter_types>::apply))
 
 #define UPSAMPLE_BATCH(op) \
   EXISTING_BDIM2(op, vec); \
@@ -401,7 +364,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(cudnn_grid_sampler_backward, CUDNN_GRID_SAMPLE_BW_BATCH_RULE(cudnn_grid_sampler_backward));
 
   VMAP_SUPPORT(cudnn_grid_sampler, GRID_SAMPLE_BATCH_RULE(cudnn_grid_sampler));
-  VMAP_SUPPORT(cross, cross_batch_rule);
 
   EXISTING_BDIM(pixel_shuffle);
   EXISTING_BDIM(pixel_unshuffle);
@@ -430,13 +392,13 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UPSAMPLE_BATCH(upsample_nearest3d);
   UPSAMPLE_BATCH(upsample_trilinear3d);
 
-  UPSAMPLE_BACKWARD(upsample_bicubic2d_backward, vec);
-  UPSAMPLE_BACKWARD(upsample_bilinear2d_backward, vec);
-  UPSAMPLE_BACKWARD(upsample_linear1d_backward, vec);
-  UPSAMPLE_BACKWARD(upsample_nearest1d_backward, vec);
-  UPSAMPLE_BACKWARD(upsample_nearest2d_backward, vec);
-  UPSAMPLE_BACKWARD(upsample_nearest3d_backward, vec);
-  UPSAMPLE_BACKWARD(upsample_trilinear3d_backward, vec);
+  UPSAMPLE_BACKWARD(upsample_bicubic2d_backward);
+  UPSAMPLE_BACKWARD(upsample_bilinear2d_backward);
+  UPSAMPLE_BACKWARD(upsample_linear1d_backward);
+  UPSAMPLE_BACKWARD(upsample_nearest1d_backward);
+  UPSAMPLE_BACKWARD(upsample_nearest2d_backward);
+  UPSAMPLE_BACKWARD(upsample_nearest3d_backward);
+  UPSAMPLE_BACKWARD(upsample_trilinear3d_backward);
   m.impl("one_hot", one_hot_decomposition_hack);
 }
 }}

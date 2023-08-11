@@ -1,17 +1,18 @@
-#include <ATen/core/ivalue.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/Formatting.h>
 #include <ATen/core/class_type.h>
 #include <ATen/core/enum_type.h>
 #include <ATen/core/function.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <ATen/core/type_factory.h>
-#include <c10/util/irange.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/hash.h>
+#include <c10/util/irange.h>
 #include <cmath>
 #include <iostream>
+#include <utility>
 
 namespace c10 {
 bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs) {
@@ -63,6 +64,11 @@ bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
              _fastEqualsForContainer);
 }
 
+std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
+  out << v.qualifiedClassName() << "." << v.name();
+  return out;
+}
+
 bool operator==(const ivalue::EnumHolder& lhs, const ivalue::EnumHolder& rhs) {
   return lhs.name() == rhs.name() && *rhs.type() == *lhs.type();
 }
@@ -95,6 +101,8 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
         return c10::SymIntType::get();
       case Tag::SymFloat:
         return c10::SymFloatType::get();
+      case Tag::SymBool:
+        return c10::SymBoolType::get();
       case Tag::Bool:
         return BoolType::get();
       case Tag::String:
@@ -107,6 +115,8 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
       }
       case Tag::GenericList:
         return ListType::create(v.toList().elementType());
+      case Tag::Await:
+        return AwaitType::create(v.toAwait()->elementType());
       case Tag::Future:
         return FutureType::create(v.toFuture()->elementType());
       case Tag::RRef:
@@ -234,12 +244,13 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       break;
     }
     case Tag::Future:
+    case Tag::Await:
     case Tag::Device:
     case Tag::Uninitialized:
     case Tag::Capsule:
       TORCH_CHECK_TYPE(
           false, "Cannot inspect value of type ", this->tagKind());
-      // Fall through
+      [[fallthrough]];
     default:
       // don't record scalars.
       break;
@@ -305,9 +316,9 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::SymInt:
       return rhs.isSymInt() && lhs.toSymInt() == rhs.toSymInt();
     case Tag::SymFloat:
-      // NB: this doesn't actually work as sym floats don't have equality
-      // defined
       return rhs.isSymFloat() && lhs.toSymFloat() == rhs.toSymFloat();
+    case Tag::SymBool:
+      return rhs.isSymBool() && lhs.toSymBool() == rhs.toSymBool();
     case Tag::Bool:
       return rhs.isBool() && lhs.toBool() == rhs.toBool();
     case Tag::String:
@@ -324,6 +335,7 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isList() && lhs.toList() == rhs.toList();
     case Tag::Blob:
     case Tag::Future:
+    case Tag::Await:
     case Tag::RRef:
     case Tag::Object:
     case Tag::PyObject:
@@ -364,6 +376,8 @@ size_t IValue::hash(const IValue& v) {
       return c10::get_hash(v.payload.u.as_int);
     case Tag::SymFloat:
       return c10::get_hash(v.payload.u.as_int);
+    case Tag::SymBool:
+      return c10::get_hash(v.payload.u.as_int);
     case Tag::String:
       return c10::get_hash(v.toStringRef());
     case Tag::Tuple:
@@ -374,6 +388,7 @@ size_t IValue::hash(const IValue& v) {
     case Tag::GenericList:
     case Tag::Blob:
     case Tag::Future:
+    case Tag::Await:
     case Tag::RRef:
     case Tag::Object:
     case Tag::PyObject:
@@ -449,12 +464,16 @@ bool IValue::isOptionalTensorList() const {
     return false;
   }
   const auto& ty = static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
-  const auto expected_ty = c10::getTypePtr<c10::optional<at::Tensor>>();
+  const auto& expected_ty = c10::getTypePtr<c10::optional<at::Tensor>>();
   return expected_ty == ty;
 }
 
 bool IValue::isIntList() const {
   return isListOf<c10::IntType>();
+}
+
+bool IValue::isSymIntList() const {
+  return isListOf<c10::SymIntType>();
 }
 
 bool IValue::isBoolList() const {
@@ -469,9 +488,9 @@ template <class T>
 std::ostream& printList(
     std::ostream& out,
     const T& list,
-    const std::string start,
-    const std::string finish,
-    IValueFormatter formatter) {
+    const std::string& start,
+    const std::string& finish,
+    const IValueFormatter& formatter) {
   out << start;
   for (const auto i : c10::irange(list.size())) {
     if (i > 0) {
@@ -487,9 +506,9 @@ std::ostream& printList(
 std::ostream& printMaybeAnnotatedList(
     std::ostream& out,
     const IValue& the_list,
-    IValueFormatter formatter) {
+    const IValueFormatter& formatter) {
   auto list_elem_type = the_list.type()->containedType(0);
-  if (the_list.toListRef().size() == 0 ||
+  if (the_list.toListRef().empty() ||
       !elementTypeCanBeInferredFromMembers(list_elem_type)) {
     out << "annotate(" << the_list.type<c10::Type>()->annotation_str() << ", ";
     printList(out, the_list.toListRef(), "[", "]", formatter);
@@ -504,7 +523,7 @@ template <typename Dict>
 std::ostream& printDict(
     std::ostream& out,
     const Dict& v,
-    IValueFormatter formatter) {
+    const IValueFormatter& formatter) {
   out << "{";
 
   bool first = true;
@@ -525,12 +544,12 @@ std::ostream& printDict(
 }
 
 // Properly disambiguate the type of an empty dict
-std::ostream& printMaybeAnnotatedDict(
+static std::ostream& printMaybeAnnotatedDict(
     std::ostream& out,
     const IValue& the_dict,
-    IValueFormatter formatter) {
+    const IValueFormatter& formatter) {
   auto value_type = the_dict.type()->castRaw<DictType>()->getValueType();
-  if (the_dict.toGenericDict().size() == 0 ||
+  if (the_dict.toGenericDict().empty() ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
     out << "annotate(" << the_dict.type<c10::Type>()->annotation_str() << ",";
     printDict(out, the_dict.toGenericDict(), formatter) << ")";
@@ -540,7 +559,7 @@ std::ostream& printMaybeAnnotatedDict(
   return out;
 }
 
-std::ostream& printComplex(std::ostream & out, const IValue & v) {
+static std::ostream& printComplex(std::ostream & out, const IValue & v) {
   c10::complex<double> d = v.toComplexDouble();
   IValue real(d.real()), imag(std::abs(d.imag()));
   auto sign = "";
@@ -595,6 +614,8 @@ std::ostream& IValue::repr(
       return out << v.toSymInt();
     case IValue::Tag::SymFloat:
       return out << v.toSymFloat();
+    case IValue::Tag::SymBool:
+      return out << v.toSymBool();
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
@@ -630,7 +651,7 @@ std::ostream& IValue::repr(
   }
 }
 
-bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
+static bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
   return arg.type() == type && !arg.kwarg_only() && !arg.default_value();
 }
 
@@ -747,11 +768,6 @@ IValueComparator getGreaterThanComparator(const IValue& v) {
   };
 }
 
-std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
-  out << v.qualifiedClassName() << "." << v.name();
-  return out;
-}
-
 std::ostream& operator<<(std::ostream & out, const IValue & v) {
   auto formatter = [&](std::ostream& out, const IValue& v) {
     out << v;
@@ -785,6 +801,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toSymInt();
     case IValue::Tag::SymFloat:
       return out << v.toSymFloat();
+    case IValue::Tag::SymBool:
+      return out << v.toSymBool();
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
@@ -804,6 +822,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << "RRef";
     case IValue::Tag::Future:
       return out << "Future";
+    case IValue::Tag::Await:
+      return out << "Await";
     case IValue::Tag::Uninitialized:
       return out << "Uninitialized";
     case IValue::Tag::Device:
@@ -852,35 +872,38 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::create(
       StrongTypePtr(nullptr, std::move(classType)), numSlots);
 }
 
-
-IValue IValue::deepcopy() const {
+IValue IValue::deepcopy(c10::optional<at::Device> device) const {
   IValue::HashAliasedIValueMap memo;
-  return deepcopy(memo);
+  return deepcopy(memo, device);
 }
 
 IValue IValue::deepcopy(
-    IValue::HashAliasedIValueMap& memo) const {
+    IValue::HashAliasedIValueMap& memo,
+    c10::optional<at::Device> device) const {
   if (memo.count(*this)) {
     return memo.at(*this);
   }
   IValue copy;
   switch(tag) {
-    case IValue::Tag::Tensor:
-      copy = IValue(toTensor().clone());
-      break;
+    case IValue::Tag::Tensor: {
+      const at::Tensor& src_tensor = toTensor();
+      copy = device.has_value() && !src_tensor.device().is_meta()
+          ? IValue(src_tensor.to(*device))
+          : IValue(src_tensor.clone());
+    } break;
     case IValue::Tag::Tuple: {
       std::vector<IValue> copied_tuple;
       for (const auto& e : toTupleRef().elements()) {
-        copied_tuple.push_back(e.deepcopy(memo));
+        copied_tuple.emplace_back(e.deepcopy(memo, device));
       }
-      copy = IValue(ivalue::Tuple::create(copied_tuple));
+      copy = IValue(ivalue::Tuple::create(std::move(copied_tuple)));
     }
       break;
     case IValue::Tag::GenericList: {
       auto list = toList();
       auto copied_list = c10::impl::GenericList(list.elementType());
       for (IValue v : list) {
-        copied_list.push_back(v.deepcopy(memo));
+        copied_list.push_back(v.deepcopy(memo, device));
       }
       copy = IValue(copied_list);
     }
@@ -889,7 +912,9 @@ IValue IValue::deepcopy(
       auto dict = toGenericDict();
       auto copied_dict = c10::impl::GenericDict(dict.keyType(), dict.valueType());
       for (const auto& entry : dict) {
-        copied_dict.insert(entry.key().deepcopy(memo), entry.value().deepcopy(memo));
+        copied_dict.insert(
+            entry.key().deepcopy(memo, device),
+            entry.value().deepcopy(memo, device));
       }
       copy = IValue(copied_dict);
     }
@@ -904,7 +929,7 @@ IValue IValue::deepcopy(
         auto state = class_type->getMethod("__getstate__")({*this});
         class_type->getMethod("__setstate__")({copy, std::move(state)});
       } else {
-        copy = IValue(toObject()->deepcopy(memo));
+        copy = IValue(toObject()->deepcopy(memo, device));
       }
     } break;
     case IValue::Tag::Enum: {
@@ -912,7 +937,7 @@ IValue IValue::deepcopy(
       copy = IValue(c10::make_intrusive<ivalue::EnumHolder>(
           enum_holder->type(),
           enum_holder->name(),
-          enum_holder->value().deepcopy(memo)));
+          enum_holder->value().deepcopy(memo, device)));
     } break;
     case IValue::Tag::String:
     case IValue::Tag::None:
@@ -920,6 +945,7 @@ IValue IValue::deepcopy(
     case IValue::Tag::Int:
     case IValue::Tag::SymInt:
     case IValue::Tag::SymFloat:
+    case IValue::Tag::SymBool:
     case IValue::Tag::Bool:
     case IValue::Tag::Device:
     case IValue::Tag::Uninitialized: {
@@ -984,12 +1010,15 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy_to_weak_compilation_ref(
   return object;
 }
 
-c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
+    c10::optional<at::Device> device) const {
   IValue::HashAliasedIValueMap memo;
-  return deepcopy(memo);
+  return deepcopy(memo, device);
 }
 
-c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedIValueMap& memo) const {
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
+    IValue::HashAliasedIValueMap& memo,
+    c10::optional<at::Device> device) const {
   auto cu = type_.cu_;
   auto object = ivalue::Object::create(WeakOrStrongTypePtr(type_.cu_, type_.type_), type()->numAttributes());
   for (const auto i : c10::irange(slots_.size())) {
@@ -1007,25 +1036,20 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedI
             "this class.";
       AT_ERROR(err.str());
     }
-    object->setSlot(i, slots_[i].deepcopy(memo));
+    object->setSlot(i, slots_[i].deepcopy(memo, device));
   }
   return object;
 }
 
 StrongTypePtr::StrongTypePtr(
     std::shared_ptr<torch::jit::CompilationUnit> cu,
-    TypePtr type) {
-  cu_ = std::move(cu);
-  type_ = type;
+    TypePtr type) : cu_(std::move(cu)), type_(std::move(type)) {
   TORCH_INTERNAL_ASSERT(type_);
 }
 
 WeakTypePtr::WeakTypePtr(
     std::weak_ptr<torch::jit::CompilationUnit> cu,
-    TypePtr type) {
-  cu_ = std::move(cu);
-  type_ = type;
-}
+    TypePtr type) : cu_(std::move(cu)), type_(std::move(type)) {}
 
 WeakTypePtr WeakOrStrongTypePtr::asWeakTypePtr() const {
   if (!holds_strong_ref()) {
@@ -1033,7 +1057,7 @@ WeakTypePtr WeakOrStrongTypePtr::asWeakTypePtr() const {
   } else {
     std::weak_ptr<torch::jit::CompilationUnit> weak_cu =
         cu_.getStrongRefOrThrow();
-    return WeakTypePtr(weak_cu, type_);
+    return WeakTypePtr(std::move(weak_cu), type_);
   }
 }
 
@@ -1064,11 +1088,13 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
       if (tensor.is_sparse()) {
         // Sparse tensor is indices and values. Both are tensors
         // and contain storage.
-        weakStorageImpls.push_back(tensor.indices().storage().getWeakStorageImpl());
-        weakStorageImpls.push_back(tensor.values().storage().getWeakStorageImpl());
+        // TODO (rohan-varma): for tensors created with at::sparse_coo_tensor held
+        // in a python object, this might need a coalesce().
+        weakStorageImpls.emplace_back(tensor.indices().storage().getWeakStorageImpl());
+        weakStorageImpls.emplace_back(tensor.values().storage().getWeakStorageImpl());
       } else {
         // A dense/strided tensor contains 1 storage
-        weakStorageImpls.push_back(tensor.storage().getWeakStorageImpl());
+        weakStorageImpls.emplace_back(tensor.storage().getWeakStorageImpl());
       }
     }
   } else {
@@ -1078,7 +1104,15 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
     value.getSubValues(sub_values);
     for (const at::IValue& sub_value : sub_values) {
       if (sub_value.isTensor()) {
-        weakStorageImpls.push_back(sub_value.toTensor().storage().getWeakStorageImpl());
+        auto tens = sub_value.toTensor();
+        if (tens.is_sparse()) {
+          // sparse tensors have 2 storages! one for indices one for values
+          auto coalesced = tens.coalesce();
+          weakStorageImpls.emplace_back(coalesced.indices().storage().getWeakStorageImpl());
+          weakStorageImpls.emplace_back(coalesced.values().storage().getWeakStorageImpl());
+        } else {
+          weakStorageImpls.emplace_back(tens.storage().getWeakStorageImpl());
+        }
       }
     }
   }
@@ -1102,7 +1136,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
   };
 
   auto ctx = std::make_shared<Ctx>(std::move(srcs));
-  if (ctx->srcFutures.size() == 0) {
+  if (ctx->srcFutures.empty()) {
     ctx->dstFuture->markCompleted(ctx->asIvalue);
   } else {
     auto typePtr = ctx->srcFutures.get(0)->elementType();

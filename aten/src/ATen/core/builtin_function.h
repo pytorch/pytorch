@@ -72,7 +72,7 @@ struct BuiltinOpFunction : public Function {
     return false;
   }
 
-  ~BuiltinOpFunction() override {}
+  ~BuiltinOpFunction() override = default;
 
  private:
   c10::QualifiedName name_;

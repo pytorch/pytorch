@@ -18,11 +18,6 @@ const BackendImplInterface* getBackend() {
   return interface;
 }
 
-// default implementation
-bool BackendImplInterface::ShouldSyncTensor(const LazyTensorPtr tensor) const {
-  return tensor->GetIrValue()->op() != ltc_not_supported;
-}
-
 BackendRegistrar::BackendRegistrar(
     const BackendImplInterface* backend_impl_interface) {
   backend_impl_registry.store(backend_impl_interface);
@@ -34,25 +29,19 @@ const IrBuilder* getIrBuilder() {
   return builder;
 }
 
-at::Tensor MakeTensorFromComputationData(
-    const BackendDataPtr data,
-    c10::optional<at::ScalarType> logical_scalar_type) {
-  return getBackend()->MakeTensorFromComputationData(data, logical_scalar_type);
-}
-
 std::unique_ptr<LoweringContext> LoweringContext::Create(
     const std::string& name,
     BackendDevice device,
-    c10::ArrayRef<Node*> post_order,
+    c10::ArrayRef<const Node*> post_order,
     Util::EmissionMap emit_status) {
   return getBackend()->CreateLoweringContext(
-      name, device, post_order, emit_status);
+      name, std::move(device), post_order, emit_status);
 }
 
 std::unique_ptr<LoweringContext> LoweringContext::Create(
     const std::string& name,
     BackendDevice device) {
-  return getBackend()->CreateLoweringContext(name, device);
+  return getBackend()->CreateLoweringContext(name, std::move(device));
 }
 
 } // namespace lazy

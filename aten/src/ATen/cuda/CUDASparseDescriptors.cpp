@@ -5,9 +5,7 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
 
-namespace at {
-namespace cuda {
-namespace sparse {
+namespace at::cuda::sparse {
 
 #if AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
@@ -26,7 +24,7 @@ void check_supported_cuda_type(cudaDataType cuda_type) {
         prop->minor,
         ")");
   }
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM)
   if (cuda_type == CUDA_R_16BF) {
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     TORCH_CHECK(
@@ -73,7 +71,7 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input, int64_t ba
   auto leading_dimension =
       is_row_major ? input_strides[ndim - 2] : input_strides[ndim - 1];
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM)
   auto order = is_row_major ? CUSPARSE_ORDER_ROW : CUSPARSE_ORDER_COL;
 #else
   TORCH_INTERNAL_ASSERT(is_column_major, "Expected column major input.");
@@ -177,7 +175,7 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
       value_type // data type of values
       ));
 
-#if AT_USE_HIPSPARSE_GENERIC_52_API() || (defined(CUDA_VERSION) && CUDA_VERSION >= 11000)
+#if AT_USE_HIPSPARSE_GENERIC_52_API() || !defined(USE_ROCM)
   if (ndim == 3 && batch_offset == -1) {
     int batch_count =
         at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
@@ -208,6 +206,4 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
 
 #endif // AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
-} // namespace sparse
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda::sparse

@@ -102,7 +102,7 @@ THManagedMapAllocatorInit::THManagedMapAllocatorInit(
     if (!manager_handle_.empty()) {
       socket = &get_manager_socket(manager_handle_);
     } else {
-      if (managers.size() == 0) {
+      if (managers.empty()) {
         start_manager();
       }
       const auto& manager = managers.begin();
@@ -120,7 +120,7 @@ THManagedMapAllocator::THManagedMapAllocator(
     const char* manager_handle,
     const char* filename,
     int flags,
-    ptrdiff_t size)
+    size_t size)
     : THManagedMapAllocatorInit(manager_handle, filename),
       at::RefcountedMapAllocator(filename, flags, size) {}
 
@@ -142,7 +142,7 @@ at::DataPtr THManagedMapAllocator::makeDataPtr(
     const char* manager_handle,
     const char* filename,
     int flags,
-    ptrdiff_t size) {
+    size_t size) {
   auto* context =
       new THManagedMapAllocator(manager_handle, filename, flags, size);
   return {

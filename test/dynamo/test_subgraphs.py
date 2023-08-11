@@ -6,9 +6,8 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo import config
 from torch._dynamo.testing import unsupported
-from torch._dynamo.utils import disable_cache_limit
+from torch._dynamo.utils import ifdynstaticdefault
 
 globalmod = torch.nn.ReLU()
 
@@ -31,7 +30,11 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         r2 = opt_fn(v2, v1)
         self.assertTrue(torch._dynamo.testing.same(r1, correct1))
         self.assertTrue(torch._dynamo.testing.same(r2, correct2))
-        self.assertEqual(cnt.frame_count, frame_count)
+        self.assertEqual(
+            cnt.frame_count,
+            frame_count,
+            f"actual {cnt.frame_count} != expected {frame_count}",
+        )
         self.assertEqual(cnt.op_count, op_count)
 
     def test_control_flow1(self):
@@ -308,10 +311,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = torch.add(unsupported(x, x), 1)
             return a * x + len_(b)
 
-        if config.dynamic_shapes:
-            self._common(fn, 2, 5)
-        else:
-            self._common(fn, 2, 4)
+        self._common(fn, 2, ifdynstaticdefault(4, 5))
 
     def test_restore_range(self):
         def fn(a, b):
@@ -322,7 +322,11 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                 x = x + i
             return x
 
-        self._common(fn, 2, 4)
+        # We don't specialize on range with dynamic shapes, which
+        # means we fail to unroll the loop.
+        # TODO: Consider forcing specialization when we iterate over
+        # the loop
+        self._common(fn, 2, ifdynstaticdefault(4, 1))
 
     def test_restore_range_iter(self):
         def fn(a, b):
@@ -345,27 +349,87 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         self._common(fn, 2, 6)
 
-    @disable_cache_limit()
-    def test_dynamic_shapes(self):
+    @patch("torch._dynamo.config.assume_static_by_default", False)
+    def test_dynamic_getitem(self):
+        def fn(a, b):
+            return a[b.size(0) - 1]
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        for i in range(3, 12):
+            opt_fn(torch.randn(i), torch.randn(i))
+        # just one graph
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_dynamic_kwarg(self):
         def fn(a, b):
             return a - b * 10
 
         torch._dynamo.reset()
-        cnt_static = torch._dynamo.testing.CompileCounter()
-        with patch("torch._dynamo.config.dynamic_shapes", False):
-            opt_fn = torch._dynamo.optimize(cnt_static)(fn)
-            for i in range(10):
-                opt_fn(torch.randn(i), torch.randn(i))
-        self.assertEqual(cnt_static.frame_count, 10)
+        cnt_dynamic = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
+        start = 2
+        end = 12
+        steps = end - start
+        for i in range(start, end):
+            opt_fn(torch.randn(i), torch.randn(i))
+
+        self.assertEqual(cnt_dynamic.frame_count, 1)
+
+    def test_dynamic_duck_size(self):
+        def fn(a, b):
+            if a.size(0) == b.size(0):
+                return a + b
+            else:
+                return a.sum() + b.sum()
 
         torch._dynamo.reset()
         cnt_dynamic = torch._dynamo.testing.CompileCounter()
-        with patch("torch._dynamo.config.dynamic_shapes", True):
-            opt_fn = torch._dynamo.optimize(cnt_dynamic)(fn)
-            for i in range(10):
-                opt_fn(torch.randn(i), torch.randn(i))
-        # just one graph now rather than 10
-        self.assertEqual(cnt_dynamic.frame_count, 1)
+        opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
+        x = torch.randn(2)
+        y = torch.randn(3)
+        self.assertEqual(opt_fn(x, x), fn(x, x))
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+        self.assertEqual(cnt_dynamic.frame_count, 2)
+
+    def test_dynamic_order_dependence(self):
+        def fn(a, b):
+            return a.sum() + b.sum()
+
+        torch._dynamo.reset()
+        cnt_dynamic = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt_dynamic)(fn)
+        x = torch.randn(2)
+        y = torch.randn(3)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+        self.assertEqual(opt_fn(x, x), fn(x, x))
+        # NB: This COULD validly be 2, but we don't test disjointness in the
+        # guards for when x and y didn't duck size together, so we end up
+        # with a generic graph that also works when x and y happen to duck
+        # size together.
+        self.assertEqual(cnt_dynamic.frame_count, 2)
+
+        torch._dynamo.reset()
+        cnt_dynamic.frame_count = 0
+        self.assertEqual(opt_fn(x, x), fn(x, x))  # this overspecializes!
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+        self.assertEqual(cnt_dynamic.frame_count, 2)
+
+    def test_dynamic_zero_inference(self):
+        def fn(a):
+            if a.size(0) != 0:
+                return a * 2
+            else:
+                return a + 1
+
+        torch._dynamo.reset()
+        cnt_dynamic = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
+        x = torch.randn(0)
+        y = torch.randn(2)
+        self.assertEqual(opt_fn(y), fn(y))
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt_dynamic.frame_count, 2)
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_no_graph_break_on_item(self):
@@ -413,8 +477,8 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                     opt_fn(v1, a, b, c)
 
         # checking here we don't create 2^n graphs
-        self.assertEqual(cnt.frame_count, 7)
-        self.assertEqual(cnt.op_count, 10)
+        self.assertEqual(cnt.frame_count, 12)
+        self.assertEqual(cnt.op_count, 16)
 
     def test_resume_with_no_grad1(self):
         def fn(a, b):
@@ -525,7 +589,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                 b = b + x * i
             return b
 
-        self._common(fn, 1, 2)
+        self._common(fn, 1, ifdynstaticdefault(2, 7))
 
 
 if __name__ == "__main__":

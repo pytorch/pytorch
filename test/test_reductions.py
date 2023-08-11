@@ -11,7 +11,7 @@ from functools import partial
 from itertools import product, combinations, permutations
 import warnings
 
-from torch._six import inf, nan
+from torch import inf, nan
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, get_all_math_dtypes, integral_types, complex_types, floating_types_and,
@@ -80,7 +80,7 @@ def _reduced_shape(shape, dim=None, keepdim=False):
 
     # Wrap negative dims
     dim = dim if isinstance(dim, Sequence) else [dim]
-    dim = set(i if i >= 0 else len(shape) + i for i in dim)
+    dim = {i if i >= 0 else len(shape) + i for i in dim}
 
     result = []
     for i, size in enumerate(shape):
@@ -464,9 +464,9 @@ class TestReductions(TestCase):
                torch.norm]
         for op in ops:
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
-                op(x, 64)
+                op(x, dim=64)
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
-                op(x, -1)
+                op(x, dim=-1)
 
     @onlyCPU
     @dtypes(torch.float, torch.bfloat16)
@@ -503,6 +503,116 @@ class TestReductions(TestCase):
         expected = logsumexp(e.cpu().numpy(), 1)
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected, actual)
+
+    @skipIfNoSciPy
+    @dtypes(torch.complex64, torch.complex128)
+    def test_logcumsumexp_complex(self, device, dtype):
+        # logcumsumexp is a more precise way to compute than ``log(cumsum(exp(a)))``
+        # and faster than ``[log(sum(exp(a[:i]))) for i in range(a.shape[0])]``
+        # the for-loop above should produce similar precision as logcumsumexp (it's just slower),
+        # so it can be used as the expected values to check our computation
+
+        # using logsumexp from scipy because by the time of writing this test code,
+        # torch.logsumexp has not been implemented for complex numbers
+        from scipy.special import logsumexp
+
+        def zero_out_neg_inf(t):
+            t = t.clone()
+            idx = torch.logical_and(~(torch.isfinite(t)), torch.real(t) < 0)
+            t[idx] = torch.real(t[idx]).to(t.dtype)
+            return t
+
+        def standardize_phase(t):
+            t = torch.real(t) + 1j * (torch.imag(t) % (2 * np.pi))
+            return t
+
+        def logcumsumexp_slow(a, dim):
+            res_lst = []
+            for i in range(a.size(dim)):
+                index = [slice(None, None, None) for _ in range(a.ndim)]
+                index[dim] = slice(None, i + 1, None)
+                a_inp = a[tuple(index)]
+                res_lst.append(logsumexp(a_inp.cpu().numpy(), axis=dim, keepdims=True))
+            res = np.concatenate(res_lst, axis=dim)
+            return torch.as_tensor(res)
+
+        def compare_logcumsumexp(a, expected=None):
+            for i in range(a.ndim):
+                actual = torch.logcumsumexp(a, dim=i)
+                # if the expected is not given, then revert to scipy's logsumexp
+                if expected is None:
+                    expected2 = logcumsumexp_slow(a, dim=i)
+                else:
+                    expected2 = expected
+
+                # move the imaginary values to (0, 2 * pi)
+                actual = standardize_phase(actual)
+                expected2 = standardize_phase(expected2)
+
+                # zeroing the imaginary part of the element if the real part is -inf
+                # as the imaginary part cannot be determined exactly and it does not
+                # really matter if we take the exp of the output
+                actual = zero_out_neg_inf(actual)
+                expected2 = zero_out_neg_inf(expected2)
+                self.assertEqual(expected2.shape, actual.shape)
+                self.assertEqual(expected2, actual)
+
+        # randomly specified values
+        # in this case, scipy.logsumexp should be enough
+        a1 = torch.randn((5, 10), dtype=dtype, device=device)
+        compare_logcumsumexp(a1)
+
+        # test with some non-normal values
+        a2 = torch.tensor([1e3 + 0j, 1e-18 + 1e4j, 1e2 + 1e-8j], dtype=dtype, device=device)
+        compare_logcumsumexp(a2)
+
+        # handle special case involving infinites and nans
+        # here we don't use scipy.logsumexp as it gives confusing answer on
+        # some inf cases
+        # see here:
+        inf = float('inf')
+        nan = float('nan')
+        a3_input = torch.tensor([
+            -inf + 4j,
+            -inf + 1j,
+            1.2 + 2.1j,
+            1e10 + 1e20j,
+            inf + 0j,
+            inf + 1j,
+            inf + 3j,
+            nan + 2j,
+        ])
+        a3_expected = torch.tensor([
+            -inf + 0j,
+            -inf + 0j,
+            1.2 + 2.1j,
+            1e10 + 1e20j,
+            inf + 0j,  # scipy's logsumexp gives (inf + 0.7853982j) here, unclear why
+            inf + (np.pi / 4) * 1j,  # the imaginary part thanks to some weird behaviour of log(inf + infj)
+            complex(inf, nan),
+            complex(nan, nan),
+        ])
+        # windows give strange results on the second-to-last results where it gives inf + pi/4 j
+        # instead of inf + nan j
+        if not IS_WINDOWS:
+            compare_logcumsumexp(a3_input, a3_expected)
+
+        a4_input = torch.tensor([
+            complex(-inf, inf),
+            complex(-inf, inf),
+            -inf + 1j,
+            1.2 + 2.1j,
+            complex(2.4, inf),
+        ])
+        a4_expected = torch.tensor([
+            -inf + 0j,
+            -inf + 0j,
+            -inf + 0j,
+            1.2 + 2.1j,
+            complex(nan, nan),
+        ])
+        if not IS_WINDOWS:
+            compare_logcumsumexp(a4_input, a4_expected)
 
     @onlyCPU
     def test_sum_parallel(self, device):
@@ -1324,7 +1434,7 @@ class TestReductions(TestCase):
         vals = [[True, True], [True, False], [False, False], []]
         for val in vals:
             result = torch.prod(torch.tensor(val, device=device), dtype=torch.bool).item()
-            expect = np.prod(np.array(val), dtype=np.bool)
+            expect = np.prod(np.array(val), dtype=bool)
             self.assertEqual(result, expect)
 
             result = torch.prod(torch.tensor(val, device=device)).item()
@@ -1453,6 +1563,14 @@ class TestReductions(TestCase):
             _, sorted_idx = torch.sort(sequence)
             torch.searchsorted(sequence, values_1d, sorter=sorted_idx.to(torch.float32))
 
+        # invalid sorter value, out of bound (>= innermost size)
+        with self.assertRaisesRegex(RuntimeError, "sorter index out of range"):
+            torch.searchsorted(torch.tensor([1, 2, 3]), 2.5, sorter=torch.tensor([0, 1, 3]))
+
+        # invalid sorter value, out of bound (< 0)
+        with self.assertRaisesRegex(RuntimeError, "sorter index out of range"):
+            torch.searchsorted(torch.tensor([1, 2, 3]), 2.5, sorter=torch.tensor([-1, 1, 2]))
+
         # scalar type bfloat16
         if self.device_type == 'cpu':
             def test_dtype_bfloat16(values_bf16=False, boundaries_bf16=False):
@@ -1571,6 +1689,7 @@ class TestReductions(TestCase):
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_extremal=True)
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_keepdim=True)
 
+    @onlyCPU
     @dtypes(*complex_types())
     def test_nansum_complex(self, device, dtype):
         x = torch.randn((3, 3, 3), device=device, dtype=dtype)
@@ -1793,11 +1912,9 @@ class TestReductions(TestCase):
         x = torch.randn(3, 3, 3, 3, device=device)
 
         error_msg = r'appears multiple times in the list of dims'
-        norm_error_msg = r'Expected dims to be different, got'
         for op in ops:
             for dim in [(0, 0), (0, -4)]:
-                e_msg = norm_error_msg if op == torch.norm else error_msg
-                with self.assertRaisesRegex(RuntimeError, e_msg):
+                with self.assertRaisesRegex(RuntimeError, error_msg):
                     op(x, dim=dim)
 
     # TODO: update this test to comapre against NumPy
@@ -1851,9 +1968,9 @@ class TestReductions(TestCase):
             a[2, 2] = nan
             actual = f(a.to(device)).cpu()
             expected = f(a).cpu()
-            self.assertEqual(torch.isnan(actual), torch.isnan(expected), msg='nans for {}'.format(name))
+            self.assertEqual(torch.isnan(actual), torch.isnan(expected), msg=f'nans for {name}')
             self.assertEqual(actual[~torch.isnan(actual)],
-                             expected[~torch.isnan(expected)], msg='nans for {}'.format(name))
+                             expected[~torch.isnan(expected)], msg=f'nans for {name}')
 
     # TODO: make this test generic using OpInfos
     @onlyCUDA
@@ -2082,16 +2199,16 @@ class TestReductions(TestCase):
                 fn_tuple(y, 1, keepdim=False, out=(values[:, 1], indices[:, 1]))
                 values_expected, indices_expected = fn_tuple(y, 1, keepdim=False)
                 self.assertEqual(values[:, 1], values_expected,
-                                 msg='{} values with out= kwarg'.format(fn_name))
+                                 msg=f'{fn_name} values with out= kwarg')
                 self.assertEqual(indices[:, 1], indices_expected,
-                                 msg='{} indices with out= kwarg'.format(fn_name))
+                                 msg=f'{fn_name} indices with out= kwarg')
                 continue
 
             x = torch.randn(5, 3, device=device)
             y = torch.randn(5, 3, device=device)
             fn(y, 1, keepdim=False, out=x[:, 1])
             expected = fn(y, 1, keepdim=False)
-            self.assertEqual(x[:, 1], expected, msg='{} with out= kwarg'.format(fn_name))
+            self.assertEqual(x[:, 1], expected, msg=f'{fn_name} with out= kwarg')
 
     @onlyCUDA
     @largeTensorTest('10GB')
@@ -2843,6 +2960,9 @@ class TestReductions(TestCase):
         expanded = torch.randn(1, 5, 1, 2, device=device).expand(3, 5, 7, 2)
         test_against_np(expanded)
 
+        linear = torch.linspace(0, 0.99 - 5.0e-7, 101).to(device)
+        test_against_np(linear, bins=20, min=0, max=0.99)
+
     @onlyCPU
     def test_histc_bfloat16(self, device):
         actual = torch.histc(
@@ -3378,8 +3498,8 @@ as the input tensor excluding its innermost dimension'):
             expected = np.asarray(expected)  # transform numpy scalars to numpy.ndarray instances
 
             msg = ("Failed to produce expected results! Input tensor was"
-                   " {0}, torch result is {1}, and reference result is"
-                   " {2}.").format(t, actual, expected) if t.numel() < 10 else None
+                   " {}, torch result is {}, and reference result is"
+                   " {}.").format(t, actual, expected) if t.numel() < 10 else None
 
             self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype)
 

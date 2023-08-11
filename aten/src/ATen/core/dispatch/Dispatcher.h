@@ -11,7 +11,9 @@
 #include <c10/util/LeftRight.h>
 #include <list>
 #include <mutex>
+#include <condition_variable>
 #include <type_traits>
+#include <c10/core/SafePyObject.h>
 
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/enum_tag.h>
@@ -19,6 +21,14 @@
 namespace c10 {
 
 TORCH_API bool show_dispatch_trace();
+TORCH_API void dispatch_trace_nesting_incr();
+TORCH_API void dispatch_trace_nesting_decr();
+TORCH_API int64_t dispatch_trace_nesting_value();
+
+struct DispatchTraceNestingGuard {
+  DispatchTraceNestingGuard() { dispatch_trace_nesting_incr(); }
+  ~DispatchTraceNestingGuard() { dispatch_trace_nesting_decr(); }
+};
 
 class TORCH_API OperatorHandle;
 template<class FuncType> class TypedOperatorHandle;
@@ -75,6 +85,12 @@ private:
   };
   friend class OperatorHandle;
   template<class> friend class TypedOperatorHandle;
+
+  struct Guard final {
+    Guard() : alive(true), mutex() {}
+    std::atomic<bool> alive;
+    std::mutex mutex;
+  };
 
 public:
   ~Dispatcher();
@@ -174,6 +190,9 @@ public:
     return backendFallbackKernels_[dispatch_ix].kernel.isValid();
   }
 
+  // Used by torchdeploy/multipy for multiple interpreters racing.
+  void waitForDef(const FunctionSchema& schema);
+  void waitForImpl(const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key);
 
   // ------------------------------------------------------------------------
   //
@@ -299,7 +318,26 @@ private:
   std::array<impl::AnnotatedKernel, num_runtime_entries> backendFallbackKernels_;
 
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
-  std::mutex mutex_;
+
+  // This condition variable gets notified whenever we add a new def/impl to the
+  // dispatch table.  This is primarily used by multipy/torchdeploy, when
+  // we have multiple interpreters trying to register to the dispatch table.
+  // In this situation, whenever the non-primary interpreter would have tried
+  // to register to the dispatch table, instead it will check to see if the
+  // expected registration has already been made, and if it hasn't, wait on
+  // this condition variable to see if it was just racing with the primary
+  // interpreter.
+  //
+  // We expect it to be rare for there to be any waiters on this condition
+  // variable.  This is mostly just to help give better diagnostics if
+  // something goes horribly wrong
+  std::condition_variable cond_var_;
+
+  // Protect concurrent access to the dispatcher.  We store this in a
+  // `shared_ptr` as we return callbacks that call back into dispatcher methods,
+  // and we need to be able to handle and guard against the event when the
+  // `Dispatcher` has been destroyed before the callbacks fire.
+  std::shared_ptr<Guard> guard_;
 };
 
 /**
@@ -308,11 +346,14 @@ private:
  * to lookup a kernel for a certain set of arguments.
  */
 class TORCH_API OperatorHandle {
+  template <typename T> friend struct std::hash;
+
 public:
   OperatorHandle(OperatorHandle&&) noexcept = default;
   OperatorHandle& operator=(OperatorHandle&&) noexcept = default;
   OperatorHandle(const OperatorHandle&) = default;
   OperatorHandle& operator=(const OperatorHandle&) = default;
+  // NOLINTNEXTLINE(performance-trivially-destructible)
   ~OperatorHandle();
 
   const OperatorName& operator_name() const {
@@ -359,6 +400,10 @@ public:
     return operatorDef_->op.getTags();
   }
 
+  void setReportErrorCallback_(std::unique_ptr<c10::SafePyObject> callback) {
+    operatorDef_->op.setReportErrorCallback_(std::move(callback));
+  }
+
   bool hasTag(const at::Tag& tag) const {
     for(const auto& tag_: getTags()) {
       if (tag == tag_) {
@@ -401,6 +446,14 @@ public:
   template <typename F>
   PyObject* getPythonOp(c10::impl::PyInterpreter* self_interpreter, F slow_accessor) const {
     return operatorDef_->op.getPythonOp(self_interpreter, slow_accessor);
+  }
+
+  bool operator==(const OperatorHandle& other) const {
+    return operatorDef_ == other.operatorDef_;
+  }
+
+  bool operator!=(const OperatorHandle& other) const {
+    return operatorDef_ != other.operatorDef_;
   }
 
 private:
@@ -536,27 +589,27 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
   auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
   auto& schema = op.schema();
   auto schema_ref = std::reference_wrapper<const FunctionSchema>(schema);
-  if (guard.needsInputs()) {
-    constexpr auto num_boxed_args = impl::boxed_size<Args...>();
-    // If we used std::array<IValue, num_boxed_args> here, we would
-    // have to spend time default constructing the IValues in
-    // boxedArgs. aligned_storage has no such requirement.
-    // Max to avoid zero-size array.`
-    std::aligned_storage_t<sizeof(IValue), alignof(IValue)> boxedArgs[std::max(num_boxed_args, static_cast<size_t>(1))];
-    // For debugging only; could be removed (but the compiler will do
-    // that for us and it's nice to have the extra assurance of
-    // correctness from our debug builds).
-    int lastArgIdx = 0;
-    impl::boxArgsToStack(boxedArgs, lastArgIdx, args...);
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(lastArgIdx == num_boxed_args);
-    // I don't *think* we need std::launder here, because IValue has
-    // no subclasses and no const or reference fields. (We also
-    // couldn't use it even if we wanted to because we are currently
-    // stuck on C++14 rather than C++17, but we could do a backport
-    // similar to folly::launder if needed.)
-    runRecordFunction(guard, schema_ref, dispatchKey, c10::ArrayRef<const c10::IValue>(reinterpret_cast<IValue *>(boxedArgs), num_boxed_args));
-    for (size_t ii = 0; ii < num_boxed_args; ++ii) {
-      reinterpret_cast<IValue *>(&boxedArgs[ii])->~IValue();
+  constexpr auto num_boxed_args = impl::boxed_size<Args...>();
+  if constexpr (num_boxed_args != 0) {
+    if (guard.needsInputs()) {
+      // If we used std::array<IValue, num_boxed_args> here, we would
+      // have to spend time default constructing the IValues in
+      // boxedArgs. aligned_storage has no such requirement.
+      impl::IValueAlignedStorage boxedArgs[num_boxed_args];
+      // For debugging only; could be removed (but the compiler will do
+      // that for us and it's nice to have the extra assurance of
+      // correctness from our debug builds).
+      int lastArgIdx = 0;
+      impl::boxArgsToStack(boxedArgs, lastArgIdx, args...);
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(lastArgIdx == num_boxed_args);
+      // I don't *think* we need std::launder here, because IValue has
+      // no subclasses and no const or reference fields.
+      runRecordFunction(guard, schema_ref, dispatchKey, c10::ArrayRef<const c10::IValue>(reinterpret_cast<IValue *>(boxedArgs), num_boxed_args));
+      for (size_t ii = 0; ii < num_boxed_args; ++ii) {
+        reinterpret_cast<IValue *>(&boxedArgs[ii])->~IValue();
+      }
+    } else {
+      runRecordFunction(guard, schema_ref, dispatchKey);
     }
   } else {
     runRecordFunction(guard, schema_ref, dispatchKey);
@@ -583,7 +636,10 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandl
   auto dispatchKeySet = op.operatorDef_->op.dispatchKeyExtractor()
     .template getDispatchKeySetUnboxed<Args...>(args...);
 #ifndef NDEBUG
+  DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
+      auto nesting_value = dispatch_trace_nesting_value();
+      for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
       std::cerr << "[call] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
   }
 #endif
@@ -603,7 +659,10 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   // do not use RecordFunction on redispatch
 #ifndef NDEBUG
+  DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
+      auto nesting_value = dispatch_trace_nesting_value();
+      for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
       std::cerr << "[redispatch] op=[" << op.operator_name() << "], key=[" << toString(currentDispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
   }
 #endif
@@ -616,7 +675,10 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   const auto& entry = op.operatorDef_->op;
   auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
 #ifndef NDEBUG
+  DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
+      auto nesting_value = dispatch_trace_nesting_value();
+      for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
       std::cerr << "[callBoxed] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
   }
 #endif
@@ -666,7 +728,10 @@ inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKeySet
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorDef_->op;
 #ifndef NDEBUG
+  DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
+      auto nesting_value = dispatch_trace_nesting_value();
+      for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
       std::cerr << "[redispatchBoxed] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
   }
 #endif
@@ -675,3 +740,14 @@ inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKeySet
 }
 
 } // namespace c10
+
+namespace std {
+
+template <>
+struct hash<c10::OperatorHandle> {
+  size_t operator()(c10::OperatorHandle op) const noexcept {
+    return std::hash<void*>{}(static_cast<void*>(op.operatorDef_));
+  }
+};
+
+} // namespace std

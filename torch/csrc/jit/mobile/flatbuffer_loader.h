@@ -117,10 +117,19 @@ TORCH_API mobile::Module load_mobile_module_from_stream_with_copy(
     c10::optional<at::Device> device = c10::nullopt,
     ExtraFilesMap* extra_files = nullptr);
 
-// This function will make the capabilities to load
-// Module as a flatbuffer file available for use by _load_for_mobile
-// and friends. This is NOT needed if using the other functions
-// in this file directly.
+TORCH_API mobile::Module parse_flatbuffer_no_object(
+    std::shared_ptr<char> data,
+    size_t size,
+    c10::optional<at::Device> device);
+
+TORCH_API mobile::Module parse_and_initialize_mobile_module(
+    void* data,
+    size_t,
+    c10::optional<at::Device>,
+    ExtraFilesMap* extra_files,
+    bool should_copy_tensor_memory);
+
+// no op, TODO(qihan) delete
 TORCH_API bool register_flatbuffer_loader();
 
 } // namespace jit

@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import functools
 import sys
 import warnings
-from typing import Callable, Sequence
+from typing import Callable, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -9,8 +11,8 @@ import torch.onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import (  # noqa: F401
-    _patch_torch,
+from torch.onnx import (
+    _constants,
     _type_utils,
     errors,
     symbolic_helper,
@@ -41,8 +43,15 @@ __all__ = [
     "quantized_add_relu",
     "quantized_add",
     "quantized_cat",
+    "quantized_conv1d_relu",
     "quantized_conv2d_relu",
+    "quantized_conv3d_relu",
+    "quantized_conv1d",
     "quantized_conv2d",
+    "quantized_conv3d",
+    "quantized_conv_transpose1d",
+    "quantized_conv_transpose2d",
+    "quantized_conv_transpose3d",
     "quantized_group_norm",
     "quantized_hardswish",
     "quantized_instance_norm",
@@ -189,11 +198,19 @@ def _max_pool(name: str, tuple_fn: Callable, ndims: int, return_indices: bool):
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if not stride:
             stride = kernel_size
+        padding = tuple(tuple_fn(padding))
+        if ceil_mode:
+            padding_ceil = opset9.get_pool_ceil_padding(
+                input, kernel_size, stride, padding
+            )
+            padding = padding + tuple(a + b for (a, b) in zip(padding_ceil, padding))
+        else:
+            padding = padding * 2
         kwargs = {
             "kernel_shape_i": tuple_fn(kernel_size),
-            "pads_i": tuple_fn(padding) * 2,
+            "pads_i": padding,
             "strides_i": tuple_fn(stride),
-            "ceil_mode_i": ceil_mode,
+            "ceil_mode_i": 0,
         }
         if set(tuple_fn(dilation)) != {1}:
             kwargs["dilations_i"] = tuple_fn(dilation)
@@ -224,8 +241,8 @@ def _max_pool(name: str, tuple_fn: Callable, ndims: int, return_indices: bool):
                 g,
                 flattened_indices,
                 axes=[2 + i for i in range(ndims)],
-                starts=tuple_fn(0),
-                ends=tuple_fn(1),
+                starts=list(tuple_fn(0)),
+                ends=list(tuple_fn(1)),
             )
             indices = opset9.sub(g, indices, s)
             return r, indices
@@ -236,20 +253,53 @@ def _max_pool(name: str, tuple_fn: Callable, ndims: int, return_indices: bool):
     return symbolic_fn
 
 
+# For AvgPool
+def _adjust_attributes_of_avg_pool(
+    expand_size: int,
+    kernel_size: Union[Sequence[int], int],
+    stride: Union[Sequence[int], int],
+    padding: Union[Sequence[int], int],
+) -> Tuple[Sequence[int], Sequence[int], Sequence[int]]:
+    """Adjust attributes of avg_pool to match ONNX specification."""
+
+    if isinstance(kernel_size, int):
+        kernel_shape = [kernel_size] * expand_size
+    else:
+        kernel_shape = kernel_size  # type: ignore[assignment]
+
+    if isinstance(padding, int):
+        pads = [padding] * expand_size * 2
+    elif len(padding) == 1:
+        pads = padding * expand_size * 2  # type: ignore[operator, assignment]
+    elif len(padding) == 2:
+        pads = padding * expand_size  # type: ignore[operator, assignment]
+    else:
+        pads = padding * 2  # type: ignore[operator, assignment]
+
+    if isinstance(stride, int):
+        strides = [stride] * expand_size
+    elif not stride:
+        strides = kernel_shape
+    else:
+        strides = stride  # type: ignore[assignment]
+
+    return (kernel_shape, strides, pads)
+
+
 @_onnx_symbolic(
     "aten::avg_pool1d",
-    decorate=[_apply_params("avg_pool1d", torch.nn.modules.utils._single)],
+    decorate=[_apply_params("avg_pool1d", 1)],
 )
 @_onnx_symbolic(
     "aten::avg_pool2d",
-    decorate=[_apply_params("avg_pool2d", torch.nn.modules.utils._pair)],
+    decorate=[_apply_params("avg_pool2d", 2)],
 )
 @_onnx_symbolic(
     "aten::avg_pool3d",
-    decorate=[_apply_params("avg_pool3d", torch.nn.modules.utils._triple)],
+    decorate=[_apply_params("avg_pool3d", 3)],
 )
 @_beartype.beartype
-def _avg_pool(name, tuple_fn):
+def _avg_pool(name, expand_size):
     @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     @_beartype.beartype
@@ -258,37 +308,26 @@ def _avg_pool(name, tuple_fn):
         input: _C.Value,
         kernel_size: Sequence[int],
         stride: Sequence[int],
-        padding: Sequence[int],
+        padding: Union[int, Sequence[int]],
         ceil_mode: int,
         count_include_pad: int,
         divisor_override=None,
     ):
-        if not stride:
-            stride = kernel_size
-        padding = symbolic_helper._avgpool_helper(
-            tuple_fn, padding, kernel_size, stride, divisor_override, name
+        kernel_shape, strides, pads = _adjust_attributes_of_avg_pool(
+            expand_size, kernel_size, stride, padding
         )
-        assert isinstance(padding, tuple)
-        if count_include_pad:
-            input = opset9._op_with_optional_float_cast(
-                g,
-                "Pad",
-                input,
-                pads_i=((0,) * 2 + padding) * 2,
-                mode_s="constant",
-                value_f=0.0,
-                opset_before=11,
-            )
-            padding = (0,) * len(padding)
-        output = g.op(
+
+        result = g.op(
             "AveragePool",
             input,
-            kernel_shape_i=tuple_fn(kernel_size),
-            strides_i=tuple_fn(stride),
-            pads_i=padding * 2,
             ceil_mode_i=ceil_mode,
+            count_include_pad_i=count_include_pad,
+            kernel_shape_i=kernel_shape,
+            pads_i=pads,
+            strides_i=strides,
         )
-        return output
+
+        return result
 
     return symbolic_fn
 
@@ -359,36 +398,59 @@ def __interpolate(
 @_beartype.beartype
 def _slice(
     g: jit_utils.GraphContext,
-    input,
-    axes,
-    starts,
-    ends,
-    steps=None,
-    dynamic_slice=False,
+    input: torch._C.Value,
+    axes: Union[List, torch.Tensor, torch._C.Value],
+    starts: Union[List, torch.Tensor, torch._C.Value],
+    ends: Union[List, torch.Tensor, torch._C.Value],
+    steps: Optional[Union[List, torch.Tensor, torch._C.Value]] = None,
 ):
-    if dynamic_slice:
-        starts = symbolic_helper._unsqueeze_helper(g, starts, [0])
-        ends = symbolic_helper._unsqueeze_helper(g, ends, [0])
-        if isinstance(axes, int):
-            axes = g.op("Constant", value_t=torch.tensor(axes))
-        axes = symbolic_helper._unsqueeze_helper(g, axes, [0])
-    else:
-        assert len(starts) == len(ends)
-        assert len(starts) == len(axes)
-        assert steps is None or len(starts) == len(steps)
-        if (
-            len(starts) == 1
-            and starts[0] == 0
-            and ends[0] == 9223372036854775807
-            and (steps is None or (len(steps) == 1 and steps[0] == 1))
-        ):
-            return input
-        axes = g.op("Constant", value_t=torch.tensor(axes))
-        starts = g.op("Constant", value_t=torch.tensor(starts))
-        ends = g.op("Constant", value_t=torch.tensor(ends))
+    def is_none_value(value):
+        if value is None:
+            return True
+        return (
+            isinstance(value, torch._C.Value)
+            and value.node().kind() == "prim::Constant"
+            and isinstance(value.type(), _C.NoneType)
+        )
+
+    def to_slice_input(list_or_value, default_value=None):
+        # Convert input param into a 1D torch.Value.
+        if is_none_value(list_or_value) and default_value is not None:
+            list_or_value = [default_value]
+
+        if isinstance(list_or_value, (list, torch.Tensor)):
+            return g.op("Constant", value_t=torch.tensor(list_or_value))
+
+        rank = symbolic_helper._get_tensor_rank(list_or_value)
+        if rank == 0:
+            return symbolic_helper._unsqueeze_helper(g, list_or_value, [0])
+        if rank == 1:
+            return list_or_value
+        raise errors.SymbolicValueError(
+            f"Rank must be 0 or 1, not {rank}", list_or_value
+        )
+
+    def get_const_value(list_or_value):
+        if isinstance(list_or_value, (list, torch.Tensor)):
+            if len(list_or_value) == 1:
+                return list_or_value[0]
+            return None
+        return symbolic_helper._maybe_get_const(list_or_value, "i")
+
+    # Check if slice is a no-op
+    if (
+        get_const_value(starts) == 0
+        and get_const_value(ends) == _constants.INT64_MAX
+        and (steps is None or get_const_value(steps) == 1)
+    ):
+        return input
+
+    axes = to_slice_input(axes)
+    starts = to_slice_input(starts, default_value=0)
+    ends = to_slice_input(ends, default_value=_constants.INT64_MAX)
     if steps is None:
         return g.op("Slice", input, starts, ends, axes)
-    steps = g.op("Constant", value_t=torch.tensor(steps))
+    steps = to_slice_input(steps, default_value=1)
     return g.op("Slice", input, starts, ends, axes, steps)
 
 
@@ -397,47 +459,21 @@ def _slice(
 def slice(g: jit_utils.GraphContext, self, *args):
     if len(args) == 4:
         # aten::slice(Tensor self, int dim, int? start=None, int? end=None, int step=1) -> Tensor
-        dim, start, end, step = args
+        dims, start, end, step = args
     elif len(args) == 3:
         # aten::slice(t[] l, int? start=None, int? end=None, int step=1) -> t[]
         start, end, step = args
-        dim = 0
+        dims = [0]
     else:
         raise errors.SymbolicValueError("Unknown aten::slice signature", self)
-    is_start_none = start.node().kind() == "prim::Constant" and isinstance(
-        start.type(), _C.NoneType
-    )
-    is_end_none = end.node().kind() == "prim::Constant" and isinstance(
-        end.type(), _C.NoneType
-    )
-    is_start_onnx_const = start.node().kind() == "onnx::Constant"
-    is_end_onnx_const = end.node().kind() == "onnx::Constant"
-    step = symbolic_helper._parse_arg(step, "i")
-    if (
-        (not is_start_none and not is_start_onnx_const)
-        or (not isinstance(end, int) and not is_end_none and not is_end_onnx_const)
-        or (not isinstance(dim, int) and dim.node().kind() != "onnx::Constant")
-    ):
-        dynamic_slice = True
-        if is_start_none:
-            start = g.op("Constant", value_t=torch.tensor(0))
-        if is_end_none:
-            end = g.op("Constant", value_t=torch.tensor(9223372036854775807))
-    else:
-        start = [0 if is_start_none else symbolic_helper._parse_arg(start, "i")]
-        end = [
-            9223372036854775807 if is_end_none else symbolic_helper._parse_arg(end, "i")
-        ]
-        dim = [symbolic_helper._parse_arg(dim, "i")]
-        dynamic_slice = False
+
     return symbolic_helper._slice_helper(
         g,
         self,
-        axes=dim,
+        axes=dims,
         starts=start,
         ends=end,
-        steps=[step],
-        dynamic_slice=dynamic_slice,
+        steps=step,
     )
 
 
@@ -450,7 +486,7 @@ def flip(g: jit_utils.GraphContext, input, dims):
         input,
         axes=dims,
         starts=[-1] * len(dims),
-        ends=[-9223372036854775807] * len(dims),
+        ends=[-_constants.INT64_MAX] * len(dims),
         steps=[-1] * len(dims),
     )
 
@@ -600,7 +636,7 @@ def fake_quantize_per_tensor_affine(
 @_onnx_symbolic("aten::isinf")
 @_beartype.beartype
 def isinf(g: jit_utils.GraphContext, input):
-    return g.op("IsInf", opset9._cast_Double(g, input, False))  # type: ignore[attr-defined]
+    return g.op("IsInf", g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.DOUBLE))
 
 
 @_onnx_symbolic("aten::isfinite")
@@ -637,7 +673,7 @@ def nan_to_num(g: jit_utils.GraphContext, input, nan, posinf, neginf):
     # return the original tensor
     if not symbolic_helper._is_fp(input):
         return input
-    input_dtype = _type_utils.JitScalarType.from_name(input.type().scalarType()).dtype()
+    input_dtype = _type_utils.JitScalarType.from_value(input).dtype()
     if nan is None:
         nan = 0.0
     nan_cond = opset9.isnan(g, input)
@@ -826,6 +862,31 @@ def quantized_instance_norm(
     return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
 
+@_onnx_symbolic("quantized::conv1d_relu")
+@_beartype.beartype
+def quantized_conv1d_relu(
+    g: jit_utils.GraphContext,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(g, bias, input_scale, weight_scale)
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv1d(g, input, weight, bias, stride, padding, dilation, groups)
+    output = opset9.relu(g, output)
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
 @_onnx_symbolic("quantized::conv2d_relu")
 @_beartype.beartype
 def quantized_conv2d_relu(
@@ -851,6 +912,55 @@ def quantized_conv2d_relu(
     return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
 
+@_onnx_symbolic("quantized::conv3d_relu")
+@_beartype.beartype
+def quantized_conv3d_relu(
+    g: jit_utils.GraphContext,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(g, bias, input_scale, weight_scale)
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv3d(g, input, weight, bias, stride, padding, dilation, groups)
+    output = opset9.relu(g, output)
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
+@_onnx_symbolic("quantized::conv1d")
+@_beartype.beartype
+def quantized_conv1d(
+    g: jit_utils.GraphContext,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(g, bias, input_scale, weight_scale)
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv1d(g, input, weight, bias, stride, padding, dilation, groups)
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
 @_onnx_symbolic("quantized::conv2d")
 @_beartype.beartype
 def quantized_conv2d(
@@ -871,6 +981,111 @@ def quantized_conv2d(
     bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
     output = opset9.conv2d(g, input, weight, bias, stride, padding, dilation, groups)
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
+@_onnx_symbolic("quantized::conv3d")
+@_beartype.beartype
+def quantized_conv3d(
+    g: jit_utils.GraphContext,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(g, bias, input_scale, weight_scale)
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv3d(g, input, weight, bias, stride, padding, dilation, groups)
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
+@_onnx_symbolic("quantized::conv_transpose1d")
+@_beartype.beartype
+def quantized_conv_transpose1d(
+    g: jit_utils.GraphContext,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    output_padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(g, bias, input_scale, weight_scale)
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv_transpose2d(
+        g, input, weight, bias, stride, padding, output_padding, groups, dilation
+    )
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
+@_onnx_symbolic("quantized::conv_transpose2d")
+@_beartype.beartype
+def quantized_conv_transpose2d(
+    g: jit_utils.GraphContext,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    output_padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(g, bias, input_scale, weight_scale)
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv_transpose2d(
+        g, input, weight, bias, stride, padding, output_padding, groups, dilation
+    )
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
+@_onnx_symbolic("quantized::conv_transpose3d")
+@_beartype.beartype
+def quantized_conv_transpose3d(
+    g: jit_utils.GraphContext,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    output_padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(g, bias, input_scale, weight_scale)
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv_transpose3d(
+        g, input, weight, bias, stride, padding, output_padding, groups, dilation
+    )
 
     return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 

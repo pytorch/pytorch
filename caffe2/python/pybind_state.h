@@ -14,6 +14,7 @@
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/python/pybind_state_dlpack.h"
+#include "caffe2/python/pybind_workspace.h"
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -55,16 +56,6 @@ Workspace* GetCurrentWorkspace();
 // Get workspace by name. Returns nullptr if none exists by name.
 Workspace* GetWorkspaceByName(const std::string& name);
 
-class C10_EXPORT BlobFetcherBase {
- public:
-  struct FetchedBlob {
-    pybind11::object obj;
-    bool copied;
-  };
-  virtual ~BlobFetcherBase();
-  virtual pybind11::object Fetch(const Blob& blob) = 0;
-};
-
 class BlobFeederBase {
  public:
   virtual ~BlobFeederBase();
@@ -74,17 +65,6 @@ class BlobFeederBase {
       Blob* blob,
       bool in_place = false) = 0;
 };
-
-C10_DECLARE_TYPED_REGISTRY(
-    BlobFetcherRegistry,
-    TypeIdentifier,
-    BlobFetcherBase,
-    std::unique_ptr);
-#define REGISTER_BLOB_FETCHER(id, ...) \
-  C10_REGISTER_TYPED_CLASS(BlobFetcherRegistry, id, __VA_ARGS__)
-inline unique_ptr<BlobFetcherBase> CreateFetcher(TypeIdentifier id) {
-  return BlobFetcherRegistry()->Create(id);
-}
 
 C10_DECLARE_TYPED_REGISTRY(
     BlobFeederRegistry,

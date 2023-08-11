@@ -2,7 +2,7 @@
 
 import sys
 import warnings
-from contextlib import suppress
+from contextlib import nullcontext
 
 import torch
 from torch import distributed as dist
@@ -11,10 +11,10 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 
 if not dist.is_available():
@@ -159,7 +159,7 @@ class TestFSDPExecOrder(FSDPTest):
                 expected_regex=regex,
             )
             if self.rank != 0
-            else suppress()
+            else nullcontext()
         )
         if self.rank != 0:
             fsdp_model.flip_path()

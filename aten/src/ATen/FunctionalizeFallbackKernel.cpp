@@ -6,6 +6,7 @@
 #include <ATen/TensorUtils.h>
 #include <torch/library.h>
 #include <c10/util/irange.h>
+#include <c10/util/strides.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/ATen.h>
@@ -22,12 +23,24 @@
 #include <ATen/ops/as_strided_copy.h>
 #include <ATen/ops/empty_strided_native.h>
 #include <ATen/ops/_unsafe_view.h>
+
+#include <utility>
 #endif
 
 namespace {
   void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet, torch::jit::Stack* stack) {
     const auto& schema = op.schema();
-    TORCH_INTERNAL_ASSERT(!schema.hasAnyAliasInfo(), "mutating and aliasing ops should all have codegen'd kernels");
+    TORCH_CHECK(
+      !schema.hasAnyAliasInfo(),
+      "Found a custom (non-ATen) operator that either mutates or its inputs: ",
+      op.operator_name().name, ".", op.operator_name().overload_name,
+      ". Getting these operators to work with functionalization requires some extra work",
+      ". For mutable ops you need to register a corresponding out-of-place variant of the op,",
+      " and you also need to register a Functionalization kernel that performs some boilerplate,",
+      " telling functionalization to map from the mutable op to the out-of-place op",
+      ". See a more complete example of how to do this at ",
+      "https://gist.github.com/bdhirsh/7dadbf6296f8f7d1abcf4c482f438aaa.",
+      " Please file a GitHub issue if you run into any problems.");
     const auto num_arguments = schema.arguments().size();
     const auto arguments_begin = stack->size() - num_arguments;
     auto arguments = torch::jit::last(stack, num_arguments);
@@ -38,7 +51,7 @@ namespace {
       const auto& ivalue = arguments[idx];
       if (ivalue.isTensor()) {
         any_tensor_inputs = true;
-        auto t = ivalue.toTensor();
+        const auto& t = ivalue.toTensor();
         if (t.defined() && at::functionalization::impl::isFunctionalTensor(t)) {
           any_functional_inputs = true;
           at::functionalization::impl::sync(t);
@@ -79,7 +92,7 @@ namespace {
     for (const auto idx : c10::irange(num_returns)) {
       const auto& ivalue = returns[idx];
       if (ivalue.isTensor() && should_wrap_outputs) {
-        auto t = ivalue.toTensor();
+        const auto& t = ivalue.toTensor();
         if (!t.defined()) continue;
         auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(t));
         (*stack)[returns_begin + idx] = t_new;
@@ -96,25 +109,11 @@ namespace {
   }
 }
 
-// Vanilla implementation to compute contiguous strides given some sizes.
-// Should probably refactor this into shared code (also used in TensorImpl.h)
-std::vector<int64_t> compute_contiguous_strides(c10::IntArrayRef sizes) {
-  auto n = sizes.size();
-  std::vector<int64_t> strides(n);
-  if (n == 0) return strides;
-
-  strides[n - 1] = 1;
-  for (int64_t i = n - 2; i >= 0; --i) {
-    strides[i] = strides[i+1] * sizes[i];
-  }
-  return strides;
-}
-
 // resize_() is special because:
 // - when we resize to a larger size, it acts as a mutation
 // - when we resize to a smaller size, it acts as a view
 // See Note [resize_ in Functionalization] for more dtails
-const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet, const at::Tensor & self, at::IntArrayRef size, c10::optional<at::MemoryFormat> memory_format) {
+static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet, const at::Tensor & self, at::IntArrayRef size, c10::optional<at::MemoryFormat> memory_format) {
   // First unwrap the tensor arguments
   at::Tensor self_;
   if (at::functionalization::impl::isFunctionalTensor(self)) {
@@ -126,7 +125,7 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
   // Case 1: arguments are not functional tensors, so we no-op and redispatch.
   if (!at::functionalization::impl::isFunctionalTensor(self)) {
      at::AutoDispatchSkipFunctionalize guard;
-     at::Tensor tmp_output = self_.resize_(size, memory_format);
+     self_.resize_(size, memory_format);
      return self;
   }
 
@@ -160,42 +159,42 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
   at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
     [reapply_views = reapply_views, size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
       if (reapply_views) {
-        return base.as_strided(size, compute_contiguous_strides(size));
+        return base.as_strided(size, c10::contiguous_strides(size));
       } else {
-        return at::as_strided_copy(base, size, compute_contiguous_strides(size));
+        return at::as_strided_copy(base, size, c10::contiguous_strides(size));
       }
     },
     [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
-      return base.as_strided_scatter(mutated_view, size, compute_contiguous_strides(size));
+      return base.as_strided_scatter(mutated_view, size, c10::contiguous_strides(size));
     }
   );
-  at::functionalization::impl::mutate_view_meta(self, view_meta);
+  at::functionalization::impl::mutate_view_meta(self, std::move(view_meta));
   return self;
 }
 
 
-at::Tensor lift_functionalize(const at::Tensor & self) {
+static at::Tensor lift_functionalize(const at::Tensor & self) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
   at::AutoDispatchSkipFunctionalize guard;
   auto out = at::lift(self);
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
-at::Tensor lift_fresh_functionalize(const at::Tensor & self) {
+static at::Tensor lift_fresh_functionalize(const at::Tensor & self) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
   at::AutoDispatchSkipFunctionalize guard;
   auto out = at::lift_fresh(self);
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
-at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
+static at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
   at::AutoDispatchSkipFunctionalize guard;
   auto out = at::lift_fresh_copy(self);
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
-bool device_opted_into_functionalization(c10::Device self_device, c10::optional<c10::Device> tgt_device) {
+static bool device_opted_into_functionalization(c10::Device self_device, c10::optional<c10::Device> tgt_device) {
     // If the target device is empty, then the output tensor should be on the same device as the input
     auto real_tgt_device = tgt_device.has_value() ? tgt_device.value() : self_device;
     return real_tgt_device.type() == c10::DeviceType::XLA || real_tgt_device.type() == c10::DeviceType::Lazy;
@@ -203,7 +202,7 @@ bool device_opted_into_functionalization(c10::Device self_device, c10::optional<
 
 // note I only need this because the to.dtype/to.dtype_layout overload calls this, so we skip the op above.
 // We should probably get rid of this though.
-at::Tensor _to_copy_functionalize(
+static at::Tensor _to_copy_functionalize(
         const at::Tensor & self,
         c10::optional<at::ScalarType> dtype,
         c10::optional<at::Layout> layout,
@@ -256,7 +255,7 @@ at::Tensor _to_copy_functionalize(
 // The idea with _unsafe_view is that you're guaranteed that the input
 // is a temporary, and don't actually have to worry about propagating
 // mutations between the input and output.
-at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymIntArrayRef size) {
+static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymIntArrayRef size) {
   if (!at::functionalization::impl::isFunctionalTensor(self)) {
     at::AutoDispatchSkipFunctionalize guard;
     return at::_unsafe_view_symint(self, size);
@@ -278,7 +277,7 @@ at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymIntArrayRe
     }
   );
 
-  auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, self, view_meta);
+  auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, self, std::move(view_meta));
   // See  Note [Propagating strides in the functionalization pass]
   // (for _unsafe_view, I'm just manually doing the shape inference rule here instead of calling the meta function for unsafe_view)
   auto inferred_size = at::infer_size_dv(size, self.sym_numel());

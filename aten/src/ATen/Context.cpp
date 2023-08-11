@@ -2,28 +2,17 @@
 
 #include <ATen/Context.h>
 
-#include <c10/core/TensorOptions.h>
 #include <c10/core/CPUAllocator.h>
-#include <c10/util/env.h>
 
 #include <algorithm>
 #include <cctype>
-#include <mutex>
-#include <sstream>
-#include <stdexcept>
 #include <string>
-#include <thread>
 
-#include <ATen/Tensor.h>
 #include <ATen/cpu/FlushDenormal.h>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
-
-#ifdef USE_MPS
-#include <ATen/mps/MPSDevice.h>
-#endif
 
 namespace at {
 
@@ -112,6 +101,14 @@ void Context::setSDPUseFlash(bool e) {
   enabled_flashSDP = e;
 }
 
+bool Context::userEnabledMemEfficientSDP() const {
+  return enabled_mem_efficientSDP;
+}
+
+void Context::setSDPUseMemEfficient(bool e) {
+  enabled_mem_efficientSDP = e;
+}
+
 bool Context::userEnabledMathSDP() const {
   return enabled_mathSDP;
 }
@@ -179,8 +176,7 @@ void Context::setBenchmarkLimitCuDNN(int b) {
 }
 
 bool Context::allowTF32CuBLAS() const {
-  static bool allow_tf32_cublas_override = c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true;
-  return allow_tf32_cublas_override || float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
+  return float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
@@ -246,6 +242,15 @@ void Context::setAllowFP16ReductionCuBLAS(bool b) {
   allow_fp16_reduction_cublas = b;
 }
 
+bool Context::allowBF16ReductionCuBLAS() const {
+  return allow_bf16_reduction_cublas;
+}
+
+void Context::setAllowBF16ReductionCuBLAS(bool b) {
+  allow_bf16_reduction_cublas = b;
+}
+
+
 bool Context::hasMKL() {
 #if AT_MKL_ENABLED()
   return true;
@@ -257,14 +262,6 @@ bool Context::hasMKL() {
 bool Context::hasMKLDNN() {
 #if AT_MKLDNN_ENABLED()
   return true;
-#else
-  return false;
-#endif
-}
-
-bool Context::hasMPS() {
-#if USE_MPS
-  return at::mps::is_available();
 #else
   return false;
 #endif
@@ -287,8 +284,29 @@ bool Context::hasLAPACK() {
 }
 
 at::QEngine Context::qEngine() const {
-  // If wasn't explicitly set - take the last one available
-  return quantized_engine.value_or(supportedQEngines().back());
+  static auto _quantized_engine = []() {
+    at::QEngine qengine = at::kNoQEngine;
+#if defined(C10_MOBILE) && defined(USE_PYTORCH_QNNPACK)
+    qengine = at::kQNNPACK;
+#endif
+
+#if AT_MKLDNN_ENABLED()
+    qengine = at::kONEDNN;
+#endif
+
+#ifdef USE_FBGEMM
+    if (fbgemm::fbgemmSupportedCPU()) {
+      /* X86 is enabled if and only if fbgemm is available.
+       * It combines goodness of fbgemm and onednn by dispatching.
+       * If onednn not available, always dispatch to fbgemm.
+       * Make it default qengine for X86 CPU platforms.
+      */
+      qengine = at::kX86;
+    }
+#endif
+    return qengine;
+  }();
+  return quantized_engine.value_or(_quantized_engine);
 }
 
 void Context::setQEngine(at::QEngine e) {
@@ -324,8 +342,8 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
 
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
-      // The X86 qengine is available if and only if FBGEMM is available
       engines.push_back(at::kX86);
+      // The X86 qengine is available if and only if FBGEMM is available
       engines.push_back(at::kFBGEMM);
     }
 #endif
@@ -341,6 +359,14 @@ bool Context::isXNNPACKAvailable() {
 #else
   return false;
 #endif
+}
+
+void Context::setCheckSparseTensorInvariants(bool e) {
+  enable_sparse_tensor_invariant_checks = e;
+}
+
+bool Context::checkSparseTensorInvariants() const {
+  return enable_sparse_tensor_invariant_checks;
 }
 
 bool Context::releaseWeightsWhenPrepacking() const {

@@ -4,7 +4,7 @@
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/SymIntArrayRef.h>
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/python_stub.h>
@@ -17,7 +17,6 @@ namespace c10 {
 struct IValue;
 class OperatorHandle;
 struct TensorImpl;
-struct SafePyObject;
 } // namespace c10
 
 namespace torch {
@@ -122,7 +121,7 @@ struct C10_API PyInterpreter;
 // another word consider doing this!
 
 struct C10_API PyInterpreterVTable {
-  virtual ~PyInterpreterVTable() {}
+  virtual ~PyInterpreterVTable() = default;
 
   // Report the name of this interpreter
   virtual std::string name() const = 0;
@@ -140,6 +139,18 @@ struct C10_API PyInterpreterVTable {
   // Invoke the Python boxed fallback dispatch to go back into Python
   virtual void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
       const = 0;
+
+  virtual void reportErrorCallback(PyObject* callback, DispatchKey key)
+      const = 0;
+
+  // This is only invoked in the multipy/torchdeploy situation from
+  // pythonOpRegistrationTrampoline; this lets us get to the Python
+  // interpreter to actually find the appropriate Python op registration
+  // entry to call.
+  virtual void python_op_registration_trampoline(
+      const c10::OperatorHandle& op,
+      c10::DispatchKey,
+      torch::jit::Stack* stack) const = 0;
 
   // Invoke the Python dispatcher to handle this call
   virtual void python_dispatcher(
@@ -174,6 +185,8 @@ struct C10_API PyInterpreterVTable {
   virtual void trace_gpu_device_synchronization() const = 0;
   virtual void trace_gpu_stream_synchronization(uintptr_t stream) const = 0;
   virtual void trace_gpu_event_synchronization(uintptr_t event) const = 0;
+
+  virtual void reset_backward_hooks(const TensorImpl* self) const = 0;
 };
 
 struct C10_API PyInterpreter {
@@ -197,6 +210,26 @@ struct C10_API PyInterpreter {
   // destructors would be disarmed here only begin the destruction process
   // on process shutdown (long after the dlclose has occurred).
   void disarm() noexcept;
+};
+
+// PyInterpreterStatus describes what the state of its interpreter tag
+// is, relative to the thread currently holding the GIL.
+enum class PyInterpreterStatus {
+  // We just allocated the Tensor, it hasn't escaped to other threads,
+  // we know that it definitely hasn't been tagged to be associated
+  // with an interpreter.
+  DEFINITELY_UNINITIALIZED,
+  // We queried the interpreter field and it looked uninitialized.  But
+  // another thread may have raced with us to tag it with some other
+  // interpreter id.  So we will have to do a CEX to make sure we can
+  // actually nab it.
+  MAYBE_UNINITIALIZED,
+  // We queried the interpreter field and it was tagged to belong to us.
+  // This means we have sole write access (as we hold the GIL for this
+  // interpreter)
+  TAGGED_BY_US,
+  // Someone else tagged this.  We can't use this TensorImpl from Python.
+  TAGGED_BY_OTHER,
 };
 
 } // namespace impl

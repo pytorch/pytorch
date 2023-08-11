@@ -96,6 +96,7 @@ For example after installing `ONNX Runtime <https://www.onnxruntime.ai>`_, you c
 load and run the model::
 
     import onnxruntime as ort
+    import numpy as np
 
     ort_session = ort.InferenceSession("alexnet.onnx")
 
@@ -333,7 +334,7 @@ an op named ``foo`` would look something like::
       ...
 
 The ``torch._C`` types are Python wrappers around the types defined in C++ in
-`ir.h <https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/ir/ir.h>`_.
+`ir.h <https://github.com/pytorch/pytorch/blob/main/torch/csrc/jit/ir/ir.h>`_.
 
 The process for adding a symbolic function depends on the type of operator.
 
@@ -358,7 +359,7 @@ Adding support for an aten or quantized operator
 If the operator is not in the list above:
 
 * Define the symbolic function in ``torch/onnx/symbolic_opset<version>.py``, for example
-  `torch/onnx/symbolic_opset9.py <https://github.com/pytorch/pytorch/blob/master/torch/onnx/symbolic_opset9.py>`_.
+  `torch/onnx/symbolic_opset9.py <https://github.com/pytorch/pytorch/blob/main/torch/onnx/symbolic_opset9.py>`_.
   Make sure the function has the same name as the ATen function, which may be declared in
   ``torch/_C/_VariableFunctions.pyi`` or ``torch/nn/functional.pyi`` (these files are generated at
   build time, so will not appear in your checkout until you build PyTorch).
@@ -455,7 +456,7 @@ ONNX operators that represent the function's behavior in ONNX. For example::
 .. . ``torch::jit::Value::setType``). This is not required, but it can help the exporter's
 .. shape and type inference for down-stream nodes. For a non-trivial example of ``setType``, see
 .. ``test_aten_embedding_2`` in
-.. `test_operators.py <https://github.com/pytorch/pytorch/blob/master/test/onnx/test_operators.py>`_.
+.. `test_operators.py <https://github.com/pytorch/pytorch/blob/main/test/onnx/test_operators.py>`_.
 
 .. The example below shows how you can access ``requires_grad`` via the ``Node`` object:
 
@@ -499,6 +500,7 @@ ONNX operators that represent the function's behavior in ONNX. For example::
 
 Inline Autograd Function
 ~~~~~~~~~~~~~~~~~~~~~~~~
+
 In cases where a static symbolic method is not provided for its subsequent :class:`torch.autograd.Function` or
 where a function to register ``prim::PythonOp`` as custom symbolic functions is not provided,
 :func:`torch.onnx.export` tries to inline the graph that corresponds to that :class:`torch.autograd.Function` such that
@@ -525,6 +527,73 @@ If you need to avoid inlining of :class:`torch.autograd.Function`, you should ex
 
 Custom operators
 ^^^^^^^^^^^^^^^^
+
+You can export your model with custom operators that includes a combination of many standard ONNX ops,
+or are driven by self-defined C++ backend.
+
+ONNX-script functions
+~~~~~~~~~~~~~~~~~~~~~
+
+If an operator is not a standard ONNX op, but can be composed of multiple existing ONNX ops, you can utilize
+`ONNX-script <https://github.com/microsoft/onnx-script>`_ to create an external ONNX function to support the operator.
+You can export it by following this example::
+
+    import onnxscript
+    # There are three opset version needed to be aligned
+    # This is (1) the opset version in ONNX function
+    from onnxscript.onnx_opset import opset15 as op
+    opset_version = 15
+
+    x = torch.randn(1, 2, 3, 4, requires_grad=True)
+    model = torch.nn.SELU()
+
+    custom_opset = onnxscript.values.Opset(domain="onnx-script", version=1)
+
+    @onnxscript.script(custom_opset)
+    def Selu(X):
+        alpha = 1.67326  # auto wrapped as Constants
+        gamma = 1.0507
+        alphaX = op.CastLike(alpha, X)
+        gammaX = op.CastLike(gamma, X)
+        neg = gammaX * (alphaX * op.Exp(X) - alphaX)
+        pos = gammaX * X
+        zero = op.CastLike(0, X)
+        return op.Where(X <= zero, neg, pos)
+
+    # setType API provides shape/type to ONNX shape/type inference
+    def custom_selu(g: jit_utils.GraphContext, X):
+        return g.onnxscript_op(Selu, X).setType(X.type())
+
+    # Register custom symbolic function
+    # There are three opset version needed to be aligned
+    # This is (2) the opset version in registry
+    torch.onnx.register_custom_op_symbolic(
+        symbolic_name="aten::selu",
+        symbolic_fn=custom_selu,
+        opset_version=opset_version,
+    )
+
+    # There are three opset version needed to be aligned
+    # This is (2) the opset version in exporter
+    torch.onnx.export(
+        model,
+        x,
+        "model.onnx",
+        opset_version=opset_version,
+        # only needed if you want to specify an opset version > 1.
+        custom_opsets={"onnx-script": 2}
+    )
+
+The example above exports it as a custom operator in the "onnx-script" opset.
+When exporting a custom operator, you can specify the custom domain version using the
+``custom_opsets`` dictionary at export. If not specified, the custom opset version defaults to 1.
+
+NOTE: Be careful to align the opset version mentioned in the above example, and make sure they are consumed in exporter step.
+The example usage of how to write a onnx-script function is a beta version in terms of the active development on onnx-script.
+Please follow the latest `ONNX-script <https://github.com/microsoft/onnx-script>`_
+
+C++ Operators
+~~~~~~~~~~~~~
 
 If a model uses a custom operator implemented in C++ as described in
 `Extending TorchScript with Custom C++ Operators <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`_,
@@ -563,8 +632,6 @@ you can export it by following this example::
         custom_opsets={"custom_domain": 2}
     )
 
-You can export your model as one or a combination of many standard ONNX ops, or as a custom ONNX operator.
-
 The example above exports it as a custom operator in the "custom_domain" opset.
 When exporting a custom operator, you can specify the custom domain version using the
 ``custom_opsets`` dictionary at export. If not specified, the custom opset version defaults to 1.
@@ -594,7 +661,7 @@ all of the unconvertible ops in one go you can::
 The set is approximated because some ops may be removed during the conversion
 process and don't need to be converted. Some other ops may have partial support
 that will fail conversion with particular inputs, but this should give you a
-general idea of what ops are not supported. Please feel free to open Github Issues
+general idea of what ops are not supported. Please feel free to open GitHub Issues
 for op support requests.
 
 Frequently Asked Questions
@@ -640,6 +707,7 @@ Functions
 .. autofunction:: is_in_onnx_export
 .. autofunction:: enable_log
 .. autofunction:: disable_log
+.. autofunction:: torch.onnx.verification.find_mismatch
 
 Classes
 -------
@@ -650,3 +718,26 @@ Classes
     :template: classtemplate.rst
 
     JitScalarType
+    torch.onnx.verification.GraphInfo
+    torch.onnx.verification.VerificationOptions
+
+Preview: torch.onnx TorchDynamo Exporter
+----------------------------------------
+
+.. warning::
+  The ONNX exporter for TorchDynamo is under active development and is
+  subject to rapid change.
+
+.. autofunction:: torch.onnx.dynamo_export
+.. autofunction:: torch.onnx.enable_fake_mode
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    torch.onnx.ExportOptions
+    torch.onnx.ExportOutput
+    torch.onnx.ExportOutputSerializer
+    torch.onnx.OnnxExporterError
+    torch.onnx.OnnxRegistry

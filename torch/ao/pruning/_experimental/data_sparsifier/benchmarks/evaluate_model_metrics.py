@@ -3,7 +3,7 @@ import torch
 from dlrm_s_pytorch import unpack_batch  # type: ignore[import]
 import numpy as np  # type: ignore[import]
 import sklearn  # type: ignore[import]
-from dlrm_utils import make_test_data_loader, dlrm_wrap, fetch_model
+from dlrm_utils import make_test_data_loader, dlrm_wrap, fetch_model  # type: ignore[import]
 import pandas as pd  # type: ignore[import]
 import argparse
 
@@ -119,9 +119,9 @@ def evaluate_metrics(test_dataloader, sparse_model_metadata):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--raw_data_file', type=str)
-    parser.add_argument('--processed_data_file', type=str)
-    parser.add_argument('--sparse_model_metadata', type=str)
+    parser.add_argument('--raw-data-file', '--raw_data_file', type=str)
+    parser.add_argument('--processed-data-file', '--processed_data_file', type=str)
+    parser.add_argument('--sparse-model-metadata', '--sparse_model_metadata', type=str)
 
     args = parser.parse_args()
 

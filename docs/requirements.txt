@@ -4,9 +4,10 @@ sphinx==5.0.0
 # but it doesn't seem to work and hangs around idly. The initial thought is probably
 # something related to Docker setup. We can investigate this later
 sphinxcontrib.katex==0.8.6
-matplotlib==3.5.3
+matplotlib==3.6.0
 tensorboard==2.10.0
 # required to build torch.distributed.elastic.rendezvous.etcd* docs
 python-etcd==0.4.5
 sphinx-copybutton==0.5.0
 sphinx-panels==0.4.1
+myst-parser==0.18.1

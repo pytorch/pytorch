@@ -9,7 +9,6 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/mobile/register_ops_common_utils.h>
@@ -302,8 +301,8 @@ inline bool tensor_list_equal(
   }
 
   for (const auto i : c10::irange(a.size())) {
-    at::Tensor a_element = a[i];
-    at::Tensor b_element = b[i];
+    const at::Tensor& a_element = a[i];
+    const at::Tensor& b_element = b[i];
     // This preserves Python's semantics, which uses eq() to compare two
     // elements, then passes the result to bool().
     // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__

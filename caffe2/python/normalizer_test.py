@@ -12,4 +12,4 @@ class TestNormalizerContext(LayersTestCase):
         bn = BatchNormalizer(momentum=0.1)
         with UseNormalizer({'BATCH': bn}):
             normalizer = NormalizerContext.current().get_normalizer('BATCH')
-            self.assertEquals(bn, normalizer)
+            self.assertEqual(bn, normalizer)

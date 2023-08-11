@@ -1,12 +1,14 @@
-r"""Functional interface"""
+"""Functional interface"""
 from typing import Callable, List, Optional, Tuple, Union
 import math
 import warnings
+import importlib
 
 import torch
 from torch import _VF
+from torch import sym_int as _sym_int
 from torch._C import _infer_size, _add_docstr
-from torch._torch_docs import reproducibility_notes, tf32_notes
+from torch._torch_docs import reproducibility_notes, tf32_notes, sparse_support_notes
 # A workaround to support both TorchScript and MyPy:
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -23,7 +25,6 @@ from . import _reduction as _Reduction
 from . import grad  # noqa: F401
 from .modules import utils
 from .modules.utils import _single, _pair, _triple, _list_with_default
-
 
 Tensor = torch.Tensor
 
@@ -429,7 +430,10 @@ def fractional_max_pool2d_with_indices(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies 2D fractional max pooling over an input signal composed of several input planes.
+    r"""
+    fractional_max_pool2d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
+
+    Applies 2D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
 
@@ -470,9 +474,11 @@ def fractional_max_pool2d_with_indices(
             _random_samples=_random_samples,
         )
     if output_size is None and output_ratio is None:
-        raise ValueError("fractional_max_pool2d requires specifying either " "an output_size or an output_ratio")
+        raise ValueError("fractional_max_pool2d requires specifying either an output_size or an output_ratio")
     if output_size is None:
         assert output_ratio is not None
+        if len(output_ratio) > 2:
+            raise ValueError("fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints.")
         _output_ratio = _pair(output_ratio)
         output_size = [int(input.size(-2) * _output_ratio[0]), int(input.size(-1) * _output_ratio[1])]
 
@@ -523,7 +529,10 @@ def fractional_max_pool3d_with_indices(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies 3D fractional max pooling over an input signal composed of several input planes.
+    r"""
+    fractional_max_pool3d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
+
+    Applies 3D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
 
@@ -571,7 +580,7 @@ def fractional_max_pool3d_with_indices(
             _random_samples=_random_samples,
         )
     if output_size is None and output_ratio is None:
-        raise ValueError("fractional_max_pool3d requires specifying either " "an output_size or an output_ratio")
+        raise ValueError("fractional_max_pool3d requires specifying either an output_size or an output_ratio")
     if output_size is None:
         assert output_ratio is not None
         _output_ratio = _triple(output_ratio)
@@ -903,9 +912,7 @@ def _unpool_output_size(
             max_size = default_size[d] + stride[d]
             if not (min_size < output_size[d] < max_size):
                 raise ValueError(
-                    'invalid output_size "{}" (dim {} must be between {} and {})'.format(
-                        output_size, d, min_size, max_size
-                    )
+                    f'invalid output_size "{output_size}" (dim {d} must be between {min_size} and {max_size})'
                 )
 
         ret = output_size
@@ -1064,7 +1071,10 @@ def lp_pool1d(
 def adaptive_max_pool1d_with_indices(
     input: Tensor, output_size: BroadcastingList1[int], return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 1D adaptive max pooling over an input signal composed of
+    r"""
+    adaptive_max_pool1d(input, output_size, return_indices=False)
+
+    Applies a 1D adaptive max pooling over an input signal composed of
     several input planes.
 
     See :class:`~torch.nn.AdaptiveMaxPool1d` for details and output shape.
@@ -1103,7 +1113,10 @@ def adaptive_max_pool2d_with_indices(
     input: Tensor, output_size: BroadcastingList2[int],
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 2D adaptive max pooling over an input signal composed of
+    r"""
+    adaptive_max_pool2d(input, output_size, return_indices=False)
+
+    Applies a 2D adaptive max pooling over an input signal composed of
     several input planes.
 
     See :class:`~torch.nn.AdaptiveMaxPool2d` for details and output shape.
@@ -1144,7 +1157,10 @@ def adaptive_max_pool3d_with_indices(
     input: Tensor, output_size: BroadcastingList3[int],
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 3D adaptive max pooling over an input signal composed of
+    r"""
+    adaptive_max_pool3d(input, output_size, return_indices=False)
+
+    Applies a 3D adaptive max pooling over an input signal composed of
     several input planes.
 
     See :class:`~torch.nn.AdaptiveMaxPool3d` for details and output shape.
@@ -1248,7 +1264,7 @@ def dropout(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool 
     if has_torch_function_unary(input):
         return handle_torch_function(dropout, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     return _VF.dropout_(input, p, training) if inplace else _VF.dropout(input, p, training)
 
 
@@ -1260,7 +1276,7 @@ def alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace
     if has_torch_function_unary(input):
         return handle_torch_function(alpha_dropout, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     return _VF.alpha_dropout_(input, p, training) if inplace else _VF.alpha_dropout(input, p, training)
 
 
@@ -1282,7 +1298,7 @@ def dropout1d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
     if has_torch_function_unary(input):
         return handle_torch_function(dropout1d, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
     if inp_dim not in (2, 3):
         raise RuntimeError(f"dropout1d: Expected 2D or 3D input, but received a {inp_dim}D input. "
@@ -1320,7 +1336,7 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
     if has_torch_function_unary(input):
         return handle_torch_function(dropout2d, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
     if inp_dim not in (3, 4):
         warn_msg = (f"dropout2d: Received a {inp_dim}-D input to dropout2d, which is deprecated "
@@ -1364,7 +1380,7 @@ def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
     if has_torch_function_unary(input):
         return handle_torch_function(dropout3d, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
     if inp_dim not in (4, 5):
         warn_msg = (f"dropout3d: Received a {inp_dim}-D input to dropout3d, which is deprecated "
@@ -1410,7 +1426,7 @@ def feature_alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False,
             feature_alpha_dropout, (input,), input, p=p, training=training, inplace=inplace
         )
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     return _VF.feature_alpha_dropout_(input, p, training) if inplace else _VF.feature_alpha_dropout(input, p, training)
 
 
@@ -1713,8 +1729,10 @@ When the approximate argument is 'none', it applies element-wise the function
 
 where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
-When the approximate argument is 'tanh', Gelu is estimated with:
-    :math::  \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+When the approximate argument is 'tanh', Gelu is estimated with
+
+.. math::
+    \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt{2 / \pi} * (x + 0.044715 * x^3)))
 
 See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
 """)
@@ -1771,8 +1789,7 @@ See :class:`~torch.nn.Softplus` for more details.
 
 def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
     warnings.warn(
-        "Implicit dimension choice for {} has been deprecated. "
-        "Change the call to include dim=X as an argument.".format(name),
+        f"Implicit dimension choice for {name} has been deprecated. Change the call to include dim=X as an argument.",
         stacklevel=stacklevel,
     )
     if ndim == 0 or ndim == 1 or ndim == 3:
@@ -1953,7 +1970,6 @@ def tanh(input):
 
     See :class:`~torch.nn.Tanh` for more details.
     """
-    warnings.warn("nn.functional.tanh is deprecated. Use torch.tanh instead.")
     return input.tanh()
 
 
@@ -1964,7 +1980,6 @@ def sigmoid(input):
 
     See :class:`~torch.nn.Sigmoid` for more details.
     """
-    warnings.warn("nn.functional.sigmoid is deprecated. Use torch.sigmoid instead.")
     return input.sigmoid()
 
 
@@ -1997,6 +2012,10 @@ linear(input, weight, bias=None) -> Tensor
 
 Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
+This operation supports 2-D :attr:`weight` with :ref:`sparse layout<sparse-docs>`
+
+{sparse_beta_warning}
+
 This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
 Shape:
@@ -2006,7 +2025,7 @@ Shape:
     - Weight: :math:`(out\_features, in\_features)` or :math:`(in\_features)`
     - Bias: :math:`(out\_features)` or :math:`()`
     - Output: :math:`(*, out\_features)` or :math:`(*)`, based on the shape of the weight
-""")
+""".format(**sparse_support_notes))
 
 
 bilinear = _add_docstr(
@@ -2119,6 +2138,16 @@ def embedding(
 
     See :class:`torch.nn.Embedding` for more details.
 
+    .. note::
+        Note that the analytical gradients of this function with respect to
+        entries in :attr:`weight` at the row specified by :attr:`padding_idx`
+        are expected to differ from the numerical ones.
+
+    .. note::
+        Note that `:class:`torch.nn.Embedding` differs from this function in
+        that it initializes the row of :attr:`weight` specified by
+        :attr:`padding_idx` to all zeros on construction.
+
     Args:
         input (LongTensor): Tensor containing indices into the embedding matrix
         weight (Tensor): The embedding matrix with number of rows equal to the maximum possible index + 1,
@@ -2163,7 +2192,7 @@ def embedding(
         >>> weights = torch.rand(10, 3)
         >>> weights[0, :].zero_()
         >>> embedding_matrix = weights
-        >>> input = torch.tensor([[0,2,0,5]])
+        >>> input = torch.tensor([[0, 2, 0, 5]])
         >>> F.embedding(input, embedding_matrix, padding_idx=0)
         tensor([[[ 0.0000,  0.0000,  0.0000],
                  [ 0.5609,  0.5384,  0.8720],
@@ -2283,8 +2312,8 @@ def embedding_bag(
         >>> # an Embedding module containing 10 tensors of size 3
         >>> embedding_matrix = torch.rand(10, 3)
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = torch.tensor([1,2,4,5,4,3,2,9])
-        >>> offsets = torch.tensor([0,4])
+        >>> input = torch.tensor([1, 2, 4, 5, 4, 3, 2, 9])
+        >>> offsets = torch.tensor([0, 4])
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> F.embedding_bag(input, embedding_matrix, offsets)
         tensor([[ 0.3397,  0.3552,  0.5545],
@@ -2293,7 +2322,7 @@ def embedding_bag(
         >>> # example with padding_idx
         >>> embedding_matrix = torch.rand(10, 3)
         >>> input = torch.tensor([2, 2, 2, 2, 4, 3, 2, 9])
-        >>> offsets = torch.tensor([0,4])
+        >>> offsets = torch.tensor([0, 4])
         >>> F.embedding_bag(input, embedding_matrix, offsets, padding_idx=2, mode='sum')
         tensor([[ 0.0000,  0.0000,  0.0000],
                 [-0.7082,  3.2145, -2.6251]])
@@ -2331,6 +2360,11 @@ def embedding_bag(
             "then it must have the same shape as the input ({})".format(per_sample_weights.shape, input.shape)
         )
 
+    if not weight.dim() == 2:
+        raise ValueError(
+            f"weight has to be a 2D Tensor, but got Tensor of dimension {weight.dim()}"
+        )
+
     if input.dim() == 2:
         if offsets is not None:
             type_str = "<unknown>"
@@ -2354,7 +2388,7 @@ def embedding_bag(
         if offsets.dim() != 1:
             raise ValueError("offsets has to be a 1D Tensor")
     else:
-        raise ValueError("input has to be 1D or 2D Tensor," " but got Tensor of dimension {}".format(input.dim()))
+        raise ValueError(f"input has to be 1D or 2D Tensor, but got Tensor of dimension {input.dim()}")
     if mode == "sum":
         mode_enum = 0
     elif mode == "mean":
@@ -2409,7 +2443,7 @@ def _verify_batch_size(size: List[int]) -> None:
     for i in range(len(size) - 2):
         size_prods *= size[i + 2]
     if size_prods == 1:
-        raise ValueError("Expected more than 1 value per channel when training, got input size {}".format(size))
+        raise ValueError(f"Expected more than 1 value per channel when training, got input size {size}")
 
 
 def batch_norm(
@@ -2454,7 +2488,7 @@ def _verify_spatial_size(size: List[int]) -> None:
     for i in range(2, len(size)):
         size_prods *= size[i]
     if size_prods == 1:
-        raise ValueError("Expected more than 1 spatial element when training, got input size {}".format(size))
+        raise ValueError(f"Expected more than 1 spatial element when training, got input size {size}")
 
 
 def instance_norm(
@@ -2520,6 +2554,8 @@ def group_norm(
     """
     if has_torch_function_variadic(input, weight, bias):
         return handle_torch_function(group_norm, (input, weight, bias,), input, num_groups, weight=weight, bias=bias, eps=eps)
+    if input.dim() < 2:
+        raise RuntimeError(f"Expected at least 2 dimensions for input tensor but received {input.dim()}")
     _verify_batch_size([input.size(0) * input.size(1) // num_groups, num_groups] + list(input.size()[2:]))
     return torch.group_norm(input, num_groups, weight, bias, eps, torch.backends.cudnn.enabled)
 
@@ -2536,17 +2572,15 @@ def local_response_norm(input: Tensor, size: int, alpha: float = 1e-4, beta: flo
     dim = input.dim()
     if dim < 3:
         raise ValueError(
-            "Expected 3D or higher dimensionality \
-                         input (got {} dimensions)".format(
-                dim
-            )
+            f"Expected 3D or higher dimensionality                          input (got {dim} dimensions)"
         )
 
     if input.numel() == 0:
         return input
 
-    div = input.mul(input).unsqueeze(1)
+    div = input.mul(input)
     if dim == 3:
+        div = div.unsqueeze(1)
         div = pad(div, (0, 0, size // 2, (size - 1) // 2))
         div = avg_pool2d(div, (size, 1), stride=1).squeeze(1)
     else:
@@ -2610,7 +2644,7 @@ def ctc_loss(
         >>> log_probs = torch.randn(50, 16, 20).log_softmax(2).detach().requires_grad_()
         >>> targets = torch.randint(1, 20, (16, 30), dtype=torch.long)
         >>> input_lengths = torch.full((16,), 50, dtype=torch.long)
-        >>> target_lengths = torch.randint(10,30,(16,), dtype=torch.long)
+        >>> target_lengths = torch.randint(10, 30, (16,), dtype=torch.long)
         >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
         >>> loss.backward()
     """
@@ -2756,7 +2790,7 @@ def poisson_nll_loss(
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if reduction != "none" and reduction != "mean" and reduction != "sum":
         ret = input
-        raise ValueError(reduction + " is not valid")
+        raise ValueError(reduction + " is not a valid value for reduction")
 
     ret = torch.poisson_nll_loss(input, target, log_input, full, eps, _Reduction.get_enum(reduction))
     return ret
@@ -2889,10 +2923,9 @@ def kl_div(
         :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
         and in the meantime, specifying either of those two args will override :attr:`reduction`.
 
-    .. note::
+    .. warning::
         :attr:`reduction` = ``'mean'`` doesn't return the true kl divergence value, please use
         :attr:`reduction` = ``'batchmean'`` which aligns with KL math definition.
-        In the next major release, ``'mean'`` will be changed to be the same as 'batchmean'.
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
@@ -3125,8 +3158,14 @@ def binary_cross_entropy_with_logits(
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
-        pos_weight (Tensor, optional): a weight of positive examples.
-                Must be a vector with length equal to the number of classes.
+        pos_weight (Tensor, optional): a weight of positive examples to be broadcasted with target.
+            Must be a tensor with equal size along the class dimension to the number of classes.
+            Pay close attention to PyTorch's broadcasting semantics in order to achieve the desired
+            operations. For a target of size [B, C, H, W] (where B is batch size) pos_weight of
+            size [B, C, H, W] will apply different pos_weights to each element of the batch or
+            [C, H, W] the same pos_weights across the batch. To apply the same positive weight
+            along all spacial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
+            Default: ``None``
 
     Examples::
 
@@ -3153,7 +3192,7 @@ def binary_cross_entropy_with_logits(
         reduction_enum = _Reduction.get_enum(reduction)
 
     if not (target.size() == input.size()):
-        raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
+        raise ValueError(f"Target size ({target.size()}) must be the same as input size ({input.size()})")
 
     return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction_enum)
 
@@ -3193,7 +3232,11 @@ def smooth_l1_loss(
         reduction = _Reduction.legacy_get_string(size_average, reduce)
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-    return torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction), beta)
+
+    if beta == 0.0:
+        return torch._C._nn.l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
+    else:
+        return torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction), beta)
 
 
 def huber_loss(
@@ -3319,10 +3362,8 @@ def margin_ranking_loss(
         reduction_enum = _Reduction.get_enum(reduction)
     if (input1.dim() != input2.dim() or input1.dim() != target.dim()):
         raise RuntimeError(
-            (
-                "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
-                "input1: {}, input2: {}, target: {} ".format(input1.size(), input2.size(), target.size())
-            )
+            f"margin_ranking_loss : All input tensors should have same dimension but got sizes: "
+            f"input1: {input1.size()}, input2: {input2.size()}, target: {target.size()} "
         )
     return torch.margin_ranking_loss(input1, input2, target, margin, reduction_enum)
 
@@ -3661,12 +3702,12 @@ Examples::
 )
 
 @_overload  # noqa: F811
-def upsample(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811
+def upsample(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811,B950
     pass
 
 
 @_overload  # noqa: F811
-def upsample(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811
+def upsample(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811,B950
     pass
 
 
@@ -3735,18 +3776,27 @@ if upsample.__doc__:
     upsample.__doc__ = upsample.__doc__.format(**reproducibility_notes)
 
 
+def _is_integer(x) -> bool:
+    r"""Type check the input number is an integer.
+    Will return True for int, SymInt and Tensors with integer elements.
+    """
+    if isinstance(x, (int, torch.SymInt)):
+        return True
+    return isinstance(x, Tensor) and not x.is_floating_point()
+
+
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811,B950
     pass
 
 
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811,B950
     pass
 
 
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811,B950
     pass
 
 
@@ -3762,7 +3812,7 @@ def interpolate(  # noqa: F811
 ) -> Tensor:  # noqa: F811
     pass
 
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811,B950
     r"""Down/up samples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
@@ -3820,6 +3870,12 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         backward compatibility.
         Mode ``mode='nearest'`` matches buggy OpenCV's ``INTER_NEAREST`` interpolation algorithm.
 
+    .. note::
+        The gradients for the dtype ``float16`` on CUDA may be inaccurate in the upsample operation
+        when using modes ``['linear', 'bilinear', 'bicubic', 'trilinear', 'area']``.
+        For more details, please refer to the discussion in
+        `issue#104157 <https://github.com/pytorch/pytorch/issues/104157>`_.
+
     Note:
         {backward_reproducibility_note}
     """
@@ -3864,8 +3920,13 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
                     f"input with spatial dimensions of {list(input.shape[2:])} and output size of {size}. "
                     "Please provide input tensor in (N, C, d1, d2, ...,dK) format and "
                     "output size in (o1, o2, ...,oK) format."
-
                 )
+            if not torch.jit.is_scripting():
+                if not all(_is_integer(x) for x in size):
+                    raise TypeError(
+                        "expected size to be one of int or Tuple[int] or Tuple[int, int] or "
+                        f"Tuple[int, int, int], but got size with types {[type(x) for x in size]}"
+                    )
             output_size = size
         else:
             output_size = [size for _ in range(dim)]
@@ -3898,15 +3959,21 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     if recompute_scale_factor is not None and recompute_scale_factor:
         # We compute output_size here, then un-set scale_factors.
         # The C++ code will recompute it based on the (integer) output size.
+        assert scale_factors is not None
         if not torch.jit.is_scripting() and torch._C._get_tracing_state():
             # make scale_factor a tensor in tracing so constant doesn't get baked in
             output_size = [
                 (torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i], dtype=torch.float32)).float()))
                 for i in range(dim)
             ]
+        elif torch.jit.is_scripting():
+            output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i]))
+                           for i in range(dim)]
         else:
-            assert scale_factors is not None
-            output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
+            output_size = [
+                _sym_int(input.size(i + 2) * scale_factors[i])
+                for i in range(dim)
+            ]
         scale_factors = None
 
     if antialias and not (mode in ("bilinear", "bicubic") and input.ndim == 4):
@@ -3943,6 +4010,15 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         assert align_corners is not None
         if antialias:
             return torch._C._nn._upsample_bilinear2d_aa(input, output_size, align_corners, scale_factors)
+        # Two levels are necessary to prevent TorchScript from touching
+        # are_deterministic_algorithms_enabled.
+        if not torch.jit.is_scripting():
+            if torch.are_deterministic_algorithms_enabled() and input.is_cuda:
+                # Use slow decomp whose backward will be in terms of index_put
+                # importlib is required because the import cannot be top level
+                # (cycle) and cannot be nested (TS doesn't support)
+                return importlib.import_module('torch._decomp.decompositions').upsample_bilinear2d_vec(
+                    input, output_size, align_corners, scale_factors)
         return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, scale_factors)
     if input.dim() == 5 and mode == "trilinear":
         assert align_corners is not None
@@ -4184,7 +4260,7 @@ def grid_sample(
         For example, `PIL`_ and `OpenCV`_ use -0.5 and -0.75 respectively.
         This algorithm may "overshoot" the range of values it's interpolating.
         For example, it may produce negative values or values greater than 255 when interpolating input in [0, 255].
-        Clamp the results with :func: `torch.clamp` to ensure they are within the valid range.
+        Clamp the results with :func:`torch.clamp` to ensure they are within the valid range.
     .. _`cubic convolution algorithm`: https://en.wikipedia.org/wiki/Bicubic_interpolation
     .. _`PIL`: https://github.com/python-pillow/Pillow/blob/4634eafe3c695a014267eefdce830b4a825beed7/src/libImaging/Resample.c#L51
     .. _`OpenCV`: https://github.com/opencv/opencv/blob/f345ed564a06178670750bad59526cfa4033be55/modules/imgproc/src/resize.cpp#L908
@@ -4195,8 +4271,7 @@ def grid_sample(
         )
     if mode != "bilinear" and mode != "nearest" and mode != "bicubic":
         raise ValueError(
-            "nn.functional.grid_sample(): expected mode to be "
-            "'bilinear', 'nearest' or 'bicubic', but got: '{}'".format(mode)
+            f"nn.functional.grid_sample(): expected mode to be 'bilinear', 'nearest' or 'bicubic', but got: '{mode}'"
         )
     if padding_mode != "zeros" and padding_mode != "border" and padding_mode != "reflection":
         raise ValueError(
@@ -4292,20 +4367,18 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
 
     # enforce floating point dtype on theta
     if not theta.is_floating_point():
-        raise ValueError("Expected theta to have floating point type, but got {}".format(theta.dtype))
+        raise ValueError(f"Expected theta to have floating point type, but got {theta.dtype}")
     # check that shapes and sizes match
     if len(size) == 4:
         if theta.dim() != 3 or theta.shape[-2] != 2 or theta.shape[-1] != 3:
             raise ValueError(
-                "Expected a batch of 2D affine matrices of shape Nx2x3 "
-                "for size {}. Got {}.".format(size, theta.shape)
+                f"Expected a batch of 2D affine matrices of shape Nx2x3 for size {size}. Got {theta.shape}."
             )
         spatial_size = size[-2:]  # spatial dimension sizes
     elif len(size) == 5:
         if theta.dim() != 3 or theta.shape[-2] != 3 or theta.shape[-1] != 4:
             raise ValueError(
-                "Expected a batch of 3D affine matrices of shape Nx3x4 "
-                "for size {}. Got {}.".format(size, theta.shape)
+                f"Expected a batch of 3D affine matrices of shape Nx3x4 for size {size}. Got {theta.shape}."
             )
         spatial_size = size[-3:]  # spatial dimension sizes
     else:
@@ -4323,7 +4396,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
             "See the documentation of affine_grid for details."
         )
     elif min(size) <= 0:
-        raise ValueError("Expected non-zero, positive output size. Got {}".format(size))
+        raise ValueError(f"Expected non-zero, positive output size. Got {size}")
 
     return torch.affine_grid_generator(theta, size, align_corners)
 
@@ -4352,12 +4425,13 @@ Padding size:
     :math:`\text{padding\_front}, \text{padding\_back})`.
 
 Padding mode:
-    See :class:`torch.nn.ConstantPad2d`, :class:`torch.nn.ReflectionPad2d`, and
-    :class:`torch.nn.ReplicationPad2d` for concrete examples on how each of the
-    padding modes works. Constant padding is implemented for arbitrary dimensions.
-    Replicate and reflection padding are implemented for padding the last 3
-    dimensions of a 4D or 5D input tensor, the last 2 dimensions of a 3D
-    or 4D input tensor, or the last dimension of a 2D or 3D input tensor.
+    See :class:`torch.nn.CircularPad2d`, :class:`torch.nn.ConstantPad2d`,
+    :class:`torch.nn.ReflectionPad2d`, and :class:`torch.nn.ReplicationPad2d`
+    for concrete examples on how each of the padding modes works. Constant
+    padding is implemented for arbitrary dimensions. Circular, replicate and
+    reflection padding are implemented for padding the last 3 dimensions of a
+    4D or 5D input tensor, the last 2 dimensions of a 3D or 4D input tensor,
+    or the last dimension of a 2D or 3D input tensor.
 
 Note:
     When using the CUDA backend, this operation may induce nondeterministic
@@ -4443,7 +4517,7 @@ squeezed (see :func:`torch.squeeze`), resulting in the
 output tensor having 1 fewer dimension.
 
 .. math ::
-    \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
+    \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2, \epsilon) \cdot \max(\Vert x_2 \Vert _2, \epsilon)}
 
 Supports :ref:`type promotion <type-promotion-doc>`.
 
@@ -4593,9 +4667,9 @@ def triplet_margin_with_distance_loss(
     n_dim = negative.ndim
     if not (a_dim == p_dim and p_dim == n_dim):
         raise RuntimeError(
-            (f"The anchor, positive, and negative tensors are expected to have "
-             f"the same number of dimensions, but got: anchor {a_dim}D, "
-             f"positive {p_dim}D, and negative {n_dim}D inputs"))
+            f"The anchor, positive, and negative tensors are expected to have "
+            f"the same number of dimensions, but got: anchor {a_dim}D, "
+            f"positive {p_dim}D, and negative {n_dim}D inputs")
 
     # Calculate loss
     if distance_function is None:
@@ -4636,7 +4710,7 @@ def normalize(input: Tensor, p: float = 2.0, dim: int = 1, eps: float = 1e-12, o
     Args:
         input: input tensor of any shape
         p (float): the exponent value in the norm formulation. Default: 2
-        dim (int): the dimension to reduce. Default: 1
+        dim (int or tuple of ints): the dimension to reduce. Default: 1
         eps (float): small value to avoid division by zero. Default: 1e-12
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
@@ -4749,7 +4823,10 @@ def _in_projection_packed(
     if k is v:
         if q is k:
             # self-attention
-            return linear(q, w, b).chunk(3, dim=-1)
+            proj = linear(q, w, b)
+            # reshape to 3, E and not E, 3 is deliberate for better memory coalescing and keeping same order as chunk()
+            proj = proj.unflatten(-1, (3, E)).unsqueeze(0).transpose(0, -2).squeeze(-2).contiguous()
+            return proj[0], proj[1], proj[2]
         else:
             # encoder-decoder attention
             w_q, w_kv = w.split([E, E * 2])
@@ -4757,7 +4834,11 @@ def _in_projection_packed(
                 b_q = b_kv = None
             else:
                 b_q, b_kv = b.split([E, E * 2])
-            return (linear(q, w_q, b_q),) + linear(k, w_kv, b_kv).chunk(2, dim=-1)
+            q_proj = linear(q, w_q, b_q)
+            kv_proj = linear(k, w_kv, b_kv)
+            # reshape to 2, E and not E, 2 is deliberate for better memory coalescing and keeping same order as chunk()
+            kv_proj = kv_proj.unflatten(-1, (2, E)).unsqueeze(0).transpose(0, -2).squeeze(-2).contiguous()
+            return (q_proj, kv_proj[0], kv_proj[1])
     else:
         w_q, w_k, w_v = w.chunk(3)
         if b is None:
@@ -4819,37 +4900,116 @@ def _in_projection(
     assert b_v is None or b_v.shape == (Eq,), f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
     return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
+scaled_dot_product_attention = _add_docstr(
+    torch._C._nn.scaled_dot_product_attention, r"""
+scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None) -> Tensor:
 
-_scaled_dot_product_attention = _add_docstr(
-    torch._C._nn._scaled_dot_product_attention, r"""
 Computes scaled dot product attention on query, key and value tensors, using
 an optional attention mask if passed, and applying dropout if a probability
 greater than 0.0 is specified.
 
+.. code-block:: python
+
+    # Efficient implementation equivalent to the following:
+    def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None) -> torch.Tensor:
+        # Efficient implementation equivalent to the following:
+        L, S = query.size(-2), key.size(-2)
+        scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+        attn_bias = torch.zeros(L, S, dtype=query.dtype)
+        if is_causal:
+            assert attn_mask is None
+            temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+            attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
+            attn_bias.to(query.dtype)
+
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.bool:
+                attn_mask.masked_fill_(attn_mask.logical_not(), float("-inf"))
+            else:
+                attn_bias += attn_mask
+        attn_weight = query @ key.transpose(-2, -1) * scale_factor
+        attn_weight += attn_bias
+        attn_weight = torch.softmax(attn_weight, dim=-1)
+        attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
+        return attn_weight @ value
+
+.. warning:: This function is beta and subject to change.
+
+Note:
+
+    There are currently three supported implementations of scaled dot product attention:
+
+        - `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_
+        - `Memory-Efficient Attention`_
+        - A PyTorch implementation defined in C++ matching the above formulation
+
+    The function may call optimized kernels for improved performance when using the CUDA backend.
+    For all other backends, the PyTorch implementation will be used.
+
+    All implementations are enabled by default. Scaled dot product attention attempts to automatically select the
+    most optimal implementation based on the inputs. In order to provide more fine-grained control over what implementation
+    is used, the following functions are provided for enabling and disabling implementations.
+    The context manager is the preferred mechanism:
+
+        - :func:`torch.backends.cuda.sdp_kernel`: A context manager used to enable/disable any of the implementations.
+        - :func:`torch.backends.cuda.enable_flash_sdp`: Enables or Disables FlashAttention.
+        - :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Enables or Disables Memory-Efficient Attention.
+        - :func:`torch.backends.cuda.enable_math_sdp`: Enables or Disables the PyTorch C++ implementation.
+
+    Each of the fused kernels has specific input limitations. If the user requires the use of a specific fused implementation,
+    disable the PyTorch C++ implementation using :func:`torch.backends.cuda.sdp_kernel`.
+    In the event that a fused implementation is not available, an error will be raised with the
+    reasons why the fused implementation cannot run.
+
+    Due to the nature of fusing floating point operations, the output of this function may be different
+    depending on what backend kernel is chosen.
+    The c++ implementation supports torch.float64 and can be used when higher precision is required.
+    For more information please see :doc:`/notes/numerical_accuracy`
+
+Note:
+    {cudnn_reproducibility_note}
+""".format(**reproducibility_notes)
+    + r"""
+
 Args:
-     query (Tensor): Query tensor; shape (N, ..., L, E)
-     key (Tensor): Key tensor; shape (N, ..., S, E)
-     value (Tensor): Value tensor; shape (N, ..., S, E)
-     attn_mask (optional Tensor): Attention mask; shape (N, ..., L, S) or (L, S). Currently, only a boolean mask
-         is supported, where a value of True indicates that the element *should* take part in attention.
-     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
-     need_attn_weights (bool): If true, the second return value will contain the attention weights used;
-         otherwise, the second return value is unspecified
-     is_causal (bool): If true, assumes causal attention masking; for this case, attn_mask should not be set.
+    query (Tensor): Query tensor; shape :math:`(N, ..., L, E)`.
+    key (Tensor): Key tensor; shape :math:`(N, ..., S, E)`.
+    value (Tensor): Value tensor; shape :math:`(N, ..., S, Ev)`.
+    attn_mask (optional Tensor): Attention mask; shape :math:`(N, ..., L, S)`. Two types of masks are supported.
+        A boolean mask where a value of True indicates that the element *should* take part in attention.
+        A float mask of the same type as query, key, value that is added to the attention score.
+    dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
+    is_causal (bool): If true, assumes causal attention masking and errors if both attn_mask and is_causal
+        are set.
+    scale (optional float): Scaling factor applied prior to softmax. If None, the default value is set
+        to :math:`\frac{1}{\sqrt{E}}`.
 
 
-Returns a tuple containing:
-    output (Tensor): Attention output; shape (N, ..., L, E)
-    attn_weights (Tensor): Attention weighting; shape (N, ..., L, S)
+Returns:
+    output (Tensor): Attention output; shape :math:`(N, ..., L, Ev)`.
 
 Shape legend:
-    N: Batch size
-    ...: Any number of other batch dimensions (optional)
-    S: Source sequence length
-    L: Target sequence lengthE: Embedding dimension
+    - :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
+    - :math:`S: \text{Source sequence length}`
+    - :math:`L: \text{Target sequence length}`
+    - :math:`E: \text{Embedding dimension of the query and key}`
+    - :math:`Ev: \text{Embedding dimension of the value}`
+
+Examples::
+
+    >>> # Optionally use the context manager to ensure one of the fused kernels is run
+    >>> query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+    >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+    >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+    >>> with torch.backends.cuda.sdp_kernel(enable_math=False):
+    >>>     F.scaled_dot_product_attention(query,key,value)
+
+.. _FlashAttention\: Fast and Memory-Efficient Exact Attention with IO-Awareness:
+    https://arxiv.org/abs/2205.14135
+.. _Memory-Efficient Attention:
+    https://github.com/facebookresearch/xformers
 
 """)
-
 
 def _mha_shape_check(query: Tensor, key: Tensor, value: Tensor,
                      key_padding_mask: Optional[Tensor], attn_mask: Optional[Tensor], num_heads: int):
@@ -4898,6 +5058,41 @@ def _mha_shape_check(query: Tensor, key: Tensor, value: Tensor,
 
     return is_batched
 
+def _canonical_mask(
+        mask: Optional[Tensor],
+        mask_name: str,
+        other_type: Optional[DType],
+        other_name: str,
+        target_type: DType,
+        check_other: bool = True,
+) -> Optional[Tensor]:
+
+    if mask is not None:
+        _mask_dtype = mask.dtype
+        _mask_is_float = torch.is_floating_point(mask)
+        if _mask_dtype != torch.bool and not _mask_is_float:
+            raise AssertionError(
+                f"only bool and floating types of {mask_name} are supported")
+        if check_other and other_type is not None:
+            if _mask_dtype != other_type:
+                warnings.warn(
+                    f"Support for mismatched {mask_name} and {other_name} "
+                    "is deprecated. Use same type for both instead."
+                )
+        if not _mask_is_float:
+            mask = (
+                torch.zeros_like(mask, dtype=target_type)
+                .masked_fill_(mask, float("-inf"))
+            )
+    return mask
+
+def _none_or_dtype(input: Optional[Tensor]) -> Optional[DType]:
+    if input is None:
+        return None
+    elif isinstance(input, torch.Tensor):
+        return input.dtype
+    raise RuntimeError("input to _none_or_dtype() must be None or torch.Tensor")
+
 def multi_head_attention_forward(
     query: Tensor,
     key: Tensor,
@@ -4923,6 +5118,7 @@ def multi_head_attention_forward(
     static_k: Optional[Tensor] = None,
     static_v: Optional[Tensor] = None,
     average_attn_weights: bool = True,
+    is_causal: bool = False,
 ) -> Tuple[Tensor, Optional[Tensor]]:
     r"""
     Args:
@@ -4941,8 +5137,21 @@ def multi_head_attention_forward(
             be ignored by the attention. This is an binary mask. When the value is True,
             the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
+            Default: `True`
+            Note: `needs_weight` defaults to `True`, but should be set to `False`
+            For best performance when attention weights are not needed.
+            *Setting needs_weights to `True`
+            leads to a significant performance degradation.*
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
+        is_causal: If specified, applies a causal mask as attention mask, and ignores
+            attn_mask for computing scaled dot product attention.
+            Default: ``False``.
+            .. warning::
+                is_causal is provides a hint that the attn_mask is the
+                causal mask.Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
         use_separate_proj_weight: the function accept the proj. weights for query, key,
             and value in different forms. If false, in_proj_weight will be used, which is
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
@@ -4962,14 +5171,13 @@ def multi_head_attention_forward(
         - value: :math:`(S, E)` or :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
         - key_padding_mask: :math:`(S)` or :math:`(N, S)` where N is the batch size, S is the source sequence length.
-          If a ByteTensor is provided, the non-zero positions will be ignored while the zero positions
-          will be unchanged. If a BoolTensor is provided, the positions with the
+          If a FloatTensor is provided, it will be directly added to the value.
+          If a BoolTensor is provided, the positions with the
           value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
         - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
           3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
           S is the source sequence length. attn_mask ensures that position i is allowed to attend the unmasked
-          positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
-          while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
+          positions. If a BoolTensor is provided, positions with ``True``
           are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
           is provided, it will be added to the attention weight.
         - static_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
@@ -5008,6 +5216,7 @@ def multi_head_attention_forward(
             key_padding_mask=key_padding_mask,
             need_weights=need_weights,
             attn_mask=attn_mask,
+            is_causal=is_causal,
             use_separate_proj_weight=use_separate_proj_weight,
             q_proj_weight=q_proj_weight,
             k_proj_weight=k_proj_weight,
@@ -5033,6 +5242,43 @@ def multi_head_attention_forward(
     # set up shape vars
     tgt_len, bsz, embed_dim = query.shape
     src_len, _, _ = key.shape
+
+    key_padding_mask = _canonical_mask(
+        mask=key_padding_mask,
+        mask_name="key_padding_mask",
+        other_type=_none_or_dtype(attn_mask),
+        other_name="attn_mask",
+        target_type=query.dtype
+    )
+
+    if is_causal and attn_mask is None:
+        raise RuntimeError(
+            "Need attn_mask if specifying the is_causal hint. "
+            "You may use the Transformer module method "
+            "`generate_square_subsequent_mask` to create this mask."
+        )
+
+    if is_causal and key_padding_mask is None and not need_weights:
+        # when we have a kpm or need weights, we need attn_mask
+        # Otherwise, we use the is_causal hint go as is_causal
+        # indicator to SDPA.
+        attn_mask = None
+    else:
+        attn_mask = _canonical_mask(
+            mask=attn_mask,
+            mask_name="attn_mask",
+            other_type=None,
+            other_name="",
+            target_type=query.dtype,
+            check_other=False,
+        )
+
+        if key_padding_mask is not None:
+            # We have the attn_mask, and use that to merge kpm into it.
+            # Turn off use of is_causal hint, as the merged mask is no
+            # longer causal.
+            is_causal = False
+
     assert embed_dim == embed_dim_to_check, \
         f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
     if isinstance(embed_dim, torch.Tensor):
@@ -5065,13 +5311,8 @@ def multi_head_attention_forward(
         q, k, v = _in_projection(query, key, value, q_proj_weight, k_proj_weight, v_proj_weight, b_q, b_k, b_v)
 
     # prep attention mask
+
     if attn_mask is not None:
-        if attn_mask.dtype == torch.uint8:
-            warnings.warn("Byte tensor for attn_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")
-            attn_mask = attn_mask.to(torch.bool)
-        else:
-            assert attn_mask.is_floating_point() or attn_mask.dtype == torch.bool, \
-                f"Only float, byte, and bool types are supported for attn_mask, not {attn_mask.dtype}"
         # ensure attn_mask's dim is 3
         if attn_mask.dim() == 2:
             correct_2d_size = (tgt_len, src_len)
@@ -5084,11 +5325,6 @@ def multi_head_attention_forward(
                 raise RuntimeError(f"The shape of the 3D attn_mask is {attn_mask.shape}, but should be {correct_3d_size}.")
         else:
             raise RuntimeError(f"attn_mask's dimension {attn_mask.dim()} is not supported")
-
-    # prep key padding mask
-    if key_padding_mask is not None and key_padding_mask.dtype == torch.uint8:
-        warnings.warn("Byte tensor for key_padding_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")
-        key_padding_mask = key_padding_mask.to(torch.bool)
 
     # add bias along batch dimension (currently second)
     if bias_k is not None and bias_v is not None:
@@ -5107,9 +5343,9 @@ def multi_head_attention_forward(
     #
     # reshape q, k, v for multihead attention and make em batch first
     #
-    q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+    q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:
-        k = k.contiguous().view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+        k = k.view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_k.size(0) == bsz * num_heads, \
@@ -5118,7 +5354,7 @@ def multi_head_attention_forward(
             f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
         k = static_k
     if static_v is None:
-        v = v.contiguous().view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+        v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_v.size(0) == bsz * num_heads, \
@@ -5148,16 +5384,8 @@ def multi_head_attention_forward(
             expand(-1, num_heads, -1, -1).reshape(bsz * num_heads, 1, src_len)
         if attn_mask is None:
             attn_mask = key_padding_mask
-        elif attn_mask.dtype == torch.bool:
-            attn_mask = attn_mask.logical_or(key_padding_mask)
         else:
-            attn_mask = attn_mask.masked_fill(key_padding_mask, float("-inf"))
-
-    # convert mask to float
-    if attn_mask is not None and attn_mask.dtype == torch.bool:
-        new_attn_mask = torch.zeros_like(attn_mask, dtype=q.dtype)
-        new_attn_mask.masked_fill_(attn_mask, float("-inf"))
-        attn_mask = new_attn_mask
+            attn_mask = attn_mask + key_padding_mask
 
     # adjust dropout probability
     if not training:
@@ -5167,27 +5395,30 @@ def multi_head_attention_forward(
     # (deep breath) calculate attention and out projection
     #
 
-    B, Nt, E = q.shape
-    q_scaled = q / math.sqrt(E)
-    if attn_mask is not None:
-        attn_output_weights = torch.baddbmm(attn_mask, q_scaled, k.transpose(-2, -1))
-    else:
-        attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
-    attn_output_weights = softmax(attn_output_weights, dim=-1)
-    if dropout_p > 0.0:
-        attn_output_weights = dropout(attn_output_weights, p=dropout_p)
-
-    attn_output = torch.bmm(attn_output_weights, v)
-
-    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
-    attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
-    attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
-
     if need_weights:
+        B, Nt, E = q.shape
+        q_scaled = q / math.sqrt(E)
+
+        assert not (is_causal and attn_mask is None), "FIXME: is_causal not implemented for need_weights"
+
+        if attn_mask is not None:
+            attn_output_weights = torch.baddbmm(attn_mask, q_scaled, k.transpose(-2, -1))
+        else:
+            attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
+        attn_output_weights = softmax(attn_output_weights, dim=-1)
+        if dropout_p > 0.0:
+            attn_output_weights = dropout(attn_output_weights, p=dropout_p)
+
+        attn_output = torch.bmm(attn_output_weights, v)
+
+        attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
+        attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+        attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
+
         # optionally average attention weights over heads
         attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
         if average_attn_weights:
-            attn_output_weights = attn_output_weights.sum(dim=1) / num_heads
+            attn_output_weights = attn_output_weights.mean(dim=1)
 
         if not is_batched:
             # squeeze the output if input was unbatched
@@ -5195,6 +5426,24 @@ def multi_head_attention_forward(
             attn_output_weights = attn_output_weights.squeeze(0)
         return attn_output, attn_output_weights
     else:
+        # attn_mask can be either (L,S) or (N*num_heads, L, S)
+        # if attn_mask's shape is (1, L, S) we need to unsqueeze to (1, 1, L, S)
+        # in order to match the input for SDPA of (N, num_heads, L, S)
+        if attn_mask is not None:
+            if attn_mask.size(0) == 1 and attn_mask.dim() == 3:
+                attn_mask = attn_mask.unsqueeze(0)
+            else:
+                attn_mask = attn_mask.view(bsz, num_heads, -1, src_len)
+
+        q = q.view(bsz, num_heads, tgt_len, head_dim)
+        k = k.view(bsz, num_heads, src_len, head_dim)
+        v = v.view(bsz, num_heads, src_len, head_dim)
+
+        attn_output = scaled_dot_product_attention(q, k, v, attn_mask, dropout_p, is_causal)
+        attn_output = attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
+
+        attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+        attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
         if not is_batched:
             # squeeze the output if input was unbatched
             attn_output = attn_output.squeeze(1)

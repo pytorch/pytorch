@@ -10,7 +10,6 @@ import inspect
 import logging
 import numpy as np
 import random
-from future.utils import viewkeys
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python.attention import (
@@ -43,7 +42,7 @@ def _RectifyNames(blob_references_or_names):
     return [_RectifyName(i) for i in blob_references_or_names]
 
 
-class RNNCell(object):
+class RNNCell:
     '''
     Base class for writing recurrent / stateful operations.
 
@@ -269,7 +268,7 @@ class RNNCell(object):
         return state_outputs[output_sequence_index]
 
 
-class LSTMInitializer(object):
+class LSTMInitializer:
     def __init__(self, hidden_size):
         self.hidden_size = hidden_size
 
@@ -303,7 +302,7 @@ class BasicRNNCell(RNNCell):
         activation=None,
         **kwargs
     ):
-        super(BasicRNNCell, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.drop_states = drop_states
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -404,7 +403,7 @@ class LSTMCell(RNNCell):
         initializer=None,
         **kwargs
     ):
-        super(LSTMCell, self).__init__(initializer=initializer, **kwargs)
+        super().__init__(initializer=initializer, **kwargs)
         self.initializer = initializer or LSTMInitializer(
             hidden_size=hidden_size)
 
@@ -508,9 +507,7 @@ class LayerNormLSTMCell(RNNCell):
         initializer=None,
         **kwargs
     ):
-        super(LayerNormLSTMCell, self).__init__(
-            initializer=initializer, **kwargs
-        )
+        super().__init__(initializer=initializer, **kwargs)
         self.initializer = initializer or LSTMInitializer(
             hidden_size=hidden_size
         )
@@ -829,7 +826,7 @@ class DropoutCell(RNNCell):
         assert 'is_test' in kwargs, "Argument 'is_test' is required"
         self.is_test = kwargs.pop('is_test')
         self.use_cudnn = use_cudnn
-        super(DropoutCell, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         self.prepare_input = internal_cell.prepare_input
         self.get_output_state_index = internal_cell.get_output_state_index
@@ -889,7 +886,7 @@ class DropoutCell(RNNCell):
         return output
 
 
-class MultiRNNCellInitializer(object):
+class MultiRNNCellInitializer:
     def __init__(self, cells):
         self.cells = cells
 
@@ -933,7 +930,7 @@ class MultiRNNCell(RNNCell):
 
         forward_only: used to construct inference-only network.
         '''
-        super(MultiRNNCell, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.cells = cells
 
         if residual_output_layers is None:
@@ -1118,7 +1115,7 @@ class AttentionCell(RNNCell):
         attention_memory_optimization,
         **kwargs
     ):
-        super(AttentionCell, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.encoder_output_dim = encoder_output_dim
         self.encoder_outputs = encoder_outputs
         self.encoder_lengths = encoder_lengths
@@ -1415,7 +1412,7 @@ class LSTMWithAttentionCell(AttentionCell):
             forward_only=False,
             drop_states=False,
         )
-        super(LSTMWithAttentionCell, self).__init__(
+        super().__init__(
             encoder_output_dim=encoder_output_dim,
             encoder_outputs=encoder_outputs,
             encoder_lengths=encoder_lengths,
@@ -1454,7 +1451,7 @@ class MILSTMWithAttentionCell(AttentionCell):
             forward_only=False,
             drop_states=False,
         )
-        super(MILSTMWithAttentionCell, self).__init__(
+        super().__init__(
             encoder_output_dim=encoder_output_dim,
             encoder_outputs=encoder_outputs,
             decoder_cell=decoder_cell,
@@ -1677,7 +1674,7 @@ def InitFromLSTMParams(lstm_pblobs, param_values):
     '''
     weight_params = GetLSTMParamNames()['weights']
     bias_params = GetLSTMParamNames()['biases']
-    for input_type in viewkeys(param_values):
+    for input_type in param_values.keys():
         weight_values = [
             param_values[input_type][w].flatten()
             for w in weight_params

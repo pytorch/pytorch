@@ -22,8 +22,7 @@
 #include <ATen/ops/upsample_nearest2d_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 #define MAX_THREADS 512
@@ -94,13 +93,13 @@ __global__ void upsample_nearest2d_nhwc_out_frame(
     float width_scale,
     const size_t out_numel) {
 
-  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t index = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (index < out_numel) {
-    const int c = index % channels;
-    const int w2 = (index / channels) % width2;
-    const int h2 = (index / channels / width2) % height2;
-    const int n = index / channels / width2 / height2;
+    const auto c = index % channels;
+    const auto w2 = (index / channels) % width2;
+    const auto h2 = (index / channels / width2) % height2;
+    const auto n = index / channels / width2 / height2;
 
     const size_t h1 = height1 == height2 ? h2 : nn_compute_source_index_fn(height_scale, h2, height1);
     const size_t w1 = width1 == width2 ? w2 : nn_compute_source_index_fn(width_scale, w2, width1);
@@ -240,17 +239,17 @@ static void upsample_nearest2d_out_cuda_template(
         output.is_contiguous(memory_format)) {
     at::Tensor input = input_.contiguous(at::MemoryFormat::ChannelsLast);
 
-    TORCH_CHECK(input.numel() < std::numeric_limits<int>::max(),
-      "upsample_nearest_nhwc only supports input tensors with less than INT_MAX elements");
-    TORCH_CHECK(output.numel() < std::numeric_limits<int>::max(),
-      "upsample_nearest_nhwc only supports output tensors with less than INT_MAX elements");
+    TORCH_CHECK(input.numel() < std::numeric_limits<int64_t>::max(),
+      "upsample_nearest_nhwc only supports input tensors with less than 2^63 - 1 elements");
+    TORCH_CHECK(output.numel() < std::numeric_limits<int64_t>::max(),
+      "upsample_nearest_nhwc only supports output tensors with less than 2^63 - 1 elements");
 
-    const int num_kernels = output.numel();
-    const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+    const int64_t num_kernels = output.numel();
+    const int64_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_nhwc_out_frame", [&] {
-      const scalar_t* idata = input.data_ptr<scalar_t>();
-      scalar_t* odata = output.data_ptr<scalar_t>();
+    AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_nhwc_out_frame", [&] {
+      const scalar_t* idata = input.const_data_ptr<scalar_t>();
+      scalar_t* odata = output.mutable_data_ptr<scalar_t>();
 
       upsample_nearest2d_nhwc_out_frame<scalar_t, nn_compute_source_index_fn>
         <<<ceil_div(num_kernels, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -306,11 +305,11 @@ static void upsample_nearest2d_out_cuda_template(
         "input tensor has spatial dimension larger than the kernel capacity");
 
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_out_frame", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_out_frame", [&] {
           using accscalar_t = at::acc_type<scalar_t, true>;
 
-          auto idata = input.data_ptr<scalar_t>();
-          auto odata = output_c.data_ptr<scalar_t>();
+          auto idata = input.const_data_ptr<scalar_t>();
+          auto odata = output_c.mutable_data_ptr<scalar_t>();
 
           upsample_nearest2d_out_frame<scalar_t, nn_compute_source_index_fn>
               <<<grid, block, 0, stream>>>(
@@ -378,11 +377,11 @@ static void upsample_nearest2d_backward_out_cuda_template(
     const int num_kernels = grad_input.numel();
     const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest2d_backward_nhwc_out_frame", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest2d_backward_nhwc_out_frame", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
 
-      const scalar_t* go = grad_output.data_ptr<scalar_t>();
-      scalar_t* gi = grad_input.data_ptr<scalar_t>();
+      const scalar_t* go = grad_output.const_data_ptr<scalar_t>();
+      scalar_t* gi = grad_input.mutable_data_ptr<scalar_t>();
 
       upsample_nearest2d_backward_nhwc_out_frame<scalar_t, accscalar_t, nn_bw_compute_source_index_fn>
         <<<ceil_div(num_kernels, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -413,11 +412,11 @@ static void upsample_nearest2d_backward_out_cuda_template(
     TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int32_t>::max());
 
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest2d_backward_out_frame", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest2d_backward_out_frame", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
 
-      auto idata = grad_input_c.data_ptr<scalar_t>();
-      auto odata = grad_output.data_ptr<scalar_t>();
+      auto idata = grad_input_c.mutable_data_ptr<scalar_t>();
+      auto odata = grad_output.const_data_ptr<scalar_t>();
 
 
       upsample_nearest2d_backward_out_frame<scalar_t, accscalar_t, nn_bw_compute_source_index_fn>
@@ -485,5 +484,4 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact2d_backward_out_cuda) (
       grad_input, grad_output, output_size, input_size, scales_h, scales_w);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -3,14 +3,76 @@ import sys
 import os
 import io
 import subprocess
+import json
+from functools import lru_cache
+from typing import Any
+from itertools import groupby
+import base64
+import warnings
+
+cache = lru_cache(None)
 
 __all__ = ["format_flamegraph", "segments", "memory", "compare"]
 
-def _frame_fmt(f):
+def _frame_fmt(f, full_filename=False):
     i = f['line']
-    fname = f['filename'].split('/')[-1]
+    fname = f['filename']
+    if not full_filename:
+        fname = fname.split('/')[-1]
     func = f['name']
     return f'{fname}:{i}:{func}'
+
+@cache
+def _frame_filter(name, filename):
+    omit_functions = [
+        "unwind::unwind",
+        "CapturedTraceback::gather",
+        "gather_with_cpp",
+        "_start",
+        "__libc_start_main",
+        "PyEval_",
+        "PyObject_",
+        "PyFunction_",
+    ]
+    omit_filenames = [
+        "core/boxing",
+        "/Register",
+        "/Redispatch",
+        "pythonrun.c",
+        "Modules/main.c",
+        "Objects/call.c",
+        "Objects/methodobject.c",
+        "pycore_ceval.h",
+        "ceval.c",
+        "cpython/abstract.h",
+    ]
+    for of in omit_functions:
+        if of in name:
+            return False
+    for of in omit_filenames:
+        if of in filename:
+            return False
+    return True
+
+def _frames_fmt(frames, full_filename=False, reverse=False):
+    if reverse:
+        frames = reversed(frames)
+    return [_frame_fmt(f, full_filename) for f in frames if _frame_filter(f['name'], f['filename'])]
+
+def _block_extra_legacy(b):
+    if 'history' in b:
+        frames = b['history'][0].get('frames', [])
+        real_size = b['history'][0]['real_size']
+    else:
+        real_size = b.get('requested_size', b['size'])
+        frames = []
+    return frames, real_size
+
+def _block_extra(b):
+    if 'frames' not in b:
+        # old snapshot format made it more complicated to get frames/allocated size
+        return _block_extra_legacy(b)
+    return b['frames'], b['requested_size']
 
 def format_flamegraph(flamegraph_lines, flamegraph_script=None):
     if flamegraph_script is None:
@@ -34,23 +96,24 @@ def format_flamegraph(flamegraph_lines, flamegraph_script=None):
     return result
 
 def _write_blocks(f, prefix, blocks):
+    def frames_fragment(frames):
+        if not frames:
+            return "<non-python>"
+        return ';'.join(_frames_fmt(frames, reverse=True))
     for b in blocks:
         if 'history' not in b:
-            f.write(f'{prefix};{b["state"]} {b["size"]}\n')
-            continue
-        accounted_for_size = 0
-        for h in b['history']:
-            sz = h['real_size']
-            accounted_for_size += sz
-            if 'frames' in h:
-                frames = h['frames']
-                if frames:
-                    frame_s = ';'.join([_frame_fmt(f) for f in reversed(frames)])
+            frames, accounted_for_size = _block_extra(b)
+            f.write(f'{prefix};{b["state"]};{frames_fragment(frames)} {accounted_for_size}\n')
+        else:
+            accounted_for_size = 0
+            for h in b['history']:
+                sz = h['real_size']
+                accounted_for_size += sz
+                if 'frames' in h:
+                    frames = h['frames']
+                    f.write(f'{prefix};{b["state"]};{frames_fragment(frames)} {sz}\n')
                 else:
-                    frame_s = "<non-python>"
-                f.write(f'{prefix};{b["state"]};{frame_s} {sz}\n')
-            else:
-                f.write(f'{prefix};{b["state"]};<no-context> {sz}\n')
+                    f.write(f'{prefix};{b["state"]};<no-context> {sz}\n')
         gaps = b['size'] - accounted_for_size
         if gaps:
             f.write(f'{prefix};{b["state"]};<gaps> {gaps}\n')
@@ -78,11 +141,11 @@ def compare(before, after, format_flamegraph=format_flamegraph):
 
     f = io.StringIO()
 
-    before_segs = set(_seg_key(seg) for seg in before)
-    after_segs = set(_seg_key(seg) for seg in after)
+    before_segs = {_seg_key(seg) for seg in before}
+    after_segs = {_seg_key(seg) for seg in after}
 
-    print(f'only_before = {list(a for a,_ in (before_segs - after_segs))}')
-    print(f'only_after = {list(a for a,_ in (after_segs - before_segs))}')
+    print(f'only_before = {[a for a,_ in (before_segs - after_segs)]}')
+    print(f'only_after = {[a for a,_ in (after_segs - before_segs)]}')
 
     for seg in before:
         if _seg_key(seg) not in after_segs:
@@ -94,6 +157,14 @@ def compare(before, after, format_flamegraph=format_flamegraph):
 
     return format_flamegraph(f.getvalue())
 
+def _format_size(num):
+    # https://stackoverflow.com/questions/1094841/get-human-readable-version-of-file-size
+    for unit in ["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"]:
+        if abs(num) < 1024.0:
+            return f"{num:3.1f}{unit}B"
+        num /= 1024.0
+    return f"{num:.1f}YiB"
+
 class Bytes:
     def __init__(self, value):
         self.value = value
@@ -102,21 +173,17 @@ class Bytes:
         return Bytes(self.value + rhs)
 
     def __repr__(self):
-        num = self.value
-        # https://stackoverflow.com/questions/1094841/get-human-readable-version-of-file-size
-        for unit in ["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"]:
-            if abs(num) < 1024.0:
-                return f"{num:3.1f}{unit}B"
-            num /= 1024.0
-        return f"{num:.1f}YiB"
+        return _format_size(self.value)
 
 def calc_active(seg):
     return sum(b['size'] for b in seg['blocks'] if b['state'] == 'active_allocated')
 
 def _report_free(free_external, free_internal):
     total = free_external + free_internal
-    pct = (free_internal / total) * 100
-    suffix = f' ({pct:.1f}% internal)'
+    suffix = ''
+    if total != 0:
+        pct = (free_internal / total) * 100
+        suffix = f' ({pct:.1f}% internal)'
     return f'{Bytes(total)}{suffix}'
 
 PAGE_SIZE = 1024 * 1024 * 20
@@ -158,19 +225,12 @@ def segsum(data):
         boffset = 0
         for b in seg['blocks']:
             active = b['state'] == 'active_allocated'
-            if 'history' in b:
-                # use the more accureate real_size to account for internal fragmenetation if we have it
-                for h in b['history']:
-                    if active:
-                        all_ranges.append((h['addr'] - seg['address'], h['real_size'], active))
-                        seg_allocated += h['real_size']
-                        assert len(b['history']) == 1
-                        seg_free_internal += b['size'] - h['real_size']
+            if active:
+                _, allocated_size = _block_extra(b)
+                all_ranges.append((boffset, allocated_size, True))
+                seg_allocated += allocated_size
+                seg_free_internal += b['size'] - allocated_size
             else:
-                if active:
-                    all_ranges.append((boffset, b['size'], True))
-                    seg_allocated += b['size']
-            if not active:
                 seg_free_external += b['size']
 
             boffset += b['size']
@@ -188,7 +248,7 @@ def segsum(data):
             finish_ = (start_ + size)
             start = start_ // PAGE_SIZE
             finish = (finish_ - 1) // PAGE_SIZE + 1
-            m = chr((ord('a' if active else 'A') + (i % 26)))
+            m = chr(ord('a' if active else 'A') + (i % 26))
             for j in range(start, finish):
                 s = max(start_, j * PAGE_SIZE)
                 e = min(finish_, (j + 1) * PAGE_SIZE)
@@ -301,6 +361,170 @@ def trace(data):
             format(d)
     return out.getvalue()
 
+
+_memory_viz_template = r"""
+<!DOCTYPE html>
+<html>
+<head>
+</head>
+<body>
+<script type="module">
+import {add_local_files} from "https://cdn.jsdelivr.net/gh/pytorch/pytorch@main/torch/utils/viz/MemoryViz.js"
+const local_files = $SNAPSHOT
+add_local_files(local_files, $VIZ_KIND)
+</script>
+</body>
+"""
+
+def _format_viz(data, viz_kind, device):
+    if device is not None:
+        warnings.warn('device argument is deprecated, plots now contain all device')
+    buffer = pickle.dumps(data)
+    buffer += b'\x00' * (3 - len(buffer) % 3)
+    # Encode the buffer with base64
+    encoded_buffer = base64.b64encode(buffer).decode('utf-8')
+
+    json_format = json.dumps([{"name": 'snapshot.pickle', "base64": encoded_buffer}])
+    return _memory_viz_template.replace('$VIZ_KIND', repr(viz_kind)) \
+                               .replace('$SNAPSHOT', json_format)
+
+def trace_plot(data, device=None, plot_segments=False):
+    """Generate a visualization over time of the memory usage recorded by the trace as an html file.
+
+    Args:
+        data: Memory snapshot as generated from torch.cuda.memory._snapshot()
+        device (torch.device, optional): Generate the trace for this device, needed if multiple devices have allocations.
+        plot_segments (bool, optional): Plots memory returned from cudaMalloc, rather than individual allocations.
+                                        Defaults to False.
+
+    Returns:
+        str: HTML of visualization
+    """
+    return _format_viz(data, 'Active Memory Timeline' if not plot_segments else 'Active Cached Memory Timeline', device)
+
+
+def _profile_to_snapshot(profile):
+    import torch
+    from torch.profiler._memory_profiler import Action, TensorKey
+    from torch._C._profiler import _EventType
+    memory_profile = profile._memory_profile()
+
+    allocation_stacks = {}
+    for event in memory_profile._op_tree.sorted_nodes:
+        if event.tag == _EventType.Allocation:
+            parent = event.parent
+            python_parents = []
+            while parent:
+                if parent.tag in (_EventType.PyCall, _EventType.PyCCall):
+                    python_parents.append(parent)
+                parent = parent.parent
+            key = TensorKey.from_allocation(event.extra_fields)
+
+            # Corner case: If allocation doesn't have an ID (can't prove it was used as a Tensor)
+            #              key will be None. I should add some way to identify these, I just haven't yet.
+            if key and event.extra_fields.alloc_size > 0:
+                allocation_stacks[key] = python_parents
+
+
+    device_count = torch.cuda.device_count()
+    snapshot = {
+        'device_traces': [[] for _ in range(device_count + 1)],
+        'segments': [{'device': device,
+                      'address': None,
+                      'total_size': 0,
+                      'stream': 0,
+                      'blocks': []} for device in range(device_count + 1)]
+    }
+
+    def to_device(device):
+        if device.type == 'cuda':
+            return device.index
+        else:
+            return device_count
+
+    def allocate(size, tensor_key, version, during_trace=True):
+        device = to_device(tensor_key.device)
+        addr = tensor_key.storage.ptr
+
+        seg = snapshot['segments'][device]  # type: ignore[index]
+        if seg['address'] is None or seg['address'] > addr:
+            seg['address'] = addr
+        seg['total_size'] = max(seg['total_size'], addr + size)  # record max addr for now, we will make it the size later
+        category = memory_profile._categories.get(tensor_key, version)
+        category = category.name.lower() if category is not None else "unknown"
+        stack = allocation_stacks.get(tensor_key, ())
+        stack = [{'filename': 'none', 'line': 0, 'name': p.name} for p in stack]
+        r = {'action': 'alloc', 'addr': addr, 'size': size, 'stream': 0, 'frames': stack, 'category': category}
+        if during_trace:
+            snapshot['device_traces'][device].append(r)  # type: ignore[index]
+        return r
+
+    def free(alloc, device):
+        for e in ('free_requested', 'free_completed'):
+            snapshot['device_traces'][device].append({'action': e,  # type: ignore[index]
+                                                      'addr': alloc['addr'],
+                                                      'size': alloc['size'],
+                                                      'stream': 0,
+                                                      'frames': alloc['frames']})
+
+    kv_to_elem = {}
+
+
+
+    # create the device trace
+    for time, action, (tensor_key, version), size in memory_profile.timeline:
+        if not isinstance(tensor_key, TensorKey):
+            continue
+        if action == Action.CREATE:
+            kv_to_elem[(tensor_key, version)] = allocate(size, tensor_key, version)
+        elif action == Action.DESTROY:
+            free(kv_to_elem.pop((tensor_key, version)), to_device(tensor_key.device))
+        elif action == Action.INCREMENT_VERSION:
+            free(kv_to_elem.pop((tensor_key, version)), to_device(tensor_key.device))
+            kv_to_elem[(tensor_key, version + 1)] = allocate(size, tensor_key, version + 1)
+        elif action == Action.PREEXISTING:
+            kv_to_elem[(tensor_key, version)] = allocate(size, tensor_key, version, during_trace=False)
+
+
+    # create the final snapshot state
+    blocks_at_end = [(to_device(tensor_key.device), event['addr'], event['size'], event['frames'])
+                     for (tensor_key, version), event in kv_to_elem.items()]
+    for device, blocks in groupby(sorted(blocks_at_end), key=lambda x: x[0]):
+        seg = snapshot['segments'][device]  # type: ignore[index]
+        last_addr = seg['address']
+        for _, addr, size, frames in blocks:
+            if last_addr < addr:
+                seg['blocks'].append({'size': addr - last_addr, 'state': 'inactive'})
+            seg['blocks'].append({'size': size, 'state': 'active_allocated', 'requested_size': size, 'frames': frames})
+            last_addr = addr + size
+        if last_addr < seg['total_size']:
+            seg['blocks'].append({'size': seg['total_size'] - last_addr, 'state': 'inactive'})
+
+    snapshot['segments'] = [seg for seg in snapshot['segments'] if seg['blocks']]  # type: ignore[attr-defined]
+    for seg in snapshot['segments']:  # type: ignore[attr-defined, name-defined, no-redef]
+        seg['total_size'] -= seg['address']
+        if not seg['blocks']:
+            seg['blocks'].append({'size': seg['total_size'], 'state': 'inactive'})
+
+    return snapshot
+
+def profile_plot(profile, device=None):
+    """Generate a visualization over time of the memory usage recorded by kineto memory profiling as an html file.
+
+    Args:
+        profile: profile as generated by `torch.profiler.profile(profile_memory=True)`
+        device (torch.device, optional): Generate the trace for this device, needed if multiple devices have allocations.
+
+    Returns:
+        str: HTML of visualization
+    """
+    snapshot = _profile_to_snapshot(profile)
+    return _format_viz(snapshot, 'Active Memory Timeline', device)
+
+
+def segment_plot(data: Any, device=None):
+    return _format_viz(data, 'Allocator State History', device)
+
 if __name__ == "__main__":
     import os.path
     thedir = os.path.realpath(os.path.dirname(__file__))
@@ -343,6 +567,21 @@ if __name__ == "__main__":
     compare_a.add_argument('after', help=pickled)
     _output(compare_a)
 
+    plots = (
+        ("trace_plot", "Generate a visualization over time of the memory usage recorded by the trace as an html file."),
+        ("segment_plot", "Visualize how allocations are packed into allocator segments at each point in a trace as an html file.")
+    )
+    for cmd, description in plots:
+        trace_plot_a = subparsers.add_parser(cmd, description=description)
+        trace_plot_a.add_argument('input', help=pickled)
+        help = 'visualize trace from this device (default: chooses the only device with trace info or errors)'
+        trace_plot_a.add_argument('-d', '--device', type=int, default=None, help=help)
+        help = 'path to save the visualization(default: output.html)'
+        trace_plot_a.add_argument('-o', '--output', default='output.html', help=help)
+        if cmd == "trace_plot":
+            help = 'visualize change to segments rather than individual allocations'
+            trace_plot_a.add_argument('-s', '--segments', action='store_true', help=help)
+
 
     args = parser.parse_args()
 
@@ -376,3 +615,9 @@ if __name__ == "__main__":
         before = _read(args.before)
         after = _read(args.after)
         _write(args.output, compare(before, after))
+    elif args.action == 'trace_plot':
+        data = _read(args.input)
+        _write(args.output, trace_plot(data, device=args.device, plot_segments=args.segments))
+    elif args.action == 'segment_plot':
+        data = _read(args.input)
+        _write(args.output, segment_plot(data, device=args.device))

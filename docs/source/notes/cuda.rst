@@ -169,11 +169,33 @@ If full precision reductions are needed, users can disable reduced precision red
 
   torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
-To toggle the reduced precision reduction flags in C++, you can do
+To toggle the reduced precision reduction flags in C++, one can do
 
 .. code:: C++
 
   at::globalContext().setAllowFP16ReductionCuBLAS(false);
+
+.. _bf16reducedprecision:
+
+Reduced Precision Reduction in BF16 GEMMs
+-----------------------------------------
+
+A similar flag (as above) exists for BFloat16 GEMMs.
+Note that this switch is set to `True` by default for BF16, if you observe
+numerical instability in your workload, you may wish to set it to `False`.
+
+If reduced precision reductions are not desired, users can disable reduced
+precision reductions in bf16 GEMMs with:
+
+.. code:: python
+
+  torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+
+To toggle the reduced precision reduction flags in C++, one can do
+
+.. code:: C++
+
+  at::globalContext().setAllowBF16ReductionCuBLAS(true);
 
 Asynchronous execution
 ----------------------
@@ -394,6 +416,12 @@ Available options:
   the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
   them, the values are 1024, 1280, 1536, and 1792. So, allocation size of 1200
   will be rounded to 1280 as the nearest ceiling of power-2 division.
+  Specify a single value to apply for all allocation sizes or specify an
+  array of key value pairs to set power-2 division individually for each
+  power of two interval. For example to set 1 division for all allocations
+  under 256MB, 2 division for allocations between 256MB and 512MB, 4 divisions
+  for allocations between 512MB and 1GB and 8 divisions for any larger allocations,
+  set the knob value to: [256:1,512:2,1024:4,>:8].
   ``roundup_power2_divisions`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``roundup_power2_divisions`` is ignored.
 * ``roundup_bypass_threshold_mb`` bypass rounding the requested allocation size,
@@ -423,6 +451,79 @@ Available options:
 
 .. _CUDA's built-in asynchronous allocator:
     https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-1/
+
+.. _cuda-memory-custom-allocator:
+
+Using custom memory allocators for CUDA
+---------------------------------------
+
+It is possible to define allocators as simple functions in C/C++ and compile
+them as a shared library, the code below shows a basic allocator that just
+traces all the memory operations.
+
+.. code:: C++
+
+   #include <sys/types.h>
+   #include <cuda_runtime_api.h>
+   #include <iostream>
+   // Compile with g++ alloc.cc -o alloc.so -I/usr/local/cuda/include -shared -fPIC
+   extern "C" {
+   void* my_malloc(ssize_t size, int device, cudaStream_t stream) {
+      void *ptr;
+      cudaMalloc(&ptr, size);
+      std::cout<<"alloc "<<ptr<<size<<std::endl;
+      return ptr;
+   }
+
+   void my_free(void* ptr, ssize_t size, int device, cudaStream_t stream) {
+      std::cout<<"free "<<ptr<< " "<<stream<<std::endl;
+      cudaFree(ptr);
+   }
+   }
+
+
+This can be used in python through the :class:`torch.cuda.memory.CUDAPluggableAllocator`.
+The user is responsible for supplying the path to the `.so` file and the name
+of the alloc/free functions that match the signatures specified above.
+
+.. code:: python
+
+   import torch
+
+   # Load the allocator
+   new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
+       'alloc.so', 'my_malloc', 'my_free')
+   # Swap the current allocator
+   torch.cuda.memory.change_current_allocator(new_alloc)
+   # This will allocate memory in the device using the new allocator
+   b = torch.zeros(10, device='cuda')
+
+
+.. code:: python
+
+   import torch
+
+   # Do an initial memory allocator
+   b = torch.zeros(10, device='cuda')
+   # Load the allocator
+   new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
+       'alloc.so', 'my_malloc', 'my_free')
+   # This will error since the current allocator was already instantiated
+   torch.cuda.memory.change_current_allocator(new_alloc)
+
+.. cublas-workspaces:
+
+cuBLAS workspaces
+-----------------
+
+For each combination of cuBLAS handle and CUDA stream, a cuBLAS workspace will be allocated
+if that handle and stream combination executes a cuBLAS kernel that requires a workspace.
+In order to avoid repeatedly allocating workspaces, these workspaces are not deallocated unless
+``torch._C._cuda_clearCublasWorkspaces()`` is called. The workspace size per allocation can be
+specified via the environment variable ``CUBLAS_WORKSPACE_CONFIG`` with the format ``:[SIZE]:[COUNT]``.
+As an example, the default workspace size per allocation is ``CUBLAS_WORKSPACE_CONFIG=:4096:2:16:8``
+which specifies a total size of ``2 * 4096 + 8 * 16 KiB``. To force cuBLAS to avoid using workspaces,
+set ``CUBLAS_WORKSPACE_CONFIG=:0:0``.
 
 .. _cufft-plan-cache:
 

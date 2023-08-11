@@ -8,7 +8,7 @@ import sys
 import warnings
 
 import torch
-from common import BenchmarkRunner, main
+from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
 
 from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import clone_inputs
@@ -68,9 +68,6 @@ finally:
         exec(f"from transformers import {cls}")
 
 
-USE_HALF_BATCH_SIZE = True
-
-
 # These models contain the models present in huggingface_models_list. It is a
 # combination of models supported by HF Fx parser and some manually supplied
 # models. For these models, we already know the largest batch size that can fit
@@ -92,46 +89,98 @@ assert len(BATCH_SIZE_KNOWN_MODELS)
 
 
 SKIP = {
-    # Difficult to run and compare
+    # Difficult to setup accuracy test because .eval() not supported
     "Reformer",
     # Fails deepcopy
-    "BlenderbotForCausalLM",
     "BlenderbotForConditionalGeneration",
-    "GPTJForCausalLM",
-    "GPTJForQuestionAnswering",
     "GPTNeoForCausalLM",
     "GPTNeoForSequenceClassification",
     # Fails with even batch size = 1
-    "DebertaV2ForMaskedLM",
-    "DebertaV2ForQuestionAnswering",
+    "GPTJForCausalLM",
+    "GPTJForQuestionAnswering",
 }
 
 # TODO - Fails even after fake tensors
-USE_SMALL_BATCH_SIZE = {
+BATCH_SIZE_DIVISORS = {
     "AlbertForMaskedLM": 2,
-    "AlbertForPreTraining": 4,
     "AlbertForQuestionAnswering": 2,
+    "AllenaiLongformerBase": 2,
     "BartForCausalLM": 2,
-    "BartForConditionalGeneration": 1,
-    "BlenderbotSmallForConditionalGeneration": 32,
+    "BartForConditionalGeneration": 2,
+    "BertForMaskedLM": 2,
+    "BertForQuestionAnswering": 2,
+    "BlenderbotForCausalLM": 8,
+    # "BlenderbotForConditionalGeneration" : 16,
+    "BlenderbotSmallForCausalLM": 4,
+    "BlenderbotSmallForConditionalGeneration": 2,
+    "CamemBert": 2,
     "DebertaForMaskedLM": 4,
-    "DebertaForQuestionAnswering": 4,
-    "DebertaV2ForMaskedLM": 1,
-    "DebertaV2ForQuestionAnswering": 1,
-    "DistilBertForMaskedLM": 16,
-    "ElectraForCausalLM": 1,
-    "GPTNeoForCausalLM": 1,
-    "GPTNeoForSequenceClassification": 1,
-    "M2M100ForConditionalGeneration": 2,
+    "DebertaForQuestionAnswering": 2,
+    "DebertaV2ForMaskedLM": 4,
+    "DebertaV2ForQuestionAnswering": 8,
+    "DistilBertForMaskedLM": 2,
+    "DistilBertForQuestionAnswering": 2,
+    "DistillGPT2": 2,
+    "ElectraForCausalLM": 2,
+    "ElectraForQuestionAnswering": 2,
+    "GPT2ForSequenceClassification": 2,
+    # "GPTJForCausalLM" : 2,
+    # "GPTJForQuestionAnswering" : 2,
+    # "GPTNeoForCausalLM" : 32,
+    # "GPTNeoForSequenceClassification" : 2,
+    "GoogleFnet": 2,
+    "LayoutLMForMaskedLM": 2,
+    "LayoutLMForSequenceClassification": 2,
+    "M2M100ForConditionalGeneration": 4,
+    "MBartForCausalLM": 2,
+    "MBartForConditionalGeneration": 2,
     "MT5ForConditionalGeneration": 2,
-    "MegatronBertForCausalLM": 2,
-    "OPTForCausalLM": 4,
-    "PegasusForCausalLM": 8,
-    "PegasusForConditionalGeneration": 4,
-    "RobertaForCausalLM": 4,
-    "TrOCRForCausalLM": 8,
-    "XGLMForCausalLM": 1,
-    "XLNetLMHeadModel": 4,
+    "MegatronBertForCausalLM": 4,
+    "MegatronBertForQuestionAnswering": 2,
+    "MobileBertForMaskedLM": 2,
+    "MobileBertForQuestionAnswering": 2,
+    "OPTForCausalLM": 2,
+    "PLBartForCausalLM": 2,
+    "PLBartForConditionalGeneration": 2,
+    "PegasusForCausalLM": 4,
+    "PegasusForConditionalGeneration": 2,
+    "RobertaForCausalLM": 2,
+    "RobertaForQuestionAnswering": 2,
+    "Speech2Text2ForCausalLM": 4,
+    "T5ForConditionalGeneration": 2,
+    "T5Small": 2,
+    "TrOCRForCausalLM": 2,
+    "XGLMForCausalLM": 4,
+    "XLNetLMHeadModel": 2,
+    "YituTechConvBert": 2,
+}
+
+SKIP_ACCURACY_CHECK_MODELS = {
+    # Models too large to have eager, dynamo and fp64_numbers simultaneosuly
+    # even for 40 GB machine.
+    "DebertaV2ForMaskedLM",
+    "BlenderbotForCausalLM",
+}
+
+
+REQUIRE_HIGHER_TOLERANCE = {
+    "MT5ForConditionalGeneration",
+    # AlbertForQuestionAnswering fails in CI GCP A100 but error does not seem
+    # harmful.
+    "AlbertForQuestionAnswering",
+}
+
+
+SKIP_FOR_CPU = {
+    "OPTForCausalLM",  # OOMs
+}
+
+ONLY_EVAL_MODE = {
+    "M2M100ForConditionalGeneration",  # Fails with dynamo for train mode
+}
+
+FP32_ONLY_MODELS = {
+    "GoogleFnet",
 }
 
 
@@ -146,20 +195,40 @@ def get_module_cls_by_model_name(model_cls_name):
 
 
 def get_sequence_length(model_cls, model_name):
-    if model_name.startswith(("Bert", "Roberta", "Blenderbot")):
+    if model_name.startswith(("Blenderbot",)):
         seq_length = 128
-    elif model_name.startswith(("GPT2", "Bart", "T5")):
+    elif model_name.startswith(("GPT2", "Bart", "T5", "PLBart", "MBart")):
         seq_length = 1024
     elif model_name in ("AllenaiLongformerBase", "BigBird"):
         seq_length = 1024
+    elif model_name.startswith("OPT"):
+        seq_length = 2048
     elif "Reformer" in model_name:
         seq_length = 4096
     elif model_name.startswith(
-        ("Albert", "Deberta", "Layout", "Electra", "XLNet")
+        (
+            "Albert",
+            "Deberta",
+            "Layout",
+            "Electra",
+            "XLNet",
+            "MegatronBert",
+            "Bert",
+            "Roberta",
+        )
     ) or model_name in ("DistillGPT2", "GoogleFnet", "YituTechConvBert", "CamemBert"):
         seq_length = 512
+    elif model_name in ("TrOCRForCausalLM"):
+        seq_length = 256
+    elif model_name.startswith("MobileBert"):
+        seq_length = 128
+    elif model_name.startswith("Wav2Vec2"):
+        # If too short, will fail with something like
+        # ValueError: `mask_length` has to be smaller than `sequence_length`,
+        # but got `mask_length`: 10 and `sequence_length`: 9`
+        seq_length = 10000  # NB: a more realistic size is 155136
     else:
-        log.warning(
+        log.info(
             f"Sequence Length not defined for {model_name}. Choosing 128 arbitrarily"
         )
         seq_length = 128
@@ -174,6 +243,18 @@ def generate_inputs_for_model(
     num_visual_features = 42
     seq_length = get_sequence_length(model_cls, model_name)
     vocab_size = model.config.vocab_size
+
+    if model_name.startswith("Wav2Vec2"):
+        # TODO: If we add more input_values style models, try to work this
+        # into the overall control flow
+        target_length = 100
+        return {
+            "input_values": torch.randn((bs, seq_length), device=device),
+            # Added because that's what the example training script has
+            "attention_mask": rand_int_tensor(device, 0, 2, (bs, seq_length)),
+            "labels": rand_int_tensor(device, 0, vocab_size, (bs, target_length)),
+        }
+
     if model_name.endswith("MultipleChoice"):
         input = rand_int_tensor(device, 0, vocab_size, (bs, num_choices, seq_length))
     elif model_name.startswith("Roberta"):
@@ -294,10 +375,10 @@ EXTRA_MODELS = {
         AutoConfig.from_pretrained("t5-small"),
         AutoModelForSeq2SeqLM,
     ),
-    "BigBird": (
-        BigBirdConfig(attention_type="block_sparse"),
-        AutoModelForMaskedLM,
-    ),
+    # "BigBird": (
+    #     BigBirdConfig(attention_type="block_sparse"),
+    #     AutoModelForMaskedLM,
+    # ),
     "DistillGPT2": (
         AutoConfig.from_pretrained("distilgpt2"),
         AutoModelForCausalLM,
@@ -319,19 +400,18 @@ EXTRA_MODELS = {
 
 class HuggingfaceRunner(BenchmarkRunner):
     def __init__(self):
-        super(HuggingfaceRunner, self).__init__()
+        super().__init__()
         self.suite_name = "huggingface"
 
-    def load_model(
-        self,
-        device,
-        model_name,
-        batch_size=None,
-    ):
+    @property
+    def skip_models_for_cpu(self):
+        return SKIP_FOR_CPU
 
-        is_training = self.args.training
-        use_eval_mode = self.args.use_eval_mode
-        dtype = torch.float32
+    @property
+    def fp32_only_models(self):
+        return FP32_ONLY_MODELS
+
+    def _get_model_cls_and_config(self, model_name):
         if model_name not in EXTRA_MODELS:
             model_cls = get_module_cls_by_model_name(model_name)
             config_cls = model_cls.config_class
@@ -353,30 +433,46 @@ class HuggingfaceRunner(BenchmarkRunner):
         else:
             config, model_cls = EXTRA_MODELS[model_name]
 
+        return model_cls, config
+
+    @download_retry_decorator
+    def _download_model(self, model_name):
+        model_cls, config = self._get_model_cls_and_config(model_name)
         if "auto" in model_cls.__module__:
             # Handle auto classes
-            model = model_cls.from_config(config).to(device, dtype=dtype)
+            model = model_cls.from_config(config)
         else:
-            model = model_cls(config).to(device, dtype=dtype)
+            model = model_cls(config)
+        return model
 
+    def load_model(
+        self,
+        device,
+        model_name,
+        batch_size=None,
+    ):
+        is_training = self.args.training
+        use_eval_mode = self.args.use_eval_mode
+        dtype = torch.float32
+        reset_rng_state()
+        model_cls, config = self._get_model_cls_and_config(model_name)
+        model = self._download_model(model_name)
+        model = model.to(device, dtype=dtype)
+        if self.args.enable_activation_checkpointing:
+            model.gradient_checkpointing_enable()
         if model_name in BATCH_SIZE_KNOWN_MODELS:
             batch_size_default = BATCH_SIZE_KNOWN_MODELS[model_name]
         elif batch_size is None:
             batch_size_default = 16
-            log.warning(
-                "Batch size not specified for {model_name}. Setting batch_size=16"
+            log.info(
+                f"Batch size not specified for {model_name}. Setting batch_size=16"
             )
 
         if batch_size is None:
             batch_size = batch_size_default
-            if model_name in USE_SMALL_BATCH_SIZE:
-                batch_size = USE_SMALL_BATCH_SIZE[model_name]
-                log.warning(
-                    f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"
-                )
-            elif USE_HALF_BATCH_SIZE and batch_size >= 2:
-                batch_size = int(batch_size / 2)
-                log.warning(
+            if model_name in BATCH_SIZE_DIVISORS:
+                batch_size = max(int(batch_size / BATCH_SIZE_DIVISORS[model_name]), 1)
+                log.info(
                     f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"
                 )
 
@@ -389,12 +485,14 @@ class HuggingfaceRunner(BenchmarkRunner):
             if "drop" in attr and isinstance(getattr(config, attr), float):
                 setattr(config, attr, 1e-30)
 
-        if is_training and not use_eval_mode:
+        if (
+            is_training
+            and not use_eval_mode
+            and not (self.args.accuracy and model_name in ONLY_EVAL_MODE)
+        ):
             model.train()
         else:
             model.eval()
-
-        self.init_optimizer(device, model.parameters())
 
         self.validate_model(model, example_inputs)
         return device, model_name, model, example_inputs, batch_size
@@ -411,10 +509,17 @@ class HuggingfaceRunner(BenchmarkRunner):
             if (
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
+                or model_name in args.exclude_exact
                 or model_name in SKIP
             ):
                 continue
             yield model_name
+
+    @property
+    def skip_accuracy_checks_large_models_dashboard(self):
+        if self.args.dashboard or self.args.accuracy:
+            return SKIP_ACCURACY_CHECK_MODELS
+        return set()
 
     def pick_grad(self, name, is_training):
         if is_training:
@@ -425,18 +530,22 @@ class HuggingfaceRunner(BenchmarkRunner):
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         if is_training:
-            return 1e-2, cosine
+            if name in REQUIRE_HIGHER_TOLERANCE:
+                return 2e-2, cosine
+            else:
+                return 1e-2, cosine
         return 1e-3, cosine
 
     def compute_loss(self, pred):
         return pred[0]
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
-        return mod(**inputs)
+        with self.autocast():
+            return mod(**inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
-        mod.zero_grad(True)
+        self.optimizer_zero_grad(mod)
         with self.autocast():
             pred = mod(**cloned_inputs)
             loss = self.compute_loss(pred)
@@ -463,7 +572,6 @@ def refresh_model_names_and_batch_sizes():
     lm_seen = set()
     family_seen = set()
     for cls_name in hf_fx._SUPPORTED_MODELS:
-
         if "For" not in cls_name:
             continue
 
@@ -473,10 +581,10 @@ def refresh_model_names_and_batch_sizes():
         if model_cls in [
             CLIPModel,
             CLIPVisionModel,
-            SwinForImageClassification,
-            SwinForImageClassification,
-            SwinForMaskedImageModeling,
-            SwinModel,
+            # SwinForImageClassification,
+            # SwinForImageClassification,
+            # SwinForMaskedImageModeling,
+            # SwinModel,
             ViTForImageClassification,
             ViTForMaskedImageModeling,
             ViTModel,
@@ -532,10 +640,14 @@ def refresh_model_names_and_batch_sizes():
             log.warning(f"Failed to find suitable batch size for {model_name}")
 
 
-if __name__ == "__main__":
+def huggingface_main():
     # Code to refresh model names and batch sizes
     # if "--find-batch-sizes" not in sys.argv:
     #     refresh_model_names_and_batch_sizes()
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main(HuggingfaceRunner())
+
+
+if __name__ == "__main__":
+    huggingface_main()

@@ -24,9 +24,7 @@ namespace detail {
 struct ListImpl final : public c10::intrusive_ptr_target {
   using list_type = std::vector<IValue>;
 
-  explicit ListImpl(list_type list_, TypePtr elementType_)
-  : list(std::move(list_))
-  , elementType(std::move(elementType_)) {}
+  explicit TORCH_API ListImpl(list_type list_, TypePtr elementType_);
 
   list_type list;
 
@@ -80,7 +78,7 @@ public:
   ListElementReference& operator=(const T& new_value) &&;
 
   // assigning another ref to this assigns the underlying value
-  ListElementReference& operator=(ListElementReference&& rhs) &&;
+  ListElementReference& operator=(ListElementReference&& rhs) && noexcept;
 
   const IValue& get() const& {
     return *iterator_;
@@ -88,12 +86,12 @@ public:
 
   friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
 
+  ListElementReference(const ListElementReference&) = delete;
+  ListElementReference& operator=(const ListElementReference&) = delete;
+
 private:
   ListElementReference(Iterator iter)
   : iterator_(iter) {}
-
-  ListElementReference(const ListElementReference&) = delete;
-  ListElementReference& operator=(const ListElementReference&) = delete;
 
   // allow moving, but only our friends (i.e. the List class) can move us
   ListElementReference(ListElementReference&&) noexcept = default;
@@ -111,20 +109,22 @@ private:
 // this wraps vector::iterator to make sure user code can't rely
 // on it being the type of the underlying vector.
 template <class T, class Iterator>
-class ListIterator final : public std::iterator<
-                               std::random_access_iterator_tag,
-                               T,
-                               std::ptrdiff_t,
-                               T*,
-                               ListElementReference<T, Iterator>> {
+class ListIterator final {
  public:
+   // C++17 friendly std::iterator implementation
+  using iterator_category = std::random_access_iterator_tag;
+  using value_type = T;
+  using difference_type = std::ptrdiff_t;
+  using pointer = T*;
+  using reference = ListElementReference<T, Iterator>;
+
   explicit ListIterator() = default;
   ~ListIterator() = default;
 
   ListIterator(const ListIterator&) = default;
   ListIterator(ListIterator&&) noexcept = default;
   ListIterator& operator=(const ListIterator&) = default;
-  ListIterator& operator=(ListIterator&&) = default;
+  ListIterator& operator=(ListIterator&&) noexcept = default;
 
   ListIterator& operator++() {
       ++iterator_;
@@ -166,7 +166,7 @@ class ListIterator final : public std::iterator<
     return ListIterator{iterator_ - offset};
   }
 
-  friend typename std::iterator<std::random_access_iterator_tag, T>::difference_type operator-(const ListIterator& lhs, const ListIterator& rhs) {
+  friend difference_type operator-(const ListIterator& lhs, const ListIterator& rhs) {
     return lhs.iterator_ - rhs.iterator_;
   }
 
@@ -478,9 +478,7 @@ namespace impl {
 // (maybe except for some internal prim ops).
 using GenericList = List<IValue>;
 
-inline const IValue* ptr_to_first_element(const GenericList& list) {
-  return &list.impl_->list[0];
-}
+const IValue* ptr_to_first_element(const GenericList& list);
 
 }
 }

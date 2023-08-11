@@ -88,6 +88,10 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
       return at::kComplexDouble;
     case ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16:
       return at::kBFloat16;
+    case ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT8E5M2:
+      return at::kFloat8_e5m2;
+    case ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT8E4M3FN:
+      return at::kFloat8_e4m3fn;
     default:
       TORCH_CHECK(
           false,
@@ -245,7 +249,7 @@ void ONNXLintGraph(
       GRAPH_DEBUG("Node does not set sourceRange:", *n);
       n_miss_source_range.emplace_back(n->kind());
     }
-    if (n->scopeName() == "") {
+    if (n->scopeName().empty()) {
       GRAPH_DEBUG("Node does not set scope:", *n);
       n_miss_scope.emplace_back(n->kind());
     }

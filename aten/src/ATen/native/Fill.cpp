@@ -37,7 +37,7 @@ Tensor& fill_out(Tensor& self, const Scalar& value) {
   return self;
 }
 
-Tensor& fill_out_quantized(Tensor& self, const Scalar& value) {
+static Tensor& fill_out_quantized(Tensor& self, const Scalar& value) {
   at::Tensor out = at::ones(self.sizes()).to(kFloat) * value;
   out = out.to(self.device()).to(self.suggest_memory_format());
   // Trust the `copy_` to handle the quantization and the boundary chacks.
@@ -131,7 +131,7 @@ Tensor& fill_diagonal_(Tensor& self, const Scalar& fill_value, bool wrap) {
   return self;
 }
 
-Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
+static Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
   void* ptr = self.data_ptr();
   if (nullptr == ptr) {
     return self.fill_(0);

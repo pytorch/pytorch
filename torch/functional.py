@@ -4,7 +4,6 @@ from typing import (
 
 import torch
 from torch._C import _add_docstr
-import torch.backends.opt_einsum as opt_einsum
 import torch.nn.functional as F
 from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import (
@@ -107,7 +106,7 @@ def broadcast_shapes(*shapes):
             if isinstance(shape, int):
                 if max_len < 1:
                     max_len = 1
-            elif isinstance(shape, tuple) or isinstance(shape, list):
+            elif isinstance(shape, (tuple, list)):
                 s = len(shape)
                 if max_len < s:
                     max_len = s
@@ -115,11 +114,10 @@ def broadcast_shapes(*shapes):
         for shape in shapes:
             if isinstance(shape, int):
                 shape = (shape,)
-            if isinstance(shape, tuple) or isinstance(shape, list):
+            if isinstance(shape, (tuple, list)):
                 for i in range(-1, -1 - len(shape), -1):
                     if shape[i] < 0:
-                        raise RuntimeError("Trying to create tensor with negative dimension ({}): ({})"
-                                           .format(shape[i], shape[i]))
+                        raise RuntimeError(f"Trying to create tensor with negative dimension ({shape[i]}): ({shape[i]})")
                     if shape[i] == 1 or shape[i] == result[i]:
                         continue
                     if result[i] != 1:
@@ -139,7 +137,7 @@ def broadcast_shapes(*shapes):
 
 def split(
     tensor: Tensor, split_size_or_sections: Union[int, List[int]], dim: int = 0
-) -> List[Tensor]:
+) -> Tuple[Tensor, ...]:
     r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
 
     If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
@@ -159,7 +157,7 @@ def split(
 
     Example::
 
-        >>> a = torch.arange(10).reshape(5,2)
+        >>> a = torch.arange(10).reshape(5, 2)
         >>> a
         tensor([[0, 1],
                 [2, 3],
@@ -172,7 +170,7 @@ def split(
          tensor([[4, 5],
                  [6, 7]]),
          tensor([[8, 9]]))
-        >>> torch.split(a, [1,4])
+        >>> torch.split(a, [1, 4])
         (tensor([[0, 1]]),
          tensor([[2, 3],
                  [4, 5],
@@ -206,7 +204,7 @@ def einsum(*args: Any) -> Tensor:
     Equation:
 
         The :attr:`equation` string specifies the subscripts (letters in `[a-zA-Z]`) for each dimension of
-        the input :attr:`operands` in the same order as the dimensions, separating subcripts for each operand by a
+        the input :attr:`operands` in the same order as the dimensions, separating subscripts for each operand by a
         comma (','), e.g. `'ij,jk'` specify subscripts for two 2D operands. The dimensions labeled with the same subscript
         must be broadcastable, that is, their size must either match or be `1`. The exception is if a subscript is
         repeated for the same input operand, in which case the dimensions labeled with this subscript for this operand
@@ -267,18 +265,18 @@ def einsum(*args: Any) -> Tensor:
 
     Examples::
 
-        >>> # trace
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> # trace
         >>> torch.einsum('ii', torch.randn(4, 4))
         tensor(-1.2104)
 
-        >>> # diagonal
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> # diagonal
         >>> torch.einsum('ii->i', torch.randn(4, 4))
         tensor([-0.1034,  0.7952, -0.2433,  0.4545])
 
-        >>> # outer product
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> # outer product
         >>> x = torch.randn(5)
         >>> y = torch.randn(4)
         >>> torch.einsum('i,j->ij', x, y)
@@ -288,10 +286,10 @@ def einsum(*args: Any) -> Tensor:
                 [ 0.1713, -0.4291, -0.5802,  0.7350],
                 [ 0.5704, -1.4290, -1.9323,  2.4480]])
 
-        >>> # batch matrix multiplication
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
-        >>> As = torch.randn(3,2,5)
-        >>> Bs = torch.randn(3,5,4)
+        >>> # batch matrix multiplication
+        >>> As = torch.randn(3, 2, 5)
+        >>> Bs = torch.randn(3, 5, 4)
         >>> torch.einsum('bij,bjk->bik', As, Bs)
         tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
                 [-1.6706, -0.8097, -0.8025, -2.1183]],
@@ -302,8 +300,8 @@ def einsum(*args: Any) -> Tensor:
                 [[ 2.8153,  1.8787, -4.3839, -1.2112],
                 [ 0.3728, -2.1131,  0.0921,  0.8305]]])
 
-        >>> # with sublist format and ellipsis
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> # with sublist format and ellipsis
         >>> torch.einsum(As, [..., 0, 1], Bs, [..., 1, 2], [..., 0, 2])
         tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
                 [-1.6706, -0.8097, -0.8025, -2.1183]],
@@ -320,13 +318,14 @@ def einsum(*args: Any) -> Tensor:
         torch.Size([2, 3, 5, 4])
 
         >>> # equivalent to torch.nn.functional.bilinear
-        >>> A = torch.randn(3,5,4)
-        >>> l = torch.randn(2,5)
-        >>> r = torch.randn(2,4)
+        >>> A = torch.randn(3, 5, 4)
+        >>> l = torch.randn(2, 5)
+        >>> r = torch.randn(2, 4)
         >>> torch.einsum('bn,anm,bm->ba', l, A, r)
         tensor([[-0.3430, -5.2405,  0.4494],
                 [ 0.3311,  5.5201, -3.0356]])
     """
+    import torch.backends.opt_einsum as opt_einsum
     # This wrapper exists to support variadic args.
     if len(args) < 2:
         raise ValueError('einsum(): must specify the equation string and at least one operand, '
@@ -473,6 +472,7 @@ else:
             `torch.meshgrid` is commonly used to produce a grid for
             plotting.
             >>> # xdoctest: +REQUIRES(module:matplotlib)
+            >>> # xdoctest: +REQUIRES(env:DOCTEST_SHOW)
             >>> import matplotlib.pyplot as plt
             >>> xs = torch.linspace(-5, 5, steps=100)
             >>> ys = torch.linspace(-5, 5, steps=100)
@@ -533,7 +533,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
     .. math::
         X[\omega, m] = \sum_{k = 0}^{\text{win\_length-1}}%
                             \text{window}[k]\ \text{input}[m \times \text{hop\_length} + k]\ %
-                            \exp\left(- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}\right),
+                            \exp\left(- j \frac{2 \pi \cdot \omega k}{\text{n\_fft}}\right),
 
     where :math:`m` is the index of the sliding window, and :math:`\omega` is
     the frequency :math:`0 \leq \omega < \text{n\_fft}` for ``onesided=False``,
@@ -590,13 +590,15 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
       previous signature may cause error or return incorrect result.
 
     Args:
-        input (Tensor): the input tensor
+        input (Tensor): the input tensor of shape `(B?, L)` where `B?` is an optional
+            batch dimension
         n_fft (int): size of Fourier transform
         hop_length (int, optional): the distance between neighboring sliding window
             frames. Default: ``None`` (treated as equal to ``floor(n_fft / 4)``)
         win_length (int, optional): the size of window frame and STFT filter.
             Default: ``None``  (treated as equal to :attr:`n_fft`)
         window (Tensor, optional): the optional window function.
+            Shape must be 1d and `<= n_fft`
             Default: ``None`` (treated as window of all :math:`1` s)
         center (bool, optional): whether to pad :attr:`input` on both sides so
             that the :math:`t`-th frame is centered at time :math:`t \times \text{hop\_length}`.
@@ -612,17 +614,24 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
             a real tensor with an extra last dimension for the real and
             imaginary components.
 
-            .. versionchanged:: 1.14.0
+            .. versionchanged:: 2.0
                ``return_complex`` is now a required argument for real inputs,
                as the default is being transitioned to ``True``.
 
-            .. deprecated:: 1.14.0
+            .. deprecated:: 2.0
                ``return_complex=False`` is deprecated, instead use ``return_complex=True``
                Note that calling :func:`torch.view_as_real` on the output will
                recover the deprecated output format.
 
     Returns:
-        Tensor: A tensor containing the STFT result with shape described above
+        Tensor: A tensor containing the STFT result with shape `(B?, N, T, C?)` where
+           - `B?` is an optional batch dimnsion from the input
+           - `N` is the number of frequency samples, `(n_fft // 2) + 1` for
+             `onesided=True`, or otherwise `n_fft`.
+           - `T` is the number of frames, `1 + L // hop_length`
+             for `center=True`, or `1 + (L - n_fft) // hop_length` otherwise.
+           - `C?` is an optional length-2 dimension of real and imaginary
+             components, present when `return_complex=False`.
 
     """
     if has_torch_function_unary(input):
@@ -679,10 +688,15 @@ IEEE Trans. ASSP, vol.32, no.2, pp.236-243, Apr. 1984.
 
 Args:
     input (Tensor): The input tensor. Expected to be in the format of :func:`~torch.stft`,
-        output. That is a complex tensor of shape (``channel``, ``fft_size``, ``n_frame``),
-        where the ``channel`` dimension is optional.
+        output. That is a complex tensor of shape `(B?, N, T)` where
 
-        .. versionchanged:: 1.14.0
+        - `B?` is an optional batch dimension
+        - `N` is the number of frequency samples, `(n_fft // 2) + 1`
+          for onesided input, or otherwise `n_fft`.
+        - `T` is the number of frames, `1 + length // hop_length` for centered stft,
+          or `1 + (length - n_fft) // hop_length` otherwise.
+
+        .. versionchanged:: 2.0
             Real datatype inputs are no longer supported. Input must now have a
             complex datatype, as returned by ``stft(..., return_complex=True)``.
     n_fft (int): Size of Fourier transform
@@ -690,15 +704,18 @@ Args:
         (Default: ``n_fft // 4``)
     win_length (Optional[int]): The size of window frame and STFT filter. (Default: ``n_fft``)
     window (Optional[torch.Tensor]): The optional window function.
+        Shape must be 1d and `<= n_fft`
         (Default: ``torch.ones(win_length)``)
     center (bool): Whether :attr:`input` was padded on both sides so that the :math:`t`-th frame is
         centered at time :math:`t \times \text{hop\_length}`.
         (Default: ``True``)
     normalized (bool): Whether the STFT was normalized. (Default: ``False``)
     onesided (Optional[bool]): Whether the STFT was onesided.
-        (Default: ``True`` if ``n_fft != fft_size`` in the input size)
+        (Default: ``True`` if `n_fft != fft_size` in the input size)
     length (Optional[int]): The amount to trim the signal by (i.e. the
-        original signal length). (Default: whole signal)
+        original signal length). Defaults to `(T - 1) * hop_length` for
+        centered stft, or `n_fft + (T - 1) * hop_length` otherwise, where `T`
+        is the number of input frames.
     return_complex (Optional[bool]):
         Whether the output should be complex, or if the input should be
         assumed to derive from a real signal and window.
@@ -706,7 +723,8 @@ Args:
         (Default: ``False``)
 
 Returns:
-    Tensor: Least squares estimation of the original signal of size (..., signal_length)
+    Tensor: Least squares estimation of the original signal of shape `(B?, length)` where
+        `B?` is an optional batch dimension from the input tensor.
 """)
 
 
@@ -1093,6 +1111,8 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
     if isinstance(dims, int):
         if dims < 0:
             raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
+        if dims > min(a.dim(), b.dim()):
+            raise RuntimeError(f"tensordot expects dims < ndim_a or ndim_b, but got dims={dims}")
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
 
@@ -1253,7 +1273,7 @@ def atleast_1d(*tensors):
         tensor([1.])
         >>> x = torch.tensor(0.5)
         >>> y = torch.tensor(1.)
-        >>> torch.atleast_1d((x,y))
+        >>> torch.atleast_1d((x, y))
         (tensor([0.5000]), tensor([1.]))
     """
     # This wrapper exists to support variadic args.
@@ -1282,7 +1302,7 @@ def atleast_2d(*tensors):
         tensor(1.)
         >>> torch.atleast_2d(x)
         tensor([[1.]])
-        >>> x = torch.arange(4).view(2,2)
+        >>> x = torch.arange(4).view(2, 2)
         >>> x
         tensor([[0, 1],
                 [2, 3]])
@@ -1291,7 +1311,7 @@ def atleast_2d(*tensors):
                 [2, 3]])
         >>> x = torch.tensor(0.5)
         >>> y = torch.tensor(1.)
-        >>> torch.atleast_2d((x,y))
+        >>> torch.atleast_2d((x, y))
         (tensor([[0.5000]]), tensor([[1.]]))
     """
     # This wrapper exists to support variadic args.
@@ -1320,7 +1340,7 @@ def atleast_3d(*tensors):
         tensor(0.5000)
         >>> torch.atleast_3d(x)
         tensor([[[0.5000]]])
-        >>> y = torch.arange(4).view(2,2)
+        >>> y = torch.arange(4).view(2, 2)
         >>> y
         tensor([[0, 1],
                 [2, 3]])
@@ -1337,7 +1357,7 @@ def atleast_3d(*tensors):
         tensor([[[1]]])
         >>> x = torch.tensor(0.5)
         >>> y = torch.tensor(1.)
-        >>> torch.atleast_3d((x,y))
+        >>> torch.atleast_3d((x, y))
         (tensor([[[0.5000]]]), tensor([[[1.]]]))
     """
     # This wrapper exists to support variadic args.
@@ -1384,7 +1404,7 @@ else:
         pass
 
 
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
+def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
     r"""Returns the matrix norm or vector norm of a given tensor.
 
     .. warning::
@@ -1393,10 +1413,11 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         Its documentation and behavior may be incorrect, and it is no longer
         actively maintained.
 
-        Use :func:`torch.linalg.norm`, instead, or :func:`torch.linalg.vector_norm`
-        when computing vector norms and :func:`torch.linalg.matrix_norm` when
-        computing matrix norms. Note, however, the signature for these functions
-        is slightly different than the signature for torch.norm.
+        Use :func:`torch.linalg.vector_norm` when computing vector norms and
+        :func:`torch.linalg.matrix_norm` when computing matrix norms.
+        For a function with a similar behavior as this one see :func:`torch.linalg.norm`.
+        Note, however, the signature for these functions is slightly different than the
+        signature for ``torch.norm``.
 
     Args:
         input (Tensor): The input tensor. Its data type must be either a floating
@@ -1446,8 +1467,8 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
     .. note::
         Even though ``p='fro'`` supports any number of dimensions, the true
         mathematical definition of Frobenius norm only applies to tensors with
-        exactly two dimensions. :func:`torch.linalg.norm` with ``ord='fro'`` aligns
-        with the mathematical definition, since it can only be applied across
+        exactly two dimensions. :func:`torch.linalg.matrix_norm` with ``ord='fro'``
+        aligns with the mathematical definition, since it can only be applied across
         exactly two dimensions.
 
     Example::
@@ -1463,15 +1484,15 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         tensor(4.)
         >>> torch.norm(b, float('inf'))
         tensor(4.)
-        >>> c = torch.tensor([[ 1, 2, 3],[-1, 1, 4]] , dtype= torch.float)
+        >>> c = torch.tensor([[ 1, 2, 3], [-1, 1, 4]] , dtype=torch.float)
         >>> torch.norm(c, dim=0)
         tensor([1.4142, 2.2361, 5.0000])
         >>> torch.norm(c, dim=1)
         tensor([3.7417, 4.2426])
         >>> torch.norm(c, p=1, dim=1)
         tensor([6., 6.])
-        >>> d = torch.arange(8, dtype= torch.float).reshape(2,2,2)
-        >>> torch.norm(d, dim=(1,2))
+        >>> d = torch.arange(8, dtype=torch.float).reshape(2, 2, 2)
+        >>> torch.norm(d, dim=(1, 2))
         tensor([ 3.7417, 11.2250])
         >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
         (tensor(3.7417), tensor(11.2250))
@@ -1480,6 +1501,43 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             norm, (input,), input, p=p, dim=dim, keepdim=keepdim, out=out, dtype=dtype)
+
+    # NB. All the repeated code and weird python is to please TorchScript.
+    #     For a more compact implementation see the relevant function in `_refs/__init__.py`
+
+    # We don't do this for MPS or sparse tensors
+    if input.layout == torch.strided and input.device.type in \
+            ("cpu", "cuda", "meta", torch.utils.backend_registration._privateuse1_backend_name):
+        if dim is not None:
+            if isinstance(dim, int):
+                _dim = [dim]
+            else:
+                _dim = dim
+        else:
+            _dim = None  # type: ignore[assignment]
+
+        if isinstance(p, str):
+            if p == "fro" and (dim is None or isinstance(dim, int) or len(dim) <= 2):
+                if out is None:
+                    return torch.linalg.vector_norm(input, 2, _dim, keepdim, dtype=dtype)
+                else:
+                    return torch.linalg.vector_norm(input, 2, _dim, keepdim, dtype=dtype, out=out)
+
+            # Here we either call the nuclear norm, or we call matrix_norm with some arguments
+            # that will throw an error
+            if _dim is None:
+                _dim = list(range(input.ndim))
+            if out is None:
+                return torch.linalg.matrix_norm(input, p, _dim, keepdim, dtype=dtype)
+            else:
+                return torch.linalg.matrix_norm(input, p, _dim, keepdim, dtype=dtype, out=out)
+        else:
+            # NB. p should be Union[str, number], not Optional!
+            _p = 2.0 if p is None else p
+            if out is None:
+                return torch.linalg.vector_norm(input, _p, _dim, keepdim, dtype=dtype)
+            else:
+                return torch.linalg.vector_norm(input, _p, _dim, keepdim, dtype=dtype, out=out)
 
     ndim = input.dim()
 
@@ -1567,6 +1625,7 @@ def chain_matmul(*matrices, out=None):
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> a = torch.randn(3, 4)
         >>> b = torch.randn(4, 5)
@@ -1667,7 +1726,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     Example::
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
-        >>> # xdoctest: +IGNORE_WANT("non-determenistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> A = torch.randn(2, 3, 3)
         >>> A_LU, pivots = torch.lu(A)
         >>> A_LU
@@ -1683,7 +1742,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
                 [ 3,  3,  3]], dtype=torch.int32)
         >>> A_LU, pivots, info = torch.lu(A, get_infos=True)
         >>> if info.nonzero().size(0) == 0:
-        ...   print('LU factorization succeeded for all samples!')
+        ...     print('LU factorization succeeded for all samples!')
         LU factorization succeeded for all samples!
     """
     # If get_infos is True, then we don't need to check for errors and vice versa

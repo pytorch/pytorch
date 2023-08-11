@@ -11,6 +11,16 @@ on:
         required: true
         type: string
         description: The build environment
+      runs_on:
+          required: false
+          default: linux.12xlarge
+          type: string
+          description: Hardware to run this "build"job on, linux.12xlarge or linux.t4g.2xlarge.
+      ALPINE_IMAGE:
+        required: false
+        type: string
+        default: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+        description: Alpine image to use
       PYTORCH_ROOT:
         required: true
         type: string
@@ -67,8 +77,8 @@ on:
 
 jobs:
   build:
-    runs-on: linux.4xlarge
-    timeout-minutes: 270
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 180
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
       BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
@@ -86,7 +96,7 @@ jobs:
       DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ inputs.PYTORCH_EXTRA_INSTALL_REQUIREMENTS }}
       # Needed for conda builds
-      ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+      ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
       ANACONDA_USER: pytorch
       AWS_DEFAULT_REGION: us-east-1
       BINARY_ENV_FILE: /tmp/env
@@ -123,19 +133,29 @@ jobs:
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
           } >> "${GITHUB_ENV} }}"
+
       - name: List the env
         shell: bash
         run: env
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        uses: ./.github/actions/chown-workspace
+
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.github-token }}
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' }}
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Chown workspace
+        uses: ./.github/actions/chown-workspace
+        with:
+          ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
+
       - name: Clean workspace
         shell: bash
         run: |
@@ -143,11 +163,13 @@ jobs:
           mkdir "${GITHUB_WORKSPACE}"
 
       - name: Checkout PyTorch to pytorch dir
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: malfet/checkout@silent-checkout
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
+          quiet-checkout: true
+
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -155,28 +177,40 @@ jobs:
         working-directory: pytorch
 
       - name: Checkout pytorch/builder to builder dir
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: malfet/checkout@silent-checkout
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
+          quiet-checkout: true
+
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
 
-      - name: Set BUILD_SPLIT_CUDA
-        if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' && startsWith(inputs.GPU_ARCH_VERSION, '11') }}
-        shell: bash
-        run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Check if the job is disabled
+        id: filter
+        uses: ./pytorch/.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # NB: Use a mock test matrix with a default value here. After filtering, if the
+          # returned matrix is empty, it means that the job is disabled
+          test-matrix: |
+            { include: [
+              { config: "default" },
+            ]}
+
       - name: Pull Docker image
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
+
       - name: Build PyTorch binary
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         run: |
           set -x
           mkdir -p artifacts/
@@ -184,7 +218,6 @@ jobs:
             -e BINARY_ENV_FILE \
             -e BUILDER_ROOT \
             -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
@@ -206,15 +239,21 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/${{ inputs.PACKAGE_TYPE }}/build.sh"
+          if [[ ${BUILD_ENVIRONMENT} == *"aarch64"* ]]; then
+            docker exec -t "${container_name}" bash -c "bash /builder/aarch64_linux/aarch64_ci_build.sh"
+          else
+            docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/${{ inputs.PACKAGE_TYPE }}/build.sh"
+          fi
+
       - name: Chown artifacts
-        if: always()
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         shell: bash
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 
       - uses: actions/upload-artifact@v3
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         with:
           name: ${{ inputs.build_name }}
           if-no-files-found: error
@@ -228,3 +267,5 @@ jobs:
       - name: Chown workspace
         if: always()
         uses: ./pytorch/.github/actions/chown-workspace
+        with:
+          ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}

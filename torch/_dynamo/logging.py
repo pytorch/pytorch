@@ -1,68 +1,19 @@
 import itertools
 import logging
-import os
 
-# logging level for dynamo generated graphs/bytecode/guards
-CODE = 15
-logging.addLevelName(CODE, "CODE")
+from torch.hub import _Faketqdm, tqdm
+
+# Disable progress bar by default, not in dynamo config because otherwise get a circular import
+disable_progress = True
 
 
 # Return all loggers that torchdynamo/torchinductor is responsible for
 def get_loggers():
     return [
-        logging.getLogger("torchdynamo"),
-        logging.getLogger("torchinductor"),
+        logging.getLogger("torch.fx.experimental.symbolic_shapes"),
+        logging.getLogger("torch._dynamo"),
+        logging.getLogger("torch._inductor"),
     ]
-
-
-# Set the level of all loggers that torchdynamo is responsible for
-def set_loggers_level(level):
-    for logger in get_loggers():
-        logger.setLevel(level)
-
-
-LOGGING_CONFIG = {
-    "version": 1,
-    "formatters": {
-        "torchdynamo_format": {
-            "format": "[%(asctime)s] %(name)s: [%(levelname)s] %(message)s"
-        },
-    },
-    "handlers": {
-        "torchdynamo_console": {
-            "class": "logging.StreamHandler",
-            "level": "DEBUG",
-            "formatter": "torchdynamo_format",
-            "stream": "ext://sys.stderr",
-        },
-    },
-    "loggers": {
-        "torchdynamo": {
-            "level": "DEBUG",
-            "handlers": ["torchdynamo_console"],
-            "propagate": False,
-        },
-        "torchinductor": {
-            "level": "DEBUG",
-            "handlers": ["torchdynamo_console"],
-            "propagate": False,
-        },
-    },
-    "disable_existing_loggers": False,
-}
-
-
-# initialize torchdynamo loggers
-def init_logging(log_level, log_file_name=None):
-    if "PYTEST_CURRENT_TEST" not in os.environ:
-        logging.config.dictConfig(LOGGING_CONFIG)
-        if log_file_name is not None:
-            log_file = logging.FileHandler(log_file_name)
-            log_file.setLevel(log_level)
-            for logger in get_loggers():
-                logger.addHandler(log_file)
-
-    set_loggers_level(log_level)
 
 
 # Creates a logging function that logs a message with a step # prepended.
@@ -78,11 +29,29 @@ def init_logging(log_level, log_file_name=None):
 
 _step_counter = itertools.count(1)
 
+# Update num_steps if more phases are added: Dynamo, AOT, Backend
+# This is very inductor centric
+# _inductor.utils.has_triton() gives a circular import error here
+
+if not disable_progress:
+    try:
+        import triton  # noqa: F401
+
+        num_steps = 3
+    except ImportError:
+        num_steps = 2
+    pbar = tqdm(total=num_steps, desc="torch.compile()", delay=0)
+
 
 def get_step_logger(logger):
+    if not disable_progress:
+        pbar.update(1)
+        if not isinstance(pbar, _Faketqdm):
+            pbar.set_postfix_str(f"{logger.name}")
+
     step = next(_step_counter)
 
     def log(level, msg):
-        logger.log(level, f"Step {step}: {msg}")
+        logger.log(level, "Step %s: %s", step, msg)
 
     return log

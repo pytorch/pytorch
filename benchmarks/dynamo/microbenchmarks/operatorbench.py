@@ -4,13 +4,13 @@ import numpy as np
 import torch
 from operator_inp_utils import OperatorInputsLoader
 
-from torch._dynamo.optimizations.backends import cudagraphs_inner
+from torch._dynamo.backends.cudagraphs import cudagraphs_inner
 from torch._dynamo.testing import same
-from torch._inductor import config as inductor_config
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.decomposition import decompositions
-from torch._inductor.lowering import fallbacks, lowerings
+from torch._inductor.lowering import lowerings
 from torch._inductor.utils import gen_gm_and_inputs
+from torch.utils._pytree import tree_map_only
 
 aten = torch.ops.aten
 
@@ -37,12 +37,13 @@ def compute_speedups(
             if device == "cuda":
                 import triton
 
+                model(*example_inputs)
+
                 # do_bench() clears L2 cache to hide the latency of CPU launch time
                 # along with cuda synchronization
-                median_ms, _, _ = triton.testing.do_bench(
+                timings[rep, m] = triton.testing.do_bench(
                     lambda: model(*example_inputs)
                 )
-                timings[rep, m] = median_ms
             else:
                 from torch._inductor.utils import timed
 
@@ -71,6 +72,10 @@ def convert_to_jit(gm, gm_args):
     return torch.jit.trace(gm, gm_args)
 
 
+def to_channels_last(ten):
+    return ten if ten.ndim != 4 else ten.to(memory_format=torch.channels_last)
+
+
 def microbenchmark(
     operator, args, kwargs, dtype, accuracy_checking, repeats, measure_nvfuser, device
 ):
@@ -79,15 +84,22 @@ def microbenchmark(
         torch.ops.aten.convolution_backward.default, "aten::convolution_backward"
     )
     if device == "cuda":
-        cudagraphs_eager = cudagraphs_inner(gm, gm_args, copy_outputs=False)
+        cudagraphs_eager = cudagraphs_inner(
+            gm, gm_args, copy_outputs=False, copy_inputs=False
+        )
         compiled_fn = compile_fx(gm, gm_args)
-        compiled = [cudagraphs_eager, compiled_fn]
+        cudagraphs_compiled = cudagraphs_inner(
+            compiled_fn, gm_args, copy_outputs=False, copy_inputs=False
+        )
+        compiled = [cudagraphs_eager, cudagraphs_compiled]
     else:
         compiled_fn = compile_fx(gm, gm_args)
         compiled = [gm, compiled_fn]
     if measure_nvfuser:
         g = convert_to_jit(gm, gm_args)
-        cudagraphs_jit = cudagraphs_inner(g, gm_args, copy_outputs=False)
+        cudagraphs_jit = cudagraphs_inner(
+            g, gm_args, copy_outputs=False, copy_inputs=False
+        )
         compiled += [cudagraphs_jit]
     if accuracy_checking:
         repeats = 1
@@ -123,23 +135,14 @@ def skip_operator(operator):
     if isinstance(operator, torch._ops.OpOverload):
         op_impls.append(operator.overloadpacket)
 
-    if any(op in fallbacks for op in op_impls):
-        print(f"Skipping {operator}, no inductor impl")
-        return True
+    # TODO - skip benchmarking fallbacks. for some ops we have both lowerings and fallbacks
+    # so its not clear just from operator what will be lowered.
 
     if all(op not in decompositions and op not in lowerings for op in op_impls):
         print(f"Skipping {operator}, no inductor impl")
         return True
 
-    if inductor_config.triton.convolution == "aten" and "convolution" in str(operator):
-        return True
-
-    if inductor_config.triton.mm == "aten" and operator in (
-        aten.mm.default,
-        aten.bmm.default,
-        aten.addmm.default,
-        aten.matmul.default,
-    ):
+    if "convolution" in str(operator):
         return True
 
     return False
@@ -162,16 +165,34 @@ def skip_operator(operator):
     "--measure-nvfuser", help="default we only measure inductor", default=False
 )
 @click.option("--device", help="cpu or cuda", default="cuda")
+@click.option("--inp-file", help="use custom input file instead of suite", default=None)
+@click.option("--start-idx", help="specify start index of samples", default=0)
+@click.option(
+    "--channels-last", help="force inputs to channels last", is_flag=True, default=False
+)
 def benchmark(
-    suite, op, dtype, max_samples, accuracy_checking, repeats, measure_nvfuser, device
+    suite,
+    op,
+    dtype,
+    max_samples,
+    accuracy_checking,
+    repeats,
+    measure_nvfuser,
+    device,
+    inp_file,
+    start_idx,
+    channels_last,
 ):
-    assert suite in ("timm", "huggingface", "torchbench"), f"got {suite}"
-    if suite == "timm":
-        loader = OperatorInputsLoader.get_timm_loader()
-    elif suite == "huggingface":
-        loader = OperatorInputsLoader.get_huggingface_loader()
+    if inp_file is not None:
+        loader = OperatorInputsLoader(inp_file)
     else:
-        loader = OperatorInputsLoader.get_torchbench_loader()
+        assert suite in ("timm", "huggingface", "torchbench"), f"got {suite}"
+        if suite == "timm":
+            loader = OperatorInputsLoader.get_timm_loader()
+        elif suite == "huggingface":
+            loader = OperatorInputsLoader.get_huggingface_loader()
+        else:
+            loader = OperatorInputsLoader.get_torchbench_loader()
 
     assert dtype in ("float16", "float32"), f"got {dtype}"
 
@@ -186,6 +207,7 @@ def benchmark(
     else:
         ops = [eval(op)]
 
+    max_samples = max_samples + start_idx
     for operator in ops:
         if skip_operator(operator):
             continue
@@ -195,12 +217,19 @@ def benchmark(
         timings = []
 
         for i in range(min(max_samples, 1000000)):
-            print(f"Iter {i}")
             try:
                 inps = next(inp_gen)
                 if inps is None:
                     break
+                if i < start_idx:
+                    continue
+                print(f"Iter {i}")
                 args, kwargs = inps
+                if channels_last:
+                    args, kwargs = tree_map_only(
+                        torch.Tensor, to_channels_last, (args, kwargs)
+                    )
+
             except StopIteration:
                 break
             try:
@@ -220,7 +249,8 @@ def benchmark(
             except Exception as e:
                 print(f"error {operator}")
                 print(e)
-                raise e
+                # comment out this line to avoid blocking other tests
+                # raise e
 
         if not timings:
             continue

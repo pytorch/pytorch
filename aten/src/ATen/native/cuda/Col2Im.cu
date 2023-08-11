@@ -20,8 +20,7 @@
 #include <ATen/ops/im2col_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 void col2im_out_cuda_template(
@@ -101,7 +100,6 @@ void col2im_out_cuda_template(
   int64_t input_batch_stride = input.stride(0);
 
   output.resize_({batch_size, n_output_plane, output_height, output_width});
-  output.zero_();
   int64_t output_batch_stride = output.stride(0);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
@@ -117,7 +115,7 @@ void col2im_out_cuda_template(
 
     col2im_batched(
         at::cuda::getCurrentCUDAStream(),
-        input.data_ptr<scalar_t>(),
+        input.const_data_ptr<scalar_t>(),
         input_batch_stride,
         batch_size,
         n_output_plane,
@@ -133,7 +131,7 @@ void col2im_out_cuda_template(
         stride_width,
         dilation_height,
         dilation_width,
-        output.data_ptr<scalar_t>(),
+        output.mutable_data_ptr<scalar_t>(),
         output_batch_stride);
 
     if (!batched_input) {
@@ -170,5 +168,4 @@ Tensor col2im_cuda(
   return output;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

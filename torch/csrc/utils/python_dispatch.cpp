@@ -3,19 +3,26 @@
 
 #include <ATen/ATen.h>
 #include <ATen/FuncTorchTLS.h>
+#include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/library.h>
 
 #include <c10/core/SafePyObject.h>
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
+#include <c10/util/flat_hash_map.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_raii.h>
 
 #include <iostream>
+#include <utility>
 
 namespace py = pybind11;
 
@@ -23,7 +30,15 @@ namespace torch {
 namespace impl {
 namespace dispatch {
 
-torch::Library::Kind parseKind(const std::string& k) {
+// NB: I'd like to index this on OperatorHandle, but I can't, as I can't
+// guarantee that the main interpreter has finish doing all registrations before
+// the other interpreters start banging on it
+static ska::flat_hash_map<
+    c10::OperatorName,
+    ska::flat_hash_map<c10::DispatchKey, std::shared_ptr<c10::SafePyObject>>>
+    python_registrations_;
+
+static torch::Library::Kind parseKind(const std::string& k) {
   static std::unordered_map<std::string, torch::Library::Kind> kind_map = {
       {"DEF", torch::Library::DEF},
       {"IMPL", torch::Library::IMPL},
@@ -33,7 +48,7 @@ torch::Library::Kind parseKind(const std::string& k) {
   TORCH_CHECK(it != kind_map.end(), "could not parse ", k);
   return it->second;
 }
-c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
+static c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
   static std::unordered_map<std::string, c10::AliasAnalysisKind> key_map = {
       {"CONSERVATIVE", c10::AliasAnalysisKind::CONSERVATIVE},
       {"FROM_SCHEMA", c10::AliasAnalysisKind::FROM_SCHEMA},
@@ -47,7 +62,7 @@ c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
 
 template <typename Func>
 inline torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
-  auto mb_key = std::string(key) == ""
+  auto mb_key = std::string(key).empty()
       ? c10::nullopt
       : c10::make_optional(c10::parseDispatchKey(key));
   if (mb_key) {
@@ -58,19 +73,103 @@ inline torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
   }
 }
 
+struct EnableHermeticPyObject {
+  EnableHermeticPyObject()
+      : old_(c10::impl::HermeticPyObjectTLS::get_state()),
+        old_excluded_python_(
+            c10::impl::tls_is_dispatch_key_excluded(at::DispatchKey::Python)),
+        old_python_(
+            c10::impl::tls_is_dispatch_key_included(at::DispatchKey::Python)),
+        old_python_snapshot_(c10::impl::tls_is_dispatch_key_included(
+            at::DispatchKey::PythonTLSSnapshot)) {
+    c10::impl::HermeticPyObjectTLS::set_state(true);
+    c10::impl::tls_set_dispatch_key_excluded(at::DispatchKey::Python, true);
+    c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Python, false);
+    c10::impl::tls_set_dispatch_key_included(
+        at::DispatchKey::PythonTLSSnapshot, false);
+  }
+  ~EnableHermeticPyObject() {
+    c10::impl::HermeticPyObjectTLS::set_state(old_);
+    c10::impl::tls_set_dispatch_key_excluded(
+        at::DispatchKey::Python, old_excluded_python_);
+    c10::impl::tls_set_dispatch_key_included(
+        at::DispatchKey::Python, old_python_);
+    c10::impl::tls_set_dispatch_key_included(
+        at::DispatchKey::PythonTLSSnapshot, old_python_snapshot_);
+  }
+  bool old_;
+  bool old_excluded_python_;
+  bool old_python_;
+  bool old_python_snapshot_;
+};
+
 class PythonKernelHolder : public c10::OperatorKernel {
   c10::SafePyObject func_;
+  c10::DispatchKey dispatch_key_;
 
  public:
-  PythonKernelHolder(py::object func)
-      : func_(func.release().ptr(), getPyInterpreter()) {}
+  PythonKernelHolder(py::object func, c10::DispatchKey dispatch_key)
+      : func_(func.release().ptr(), getPyInterpreter()),
+        dispatch_key_(dispatch_key) {}
 
   void operator()(
       const c10::OperatorHandle& op,
       c10::DispatchKeySet keyset,
       torch::jit::Stack* stack) {
+    // Figure out if we can handle it hermetically, or if we have
+    // to double dispatch
+
+    // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch
+    const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
+    if (mode_stack_len > 0) {
+      const auto& cur_torch_dispatch_mode_state =
+          c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
+      cur_torch_dispatch_mode_state->pyinterpreter()
+          ->python_op_registration_trampoline(op, dispatch_key_, stack);
+      return;
+    }
+
+    const auto& schema = op.schema();
+    const auto num_arguments = schema.arguments().size();
+
+    // Otherwise, find a PyInterpreter on a Tensor IF if has Python key (which
+    // means it's a nontrivial tensor subclass)
+    for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
+      if (ivalue.isTensor()) {
+        auto* interpreter =
+            ivalue.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
+        if (interpreter &&
+            ivalue.unsafeToTensorImpl()->key_set().has(
+                at::DispatchKey::Python)) {
+          (*interpreter)
+              ->python_op_registration_trampoline(op, dispatch_key_, stack);
+          return;
+        }
+      } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
+        // NB: use toListRef as it doesn't induce refcount bumps
+        // (toTensorListRef is not a thing)
+        for (const auto& nv : ivalue.toListRef()) {
+          if (nv.isNone()) {
+            continue;
+          }
+          auto* interpreter =
+              nv.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
+          if (interpreter &&
+              nv.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
+            (*interpreter)
+                ->python_op_registration_trampoline(op, dispatch_key_, stack);
+            return;
+          }
+        }
+      }
+    }
+
+    // Nothing requires the operator to be homed to a specific interpreter, so
+    // run it on the current interpreter
+
     auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
     py::gil_scoped_acquire g;
+    EnableHermeticPyObject g2;
     auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
     auto obj = py::reinterpret_steal<py::object>(PyObject_Call(
         func_.ptr(getPyInterpreter()),
@@ -83,17 +182,46 @@ class PythonKernelHolder : public c10::OperatorKernel {
   }
 };
 
+static torch::_RegisterOrVerify register_or_verify() {
+  if (isMainPyInterpreter()) {
+    return torch::_RegisterOrVerify::REGISTER;
+  } else {
+    return torch::_RegisterOrVerify::VERIFY;
+  }
+}
+
+static py::object ophandle_call_boxed(
+    const c10::OperatorHandle& handle,
+    py::args args,
+    const py::kwargs& kwargs) {
+  auto stack = torch::jit::createStackForSchema(
+      handle.schema(),
+      std::move(args),
+      kwargs,
+      /*self=*/c10::nullopt);
+  {
+    pybind11::gil_scoped_release no_gil_guard;
+    handle.callBoxed(stack);
+  }
+  return torch::jit::createPyObjectForStack(std::move(stack));
+}
+
 void initDispatchBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   py::class_<c10::OperatorHandle>(m, "_DispatchOperatorHandle")
       .def("schema", &c10::OperatorHandle::schema);
 
+  m.def("_dispatch_call_boxed", &ophandle_call_boxed);
+
   // TODO: figure out how to do chaining
   py::class_<torch::Library>(m, "_DispatchModule")
+      // Some of these APIs are only for testing and do not work in multipy
+      // environment
       .def(
           "def_",
           [](py::object self, const char* schema, const char* alias) {
+            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().def(
                 torch::schema(schema, parseAliasAnalysisKind(alias)));
             return self;
@@ -107,6 +235,7 @@ void initDispatchBindings(PyObject* module) {
       .def(
           "def_legacy",
           [](py::object self, const char* schema) {
+            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().def(torch::jit::parseSchema(schema));
             return self;
           },
@@ -126,6 +255,7 @@ void initDispatchBindings(PyObject* module) {
              const char* name,
              const char* dispatch,
              const char* debug) {
+            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().def(
                 name, dispatch_str(dispatch, [](const at::Tensor& a) {
                         return a;
@@ -143,6 +273,7 @@ void initDispatchBindings(PyObject* module) {
              const char* dispatch,
              const char* alias,
              const char* debug) {
+            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().def(
                 torch::schema(schema, parseAliasAnalysisKind(alias)),
                 dispatch_str(dispatch, [](const at::Tensor& a) {
@@ -163,6 +294,7 @@ void initDispatchBindings(PyObject* module) {
              const char* name,
              const char* dispatch,
              const char* debug) {
+            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().impl(
                 name, dispatch_str(dispatch, [](const at::Tensor& a) {
                         return a;
@@ -174,37 +306,34 @@ void initDispatchBindings(PyObject* module) {
           py::arg("dispatch") = "",
           py::arg("debug") = "impl_t_t")
       .def(
-          "impl_tt_t",
-          [](py::object self,
-             const char* name,
-             const char* dispatch,
-             const char* debug) {
-            self.cast<torch::Library&>().impl(
-                name,
-                dispatch_str(
-                    dispatch,
-                    [](const at::Tensor& a, const at::Tensor& b) { return a; })
-                    .debug(debug));
-            return self;
-          },
-          "",
-          py::arg("name"),
-          py::arg("dispatch") = "",
-          py::arg("debug") = "")
-      .def(
           "impl",
-          [](py::object self,
+          [](const py::object& self,
              const char* name,
-             const char* dispatch,
+             // TODO: empty string no longer works
+             c10::DispatchKey dispatch,
              py::object func) {
             HANDLE_TH_ERRORS
-            self.cast<torch::Library&>().impl(
-                name,
-                dispatch_str(
-                    dispatch,
-                    CppFunction::makeFromBoxedFunctor(
-                        std::make_unique<PythonKernelHolder>(
-                            std::move(func)))));
+            auto& lib = self.cast<torch::Library&>();
+            if (func.is(py::module::import("torch.library")
+                            .attr("fallthrough_kernel"))) {
+              lib.impl(
+                  name,
+                  torch::dispatch(dispatch, CppFunction::makeFallthrough()),
+                  register_or_verify());
+            } else {
+              lib.impl(
+                  name,
+                  torch::dispatch(
+                      dispatch,
+                      CppFunction::makeFromBoxedFunctor(
+                          std::make_unique<PythonKernelHolder>(
+                              func, dispatch))),
+                  register_or_verify());
+              python_registrations_[lib._resolve(name)].insert_or_assign(
+                  dispatch,
+                  std::make_shared<c10::SafePyObject>(
+                      func.release().ptr(), getPyInterpreter()));
+            }
             END_HANDLE_TH_ERRORS_PYBIND
           },
           "",
@@ -213,9 +342,14 @@ void initDispatchBindings(PyObject* module) {
           py::arg("func"))
       .def(
           "define",
-          [](py::object self, const char* schema, const char* alias_analysis) {
+          [](const py::object& self,
+             const char* schema,
+             const char* alias_analysis) {
+            auto parsed_schema =
+                torch::schema(schema, parseAliasAnalysisKind(alias_analysis));
             self.cast<torch::Library&>().def(
-                torch::schema(schema, parseAliasAnalysisKind(alias_analysis)));
+                std::move(parsed_schema), {}, register_or_verify());
+            // TODO: this is dumb, had to make a second copy
             return torch::schema(schema, parseAliasAnalysisKind(alias_analysis))
                 .name();
           },
@@ -225,6 +359,7 @@ void initDispatchBindings(PyObject* module) {
       .def(
           "fallback_fallthrough",
           [](py::object self, const char* dispatch) {
+            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().fallback(
                 dispatch_str(dispatch, CppFunction::makeFallthrough()));
             return self;
@@ -243,7 +378,7 @@ void initDispatchBindings(PyObject* module) {
         return std::make_unique<torch::Library>(
             parseKind(kind),
             std::move(name),
-            std::string(dispatch) == ""
+            std::string(dispatch).empty()
                 ? c10::nullopt
                 : c10::make_optional(c10::parseDispatchKey(dispatch)),
             "/dev/null", // temporary workaround
@@ -256,6 +391,13 @@ void initDispatchBindings(PyObject* module) {
       py::arg("dispatch"),
       py::arg("file") = "/dev/null",
       py::arg("linenum") = 0);
+
+  m.def(
+      "_dispatch_find_schema_or_throw",
+      [](const char* name, const char* overload_name) -> c10::OperatorHandle {
+        return c10::Dispatcher::singleton().findSchemaOrThrow(
+            name, overload_name);
+      });
 
   m.def("_dispatch_dump", [](const char* name) -> std::string {
     auto op = c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
@@ -334,10 +476,27 @@ void initDispatchBindings(PyObject* module) {
     std::vector<std::string> states;
     states.reserve(danglingImpls.size());
     for (auto& danglingImpl : danglingImpls) {
-      states.push_back(danglingImpl.dumpState());
+      states.emplace_back(danglingImpl.dumpState());
     }
 
     return states;
+  });
+
+  m.def("_dispatch_get_all_op_names", []() -> std::vector<std::string> {
+    auto op_names = c10::Dispatcher::singleton().getAllOpNames();
+
+    std::vector<std::string> names;
+    names.reserve(op_names.size());
+    for (auto& op : op_names) {
+      std::stringstream ss;
+      ss << op.name;
+      if (!op.overload_name.empty()) {
+        ss << "." << op.overload_name;
+      }
+      names.emplace_back(ss.str());
+    }
+
+    return names;
   });
 
   m.def(
@@ -350,6 +509,16 @@ void initDispatchBindings(PyObject* module) {
       [](c10::DispatchKey dispatch_key) {
         return c10::impl::tls_is_dispatch_key_excluded(dispatch_key);
       });
+  m.def(
+      "_dispatch_tls_set_dispatch_key_included",
+      [](c10::DispatchKey dispatch_key, bool desired_state) {
+        c10::impl::tls_set_dispatch_key_included(dispatch_key, desired_state);
+      });
+  m.def(
+      "_dispatch_tls_is_dispatch_key_included",
+      [](c10::DispatchKey dispatch_key) {
+        return c10::impl::tls_is_dispatch_key_included(dispatch_key);
+      });
 
   m.def("_dispatch_isTensorSubclassLike", [](const at::Tensor& tensor) {
     return at::isTensorSubclassLike(tensor);
@@ -359,18 +528,60 @@ void initDispatchBindings(PyObject* module) {
     return c10::toString(k);
   });
   m.def("_dispatch_key_parse", [](c10::DispatchKey k) { return k; });
+  m.def("_to_functionality_key", [](c10::DispatchKey k) {
+    return c10::toFunctionalityKey(k);
+  });
+  // E.g. given `DispatchKey::AutogradFunctionality`, returns a keyset of:
+  //  AutogradCPU
+  //  AutogradCUDA
+  //  ...
+  //  AutogradPrivateUse3
+  m.def("_functionality_to_backend_keys", [](c10::DispatchKey key) {
+    std::vector<c10::DispatchKey> keys;
+    if (c10::isPerBackendFunctionalityKey(key)) {
+      auto ks = c10::DispatchKeySet(key) |
+          c10::DispatchKeySet(c10::DispatchKeySet::RAW, c10::full_backend_mask);
+      for (auto k : ks) {
+        keys.push_back(k);
+      }
+    } else {
+      keys.push_back(key);
+    }
+    return keys;
+  });
   m.def("_dispatch_num_backends", []() { return c10::num_backends; });
 
 #define DEF_ONE(n) .value(#n, c10::DispatchKey::n)
 
-  py::enum_<c10::DispatchKey>(m, "DispatchKey") DEF_ONE(Undefined)
+  py::enum_<c10::DispatchKey>(m, "DispatchKey")
+      // clang-format off
+      DEF_ONE(Undefined)
       DEF_ONE(CompositeExplicitAutogradNonFunctional)
-          DEF_ONE(CompositeExplicitAutograd)
-              DEF_ONE(CompositeImplicitAutogradNestedTensor)
-                  DEF_ONE(CompositeImplicitAutograd) DEF_ONE(AutogradOther)
-                      DEF_ONE(Autograd) DEF_ONE(BackendSelect)
-                          DEF_ONE(ADInplaceOrView) DEF_ONE(PythonTLSSnapshot)
-                              DEF_ONE(Python)
+      DEF_ONE(CompositeExplicitAutograd)
+      DEF_ONE(CompositeImplicitAutogradNestedTensor)
+      DEF_ONE(CompositeImplicitAutograd)
+      DEF_ONE(AutogradOther)
+      DEF_ONE(Autograd)
+      DEF_ONE(BackendSelect)
+      DEF_ONE(ADInplaceOrView)
+      DEF_ONE(PythonTLSSnapshot)
+      DEF_ONE(Python)
+      DEF_ONE(FuncTorchDynamicLayerFrontMode)
+      DEF_ONE(FuncTorchDynamicLayerBackMode)
+      DEF_ONE(FuncTorchBatchedDecomposition)
+      DEF_ONE(FuncTorchBatched)
+      DEF_ONE(FuncTorchVmapMode)
+      DEF_ONE(FuncTorchGradWrapper)
+      DEF_ONE(PythonDispatcher)
+      DEF_ONE(PreDispatch)
+      DEF_ONE(Functionalize)
+      DEF_ONE(AutocastCPU)
+      DEF_ONE(AutocastXPU)
+      DEF_ONE(AutocastHPU)
+      DEF_ONE(AutocastIPU)
+      DEF_ONE(AutocastCUDA)
+      DEF_ONE(AutocastPrivateUse1)
+  // clang-format on
 
 #define DEF_SINGLE(n, prefix) .value(#prefix #n, c10::DispatchKey::prefix##n)
 #define DEF_MULTIPLE(fullname, prefix)              \
@@ -379,11 +590,13 @@ void initDispatchBindings(PyObject* module) {
   C10_FORALL_BACKEND_COMPONENTS(DEF_SINGLE, prefix) \
   DEF_SINGLE(, EndOf##fullname##Backends)
 
-                                  C10_FORALL_FUNCTIONALITY_KEYS(DEF_MULTIPLE)
+      // clang-format off
+  C10_FORALL_FUNCTIONALITY_KEYS(DEF_MULTIPLE)
+  // clang-format on
 
 #undef DEF_MULTIPLE
 #undef DEF_SINGLE
-                                      ;
+          ;
 
   py::class_<c10::DispatchKeySet>(m, "DispatchKeySet")
       .def(py::init<c10::DispatchKey>())
@@ -391,6 +604,16 @@ void initDispatchBindings(PyObject* module) {
       .def("__sub__", &c10::DispatchKeySet::operator-)
       .def("__and__", &c10::DispatchKeySet::operator&)
       .def("highestPriorityTypeId", &c10::DispatchKeySet::highestPriorityTypeId)
+      .def(
+          "remove",
+          [](c10::DispatchKeySet self, c10::DispatchKey k) {
+            return self.remove(k);
+          })
+      .def(
+          "add",
+          [](c10::DispatchKeySet self, c10::DispatchKey k) {
+            return self.add(k);
+          })
       .def("has", &c10::DispatchKeySet::has)
       .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); });
 
@@ -404,6 +627,12 @@ void initDispatchBindings(PyObject* module) {
   m.def("_dispatch_keyset_full_after", [](c10::DispatchKey t) {
     return c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, t);
   });
+
+  m.def("_dispatch_keyset_full", []() {
+    return c10::DispatchKeySet(c10::DispatchKeySet::FULL);
+  });
+
+  m.def("_dispatch_is_alias_key", c10::isAliasDispatchKey);
 
   m.def("_dispatch_keyset_to_string", [](c10::DispatchKeySet keyset) {
     return c10::toString(keyset);
@@ -423,16 +652,26 @@ void initDispatchBindings(PyObject* module) {
   m.def("_dispatch_tls_local_exclude_set", []() {
     return c10::impl::tls_local_dispatch_key_set().excluded_;
   });
+  m.def("_functionalization_reapply_views_tls", []() {
+    return at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
+  });
   m.def(
       "_dispatch_is_included_in_alias",
       [](c10::DispatchKey a, c10::DispatchKey b) {
         return c10::isIncludedInAlias(a, b);
       });
-  py::class_<c10::impl::ExcludeDispatchKeyGuard>(m, "ExcludeDispatchKeyGuard")
-      .def(py::init<c10::DispatchKeySet>());
 
-  py::class_<at::AutoDispatchBelowAutograd>(m, "_AutoDispatchBelowAutograd")
-      .def(py::init<>());
+  // DEPRECATED, please don't use this. Instead use
+  // torch._C._ExcludeDispatchKeyGuard
+  py_context_manager_DEPRECATED<
+      c10::impl::ExcludeDispatchKeyGuard,
+      c10::DispatchKeySet>(m, "ExcludeDispatchKeyGuard");
+
+  py_context_manager<c10::impl::ExcludeDispatchKeyGuard, c10::DispatchKeySet>(
+      m, "_ExcludeDispatchKeyGuard");
+
+  py_context_manager_DEPRECATED<at::AutoDispatchBelowAutograd>(
+      m, "_AutoDispatchBelowAutograd");
 
   // Prints out the name of every operator that has a kernel registered to the
   // Dispatcher under [dispatch_key]. If no arguments are specified, it'll print
@@ -442,7 +681,7 @@ void initDispatchBindings(PyObject* module) {
   m.def(
       "_dispatch_print_registrations_for_dispatch_key",
       [](const char* dispatch_key = "") {
-        auto k = std::string(dispatch_key) == ""
+        auto k = std::string(dispatch_key).empty()
             ? c10::nullopt
             : c10::make_optional(c10::parseDispatchKey(dispatch_key));
         auto op_names =
@@ -456,7 +695,7 @@ void initDispatchBindings(PyObject* module) {
   m.def(
       "_dispatch_get_registrations_for_dispatch_key",
       [](const char* dispatch_key = "") {
-        auto k = std::string(dispatch_key) == ""
+        auto k = std::string(dispatch_key).empty()
             ? c10::nullopt
             : c10::make_optional(c10::parseDispatchKey(dispatch_key));
         auto op_names =
@@ -464,12 +703,34 @@ void initDispatchBindings(PyObject* module) {
         std::vector<std::string> names;
         names.reserve(op_names.size());
         for (auto& op : op_names) {
-          names.push_back(
-              op.name + (op.overload_name == "" ? "" : "." + op.overload_name));
+          names.emplace_back(
+              op.name +
+              (op.overload_name.empty() ? "" : "." + op.overload_name));
         }
         return names;
       },
       py::arg("dispatch_key") = static_cast<const char*>(""));
+  m.def(
+      "_dispatch_set_report_error_callback",
+      [](c10::OperatorHandle& handle, py::object callback) {
+        auto obj = callback.release().ptr();
+        auto callback_obj =
+            std::make_unique<c10::SafePyObject>(obj, getPyInterpreter());
+        handle.setReportErrorCallback_(std::move(callback_obj));
+      });
+
+  m.def(
+      "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });
+
+  m.def("_replace_", [](const at::Tensor& a, const at::Tensor& b) {
+    return at::functionalization::impl::replace_(a, b);
+  });
+  m.def("_propagate_xla_data", [](const at::Tensor& a, const at::Tensor& b) {
+    at::functionalization::impl::propagate_xla_data(a, b);
+  });
+  m.def("_commit_update", [](const at::Tensor& a) {
+    return at::functionalization::impl::commit_update(a);
+  });
 
   m.def("_are_functorch_transforms_active", []() {
     auto include_set = c10::impl::tls_local_dispatch_key_set().included_;
@@ -477,6 +738,26 @@ void initDispatchBindings(PyObject* module) {
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerFrontMode) ||
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode));
   });
+}
+
+// TODO: dedupe with the kernel
+void python_op_registration_trampoline_impl(
+    const c10::OperatorHandle& op,
+    c10::DispatchKey key,
+    torch::jit::Stack* stack) {
+  auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
+  py::gil_scoped_acquire g;
+  auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
+  const auto& func = python_registrations_[op.operator_name()][key];
+  TORCH_INTERNAL_ASSERT(func != nullptr);
+  auto* pyobj = func->ptr(getPyInterpreter());
+  TORCH_INTERNAL_ASSERT(pyobj != nullptr);
+  auto obj = py::reinterpret_steal<py::object>(
+      PyObject_Call(pyobj, args_kwargs.first.ptr(), args_kwargs.second.ptr()));
+  if (!obj) {
+    throw python_error();
+  }
+  pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
 }
 
 } // namespace dispatch

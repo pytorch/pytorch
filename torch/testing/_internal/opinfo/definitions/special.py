@@ -36,6 +36,7 @@ from torch.testing._internal.opinfo.utils import (
 if TEST_SCIPY:
     import scipy.special
 
+
 # TODO: Consolidate `i0e` with sample_inputs_unary when `make_tensor`,
 #       supports `exclude` argument.
 #       For more context: https://github.com/pytorch/pytorch/pull/56352#discussion_r633277617
@@ -104,8 +105,7 @@ op_db: List[OpInfo] = [
         aten_name="special_i0e",
         ref=scipy.special.i0e if TEST_SCIPY else None,
         decorators=(precisionOverride({torch.bfloat16: 3e-1, torch.float16: 3e-1}),),
-        dtypes=all_types_and(torch.bool, torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+        dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
         backward_dtypes=floating_types(),
         sample_inputs_func=sample_inputs_i0_i1,
         supports_forward_ad=True,
@@ -156,15 +156,14 @@ op_db: List[OpInfo] = [
         aten_name="special_ndtr",
         decorators=(precisionOverride({torch.bfloat16: 5e-3, torch.float16: 5e-4}),),
         ref=scipy.special.ndtr if TEST_SCIPY else None,
-        dtypes=all_types_and(torch.bool, torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+        dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
             # Dispatch stub: unsupported device typemeta
             DecorateInfo(
                 unittest.expectedFailure,
-                "TestGradients",
+                "TestFwdGradients",
                 "test_fn_fwgrad_bwgrad",
                 device_type="meta",
             ),
@@ -177,7 +176,7 @@ op_db: List[OpInfo] = [
         op=lambda x, n, **kwargs: torch.special.polygamma(n, x, **kwargs),
         variant_test_name="special_polygamma_n_0",
         ref=reference_polygamma if TEST_SCIPY else None,
-        dtypes=all_types_and(torch.bool, torch.bfloat16),
+        dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bool, torch.half),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -217,6 +216,10 @@ op_db: List[OpInfo] = [
         promotes_int_to_float=True,
         supports_autograd=False,
         supports_one_python_scalar=True,
+        skips=(
+            # Reference reference_inputs nans and infs on cuda and nan, inf, 0., -inf for cpu
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+        ),
     ),
     # TODO: FIXME
     # OpInfo entry to verify the gradient formula of `other`/`q`
@@ -245,8 +248,7 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         decorators=(precisionOverride({torch.float16: 1e-1, torch.bfloat16: 1e-1}),),
-        dtypes=all_types_and(torch.bool, torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+        dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -374,6 +376,11 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -385,6 +392,11 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -428,6 +440,8 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
+            # Greatest absolute difference: inf
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -439,6 +453,11 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -450,6 +469,11 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -466,6 +490,11 @@ op_db: List[OpInfo] = [
             ),
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -566,6 +595,11 @@ op_db: List[OpInfo] = [
             ),
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -582,6 +616,11 @@ op_db: List[OpInfo] = [
             ),
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -598,6 +637,11 @@ op_db: List[OpInfo] = [
             ),
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -614,6 +658,11 @@ op_db: List[OpInfo] = [
             ),
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -641,67 +690,56 @@ python_ref_db: List[OpInfo] = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.bessel_j0",
         torch_opinfo_name="special.bessel_j0",
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.bessel_j1",
         torch_opinfo_name="special.bessel_j1",
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.entr",
         torch_opinfo_name="special.entr",
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.erfcx",
         torch_opinfo_name="special.erfcx",
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i0e",
         torch_opinfo_name="special.i0e",
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i1",
         torch_opinfo_name="special.i1",
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i1e",
         torch_opinfo_name="special.i1e",
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.log_ndtr",
         torch_opinfo_name="special.log_ndtr",
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.ndtr",
         torch_opinfo_name="special.ndtr",
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.ndtri",
         torch_opinfo_name="special.ndtri",
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.spherical_bessel_j0",
         torch_opinfo_name="special.spherical_bessel_j0",
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     #
@@ -711,7 +749,10 @@ python_ref_db: List[OpInfo] = [
         "_refs.special.zeta",
         torch_opinfo_name="special.zeta",
         supports_one_python_scalar=True,
-        supports_nvfuser=False,
         op_db=op_db,
+        skips=(
+            # Reference reference_inputs nans and infs on cuda and nan, inf, 0., -inf for cpu
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+        ),
     ),
 ]

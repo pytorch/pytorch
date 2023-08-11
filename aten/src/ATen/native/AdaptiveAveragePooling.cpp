@@ -115,7 +115,7 @@ namespace {
         "but received {", output_size[0], ", ", output_size[1], "}");
 
     if (input.is_mkldnn()) {
-      return at::mkldnn_adaptive_avg_pool2d(input, c10::asIntArrayRefSlow(output_size));
+      return at::mkldnn_adaptive_avg_pool2d(input, C10_AS_INTARRAYREF_SLOW(output_size));
     }
 
     if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1 && !input.is_xpu()) {
@@ -130,24 +130,14 @@ namespace {
       Tensor out = input.mean({-1, -2}, /* keepdim = */ true);
       if (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
         // assert ndim == 4, since ndim = 3 doesn't give channels_last
-        const int n = input.size(0);
-        const int c = input.size(1);
-        out.as_strided_({n, c, 1, 1}, {c, 1, c, c});
+        const auto n = input.sym_size(0);
+        const auto c = input.sym_size(1);
+        out.as_strided__symint({n, c, 1, 1}, {c, 1, c, c});
       }
       return out;
     } else {
       return _adaptive_avg_pool2d_symint(input, output_size);
     }
-  }
-
-  Tensor& adaptive_avg_pool2d_backward_out_cpu(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& input)
-  {
-    adaptive_avg_pool2d_backward_out_cpu_template(
-      grad_input, grad_output, input);
-    return grad_input;
   }
 
   Tensor adaptive_avg_pool2d_backward_cpu(

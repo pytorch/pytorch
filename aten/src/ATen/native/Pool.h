@@ -4,10 +4,11 @@
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/irange.h>
 
+#include <utility>
+
 #pragma once
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using max_pool2d_fn = void(*)(const Tensor& output, const Tensor& indices, const Tensor& input,
     int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH);
@@ -67,17 +68,18 @@ static inline T pooling_output_shape(
         inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode);
 }
 
-inline std::pair<int64_t, int64_t> pooling_same_mode_padding_lr(
-    int64_t inputSize, int64_t kernelSize, int64_t stride, int64_t dilation) {
+template <typename T>
+std::pair<T, T> _pooling_same_mode_padding_lr(
+    T inputSize, T kernelSize, int64_t stride, int64_t dilation) {
   // NOTE: with strides, the output shape is ceil(inputSize/stride)
-  auto total_padding = dilation * (kernelSize - 1);
+  auto total_padding = T(dilation) * (kernelSize - 1);
 
   // Prefer symmetric padding if possible
   if (stride > 2 && (total_padding % 2 == 1)) {
     // The floor in the output size calculation gives us a little wiggle room
     auto wiggle_room = inputSize % stride - 1;
     if (wiggle_room > 0) {
-      --total_padding;
+      total_padding = total_padding - 1;
     }
   }
 
@@ -85,6 +87,15 @@ inline std::pair<int64_t, int64_t> pooling_same_mode_padding_lr(
   return {left, total_padding - left};
 }
 
+inline std::pair<int64_t, int64_t> pooling_same_mode_padding_lr(
+    int64_t inputSize, int64_t kernelSize, int64_t stride, int64_t dilation) {
+  return _pooling_same_mode_padding_lr(inputSize, kernelSize, stride, dilation);
+}
+
+inline std::pair<c10::SymInt, c10::SymInt> pooling_same_mode_padding_lr(
+    c10::SymInt inputSize, c10::SymInt kernelSize, int64_t stride, int64_t dilation) {
+  return _pooling_same_mode_padding_lr(std::move(inputSize), std::move(kernelSize), stride, dilation);
+}
 
 // AveragePool2d/DilatedMaxPool2d (forward)
 static inline void
@@ -318,7 +329,6 @@ avg_pool3d_backward_shape_check(
   check_dim_size(gradOutput, ndim, ndim-1, owidth);
 }
 
-} // namespace
+} // anonymous namespace
 
-} // at::native
-} // at
+} // namespace at::native

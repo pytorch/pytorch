@@ -65,7 +65,7 @@ in real time.
 
 See :class:`~torch.utils.data.IterableDataset` for more details.
 
-.. note:: When using an :class:`~torch.utils.data.IterableDataset` with
+.. note:: When using a :class:`~torch.utils.data.IterableDataset` with
           `multi-process data loading <Multi-process data loading_>`_. The same
           dataset object is replicated on each worker process, and thus the
           replicas must be configured differently to avoid duplicated data. See
@@ -424,6 +424,7 @@ Example::
 .. autoclass:: Dataset
 .. autoclass:: IterableDataset
 .. autoclass:: TensorDataset
+.. autoclass:: StackDataset
 .. autoclass:: ConcatDataset
 .. autoclass:: ChainDataset
 .. autoclass:: Subset
@@ -440,9 +441,6 @@ Example::
 .. autoclass:: torch.utils.data.BatchSampler
 .. autoclass:: torch.utils.data.distributed.DistributedSampler
 
-
-.. This module is experimental and should be private, adding it here for now
-.. py:module:: torch.utils.data.communication
 
 .. These modules are documented as part of torch/data listing them here for
 .. now until we have a clearer fix

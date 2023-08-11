@@ -1,11 +1,16 @@
+Thank you for your interest in contributing to PyTorch!
+If you're a new contributor, please first take a read through our
+[Contributing Guidelines](https://docs.google.com/document/d/1oNhUeGE-8ajsYaMpoV6ZQANQZVeKrdFanI9VMbFzOzc/edit)
+that walks through the process of contributing a change to PyTorch.
+
+The rest of this document (CONTRIBUTING.md) covers some of the more technical
+aspects of contributing to PyTorch.
+
 # Table of Contents
 
 <!-- toc -->
 
-- [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
-  - [Prerequisites](#prerequisites)
-  - [Instructions](#instructions)
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
@@ -57,106 +62,48 @@
 
 <!-- tocstop -->
 
-## Contributing to PyTorch
-
-Thank you for your interest in contributing to PyTorch! Before you begin writing code, it is important
-that you share your intention to contribute with the team, based on the type of contribution:
-
-1. You want to propose a new feature and implement it.
-    - Post about your intended feature in an [issue](https://github.com/pytorch/pytorch/issues),
-    and we shall discuss the design and implementation. Once we agree that the plan looks good,
-    go ahead and implement it.
-2. You want to implement a feature or bug-fix for an outstanding issue.
-    - Search for your issue in the [PyTorch issue list](https://github.com/pytorch/pytorch/issues).
-    - Pick an issue and comment that you'd like to work on the feature or bug-fix.
-    - If you need more context on a particular issue, please ask and we shall provide.
-
-Once you implement and test your feature or bug-fix, please submit a Pull Request to
-https://github.com/pytorch/pytorch.
-
-This document covers some of the more technical aspects of contributing
-to PyTorch.  For more non-technical guidance about how to contribute to
-PyTorch, see the [Contributing Guide](docs/source/community/contribution_guide.rst).
-
 ## Developing PyTorch
-
-A full set of instructions on installing PyTorch from source is here:
-https://github.com/pytorch/pytorch#from-source
-
-To develop PyTorch on your machine, here are some tips:
-
-### Prerequisites
-* CMake. You can install it via `pip install cmake`
-* Python >= 3.7 (3.7.6+ recommended)
-
-### Instructions
-
-1. Uninstall all existing PyTorch installs. You may need to run `pip
-uninstall torch` multiple times. You'll know `torch` is fully
-uninstalled when you see `WARNING: Skipping torch as it is not
-installed`. (You should only have to `pip uninstall` a few times, but
-you can always `uninstall` with `timeout` or in a loop if you're feeling
-lazy.)
-
-```bash
-conda uninstall pytorch -y
-yes | pip uninstall torch
-```
-
-2. Clone a copy of PyTorch from source:
-
-```bash
-git clone https://github.com/pytorch/pytorch
-cd pytorch
-```
-
-If you already have PyTorch from source, update it:
-
-```bash
-git pull --rebase
-git submodule sync --recursive
-git submodule update --init --recursive --jobs 0
-```
-
-If you want to have no-op incremental rebuilds (which are fast), see the section below titled "Make no-op build fast."
-
-3. Follow  the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source), except when it's time to install PyTorch instead of invoking `setup.py install` you'll want to call `setup.py develop` instead:
-
-Specifically, the change you have to make is to replace
-
-```bash
-python setup.py install
-```
-
-with
-
-```bash
-python setup.py develop
-```
-
-This mode will symlink the Python files from the current local source
-tree into the Python install.  This way when you modify a Python file, you
-won't need to reinstall PyTorch again and again.  This is especially
-useful if you are only changing Python files.
-
-For example:
-- Install local PyTorch in `develop` mode
-- modify your Python file `torch/__init__.py` (for example)
-- test functionality
-
-You do not need to repeatedly install after modifying Python files (`.py`). However, you would need to reinstall
-if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
-
-In case you want to reinstall, make sure that you uninstall PyTorch
-first by running `pip uninstall torch` until you see `WARNING: Skipping
-torch as it is not installed`; next run `python setup.py clean`. After
-that, you can install in `develop` mode again.
+Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source). If you get stuck when developing PyTorch on your machine, check out the [tips and debugging](#tips-and-debugging) section below for common solutions.
 
 ### Tips and Debugging
+
+* If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.
+
+* When installing with `python setup.py develop` (in contrast to `python setup.py install`) Python runtime will use
+  the current local source-tree when importing `torch` package. (This is done by creating [`.egg-link`](https://wiki.python.org/moin/PythonPackagingTerminology#egg-link) file in `site-packages` folder)
+  This way you do not need to repeatedly install after modifying Python files (`.py`).
+  However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or
+   non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
+
+
+  One way to avoid running `python setup.py develop` every time one makes a change to C++/CUDA/ObjectiveC files on Linux/Mac,
+  is to create a symbolic link from `build` folder to `torch/lib`, for example, by issuing following:
+  ```bash
+   pushd torch/lib; sh -c "ln -sf ../../build/lib/libtorch_cpu.* ."; popd
+  ```
+   Afterwards rebuilding a library (for example to rebuild `libtorch_cpu.so` issue `ninja torch_cpu` from `build` folder),
+   would be sufficient to make change visible in `torch` package.
+
+
+  To reinstall, first uninstall all existing PyTorch installs. You may need to run `pip
+  uninstall torch` multiple times. You'll know `torch` is fully
+  uninstalled when you see `WARNING: Skipping torch as it is not
+  installed`. (You should only have to `pip uninstall` a few times, but
+  you can always `uninstall` with `timeout` or in a loop if you're feeling
+  lazy.)
+
+  ```bash
+  conda uninstall pytorch -y
+  yes | pip uninstall torch
+  ```
+
+  Next run `python setup.py clean`. After that, you can install in `develop` mode again.
+
 * If a commit is simple and doesn't affect any code (keep in mind that some docstrings contain code
   that is used in tests), you can add `[skip ci]` (case sensitive) somewhere in your commit message to
   [skip all build / test steps](https://github.blog/changelog/2021-02-08-github-actions-skip-pull-request-and-push-workflows-with-skip-ci/).
   Note that changing the pull request body or title on GitHub itself has no effect.
+
 * If you run into errors when running `python setup.py develop`, here are some debugging steps:
   1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
   your CMake works and can compile this simple Hello World program without errors.
@@ -165,19 +112,20 @@ that, you can install in `develop` mode again.
   `rm -rf build` from the toplevel `pytorch` directory and start over.
   3. If you have made edits to the PyTorch repo, commit any change you'd like to keep and clean the repo with the
   following commands (note that clean _really_ removes all untracked files and changes.):
-  ```bash
-  git submodule deinit -f .
-  git clean -xdf
-  python setup.py clean
-  git submodule update --init --recursive --jobs 0 # very important to sync the submodules
-  python setup.py develop                          # then try running the command again
-  ```
+      ```bash
+      git submodule deinit -f .
+      git clean -xdf
+      python setup.py clean
+      git submodule update --init --recursive # very important to sync the submodules
+      python setup.py develop                 # then try running the command again
+      ```
   4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
-  experiment with some environment variables, you can pass them into the command:
-  ```bash
-  ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
-  ```
-* If you run into issue running `git submodule update --init --recursive --jobs 0`. Please try the following:
+    experiment with some environment variables, you can pass them into the command:
+      ```bash
+      ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
+      ```
+
+* If you run into issue running `git submodule update --init --recursive`. Please try the following:
   - If you encounter an error such as
     ```
     error: Submodule 'third_party/pybind11' could not be updated
@@ -437,13 +385,13 @@ ghstack submit
 of very low signal to reviewers.
 
 ## Merging your Change
-If you know the right people or team that should approve your PR (and you have the required permisssions to do so), add them to the Reviewers list.
+If you know the right people or team that should approve your PR (and you have the required permissions to do so), add them to the Reviewers list.
 
 If not, leave the Reviewers section empty. Our triage squad will review your PR, add a module label, and assign it to the appropriate reviewer in a couple business days.  The reviewer will then look at your PR and respond.
 
 Occasionally, things might fall through the cracks (sorry!). In case your PR either doesn't get assigned to a reviewer or doesn't get any response from the reviewer for 4 business days, please leave comment on the PR (mentioning the reviewer if one has been assigned). That'll get it nudged back onto people's radar.
 
-If that still doesn't help, come see us during [our office hours](https://github.com/pytorch/pytorch/wiki/Contact-Pytorch-Dev-Infra-Office)
+If that still doesn't help, come see us during [our office hours](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours)
 
 Once your PR is approved, you can merge it in by entering a comment with the content `@pytorchmergebot merge` ([what's this bot?](https://github.com/pytorch/pytorch/wiki/Bot-commands))
 
@@ -1006,8 +954,8 @@ than Linux, which are worth keeping in mind when fixing these problems.
    transitive dependencies can be used to fulfill unresolved symbols.)
 
 3. If you have a Windows box (we have a few on EC2 which you can request access to) and
-   you want to run the build, the easiest way is to just run `.jenkins/pytorch/win-build.sh`.
-   If you need to rebuild, run `REBUILD=1 .jenkins/pytorch/win-build.sh` (this will avoid
+   you want to run the build, the easiest way is to just run `.ci/pytorch/win-build.sh`.
+   If you need to rebuild, run `REBUILD=1 .ci/pytorch/win-build.sh` (this will avoid
    blowing away your Conda environment.)
 
 Even if you don't know anything about MSVC, you can use cmake to build simple programs on
@@ -1108,7 +1056,7 @@ Note: There's a [compilation issue](https://github.com/oneapi-src/oneDNN/issues/
 linter and static analysis tool based on the clang compiler. We run clang-tidy
 in our CI to make sure that new C++ code is safe, sane and efficient. See the
 [`clang-tidy` job in our GitHub Workflow's
-lint.yml file](https://github.com/pytorch/pytorch/blob/master/.github/workflows/lint.yml)
+lint.yml file](https://github.com/pytorch/pytorch/blob/main/.github/workflows/lint.yml)
 for the simple commands we use for this.
 
 To run clang-tidy locally, follow these steps:
@@ -1116,7 +1064,7 @@ To run clang-tidy locally, follow these steps:
 1. Install clang-tidy.
 We provide custom built binaries which have additional checks enabled. You can install it by running:
 ```bash
-python3 -m tools.linter.install.clang_tidy
+python3 -m tools.linter.clang_tidy.generate_build_files
 ```
 We currently only support Linux and MacOS (x86).
 
@@ -1148,7 +1096,7 @@ If you have already committed files and
 CI reports `flake8` errors, you can run the check locally in your PR branch with:
 
   ```bash
-  flake8 $(git diff --name-only $(git merge-base --fork-point master))
+  flake8 $(git diff --name-only $(git merge-base --fork-point main))
   ```
 
 You'll need to install an appropriately configured flake8; see
@@ -1276,7 +1224,7 @@ an active PR, CI jobs will be run automatically. Some of these may
 fail and you will need to find out why, by looking at the logs.
 
 Fairly often, a CI failure might be unrelated to your changes. You can
-confirm by going to our [HUD](hud.pytorch.org) and seeing if the CI job
+confirm by going to our [HUD](https://hud.pytorch.org) and seeing if the CI job
 is failing upstream already. In this case, you
 can usually ignore the failure. See [the following
 subsection](#which-commit-is-used-in-ci) for more details.
@@ -1289,10 +1237,11 @@ our [CI wiki](https://github.com/pytorch/pytorch/wiki/Debugging-using-with-ssh-f
 
 ### Which commit is used in CI?
 
-For CI run on `master`, this repository is checked out for a given `master`
-commit, and CI is run on that commit (there isn't really any other choice). For
-PRs, however, it's a bit more complicated. Consider this commit graph, where
-`master` is at commit `A`, and the branch for PR #42 (just a placeholder) is at
+For CI run on `main`, this repository is checked out for a given `main`
+commit, and CI is run on that commit (there isn't really any other choice).
+
+For PRs, however, it's a bit more complicated. Consider this commit graph, where
+`main` is at commit `A`, and the branch for PR #42 (just a placeholder) is at
 commit `B`:
 
 ```
@@ -1300,7 +1249,7 @@ commit `B`:
       /         \
      /           C (refs/pull/42/merge)
     /           /
----o---o---o---A (refs/heads/master)
+---o---o---o---A (merge-destination) - usually main
 ```
 
 There are two possible choices for which commit to use:
@@ -1308,37 +1257,18 @@ There are two possible choices for which commit to use:
 1. Checkout commit `B`, the head of the PR (manually committed by the PR
    author).
 2. Checkout commit `C`, the hypothetical result of what would happen if the PR
-   were merged into `master` (automatically generated by GitHub).
+   were merged into it's destination (usually `main`).
 
-This choice depends on several factors; here is the decision tree as of
-2021-03-30:
+For all practical purposes, most people can think of the commit being used as
+commit `B` (choice **1**).
 
-- For CI jobs on CircleCI:
-  - If the name of the job (or one of its ancestors in the workflow DAG)
-    contains "xla" or "gcc5", choice **2** is used. This includes the following
-    jobs:
-    - pytorch_linux_xenial_py3_6_gcc5_4_build
-      - pytorch_cpp_doc_build
-      - pytorch_doc_test
-      - pytorch_linux_forward_backward_compatibility_check_test
-      - pytorch_linux_xenial_py3_6_gcc5_4_jit_legacy_test
-      - pytorch_linux_xenial_py3_6_gcc5_4_test
-      - pytorch_python_doc_build
-    - pytorch_xla_linux_bionic_py3_6_clang9_build
-      - pytorch_xla_linux_bionic_py3_6_clang9_test
-  - Otherwise, choice **1** is used.
-- For CI jobs on GitHub Actions:
-  - If the PR was created using [`ghstack`](https://github.com/ezyang/ghstack),
-    choice **1** is used.
-  - Otherwise, choice **2** is used.
+However, if workflow files (which govern CI behavior) were modified (either by your PR or since dev branch were created ) there's
+a nuance to know about:
+The workflow files themselves get taken from checkpoint `C`, the merger of your
+PR and the `main` branch. But only the workflow files get taken from that merged
+checkpoint. Everything else (tests, code, etc) all get taken directly from your
+PR's commit (commit `B`). Please note, this scenario would never affect PRs authored by `ghstack` as they would not automatically ingest the updates from default branch.
 
-This is important to be aware of, because if you see a CI failure on your PR and
-choice **2** is being used for that CI job, it is possible that the failure is
-nondeterministically caused by a commit that does not exist in the ancestry of
-your PR branch. If you happen to have write access to this repo, you can choose
-to use `ghstack` to eliminate this nondeterminism for GitHub Actions jobs on
-your PRs, but it will still be present for the select CircleCI jobs listed
-above.
 
 ## Dev Infra Office Hours
 [Dev Infra Office Hours](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours) are hosted every Friday to answer any questions regarding developer experience, Green HUD, and CI.

@@ -701,6 +701,15 @@ See :func:`torch.as_strided`
 )
 
 add_docstr_all(
+    "as_strided_",
+    r"""
+as_strided_(size, stride, storage_offset=None) -> Tensor
+
+In-place version of :meth:`~Tensor.as_strided`
+""",
+)
+
+add_docstr_all(
     "atan",
     r"""
 atan() -> Tensor
@@ -1584,7 +1593,7 @@ See :func:`torch.diagonal_scatter`
 add_docstr_all(
     "as_strided_scatter",
     r"""
-as_strided_scatter(src, size, stride, storage_offset=0) -> Tensor
+as_strided_scatter(src, size, stride, storage_offset=None) -> Tensor
 
 See :func:`torch.as_strided_scatter`
 """,
@@ -2094,7 +2103,7 @@ Fills :attr:`self` tensor with elements drawn from the geometric distribution:
 
 .. math::
 
-    f(X=k) = p^{k - 1} (1 - p)
+    f(X=k) = (1 - p)^{k - 1} p
 
 """,
 )
@@ -2229,14 +2238,15 @@ add_docstr_all(
 get_device() -> Device ordinal (Integer)
 
 For CUDA tensors, this function returns the device ordinal of the GPU on which the tensor resides.
-For CPU tensors, an error is thrown.
+For CPU tensors, this function returns `-1`.
 
 Example::
 
     >>> x = torch.randn(3, 4, 5, device='cuda:0')
     >>> x.get_device()
     0
-    >>> x.cpu().get_device()  # RuntimeError: get_device is not implemented for type torch.FloatTensor
+    >>> x.cpu().get_device()
+    -1
 """,
 )
 
@@ -2581,6 +2591,12 @@ strided tensor :attr:`self` filtered by the indices of the sparse
 tensor :attr:`mask`. The values of :attr:`mask` sparse tensor are
 ignored. :attr:`self` and :attr:`mask` tensors must have the same
 shape.
+
+.. note::
+
+  The returned sparse tensor might contain duplicate values if :attr:`mask`
+  is not coalesced. It is therefore advisable to pass ``mask.coalesce()``
+  if such behavior is not desired.
 
 .. note::
 
@@ -3117,10 +3133,12 @@ add_docstr_all(
 masked_scatter_(mask, source)
 
 Copies elements from :attr:`source` into :attr:`self` tensor at positions where
-the :attr:`mask` is True.
+the :attr:`mask` is True. Elements from :attr:`source` are copied into :attr:`self`
+starting at position 0 of :attr:`source` and continuing in order one-by-one for each
+occurrence of :attr:`mask` being True.
 The shape of :attr:`mask` must be :ref:`broadcastable <broadcasting-semantics>`
 with the shape of the underlying tensor. The :attr:`source` should have at least
-as many elements as the number of ones in :attr:`mask`
+as many elements as the number of ones in :attr:`mask`.
 
 Args:
     mask (BoolTensor): the boolean mask
@@ -3130,6 +3148,16 @@ Args:
 
     The :attr:`mask` operates on the :attr:`self` tensor, not on the given
     :attr:`source` tensor.
+
+Example:
+
+    >>> self = torch.tensor([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]])
+    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]])
+    >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
+    >>> self.masked_scatter_(mask, source)
+    tensor([[0, 0, 0, 0, 1],
+            [2, 3, 0, 4, 5]])
+
 """,
 )
 
@@ -3435,18 +3463,7 @@ add_docstr_all(
     r"""
 narrow(dimension, start, length) -> Tensor
 
-See :func:`torch.narrow`
-
-Example::
-
-    >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
-    >>> x.narrow(0, 0, 2)
-    tensor([[ 1,  2,  3],
-            [ 4,  5,  6]])
-    >>> x.narrow(1, 1, 2)
-    tensor([[ 2,  3],
-            [ 5,  6],
-            [ 8,  9]])
+See :func:`torch.narrow`.
 """,
 )
 
@@ -3589,6 +3606,58 @@ add_docstr_all(
 nonzero() -> LongTensor
 
 See :func:`torch.nonzero`
+""",
+)
+
+add_docstr_all(
+    "nonzero_static",
+    r"""
+nonzero_static(input, *, size, fill_value=-1) -> Tensor
+
+Returns a 2-D tensor where each row is the index for a non-zero value.
+The returned Tensor has the same `torch.dtype` as `torch.nonzero()`.
+
+Args:
+    input (Tensor): the input tensor to count non-zero elements.
+
+Keyword args:
+    size (int): the size of non-zero elements expected to be included in the out
+        tensor. Pad the out tensor with `fill_value` if the `size` is larger
+        than total number of non-zero elements, truncate out tensor if `size`
+        is smaller. The size must be a non-negative integer.
+    fill_value (int): the value to fill the output tensor with when `size` is larger
+        than the total number of non-zero elements. Default is `-1` to represent
+        invalid index.
+
+Example:
+
+    # Example 1: Padding
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 4
+    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    tensor([[  0,   0],
+            [  1,   0],
+            [  1,   1],
+            [  -1, -1]], dtype=torch.int64)
+
+    # Example 2: Truncating
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    tensor([[  0,   0],
+            [  1,   0]], dtype=torch.int64)
+
+    # Example 3: 0 size
+    >>> input_tensor = torch.tensor([10])
+    >>> static_size = 0
+    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    tensor([], size=(0, 1), dtype=torch.int64)
+
+    # Example 4: 0 rank input
+    >>> input_tensor = torch.tensor(10)
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    tensor([], size=(2, 0), dtype=torch.int64)
 """,
 )
 
@@ -4146,6 +4215,13 @@ memory is uninitialized.
     contiguity, or :meth:`~Tensor.reshape()`, which copies data if needed. To
     change the size in-place with custom strides, see :meth:`~Tensor.set_()`.
 
+.. note::
+
+    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, new
+    elements are initialized to prevent nondeterministic behavior from using
+    the result as an input to an operation. Floating point and complex values
+    are set to NaN, and integer values are set to the maximum value.
+
 Args:
     sizes (torch.Size or int...): the desired size
     memory_format (:class:`torch.memory_format`, optional): the desired memory format of
@@ -4262,7 +4338,7 @@ between ``0`` and ``self.size(dim) - 1`` inclusive.
 
 Additionally accepts an optional :attr:`reduce` argument that allows
 specification of an optional reduction operation, which is applied to all
-values in the tensor :attr:`src` into :attr:`self` at the indicies
+values in the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index`. For each value in :attr:`src`, the reduction
 operation is applied to an index in :attr:`self` which is specified by
 its index in :attr:`src` for ``dimension != dim`` and by the corresponding
@@ -4277,6 +4353,11 @@ is updated as::
 
 Reducing with the addition operation is the same as using
 :meth:`~torch.Tensor.scatter_add_`.
+
+.. warning::
+    The reduce argument with Tensor ``src`` is deprecated and will be removed in
+    a future PyTorch release. Please use :meth:`~torch.Tensor.scatter_reduce_`
+    instead for more reduction options.
 
 Args:
     dim (int): the axis along which to index
@@ -4647,6 +4728,26 @@ Example::
 )
 
 add_docstr_all(
+    "shape",
+    r"""
+shape() -> torch.Size
+
+Returns the size of the :attr:`self` tensor. Alias for :attr:`size`.
+
+See also :meth:`Tensor.size`.
+
+Example::
+
+    >>> t = torch.empty(3, 4, 5)
+    >>> t.size()
+    torch.Size([3, 4, 5])
+    >>> t.shape
+    torch.Size([3, 4, 5])
+
+""",
+)
+
+add_docstr_all(
     "sort",
     r"""
 sort(dim=-1, descending=False) -> (Tensor, LongTensor)
@@ -4795,12 +4896,7 @@ In-place version of :meth:`~Tensor.squeeze`
 add_docstr_all(
     "std",
     r"""
-std(dim, unbiased=True, keepdim=False) -> Tensor
-
-See :func:`torch.std`
-
-.. function:: std(unbiased=True) -> Tensor
-   :noindex:
+std(dim=None, *, correction=1, keepdim=False) -> Tensor
 
 See :func:`torch.std`
 """,
@@ -4822,6 +4918,15 @@ Example::
     >>> x[3:].storage_offset()
     3
 
+""",
+)
+
+add_docstr_all(
+    "untyped_storage",
+    r"""
+untyped_storage() -> torch.UntypedStorage
+
+Returns the underlying :class:`UntypedStorage`.
 """,
 )
 
@@ -4917,15 +5022,6 @@ See :func:`torch.svd`
 )
 
 add_docstr_all(
-    "symeig",
-    r"""
-symeig(eigenvectors=False, upper=True) -> (Tensor, Tensor)
-
-See :func:`torch.symeig`
-""",
-)
-
-add_docstr_all(
     "swapdims",
     r"""
 swapdims(dim0, dim1) -> Tensor
@@ -4982,7 +5078,7 @@ In-place version of :meth:`~Tensor.t`
 add_docstr_all(
     "tile",
     r"""
-tile(*reps) -> Tensor
+tile(dims) -> Tensor
 
 See :func:`torch.tile`
 """,
@@ -5301,6 +5397,15 @@ See :func:`torch.tanh`
 )
 
 add_docstr_all(
+    "softmax",
+    r"""
+softmax(dim) -> Tensor
+
+Alias for :func:`torch.nn.functional.softmax`.
+""",
+)
+
+add_docstr_all(
     "tanh_",
     r"""
 tanh_() -> Tensor
@@ -5343,9 +5448,15 @@ See :func:`torch.topk`
 add_docstr_all(
     "to_dense",
     r"""
-to_dense() -> Tensor
+to_dense(dtype=None, *, masked_grad=True) -> Tensor
 
 Creates a strided copy of :attr:`self` if :attr:`self` is not a strided tensor, otherwise returns :attr:`self`.
+
+Keyword args:
+    {dtype}
+    masked_grad (bool, optional): If set to ``True`` (default) and
+      :attr:`self` has a sparse layout then the backward of
+      :meth:`to_dense` returns ``grad.sparse_mask(self)``.
 
 Example::
 
@@ -5388,15 +5499,86 @@ Example::
     tensor(indices=tensor([[1]]),
            values=tensor([[ 9,  0, 10]]),
            size=(3, 3), nnz=1, layout=torch.sparse_coo)
+
+.. method:: to_sparse(*, layout=None, blocksize=None, dense_dim=None) -> Tensor
+   :noindex:
+
+Returns a sparse tensor with the specified layout and blocksize.  If
+the :attr:`self` is strided, the number of dense dimensions could be
+specified, and a hybrid sparse tensor will be created, with
+`dense_dim` dense dimensions and `self.dim() - 2 - dense_dim` batch
+dimension.
+
+.. note:: If the :attr:`self` layout and blocksize parameters match
+          with the specified layout and blocksize, return
+          :attr:`self`. Otherwise, return a sparse tensor copy of
+          :attr:`self`.
+
+Args:
+
+    layout (:class:`torch.layout`, optional): The desired sparse
+      layout. One of ``torch.sparse_coo``, ``torch.sparse_csr``,
+      ``torch.sparse_csc``, ``torch.sparse_bsr``, or
+      ``torch.sparse_bsc``. Default: if ``None``,
+      ``torch.sparse_coo``.
+
+    blocksize (list, tuple, :class:`torch.Size`, optional): Block size
+      of the resulting BSR or BSC tensor. For other layouts,
+      specifying the block size that is not ``None`` will result in a
+      RuntimeError exception.  A block size must be a tuple of length
+      two such that its items evenly divide the two sparse dimensions.
+
+    dense_dim (int, optional): Number of dense dimensions of the
+      resulting CSR, CSC, BSR or BSC tensor.  This argument should be
+      used only if :attr:`self` is a strided tensor, and must be a
+      value between 0 and dimension of :attr:`self` tensor minus two.
+
+Example::
+
+    >>> x = torch.tensor([[1, 0], [0, 0], [2, 3]])
+    >>> x.to_sparse(layout=torch.sparse_coo)
+    tensor(indices=tensor([[0, 2, 2],
+                           [0, 0, 1]]),
+           values=tensor([1, 2, 3]),
+           size=(3, 2), nnz=3, layout=torch.sparse_coo)
+    >>> x.to_sparse(layout=torch.sparse_bsr, blocksize=(1, 2))
+    tensor(crow_indices=tensor([0, 1, 1, 2]),
+           col_indices=tensor([0, 0]),
+           values=tensor([[[1, 0]],
+                          [[2, 3]]]), size=(3, 2), nnz=2, layout=torch.sparse_bsr)
+    >>> x.to_sparse(layout=torch.sparse_bsr, blocksize=(2, 1))
+    RuntimeError: Tensor size(-2) 3 needs to be divisible by blocksize[0] 2
+    >>> x.to_sparse(layout=torch.sparse_csr, blocksize=(3, 1))
+    RuntimeError: to_sparse for Strided to SparseCsr conversion does not use specified blocksize
+
+    >>> x = torch.tensor([[[1], [0]], [[0], [0]], [[2], [3]]])
+    >>> x.to_sparse(layout=torch.sparse_csr, dense_dim=1)
+    tensor(crow_indices=tensor([0, 1, 1, 3]),
+           col_indices=tensor([0, 0, 1]),
+           values=tensor([[1],
+                          [2],
+                          [3]]), size=(3, 2, 1), nnz=3, layout=torch.sparse_csr)
+
 """,
 )
 
 add_docstr_all(
     "to_sparse_csr",
     r"""
-to_sparse_csr() -> Tensor
+to_sparse_csr(dense_dim=None) -> Tensor
 
-Convert a tensor to compressed row storage format (CSR). Only works with 2D tensors.
+Convert a tensor to compressed row storage format (CSR).  Except for
+strided tensors, only works with 2D tensors.  If the :attr:`self` is
+strided, then the number of dense dimensions could be specified, and a
+hybrid CSR tensor will be created, with `dense_dim` dense dimensions
+and `self.dim() - 2 - dense_dim` batch dimension.
+
+Args:
+
+    dense_dim (int, optional): Number of dense dimensions of the
+      resulting CSR tensor.  This argument should be used only if
+      :attr:`self` is a strided tensor, and must be a value between 0
+      and dimension of :attr:`self` tensor minus two.
 
 Example::
 
@@ -5404,6 +5586,18 @@ Example::
     >>> sparse = dense.to_sparse_csr()
     >>> sparse._nnz()
     25
+
+    >>> dense = torch.zeros(3, 3, 1, 1)
+    >>> dense[0, 0] = dense[1, 2] = dense[2, 1] = 1
+    >>> dense.to_sparse_csr(dense_dim=2)
+    tensor(crow_indices=tensor([0, 1, 2, 3]),
+           col_indices=tensor([0, 2, 1]),
+           values=tensor([[[1.]],
+
+                          [[1.]],
+
+                          [[1.]]]), size=(3, 3, 1, 1), nnz=3,
+           layout=torch.sparse_csr)
 
 """,
 )
@@ -5413,7 +5607,18 @@ add_docstr_all(
     r"""
 to_sparse_csc() -> Tensor
 
-Convert a tensor to compressed column storage (CSC) format. Only works with 2D tensors.
+Convert a tensor to compressed column storage (CSC) format.  Except
+for strided tensors, only works with 2D tensors.  If the :attr:`self`
+is strided, then the number of dense dimensions could be specified,
+and a hybrid CSC tensor will be created, with `dense_dim` dense
+dimensions and `self.dim() - 2 - dense_dim` batch dimension.
+
+Args:
+
+    dense_dim (int, optional): Number of dense dimensions of the
+      resulting CSC tensor.  This argument should be used only if
+      :attr:`self` is a strided tensor, and must be a value between 0
+      and dimension of :attr:`self` tensor minus two.
 
 Example::
 
@@ -5422,15 +5627,43 @@ Example::
     >>> sparse._nnz()
     25
 
+    >>> dense = torch.zeros(3, 3, 1, 1)
+    >>> dense[0, 0] = dense[1, 2] = dense[2, 1] = 1
+    >>> dense.to_sparse_csc(dense_dim=2)
+    tensor(ccol_indices=tensor([0, 1, 2, 3]),
+           row_indices=tensor([0, 2, 1]),
+           values=tensor([[[1.]],
+
+                          [[1.]],
+
+                          [[1.]]]), size=(3, 3, 1, 1), nnz=3,
+           layout=torch.sparse_csc)
+
 """,
 )
 
 add_docstr_all(
     "to_sparse_bsr",
     r"""
-to_sparse_bsr(blocksize) -> Tensor
+to_sparse_bsr(blocksize, dense_dim) -> Tensor
 
-Convert a CSR tensor to a block sparse row (BSR) storage format of given blocksize.
+Convert a tensor to a block sparse row (BSR) storage format of given
+blocksize.  If the :attr:`self` is strided, then the number of dense
+dimensions could be specified, and a hybrid BSR tensor will be
+created, with `dense_dim` dense dimensions and `self.dim() - 2 -
+dense_dim` batch dimension.
+
+Args:
+
+    blocksize (list, tuple, :class:`torch.Size`, optional): Block size
+      of the resulting BSR tensor. A block size must be a tuple of
+      length two such that its items evenly divide the two sparse
+      dimensions.
+
+    dense_dim (int, optional): Number of dense dimensions of the
+      resulting BSR tensor.  This argument should be used only if
+      :attr:`self` is a strided tensor, and must be a value between 0
+      and dimension of :attr:`self` tensor minus two.
 
 Example::
 
@@ -5440,15 +5673,51 @@ Example::
     >>> sparse_bsr.col_indices()
     tensor([0, 1, 0, 1])
 
+    >>> dense = torch.zeros(4, 3, 1)
+    >>> dense[0:2, 0] = dense[0:2, 2] = dense[2:4, 1] = 1
+    >>> dense.to_sparse_bsr((2, 1), 1)
+    tensor(crow_indices=tensor([0, 2, 3]),
+           col_indices=tensor([0, 2, 1]),
+           values=tensor([[[[1.]],
+
+                           [[1.]]],
+
+
+                          [[[1.]],
+
+                           [[1.]]],
+
+
+                          [[[1.]],
+
+                           [[1.]]]]), size=(4, 3, 1), nnz=3,
+           layout=torch.sparse_bsr)
+
 """,
 )
 
 add_docstr_all(
     "to_sparse_bsc",
     r"""
-to_sparse_bsc(blocksize) -> Tensor
+to_sparse_bsc(blocksize, dense_dim) -> Tensor
 
-Convert a CSR tensor to a block sparse column (BSC) storage format of given blocksize.
+Convert a tensor to a block sparse column (BSC) storage format of
+given blocksize.  If the :attr:`self` is strided, then the number of
+dense dimensions could be specified, and a hybrid BSC tensor will be
+created, with `dense_dim` dense dimensions and `self.dim() - 2 -
+dense_dim` batch dimension.
+
+Args:
+
+    blocksize (list, tuple, :class:`torch.Size`, optional): Block size
+      of the resulting BSC tensor. A block size must be a tuple of
+      length two such that its items evenly divide the two sparse
+      dimensions.
+
+    dense_dim (int, optional): Number of dense dimensions of the
+      resulting BSC tensor.  This argument should be used only if
+      :attr:`self` is a strided tensor, and must be a value between 0
+      and dimension of :attr:`self` tensor minus two.
 
 Example::
 
@@ -5457,6 +5726,26 @@ Example::
     >>> sparse_bsc = sparse.to_sparse_bsc((5, 5))
     >>> sparse_bsc.row_indices()
     tensor([0, 1, 0, 1])
+
+    >>> dense = torch.zeros(4, 3, 1)
+    >>> dense[0:2, 0] = dense[0:2, 2] = dense[2:4, 1] = 1
+    >>> dense.to_sparse_bsc((2, 1), 1)
+    tensor(ccol_indices=tensor([0, 1, 2, 3]),
+           row_indices=tensor([0, 1, 0]),
+           values=tensor([[[[1.]],
+
+                           [[1.]]],
+
+
+                          [[[1.]],
+
+                           [[1.]]],
+
+
+                          [[[1.]],
+
+                           [[1.]]]]), size=(4, 3, 1), nnz=3,
+           layout=torch.sparse_bsc)
 
 """,
 )
@@ -5675,7 +5964,7 @@ Example::
 add_docstr_all(
     "uniform_",
     r"""
-uniform_(from=0, to=1) -> Tensor
+uniform_(from=0, to=1, *, generator=None) -> Tensor
 
 Fills :attr:`self` tensor with numbers sampled from the continuous uniform
 distribution:
@@ -5706,12 +5995,7 @@ In-place version of :meth:`~Tensor.unsqueeze`
 add_docstr_all(
     "var",
     r"""
-var(dim, unbiased=True, keepdim=False) -> Tensor
-
-See :func:`torch.var`
-
-.. function:: var(unbiased=True) -> Tensor
-   :noindex:
+var(dim=None, *, correction=1, keepdim=False) -> Tensor
 
 See :func:`torch.var`
 """,
@@ -6184,6 +6468,21 @@ add_docstr_all(
 masked_scatter(mask, tensor) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
+
+.. note::
+
+    The inputs :attr:`self` and :attr:`mask`
+    :ref:`broadcast <broadcasting-semantics>`.
+
+Example:
+
+    >>> self = torch.tensor([0, 0, 0, 0, 0])
+    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]])
+    >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
+    >>> self.masked_scatter(mask, source)
+    tensor([[0, 0, 0, 0, 1],
+            [2, 3, 0, 4, 5]])
+
 """,
 )
 
@@ -6332,6 +6631,13 @@ Is ``True`` if the Tensor is stored on the CPU, ``False`` otherwise.
 )
 
 add_docstr_all(
+    "is_xla",
+    r"""
+Is ``True`` if the Tensor is stored on an XLA device, ``False`` otherwise.
+""",
+)
+
+add_docstr_all(
     "is_ipu",
     r"""
 Is ``True`` if the Tensor is stored on the IPU, ``False`` otherwise.
@@ -6370,7 +6676,7 @@ Is ``True`` if the Tensor is stored on the MPS device, ``False`` otherwise.
 add_docstr_all(
     "is_sparse",
     r"""
-Is ``True`` if the Tensor uses sparse storage layout, ``False`` otherwise.
+Is ``True`` if the Tensor uses sparse COO storage layout, ``False`` otherwise.
 """,
 )
 
@@ -6392,6 +6698,22 @@ add_docstr_all(
     "ndim",
     r"""
 Alias for :meth:`~Tensor.dim()`
+""",
+)
+
+add_docstr_all(
+    "itemsize",
+    r"""
+Alias for :meth:`~Tensor.element_size()`
+""",
+)
+
+add_docstr_all(
+    "nbytes",
+    r"""
+Returns the number of bytes consumed by the "view" of elements of the Tensor
+if the Tensor does not use sparse storage layout.
+Defined to be :meth:`~Tensor.numel()` * :meth:`~Tensor.element_size()`
 """,
 )
 

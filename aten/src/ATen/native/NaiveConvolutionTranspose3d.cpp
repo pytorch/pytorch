@@ -1,10 +1,22 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/vol2col.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/slow_conv_transpose3d_native.h>
+#include <ATen/ops/sum.h>
+#endif
 
 namespace at {
 namespace native {
@@ -279,7 +291,7 @@ void slow_conv_transpose3d_out_cpu_template(
   // Define a buffer of ones, for bias accumulation
   Tensor ones = bias.defined() ? at::ones({output_depth, output_height, output_width}, input_.options()) : Tensor();
 
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long,
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Long, at::ScalarType::BFloat16,
       input.scalar_type(), "slow_conv_transpose3d_out_cpu", [&] {
         // Helpers
         Tensor input_n;
@@ -307,13 +319,13 @@ void slow_conv_transpose3d_out_cpu_template(
               n,
               m,
               k,
-              1,
-              input_n.data_ptr<scalar_t>(),
+              static_cast<scalar_t>(1),
+              input_n.const_data_ptr<scalar_t>(),
               n,
-              weight.data_ptr<scalar_t>(),
+              weight.const_data_ptr<scalar_t>(),
               m,
-              0,
-              columns.data_ptr<scalar_t>(),
+              static_cast<scalar_t>(0),
+              columns.mutable_data_ptr<scalar_t>(),
               n);
 
           // Unpack columns back into input:
@@ -356,13 +368,13 @@ void slow_conv_transpose3d_out_cpu_template(
                 n_,
                 m_,
                 k_,
-                1,
-                ones.data_ptr<scalar_t>(),
+                static_cast<scalar_t>(1),
+                ones.const_data_ptr<scalar_t>(),
                 k_,
-                bias.data_ptr<scalar_t>(),
+                bias.const_data_ptr<scalar_t>(),
                 k_,
-                1,
-                output_n.data_ptr<scalar_t>(),
+                static_cast<scalar_t>(1),
+                output_n.mutable_data_ptr<scalar_t>(),
                 n_);
           }
         }
@@ -503,7 +515,7 @@ void slow_conv_transpose3d_backward_out_cpu_template(
   Tensor grad_columns = need_columns ? at::empty({n_output_plane * kernel_width * kernel_height * kernel_depth,
       input_depth * input_height * input_width}, input.options()) : Tensor();
 
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16,
       input.scalar_type(), "slow_conv_transpose3d_backward_out_cpu", [&] {
         // Helpers
         Tensor grad_input_n;
@@ -519,7 +531,7 @@ void slow_conv_transpose3d_backward_out_cpu_template(
           if (need_columns) {
             // Extract columns:
             at::native::vol2col<scalar_t>(
-                grad_output_n.data_ptr<scalar_t>(),
+                grad_output_n.const_data_ptr<scalar_t>(),
                 n_output_plane,
                 output_depth,
                 output_height,
@@ -539,7 +551,7 @@ void slow_conv_transpose3d_backward_out_cpu_template(
                 dilation_depth,
                 dilation_height,
                 dilation_width,
-                grad_columns.data_ptr<scalar_t>());
+                grad_columns.mutable_data_ptr<scalar_t>());
           }
 
           // M,N,K are dims of matrix A and B
@@ -559,13 +571,13 @@ void slow_conv_transpose3d_backward_out_cpu_template(
               n,
               m,
               k,
-              1,
+              static_cast<scalar_t>(1),
               gemm_in_ptr,
               n,
-              weight.data_ptr<scalar_t>(),
+              weight.const_data_ptr<scalar_t>(),
               k,
-              0,
-              grad_input_n.data_ptr<scalar_t>(),
+              static_cast<scalar_t>(0),
+              grad_input_n.mutable_data_ptr<scalar_t>(),
               n);
         }
 
@@ -716,7 +728,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
   Tensor columns = need_columns ? at::empty({n_output_plane * kernel_width * kernel_height * kernel_depth,
       input_depth * input_height * input_width}, input.options()) : Tensor();
 
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16,
       input.scalar_type(),
       "slow_conv_transpose3d_acc_grad_parameters_cpu",
       [&] {
@@ -740,7 +752,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
             if (need_columns) {
               // Extract columns:
               at::native::vol2col<scalar_t>(
-                  grad_output_n.data_ptr<scalar_t>(),
+                  grad_output_n.const_data_ptr<scalar_t>(),
                   n_output_plane,
                   output_depth,
                   output_height,
@@ -760,7 +772,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
                   dilation_depth,
                   dilation_height,
                   dilation_width,
-                  columns.data_ptr<scalar_t>());
+                  columns.mutable_data_ptr<scalar_t>());
             }
 
             // M,N,K are dims of matrix A and B
@@ -779,13 +791,13 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
                 n,
                 m,
                 k,
-                scale,
+                static_cast<scalar_t>(scale),
                 gemm_in_ptr,
                 k,
-                input_n.data_ptr<scalar_t>(),
+                input_n.const_data_ptr<scalar_t>(),
                 k,
-                1,
-                grad_weight.data_ptr<scalar_t>(),
+                static_cast<scalar_t>(1),
+                grad_weight.mutable_data_ptr<scalar_t>(),
                 n);
           }
         }
@@ -860,7 +872,7 @@ Tensor slow_conv_transpose3d_cpu(
   return output;
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose3d_backward_out_cpu(const Tensor& grad_output,
+static std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose3d_backward_out_cpu(const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -912,7 +924,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose3d_backward_out_cpu(con
       grad_input, grad_weight, grad_bias);
 }
 
-std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose3d_backward_cpu(
+static std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose3d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,

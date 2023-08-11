@@ -30,10 +30,9 @@
 
 #include <caffe2/serialize/inline_container.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
-std::vector<Method> gatherGetSetStates(ObjectPtr obj) {
+static std::vector<Method> gatherGetSetStates(ObjectPtr obj) {
   std::vector<Method> methods;
   // Use DFS on IValue's to traverse dependencies of module._ivalue and
   // add all setstate/getstates to initial stack.
@@ -64,7 +63,7 @@ std::vector<Method> gatherGetSetStates(ObjectPtr obj) {
   return methods;
 }
 
-std::vector<Method> findAllDependentFunctions(
+static std::vector<Method> findAllDependentFunctions(
     const Module& module,
     Graph& graph) {
   std::vector<Method> methods;
@@ -93,7 +92,7 @@ std::vector<Method> findAllDependentFunctions(
 // 2. All the dependent functions will come afterwards.
 // This order is meaningful because currently mobile Module looks up
 // methods with linear search.
-std::vector<std::unique_ptr<GraphFunction>> inlineFunctions(
+static std::vector<std::unique_ptr<GraphFunction>> inlineFunctions(
     const std::vector<Method>& initial_methods,
     bool incl_dependent_functions) {
   std::set<std::pair<std::string, Function*>> visited;
@@ -212,7 +211,7 @@ mobile::Code compileGraphToMobileCode(
           for (const TypePtr& element_type : input_type->containedTypes()) {
             TORCH_CHECK(
                 element_type->kind() != TypeKind::ClassType,
-                "Returining a list or dictionary with pytorch class type ",
+                "Returning a list or dictionary with pytorch class type ",
                 "is not supported in mobile module "
                 "(List[Foo] or Dict[int, Foo] for class Foo(torch.nn.Module)). "
                 "Workaround: instead of using pytorch class as their element type, ",
@@ -270,7 +269,7 @@ IValue convertMobileFunctionToCodeTable(
 
   std::vector<IValue> operators;
   operators.reserve(code.op_names_.size());
-  for (int i = 0; i < code.op_names_.size(); ++i) {
+  for (unsigned i = 0; i < code.op_names_.size(); ++i) {
     const auto& opname = code.op_names_[i];
     const int size = code.operator_input_sizes_[i];
     if (compilation_options.enable_default_value_for_unspecified_arg) {
@@ -298,7 +297,7 @@ IValue convertMobileFunctionToCodeTable(
   return codeTable;
 }
 
-void checkSchema(const c10::FunctionSchema& schema) {
+static void checkSchema(const c10::FunctionSchema& schema) {
   TORCH_CHECK(
       schema.overload_name().empty(), // @TODO: is this check correct?
       "Overloads are not supported in mobile modules.");
@@ -309,7 +308,7 @@ void checkSchema(const c10::FunctionSchema& schema) {
       "A variable number of return values is not supported in mobile modules.");
 }
 
-bool isLoweredModule(const Module& m) {
+static bool isLoweredModule(const Module& m) {
   c10::QualifiedName type_name;
   if (m.type()->name()) {
     type_name = m.type()->name().value();
@@ -327,7 +326,7 @@ bool isLoweredModule(const Module& m) {
 // Check if the global static map of backend debug info
 // contains debug info for this module and any of its children.
 // If so combine all the maps together and return one.
-void getBackendDebugInfoMap(
+static void getBackendDebugInfoMap(
     const Module& m,
     BackendDebugInfoMapType& debug_map) {
   if (isLoweredModule(m)) {
@@ -343,7 +342,7 @@ void getBackendDebugInfoMap(
   }
 }
 
-uint64_t get_min_operator_version_from_version_map(
+static uint64_t get_min_operator_version_from_version_map(
     const mobile::Module& module) {
   uint64_t min_version = caffe2::serialize::kMinSupportedFileFormatVersion;
   for (const auto& func : module.compilation_unit().methods()) {
@@ -401,5 +400,4 @@ mobile::Module jitModuleToMobile(
   return m;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

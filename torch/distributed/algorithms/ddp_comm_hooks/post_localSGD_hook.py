@@ -8,7 +8,7 @@ from . import default_hooks as default
 logger = logging.getLogger(__name__)
 
 
-class PostLocalSGDState(object):
+class PostLocalSGDState:
     r"""
     Stores the state for all-reducing gradients globally using ``process_group`` until step ``start_localSGD_iter``,
     and all-reducing gradients locally using ``subgroup`` afterwards.
@@ -36,7 +36,7 @@ class PostLocalSGDState(object):
         post_local_gradient_allreduce=True,
     ):
         logger.info(
-            "Local SGD will be started after {} iterations".format(start_localSGD_iter)
+            "Local SGD will be started after %s iterations", start_localSGD_iter
         )
 
         # The group used for all-reducing gradients globally.
@@ -58,7 +58,7 @@ class PostLocalSGDState(object):
 
         if self.iter == self.start_localSGD_iter:
             logger.info(
-                "Start to apply local SGD after {} iterations.".format(self.iter)
+                "Start to apply local SGD after %s iterations.", self.iter
             )
 
 

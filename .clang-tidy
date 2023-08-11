@@ -3,11 +3,15 @@
 InheritParentConfig: true
 Checks: '
 bugprone-*,
+-bugprone-easily-swappable-parameters,
 -bugprone-forward-declaration-namespace,
 -bugprone-macro-parentheses,
 -bugprone-lambda-function-name,
 -bugprone-reserved-identifier,
+-bugprone-swapped-arguments,
+clang-diagnostic-missing-prototypes,
 cppcoreguidelines-*,
+-cppcoreguidelines-avoid-do-while,
 -cppcoreguidelines-avoid-magic-numbers,
 -cppcoreguidelines-avoid-non-const-global-variables,
 -cppcoreguidelines-interfaces-global-init,
@@ -26,8 +30,11 @@ cppcoreguidelines-*,
 -facebook-hte-RelativeInclude,
 hicpp-exception-baseclass,
 hicpp-avoid-goto,
+misc-unused-alias-decls,
+misc-unused-using-decls,
 modernize-*,
 -modernize-concat-nested-namespaces,
+-modernize-macro-to-enum,
 -modernize-return-braced-init-list,
 -modernize-use-auto,
 -modernize-use-default-member-init,
@@ -35,11 +42,9 @@ modernize-*,
 -modernize-use-trailing-return-type,
 -modernize-use-nodiscard,
 performance-*,
--performance-noexcept-move-constructor,
--performance-unnecessary-value-param,
+readability-container-size-empty,
 '
-HeaderFilterRegex: 'torch/csrc/(?!deploy/interpreter/cpython).*'
+HeaderFilterRegex: '^(c10/(?!test)|torch/csrc/(?!deploy/interpreter/cpython)).*$'
 AnalyzeTemporaryDtors: false
 WarningsAsErrors: '*'
-CheckOptions:
 ...

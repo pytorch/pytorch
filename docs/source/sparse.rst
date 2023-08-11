@@ -7,51 +7,308 @@
 torch.sparse
 ============
 
-Introduction
-++++++++++++
-
-PyTorch provides :class:`torch.Tensor` to represent a
-multi-dimensional array containing elements of a single data type. By
-default, array elements are stored contiguously in memory leading to
-efficient implementations of various array processing algorithms that
-relay on the fast access to array elements.  However, there exists an
-important class of multi-dimensional arrays, so-called sparse arrays,
-where the contiguous memory storage of array elements turns out to be
-suboptimal. Sparse arrays have a property of having a vast portion of
-elements being equal to zero which means that a lot of memory as well
-as processor resources can be spared if only the non-zero elements are
-stored or/and processed. Various sparse storage formats (`such as COO,
-CSR/CSC, LIL, etc.`__) have been developed that are optimized for a
-particular structure of non-zero elements in sparse arrays as well as
-for specific operations on the arrays. PyTorch supports the following
-sparse storage formats: :ref:`COO<sparse-coo-docs>`,
-:ref:`CSR<sparse-csr-docs>`, :ref:`CSC<sparse-csc-docs>`,
-:ref:`BSR<sparse-bsr-docs>`, and :ref:`BSC<sparse-bsc-docs>`.
-
-__ https://en.wikipedia.org/wiki/Sparse_matrix
-
-.. note::
-
-   When talking about storing only non-zero elements of a sparse
-   array, the usage of adjective "non-zero" is not strict: one is
-   allowed to store also zeros in the sparse array data
-   structure. Hence, in the following, we use "specified elements" for
-   those array elements that are actually stored. In addition, the
-   unspecified elements are typically assumed to have zero value, but
-   not only, hence we use the term "fill value" to denote such
-   elements.
-
-.. note::
-
-   Using a sparse storage format for storing sparse arrays can be
-   advantageous only when the size and sparsity levels of arrays are
-   high. Otherwise, for small-sized or low-sparsity arrays using the
-   contiguous memory storage format is likely the most efficient
-   approach.
-
 .. warning::
 
   The PyTorch API of sparse tensors is in beta and may change in the near future.
+  We highly welcome feature requests, bug reports and general suggestions as GitHub issues.
+
+Why and when to use sparsity
+++++++++++++++++++++++++++++
+
+By default PyTorch stores :class:`torch.Tensor` stores elements contiguously
+physical memory. This leads to efficient implementations of various array
+processing algorithms that require fast access to elements.
+
+Now, some users might decide to represent data such as graph adjacency
+matrices, pruned weights or points clouds by Tensors whose *elements are
+mostly zero valued*. We recognize these are important applications and aim
+to provide performance optimizations for these use cases via sparse storage formats.
+
+Various sparse storage formats such as COO, CSR/CSC, semi-structured, LIL, etc. have been
+developed over the years. While they differ in exact layouts, they all
+compress data through efficient representation of zero valued elements.
+We call the uncompressed values *specified* in contrast to *unspecified*,
+compressed elements.
+
+By compressing repeat zeros sparse storage formats aim to save memory
+and computational resources on various CPUs and GPUs. Especially for high
+degrees of sparsity or highly structured sparsity this can have significant
+performance implications. As such sparse storage formats can be seen as a
+performance optimization.
+
+Like many other performance optimization sparse storage formats are not
+always advantageous. When trying sparse formats for your use case
+you might find your execution time to increase rather than decrease.
+
+Please feel encouraged to open a GitHub issue if you analytically
+expected to see a stark increase in performance but measured a
+degradation instead. This helps us prioritize the implementation
+of efficient kernels and wider performance optimizations.
+
+We make it easy to try different sparsity layouts, and convert between them,
+without being opinionated on what's best for your particular application.
+
+Functionality overview
+++++++++++++++++++++++
+
+We want it to be straightforward to construct a sparse Tensor from a
+given dense Tensor by providing conversion routines for each layout.
+
+In the next example we convert a 2D Tensor with default dense (strided)
+layout to a 2D Tensor backed by the COO memory layout. Only values and
+indices of non-zero elements are stored in this case.
+
+    >>> a = torch.tensor([[0, 2.], [3, 0]])
+    >>> a.to_sparse()
+    tensor(indices=tensor([[0, 1],
+                           [1, 0]]),
+           values=tensor([2., 3.]),
+           size=(2, 2), nnz=2, layout=torch.sparse_coo)
+
+PyTorch currently supports :ref:`COO<sparse-coo-docs>`, :ref:`CSR<sparse-csr-docs>`,
+:ref:`CSC<sparse-csc-docs>`, :ref:`BSR<sparse-bsr-docs>`, and :ref:`BSC<sparse-bsc-docs>`.
+
+We also have a prototype implementation to support :ref: `semi-structured sparsity<sparse-semi-structured-docs>`.
+Please see the references for more details.
+
+Note that we provide slight generalizations of these formats.
+
+Batching: Devices such as GPUs require batching for optimal performance and
+thus we support batch dimensions.
+
+We currently offer a very simple version of batching where each component of a sparse format
+itself is batched. This also requires the same number of specified elements per batch entry.
+In this example we construct a 3D (batched) CSR Tensor from a 3D dense Tensor.
+
+    >>> t = torch.tensor([[[1., 0], [2., 3.]], [[4., 0], [5., 6.]]])
+    >>> t.dim()
+    3
+    >>> t.to_sparse_csr()
+    tensor(crow_indices=tensor([[0, 1, 3],
+                                [0, 1, 3]]),
+           col_indices=tensor([[0, 0, 1],
+                               [0, 0, 1]]),
+           values=tensor([[1., 2., 3.],
+                          [4., 5., 6.]]), size=(2, 2, 2), nnz=3,
+           layout=torch.sparse_csr)
+
+
+Dense dimensions: On the other hand, some data such as Graph embeddings might be
+better viewed as sparse collections of vectors instead of scalars.
+
+In this example we create a 3D Hybrid COO Tensor with 2 sparse and 1 dense dimension
+from a 3D strided Tensor. If an entire row in the 3D strided Tensor is zero, it is
+not stored. If however any of the values in the row are non-zero, they are stored
+entirely. This reduces the number of indices since we need one index one per row instead
+of one per element. But it also increases the amount of storage for the values. Since
+only rows that are *entirely* zero can be emitted and the presence of any non-zero
+valued elements cause the entire row to be stored.
+
+    >>> t = torch.tensor([[[0., 0], [1., 2.]], [[0., 0], [3., 4.]]])
+    >>> t.to_sparse(sparse_dim=2)
+    tensor(indices=tensor([[0, 1],
+                           [1, 1]]),
+           values=tensor([[1., 2.],
+                          [3., 4.]]),
+           size=(2, 2, 2), nnz=2, layout=torch.sparse_coo)
+
+
+Operator overview
++++++++++++++++++
+
+Fundamentally, operations on Tensor with sparse storage formats behave the same as
+operations on Tensor with strided (or other) storage formats. The particularities of
+storage, that is the physical layout of the data, influences the performance of
+an operation but should not influence the semantics.
+
+
+We are actively increasing operator coverage for sparse tensors. Users should not
+expect support same level of support as for dense Tensors yet.
+See our :ref:`operator<sparse-ops-docs>` documentation for a list.
+
+    >>> b = torch.tensor([[0, 0, 1, 2, 3, 0], [4, 5, 0, 6, 0, 0]])
+    >>> b_s = b.to_sparse_csr()
+    >>> b_s.cos()
+    Traceback (most recent call last):
+      File "<stdin>", line 1, in <module>
+    RuntimeError: unsupported tensor layout: SparseCsr
+    >>> b_s.sin()
+    tensor(crow_indices=tensor([0, 3, 6]),
+           col_indices=tensor([2, 3, 4, 0, 1, 3]),
+           values=tensor([ 0.8415,  0.9093,  0.1411, -0.7568, -0.9589, -0.2794]),
+           size=(2, 6), nnz=6, layout=torch.sparse_csr)
+
+As shown in the example above, we don't support non-zero preserving unary
+operators such as cos. The output of a non-zero preserving unary operation
+will not be able to take advantage of sparse storage formats to the same
+extent as the input and potentially result in a catastrophic increase in memory.
+We instead rely on the user to explicitly convert to a dense Tensor first and
+then run the operation.
+
+    >>> b_s.to_dense().cos()
+    tensor([[ 1.0000, -0.4161],
+            [-0.9900,  1.0000]])
+
+We are aware that some users want to ignore compressed zeros for operations such
+as `cos` instead of preserving the exact semantics of the operation. For this we
+can point to torch.masked and its MaskedTensor, which is in turn also backed and
+powered by sparse storage formats and kernels.
+
+Also note that, for now, the user doesn't have a choice of the output layout. For example,
+adding a sparse Tensor to a regular strided Tensor results in a strided Tensor. Some
+users might prefer for this to stay a sparse layout, because they know the result will
+still be sufficiently sparse.
+
+    >>> a + b.to_sparse()
+    tensor([[0., 3.],
+            [3., 0.]])
+
+We acknowledge that access to kernels that can efficiently produce different output
+layouts can be very useful. A subsequent operation might significantly benefit from
+receiving a particular layout. We are working on an API to control the result layout
+and recognize it is an important feature to plan a more optimal path of execution for
+any given model.
+
+.. _sparse-semi-structured-docs:
+
+Sparse Semi-Structured Tensors
+++++++++++++++++++++++++++++++
+
+.. warning::
+
+   Sparse semi-sturctured tensors are currently a prototype feature and subject to change. Please feel free to open an issue to report a bug or if you have feedback to share.
+
+Semi-Structured sparsity is a sparse data layout that was first introduced in NVIDIA's Ampere architecture. It is also referred to as **fine-grained structured sparsity** or **2:4 structured sparsity**.
+
+This sparse layout stores `n` elements out of every `2n` elements, with `n` being determined by the width of the Tensor's data type (dtype). The most frequently used dtype is float16, where `n=2`, thus the term "2:4 structured sparsity."
+
+Semi-structured sparsity is explained in greater detail in `this NVIDIA blog post <https://developer.nvidia.com/blog/exploiting-ampere-structured-sparsity-with-cusparselt>`_.
+
+In PyTorch, semi-structured sparsity is implemented via a Tensor subclass.
+By subclassing, we can override ``__torch_dispatch__`` , allowing us to use faster sparse kernels when performing matrix multiplication.
+We can also store the tensor in it's compressed form inside the subclass to reduce memory overhead.
+
+In this compressed form, the sparse tensor is stored by retaining only the *specified* elements and some metadata, which encodes the mask.
+
+.. note::
+    The specified elements and metadata mask of a semi-structured sparse tensor are stored together in a single
+    flat compressed tensor. They are appended to each other to form a contiguous chunk of memory.
+
+    compressed tensor = [ specified elements of original tensor |   metadata_mask ]
+
+    For an original tensor of size `(r, c)` we expect the first `m * k // 2` elements to be the kept elements
+    and the rest of the tensor is metadata.
+
+    In order to make it easier for the user to view the specified elements
+    and mask, one can use ``.indices()`` and ``.values()`` to access the mask and specified elements respectively.
+
+
+    - ``.values()`` returns the specified elements in a tensor of size `(r, c//2)` and with the same dtype as the dense matrix.
+
+    - ``.indices()`` returns the metadata_mask in a tensor of size `(r, c//2 )` and with element type ``torch.int16`` if dtype is torch.float16 or torch.bfloat16, and element type ``torch.int32`` if dtype is torch.int8.
+
+
+For 2:4 sparse tensors, the metadata overhead is minor - just 2 bits per specified element.
+
+.. note::
+  It's important to note that ``torch.float32`` is only supported for 1:2 sparsity. Therefore, it does not follow the same formula as above.
+
+Here, we break down how to calculate the compression ratio ( size dense / size sparse) of a 2:4 sparse tensor.
+
+Let `(r, c) = tensor.shape` and `e = bitwidth(tensor.dtype)`, so `e = 16` for ``torch.float16`` and ``torch.bfloat16`` and `e = 8` for ``torch.int8``.
+
+.. math::
+  M_{dense} = r \times c \times e \\
+  M_{sparse} = M_{specified} + M_{metadata} = r \times \frac{c}{2} \times e + r \times \frac{c}{2} \times 2 = \frac{rce}{2} + rc =rce(\frac{1}{2} +\frac{1}{e})
+
+Using these calculations, we can determine the total memory footprint for both the original dense and the new sparse representation.
+
+This gives us a simple formula for the compression ratio, which is dependent only on the bitwidth of the tensor datatype.
+
+.. math::
+  C = \frac{M_{sparse}}{M_{dense}} =  \frac{1}{2} + \frac{1}{e}
+
+By using this formula, we find that the compression ratio is 56.25% for ``torch.float16`` or ``torch.bfloat16``, and 62.5% for ``torch.int8``.
+
+Constructing Sparse Semi-Structured Tensors
+-------------------------------------------
+
+You can transform a dense tensor into a sparse semi-structured tensor by simply using the ``torch.to_sparse_semi_structured`` function.
+
+Please also note that we only support CUDA tensors since hardware compatibility for semi-structured sparsity is limited to NVIDIA GPUs.
+
+
+The following datatypes are supported for semi-structured sparsity. Note that each datatype has its own shape constraints and compression factor.
+
+.. csv-table::
+   :header: "PyTorch dtype", "Shape Constraints", "Compression Factor", "Sparsity Pattern"
+   :widths: 15, 45, 10, 10
+   :delim: ;
+
+   ``torch.float16``; Tensor must be 2D and (r, c) must both be a positive multiple of 64;9/16;2:4
+   ``torch.bfloat16``; Tensor must be 2D and (r, c) must both be a positive multiple of 64;9/16;2:4
+   ``torch.int8``; Tensor must be 2D and (r, c) must both be a positive multiple of 128;10/16;2:4
+
+
+To construct a semi-structured sparse tensor, start by creating a regular dense tensor that adheres to a 2:4 (or semi-structured) sparse format.
+To do this we  tile a small 1x4 strip to create a 16x16 dense float16 tensor.
+Afterwards, we can call ``to_sparse_semi_structured`` function to compress it for accelerated inference.
+
+    >>> from torch.sparse import to_sparse_semi_structured
+    >>> A = torch.Tensor([0, 0, 1, 1]).tile((128, 32)).half().cuda()
+    tensor([[0., 0., 1.,  ..., 0., 1., 1.],
+            [0., 0., 1.,  ..., 0., 1., 1.],
+            [0., 0., 1.,  ..., 0., 1., 1.],
+            ...,
+            [0., 0., 1.,  ..., 0., 1., 1.],
+            [0., 0., 1.,  ..., 0., 1., 1.],
+            [0., 0., 1.,  ..., 0., 1., 1.]], device='cuda:0', dtype=torch.float16)
+    >>> A_sparse = to_sparse_semi_structured(A)
+    SparseSemiStructuredTensor(shape=torch.Size([128, 128]), transposed=False, values=tensor([[1., 1., 1.,  ..., 1., 1., 1.],
+            [1., 1., 1.,  ..., 1., 1., 1.],
+            [1., 1., 1.,  ..., 1., 1., 1.],
+            ...,
+            [1., 1., 1.,  ..., 1., 1., 1.],
+            [1., 1., 1.,  ..., 1., 1., 1.],
+            [1., 1., 1.,  ..., 1., 1., 1.]], device='cuda:0', dtype=torch.float16), metadata=tensor([[-4370, -4370, -4370,  ..., -4370, -4370, -4370],
+            [-4370, -4370, -4370,  ..., -4370, -4370, -4370],
+            [-4370, -4370, -4370,  ..., -4370, -4370, -4370],
+            ...,
+            [-4370, -4370, -4370,  ..., -4370, -4370, -4370],
+            [-4370, -4370, -4370,  ..., -4370, -4370, -4370],
+            [-4370, -4370, -4370,  ..., -4370, -4370, -4370]], device='cuda:0',
+    dtype=torch.int16))
+
+Sparse Semi-Structured Tensor Operations
+----------------------------------------
+
+Currently, the following operations are supported for semi-structured sparse tensors:
+
+- torch.addmm(bias, dense, sparse.t())
+- torch.mm(dense, sparse)
+- torch.mm(sparse, dense)
+- aten.linear.default(dense, sparse, bias)
+- aten.t.default(sparse)
+- aten.t.detach(sparse)
+
+To use these ops, simply pass the output of ``to_sparse_semi_structured(tensor)``  instead of using ``tensor`` once your tensor has 0s in a semi-structured sparse format, like this:
+
+    >>> a = torch.Tensor([0, 0, 1, 1]).tile((64, 16)).half().cuda()
+    >>> b = torch.rand(64, 64).half().cuda()
+    >>> c = torch.mm(a, b)
+    >>> a_sparse = to_sparse_semi_structured(a)
+    >>> torch.allclose(c, torch.mm(a_sparse, b))
+    True
+
+Accelerating nn.Linear with semi-structured sparsity
+----------------------------------------------------
+You can accelerate the linear layers in your model if the weights are already semi-structured sparse with just a few lines of code:
+
+    >>> input = torch.rand(64, 64).half().cuda()
+    >>> mask = torch.Tensor([0, 0, 1, 1]).tile((64, 16)).cuda().bool()
+    >>> linear = nn.Linear(64, 64).half().cuda()
+    >>> linear.weight = nn.Parameter(to_sparse_semi_structured(linear.weight.masked_fill(~mask, 0)))
+
 
 .. _sparse-coo-docs:
 
@@ -206,6 +463,15 @@ invariants:
    Dense dimensions always follow sparse dimensions, that is, mixing
    of dense and sparse dimensions is not supported.
 
+.. note::
+
+   To be sure that a constructed sparse tensor has consistent indices,
+   values, and size, the invariant checks can be enabled per tensor
+   creation via ``check_invariants=True`` keyword argument, or
+   globally using :class:`torch.sparse.check_sparse_tensor_invariants`
+   context manager instance. By default, the sparse tensor invariants
+   checks are disabled.
+
 .. _sparse-uncoalesced-coo-docs:
 
 Uncoalesced sparse COO tensors
@@ -267,7 +533,6 @@ sparse tensor with the following properties:
   On the other hand, the lexicographical ordering of indices can be
   advantageous for implementing algorithms that involve many element
   selection operations, such as slicing or matrix products.
-
 
 Working with sparse COO tensors
 -------------------------------
@@ -416,6 +681,33 @@ __ https://en.wikipedia.org/wiki/Sparse_matrix#Compressed_sparse_row_(CSR,_CRS_o
      where ``plain_dim_size`` is the number of plain dimensions
      (orthogonal to compressed dimensions, e.g. columns or rows).
 
+   To be sure that a constructed sparse tensor has consistent indices,
+   values, and size, the invariant checks can be enabled per tensor
+   creation via ``check_invariants=True`` keyword argument, or
+   globally using :class:`torch.sparse.check_sparse_tensor_invariants`
+   context manager instance. By default, the sparse tensor invariants
+   checks are disabled.
+
+.. note::
+
+   The generalization of sparse compressed layouts to N-dimensional
+   tensors can lead to some confusion regarding the count of specified
+   elements. When a sparse compressed tensor contains batch dimensions
+   the number of specified elements will correspond to the number of such
+   elements per-batch. When a sparse compressed tensor has dense dimensions
+   the element considered is now the K-dimensional array. Also for block
+   sparse compressed layouts the 2-D block is considered as the element
+   being specified.  Take as an example a 3-dimensional block sparse
+   tensor, with one batch dimension of length ``b``, and a block
+   shape of ``p, q``. If this tensor has ``n`` specified elements, then
+   in fact we have ``n`` blocks specified per batch. This tensor would
+   have ``values`` with shape ``(b, n, p, q)``. This interpretation of the
+   number of specified elements comes from all sparse compressed layouts
+   being derived from the compression of a 2-dimensional matrix. Batch
+   dimensions are treated as stacking of sparse matrices, dense dimensions
+   change the meaning of the element from a simple scalar value to an
+   array with its own dimensions.
+
 .. _sparse-csr-docs:
 
 Sparse CSR Tensor
@@ -512,9 +804,9 @@ argument is optional and will be deduced from the ``crow_indices`` and
     >>> csr = torch.sparse_csr_tensor(crow_indices, col_indices, values, dtype=torch.float64)
     >>> csr
     tensor(crow_indices=tensor([0, 2, 4]),
-          col_indices=tensor([0, 1, 0, 1]),
-          values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
-          dtype=torch.float64)
+           col_indices=tensor([0, 1, 0, 1]),
+           values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
+           dtype=torch.float64)
     >>> csr.to_dense()
     tensor([[1., 2.],
             [3., 4.]], dtype=torch.float64)
@@ -817,9 +1109,13 @@ function:
     >>> (csr.transpose(0, 1).to_dense() == csc.to_dense()).all()
     tensor(True)
 
+.. _sparse-ops-docs:
 
-Supported Linear Algebra operations
+Supported operations
 +++++++++++++++++++++++++++++++++++
+
+Linear Algebra operations
+-------------------------
 
 The following table summarizes supported Linear Algebra operations on
 sparse matrices where the operands layouts may vary. Here
@@ -838,12 +1134,18 @@ multiplication, and ``@`` is matrix multiplication.
    :func:`torch.mv`;no; ``M[sparse_csr] @ V[strided] -> V[strided]``
    :func:`torch.matmul`; no; ``M[sparse_coo] @ M[strided] -> M[strided]``
    :func:`torch.matmul`; no; ``M[sparse_csr] @ M[strided] -> M[strided]``
+   :func:`torch.matmul`; no; ``M[SparseSemiStructured] @ M[strided] -> M[strided]``
+   :func:`torch.matmul`; no; ``M[strided] @ M[SparseSemiStructured] -> M[strided]``
    :func:`torch.mm`; no; ``M[sparse_coo] @ M[strided] -> M[strided]``
+   :func:`torch.mm`; no; ``M[SparseSemiStructured] @ M[strided] -> M[strided]``
+   :func:`torch.mm`; no; ``M[strided] @ M[SparseSemiStructured] -> M[strided]``
    :func:`torch.sparse.mm`; yes; ``M[sparse_coo] @ M[strided] -> M[strided]``
    :func:`torch.smm`; no; ``M[sparse_coo] @ M[strided] -> M[sparse_coo]``
    :func:`torch.hspmm`; no; ``M[sparse_coo] @ M[strided] -> M[hybrid sparse_coo]``
    :func:`torch.bmm`; no; ``T[sparse_coo] @ T[strided] -> T[strided]``
    :func:`torch.addmm`; no; ``f * M[strided] + f * (M[sparse_coo] @ M[strided]) -> M[strided]``
+   :func:`torch.addmm`; no; ``f * M[strided] + f * (M[SparseSemiStructured] @ M[strided]) -> M[strided]``
+   :func:`torch.addmm`; no; ``f * M[strided] + f * (M[strided] @ M[SparseSemiStructured]) -> M[strided]``
    :func:`torch.sparse.addmm`; yes; ``f * M[strided] + f * (M[sparse_coo] @ M[strided]) -> M[strided]``
    :func:`torch.sspaddmm`; no; ``f * M[sparse_coo] + f * (M[sparse_coo] @ M[strided]) -> M[sparse_coo]``
    :func:`torch.lobpcg`; no; ``GENEIG(M[sparse_coo]) -> M[strided], M[strided]``
@@ -863,7 +1165,7 @@ matrix arguments.
    S == (S.t() @ D.t()).t()``.
 
 Tensor methods and sparse
-+++++++++++++++++++++++++
+-------------------------
 
 The following Tensor methods are related to sparse tensors:
 
@@ -970,7 +1272,8 @@ The following Tensor methods support sparse COO tensors:
 :meth:`~torch.Tensor.zero_`
 
 Torch functions specific to sparse Tensors
-++++++++++++++++++++++++++++++++++++++++++
+------------------------------------------
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -993,7 +1296,7 @@ Torch functions specific to sparse Tensors
     sparse.spdiags
 
 Other functions
-+++++++++++++++
+---------------
 
 The following :mod:`torch` functions support sparse tensors:
 
@@ -1021,8 +1324,24 @@ The following :mod:`torch` functions support sparse tensors:
 :func:`~torch.zeros`
 :func:`~torch.zeros_like`
 
-In addition, all zero-preserving unary functions support sparse
-COO/CSR/CSC/BSR/CSR tensor inputs:
+To manage checking sparse tensor invariants, see:
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    sparse.check_sparse_tensor_invariants
+
+Unary functions
+---------------
+
+We aim to support all zero-preserving unary functions.
+
+If you find that we are missing a zero-preserving unary function
+that you need, please feel encouraged to open an issue for a feature request.
+As always please kindly try the search function first before opening an issue.
+
+The following operators currently support sparse COO/CSR/CSC/BSR/CSR tensor inputs.
 
 :func:`~torch.abs`
 :func:`~torch.asin`

@@ -1,11 +1,9 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["module: unknown"]
 
 import logging
 import torch
 from torch.nn.utils.parametrize import is_parametrized
-import unittest
-from torch.testing._internal.common_utils import TestCase, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import TestCase
 
 from typing import Tuple
 from torch import nn
@@ -213,7 +211,7 @@ class _BaseDataSparsiferTestCase(TestCase):
             weight = sparsifier._extract_weight(data)
             weight.data = weight + torch.randn(*weight.shape)
             contained_data = sparsifier.get_data(name=name)
-            assert id(weight.data) == id(contained_data.data)
+            assert weight.data.storage().data_ptr() == contained_data.data.storage().data_ptr()
             assert torch.all(contained_data == weight)
 
 
@@ -511,7 +509,6 @@ class Model(nn.Module):
 
 
 class TestQuantizationUtils(TestCase):
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN due to address sanitization")
     def test_ptq_sparsify_first(self):
         """The expectation is post_training_sparse_quantize function
         1. Takes in a model
@@ -533,8 +530,8 @@ class TestQuantizationUtils(TestCase):
                                       select_embeddings=select_embeddings,
                                       **sparse_config)
 
-        assert type(model.emb1) == torch.nn.quantized.modules.embedding_ops.Embedding
-        assert type(model.embbag1) == torch.nn.quantized.modules.embedding_ops.EmbeddingBag
+        assert type(model.emb1) == torch.ao.nn.quantized.modules.embedding_ops.Embedding
+        assert type(model.embbag1) == torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
         assert type(model.emb_seq[0] == nn.Embedding)
         assert type(model.emb_seq[1] == nn.EmbeddingBag)
         assert type(model.linear1) == nn.Linear
@@ -551,7 +548,6 @@ class TestQuantizationUtils(TestCase):
         assert abs(sl_emb1 - 0.80) <= 0.05  # +- 5% leeway
         assert abs(sl_embbag1 - 0.80) <= 0.05  # +- 5% leeway
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN due to address sanitization")
     def test_ptq_quantize_first(self):
         """The expectation is post_training_sparse_quantize function
         1. Takes in a model
@@ -568,10 +564,10 @@ class TestQuantizationUtils(TestCase):
         sparse_config = {'sparsity_level': 0.8, 'sparse_block_shape': (1, 1)}
         post_training_sparse_quantize(model, DataNormSparsifier, sparsify_first=False, **sparse_config)
 
-        assert type(model.emb1) == torch.nn.quantized.modules.embedding_ops.Embedding
-        assert type(model.embbag1) == torch.nn.quantized.modules.embedding_ops.EmbeddingBag
-        assert type(model.emb_seq[0] == torch.nn.quantized.modules.embedding_ops.Embedding)
-        assert type(model.emb_seq[1] == torch.nn.quantized.modules.embedding_ops.EmbeddingBag)
+        assert type(model.emb1) == torch.ao.nn.quantized.modules.embedding_ops.Embedding
+        assert type(model.embbag1) == torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
+        assert type(model.emb_seq[0] == torch.ao.nn.quantized.modules.embedding_ops.Embedding)
+        assert type(model.emb_seq[1] == torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag)
         assert type(model.linear1) == nn.Linear  # not quantized
         assert type(model.linear2) == nn.Linear  # not quantized
 

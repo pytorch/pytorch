@@ -19,7 +19,6 @@ TORCH_API extern const char* ERR_BACKWARD_TWICE;
 
 /// A snapshot of a variable at a certain version. A `SavedVariable` stores
 /// enough information to reconstruct a variable from a certain point in time.
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_API SavedVariable {
  public:
   SavedVariable() = default;
@@ -49,6 +48,10 @@ class TORCH_API SavedVariable {
 
   void reset_data();
 
+  bool has_hooks() const {
+    return (bool)hooks_;
+  }
+
  private:
   // This field contains either:
   // 1. the variable to save
@@ -57,7 +60,7 @@ class TORCH_API SavedVariable {
   // we fall into the second case and its metadata is also saved separately.
   // In that case, the grad_fn must be passed in to the unpack function when
   // reconstructing the Variable (except when we are doing an inplace operation
-  // on a view, see below). The field saved_orignal_ below reflects the two
+  // on a view, see below). The field saved_original_ below reflects the two
   // cases: its value is true in the first case and false in the second case.
   // The value data_.defined() can be false in three cases:
   // 1. SavedVariable was constructed without a Tensor (the value to save is
@@ -103,7 +106,11 @@ class TORCH_API SavedVariable {
   // hooks are defined. They are set before pack_hook is called and used after
   // unpack_hook is called.
   std::shared_ptr<Node> grad_fn_;
-  std::weak_ptr<Node> grad_accumulator_;
+  // For the usual case where leaf tensors are the input, we expect its
+  // grad_acc to be kept alive by the graph. The reason SavedVariable holds
+  // a owning reference is to support the case where a custom autograd Function
+  // saves an intermediate.
+  std::shared_ptr<Node> grad_accumulator_;
   bool requires_grad_ = false;
 
   void save_metadata(const Variable& data);

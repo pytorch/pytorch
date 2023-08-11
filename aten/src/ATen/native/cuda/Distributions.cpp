@@ -16,7 +16,7 @@
 #include <ATen/ops/poisson_native.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor _s_poisson_cuda(const Tensor& lambda, c10::optional<Generator> gen_) {
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
@@ -81,4 +81,4 @@ Tensor _dirichlet_grad_cuda(const Tensor& x, const Tensor& alpha, const Tensor& 
   return ret;
 }
 
-}} // namespace at::native
+} // namespace at::native

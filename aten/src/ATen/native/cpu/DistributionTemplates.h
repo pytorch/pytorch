@@ -40,11 +40,11 @@ void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t bas
 template<typename RNG>
 void random_full_64_bits_range_kernel(TensorIteratorBase& iter, RNG generator) {
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::BFloat16, iter.dtype(), "random_full_64_bits_range_kernel_cpu", [&] {
-    std::lock_guard<std::mutex> lock(generator->mutex_);
-    if (std::is_same<scalar_t, int64_t>::value ||
+    if constexpr (std::is_same<scalar_t, int64_t>::value ||
         std::is_same<scalar_t, double>::value ||
         std::is_same<scalar_t, float>::value ||
         std::is_same<scalar_t, at::BFloat16>::value) {
+      std::lock_guard<std::mutex> lock(generator->mutex_);
       cpu_serial_kernel(iter, [generator]() -> scalar_t {
         uniform_int_full_range_distribution<scalar_t> random;
         return random(generator);
@@ -290,6 +290,7 @@ struct GeometricKernel {
 
 template<typename RNG>
 void exponential_kernel(TensorIteratorBase& iter, double lambda, RNG generator) {
+  TORCH_CHECK(isFloatingType(iter.dtype()), "Exponential distribution is a continuous probability distribution. dtype must be a floating point but you specified ", iter.dtype());
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "exponential_cpu", [&]() {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     at::exponential_distribution<double> exponential(lambda);

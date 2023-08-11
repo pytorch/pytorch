@@ -7,11 +7,12 @@ from itertools import product, combinations, permutations, chain
 from functools import partial
 import random
 import warnings
+import unittest
 
-from torch._six import nan
+from torch import nan
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, skipIfTorchDynamo, torch_to_numpy_dtype_dict)
+    TestCase, run_tests, skipIfTorchDynamo, torch_to_numpy_dtype_dict, IS_JETSON)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, onlyNativeDeviceTypes,
     dtypesIfCUDA, largeTensorTest)
@@ -406,6 +407,34 @@ class TestShapeOps(TestCase):
             out_t = make_from_data([[3, 2, 1], [6, 5, 4]])
             yield in_t, dims, out_t
 
+            # vectorized NCHW cases (images)
+            if device == "cpu" and dtype != torch.bfloat16:
+                for mf in [torch.contiguous_format, torch.channels_last]:
+                    for c in [2, 3, 8, 16]:
+                        in_t = make_from_size((2, c, 32, 32)).contiguous(memory_format=mf)
+                        np_in_t = in_t.numpy()
+
+                        np_out_t = np_in_t[:, :, :, ::-1].copy()
+                        out_t = torch.from_numpy(np_out_t)
+                        yield in_t, 3, out_t
+
+                        np_out_t = np_in_t[:, :, ::-1, :].copy()
+                        out_t = torch.from_numpy(np_out_t)
+                        yield in_t, 2, out_t
+
+                        # non-contig cases
+                        in_tt = in_t[..., ::2, :]
+                        np_in_t = in_tt.numpy()
+                        np_out_t = np_in_t[:, :, :, ::-1].copy()
+                        out_t = torch.from_numpy(np_out_t)
+                        yield in_tt, 3, out_t
+
+                        in_tt = in_t[..., ::2]
+                        np_in_t = in_tt.numpy()
+                        np_out_t = np_in_t[:, :, :, ::-1].copy()
+                        out_t = torch.from_numpy(np_out_t)
+                        yield in_tt, 3, out_t
+
             # Noops (edge cases)
 
             # Size 0
@@ -477,6 +506,7 @@ class TestShapeOps(TestCase):
     @onlyCUDA  # CPU is too slow
     @largeTensorTest('17GB')  # 4 tensors of 4GB (in, out) x (torch, numpy) + 1GB
     @largeTensorTest("81GB", "cpu")  # even for CUDA test, sufficient system memory is required
+    @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     def test_flip_large_tensor(self, device):
         t_in = torch.empty(2**32 + 1, dtype=torch.uint8).random_()
         torch_fn = partial(torch.flip, dims=(0,))

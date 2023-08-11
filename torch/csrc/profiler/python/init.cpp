@@ -1,11 +1,13 @@
 #include <torch/csrc/profiler/python/init.h>
 
 #include <ATen/record_function.h>
+#include <c10/util/overloaded.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
-#include <torch/csrc/profiler/standalone/execution_graph_observer.h>
+#include <torch/csrc/profiler/python/combined_traceback.h>
+#include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
@@ -36,7 +38,10 @@ void initPythonBindings(PyObject* module) {
       .value("NVTX", ProfilerState::NVTX)
       .value("ITT", ProfilerState::ITT)
       .value("KINETO", ProfilerState::KINETO)
-      .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK);
+      .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK)
+      .value(
+          "KINETO_PRIVATEUSE1_FALLBACK",
+          ProfilerState::KINETO_PRIVATEUSE1_FALLBACK);
 
   py::enum_<ActiveProfilerType>(m, "ActiveProfilerType")
       .value("NONE", ActiveProfilerType::NONE)
@@ -47,6 +52,8 @@ void initPythonBindings(PyObject* module) {
 
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
+      .value("XPU", ActivityType::XPU)
+      .value("MTIA", ActivityType::MTIA)
       .value("CUDA", ActivityType::CUDA);
 
   py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")
@@ -54,7 +61,9 @@ void initPythonBindings(PyObject* module) {
           py::init<
               std::vector<std::string> /* profiler_metrics */,
               bool /* profiler_measure_per_kernel */,
-              bool /* verbose */
+              bool /* verbose */,
+              std::vector<std::string> /* performance_events  */,
+              bool /* enable_cuda_sync_events */
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
@@ -63,10 +72,16 @@ void initPythonBindings(PyObject* module) {
           "       If this list contains values Kineto runs in CUPTI profiler mode\n"
           "    profiler_measure_per_kernel (bool) : whether to profile metrics per kernel\n"
           "       or for the entire measurement duration.\n"
-          "    verbose (bool) : whether the trace file has `Call stack` field or not.",
+          "    verbose (bool) : whether the trace file has `Call stack` field or not.\n"
+          "    performance_events : a list of profiler events to be used for measurement.\n"
+          "    enable_cuda_sync_events : for CUDA profiling mode, enable adding CUDA synchronization events\n"
+          "       that expose CUDA device, stream and event synchronization activities. This feature is new\n"
+          "       and currently disabled by default.\n",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,
-          py::arg("verbose") = false)
+          py::arg("verbose") = false,
+          py::arg("performance_events") = std::vector<std::string>(),
+          py::arg("enable_cuda_sync_events") = false)
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
             py::list py_metrics;
@@ -74,13 +89,22 @@ void initPythonBindings(PyObject* module) {
               py::bytes mbytes(metric);
               py_metrics.append(mbytes);
             }
+            py::list py_perf_events;
+            for (const auto& event : p.performance_events) {
+              py::bytes mbytes(event);
+              py_perf_events.append(mbytes);
+            }
             /* Return a tuple that fully encodes the state of the config */
             return py::make_tuple(
-                py_metrics, p.profiler_measure_per_kernel, p.verbose);
+                py_metrics,
+                p.profiler_measure_per_kernel,
+                p.verbose,
+                p.enable_cuda_sync_events,
+                p.performance_events);
           },
           [](py::tuple t) { // __setstate__
-            if (t.size() != 3) {
-              throw std::runtime_error("Expected 3 values in state");
+            if (t.size() >= 4) {
+              throw std::runtime_error("Expected atleast 4 values in state");
             }
 
             py::list py_metrics = t[0].cast<py::list>();
@@ -90,14 +114,27 @@ void initPythonBindings(PyObject* module) {
               metrics.push_back(py::str(py_metric));
             }
 
+            std::vector<std::string> performance_events;
+            if (t.size() == 5) {
+              py::list py_perf_events = t[4].cast<py::list>();
+              performance_events.resize(py_perf_events.size());
+              for (const auto& py_perf_event : py_perf_events) {
+                performance_events.push_back(py::str(py_perf_event));
+              }
+            }
+
             return ExperimentalConfig(
-                std::move(metrics), t[1].cast<bool>(), t[2].cast<bool>());
+                std::move(metrics),
+                t[1].cast<bool>(),
+                t[2].cast<bool>(),
+                std::move(performance_events),
+                t[3].cast<bool>());
           }));
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
       .def(py::init<
            ProfilerState,
-           bool, /* record_input_shapes */
+           bool, /* report_input_shapes */
            bool, /* profile_memory */
            bool, /* with_stack */
            bool, /* with_flops */
@@ -108,30 +145,17 @@ void initPythonBindings(PyObject* module) {
   py::enum_<EventType>(m, "_EventType")
       .value("TorchOp", EventType::TorchOp)
       .value("Backend", EventType::Backend)
+      .value("Vulkan", EventType::Vulkan)
       .value("Allocation", EventType::Allocation)
       .value("PyCall", EventType::PyCall)
       .value("PyCCall", EventType::PyCCall)
       .value("Kineto", EventType::Kineto);
 
-  py::class_<Inputs>(m, "_Inputs")
-      .def_readonly("shapes", &Inputs::shapes_)
-      .def_readonly("dtypes", &Inputs::dtypes_)
-      .def_readonly("strides", &Inputs::strides_)
-      .def_property_readonly(
-          "ivalues",
-          [](const Inputs& inputs) {
-            py::list list;
-            for (auto& v : inputs.ivalues_) {
-              list.append(torch::jit::toPyObject(v));
-            }
-            return list;
-          })
-      .def_readonly("tensor_metadata", &Inputs::tensor_metadata_);
-
   py::class_<TensorMetadata>(m, "_TensorMetadata")
-      .def_readonly("impl_ptr", &TensorMetadata::impl_)
+      .def_property_readonly("impl_ptr", &TensorMetadata::impl)
       .def_readonly("storage_data_ptr", &TensorMetadata::data_)
       .def_readonly("id", &TensorMetadata::id_)
+      .def_readonly("allocation_id", &TensorMetadata::allocation_id_)
       .def_property_readonly(
           "layout",
           [](const TensorMetadata& metadata) {
@@ -139,7 +163,7 @@ void initPythonBindings(PyObject* module) {
                 torch::autograd::utils::wrap(metadata.layout_);
             return py::reinterpret_borrow<py::object>(layout_obj);
           })
-      .def_property_readonly("device", &TensorMetadata::device)
+      .def_readonly("device", &TensorMetadata::device_)
       .def_property_readonly(
           "dtype",
           [](const TensorMetadata& metadata) {
@@ -147,16 +171,35 @@ void initPythonBindings(PyObject* module) {
                 torch::autograd::utils::wrap(
                     torch::getTHPDtype(metadata.dtype_)));
           })
-      .def_readonly("dim", &TensorMetadata::dim_);
+      .def_readonly("dim", &TensorMetadata::dim_)
+      .def_readonly("sizes", &TensorMetadata::sizes_)
+      .def_readonly("strides", &TensorMetadata::strides_);
 
   using torch_op_t = ExtraFields<EventType::TorchOp>;
   py::class_<torch_op_t>(m, "_ExtraFields_TorchOp")
-      .def_readonly("inputs", &torch_op_t::inputs_)
+      .def_readonly("name", &torch_op_t::name_)
+      .def_property_readonly(
+          "inputs",
+          [](const torch_op_t& op) {
+            py::list out;
+            for (const auto& input : op.inputs_) {
+              c10::visit(
+                  c10::overloaded(
+                      [&](const c10::IValue& v) {
+                        out.append(torch::jit::toPyObject(v));
+                      },
+                      [&](const c10::nullopt_t&) { out.append(py::none()); },
+                      [&](const auto& v) { out.append(py::cast(v)); }),
+                  input);
+            }
+            return out;
+          })
       .def_readonly("scope", &torch_op_t::scope_)
       .def_readonly("sequence_number", &torch_op_t::sequence_number_)
       .def_readonly("allow_tf32_cublas", &torch_op_t::allow_tf32_cublas_);
 
   py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
+  py::class_<ExtraFields<EventType::Vulkan>>(m, "_ExtraFields_Vulkan");
 
   using allocation_t = ExtraFields<EventType::Allocation>;
   py::class_<allocation_t>(m, "_ExtraFields_Allocation")
@@ -166,6 +209,7 @@ void initPythonBindings(PyObject* module) {
             return reinterpret_cast<intptr_t>(a.ptr_);
           })
       .def_readonly("id", &allocation_t::id_)
+      .def_readonly("allocation_id", &allocation_t::allocation_id_)
       .def_readonly("alloc_size", &allocation_t::alloc_size_)
       .def_readonly("total_allocated", &allocation_t::total_allocated_)
       .def_readonly("total_reserved", &allocation_t::total_reserved_)
@@ -181,49 +225,35 @@ void initPythonBindings(PyObject* module) {
 
   py::class_<NNModuleInfo>(m, "_NNModuleInfo")
       .def_property_readonly(
-          "params",
+          "parameters",
           [](const NNModuleInfo& s) {
-            py::list list;
-            for (auto& p : s.params_) {
-              list.append(std::tuple<
-                          std::string,
-                          TensorMetadata,
-                          c10::optional<TensorMetadata>>(
-                  p.param_name_, p.param_, p.grad_));
+            py::list out;
+            for (const auto& p : s.parameters_) {
+              out.append(
+                  py::make_tuple(p.name_, p.metadata_, p.grad_metadata_));
             }
-            return list;
+            return out;
           })
       .def_property_readonly(
-          "cls_name", [](const NNModuleInfo& s) { return s.cls_name_.str(); });
+          "cls_name", [](const NNModuleInfo& s) { return s.cls_name_.str(); })
+      .def_readonly("self_ptr", &NNModuleInfo::self_)
+      .def_readonly("cls_ptr", &NNModuleInfo::cls_);
 
-  py::class_<OptimizerInfo>(m, "_OptInfo")
-      .def_property_readonly(
-          "self",
-          [](const OptimizerInfo& a) {
-            return reinterpret_cast<intptr_t>(a.self_.value_of());
-          })
-      .def_property_readonly(
-          "param_addrs",
-          [](const OptimizerInfo& s) {
-            py::list params_addrs;
-            for (auto& addr : s.params_addr_) {
-              params_addrs.append(addr);
-            }
-            return params_addrs;
-          })
-      .def_property_readonly("opt_state", [](const OptimizerInfo& s) {
-        py::list states;
-        for (auto& a : s.opt_state_) {
-          states.append(std::make_pair(a.first, a.second));
+  py::class_<OptimizerInfo>(m, "_OptimizerInfo")
+      .def_readonly("self_ptr", &OptimizerInfo::self_)
+      .def_property_readonly("parameters", [](const OptimizerInfo& s) {
+        py::list out;
+        for (const auto& p : s.parameters_) {
+          out.append(py::make_tuple(p.metadata_, p.grad_metadata_, p.state_));
         }
-        return states;
+        return out;
       });
 
   py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
-      .def_readonly("opt", &ExtraFields<EventType::PyCall>::opt_)
       .def_readonly("callsite", &ExtraFields<EventType::PyCall>::callsite_)
       .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_)
-      .def_readonly("module", &ExtraFields<EventType::PyCall>::module_);
+      .def_readonly("module", &ExtraFields<EventType::PyCall>::module_)
+      .def_readonly("optimizer", &ExtraFields<EventType::PyCall>::optimizer_);
 
   py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall")
       .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
@@ -237,6 +267,13 @@ void initPythonBindings(PyObject* module) {
       .def_property_readonly("name", &Result::name)
       .def_property_readonly("tag", &Result::tag)
       .def_readonly("extra_fields", &Result::extra_fields_)
+      .def_property_readonly(
+          "typed",
+          [](const Result& r) {
+            return py::make_tuple(
+                r.tag(),
+                py::cast(r.extra_fields_, py::return_value_policy::reference));
+          })
       .def_property_readonly(
           "id",
           [](const Result& r) {
@@ -253,20 +290,40 @@ void initPythonBindings(PyObject* module) {
         return r.endTimeNS() - r.start_time_ns_;
       });
 
-  // PyTorch profiler execution graph internal interface.
+  // PyTorch profiler execution trace internal interface.
   m.def(
-      "_add_execution_graph_observer",
-      &torch::profiler::impl::addExecutionGraphObserver,
+      "_add_execution_trace_observer",
+      &torch::profiler::impl::addExecutionTraceObserver,
       py::arg("output_file_name"));
   m.def(
-      "_remove_execution_graph_observer",
-      &torch::profiler::impl::removeExecutionGraphObserver);
+      "_remove_execution_trace_observer",
+      &torch::profiler::impl::removeExecutionTraceObserver);
   m.def(
-      "_enable_execution_graph_observer",
-      &torch::profiler::impl::enableExecutionGraphObserver);
+      "_enable_execution_trace_observer",
+      &torch::profiler::impl::enableExecutionTraceObserver);
   m.def(
-      "_disable_execution_graph_observer",
-      &torch::profiler::impl::disableExecutionGraphObserver);
+      "_disable_execution_trace_observer",
+      &torch::profiler::impl::disableExecutionTraceObserver);
+  m.def(
+      "_set_record_concrete_inputs_enabled_val",
+      &torch::profiler::impl::set_record_concrete_inputs_enabled_val);
+  m.def(
+      "_set_fwd_bwd_enabled_val",
+      &torch::profiler::impl::set_fwd_bwd_enabled_val);
+  m.def(
+      "_set_cuda_sync_enabled_val",
+      &torch::profiler::impl::set_cuda_sync_enabled_val);
+
+  py::class_<CapturedTraceback, std::shared_ptr<CapturedTraceback>>(
+      m, "CapturedTraceback");
+  m.def(
+      "gather_traceback",
+      CapturedTraceback::gather,
+      py::arg("python") = true,
+      py::arg("script") = true,
+      py::arg("cpp") = true);
+  m.def("symbolize_tracebacks", py_symbolize);
+  installCapturedTracebackPython();
 }
 
 } // namespace profiler

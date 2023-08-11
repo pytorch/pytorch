@@ -9,21 +9,19 @@ import torch
 from typing import NamedTuple
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.common_utils import skipIfRocm, skipCUDANonDefaultStreamIf
+from torch.testing._internal.common_utils import skipIfRocm, skipCUDANonDefaultStreamIf, NoTest, TEST_CUDA
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-# Check if GPU is available
-TEST_CUDA = torch.cuda.is_available()
 # Check if multiple GPU's are available
 TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 
 # If GPU is not available, then do not run the tests
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
-    JitTestCase = object  # noqa: F811
+    JitTestCase = NoTest  # noqa: F811
 
 TEST_LARGE_TENSOR = TEST_CUDA
 
@@ -44,13 +42,10 @@ class TestCUDA(JitTestCase):
     """
     A suite of tests for the CUDA API in TorchScript.
     """
-    def setUp(self):
-        super(TestCUDA, self).setUp()
-
     def tearDown(self):
         gc.collect()
         torch.cuda.empty_cache()
-        super(TestCUDA, self).tearDown()
+        super().tearDown()
 
     @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
@@ -592,3 +587,33 @@ class TestCUDA(JitTestCase):
             is_stream_s, a_load, b_load, c_load = load_model()
             self.assertTrue(is_stream_s)
             self.assertEqual(torch.cat((a_load, b_load), 0), c_load)
+
+    # Make sure that cuda._exchange_device doesn't get DCE'ed
+    @unittest.skipIf(not TEST_CUDA, "Cuda not available")
+    def test__exchange_device_op(self):
+        def fn(device: int, tensor):
+            torch.cuda._exchange_device(device)
+            return tensor.cos().relu()
+
+        fn_s = torch.jit.script(fn)
+        # Just check the graph, don't run it. Otherwise, we'd  need to
+        # run this test on a multi-gpu CI runner, which is overkill.
+        g = fn_s.graph
+        FileCheck().check("cuda::_exchange_device(").run(g)
+        torch._C._jit_pass_inline(g)
+        FileCheck().check("cuda::_exchange_device(").run(g)
+
+    # Make sure that cuda._maybe_exchange_device doesn't get DCE'ed
+    @unittest.skipIf(not TEST_CUDA, "Cuda not available")
+    def test__maybe_exchange_device_op(self):
+        def fn(device: int, tensor):
+            torch.cuda._maybe_exchange_device(device)
+            return tensor.cos().relu()
+
+        fn_s = torch.jit.script(fn)
+        # Just check the graph, don't run it. Otherwise, we'd  need to
+        # run this test on a multi-gpu CI runner, which is overkill.
+        g = fn_s.graph
+        FileCheck().check("cuda::_maybe_exchange_device(").run(g)
+        torch._C._jit_pass_inline(g)
+        FileCheck().check("cuda::_maybe_exchange_device(").run(g)

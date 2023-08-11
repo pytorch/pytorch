@@ -15,10 +15,23 @@ __all__ = ['Container', 'Sequential', 'ModuleList', 'ModuleDict', 'ParameterList
 T = TypeVar('T', bound=Module)
 
 
+# Copied from torch.nn.modules.module, required for a custom __repr__ for ModuleList
+def _addindent(s_, numSpaces):
+    s = s_.split('\n')
+    # don't do anything for single-line stuff
+    if len(s) == 1:
+        return s_
+    first = s.pop(0)
+    s = [(numSpaces * ' ') + line for line in s]
+    s = '\n'.join(s)
+    s = first + '\n' + s
+    return s
+
+
 class Container(Module):
 
     def __init__(self, **kwargs: Any) -> None:
-        super(Container, self).__init__()
+        super().__init__()
         # DeprecationWarning is ignored by default <sigh>
         warnings.warn("nn.Container is deprecated. All of it's functionality "
                       "is now implemented in nn.Module. Subclass that instead.")
@@ -82,7 +95,7 @@ class Sequential(Module):
         ...
 
     def __init__(self, *args):
-        super(Sequential, self).__init__()
+        super().__init__()
         if len(args) == 1 and isinstance(args[0], OrderedDict):
             for key, module in args[0].items():
                 self.add_module(key, module)
@@ -90,12 +103,12 @@ class Sequential(Module):
             for idx, module in enumerate(args):
                 self.add_module(str(idx), module)
 
-    def _get_item_by_idx(self, iterator, idx) -> T:
+    def _get_item_by_idx(self, iterator, idx) -> T:  # type: ignore[misc, type-var]
         """Get the idx-th item of the iterator"""
         size = len(self)
         idx = operator.index(idx)
         if not -size <= idx < size:
-            raise IndexError('index {} is out of range'.format(idx))
+            raise IndexError(f'index {idx} is out of range')
         idx %= size
         return next(islice(iterator, idx, None))
 
@@ -187,7 +200,7 @@ class Sequential(Module):
 
     @_copy_to_script_wrapper
     def __dir__(self):
-        keys = super(Sequential, self).__dir__()
+        keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
@@ -216,11 +229,11 @@ class Sequential(Module):
     def insert(self, index: int, module: Module) -> 'Sequential':
         if not isinstance(module, Module):
             raise AssertionError(
-                'module should be of type: {}'.format(Module))
+                f'module should be of type: {Module}')
         n = len(self._modules)
         if not (-n <= index <= n):
             raise IndexError(
-                'Index out of range: {}'.format(index))
+                f'Index out of range: {index}')
         if index < 0:
             index += n
         for i in range(n, index, -1):
@@ -248,7 +261,7 @@ class ModuleList(Module):
 
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.linears = nn.ModuleList([nn.Linear(10, 10) for i in range(10)])
 
             def forward(self, x):
@@ -261,7 +274,7 @@ class ModuleList(Module):
     _modules: Dict[str, Module]  # type: ignore[assignment]
 
     def __init__(self, modules: Optional[Iterable[Module]] = None) -> None:
-        super(ModuleList, self).__init__()
+        super().__init__()
         if modules is not None:
             self += modules
 
@@ -269,7 +282,7 @@ class ModuleList(Module):
         """Get the absolute index for the list of modules"""
         idx = operator.index(idx)
         if not (-len(self) <= idx < len(self)):
-            raise IndexError('index {} is out of range'.format(idx))
+            raise IndexError(f'index {idx} is out of range')
         if idx < 0:
             idx += len(self)
         return str(idx)
@@ -312,9 +325,41 @@ class ModuleList(Module):
             combined.add_module(str(i), module)
         return combined
 
+    def __repr__(self):
+        """A custom repr for ModuleList that compresses repeated module representations"""
+        list_of_reprs = [repr(item) for item in self]
+        if len(list_of_reprs) == 0:
+            return self._get_name() + '()'
+
+        start_end_indices = [[0, 0]]
+        repeated_blocks = [list_of_reprs[0]]
+        for i, r in enumerate(list_of_reprs[1:], 1):
+            if r == repeated_blocks[-1]:
+                start_end_indices[-1][1] += 1
+                continue
+
+            start_end_indices.append([i, i])
+            repeated_blocks.append(r)
+
+        lines = []
+        main_str = self._get_name() + '('
+        for (start_id, end_id), b in zip(start_end_indices, repeated_blocks):
+            local_repr = f"({start_id}): {b}"  # default repr
+
+            if start_id != end_id:
+                n = end_id - start_id + 1
+                local_repr = f"({start_id}-{end_id}): {n} x {b}"
+
+            local_repr = _addindent(local_repr, 2)
+            lines.append(local_repr)
+
+        main_str += '\n  ' + '\n  '.join(lines) + '\n'
+        main_str += ')'
+        return main_str
+
     @_copy_to_script_wrapper
     def __dir__(self):
-        keys = super(ModuleList, self).__dir__()
+        keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
@@ -388,7 +433,7 @@ class ModuleDict(Module):
 
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.choices = nn.ModuleDict({
                         'conv': nn.Conv2d(10, 10, 3),
                         'pool': nn.MaxPool2d(3)
@@ -407,7 +452,7 @@ class ModuleDict(Module):
     _modules: Dict[str, Module]  # type: ignore[assignment]
 
     def __init__(self, modules: Optional[Mapping[str, Module]] = None) -> None:
-        super(ModuleDict, self).__init__()
+        super().__init__()
         if modules is not None:
             self.update(modules)
 
@@ -522,7 +567,7 @@ class ParameterList(Module):
 
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.params = nn.ParameterList([nn.Parameter(torch.randn(10, 10)) for i in range(10)])
 
             def forward(self, x):
@@ -533,7 +578,7 @@ class ParameterList(Module):
     """
 
     def __init__(self, values: Optional[Iterable[Any]] = None) -> None:
-        super(ParameterList, self).__init__()
+        super().__init__()
         self._size = 0
         if values is not None:
             self += values
@@ -542,7 +587,7 @@ class ParameterList(Module):
         """Get the absolute index for the list of modules"""
         idx = operator.index(idx)
         if not (-len(self) <= idx < len(self)):
-            raise IndexError('index {} is out of range'.format(idx))
+            raise IndexError(f'index {idx} is out of range')
         if idx < 0:
             idx += len(self)
         return str(idx)
@@ -587,7 +632,7 @@ class ParameterList(Module):
         return self.extend(parameters)
 
     def __dir__(self):
-        keys = super(ParameterList, self).__dir__()
+        keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
@@ -621,7 +666,10 @@ class ParameterList(Module):
         for k, p in enumerate(self):
             if isinstance(p, torch.Tensor):
                 size_str = 'x'.join(str(size) for size in p.size())
-                device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
+                if p.device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
+                    device_str = f' ({p.device})'
+                else:
+                    device_str = ''
                 parastr = '{} containing: [{} of size {}{}]'.format(
                     "Parameter" if isinstance(p, Parameter) else "Tensor",
                     p.dtype, size_str, device_str)
@@ -662,7 +710,7 @@ class ParameterDict(Module):
 
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.params = nn.ParameterDict({
                         'left': nn.Parameter(torch.randn(5, 10)),
                         'right': nn.Parameter(torch.randn(5, 10))
@@ -674,7 +722,7 @@ class ParameterDict(Module):
     """
 
     def __init__(self, parameters: Any = None) -> None:
-        super(ParameterDict, self).__init__()
+        super().__init__()
         self._keys: Dict[str, None] = {}
         if parameters is not None:
             self.update(parameters)
@@ -786,7 +834,7 @@ class ParameterDict(Module):
             keys (iterable, string): keys to make the new ParameterDict from
             default (Parameter, optional): value to set for all keys
         """
-        return ParameterDict(((k, default) for k in keys))
+        return ParameterDict((k, default) for k in keys)
 
     def keys(self) -> Iterable[str]:
         r"""Return an iterable of the ParameterDict keys.
@@ -845,7 +893,10 @@ class ParameterDict(Module):
         for k, p in self.items():
             if isinstance(p, torch.Tensor):
                 size_str = 'x'.join(str(size) for size in p.size())
-                device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
+                if p.device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
+                    device_str = f' ({p.device})'
+                else:
+                    device_str = ''
                 parastr = '{} containing: [{} of size {}{}]'.format(
                     "Parameter" if isinstance(p, Parameter) else "Tensor",
                     torch.typename(p), size_str, device_str)

@@ -164,7 +164,7 @@ class FxNetAccFusionsFinder:
             if node not in self.acc_nodes:
                 continue
 
-            fusion_group: "FxNetAccFusionsFinder.FusionGroup" = self.FusionGroup(
+            fusion_group: FxNetAccFusionsFinder.FusionGroup = self.FusionGroup(
                 top_node_idx=self.nodes.index(node),
                 nodes={node},
                 inputs=set(node.all_input_nodes),
@@ -249,5 +249,6 @@ def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     # a cycle (i.e. some node's dependencies were not satisfied.)
     if len(new_graph.nodes) < len(gm.graph.nodes):
         raise RuntimeError(f"Input graph has cycles, unable to add {[node for node in indeg if indeg[node] != 0]}")
+    new_graph._codegen = gm.graph._codegen
     gm.graph = new_graph
     return gm

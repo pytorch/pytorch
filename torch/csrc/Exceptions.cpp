@@ -1,11 +1,10 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/python_headers.h>
 
+#include <array>
 #include <cstdarg>
 #include <exception>
-#include <sstream>
 #include <utility>
-#include <vector>
 
 #include <fmt/format.h>
 #include <torch/csrc/THP.h>
@@ -13,7 +12,7 @@
 #include <c10/util/StringUtil.h>
 
 PyObject *THPException_FatalError, *THPException_LinAlgError,
-    *THPException_OutOfMemoryError;
+    *THPException_OutOfMemoryError, *THPException_DistBackendError;
 
 #define ASSERT_TRUE(cond) \
   if (!(cond))            \
@@ -63,6 +62,16 @@ could not be completed because the input matrix is singular.",
       PyModule_AddObject(
           module, "_OutOfMemoryError", THPException_OutOfMemoryError) == 0);
 
+  ASSERT_TRUE(
+      THPException_DistBackendError = PyErr_NewExceptionWithDoc(
+          "torch.distributed.DistBackendError",
+          "Exception raised when a backend error occurs in distributed",
+          PyExc_RuntimeError,
+          nullptr));
+  ASSERT_TRUE(
+      PyModule_AddObject(
+          module, "_DistBackendError", THPException_DistBackendError) == 0);
+
   return true;
 }
 
@@ -72,6 +81,7 @@ void processErrorMsgInplace(std::string& str) {
   // Translate Aten types to their respective pytorch ones
   constexpr std::array<std::pair<c10::string_view, c10::string_view>, 64>
       changes{{
+          // TODO: remove torch.(cuda.|)sparse.*Tensor items?
           {"Variable[SparseCUDAByteType]", "torch.cuda.sparse.ByteTensor"},
           {"Variable[SparseCUDACharType]", "torch.cuda.sparse.CharTensor"},
           {"Variable[SparseCUDADoubleType]", "torch.cuda.sparse.DoubleTensor"},
@@ -196,6 +206,13 @@ ValueError::ValueError(const char* format, ...) {
   va_end(fmt_args);
 }
 
+NotImplementedError::NotImplementedError(const char* format, ...) {
+  va_list fmt_args;
+  va_start(fmt_args, format);
+  msg = formatMessage(format, fmt_args);
+  va_end(fmt_args);
+}
+
 AttributeError::AttributeError(const char* format, ...) {
   va_list fmt_args;
   va_start(fmt_args, format);
@@ -210,25 +227,36 @@ LinAlgError::LinAlgError(const char* format, ...) {
   va_end(fmt_args);
 }
 
-void PyWarningHandler::InternalHandler::process(
-    const c10::SourceLocation& source_location,
-    const std::string& msg,
-    const bool verbatim) {
-  warning_buffer_.push_back({source_location, msg, verbatim});
-};
+void PyWarningHandler::InternalHandler::process(const c10::Warning& warning) {
+  warning_buffer_.push_back(warning);
+}
 
 PyWarningHandler::PyWarningHandler() noexcept(true)
-    : prev_handler_(c10::Warning::get_warning_handler()), in_exception_(false) {
-  c10::Warning::set_warning_handler(&internal_handler_);
+    : prev_handler_(c10::WarningUtils::get_warning_handler()),
+      in_exception_(false) {
+  c10::WarningUtils::set_warning_handler(&internal_handler_);
+}
+
+// Get the Python warning type for a warning
+PyObject* map_warning_to_python_type(const c10::Warning& warning) {
+  struct Visitor {
+    PyObject* operator()(const c10::UserWarning&) const {
+      return PyExc_UserWarning;
+    }
+    PyObject* operator()(const c10::DeprecationWarning&) const {
+      return PyExc_DeprecationWarning;
+    }
+  };
+  return c10::visit(Visitor(), warning.type());
 }
 
 /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
 /// NOLINTNEXTLINE(bugprone-exception-escape)
 PyWarningHandler::~PyWarningHandler() noexcept(false) {
-  c10::Warning::set_warning_handler(prev_handler_);
+  c10::WarningUtils::set_warning_handler(prev_handler_);
   auto& warning_buffer = internal_handler_.warning_buffer_;
 
-  if (warning_buffer.size() > 0) {
+  if (!warning_buffer.empty()) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject *type, *value, *traceback;
     pybind11::gil_scoped_acquire gil;
@@ -238,19 +266,20 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
       // error has been set yet
       PyErr_Fetch(&type, &value, &traceback);
     }
-    for (auto& warning : warning_buffer) {
-      auto source_location = warning.source_location_;
-      auto& msg = warning.msg_;
+    for (const auto& warning : warning_buffer) {
+      auto source_location = warning.source_location();
+      auto msg = warning.msg();
       processErrorMsgInplace(msg);
       if (source_location.file == nullptr) {
-        result = PyErr_WarnEx(PyExc_RuntimeWarning, msg.c_str(), 1);
-      } else if (warning.verbatim_) {
+        result =
+            PyErr_WarnEx(map_warning_to_python_type(warning), msg.c_str(), 1);
+      } else if (warning.verbatim()) {
         // Sets the source location from the warning
         // Note: PyErr_WarnExplicit will disregard Python's warning filter
         // and always appear. This is in contrast to PyErr_WarnEx,
         // which respects the warning filter.
         result = PyErr_WarnExplicit(
-            /*category=*/PyExc_UserWarning,
+            /*category=*/map_warning_to_python_type(warning),
             /*message=*/msg.c_str(),
             /*filename=*/source_location.file,
             /*lineno=*/source_location.line,
@@ -259,15 +288,13 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
       } else {
         // Lets Python set the source location and puts the C++ warning
         // location into the message.
-        fmt::memory_buffer buf;
-        fmt::format_to(
-            buf,
-            FMT_STRING("{} (Triggered internally at {}:{}.)"),
+        auto buf = fmt::format(
+            "{} (Triggered internally at {}:{}.)",
             msg,
             source_location.file,
             source_location.line);
-        buf.push_back('\0');
-        result = PyErr_WarnEx(PyExc_UserWarning, buf.data(), 1);
+        result =
+            PyErr_WarnEx(map_warning_to_python_type(warning), buf.c_str(), 1);
       }
       if (result < 0) {
         if (in_exception_) {

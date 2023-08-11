@@ -14,10 +14,14 @@ at::ScalarType numpy_dtype_to_aten(int dtype);
 
 bool is_numpy_available();
 bool is_numpy_int(PyObject* obj);
+bool is_numpy_bool(PyObject* obj);
 bool is_numpy_scalar(PyObject* obj);
 
 void warn_numpy_not_writeable();
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj);
+
+void validate_numpy_for_dlpack_deleter_bug();
+bool is_numpy_dlpack_deleter_bugged();
 
 } // namespace utils
 } // namespace torch

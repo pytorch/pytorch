@@ -39,6 +39,9 @@ IMPLICIT_IMPORT_ALLOWLIST: Iterable[str] = [
     "numpy",
     "numpy.core",
     "numpy.core._multiarray_umath",
+    # FX GraphModule might depend on builtins module and users usually
+    # don't extern builtins. Here we import it here by default.
+    "builtins",
 ]
 
 
@@ -95,6 +98,11 @@ class PackageImporter(Importer):
         else:
             self.filename = "<binary>"
             self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer)
+
+        torch._C._log_api_usage_metadata(
+            "torch.package.PackageImporter.metadata",
+            {"serialization_id": self.zip_reader.serialization_id()},
+        )
 
         self.root = _PackageNode(None)
         self.modules = {}
@@ -205,14 +213,14 @@ class PackageImporter(Importer):
             name = f"{key}.storage"
 
             if storage_context.has_storage(name):
-                storage = storage_context.get_storage(name, dtype).storage()
+                storage = storage_context.get_storage(name, dtype)._typed_storage()
             else:
                 tensor = self.zip_reader.get_storage_from_record(
                     ".data/" + name, size, dtype
                 )
                 if isinstance(self.zip_reader, torch._C.PyTorchFileReader):
                     storage_context.add_storage(name, tensor)
-                storage = tensor.storage()
+                storage = tensor._typed_storage()
             loaded_storages[key] = restore_location(storage, location)
 
         def persistent_load(saved_id):
@@ -236,7 +244,7 @@ class PackageImporter(Importer):
                 # TODO: Once we decide to break serialization FC, we can
                 # stop wrapping with TypedStorage
                 return torch.storage.TypedStorage(
-                    wrap_storage=storage.untyped(), dtype=dtype
+                    wrap_storage=storage._untyped_storage, dtype=dtype, _internal=True
                 )
             elif typename == "reduce_package":
                 # to fix BC breaking change, objects on this load path
@@ -294,7 +302,7 @@ class PackageImporter(Importer):
 
         Args:
             include (Union[List[str], str]): An optional string e.g. ``"my_package.my_subpackage"``, or optional list of strings
-                for the names of the files to be inluded in the zipfile representation. This can also be
+                for the names of the files to be included in the zipfile representation. This can also be
                 a glob-style pattern, as described in :meth:`PackageExporter.mock`
 
             exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
@@ -476,7 +484,7 @@ class PackageImporter(Importer):
             return self._do_find_and_load(name)
 
         if module is None:
-            message = "import of {} halted; " "None in sys.modules".format(name)
+            message = f"import of {name} halted; None in sys.modules"
             raise ModuleNotFoundError(message, name=name)
 
         # To handle https://github.com/pytorch/pytorch/issues/57490, where std's
@@ -531,7 +539,7 @@ class PackageImporter(Importer):
                     if not recursive and hasattr(module, "__all__"):
                         self._handle_fromlist(module, module.__all__, recursive=True)
                 elif not hasattr(module, x):
-                    from_name = "{}.{}".format(module_name, x)
+                    from_name = f"{module_name}.{x}"
                     try:
                         self._gcd_import(from_name)
                     except ModuleNotFoundError as exc:
@@ -579,13 +587,13 @@ class PackageImporter(Importer):
         """
         if hasattr(package, "__spec__"):
             if package.__spec__.submodule_search_locations is None:
-                raise TypeError("{!r} is not a package".format(package.__spec__.name))
+                raise TypeError(f"{package.__spec__.name!r} is not a package")
             else:
                 return package
         else:
             module = self.import_module(package)
             if module.__spec__.submodule_search_locations is None:
-                raise TypeError("{!r} is not a package".format(package))
+                raise TypeError(f"{package!r} is not a package")
             else:
                 return module
 

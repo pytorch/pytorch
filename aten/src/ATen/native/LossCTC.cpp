@@ -5,17 +5,38 @@
 // 1. Graves et al: http://www.cs.toronto.edu/~graves/icml_2006.pdf
 // We use the equations from above link, but note that [1] has 1-based indexing and we (of course) use 0-based.
 // Graves et al call the probabilities y, we use log_probs (also calling them inputs)
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/TensorUtils.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/Fill.h>
 #include <c10/util/irange.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 
-#include <numeric>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_ctc_loss.h>
+#include <ATen/ops/_ctc_loss_backward.h>
+#include <ATen/ops/_ctc_loss_backward_native.h>
+#include <ATen/ops/_ctc_loss_native.h>
+#include <ATen/ops/_cudnn_ctc_loss.h>
+#include <ATen/ops/_use_cudnn_ctc_loss.h>
+#include <ATen/ops/ctc_loss_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/full_like.h>
+#include <ATen/ops/tensor.h>
+#include <ATen/ops/where.h>
+#include <ATen/ops/zeros.h>
+#endif
+
 #include <type_traits>
+#include <utility>
 
 namespace at {
 namespace native {
@@ -410,7 +431,7 @@ Tensor get_clamped_target_length(
 }
 
 Tensor get_clamped_target_length(
-    Tensor target_lengths,
+    const Tensor & target_lengths,
     const TensorOptions& options) {
   return target_lengths.clamp_min(1);
 }
@@ -452,7 +473,7 @@ Tensor ctc_loss_impl(const Tensor& log_probs_, const Tensor& targets, LengthsTyp
   } else if (reduction == at::Reduction::Sum) {
     return res.sum();
   }
-  return is_batched ? res : res.squeeze(0);
+  return is_batched ? std::move(res) : res.squeeze(0);
 }
 
 } // namespace

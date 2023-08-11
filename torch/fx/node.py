@@ -7,14 +7,15 @@ import builtins
 import types
 import warnings
 from torch.fx.operator_schemas import normalize_function, normalize_module, ArgsKwargsPair
+from .._ops import ops as _ops
 
 if TYPE_CHECKING:
     from .graph import Graph
 
-__all__ = ['Node', 'map_arg', 'map_aggregate']
+__all__ = ['Node', 'map_arg', 'map_aggregate', "has_side_effect"]
 
 BaseArgumentTypes = Union[str, int, float, bool, complex, torch.dtype,
-                          torch.Tensor, torch.device, torch.memory_format, torch.layout]
+                          torch.Tensor, torch.device, torch.memory_format, torch.layout, torch._ops.OpOverload]
 base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 
 Target = Union[Callable[..., Any], str]
@@ -24,15 +25,28 @@ Argument = Optional[Union[
     List[Any],  # actually Argument
     Dict[str, Any],  # actually Argument
     slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
+    range,
     'Node',
     BaseArgumentTypes
 ]]
 
 _side_effectful_functions: Set[Callable] = {
     torch._assert,
-    torch.ops.profiler._record_function_enter,
-    torch.ops.profiler._record_function_enter_new,
-    torch.ops.profiler._record_function_exit}
+    torch._assert_async,
+    _ops.aten._assert_async.msg,
+    _ops.aten.copy_.default,
+    _ops.aten.sym_constrain_range.default,
+    _ops.aten.sym_constrain_range_for_size.default,
+    _ops.profiler._record_function_enter,
+    _ops.profiler._record_function_enter_new,
+    _ops.profiler._record_function_exit}
+
+
+@compatibility(is_backward_compatible=False)
+def has_side_effect(fn: Callable) -> None:
+    _side_effectful_functions.add(fn)
+    return fn
+
 
 # this is fixed on master, WAR for 1.5
 def _find_module_of_method(orig_method: Callable[..., Any]) -> str:
@@ -68,9 +82,15 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     # things like getattr just appear in builtins
     if getattr(builtins, func.__name__, None) is func:
         return func.__name__
+    # torch.Tensor.{fn}
+    if isinstance(func, types.MethodDescriptorType) and func is getattr(torch.Tensor, func.__name__, None):
+        return f"torch.Tensor.{func.__name__}"
     name = func.__name__
     module = _find_module_of_method(func)
     module = module.replace('torch._ops', 'torch.ops')  # WAR for bug in how torch.ops assigns module
+    # Fixup segment_reduce mismatch
+    if module == "torch" and name == "segment_reduce":
+        name = "_" + name
     return f'{module}.{name}'
 
 def _format_arg(arg, max_list_len=float('inf')) -> str:
@@ -179,7 +199,7 @@ class Node:
         # would appear once here, but represents two uses.
         #
         # Is a dict to act as an "ordered set". Keys are significant, value dont-care
-        self.users : Dict['Node', None] = {}
+        self.users : Dict[Node, None] = {}
         # Type expression representing the output value of this node.
         # This should contain the same class of Type objects that would appear
         # as type annotations for function inputs/outputs.
@@ -355,9 +375,13 @@ class Node:
     def stack_trace(self) -> Optional[str]:
         """
         Return the Python stack trace that was recorded during tracing, if any.
-        This property is usually populated by `Tracer.create_proxy`. To record
-        stack traces during tracing for debug purposes, set
-        `record_stack_traces = True` on the `Tracer` instance.
+        When traced with fx.Tracer, this property is usually populated by
+        `Tracer.create_proxy`. To record stack traces during tracing for debug purposes,
+        set `record_stack_traces = True` on the `Tracer` instance.
+        When traced with dynamo, this property will be populated by default by
+        `OutputGraph.create_proxy`.
+
+        stack_trace would have the innermost frame at the end of the string.
         """
         return self.meta.get("stack_trace", None)
 
@@ -392,7 +416,7 @@ class Node:
         Make target printouts more user-friendly.
         1) builtins will be printed as `builtins.xyz`
         2) operators will be printed as `operator.xyz`
-        3) other callables will be printed with qualfied name, e.g. torch.add
+        3) other callables will be printed with qualified name, e.g. torch.add
         """
         if isinstance(target, str):
             return target
@@ -450,10 +474,10 @@ class Node:
                 return None
             maybe_typename = f'{_type_repr(self.type)} ' if self.type else ''
             default_val = '(default=' + str(self.args[0]) + ')' if self.args else ''
-            return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = {self.op}[target={self.target}]{default_val}'
+            return f'%{self.name} : {maybe_typename}[num_users={len(self.users)}] = {self.op}[target={self.target}]{default_val}'
         elif self.op == 'get_attr':
             maybe_typename = f'{_type_repr(self.type)} ' if self.type is not None else ''
-            return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = ' \
+            return f'%{self.name} : {maybe_typename}[num_users={len(self.users)}] = ' \
                    f'{self.op}[target={self._pretty_print_target(self.target)}]'
         elif self.op == 'output':
             if self.type and maybe_return_typename:
@@ -461,14 +485,16 @@ class Node:
             return f'return {self.args[0]}'
         else:
             maybe_typename = f'{_type_repr(self.type)} ' if self.type is not None else ''
-            return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = ' \
+            return f'%{self.name} : {maybe_typename}[num_users={len(self.users)}] = ' \
                    f'{self.op}[target={self._pretty_print_target(self.target)}](' \
                    f'args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})'
 
     @compatibility(is_backward_compatible=True)
     def replace_all_uses_with(self,
                               replace_with : 'Node',
-                              delete_user_cb: Callable[['Node'], bool] = lambda user: True
+                              delete_user_cb: Callable[['Node'], bool] = lambda user: True,
+                              *,
+                              propagate_meta=False
                               ) -> List['Node']:
         """
         Replace all uses of ``self`` in the Graph with the Node ``replace_with``.
@@ -478,11 +504,21 @@ class Node:
             replace_with (Node): The node to replace all uses of ``self`` with.
             delete_user_cb (Callable): Callback that is called to determine
               whether a given user of the self node should be removed.
+            propagate_meta (bool): Whether or not to copy all properties
+              on the .meta field of the original node onto the replacement node.
+              For safety, this is only valid to do if the replacement node
+              doesn't already have an existing .meta field.
 
         Returns:
 
             The list of Nodes on which this change was made.
         """
+        if propagate_meta:
+            assert len(replace_with.meta) == 0, \
+                'Called node.replace_all_uses_with(replace_with, propagate_meta=True), ' \
+                'but replace_with already has .meta keys'
+            for k, v in self.meta.items():
+                replace_with.meta[k] = v
         to_process = list(self.users)
         skipped = []
         for use_node in to_process:

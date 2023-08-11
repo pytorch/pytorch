@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import Optional, Any, Union
+from typing import Optional, Any, Union, Type
 
 import torch
 import torch.nn as nn
@@ -22,6 +22,7 @@ from torch.ao.quantization.fake_quantize import (
 
 from .observer import (
     _PartialWrapper,
+    MinMaxObserver,
     HistogramObserver,
     MovingAverageMinMaxObserver,
     NoopObserver,
@@ -56,6 +57,7 @@ __all__ = [
     "per_channel_dynamic_qconfig",
     "float_qparams_weight_only_qconfig",
     "float_qparams_weight_only_qconfig_4bit",
+    "default_quint8_weight_qconfig",
     "default_qat_qconfig",
     "default_dynamic_qat_qconfig",
     "default_weight_only_qconfig",
@@ -72,13 +74,9 @@ __all__ = [
     "get_default_qat_qconfig",
     "get_default_qconfig_dict",
     "get_default_qat_qconfig_dict",
-    "assert_valid_qconfig",
-    "add_module_to_qconfig_obs_ctr",
     "QConfigAny",
-    "obs_or_fq_ctr_equals",
     "qconfig_equals",
-    "activation_is_memoryless",
-    "is_reuse_input_qconfig",
+
 ]
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
@@ -105,7 +103,7 @@ class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
         if isinstance(activation, nn.Module) or isinstance(weight, nn.Module):
             raise ValueError("QConfig received observer instance, please pass observer class instead. " +
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
-        return super(QConfig, cls).__new__(cls, activation, weight)
+        return super().__new__(cls, activation, weight)
 
 
 class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
@@ -130,7 +128,7 @@ class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
             raise ValueError("QConfigDynamic received observer instance, please pass observer class instead. " +
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
         warnings.warn("QConfigDynamic is going to be deprecated in PyTorch 1.12, please use QConfig instead")
-        return super(QConfigDynamic, cls).__new__(cls, activation, weight)
+        return super().__new__(cls, activation, weight)
 
 
 default_qconfig = QConfig(activation=default_observer,
@@ -157,7 +155,7 @@ default_dynamic_qconfig = QConfig(activation=default_dynamic_quant_observer,
 Default dynamic qconfig.
 """
 
-float16_dynamic_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float16, compute_dtype=torch.float16),
+float16_dynamic_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float16, is_dynamic=True),
                                   weight=PlaceholderObserver.with_args(dtype=torch.float16))
 """
 Dynamic qconfig with weights quantized to `torch.float16`.
@@ -223,17 +221,24 @@ default_reuse_input_qconfig = QConfig(activation=default_reuse_input_observer,
 Default qconfig for operators that reuse the observers from input Tensor, e.g. reshape
 """
 
-def get_default_qconfig(backend='fbgemm', version=0):
+def get_default_qconfig(backend='x86', version=0):
     """
     Returns the default PTQ qconfig for the specified backend.
 
     Args:
-      * `backend`: a string representing the target backend. Currently supports
-        `x86`, `fbgemm` (default), `qnnpack` and `onednn`.
+      * `backend` (str): a string representing the target backend. Currently supports
+        `x86` (default), `fbgemm`, `qnnpack` and `onednn`.
 
     Return:
         qconfig
     """
+    supported_backends = ["fbgemm", "x86", "qnnpack", "onednn"]
+    if backend not in supported_backends:
+        raise AssertionError(
+            "backend: " + str(backend) +
+            f" not supported. backend must be one of {supported_backends}"
+        )
+
     if version == 0:
         if backend == 'fbgemm':
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
@@ -243,12 +248,17 @@ def get_default_qconfig(backend='fbgemm', version=0):
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_weight_observer)
         elif backend == 'onednn':
+            if not torch.cpu._is_cpu_support_vnni():
+                warnings.warn(
+                    "Default qconfig of oneDNN backend with reduce_range of false may have accuracy issues "
+                    "on CPU without Vector Neural Network Instruction support.")
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_per_channel_weight_observer)
         elif backend == 'x86':
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
                               weight=default_per_channel_weight_observer)
         else:
+            # won't reach
             qconfig = default_qconfig
     else:
         raise AssertionError("Version number: " + str(version) +
@@ -298,18 +308,27 @@ default_embedding_qat_qconfig = QConfig(activation=NoopObserver.with_args(dtype=
 default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                              weight=default_embedding_fake_quant_4bit)
 
-def get_default_qat_qconfig(backend='fbgemm', version=1):
+default_quint8_weight_qconfig = QConfig(activation=HistogramObserver, weight=MinMaxObserver)
+
+def get_default_qat_qconfig(backend='x86', version=1):
     """
     Returns the default QAT qconfig for the specified backend.
 
     Args:
-      * `backend`: a string representing the target backend. Currently supports
-        `x86`, `fbgemm` (default), `qnnpack` and `onednn`.
+      * `backend` (str): a string representing the target backend. Currently supports
+        `x86` (default), `fbgemm`, `qnnpack` and `onednn`.
       * `version`: version, for backwards compatibility. Can be `None` or `1`.
 
     Return:
         qconfig
     """
+    supported_backends = ["fbgemm", "x86", "qnnpack", "onednn"]
+    if backend not in supported_backends:
+        raise AssertionError(
+            "backend: " + str(backend) +
+            f" not supported. backend must be one of {supported_backends}"
+        )
+
     # Histogram observer is too slow for quantization aware training
     if version == 0:
         if backend == 'fbgemm':
@@ -329,7 +348,7 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
                                                                 quant_min=0,
                                                                 quant_max=255),
                               weight=default_per_channel_weight_fake_quant)
-        if backend == 'x86':
+        elif backend == 'x86':
             qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                 quant_min=0,
                                                                 quant_max=255,
@@ -392,46 +411,54 @@ default_per_channel_symmetric_qnnpack_qat_qconfig = QConfig(
                                                        eps=2 ** -12),
     weight=fused_per_channel_wt_fake_quant_range_neg_127_to_127)
 
-def get_default_qconfig_dict(backend='fbgemm', version=0):
+_default_fp32_placeholder_qconfig = QConfig(
+    activation=PlaceholderObserver.with_args(dtype=torch.float32),
+    weight=PlaceholderObserver.with_args(dtype=torch.float32)
+)
+
+_default_quint8_placeholder_qconfig = QConfig(
+    activation=PlaceholderObserver.with_args(dtype=torch.quint8),
+    # operators using this qconfig doesn't have weights
+    weight=None,
+)
+
+def get_default_qconfig_dict(backend='x86', version=0):
     warnings.warn(
         "torch.ao.quantization.get_default_qconfig_dict is deprecated and will be removed in "
         "a future version. Please use torch.ao.quantization.get_default_qconfig_mapping instead.")
     return torch.ao.quantization.get_default_qconfig_mapping(backend, version).to_dict()
 
-def get_default_qat_qconfig_dict(backend='fbgemm', version=1):
+def get_default_qat_qconfig_dict(backend='x86', version=1):
     warnings.warn(
         "torch.ao.quantization.get_default_qat_qconfig_dict is deprecated and will be removed in "
         "a future version. Please use torch.ao.quantization.get_default_qat_qconfig_mapping instead.")
     return torch.ao.quantization.get_default_qat_qconfig_mapping(backend, version).to_dict()
 
-def assert_valid_qconfig(qconfig: Optional[QConfig],
-                         mod: torch.nn.Module) -> None:
+def _assert_valid_qconfig(qconfig: Optional[QConfig],
+                          mod: torch.nn.Module) -> None:
     """
     Verifies that this `qconfig` is valid.
     """
     if qconfig is None:
         return
     is_conv_transpose_mod = (
-        isinstance(mod, torch.nn.ConvTranspose1d) or
-        isinstance(mod, torch.nn.ConvTranspose2d) or
-        isinstance(mod, torch.nn.ConvTranspose3d))
+        isinstance(mod, (torch.nn.ConvTranspose1d, torch.nn.ConvTranspose2d, torch.nn.ConvTranspose3d)))
     if is_conv_transpose_mod:
         if qconfig.weight is None:
             # for now, we assume that any qconfig for ConvTranspose without a weight is valid
             return
         example_observer = qconfig.weight()
         is_per_channel = (
-            isinstance(example_observer, torch.ao.quantization.PerChannelMinMaxObserver) or
-            isinstance(example_observer, torch.ao.quantization.MovingAveragePerChannelMinMaxObserver)
+            isinstance(example_observer, (torch.ao.quantization.PerChannelMinMaxObserver,
+                                          torch.ao.quantization.MovingAveragePerChannelMinMaxObserver))
         )
         assert not is_per_channel, \
             'Per channel weight observer is not supported yet for ConvTranspose{n}d.'
 
-# TODO: remove QConfigAny and replace it with Optional[QConfig]
 QConfigAny = Optional[QConfig]
 QConfigAny.__module__ = "torch.ao.quantization.qconfig"
 
-def add_module_to_qconfig_obs_ctr(
+def _add_module_to_qconfig_obs_ctr(
         qconfig: QConfigAny,
         module: Optional[nn.Module]) -> Any:
     r"""This is a helper function for use in quantization prepare that updates a qconfig so that
@@ -473,9 +500,9 @@ def add_module_to_qconfig_obs_ctr(
 
     return QConfig(activation, weight)
 
-_ObserverOrFakeQuantizeConstructor = Union[_PartialWrapper, ObserverBase, FakeQuantizeBase]
+_ObserverOrFakeQuantizeConstructor = Union[_PartialWrapper, Type[ObserverBase], Type[FakeQuantizeBase]]
 
-def obs_or_fq_ctr_equals(obs_or_fq1: _ObserverOrFakeQuantizeConstructor, obs_or_fq2: _ObserverOrFakeQuantizeConstructor):
+def _obs_or_fq_ctr_equals(obs_or_fq1: _ObserverOrFakeQuantizeConstructor, obs_or_fq2: _ObserverOrFakeQuantizeConstructor):
     if isinstance(obs_or_fq1, _PartialWrapper) and isinstance(obs_or_fq2, _PartialWrapper):
         return _partial_wrapper_equals(obs_or_fq1, obs_or_fq2)
     return obs_or_fq1 == obs_or_fq2
@@ -488,9 +515,9 @@ def _partial_wrapper_equals(obs_or_fq1: _PartialWrapper, obs_or_fq2: _PartialWra
     obs_or_fq1_keywords = copy.copy(obs_or_fq1.p.keywords)
     obs_or_fq2_keywords = copy.copy(obs_or_fq2.p.keywords)
     keywords_equal = True
-    # compare observer constructor with obs_or_fq_ctr_equals since direct compare would fail
+    # compare observer constructor with _obs_or_fq_ctr_equals since direct compare would fail
     if "observer" in obs_or_fq1_keywords and "observer" in obs_or_fq2_keywords:
-        keywords_equal = keywords_equal and obs_or_fq_ctr_equals(obs_or_fq1_keywords["observer"], obs_or_fq2_keywords["observer"])
+        keywords_equal = keywords_equal and _obs_or_fq_ctr_equals(obs_or_fq1_keywords["observer"], obs_or_fq2_keywords["observer"])
         obs_or_fq1_keywords.pop("observer")
         obs_or_fq2_keywords.pop("observer")
     keywords_equal = keywords_equal and obs_or_fq1_keywords == obs_or_fq2_keywords
@@ -508,13 +535,13 @@ def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
             # Qconfig weight and activation can be either a partial wrapper,
             # or an observer class. Special handling is required (above) for
             # comparing partial wrappers.
-            activation_same = obs_or_fq_ctr_equals(q1.activation, q2.activation)
-            weight_same = obs_or_fq_ctr_equals(q1.weight, q2.weight)
+            activation_same = _obs_or_fq_ctr_equals(q1.activation, q2.activation)
+            weight_same = _obs_or_fq_ctr_equals(q1.weight, q2.weight)
             return activation_same and weight_same
         except AttributeError:
             return q1 == q2
 
-def activation_is_memoryless(qconfig: QConfig):
+def _activation_is_memoryless(qconfig: QConfig):
     """
     Return whether the observer for activations defined in the given QConfig is memoryless.
     This means a MovingAverage observer with averaging constant equal to 1.
@@ -527,7 +554,7 @@ def activation_is_memoryless(qconfig: QConfig):
     else:
         return _is_memoryless(act)
 
-def is_reuse_input_qconfig(qconfig: Optional[QConfig]):
+def _is_reuse_input_qconfig(qconfig: Optional[QConfig]):
     return qconfig is not None and \
         isinstance(qconfig.activation(), ReuseInputObserver) and \
         isinstance(qconfig.weight(), NoopObserver)

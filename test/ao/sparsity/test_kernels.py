@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["module: unknown"]
 
 from torch.testing._internal.common_utils import run_tests
@@ -246,6 +245,7 @@ class SparseQuantizedModel(nn.Module):
 
 class TestQuantizedSparseLayers(TestCase):
     @override_qengines
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_sparse_qlinear(self):
         # Note: At the moment, for sparse kernels
         # fbgemm supports only static quantized sparse linear
@@ -278,6 +278,7 @@ class TestQuantizedSparseLayers(TestCase):
         )
 
     @override_qengines
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_sparse_qlinear_serdes(self):
         # Note: At the moment, for sparse kernels
         # fbgemm supports only static quantized sparse linear

@@ -1,6 +1,7 @@
 #pragma once
 
-#include <ATen/BatchedTensorImpl.h>
+#include <ATen/CachedTensorUtils.h>
+#include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/TensorOperators.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/function.h>
@@ -42,13 +43,13 @@ struct TORCH_API AccumulateGrad : public Node {
 
   variable_list apply(variable_list&& grads) override;
 
-  static at::Tensor callHooks(const Variable& variable, at::Tensor new_grad) {
-    for (auto& hook : impl::hooks(variable)) {
-      new_grad = (*hook)({new_grad})[0];
-    }
-    return new_grad;
+  std::vector<std::unique_ptr<FunctionPreHook>>& tensor_pre_hooks() noexcept
+      override {
+    // NB: Since the AccumulateGrad Node is only a weak ref from the Tensor,
+    //     it can be destroyed even though the Tensor is still alive (contrary
+    //     to all other Nodes). So we must lazily read the Tensor hooks here.
+    return impl::hooks(variable);
   }
-
   // Given a variable with its current grad as variable_grad, accumulates
   // new_grad into variable_grad if in place accumulation is possible.
   // Otherwise, uses 'update_grad' to update the grad for the variable.
@@ -113,7 +114,7 @@ struct TORCH_API AccumulateGrad : public Node {
       if (!GradMode::is_enabled() && !new_grad.is_sparse() &&
           !new_grad.is_sparse_csr() &&
           !(variable.is_sparse_csr() && new_grad.layout() == at::kStrided) &&
-          new_grad.use_count() <= num_expected_refs &&
+          at::caching::adjusted_use_count(new_grad) <= num_expected_refs &&
           (new_grad.is_mkldnn() ||
            utils::obeys_layout_contract(new_grad, variable))) {
         // we aren't setting up for double-backward
@@ -138,10 +139,17 @@ struct TORCH_API AccumulateGrad : public Node {
         // shallow copy. We need a shallow copy so that modifying the original
         // grad tensor doesn't modify the grad we accumulate.
         // We only skip clone if indices and values themselves are contiguous
-        // for backward compatiblity reasons. Since without this optimization,
+        // for backward compatibility reasons. Since without this optimization,
         // earlier we would clone the entire SparseTensor which cloned indices
         // and values.
         // For details see https://github.com/pytorch/pytorch/issues/34375.
+
+        // No scenario where we expect this to be true currently
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            !at::caching::is_cached_tensor(new_grad._indices()) &&
+            !at::caching::is_cached_tensor(new_grad._values()) &&
+            !at::caching::is_cached_tensor(new_grad));
+
         update_grad(at::_sparse_coo_tensor_unsafe(
             new_grad._indices(),
             new_grad._values(),
@@ -245,6 +253,11 @@ struct TORCH_API AccumulateGrad : public Node {
       // differentiable. Maybe more trouble than it's worth.
     }
   }
+
+  void compiled_args(CompiledNodeArgs& args) override;
+  variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) override;
 
   Variable variable;
 };

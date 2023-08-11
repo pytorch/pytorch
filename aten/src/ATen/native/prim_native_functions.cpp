@@ -1,4 +1,13 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/is_nonzero_native.h>
+#include <ATen/ops/_foobar_native.h>
+#include <ATen/ops/_test_functorch_fallback_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -28,6 +37,11 @@ bool is_nonzero(const Tensor& self) {
 // within test/test_python_dispatch.py
 Tensor foobar(const Tensor& self, bool arg1, bool arg2, bool arg3) {
   return self;
+}
+
+// Aux function used to test functorch fallback warning
+Tensor _test_functorch_fallback(const Tensor& self, const Tensor& other) {
+  return self.clone();
 }
 
 } // namespace meta

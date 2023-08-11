@@ -28,9 +28,7 @@ def unzip_namedshape(namedshape):
         namedshape = namedshape.items()
     if not hasattr(namedshape, "__iter__") and not isinstance(namedshape, tuple):
         raise RuntimeError(
-            "Expected namedshape to be OrderedDict or iterable of tuples, got: {}".format(
-                type(namedshape)
-            )
+            f"Expected namedshape to be OrderedDict or iterable of tuples, got: {type(namedshape)}"
         )
     if len(namedshape) == 0:
         raise RuntimeError("Expected namedshape to non-empty.")
@@ -122,10 +120,12 @@ def update_names(tensor, names, rename_map, inplace):
 
     For example,
     ```
+    >>> # xdoctest: +SKIP
     >>> x = torch.empty(2, 3, 5, 7, names=('N', 'C', 'H', 'W'))
     >>> x.rename('...', 'height', 'width').names
     ('N', 'C', 'height', 'width')
 
+    >>> # xdoctest: +SKIP
     >>> x.rename('batch', '...', 'width').names
     ('batch', 'C', 'H', 'width')
 
@@ -136,6 +136,7 @@ def update_names(tensor, names, rename_map, inplace):
 
     For example,
     ```
+    >>> # xdoctest: +SKIP
     >>> x = torch.empty(2, 3, 5, 7, names=('N', 'C', 'H', 'W'))
     >>> x.rename(W='width', H='height').names
     ('N', 'C', 'height', 'width')

@@ -169,6 +169,8 @@ void read_config() {
   for (auto op : parse_blocking_wait(blocking_wait_str)) {
     torch_ucc_config.blocking_wait[(std::uint8_t)op] = true;
   }
+  // barrier is always blocking
+  torch_ucc_config.blocking_wait[(std::uint8_t)OpType::BARRIER] = true;
 
   torch_ucc_config.use_future =
       std::stoi(torch_ucc_envs_map.at("TORCH_UCC_USE_FUTURE"));
@@ -461,7 +463,8 @@ void Comm::enqueue_collective(
   ucc_coll_req_h request;
   TORCH_UCC_CHECK(
       ucc_collective_init(&coll, &request, team), "failed to init collective");
-  TORCH_UCC_CHECK(ucc_collective_post(request), "failed to post collective");
+  TORCH_UCC_CHECK_REQUEST(
+      request, ucc_collective_post(request), "failed to post collective");
 
   auto entry =
       std::make_shared<ProcessGroupUCC::ProgressEntry>(&ucc_comm, request);
@@ -490,7 +493,8 @@ void Comm::enqueue_cuda_collective(
   comp_ev.ev_context = nullptr;
   comp_ev.ev_context_size = 0;
   comp_ev.req = request;
-  TORCH_UCC_CHECK(
+  TORCH_UCC_CHECK_REQUEST(
+      request,
       ucc_collective_triggered_post(ee, &comp_ev),
       "failed to post triggered collective");
   ucc_status_t st = ucc_ee_get_event(ee, &post_ev);
@@ -557,7 +561,7 @@ ProcessGroupUCC::ProcessGroupUCC(
     int rank,
     int size,
     std::chrono::duration<float> timeout)
-    : ProcessGroup(rank, size), timeout_(timeout) {
+    : Backend(rank, size), timeout_(timeout) {
   c10::call_once(torch_ucc_config.flag, read_config);
   oob = std::make_shared<torch_ucc_oob_coll_info_t>();
   oob->rank = rank;
@@ -758,9 +762,10 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::collective_post(
     std::vector<at::Tensor>& inputTensors,
     std::vector<at::Tensor>& outputTensors,
     const char* prof_title) {
+  seq_++;
   set_timeout(coll);
   auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCC>(
-      opType, prof_title, inputTensors, logger);
+      opType, seq_, prof_title, inputTensors, logger);
 
   if (opType == OpType::RECV) {
     work->sourceRank_ = coll.root;
@@ -783,7 +788,9 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::collective_post(
         work->future_ = c10::make_intrusive<at::ivalue::Future>(
             c10::ListType::create(c10::TensorType::get()));
       }
+      preproc();
       comm->enqueue_collective(std::move(data), work, coll, team);
+      postproc();
       return work;
     }
 #ifdef USE_CUDA
@@ -1569,7 +1576,13 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::recv(
       "ucc:recv");
 }
 
-c10::intrusive_ptr<ProcessGroup> ProcessGroupUCC::createProcessGroupUCC(
+void ProcessGroupUCC::setSequenceNumberForGroup() {}
+
+uint64_t ProcessGroupUCC::getSequenceNumberForGroup() {
+  return seq_;
+}
+
+c10::intrusive_ptr<Backend> ProcessGroupUCC::createProcessGroupUCC(
     const c10::intrusive_ptr<::c10d::Store>& store,
     int rank,
     int size,

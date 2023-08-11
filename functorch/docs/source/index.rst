@@ -7,14 +7,14 @@ functorch
 
 functorch is `JAX-like <https://github.com/google/jax>`_ composable function transforms for PyTorch.
 
-.. note::
-   This library is currently in `beta <https://pytorch.org/blog/pytorch-feature-classification-changes/#beta>`_.
-   What this means is that the features generally work (unless otherwise documented)
-   and we (the PyTorch team) are committed to bringing this library forward. However, the APIs
-   may change under user feedback and we don't have full coverage over PyTorch operations.
+.. warning::
 
-   If you have suggestions on the API or use-cases you'd like to be covered, please
-   open an github issue or reach out. We'd love to hear about how you're using the library.
+   We've integrated functorch into PyTorch. As the final step of the
+   integration, the functorch APIs are deprecated as of PyTorch 2.0.
+   Please use the torch.func APIs instead and see the
+   `migration guide <https://pytorch.org/docs/master/func.migrating.html>`_
+   and `docs <https://pytorch.org/docs/master/func.html>`_
+   for more details.
 
 What are composable function transforms?
 ----------------------------------------

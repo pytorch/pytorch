@@ -1,14 +1,13 @@
 import os
+import tempfile
 import textwrap
 from functools import lru_cache
-
-from . import config
 
 if os.environ.get("TORCHINDUCTOR_WRITE_MISSING_OPS") == "1":
 
     @lru_cache(None)
     def _record_missing_op(target):
-        with open("/tmp/missing_ops.txt", "a") as fd:
+        with open(f"{tempfile.gettempdir()}/missing_ops.txt", "a") as fd:
             fd.write(str(target) + "\n")
 
 else:
@@ -44,7 +43,7 @@ class MissingOperatorWithDecomp(OperatorIssue):
 
                 There is a decomposition available for {target} in
                 torch._decomp.get_decompositions().  Please add this operator to the
-                `decompositions` list in {config.inductor_import}.decompositions
+                `decompositions` list in torch._inductor.decompositions
                 """
             )
         )
@@ -68,6 +67,9 @@ class InvalidCxxCompiler(RuntimeError):
 
 class CppCompileError(RuntimeError):
     def __init__(self, cmd, output):
+        if isinstance(output, bytes):
+            output = output.decode("utf-8")
+
         super().__init__(
             textwrap.dedent(
                 """
@@ -81,5 +83,5 @@ class CppCompileError(RuntimeError):
                 """
             )
             .strip()
-            .format(cmd=" ".join(cmd), output=output.decode("utf-8"))
+            .format(cmd=" ".join(cmd), output=output)
         )

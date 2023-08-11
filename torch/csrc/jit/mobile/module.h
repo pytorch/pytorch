@@ -62,10 +62,9 @@ class CompilationUnit {
 class TORCH_API Module {
  public:
   Module(
-      // NOLINTNEXTLINE(modernize-pass-by-value)
       c10::intrusive_ptr<c10::ivalue::Object> object,
       std::shared_ptr<CompilationUnit> cu)
-      : object_(object), cu_(std::move(cu)) {}
+      : object_(std::move(object)), cu_(std::move(cu)) {}
   Module() = default;
   Method get_method(const std::string& method_name) const;
   template <typename... Types>

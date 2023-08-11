@@ -12,14 +12,13 @@
 #include <caffe2/core/common.h>
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
-#include <caffe2/proto/torch_pb.h>
+#include <caffe2/proto/torch.pb.h>
 #include <caffe2/serialize/inline_container.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using caffe2::serialize::PyTorchStreamReader;
 void postSetStateValidate(const IValue& v);
@@ -399,5 +398,4 @@ Module LEGACY_deserialize(
   return deserializer.LEGACY_deserialize();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

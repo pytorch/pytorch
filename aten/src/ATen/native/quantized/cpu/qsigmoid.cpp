@@ -18,6 +18,7 @@
 #endif
 
 #include <algorithm>
+#include <utility>
 
 namespace at {
 namespace native {
@@ -25,7 +26,7 @@ namespace native {
 DEFINE_DISPATCH(qsigmoid_stub);
 
 #ifdef USE_PYTORCH_QNNPACK
-Tensor qnnpack_sigmoid(
+static Tensor qnnpack_sigmoid(
     Tensor input, double output_scale, int64_t output_zero_point) {
   TORCH_CHECK(input.ndimension() > 0, "qnnpack_sigmoid(): Got empty input tensor");
   TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
@@ -134,7 +135,7 @@ class QSigmoid final {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qx.scalar_type() == kQUInt8) {
-    return qnnpack_sigmoid(qx, output_scale, output_zero_point);
+    return qnnpack_sigmoid(std::move(qx), output_scale, output_zero_point);
   }
 #endif  // USE_PYTORCH_QNNPACK
   Tensor qy;

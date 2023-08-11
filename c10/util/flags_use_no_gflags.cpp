@@ -148,7 +148,7 @@ C10_EXPORT bool C10FlagParser::Parse<int64_t>(
     const string& content,
     int64_t* value) {
   try {
-    static_assert(sizeof(long long) == sizeof(int64_t), "");
+    static_assert(sizeof(long long) == sizeof(int64_t));
 #ifdef __ANDROID__
     // Android does not have std::atoll.
     *value = atoll(content.c_str());

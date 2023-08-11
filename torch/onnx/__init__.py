@@ -25,6 +25,7 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     symbolic_opset15,
     symbolic_opset16,
     symbolic_opset17,
+    symbolic_opset18,
     utils,
 )
 
@@ -42,6 +43,16 @@ from .utils import (
     register_custom_op_symbolic,
     select_model_mode_for_export,
     unregister_custom_op_symbolic,
+)
+
+from ._internal.exporter import (  # usort:skip. needs to be last to avoid circular import
+    ExportOptions,
+    ExportOutput,
+    ExportOutputSerializer,
+    dynamo_export,
+    OnnxExporterError,
+    enable_fake_mode,
+    OnnxRegistry,
 )
 
 __all__ = [
@@ -62,6 +73,7 @@ __all__ = [
     "symbolic_opset15",
     "symbolic_opset16",
     "symbolic_opset17",
+    "symbolic_opset18",
     # Enums
     "ExportTypes",
     "OperatorExportTypes",
@@ -79,18 +91,33 @@ __all__ = [
     "enable_log",
     # Errors
     "CheckerError",  # Backwards compatibility
+    # Dynamo Exporter
+    "ExportOptions",
+    "ExportOutput",
+    "ExportOutputSerializer",
+    "dynamo_export",
+    "OnnxExporterError",
+    "enable_fake_mode",
+    "OnnxRegistry",
 ]
 
 # Set namespace for exposed private names
 ExportTypes.__module__ = "torch.onnx"
 JitScalarType.__module__ = "torch.onnx"
+ExportOptions.__module__ = "torch.onnx"
+ExportOutput.__module__ = "torch.onnx"
+ExportOutputSerializer.__module__ = "torch.onnx"
+dynamo_export.__module__ = "torch.onnx"
+OnnxExporterError.__module__ = "torch.onnx"
+enable_fake_mode.__module__ = "torch.onnx"
+OnnxRegistry.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
 
 
 @_deprecation.deprecated(
-    since="1.12.0", removed_in="1.14", instructions="use `torch.onnx.export` instead"
+    since="1.12.0", removed_in="2.0", instructions="use `torch.onnx.export` instead"
 )
 def _export(*args, **kwargs):
     return utils._export(*args, **kwargs)

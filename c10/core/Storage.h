@@ -8,7 +8,7 @@ struct C10_API Storage {
  public:
   struct use_byte_size_t {};
 
-  Storage() {}
+  Storage() = default;
   Storage(c10::intrusive_ptr<StorageImpl> ptr)
       : storage_impl_(std::move(ptr)) {}
 
@@ -20,7 +20,7 @@ struct C10_API Storage {
       bool resizable = false)
       : storage_impl_(c10::make_intrusive<StorageImpl>(
             StorageImpl::use_byte_size_t(),
-            size_bytes,
+            std::move(size_bytes),
             allocator,
             resizable)) {}
 
@@ -60,23 +60,13 @@ struct C10_API Storage {
     set_data_ptr_noswap(allocator()->allocate(0));
   }
 
-  template <typename T>
-  T* data() const {
-    return storage_impl_->data<T>();
-  }
-
-  template <typename T>
-  T* unsafe_data() const {
-    return storage_impl_->unsafe_data<T>();
-  }
-
   // TODO: remove later
   void set_nbytes(size_t size_bytes) const {
     storage_impl_.get()->set_nbytes(size_bytes);
   }
 
   void set_nbytes(c10::SymInt size_bytes) const {
-    storage_impl_.get()->set_nbytes(size_bytes);
+    storage_impl_.get()->set_nbytes(std::move(size_bytes));
   }
 
   bool resizable() const {
@@ -92,12 +82,16 @@ struct C10_API Storage {
   }
   // get() use here is to get const-correctness
 
-  void* data() const {
-    return storage_impl_.get()->data();
+  const void* data() const {
+    return storage_impl_->data();
   }
 
-  at::DataPtr& data_ptr() {
-    return storage_impl_->data_ptr();
+  void* mutable_data() const {
+    return storage_impl_->mutable_data();
+  }
+
+  at::DataPtr& mutable_data_ptr() {
+    return storage_impl_->mutable_data_ptr();
   }
 
   const at::DataPtr& data_ptr() const {

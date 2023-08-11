@@ -1,12 +1,10 @@
-# coding=utf-8
 
 import torch
 import torch.distributed as dist
-from torch.distributed._shard.replicated_tensor import ReplicatedTensor
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
-from torch.distributed.nn.functional import all_gather, all_reduce, reduce_scatter
+from torch.distributed.nn.functional import all_gather, reduce_scatter
 
 from ._common import (
     _all_gather_base_input,
@@ -61,7 +59,7 @@ def sharded_embedding(types, args, kwargs, pg):
        because when max_norm is specified only weight which has looked will
        be re-normed so mask IDs whose embeddings are not stored in current
        rank will to an extra row will ensure max_norm still works as expected.
-    3. If max_norm is specified, the extra row gurantee that the mask ID will
+    3. If max_norm is specified, the extra row guarantees that the mask ID will
        not affect the behavior of weigh re-norm.
 
     COLWISE SHARDING
@@ -135,7 +133,7 @@ def _validate_embedding_param(args, kwargs):
 
     Args:
         input: list of ID used for lookup.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         kwargs: same as normal Embedding.
 
     Return: None.
@@ -195,7 +193,7 @@ def _handle_col_wise_sharding(
     Args:
         input: list of ID used for lookup and aggregation.
         world_size: number of ranks.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         local_shard: col-wise shared local weight used for lookup.
         max_norm: If given, each embedding vector with norm larger
             than max_norm is renormalized to have norm max_norm.
@@ -209,11 +207,8 @@ def _handle_col_wise_sharding(
 
     Returns: final result of lookup.
     """
-    if not isinstance(input, ReplicatedTensor):
-        # allgather the inputs first for non Replicated Tensor.
-        gathered_inputs = all_gather(input, group=pg)
-    else:
-        gathered_inputs = input
+    # allgather the inputs first for non Replicated Tensor.
+    gathered_inputs = all_gather(input, group=pg)
 
     if max_norm is not None:
         # max_norm changes the weight in-place
@@ -246,7 +241,7 @@ def _handle_row_wise_sharding(
     Args:
         input: list of ID used for lookup and aggregation.
         world_size: number of ranks.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         local_shard: row-wise shared local weight used for lookup.
         max_norm: If given, each embedding vector with norm larger
             than max_norm is renormalized to have norm max_norm.
@@ -261,11 +256,8 @@ def _handle_row_wise_sharding(
 
     Returns: final result of lookup.
     """
-    if not isinstance(input, ReplicatedTensor):
-        # allgather the inputs first for non Replicated Tensor.
-        gather_inp = _all_gather_base_input(input, pg)
-    else:
-        gather_inp = input
+    # allgather the inputs first for non Replicated Tensor.
+    gather_inp = _all_gather_base_input(input, pg)
 
     # Mask the input according to sharding spec.
     lookup_input, padding_idx, padding_row = _handle_row_wise_mask(
@@ -293,12 +285,9 @@ def _handle_row_wise_sharding(
     )
 
     # TODO: Make the result a PartialTensor.
-    if isinstance(input, ReplicatedTensor):
-        return all_reduce(local_input_embeddings, group=pg)
-    else:
-        local_shards = local_input_embeddings.chunk(pg.size())
-        return reduce_scatter(
-            torch.empty_like(local_shards[0]),
-            list(local_shards),
-            group=pg,
-        )
+    local_shards = local_input_embeddings.chunk(pg.size())
+    return reduce_scatter(
+        torch.empty_like(local_shards[0]),
+        list(local_shards),
+        group=pg,
+    )

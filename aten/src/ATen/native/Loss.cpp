@@ -1,14 +1,61 @@
-#include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/core/Reduction.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/PointwiseOps.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/Exception.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/binary_cross_entropy_backward_native.h>
+#include <ATen/ops/binary_cross_entropy_native.h>
+#include <ATen/ops/binary_cross_entropy_with_logits_native.h>
+#include <ATen/ops/clamp_min.h>
+#include <ATen/ops/cosine_embedding_loss_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/exp.h>
+#include <ATen/ops/hinge_embedding_loss_native.h>
+#include <ATen/ops/huber_loss_backward.h>
+#include <ATen/ops/huber_loss_backward_native.h>
+#include <ATen/ops/huber_loss_native.h>
+#include <ATen/ops/kl_div_native.h>
+#include <ATen/ops/l1_loss_native.h>
+#include <ATen/ops/log.h>
+#include <ATen/ops/margin_ranking_loss_native.h>
+#include <ATen/ops/mean.h>
+#include <ATen/ops/min.h>
+#include <ATen/ops/mse_loss_backward.h>
+#include <ATen/ops/mse_loss_backward_native.h>
+#include <ATen/ops/mse_loss_meta.h>
+#include <ATen/ops/mse_loss_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/neg.h>
+#include <ATen/ops/pairwise_distance.h>
+#include <ATen/ops/poisson_nll_loss_native.h>
+#include <ATen/ops/smooth_l1_loss_backward.h>
+#include <ATen/ops/smooth_l1_loss_backward_native.h>
+#include <ATen/ops/smooth_l1_loss_meta.h>
+#include <ATen/ops/smooth_l1_loss_native.h>
+#include <ATen/ops/soft_margin_loss.h>
+#include <ATen/ops/soft_margin_loss_backward.h>
+#include <ATen/ops/soft_margin_loss_backward_native.h>
+#include <ATen/ops/soft_margin_loss_native.h>
+#include <ATen/ops/squeeze.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/triplet_margin_loss_native.h>
+#include <ATen/ops/where.h>
+#include <ATen/ops/xlogy.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 constexpr float EPSILON = 1e-12;
 
@@ -199,13 +246,7 @@ Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool
   if (log_target) {
     output = at::exp(target) * (target - input);
   } else {
-    if (input.is_mps() || target.is_mps()) {
-      // MPS fallback, as MPS does not currently implement xlogy.
-      // MPS will give the wrong results at `target[i] = 0`
-      output = target * (at::log(target) - input);
-    } else {
-      output = at::xlogy(target, target) - target * input;
-    }
+    output = at::xlogy(target, target) - target * input;
   }
   return apply_loss_reduction(output, reduction);
 }
@@ -241,11 +282,15 @@ Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, 
                     (input_val >= 0) && (input_val <= 1),
                     "all elements of input should be between 0 and 1"
                 );
+                TORCH_CHECK(
+                    (target_val >= 0) && (target_val <= 1),
+                    "all elements of target should be between 0 and 1"
+                );
 
                 // Binary cross entropy tensor is defined by the equation:
                 // L = -w (y ln(x) + (1-y) ln(1-x))
                 return (target_val - scalar_t(1))
-                    * std::max(scalar_t(std::log(scalar_t(1) - input_val)), scalar_t(-100))
+                    * std::max(scalar_t(std::log1p(-input_val)), scalar_t(-100))
                     - target_val * std::max(scalar_t(std::log(input_val)), scalar_t(-100));
             }
         );
@@ -369,8 +414,8 @@ Tensor& soft_margin_loss_out(const Tensor& input,
     const Tensor& target,
     int64_t reduction,
     Tensor& output) {
-  // compute inplace variant of: output = at::log(1. + at::exp(-input * target));
-  at::neg_out(output, input).mul_(target).exp_().add_(1.).log_();
+  // compute inplace variant of: output = at::log1p(at::exp(-input * target));
+  at::neg_out(output, input).mul_(target).exp_().log1p_();
   if (reduction != Reduction::None) {
     auto tmp = apply_loss_reduction(output, reduction);
     output.resize_({});

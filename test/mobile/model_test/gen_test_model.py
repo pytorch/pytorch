@@ -140,7 +140,7 @@ def calcOpsCoverage(ops):
                 "_coverage": round(coverage, 2),
                 "uncovered_ops": uncovered_ops_dict,
                 "covered_ops": covered_ops_dict,
-                "all_generated_ops": sorted(list(all_generated_ops)),
+                "all_generated_ops": sorted(all_generated_ops),
             },
             f,
         )

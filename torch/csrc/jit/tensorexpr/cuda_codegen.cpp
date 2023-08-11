@@ -1,10 +1,11 @@
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #include <torch/csrc/jit/tensorexpr/half_support.h>
 
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
+#include <ATen/native/cuda/jit_utils.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 #include <torch/csrc/jit/codegen/fuser/cuda/resource_strings.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -15,9 +16,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/registerizer.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 // A RAII wrapper to manage a variable and name pair in the look-up table.
 // TODO: move this to a more shared place.
@@ -120,9 +119,8 @@ void CudaAnalysis::visit(ForPtr v) {
       throw std::runtime_error("support only 3D gpu_block_index");
     }
     ExprPtr prev = nullptr;
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (gpu_block_extents_.size() <= gpu_block_index) {
+    if (gpu_block_extents_.size() <= static_cast<size_t>(gpu_block_index)) {
       gpu_block_extents_.resize(gpu_block_index + 1);
     } else {
       prev = gpu_block_extents_[gpu_block_index];
@@ -150,9 +148,8 @@ void CudaAnalysis::visit(ForPtr v) {
       throw std::runtime_error("support only 3D gpu_thread_index");
     }
     ExprPtr prev = nullptr;
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (gpu_thread_extents_.size() <= gpu_thread_index) {
+    if (gpu_thread_extents_.size() <= static_cast<size_t>(gpu_thread_index)) {
       gpu_thread_extents_.resize(gpu_thread_index + 1);
     } else {
       prev = gpu_thread_extents_[gpu_thread_index];
@@ -504,8 +501,7 @@ class PrioritizeLoad : public IRMutator {
           v->indices().size() == nested_store_->indices().size()) {
         // also check indices
         bool same = true;
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        for (int i = 0; i < v->indices().size(); ++i) {
+        for (const auto i : c10::irange(v->indices().size())) {
           if (!exprEquals(v->indices()[i], nested_store_->indices()[i])) {
             same = false;
             break;
@@ -1117,7 +1113,7 @@ void CudaCodeGen::call_with_numel(void** args, int64_t numel) {
   }
 
   auto stream = at::cuda::getCurrentCUDAStream();
-  fuser::cuda::executor_utils::initializeCudaContext();
+  at::cuda::jit::initializeCudaContext();
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
       function_,
       gpu_block_extents,
@@ -1241,7 +1237,7 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
   }
   // Launch the kernels
   auto stream = at::cuda::getCurrentCUDAStream();
-  fuser::cuda::executor_utils::initializeCudaContext();
+  at::cuda::jit::initializeCudaContext();
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
       function_,
       gpu_block_extents_v[0],
@@ -1291,7 +1287,7 @@ at::Tensor CudaCodeGen::empty_strided(
 void CudaCodeGen::CompileToNVRTC(
     const std::string& code,
     const std::string& func_name) {
-  fuser::cuda::executor_utils::initializeCudaContext();
+  at::cuda::jit::initializeCudaContext();
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
   // properly in some scenarios
   auto prior_device = at::cuda::current_device();
@@ -1314,7 +1310,7 @@ void CudaCodeGen::CompileToNVRTC(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
 
 #if defined(USE_ROCM)
-  std::vector<const char*> args = {"--std=c++14"};
+  std::vector<const char*> args = {"--std=c++17"};
 #if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
 #endif
@@ -1323,7 +1319,7 @@ void CudaCodeGen::CompileToNVRTC(
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
       // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
       // which gives better backwards compatibility to work on older driver,
-      // (since older driver doesn't necessrily recognize PTX emitted by new
+      // (since older driver doesn't necessarily recognize PTX emitted by new
       // toolkit);
       // Meanwhile, for forward compatibility (future device with
       // `compile_to_sass==false`), since SASS are not necessarily compatible,
@@ -1335,7 +1331,7 @@ void CudaCodeGen::CompileToNVRTC(
       std::to_string(major) + std::to_string(minor);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const std::vector<const char*> args = {
-      "--std=c++14", compute.c_str(), "-default-device"};
+      "--std=c++17", compute.c_str(), "-default-device"};
 #endif
 
   auto result = nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
@@ -1390,6 +1386,4 @@ CudaCodeGen::~CudaCodeGen() = default;
 
 RegisterCodeGen<CudaCodeGen> cuda_codegen_reg("cuda_codegen");
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

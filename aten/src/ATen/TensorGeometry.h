@@ -13,12 +13,11 @@ namespace at {
 TORCH_API bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides);
 
 struct TORCH_API TensorGeometry {
-  TensorGeometry() : storage_offset_(0) {}
+  TensorGeometry() = default;
 
   explicit TensorGeometry(c10::SymIntArrayRef sizes)
       : sizes_(sizes.vec()),
         strides_(sizes.size()),
-        storage_offset_(0),
         has_symbolic_sizes_strides_(
             !c10::asIntArrayRefSlowOpt(sizes).has_value()) {
     int64_t dim = sizes.size();
@@ -114,12 +113,32 @@ struct TORCH_API TensorGeometry {
     return r;
   }
 
+  std::vector<c10::SymInt>& mutable_sizes() {
+    return sizes_;
+  }
+  std::vector<c10::SymInt>& mutable_strides() {
+    return strides_;
+  }
+  c10::SymInt& mutable_storage_offset() {
+    return storage_offset_;
+  }
+  void recompute() {
+    // recalculate numel after a change
+    c10::SymInt numel = 1;
+    for (const auto& i : sizes_) {
+      numel = numel * i;
+    }
+    numel_ = std::move(numel);
+    has_symbolic_sizes_strides_ =
+        !c10::asIntArrayRefSlowOpt(sizes_).has_value();
+  }
+
  private:
   std::vector<c10::SymInt> sizes_;
   std::vector<c10::SymInt> strides_;
   c10::SymInt storage_offset_;
   c10::SymInt numel_;
-  bool has_symbolic_sizes_strides_;
+  bool has_symbolic_sizes_strides_{false};
 };
 
 } // namespace at

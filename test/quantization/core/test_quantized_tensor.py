@@ -22,7 +22,7 @@ import tempfile
 
 class Foo(torch.nn.Module):
     def __init__(self):
-        super(Foo, self).__init__()
+        super().__init__()
         self.qscheme = torch.per_tensor_symmetric
 
 def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
@@ -70,7 +70,7 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
     return [scale.astype(np.float32), int(nudged_zero_point)]
 
 # Note we explicitly cast variables to np.float32 in a couple of places to avoid
-# the default casting in Python often resuling in double precision and to make
+# the default casting in Python often resulting in double precision and to make
 # sure we're doing the same numerics as C++ code.
 def param_search_greedy(x, bit_rate, n_bins=200, ratio=0.16):
     xmin, xmax = np.min(x), np.max(x)
@@ -443,8 +443,7 @@ class TestQuantizedTensor(TestCase):
         for dtype, zero_points in itertools.product([torch.qint8, torch.quint8], [zero_points_float, zero_points_int]):
             q = torch._empty_per_channel_affine_quantized(
                 [numel], scales=scales, zero_points=zero_points, axis=ch_axis, dtype=dtype, device=device)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(scales, q.q_per_channel_scales())
+            self.assertEqual(scales, q.q_per_channel_scales(), exact_dtype=False)
             self.assertEqual(zero_points, q.q_per_channel_zero_points())
             self.assertEqual(ch_axis, q.q_per_channel_axis())
 
@@ -453,8 +452,7 @@ class TestQuantizedTensor(TestCase):
             int_tensor = torch.randint(0, 100, size=(numel,), dtype=torch.uint8, device=device)
             q = torch._make_per_channel_quantized_tensor(int_tensor, scales, zero_points, ch_axis)
             self.assertEqual(int_tensor, q.int_repr())
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(scales, q.q_per_channel_scales())
+            self.assertEqual(scales, q.q_per_channel_scales(), exact_dtype=False)
             self.assertEqual(zero_points, q.q_per_channel_zero_points())
             self.assertEqual(ch_axis, q.q_per_channel_axis())
 
@@ -779,8 +777,8 @@ class TestQuantizedTensor(TestCase):
 
                 # change memory format
                 qlast = qr.contiguous(memory_format=torch.channels_last)
-                self.assertEqual(qr.stride(), list(reversed(sorted(qr.stride()))))
-                self.assertNotEqual(qlast.stride(), list(reversed(sorted(qlast.stride()))))
+                self.assertEqual(qr.stride(), sorted(qr.stride(), reverse=True))
+                self.assertNotEqual(qlast.stride(), sorted(qlast.stride(), reverse=True))
                 self.assertEqual(qr.int_repr(), qlast.int_repr())
                 self.assertEqual(qr.q_scale(), qlast.q_scale())
                 self.assertEqual(qr.q_zero_point(), qlast.q_zero_point())
@@ -806,11 +804,10 @@ class TestQuantizedTensor(TestCase):
 
             # but we can change memory format
             qlast = qr.contiguous(memory_format=torch.channels_last)
-            self.assertEqual(qr.stride(), list(reversed(sorted(qr.stride()))))
-            self.assertNotEqual(qlast.stride(), list(reversed(sorted(qlast.stride()))))
+            self.assertEqual(qr.stride(), sorted(qr.stride(), reverse=True))
+            self.assertNotEqual(qlast.stride(), sorted(qlast.stride(), reverse=True))
             self.assertEqual(qr.int_repr(), qlast.int_repr())
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(scales, qlast.q_per_channel_scales())
+            self.assertEqual(scales.to(dtype=torch.float64), qlast.q_per_channel_scales())
             self.assertEqual(zero_points, qlast.q_per_channel_zero_points())
             self.assertEqual(1, qlast.q_per_channel_axis())
             self.assertEqual(qlast.dequantize(), qr.dequantize())
@@ -1407,7 +1404,7 @@ class TestQuantizedTensor(TestCase):
                 __constants__ = ['fname']
 
                 def __init__(self):
-                    super(M, self).__init__()
+                    super().__init__()
                     self.fname = fname
 
                 @torch.jit.script_method
@@ -1435,7 +1432,7 @@ class TestQuantizedTensor(TestCase):
     def test_jit_serialization(self):
         class SimpleQTensor(torch.jit.ScriptModule):
             def __init__(self, per_channel):
-                super(SimpleQTensor, self).__init__()
+                super().__init__()
                 x = torch.rand(5, 5).float()
                 if not per_channel:
                     x_q = torch.quantize_per_tensor(x, 0.2, 10, torch.quint8)
@@ -1461,7 +1458,112 @@ class TestQuantizedTensor(TestCase):
         X = torch.randn(5 , 10)
         quantized_X = X.to(torch.bfloat16)
         dedequantized_X = quantized_X.to(torch.float32)
-        torch.testing.assert_allclose(X, dedequantized_X, rtol=1e-4, atol=5e-3)
+        torch.testing.assert_close(X, dedequantized_X, rtol=1e-4, atol=5e-3)
+
+    def test_decomposed_quantize_per_tensor(self):
+        # register the ops
+        import torch.ao.quantization.fx._decomposed
+        X = torch.randn(5, 10)
+        test_cases = [
+            (torch.quint8, torch.uint8, 0, 255),
+            (torch.qint8, torch.int8, -128, 127),
+            (torch.qint32, torch.int32, -2**31, 2**31 - 1),
+        ]
+        for qdtype, dtype, quant_min, quant_max in test_cases:
+            scale, zero_point = _calculate_dynamic_qparams(X, qdtype)
+            quantized_X = torch.quantize_per_tensor(X, scale, zero_point, qdtype)
+            quantized_decomposed_X = \
+                torch.ops.quantized_decomposed.quantize_per_tensor(
+                    X, scale, zero_point, quant_min, quant_max, dtype)
+            self.assertEqual(quantized_decomposed_X.dtype, dtype)
+            self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
+
+    def test_decomposed_dequantize_per_tensor(self):
+        import torch.ao.quantization.fx._decomposed
+        X = torch.randn(5, 10)
+        test_cases = [
+            (torch.quint8, torch.uint8, 0, 255),
+            (torch.qint8, torch.int8, -128, 127),
+            (torch.qint32, torch.int32, -2**31, 2**31 - 1),
+        ]
+
+        for qdtype, dtype, quant_min, quant_max in test_cases:
+            scale, zero_point = _calculate_dynamic_qparams(X, qdtype)
+            quantized_X = torch.quantize_per_tensor(X, scale, zero_point, qdtype)
+            dequantized_X = torch.dequantize(quantized_X)
+
+            quantized_decomposed_X = torch.ops.quantized_decomposed.quantize_per_tensor(
+                X, scale, zero_point, quant_min, quant_max, dtype)
+            dequantized_decomposed_X = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                quantized_decomposed_X, scale, zero_point, quant_min, quant_max, dtype
+            )
+            self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
+            self.assertEqual(dequantized_X, dequantized_decomposed_X)
+
+    def test_decomposed_dynamic_quant_pattern(self):
+        import torch.ao.quantization.fx._decomposed
+        X = torch.randn(5, 10)
+        dtype = torch.uint8
+        qdtype = torch.quint8
+        scale, zero_point = torch._choose_qparams_per_tensor(X, False)
+        quant_min, quant_max = 0, 255
+
+        quantized_X = torch.quantize_per_tensor(X, scale, zero_point, qdtype)
+        dequantized_X = torch.dequantize(quantized_X)
+
+        # Now try decomposed pattern
+        (scale_decomposed, zero_point_decomposed) = torch.ops.quantized_decomposed.choose_qparams.tensor(
+            X, quant_min, quant_max, torch.Tensor([torch.finfo(torch.float32).eps]), dtype)
+        quantized_decomposed_X = torch.ops.quantized_decomposed.quantize_per_tensor.tensor(
+            X, scale_decomposed, zero_point_decomposed, quant_min, quant_max, dtype)
+
+        dequantized_decomposed_X = torch.ops.quantized_decomposed.dequantize_per_tensor.tensor(
+            quantized_decomposed_X, scale_decomposed, zero_point_decomposed, quant_min, quant_max, dtype
+        )
+        self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
+        self.assertEqual(dequantized_X, dequantized_decomposed_X)
+
+    def test_decomposed_quantize_per_channel(self):
+        # register the ops
+        import torch.ao.quantization.fx._decomposed
+        X = torch.randn(5, 10)
+        qdtype = torch.quint8
+        dtype = torch.uint8
+        scales = torch.randn(5,)
+        zero_points = torch.randint(0, 100, (5,))
+        quant_min, quant_max = 0, 255
+        axis = 0
+
+        quantized_X = torch.quantize_per_channel(X, scales, zero_points, axis, qdtype)
+        quantized_decomposed_X = \
+            torch.ops.quantized_decomposed.quantize_per_channel(
+                X, scales, zero_points, axis, quant_min, quant_max, dtype)
+        self.assertEqual(quantized_decomposed_X.dtype, dtype)
+        self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
+
+    def test_decomposed_dequantize_per_channel(self):
+        # register the ops
+        import torch.ao.quantization.fx._decomposed
+        X = torch.randn(5, 10)
+        qdtype = torch.quint8
+        dtype = torch.uint8
+        scales = torch.randn(5,)
+        zero_points = torch.randint(0, 100, (5,))
+        quant_min, quant_max = 0, 255
+        axis = 0
+
+        quantized_X = torch.quantize_per_channel(X, scales, zero_points, axis, qdtype)
+        dequantized_X = torch.dequantize(quantized_X)
+
+        quantized_decomposed_X = \
+            torch.ops.quantized_decomposed.quantize_per_channel(
+                X, scales, zero_points, axis, quant_min, quant_max, dtype)
+        dequantized_decomposed_X = \
+            torch.ops.quantized_decomposed.dequantize_per_channel(
+                quantized_decomposed_X, scales, zero_points, axis, quant_min, quant_max, dtype)
+
+        self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
+        self.assertEqual(dequantized_X, dequantized_decomposed_X)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

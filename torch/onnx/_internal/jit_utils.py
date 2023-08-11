@@ -1,4 +1,5 @@
 """Utilities for manipulating the torch.Graph object and the torchscript."""
+from __future__ import annotations
 
 # TODO(justinchuby): Move more of the symbolic helper functions here and expose
 # them to the user.
@@ -12,7 +13,8 @@ import torch
 from torch import _C
 from torch._C import _onnx as _C_onnx
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, registration
+
 
 _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 _SKIP_NODE_ATTRIBUTES = {"inplace", "aten"}
@@ -98,6 +100,53 @@ class GraphContext:
             **kwargs,
         )
 
+    # NOTE: For backward compatibility with the old symbolic functions.
+    # We are probably going to remove this only after the fx exporter is established.
+    at = aten_op
+
+    @_beartype.beartype
+    def onnxscript_op(
+        self,
+        onnx_fn,  # TODO(titaiwang): annotate this when onnx-script becomes dependency
+        *raw_args: Union[torch.Tensor, _C.Value],
+        outputs: int = 1,
+        **kwargs,
+    ):
+        """Creates an ONNX operator from onnx-script function, taking "raw_args" as inputs and "kwargs" as attributes.
+
+        onnx-script repository: https://github.com/microsoft/onnx-script
+
+        Args:
+            onnx_fn: ONNXFunction from onnx-script; An example can be found at
+                https://github.com/microsoft/onnx-script#example
+            raw_args: The inputs to the operator; usually provided
+                as arguments to the `symbolic` definition.
+            outputs: The number of outputs this operator returns.
+                By default an operator is assumed to return a single output.
+                If `outputs` is greater than one, this functions returns a tuple
+                of output `Value`, representing each output of the ONNX operator
+                in order.
+            kwargs: The attributes of the ONNX operator, whose keys are named
+                according to the following convention: `alpha_f` indicates
+                the `alpha` attribute with type `f`.  The valid type specifiers are
+                `f` (float), `i` (int), `s` (string) or `t` (Tensor).  An attribute
+                specified with type float accepts either a single float, or a
+                list of floats (e.g., you would say `dims_i` for a `dims` attribute
+                that takes a list of integers).
+
+        Returns:
+            The value representing the single output of this operator (see the `outputs`
+            keyword argument for multi-return nodes).
+        """
+        # NOTE(titaiwang): This is using class attributes, and it needs to be updated
+        # if onnx-script makes any change on these.
+        symbolic_name = f"{onnx_fn.opset.domain}::{onnx_fn.name}"
+        opset_version = onnx_fn.opset.version
+
+        registration.custom_onnx_symbolic(symbolic_name, opset_version)(onnx_fn)
+
+        return _add_op(self, symbolic_name, *raw_args, outputs=outputs, **kwargs)
+
 
 @_beartype.beartype
 def add_op_with_blocks(
@@ -125,7 +174,7 @@ def add_op_with_blocks(
 
     Returns:
         A tuple of (output_values, new_contexts, node) where:
-            output_values: ONe or more output value of this operator
+            output_values: One or more output value of this operator
                 (see the `outputs` keyword argument for multi-return nodes).
             new_contexts: A tuple of new graph contexts for each sub-block.
             node: The node representing the operator.
@@ -163,7 +212,7 @@ def _add_op(
     This function is monkey-patched onto Graph.
 
     Args:
-        g: The Torch Graph or Block.
+        graph_context: The Torch Graph or Block.
         opname: The ONNX operator name, e.g., `Abs` or `Add`, or an operator qualified
             with a namespace, e.g., `aten::add`.
         args: The inputs to the operator; usually provided
@@ -261,10 +310,8 @@ def _create_node(
 
 @_beartype.beartype
 def _is_onnx_list(value):
-    return (
-        not isinstance(value, torch._six.string_classes)
-        and not isinstance(value, torch.Tensor)
-        and isinstance(value, Iterable)
+    return isinstance(value, Iterable) and not isinstance(
+        value, (str, bytes, torch.Tensor)
     )
 
 
@@ -321,3 +368,32 @@ def get_device_from_value(value: _C.Value) -> Optional[torch.device]:
         return None
     tensor_type = typing.cast(_C.TensorType, value.type())
     return tensor_type.device()
+
+
+@_beartype.beartype
+def parse_node_kind(kind: str) -> Tuple[str, str]:
+    """Parse node kind into domain and Op name."""
+    if "::" not in kind:
+        raise ValueError(f"Node kind: {kind} is invalid. '::' is not in node kind.")
+    domain, opname = kind.split("::", 1)
+    if "::" in opname:
+        raise ValueError(f"Node kind: {kind} is invalid. '::' should only apear once.")
+    return domain, opname
+
+
+@_beartype.beartype
+def is_aten(domain: str) -> bool:
+    """Check if the domain is official."""
+    return domain == "aten"
+
+
+@_beartype.beartype
+def is_prim(domain: str) -> bool:
+    """Check if the domain is official."""
+    return domain == "prim"
+
+
+@_beartype.beartype
+def is_onnx(domain: str) -> bool:
+    """Check if the domain is official."""
+    return domain == "onnx"

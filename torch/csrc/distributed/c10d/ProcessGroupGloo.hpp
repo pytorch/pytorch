@@ -18,7 +18,7 @@
 
 #include <c10/util/hash.h>
 
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -50,7 +50,7 @@ constexpr const char* GLOO_BACKEND_NAME = "gloo";
 // number can be automatically tuned, but only if we let a single
 // process take charge, and have it broadcast the limits.
 //
-class TORCH_API ProcessGroupGloo : public ProcessGroup {
+class TORCH_API ProcessGroupGloo : public Backend {
  public:
   // AsyncWork is the Gloo specific superclass for asynchronous work items.
   // We can split asynchronous work into 3 phases:
@@ -125,7 +125,7 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
     }
 
     void wait(const std::vector<std::string>& keys) override {
-      store_->wait(keys, Store::kDefaultTimeout);
+      store_->wait(keys, ::c10d::Store::kDefaultTimeout);
     }
 
     void wait(
@@ -133,6 +133,37 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
       const std::chrono::milliseconds& timeout) override {
       store_->wait(keys, timeout);
     }
+
+#ifdef GLOO_STORE_HAS_STORE_V2
+  bool has_v2_support() override {
+    return store_->hasExtendedApi();
+  }
+
+  std::vector<std::vector<char>> multi_get(const std::vector<std::string>& keys) override {
+    std::vector<std::vector<char>> res;
+    for(auto& value : store_->multiGet(keys)) {
+      res.emplace_back(std::vector<char>(value.begin(), value.end()));
+    }
+    return res;
+  }
+
+  void multi_set(const std::vector<std::string>& keys, const std::vector<std::vector<char>>& values) override {
+    std::vector<std::vector<uint8_t>> u_values;
+    for(auto& value : values) {
+      u_values.emplace_back(std::vector<uint8_t>(value.begin(), value.end()));
+    }
+    store_->multiSet(keys, u_values);
+  }
+
+  void append(const std::string& key, const std::vector<char>& value) override {
+    std::vector<uint8_t> tmp(value.begin(), value.end());
+    return store_->append(key, tmp);
+  }
+
+  int64_t add(const std::string& key, int64_t value) override {
+    return store_->add(key, value);
+  }
+#endif
 
    protected:
     c10::intrusive_ptr<::c10d::Store> store_;
@@ -178,13 +209,13 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
     int srcRank_;
   };
 
-  struct TORCH_API Options : public ProcessGroup::Options {
+  struct TORCH_API Options : public Backend::Options {
     explicit Options(
-        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout);
+        std::chrono::milliseconds timeout = kBackendDefaultTimeout);
 
     // return intrusive_ptr of the object
     static c10::intrusive_ptr<Options> create(
-        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout) {
+        std::chrono::milliseconds timeout = kBackendDefaultTimeout) {
       return c10::make_intrusive<Options>(timeout);
     }
 
@@ -214,13 +245,20 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
   // falls back to binding to the loopback address.
   static std::shared_ptr<::gloo::transport::Device> createDefaultDevice();
 
+  // Create ProcessGroupGloo instance.
+  static c10::intrusive_ptr<ProcessGroupGloo> createProcessGroupGloo(
+    const c10::intrusive_ptr<Store>& store,
+    int rank,
+    int size,
+    std::chrono::milliseconds timeout);
+
   explicit ProcessGroupGloo(
       const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
       c10::intrusive_ptr<Options> options = Options::create());
 
-  virtual ~ProcessGroupGloo();
+  ~ProcessGroupGloo() override;
 
   c10::intrusive_ptr<Options> getOptions() {
     return options_;

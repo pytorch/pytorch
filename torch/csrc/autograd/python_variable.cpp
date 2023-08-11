@@ -1,23 +1,20 @@
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/PythonFallbackKernel.h>
 #include <c10/core/DeviceType.h>
-#include <c10/core/SafePyObject.h>
 #include <c10/core/impl/GPUTrace.h>
+#include <c10/core/impl/HermeticPyObjectTLS.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
-#include <c10/util/DeadlockDetection.h>
 #include <c10/util/irange.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/Size.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/Types.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/functions/accumulate_grad.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
 #include <torch/csrc/autograd/python_variable_indexing.h>
@@ -27,18 +24,15 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/tensor/python_tensor.h>
-#include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_new.h>
+#include <torch/csrc/utils/tensor_numpy.h>
 
-#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
-#include <torch/library.h>
 
 #include <ATen/ATen.h>
 
@@ -167,7 +161,7 @@ void pushPyOutToStack(
   if (num_returns == 0) {
     // Check that we got a None return from Python. Anything else is an error.
     TORCH_CHECK(
-        out.is(py::none()),
+        out.is_none(),
         "Expected ",
         msg,
         " for ",
@@ -175,160 +169,19 @@ void pushPyOutToStack(
         " to return None but it returned something else instead.");
   } else if (num_returns == 1) {
     torch::jit::push(
-        stack, torch::jit::toIValue(out.ptr(), schema_returns[0].type()));
+        stack, torch::jit::toIValue(out.ptr(), schema_returns[0].real_type()));
   } else {
     auto outs = py::cast<py::sequence>(out);
     for (const auto idx : c10::irange(outs.size())) {
       torch::jit::push(
           stack,
-          torch::jit::toIValue(outs[idx].ptr(), schema_returns[idx].type()));
+          torch::jit::toIValue(
+              outs[idx].ptr(), schema_returns[idx].real_type()));
     }
   }
 }
 
 namespace {
-
-// NB: This is a macro and not a template function (like it was before)
-// because passing in constexpr char* as template argument breaks some
-// versions of MSVC that are being used internally at Meta.
-// MSVC 14.16.27023 (vs2017_15.9)
-#define CONCRETE_TRACE_CUDA(func_name, ...)                           \
-  at::impl::MaybeSetTLSOnEntryGuard guard;                            \
-  if (Py_IsInitialized()) {                                           \
-    pybind11::gil_scoped_acquire gil;                                 \
-    try {                                                             \
-      py::module mod = py::module::import("torch.utils._cuda_trace"); \
-      py::object hook = mod.attr(func_name).attr("fire_callbacks");   \
-      hook(__VA_ARGS__);                                              \
-    } catch (const std::exception& e) {                               \
-      LOG(ERROR) << "CUDA trace hook execution failed: " << e.what(); \
-    }                                                                 \
-  }
-
-struct ConcretePyInterpreterVTable final
-    : public c10::impl::PyInterpreterVTable {
-  std::string name() const override;
-
-  void decref(PyObject* pyobj, bool is_tensor) const override;
-
-  c10::intrusive_ptr<TensorImpl> detach(const TensorImpl* self) const override;
-
-  void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
-      const override;
-  void python_dispatcher(
-      const c10::OperatorHandle& op,
-      c10::DispatchKeySet,
-      torch::jit::Stack* stack) const override;
-
-  bool is_contiguous(const TensorImpl* self, at::MemoryFormat) const override;
-  bool is_strides_like(const TensorImpl* self, at::MemoryFormat) const override;
-  bool is_non_overlapping_and_dense(const TensorImpl* self) const override;
-  c10::Device device(const TensorImpl* self) const override;
-  int64_t dim(const TensorImpl* self) const override;
-  c10::IntArrayRef strides(const TensorImpl* self) const override;
-  c10::IntArrayRef sizes(const TensorImpl* self) const override;
-  c10::SymIntArrayRef sym_sizes(const TensorImpl* self) const override;
-  c10::Layout layout(const TensorImpl* self) const override;
-  c10::SymInt sym_numel(const TensorImpl* self) const override;
-  c10::SymIntArrayRef sym_strides(const TensorImpl* self) const override;
-  c10::SymInt sym_storage_offset(const TensorImpl* self) const override;
-
-  void trace_gpu_event_creation(uintptr_t event) const override {
-    CONCRETE_TRACE_CUDA("CUDAEventCreationCallbacks", event);
-  }
-  void trace_gpu_event_deletion(uintptr_t event) const override {
-    CONCRETE_TRACE_CUDA("CUDAEventDeletionCallbacks", event);
-  }
-  void trace_gpu_event_record(uintptr_t event, uintptr_t stream)
-      const override {
-    CONCRETE_TRACE_CUDA("CUDAEventRecordCallbacks", event, stream);
-  }
-  void trace_gpu_event_wait(uintptr_t event, uintptr_t stream) const override {
-    CONCRETE_TRACE_CUDA("CUDAEventWaitCallbacks", event, stream);
-  }
-  void trace_gpu_memory_allocation(uintptr_t ptr) const override {
-    CONCRETE_TRACE_CUDA("CUDAMemoryAllocationCallbacks", ptr);
-  }
-  void trace_gpu_memory_deallocation(uintptr_t ptr) const override {
-    CONCRETE_TRACE_CUDA("CUDAMemoryDeallocationCallbacks", ptr);
-  }
-  void trace_gpu_stream_creation(uintptr_t stream) const override {
-    CONCRETE_TRACE_CUDA("CUDAStreamCreationCallbacks", stream);
-  }
-  void trace_gpu_device_synchronization() const override {
-    CONCRETE_TRACE_CUDA("CUDADeviceSynchronizationCallbacks");
-  }
-  void trace_gpu_stream_synchronization(uintptr_t stream) const override {
-    CONCRETE_TRACE_CUDA("CUDAStreamSynchronizationCallbacks", stream);
-  }
-  void trace_gpu_event_synchronization(uintptr_t event) const override {
-    CONCRETE_TRACE_CUDA("CUDAEventSynchronizationCallbacks", event);
-  }
-
-  static ConcretePyInterpreterVTable* instance() {
-    static ConcretePyInterpreterVTable s;
-    return &s;
-  }
-};
-
-// NOTE [PyInterpreter::decref takes an `is_tensor` arg]
-// Before calling PyInterpreter::decref, we must statically know if the
-// pyobj is a Tensor or not.
-// - If it is a tensor, we need to be careful about PyObject resurrection
-// - If it is not a tensor, we can freely decref
-// One alternative to this is using PyObject_IsInstance
-// to get at this information. However, we don't want to risk an incorrect
-// `__instancecheck__` changing the semantics here.
-void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool is_tensor)
-    const {
-  // Leak the pyobj if not initialized.  This can happen if we are running
-  // exit handlers that are destructing tensors with residual (owned)
-  // PyObjects stored in them.
-  if (!Py_IsInitialized())
-    return;
-
-  pybind11::gil_scoped_acquire gil;
-  // Two possibilities:
-  // 1. We are decref-ing a tensor. Then we must be careful about
-  // PyObject resurrection (this only applies to Tensors, see
-  // THPVariable_clear).
-  // 2. We are decref-ing some other Python object. We don't do
-  // PyObject resurrection on non-Tensors, so we just carry on as usual
-  if (is_tensor && Py_REFCNT(pyobj) > 1) {
-    // It's still alive!  This can happen if a weak ref resurrected
-    // the PyObject without flipping ownership.  At this point it is
-    // too late to rescue the object, so just stub out the PyObject
-    // so that it fails on subsequent uses.  Don't raise an error here;
-    // you're probably in a destructor.
-    TORCH_WARN(
-        "Deallocating Tensor that still has live PyObject references.  "
-        "This probably happened because you took out a weak reference to "
-        "Tensor and didn't call _fix_weakref() after dereferencing it.  "
-        "Subsequent accesses to this tensor via the PyObject will now fail.");
-    ((THPVariable*)pyobj)->cdata = MaybeOwned<Variable>();
-  }
-  Py_DECREF(pyobj);
-};
-
-class PyInterpreterHolder {
- public:
-  PyInterpreterHolder()
-      : impl_(new c10::impl::PyInterpreter(
-            ConcretePyInterpreterVTable::instance())) {}
-  // NB: intentionally leaks the PyInterpreter, as there may still be
-  // references to it that are live, living in objects that aren't being
-  // destructed while Python is being cleaned up.
-  ~PyInterpreterHolder() {
-    impl_->disarm();
-  }
-  c10::impl::PyInterpreter* get() const noexcept {
-    return impl_;
-  }
-
- private:
-  c10::impl::PyInterpreter* impl_;
-};
-PyInterpreterHolder self_interpreter;
 
 c10::TensorImpl::SizesStridesPolicy parseSizesStridesPolicyArgument(
     c10::string_view arg) {
@@ -348,16 +201,6 @@ c10::TensorImpl::SizesStridesPolicy parseSizesStridesPolicyArgument(
 }
 } // anonymous namespace
 
-c10::impl::PyInterpreter* getPyInterpreter() {
-  return self_interpreter.get();
-}
-
-std::string ConcretePyInterpreterVTable::name() const {
-  std::stringstream ss;
-  ss << getPyInterpreter();
-  return ss.str();
-}
-
 PyObject* THPVariableClass = nullptr;
 
 PyObject* ParameterClass = nullptr;
@@ -365,7 +208,8 @@ PyObject* ParameterClass = nullptr;
 static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
     Variable _var,
-    c10::impl::PyInterpreterStatus status);
+    c10::impl::PyInterpreterStatus status,
+    bool allow_preexisting_pyobj = false);
 
 // clang-tidy gets confused by static const
 static const char* VOLATILE_WARNING =
@@ -407,7 +251,7 @@ static PyObject* getPythonTensorClass(c10::Device d) {
 }
 
 void activateCUDATrace() {
-  c10::impl::GPUTrace::set_trace(self_interpreter.get());
+  c10::impl::GPUTrace::set_trace(getPyInterpreter());
 }
 
 // TODO: Make this take Variable by const reference
@@ -416,19 +260,26 @@ PyObject* THPVariable_Wrap(at::TensorBase var) {
     Py_RETURN_NONE;
   }
 
+  if (c10::impl::HermeticPyObjectTLS::get_state()) {
+    return THPVariable_NewWithVar(
+        (PyTypeObject*)THPVariableClass,
+        std::move(var),
+        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+  }
+
   c10::optional<PyObject*> mb_obj =
-      var.unsafeGetTensorImpl()->check_pyobj(self_interpreter.get());
+      var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter());
   c10::impl::PyInterpreterStatus status;
   if (mb_obj.has_value()) {
     auto obj = *mb_obj;
     if (obj) {
-      if (var.unsafeGetTensorImpl()->owns_pyobj()) {
+      if (var.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()) {
         // C++ owns the Python object; this implies there weren't any other
         // owning references to the Python object.  Since we're making the
         // object "live" again on Python side, let's flip back the ownership
         // (Python owns C++) as it would now be unsound to deallocate the C++
         // object if all C++ references go to zero
-        var.unsafeGetTensorImpl()->set_owns_pyobj(false);
+        var.unsafeGetTensorImpl()->pyobj_slot()->set_owns_pyobj(false);
         reinterpret_cast<THPVariable*>(obj)->cdata =
             MaybeOwned<Variable>::owned(std::move(var));
         // NB: incref is not necessary, because we are "stealing" the previous
@@ -489,6 +340,11 @@ bool isResurrectable(THPVariable* self) {
     return false;
   }
   auto const& tensor = THPVariable_Unpack(self);
+  // Check if this is hermetic. If it is, no resurrection.
+  if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+          getPyInterpreter()) != c10::make_optional((PyObject*)self)) {
+    return false;
+  }
   if (!tensor.defined() || tensor.use_count() <= 1) {
     return false;
   }
@@ -510,9 +366,10 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
 
   // There are other C++ owners of the tensor.  Flip ownership
   // so that C++ owns this Python object, and cancel deallocation.
-  TORCH_INTERNAL_ASSERT(!tensor.unsafeGetTensorImpl()->owns_pyobj());
+  TORCH_INTERNAL_ASSERT(
+      !tensor.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj());
 
-  tensor.unsafeGetTensorImpl()->set_owns_pyobj(true);
+  tensor.unsafeGetTensorImpl()->pyobj_slot()->set_owns_pyobj(true);
 
 // Resurrect the Python object.  This is something CPython does
 // internally occasionally, see
@@ -531,6 +388,7 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
   // Flip THPVariable to be non-owning
   // (near use-after-free miss here: fresh MaybeOwned is created breaking
   // reference on Tensor in struct BEFORE we overwrite the old one)
+  TORCH_INTERNAL_ASSERT(!c10::impl::HermeticPyObjectTLS::get_state());
   self->cdata = MaybeOwned<Variable>::borrowed(tensor);
 
   // NB: At this point, tensor *could* be dead (e.g., some other C++ thread
@@ -582,15 +440,19 @@ static int THPVariable_clear(THPVariable* self) {
     //        unsafeIsBorrowed() is TRUE.  We're deallocating the PyObject
     //        because Tensor asked us to (it's already destructing).
 
-    if (!self->cdata.unsafeIsBorrowed()) {
+    if (!self->cdata.unsafeIsBorrowed() &&
+        tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+            getPyInterpreter()) == c10::make_optional((PyObject*)self)) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
       //
       //  libc++abi.dylib: terminating with uncaught exception of type
-      //  c10::Error: !tensor.unsafeGetTensorImpl()->owns_pyobj()INTERNAL ASSERT
-      //  FAILED at "../torch/csrc/autograd/python_variable.cpp":171, please
-      //  report a bug to PyTorch. Exception raised from THPVariable_clear at
+      //  c10::Error:
+      //  !tensor.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()INTERNAL
+      //  ASSERT FAILED at "../torch/csrc/autograd/python_variable.cpp":171,
+      //  please report a bug to PyTorch. Exception raised from
+      //  THPVariable_clear at
       //  ../torch/csrc/autograd/python_variable.cpp:171 (most recent call
       //  first): frame #0: c10::Error::Error(c10::SourceLocation,
       //  std::__1::basic_string<char, std::__1::char_traits<char>,
@@ -613,10 +475,12 @@ static int THPVariable_clear(THPVariable* self) {
       //  THPVariable_subclass_dealloc(_object*) + 607 (0x1148a50cf in
       //  libtorch_python.dylib) <omitting python frames> frame #47: start + 1
       //  (0x7fff6ffc7cc9 in libdyld.dylib) frame #48: 0x0 + 4 (0x4 in ???)
-      // TORCH_INTERNAL_ASSERT(!tensor.unsafeGetTensorImpl()->owns_pyobj());
+      // TORCH_INTERNAL_ASSERT(!tensor.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj());
       if (auto grad_acc =
               torch::autograd::impl::try_get_grad_accumulator(tensor)) {
         grad_acc->pre_hooks().clear();
+        grad_acc->tensor_pre_hooks().clear();
+        grad_acc->retains_grad_hooks().clear();
       }
     }
   }
@@ -643,8 +507,37 @@ PyObject* THPVariable_pynew(
 
 static PyObject* THPVariable_fix_weakref(PyObject* self, PyObject* noargs) {
   const auto& var = THPVariable_Unpack(self);
-  THPVariable_Wrap(var);
+  Py_DECREF(THPVariable_Wrap(var));
   Py_RETURN_NONE;
+}
+
+static PyObject* THPVariable_view_func(PyObject* self_, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  const auto& self = THPVariable_Unpack(self_);
+  TORCH_CHECK(
+      THPVariable_Check(arg),
+      "_view_func expect a single argument that is a Tensor");
+  const auto& new_base = THPVariable_Unpack(arg);
+
+  // Ensure that self is indeed a backward differentiable view
+  // If not, we return an undefined Tensor (None) and let the user handle it.
+  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  at::Tensor out;
+  if (diff_view_meta && diff_view_meta->has_bw_view()) {
+    const auto& view_info = diff_view_meta->get_backward_view();
+    // Ensure that the newly provided base is similar to the original base
+    if (torch::autograd::utils::has_same_meta(new_base, view_info.base_)) {
+      // Do the actual view replay
+      if (view_info.has_view_fn()) {
+        out = view_info.view_fn()(new_base);
+      } else {
+        out = new_base.as_strided(
+            self.sizes(), self.strides(), self.storage_offset());
+      }
+    }
+  }
+  return THPVariable_Wrap(std::move(out));
+  END_HANDLE_TH_ERRORS
 }
 
 // Instantiates a subclass of self with the same data.
@@ -686,7 +579,9 @@ static PyObject* THPVariable_make_subclass(
     throw torch::TypeError(
         "cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  torch_dispatch_mode::StashTorchDispatchModeGuard td_g;
+  // guard completely turns off torch dispatch modes, doesn't just pop off the
+  // stack
+  torch_dispatch_mode::StashTorchDispatchStackGuard td_g;
   c10::impl::DisablePythonDispatcher dpd_g;
   auto data =
       r.tensor(1).detach(); // creates a fresh Tensor (DEFINITELY_UNINITIALIZED)
@@ -818,7 +713,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
     if (sizes_strides_policy.has_value()) {
       TORCH_CHECK(
           false,
-          "Setting sizes_strides_policy isn't suppored for this overload")
+          "Setting sizes_strides_policy isn't supported for this overload")
     }
   }
 
@@ -1011,7 +906,7 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
 
   TORCH_CHECK_TYPE(
       THPVariable_Check(py_grad),
-      "assigned grad expected to be a Tensor or None but got grad of type",
+      "assigned grad expected to be a Tensor or None but got grad of type ",
       THPUtils_typename(py_grad));
   THPUtils_assertRet(
       -1,
@@ -1019,23 +914,41 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
       "can't assign Variable as its own grad");
 
   const auto& grad = THPVariable_Unpack(py_grad);
-  bool gradIsSparse =
-      (var.dtype() == grad.dtype() &&
-       var.device().type() == grad.device().type() && grad.layout() == kSparse);
-  THPUtils_assertRet(
-      -1,
-      grad.options().type_equal(var.options()) || gradIsSparse,
-      "assigned grad has data of a different type");
-  if (var.is_cuda()) {
-    THPUtils_assertRet(
-        -1,
-        grad.get_device() == var.get_device(),
-        "assigned grad has data located on a different device");
+  TORCH_CHECK(
+      var.dtype() == grad.dtype(),
+      "attempting to assign a gradient with dtype '",
+      grad.dtype(),
+      "' to a tensor with dtype '",
+      var.dtype(),
+      "'. Please ensure that the gradient and the tensor have the same dtype");
+  TORCH_CHECK(
+      var.device().type() == grad.device().type(),
+      "attempting to assign a gradient with device type '",
+      grad.device().type(),
+      "' to a tensor with device type '",
+      var.device().type(),
+      "'. Please ensure that the gradient and the tensor are on the same device");
+  if (grad.layout() != kSparse) {
+    TORCH_CHECK(
+        grad.options().type_equal(var.options()),
+        "attempting to assign a gradient to a tensor that has data of a different type");
   }
-  THPUtils_assertRet(
-      -1,
+  if (var.is_cuda()) {
+    TORCH_CHECK(
+        grad.get_device() == var.get_device(),
+        "attempting to assign a gradient located on device with index '",
+        grad.get_device(),
+        "' to a tensor located on device with index '",
+        var.get_device(),
+        "'. Please ensure that the gradient and the tensor are on the same device");
+  }
+  TORCH_CHECK(
       grad.sym_sizes().equals(var.sym_sizes()),
-      "assigned grad has data of a different size");
+      "attempting to assign a gradient of size '",
+      grad.sym_sizes(),
+      "' to a tensor of size '",
+      var.sym_sizes(),
+      "'. Please ensure that the gradient and the tensor are the same size");
 
   var.mutable_grad() = grad;
   return 0;
@@ -1206,7 +1119,7 @@ PyObject* THPVariable_get_name(THPVariable* self, void* unused) {
     END_HANDLE_TH_ERRORS
   }
   const auto& tensor = THPVariable_Unpack(self);
-  if (tensor.name() == "")
+  if (tensor.name().empty())
     Py_RETURN_NONE;
   return THPUtils_packString(tensor.name().c_str());
 }
@@ -1243,7 +1156,7 @@ int THPVariable_set_backwards_hooks(
   torch::autograd::impl::clear_hooks(tensor);
   if (obj) {
     torch::autograd::impl::add_hook(
-        tensor, std::make_shared<PyFunctionTensorPreHook>(obj, 0));
+        tensor, std::make_unique<PyFunctionTensorPreHook>(obj, 0));
   }
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -1288,6 +1201,16 @@ PyObject* THPVariable_is_cuda(THPVariable* self, void* unused) {
   }
   auto& self_ = THPVariable_Unpack(self);
   return torch::autograd::utils::wrap(self_.is_cuda());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPVariable_is_xla(THPVariable* self, void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "is_xla");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.is_xla());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1450,6 +1373,24 @@ static PyObject* THPVariable_device(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable_get_nbytes(THPVariable* self, void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "nbytes");
+  }
+  return PyLong_FromSize_t(THPVariable_Unpack(self).nbytes());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPVariable_get_itemsize(THPVariable* self, void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "itemsize");
+  }
+  return PyLong_FromSize_t(THPVariable_Unpack(self).itemsize());
+  END_HANDLE_TH_ERRORS
+}
+
 int THPVariable_set_real(PyObject* self, PyObject* real, void* unused) {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
@@ -1539,6 +1480,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"shape", (getter)THPVariable_get_shape, nullptr, nullptr, nullptr},
     {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
     {"is_cpu", (getter)THPVariable_is_cpu, nullptr, nullptr, nullptr},
+    {"is_xla", (getter)THPVariable_is_xla, nullptr, nullptr, nullptr},
     {"is_xpu", (getter)THPVariable_is_xpu, nullptr, nullptr, nullptr},
     {"is_ipu", (getter)THPVariable_is_ipu, nullptr, nullptr, nullptr},
     {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
@@ -1568,6 +1510,8 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
     {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
     {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
+    {"nbytes", (getter)THPVariable_get_nbytes, nullptr, nullptr, nullptr},
+    {"itemsize", (getter)THPVariable_get_itemsize, nullptr, nullptr, nullptr},
     {"names",
      (getter)THPVariable_get_names,
      (setter)THPVariable_set_names,
@@ -1606,16 +1550,8 @@ static PyMethodDef extra_methods[] = {
      METH_STATIC | METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_fix_weakref", THPVariable_fix_weakref, METH_NOARGS, nullptr},
+    {"_view_func", THPVariable_view_func, METH_O, nullptr},
     {nullptr}};
-
-/* From https://github.com/python/cpython/blob/v3.7.0/Modules/xxsubtype.c
-   If compiled as a shared library instead, some compilers don't allow addresses
-   of Python objects defined in other libraries to be used in static
-   initializers here.  The DEFERRED_ADDRESS macro is used to tag the slots where
-   such addresses appear; the module init function must fill in the tagged slots
-   at runtime.  The argument is for documentation -- the macro ignores it.
-*/
-#define DEFERRED_ADDRESS(ADDR) nullptr
 
 struct THPVariableMeta {
   PyHeapTypeObject base;
@@ -1726,10 +1662,14 @@ PyObject* THPVariable_pynew(
   auto tensor = torch::utils::base_tensor_ctor(args, kwargs);
   // WARNING: tensor is NOT guaranteed to be a fresh tensor; e.g., if it was
   // given a raw pointer that will refcount bump
+  // NB: base_tensor_ctor can call into dispatched ATen functions (e.g.,
+  // alias(), lift_fresh()) which can return Tensor subclasses.  We allow
+  // these to be passed on directly.
   return THPVariable_NewWithVar(
       type,
       std::move(tensor),
-      c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED);
+      c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED,
+      /*allow_preexisting_pyobj=*/true);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1862,34 +1802,104 @@ void THPVariable_subclass_dealloc(PyObject* self) {
 static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
     Variable _var,
-    c10::impl::PyInterpreterStatus status) {
-  // This function overwrite the Tensor's pyobj field without extra checks
-  // Make sure it is not set otherwise we would leak memory
-  auto mb_obj = _var.unsafeGetTensorImpl()->check_pyobj(self_interpreter.get());
-  TORCH_CHECK(
-      !mb_obj.has_value() || !mb_obj.value(),
-      "Creating a new Tensor subclass ",
-      type->tp_name,
-      " but the raw Tensor object is already associated to a python object ",
-      "of type ",
-      mb_obj.value()->ob_type->tp_name);
-
+    c10::impl::PyInterpreterStatus status,
+    bool allow_preexisting_pyobj) {
   // Make sure that the reinterpret into a THPVariable* will be valid
   TORCH_CHECK(
       PyType_IsSubtype(type, &THPVariableType),
       "Creating a Tensor subclass from a class ",
       "that does not inherit from Tensor is not possible. Make sure your class inherits from Tensor.");
 
+  // This function overwrite the Tensor's pyobj field without extra checks
+  // Make sure it is not set otherwise we would leak memory
+  auto mb_obj =
+      _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter());
+
+  // Under some circumstances, we may attempt to create a new Python
+  // object for a variable that already has a Python object.  The most common
+  // situation this can occur is if you have a TorchDispatchMode active that
+  // is returning a subclass from lift_fresh (which is invoked to
+  // appropriately "wrap" a constant tensor into whatever ambient modes are
+  // active.)
+  //
+  // In general, it is impossible to handle this case compositionally.
+  // Suppose you have a user call ATensor([1, 2, 3]) when a mode is active
+  // that is transforming all ops (including the internal lift_fresh call that
+  // transforms [1, 2, 3] into a torch.tensor([1., 2., 3.])) to output
+  // BTensor, where ATensor and BTensor are completely unrelated subclasses
+  // and there is no way to compose them.  There is no way to satisfy the user
+  // request here: in particular, you can't just try to re-invoke the ATensor
+  // constructor on the returned BTensor, because (1) this could cause an
+  // infinite loop--we are already in ATensor.__new__ and (2) there isn't any
+  // guarantee that ATensor.__new__ supports a single element constructor
+  // anyway.
+  //
+  // However, a more common case is a user just called torch.Tensor([1, 2, 3]),
+  // and a fake tensor mode is active.  Really, all you want is to get back
+  // a FakeTensor, in the same way torch.tensor([1, 2, 3]) or torch.arange(3)
+  // would have returned a fake tensor (concretely, the way this happens
+  // is we create a *real* tensor torch.tensor([1., 2., 3.]), and then it
+  // turns into a FakeTensor when we call lift_fresh on this real tensor).
+  // This case is compositional because FakeTensor is a subclass of Tensor, so
+  // it's valid for us to return it in place of a Tensor.  So this is what we
+  // do.
+
+  if (mb_obj.has_value() && mb_obj.value()) {
+    TORCH_CHECK(
+        allow_preexisting_pyobj,
+        "Creating a new Tensor subclass ",
+        type->tp_name,
+        " but the raw Tensor object is already associated to a python object ",
+        "of type ",
+        mb_obj.value()->ob_type->tp_name);
+    // Even if we allow pre-existing PyObject, we don't allow completely
+    // ignoring the requested type.  Check that we fulfilled a subtype
+    // relation here.  In the common case the requested type is Tensor and
+    // this always succeeds.
+    PyObject* obj = *mb_obj;
+    // Check if it's OK to just directly return the Python object without
+    // allocating a new variable.  We just check that the existing Python
+    // object is a subclass of the requested type.
+    PyTypeObject* obj_type = Py_TYPE(obj);
+    TORCH_CHECK(
+        obj_type == type || PyType_IsSubtype(obj_type, type),
+        "Creating a new Tensor subclass ",
+        type->tp_name,
+        " but the raw Tensor object is already associated to a python object ",
+        "of type ",
+        mb_obj.value()->ob_type->tp_name,
+        " which is not a subclass of the "
+        "requested type");
+    // We may (in fact, we typically will) need to resurrect this
+    return THPVariable_Wrap(std::move(_var));
+  }
+
   PyObject* obj = type->tp_alloc(type, 0);
   if (obj) {
     auto v = (THPVariable*)obj;
     // TODO: named constructor to avoid default initialization
     new (&v->cdata) MaybeOwned<Variable>();
-    v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
-    const auto& var = THPVariable_Unpack(v);
-    var.unsafeGetTensorImpl()->init_pyobj(self_interpreter.get(), obj, status);
-    if (check_has_torch_dispatch(obj)) {
-      var.unsafeGetTensorImpl()->set_python_dispatch(true);
+    if (c10::impl::HermeticPyObjectTLS::get_state()) {
+      // Do NOT initialize pyobj field on the tensor, you own the C++
+      v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
+      TORCH_INTERNAL_ASSERT(
+          !check_has_torch_dispatch(obj),
+          "While HermeticPyObject was enabled, we attempted to create a tensor "
+          "subclass with __torch_dispatch__.  This violates the invariant that "
+          "operations in HermeticPyObject have equivalent C++ implementations. "
+          "If your operator registered from Python operator registration isn't "
+          "doing anything strange, there may be an internal PyTorch bug involving "
+          "not appropriately disabling TorchDispatchMode before executing "
+          "Python op registration.");
+    } else {
+      // Normal codepath
+      v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
+      const auto& var = THPVariable_Unpack(v);
+      var.unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
+          getPyInterpreter(), obj, status);
+      if (check_has_torch_dispatch(obj)) {
+        var.unsafeGetTensorImpl()->set_python_dispatch(true);
+      }
     }
   }
   return obj;
@@ -2037,9 +2047,8 @@ static int THPVariable_subclass_traverse(
       // object, which requires the GIL to be accessed. Note that this is only
       // valid as long as user don't share non-owning references across
       // different threads (which is crazy and should never be done).
-
+      auto autograd_meta = torch::autograd::impl::get_autograd_meta(tensor);
       if (tensor.use_count() == 1) {
-        auto autograd_meta = torch::autograd::impl::get_autograd_meta(tensor);
         if (autograd_meta) {
           // Do NOT call grad_fn() here as that might trigger a recompute
           const auto& grad_fn = autograd_meta->grad_fn_;
@@ -2053,10 +2062,12 @@ static int THPVariable_subclass_traverse(
           }
         }
       }
-
-      for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
-        if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
-          Py_VISIT(pyhook->dict);
+      if (autograd_meta) {
+        for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
+          if (auto pyhook =
+                  dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
+            Py_VISIT(pyhook->dict);
+          }
         }
       }
     }
@@ -2089,7 +2100,6 @@ void initTensorImplConversion(PyObject* module) {
         unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
     TORCH_CHECK(p.defined(), "Can't wrap undefined tensor");
     auto tensor = at::Tensor::wrap_tensor_impl(std::move(p));
-    // NOLINTNEXTLINE(performance-move-const-arg)
     return py::cast(std::move(tensor));
   });
   // set on the module level to avoid mixing pybind and plain CPython extensions
@@ -2119,598 +2129,6 @@ bool THPVariable_initModule(PyObject* module) {
   PyModule_AddObject(module, "_TensorBase", (PyObject*)&THPVariableType);
   torch::autograd::initTorchFunctions(module);
   torch::autograd::initTensorImplConversion(module);
+  torch::utils::validate_numpy_for_dlpack_deleter_bug();
   return true;
 }
-
-namespace {
-
-bool isPythonTensor(const Tensor& tensor) {
-  return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python);
-}
-
-py::object torchDispatchFromTensorImpl(
-    const c10::TensorImpl* self,
-    const char* func_name,
-    PyObject* torch_api_function,
-    const char* module_name,
-    // WARNING: MUST NOT BE TENSOR ARGS
-    c10::SmallVector<py::object, 1> extra_args = {}) {
-  if (torch_api_function == nullptr) {
-    throw python_error();
-  }
-  TORCH_CHECK(
-      PyGILState_Check(),
-      "GIL must be held before you call parseIValuesToPyArgsKwargs");
-
-  std::vector<py::handle> overloaded_args;
-  // TODO: there should be a shorter way to spell this
-  // TODO: fix the constness of target
-  Tensor self_t = Tensor(
-      c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
-          unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
-  auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
-  // NB: this may not be a python tensor if you got here from a mode!
-  // TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
-  append_overloaded_tensor(&overloaded_args, self_p.ptr());
-  auto args =
-      py::reinterpret_steal<py::object>(PyTuple_New(1 + extra_args.size()));
-  PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
-  int64_t i = 1;
-  for (auto& a : extra_args) {
-    if (a.ptr() == nullptr)
-      throw python_error();
-    PyTuple_SET_ITEM(args.ptr(), i, std::move(a).release().ptr());
-    i++;
-  }
-
-  py::dict kwargs;
-
-  return py::reinterpret_steal<py::object>(
-      handle_torch_function_no_python_arg_parser(
-          overloaded_args,
-          args.ptr(),
-          kwargs.ptr(),
-          func_name,
-          torch_api_function,
-          module_name,
-          TorchFunctionName::TorchDispatch));
-}
-
-py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
-  return op.getPythonOp(getPyInterpreter(), [&]() -> PyObject* {
-    // Parse the name into namespace and name (no overload_name)
-    // TODO: put this into the library
-    const auto& schema = op.schema();
-    const auto& qualified_name = op.operator_name().name;
-    const auto& overload_name = schema.overload_name();
-    auto pos = qualified_name.find("::");
-    TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
-    // Make me some null terminated strings
-    std::string ns_str = qualified_name.substr(0, pos);
-    const char* ns = ns_str.c_str();
-    const char* func_name = qualified_name.c_str() + pos + strlen("::");
-
-    py::handle torch_api_function =
-        py::module::import("torch").attr("ops").attr(ns).attr(func_name);
-    if (overload_name == "") {
-      return torch_api_function.attr("default").ptr();
-    } else {
-      return torch_api_function.attr(overload_name.c_str()).ptr();
-    }
-  });
-}
-
-void ConcretePyInterpreterVTable::dispatch(
-    const c10::OperatorHandle& op,
-    torch::jit::Stack* stack) const {
-  const auto& schema = op.schema();
-  const auto num_arguments = schema.arguments().size();
-  auto arguments = torch::jit::pop(*stack, num_arguments);
-
-  // The plan: convert all the arguments back into PyObjects,
-  // extracting out the tensor handles, then call
-  // handle_torch_function_no_python_arg_parser
-  // NB: at the point arguments are pushed to the stack, ALL defaults
-  // are already present
-
-  py::gil_scoped_acquire g;
-
-  std::vector<py::handle> overloaded_args;
-  py::handle torch_api_function_overload = getTorchApiFunction(op);
-
-  // Find overloaded tensors
-  for (const auto idx : c10::irange(arguments.size())) {
-    const auto& ivalue = arguments[idx];
-    if (ivalue.isTensor()) {
-      const auto& tensor = ivalue.toTensor();
-      if (isPythonTensor(tensor)) {
-        append_overloaded_tensor(&overloaded_args, py::cast(tensor).ptr());
-      }
-    } else if (ivalue.isList()) {
-      const auto& list = ivalue.toListRef();
-      for (const auto jdx : c10::irange(list.size())) {
-        const auto& nv = list[jdx];
-        if (nv.isTensor()) {
-          const auto& tensor = nv.toTensor();
-          if (isPythonTensor(tensor)) {
-            append_overloaded_tensor(&overloaded_args, py::cast(tensor).ptr());
-          }
-        }
-      }
-    }
-  }
-
-  auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
-  auto args = std::move(args_kwargs.first);
-  auto kwargs = std::move(args_kwargs.second);
-
-  PyObject* obj = handle_torch_function_no_python_arg_parser(
-      overloaded_args,
-      args.ptr(),
-      kwargs.ptr(),
-      nullptr,
-      torch_api_function_overload.ptr(),
-      nullptr,
-      TorchFunctionName::TorchDispatch);
-  pushPyOutToStack(
-      op, stack, py::reinterpret_steal<py::object>(obj), "__torch_dispatch__");
-}
-
-void ConcretePyInterpreterVTable::python_dispatcher(
-    const c10::OperatorHandle& op,
-    c10::DispatchKeySet ks,
-    torch::jit::Stack* stack) const {
-  py::gil_scoped_acquire g;
-  py::handle torch_api_function_overload = getTorchApiFunction(op);
-
-  c10::DispatchKey k = ks.highestPriorityTypeId();
-  auto handler = torch_api_function_overload.attr(toString(k));
-  if (handler.ptr() == nullptr) {
-    throw python_error();
-  }
-  if (py::isinstance<c10::DispatchKey>(handler)) {
-    // NB: not redispatch, as that will permanently remove the python
-    // dispatcher for subsequent redispatches
-    op.callBoxedForDispatchKey(py::cast<c10::DispatchKey>(handler), *stack);
-    return;
-  }
-
-  const auto& schema = op.schema();
-  const auto num_arguments = schema.arguments().size();
-  auto arguments = torch::jit::pop(*stack, num_arguments);
-
-  auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
-  auto args = std::move(args_kwargs.first);
-  auto kwargs = std::move(args_kwargs.second);
-
-  py::object obj = py::reinterpret_steal<py::object>(
-      PyObject_Call(handler.ptr(), args.ptr(), kwargs.ptr()));
-
-  if (obj.ptr() == nullptr) {
-    throw python_error();
-  }
-
-  pushPyOutToStack(op, stack, std::move(obj), "Python dispatcher");
-}
-
-c10::intrusive_ptr<TensorImpl> ConcretePyInterpreterVTable::detach(
-    const c10::TensorImpl* self) const {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-
-  auto out = torchDispatchFromTensorImpl(
-      self,
-      "detach",
-      py::module::import("torch")
-          .attr("ops")
-          .attr("aten")
-          .attr("detach")
-          .attr("default")
-          .ptr(),
-      "torch.ops.aten");
-
-  TORCH_CHECK(
-      THPVariable_Check(out.ptr()),
-      "detach returned invalid type ",
-      py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
-      ", expected Tensor");
-  const Tensor& res_t = THPVariable_Unpack(out.ptr());
-  return res_t.getIntrusivePtr();
-}
-
-bool ConcretePyInterpreterVTable::is_contiguous(
-    const c10::TensorImpl* self,
-    at::MemoryFormat memory_format) const {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-
-  py::object out;
-  if (memory_format == at::MemoryFormat::Contiguous) {
-    // For backwards compatibility
-    out = torchDispatchFromTensorImpl(
-        self,
-        "is_contiguous",
-        py::module::import("torch")
-            .attr("ops")
-            .attr("aten")
-            .attr("is_contiguous")
-            .attr("default")
-            .ptr(),
-        "torch.ops.aten");
-  } else {
-    out = torchDispatchFromTensorImpl(
-        self,
-        "is_contiguous",
-        py::module::import("torch")
-            .attr("ops")
-            .attr("aten")
-            .attr("is_contiguous")
-            .attr("memory_format")
-            .ptr(),
-        "torch.ops.aten",
-        {py::cast(memory_format)});
-  }
-
-  if (out.is(py::none())) {
-    return self->is_contiguous_default(memory_format);
-  }
-
-  TORCH_CHECK(
-      PyBool_Check(out.ptr()),
-      "is_contiguous returned invalid type ",
-      py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
-      ", expected bool");
-
-  return PyObject_IsTrue(out.ptr());
-}
-
-bool ConcretePyInterpreterVTable::is_strides_like(
-    const c10::TensorImpl* self,
-    at::MemoryFormat memory_format) const {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-
-  auto out = torchDispatchFromTensorImpl(
-      self,
-      "is_strides_like",
-      py::module::import("torch")
-          .attr("ops")
-          .attr("aten")
-          // NB: intentionally suffixed with _format to avoid
-          // triggering matches against "_like" suffix
-          .attr("is_strides_like_format")
-          .attr("default")
-          .ptr(),
-      "torch.ops.aten",
-      {py::cast(memory_format)});
-
-  if (out.is(py::none())) {
-    return self->is_strides_like_default(memory_format);
-  }
-
-  TORCH_CHECK(
-      PyBool_Check(out.ptr()),
-      "is_strides_like_format returned invalid type ",
-      py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
-      ", expected bool");
-
-  return PyObject_IsTrue(out.ptr());
-}
-
-bool ConcretePyInterpreterVTable::is_non_overlapping_and_dense(
-    const c10::TensorImpl* self) const {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-
-  auto out = torchDispatchFromTensorImpl(
-      self,
-      "is_non_overlapping_and_dense",
-      py::module::import("torch")
-          .attr("ops")
-          .attr("aten")
-          .attr("is_non_overlapping_and_dense")
-          .attr("default")
-          .ptr(),
-      "torch.ops.aten");
-
-  if (out.is(py::none())) {
-    return self->is_non_overlapping_and_dense_default();
-  }
-
-  TORCH_CHECK(
-      PyBool_Check(out.ptr()),
-      "is_non_overlapping_and_dense returned invalid type ",
-      py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
-      ", expected bool");
-
-  return PyObject_IsTrue(out.ptr());
-}
-
-int64_t ConcretePyInterpreterVTable::dim(const c10::TensorImpl* self) const {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-
-  auto out = torchDispatchFromTensorImpl(
-      self,
-      "dim",
-      py::module::import("torch")
-          .attr("ops")
-          .attr("aten")
-          .attr("dim")
-          .attr("default")
-          .ptr(),
-      "torch.ops.aten");
-
-  TORCH_CHECK(
-      PyLong_Check(out.ptr()),
-      "dim returned invalid type ",
-      py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
-      ", expected int");
-
-  return THPUtils_unpackLong(out.ptr());
-}
-
-c10::Device ConcretePyInterpreterVTable::device(
-    const c10::TensorImpl* self) const {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-
-  auto out = torchDispatchFromTensorImpl(
-      self,
-      "device",
-      py::module::import("torch")
-          .attr("ops")
-          .attr("prim")
-          .attr("device")
-          .attr("default")
-          .ptr(),
-      "torch.ops.prim");
-
-  return toDevice(out.ptr());
-}
-
-c10::IntArrayRef ConcretePyInterpreterVTable::strides(
-    const c10::TensorImpl* self) const {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-
-  auto out = torchDispatchFromTensorImpl(
-      self,
-      "stride",
-      py::module::import("torch")
-          .attr("ops")
-          .attr("aten")
-          .attr("stride")
-          .attr("default")
-          .ptr(),
-      "torch.ops.aten");
-
-  if (out.is(py::none())) {
-    TORCH_CHECK(
-        !self->has_symbolic_sizes_strides(),
-        "Cannot call strides on a tensor with symbolic shapes/strides");
-    return self->strides_default();
-  }
-
-  py::object values = py::reinterpret_steal<py::object>(out.ptr());
-
-  c10::optional<PyObject*> mb_obj = self->check_pyobj(getPyInterpreter());
-  TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  PyObject* subclass = *mb_obj;
-  Py_INCREF(subclass);
-  py::object sub = py::reinterpret_steal<py::object>(subclass);
-
-  py::object os = py::module_::import("torch").attr("overrides");
-  py::function get_buffer =
-      py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
-  auto buffer = get_buffer(sub, values, "stride");
-  auto result = THPUtils_unpackLongs(buffer.ptr());
-  int64_t* start = (int64_t*)result[0];
-  int64_t len = result[1];
-
-  return c10::IntArrayRef(start, len);
-}
-
-static std::vector<int64_t> values_from_buffer(
-    const c10::TensorImpl* self,
-    py::handle values) {
-  c10::TensorImpl* ptr = const_cast<c10::TensorImpl*>(self);
-  c10::optional<PyObject*> mb_obj = ptr->check_pyobj(getPyInterpreter());
-  TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-
-  py::object os = py::module_::import("torch").attr("overrides");
-  py::function get_buffer =
-      py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
-  auto buffer = get_buffer(py::handle(*mb_obj), values, "size");
-  auto result = THPUtils_unpackLongs(buffer.ptr());
-  return result;
-}
-
-c10::IntArrayRef ConcretePyInterpreterVTable::sizes(
-    const c10::TensorImpl* self) const {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-
-  auto out = torchDispatchFromTensorImpl(
-      self,
-      "size",
-      py::module::import("torch")
-          .attr("ops")
-          .attr("aten")
-          .attr("size")
-          .attr("default")
-          .ptr(),
-      "torch.ops.aten");
-
-  if (out.is(py::none())) {
-    TORCH_CHECK(
-        !self->has_symbolic_sizes_strides(),
-        "Cannot call sizes on a tensor with symbolic shapes/strides");
-    return self->sizes_default();
-  }
-
-  py::object values = py::reinterpret_steal<py::object>(out.ptr());
-  auto result = values_from_buffer(self, values);
-  int64_t* start = (int64_t*)result[0];
-  int64_t len = result[1];
-
-  return c10::IntArrayRef(start, len);
-}
-
-c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
-    const c10::TensorImpl* self) const {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-  HANDLE_TH_ERRORS
-  auto out = torchDispatchFromTensorImpl(
-      self,
-      "sym_size",
-      py::module::import("torch")
-          .attr("ops")
-          .attr("aten")
-          .attr("sym_size")
-          .attr("default")
-          .ptr(),
-      "torch.ops.aten");
-
-  if (out.is(py::none())) {
-    return self->sym_sizes_default();
-  }
-  // We need to squeeze SymIntNodes and ints into `SymInts`
-  // since it's a format `sym_sizes()` are stored in
-  TORCH_CHECK(
-      py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
-      "Symshape must be a list or a tuple");
-  py::list symints;
-  for (auto it = out.begin(); it != out.end(); it++) {
-    auto elm = *it;
-    auto si = py::cast<c10::SymInt>(elm);
-    // TODO: the buffer will need to be made owning later
-    symints.append(si.as_int_unchecked());
-  }
-
-  auto result = values_from_buffer(self, symints);
-  c10::SymInt* start = (c10::SymInt*)result[0];
-  int64_t len = result[1];
-
-  return c10::SymIntArrayRef(start, len);
-  END_HANDLE_TH_ERRORS_PYBIND
-}
-
-c10::Layout ConcretePyInterpreterVTable::layout(
-    const c10::TensorImpl* self) const {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-  auto out = torchDispatchFromTensorImpl(
-      self,
-      "layout",
-      py::module::import("torch")
-          .attr("ops")
-          .attr("prim")
-          .attr("layout")
-          .attr("default")
-          .ptr(),
-      "torch.ops.prim");
-
-  TORCH_CHECK(
-      THPLayout_Check(out.ptr()),
-      "layout returned invalid type ",
-      py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
-      ", expected Layout");
-
-  return toLayout(out.ptr());
-}
-
-c10::SymInt ConcretePyInterpreterVTable::sym_numel(
-    const c10::TensorImpl* self) const {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-  auto out = torchDispatchFromTensorImpl(
-      self,
-      "sym_numel",
-      py::module::import("torch")
-          .attr("ops")
-          .attr("aten")
-          .attr("sym_numel")
-          .attr("default")
-          .ptr(),
-      "torch.ops.aten");
-
-  if (out.is(py::none())) {
-    TORCH_CHECK(
-        !self->has_symbolic_sizes_strides(),
-        "Cannot call numel on a tensor with symbolic shapes/strides");
-    return self->sym_numel_default();
-  }
-  return torch::is_symint_node(out)
-      ? out.cast<c10::SymIntNodeImpl*>()->toSymInt()
-      : c10::SymInt{py::cast<int64_t>(out)};
-}
-
-c10::SymInt ConcretePyInterpreterVTable::sym_storage_offset(
-    const c10::TensorImpl* self) const {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-  auto out = torchDispatchFromTensorImpl(
-      self,
-      "sym_storage_offset",
-      py::module::import("torch")
-          .attr("ops")
-          .attr("aten")
-          .attr("sym_storage_offset")
-          .attr("default")
-          .ptr(),
-      "torch.ops.aten");
-
-  if (out.is(py::none())) {
-    return self->sym_storage_offset_default();
-  }
-  return torch::is_symint_node(out)
-      ? out.cast<c10::SymIntNodeImpl*>()->toSymInt()
-      : c10::SymInt{py::cast<int64_t>(out)};
-}
-
-c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
-    const c10::TensorImpl* self) const {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-  HANDLE_TH_ERRORS
-  auto out = torchDispatchFromTensorImpl(
-      self,
-      "sym_stride",
-      py::module::import("torch")
-          .attr("ops")
-          .attr("aten")
-          .attr("sym_stride")
-          .attr("default")
-          .ptr(),
-      "torch.ops.aten");
-
-  if (out.is(py::none())) {
-    return self->sym_strides_default();
-  }
-  // We need to squeeze SymIntNodes and ints into `SymInts`
-  // since it's a format `sym_strides()` are stored in
-  TORCH_CHECK(
-      py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
-      "Symshape must be a list or a tuple");
-  py::list symints;
-  for (auto it = out.begin(); it != out.end(); it++) {
-    auto elm = *it;
-    auto si = torch::is_symint_node(elm)
-        ? elm.cast<c10::SymIntNodeImpl*>()->toSymInt()
-        : c10::SymInt{py::cast<int64_t>(elm)};
-    symints.append(si.as_int_unchecked());
-  }
-
-  auto result = values_from_buffer(self, symints);
-  c10::SymInt* start = (c10::SymInt*)result[0];
-  int64_t len = result[1];
-
-  return c10::SymIntArrayRef(start, len);
-  END_HANDLE_TH_ERRORS_PYBIND
-}
-
-} // anonymous namespace
