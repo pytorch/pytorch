@@ -1,18 +1,16 @@
 # Owner(s): ["module: autograd"]
 
-import contextlib
-import warnings
-
-import numpy as np
 import torch
 from torch.library import Library
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
     TestCase,
+    parametrize,
+    instantiate_parametrized_tests,
+    run_tests,
 )
-
+import contextlib
+import numpy as np
+import warnings
 
 @contextlib.contextmanager
 def autograd_fallback_mode(mode):
@@ -23,14 +21,13 @@ def autograd_fallback_mode(mode):
     finally:
         torch._C._set_autograd_fallback_mode(prev)
 
-
 class TestAutogradFallback(TestCase):
-    test_ns = "_test_autograd_fallback"
+    test_ns = '_test_autograd_fallback'
 
     def tearDown(self):
         if hasattr(torch.ops, self.test_ns):
             delattr(torch.ops, self.test_ns)
-        if hasattr(self, "lib"):
+        if hasattr(self, 'lib'):
             del self.lib.m
             del self.lib
 
@@ -88,9 +85,7 @@ class TestAutogradFallback(TestCase):
 
     def _check_ctx(self, mode, *, mode_nothing_raises=False):
         if mode == "warn":
-            return self.assertWarnsRegex(
-                UserWarning, "an autograd kernel was not registered"
-            )
+            return self.assertWarnsRegex(UserWarning, 'an autograd kernel was not registered')
         assert mode == "nothing"
         if mode_nothing_raises:
             return self.assertRaisesRegex(RuntimeError, "does not require grad")
@@ -195,7 +190,7 @@ class TestAutogradFallback(TestCase):
 
                 @staticmethod
                 def backward(ctx, gx):
-                    (x,) = ctx.saved_tensors
+                    x, = ctx.saved_tensors
                     return gx * x.cos()
 
             lib.impl("foo", NumpySin.apply, "CPU")
@@ -224,7 +219,7 @@ class TestAutogradFallback(TestCase):
 
                 @staticmethod
                 def backward(ctx, gx):
-                    (x,) = ctx.saved_tensors
+                    x, = ctx.saved_tensors
                     return gx * x.cos()
 
             lib.impl("foo", NumpySin_.apply, "CPU")
@@ -238,13 +233,13 @@ class TestAutogradFallback(TestCase):
             expected = torch.zeros_like(x)
             expected[0] = x[0].cos()
             with self._check_ctx(mode):
-                (gx,) = torch.autograd.grad(y, x, torch.ones_like(y), retain_graph=True)
+                gx, = torch.autograd.grad(y, x, torch.ones_like(y), retain_graph=True)
                 self.assertEqual(gx, expected)
 
             expected = torch.ones_like(x)
             expected[0] = x[0].cos()
             with self._check_ctx(mode):
-                (gx,) = torch.autograd.grad(z, x, torch.ones_like(z))
+                gx, = torch.autograd.grad(z, x, torch.ones_like(z))
                 self.assertEqual(gx, expected)
 
     @parametrize("mode", ("nothing", "warn"))
@@ -314,9 +309,7 @@ class TestAutogradFallback(TestCase):
             lib.define("foo(Tensor a) -> (Tensor, Tensor)")
             op = self.get_op("foo")
 
-            lib.impl(
-                "foo", lambda a: (a.clone(), a.clone().detach().requires_grad_()), "CPU"
-            )
+            lib.impl("foo", lambda a: (a.clone(), a.clone().detach().requires_grad_()), "CPU")
             x = torch.randn(3, requires_grad=True)
             y, z = op(x)
             with self._check_ctx(mode):
@@ -403,19 +396,13 @@ class TestAutogradFallback(TestCase):
             x, y, z = op(a, b)
 
             with self._check_ctx(mode, mode_nothing_raises=True):
-                torch.autograd.grad(
-                    x, (a, b), torch.ones_like(x), allow_unused=True, retain_graph=True
-                )
+                torch.autograd.grad(x, (a, b), torch.ones_like(x), allow_unused=True, retain_graph=True)
 
             with self._check_ctx(mode, mode_nothing_raises=False):
-                torch.autograd.grad(
-                    y, (a, b), torch.ones_like(y), allow_unused=True, retain_graph=True
-                )
+                torch.autograd.grad(y, (a, b), torch.ones_like(y), allow_unused=True, retain_graph=True)
 
             with self._check_ctx(mode, mode_nothing_raises=True):
-                torch.autograd.grad(
-                    z, (a, b), torch.ones_like(z), allow_unused=True, retain_graph=True
-                )
+                torch.autograd.grad(z, (a, b), torch.ones_like(z), allow_unused=True, retain_graph=True)
 
     @parametrize("mode", ("nothing", "warn"))
     def test_supports_tensor_lists(self, mode):
@@ -435,24 +422,12 @@ class TestAutogradFallback(TestCase):
             z = torch.randn(2, 1, requires_grad=True)
             a, b = op([x, y, z])
             with self._check_ctx(mode, mode_nothing_raises=True):
-                torch.autograd.grad(
-                    a,
-                    (x, y, z),
-                    torch.ones_like(a),
-                    allow_unused=True,
-                    retain_graph=True,
-                )
+                torch.autograd.grad(a, (x, y, z), torch.ones_like(a), allow_unused=True, retain_graph=True)
             with self._check_ctx(mode, mode_nothing_raises=True):
-                torch.autograd.grad(
-                    b,
-                    (x, y, z),
-                    torch.ones_like(b),
-                    allow_unused=True,
-                    retain_graph=True,
-                )
+                torch.autograd.grad(b, (x, y, z), torch.ones_like(b), allow_unused=True, retain_graph=True)
 
 
 instantiate_parametrized_tests(TestAutogradFallback)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     run_tests()

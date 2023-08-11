@@ -479,7 +479,7 @@ def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
 
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
-    lambda func: torch.Tag.dynamic_output_shape in func.tags
+    lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
     and func
     not in [aten.index.Tensor, aten.nonzero.default, aten.repeat_interleave.Tensor]
 )
@@ -550,7 +550,9 @@ def nonzero(fake_mode, func, arg):
 
 
 # NB: this must be ordered after local_scalar_dense
-@register_op_impl(lambda func: torch.Tag.data_dependent_output in func.tags)
+@register_op_impl(
+    lambda func: torch.Tag.data_dependent_output in func.tags  # type: ignore[attr-defined]
+)
 def data_dep(fake_mode, func, *args, **kwargs):
     raise DataDependentOutputException(func)
 
@@ -1370,8 +1372,8 @@ class FakeTensorMode(TorchDispatchMode):
         # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view
         all_constant = all(e.constant is not None for e in flat_arg_fake_tensors)
         if (
-            torch.Tag.nondeterministic_seeded not in func.tags
-            and torch.Tag.inplace_view not in func.tags
+            torch.Tag.nondeterministic_seeded not in func.tags  # type: ignore[attr-defined]
+            and torch.Tag.inplace_view not in func.tags  # type: ignore[attr-defined]
             and all_constant
             and len(flat_arg_fake_tensors) != 0
             and not has_symbolic_sizes
@@ -1559,7 +1561,7 @@ class FakeTensorMode(TorchDispatchMode):
         def validate(x):
             nonlocal flat_arg_fake_tensors
             if not self.is_our_fake(x):
-                if torch.Tag.inplace_view in func.tags:
+                if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
                     raise Exception(
                         f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"
                     )
@@ -1635,7 +1637,7 @@ class FakeTensorMode(TorchDispatchMode):
         return wrap
 
     def cpp_meta_supports_symint(self, func):
-        if torch.Tag.view_copy in func.tags:
+        if torch.Tag.view_copy in func.tags:  # type: ignore[attr-defined]
             return True
         return func in [
             aten.empty.memory_format,
@@ -1717,7 +1719,7 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
     # these should all be supported, just to be safe
     # avoid fallback for operators which inplace modify metadata
     # because the input fake tensors would be umodified
-    if torch.Tag.inplace_view in func.tags:
+    if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
         raise orig_not_implemented_exception
 
     inp_impls = {}

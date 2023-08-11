@@ -6,7 +6,9 @@
 
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 
-namespace torch::cuda::CUDAPluggableAllocator {
+namespace torch {
+namespace cuda {
+namespace CUDAPluggableAllocator {
 
 int device_count = 0;
 
@@ -348,4 +350,6 @@ void custom_raw_deleter(void* ptr) {
   current_custom_allocator->raw_delete(ptr);
 }
 
-} // namespace torch::cuda::CUDAPluggableAllocator
+} // namespace CUDAPluggableAllocator
+} // namespace cuda
+} // namespace torch

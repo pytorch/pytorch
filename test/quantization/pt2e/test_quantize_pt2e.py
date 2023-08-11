@@ -5,7 +5,6 @@ from typing import Any, List, Optional, Tuple, Dict
 
 import torch
 import torch._dynamo as torchdynamo
-import torch._export as export
 from torch import Tensor
 from torch.ao.ns.fx.utils import compute_sqnr
 from torch.ao.quantization import (
@@ -240,16 +239,18 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
 
         # program capture
         m = copy.deepcopy(m_eager)
-        m = export.capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
+        with torchdynamo.config.patch(dynamic_shapes=export_with_dynamic_shape):
+            m, guards = torchdynamo.export(
+                m,
+                *copy.deepcopy(example_inputs),
+                aten_graph=True,
+                tracing_mode="symbolic" if export_with_dynamic_shape else "real",
+            )
 
         m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
         m = convert_pt2e(m)
-
         pt2_quant_output = m(*example_inputs)
         node_occurrence = {
             ns.call_function(k): v for k, v in expected_node_occurrence.items()
@@ -1016,6 +1017,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         }
         node_list = [
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.aten.convolution.default,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
         ]
@@ -1150,6 +1152,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         }
         node_list = [
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.aten.convolution.default,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
@@ -1860,29 +1863,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self._verify_symmetric_qnnpack_qat_numerics(
             M(), example_inputs, is_per_channel=True, verify_convert=True,
         )
-
-    def test_representation_conv2d(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv2d = torch.nn.Conv2d(3, 3, 3)
-
-            def forward(self, x):
-                return self.conv2d(x)
-
-        quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=False)
-        quantizer.set_global(operator_config)
-        example_inputs = (torch.randn(1, 3, 3, 3),)
-
-        with torch.no_grad():
-            self._test_representation(
-                M().eval(),
-                example_inputs,
-                quantizer,
-                ref_node_occurrence={},
-                non_ref_node_occurrence={}
-            )
 
     def test_representation_add(self):
         class M(torch.nn.Module):

@@ -10,7 +10,9 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 
-namespace torch::cuda::shared {
+namespace torch {
+namespace cuda {
+namespace shared {
 
 #ifdef USE_ROCM
 namespace {
@@ -112,4 +114,6 @@ void initCudartBindings(PyObject* module) {
       });
 }
 
-} // namespace torch::cuda::shared
+} // namespace shared
+} // namespace cuda
+} // namespace torch

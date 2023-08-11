@@ -374,10 +374,6 @@ def constrain_range_int(a, *, min, max):
     - During tracing the traced symbol is resolved as a static integer (see
       PR #101655 for more details).
     """
-    if min is None:
-        min = -sympy.oo
-    if max is None:
-        max = sympy.oo
 
     assert not isinstance(a, SymInt)
     if not (min <= a <= max):
@@ -2904,10 +2900,7 @@ class ShapeEnv:
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
             # SymInt
-            if (
-                vr.lower < (-sys.maxsize - 1) // 2 or
-                (unbacked_only and k in self.var_to_val)
-            ):
+            if vr.lower == -sympy.oo or (unbacked_only and k in self.var_to_val):
                 new_range_env[k] = vr
                 continue
             # Positive means >= 1

@@ -83,13 +83,7 @@ STATE_DICT_MAPPING = {
 
 
 class Model(Module):
-    def __init__(
-        self,
-        wrap_fsdp,
-        register_buffers=False,
-        ignore_inner=False,
-        mixed_precision=False,
-    ):
+    def __init__(self, wrap_fsdp, register_buffers=False, ignore_inner=False):
         super().__init__()
         self.inner = Linear(*INNER_SHAPE)
         if register_buffers:
@@ -99,15 +93,7 @@ class Model(Module):
             )
         if wrap_fsdp:
             self.inner = FSDP(
-                self.inner,
-                ignored_modules=([self.inner] if ignore_inner else []),
-                mixed_precision=MixedPrecision(
-                    param_dtype=torch.float16,
-                    reduce_dtype=torch.float16,
-                    buffer_dtype=torch.float16,
-                )
-                if mixed_precision
-                else None,
+                self.inner, ignored_modules=([self.inner] if ignore_inner else [])
             )
         self.outer = Linear(*OUTER_SHAPE)
         if register_buffers:
@@ -993,17 +979,13 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("state_dict_type", _UNFLATTENED_STATE_DICT_IMPLS)
     @parametrize("prefix", [True, False])
     @parametrize("ignore_inner", [True, False])
-    @parametrize("mixed_precision", [True, False])
     def test_state_dict_with_ignored_modules(
-        self, state_dict_type, prefix, ignore_inner, mixed_precision
+        self, state_dict_type, prefix, ignore_inner
     ):
         # Initialize an FSDP-wrapped model with an ignored module that includes
         # both parameters and a buffer
         model = Model(
-            wrap_fsdp=True,
-            register_buffers=True,
-            ignore_inner=ignore_inner,
-            mixed_precision=mixed_precision,
+            wrap_fsdp=True, register_buffers=True, ignore_inner=ignore_inner
         ).cuda()
         ignored_modules = [model.outer]
         ignored_tensor_to_tensor_name = {
@@ -1022,23 +1004,7 @@ class TestFSDPStateDict(FSDPTest):
             model.inner.buffer: "inner.buffer",
             model.outer.buffer: "outer.buffer",
         }
-        # expect fp16 model.inner.buffer with mixed_precisions
-        # expect fp32 sd.inner.buffer after restoring to original precision
-        # so skip AssertEqual
-        if mixed_precision and not ignore_inner:
-            buffer_to_buffer_name.pop(model.inner.buffer)
-
-        fsdp_model = FSDP(
-            model,
-            ignored_modules=ignored_modules,
-            mixed_precision=MixedPrecision(
-                param_dtype=torch.float16,
-                reduce_dtype=torch.float16,
-                buffer_dtype=torch.float16,
-            )
-            if mixed_precision
-            else None,
-        )
+        fsdp_model = FSDP(model, ignored_modules=ignored_modules)
         prefix_str = "foo." if prefix else ""
         with FSDP.state_dict_type(fsdp_model, STATE_DICT_MAPPING[state_dict_type]):
             sd1 = _gather_state_dict(fsdp_model.state_dict(prefix=prefix_str))
@@ -1056,11 +1022,6 @@ class TestFSDPStateDict(FSDPTest):
                 sd1[prefixed_tensor_name].data_ptr(),
                 f"{prefixed_tensor_name}",
             )
-        # should not apply mixed_precision to ignored buffers
-        for buffer_name in buffer_to_buffer_name.values():
-            prefixed_buffer_name = f"{prefix_str}{buffer_name}"
-            self.assertTrue(prefixed_buffer_name in sd1)
-            self.assertEqual(sd1[prefixed_buffer_name].dtype, torch.float32)
         # Check that the state dict can be loaded into a non-wrapped version of
         # the model
         nonwrapped_model = Model(wrap_fsdp=False, register_buffers=True).cuda()
