@@ -251,7 +251,7 @@ class DTensorTest(DTensorTestBase):
         # Tests that if the output of some dtensor operations  isn't used in any compute,
         # the output should be an AsyncCollectiveTensor (representing the fact that
         # we haven't synced the collective yet).
-        from torch.distributed._functional_collectives_impl import _tensor_needs_wait,
+        from torch.distributed._functional_collectives_impl import _tensor_needs_wait
 
         mesh = DeviceMesh(
             self.device_type, torch.arange(self.world_size), _validate_mesh=False
@@ -280,8 +280,9 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(type(out_view), AsyncCollectiveTensor)
         self.assertTrue(_tensor_needs_wait(out_view.elem))
 
-        ref = torch.arange(8) + 1
-        # Use the data, requiring a sync
+        # Use the daa, requiring a sync
+        ref = torch.ones((4, 2), device=self.device_type) + 1
+        ref = ref.view(-1)
         out_data = out_view + 1
         self.assertEqual(type(out_data), torch.Tensor)
         self.assertEqual(out_data, ref)
