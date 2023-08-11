@@ -21,13 +21,6 @@ on:
         description: Path to folder with commit pin
         required: false
         default: .github/ci_commit_pins
-    secrets:
-      UPDATEBOT_TOKEN:
-        required: true
-        description: Permissions for opening PR
-      PYTORCHBOT_TOKEN:
-        required: true
-        description: Permissions for approving PR
 
 env:
   NEW_BRANCH_NAME: update-${{ inputs.repo-name }}-commit-hash/${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}
@@ -35,6 +28,7 @@ env:
 jobs:
   update-commit-hash:
     runs-on: ubuntu-latest
+    environment: update-commit-hash
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
