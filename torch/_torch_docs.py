@@ -14173,3 +14173,19 @@ Apply :func:`torch.linalg.vector_norm` to each Tensor of the input list.
 Input lists are supposed to have the same number of Tensor or Numbers.
     """,
 )
+add_docstr(
+    torch._foreach_clamp,
+    r"""
+_foreach_clamp(self: List[Tensor], min: Optional[Number] = None, max: Optional[Number] = None) -> List[Tensor]
+
+Apply :func:`torch.clamp` to each Tensor of the input lists.
+    """,
+)
+add_docstr(
+    torch._foreach_clamp_,
+    r"""
+_foreach_clamp_(self: List[Tensor], min: Optional[Number] = None, max: Optional[Number] = None)
+
+Apply :func:`torch.clamp` to each Tensor of the input lists.
+    """,
+)
