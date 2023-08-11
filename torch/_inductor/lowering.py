@@ -186,18 +186,19 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
             dtype = get_promoted_dtype(
                 *promoting_args, type_promotion_kind=type_promotion_kind
             )
+
         # sometimes args are an immutable list so we can't mutate them
-        new_args = []
-        for i in range(len(args)):
-            if i in indices:
-                new_args.append(to_dtype(args[i], dtype))
-            elif isinstance(args[i], ir.Constant):
-                new_args.append(
-                    ir.Constant(args[i].value, dtype, args[indices[0]].get_device())
-                )
+        def promote(arg):
+            if isinstance(arg, TensorBox):
+                if arg.get_dtype() != dtype:
+                    return to_dtype(arg, dtype)
+                return arg
+            elif isinstance(arg, ir.Constant):
+                return ir.Constant(arg.value, dtype, args[indices[0]].get_device())
             else:
-                new_args.append(args[i])
-        args = new_args
+                return arg
+
+        args = [promote(a) for a in args]
     if broadcast and indices:
         for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
             args[i] = x
@@ -222,7 +223,7 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        assert len(args) <= 2
+        assert len(args) <= 3
         out = decomp_fn(*args, **kwargs)
         validate_ir(out)
         return out
@@ -509,7 +510,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 @register_lowering(prims.convert_element_type, type_promotion_kind=None)
 def to_dtype(x: TensorBox, dtype: torch.dtype):
     if x.get_dtype() == dtype:
-        return x
+        return clone(x)
 
     def _to_dtype(x):
         return ops.to_dtype(x, dtype)
@@ -545,7 +546,7 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
 def to_device(x: TensorBox, device: torch.device):
     device = decode_device(device)
     if x.get_device() == device:
-        return x
+        return clone(x)
     return TensorBox.create(ir.DeviceCopy.create(x, device))
 
 
@@ -704,7 +705,7 @@ def isnan(x):
 @register_lowering(aten.ceil)
 def ceil(x):
     if is_integer_type(x):
-        return x
+        return clone(x)
     fn = ops_wrapper("ceil")
     return make_pointwise(fn)(x)
 
@@ -712,7 +713,7 @@ def ceil(x):
 @register_lowering(aten.floor)
 def floor(x):
     if is_integer_type(x):
-        return x
+        return clone(x)
     fn = ops_wrapper("floor")
     return make_pointwise(fn)(x)
 
@@ -720,7 +721,7 @@ def floor(x):
 @register_lowering(aten.round)
 def round(x):
     if is_integer_type(x):
-        return x
+        return clone(x)
     fn = ops_wrapper("round")
     return make_pointwise(fn)(x)
 
@@ -728,7 +729,7 @@ def round(x):
 @register_lowering(aten.trunc)
 def trunc(x):
     if is_integer_type(x):
-        return x
+        return clone(x)
     fn = ops_wrapper("trunc")
     return make_pointwise(fn)(x)
 
@@ -1626,8 +1627,8 @@ def inductor_randint(
     )
 
 
-@register_lowering(inductor_prims._bucketize, type_promotion_kind=None)
-def _inductor_bucketize(
+@register_lowering(aten.bucketize, type_promotion_kind=None)
+def bucketize(
     input: TensorBox,
     boundaries: TensorBox,
     *,
@@ -1637,7 +1638,7 @@ def _inductor_bucketize(
     assert len(boundaries.get_size()) == 1
 
     if not (is_triton(input) and is_triton(boundaries)):
-        return fallback_handler(inductor_prims._bucketize, add_to_fallback_set=False)(
+        return fallback_handler(aten.bucketize, add_to_fallback_set=False)(
             input, boundaries, out_int32=out_int32, right=right
         )
 
@@ -1870,9 +1871,6 @@ make_fallback(torch._prims.rng_prims.run_with_rng_state)
 
 # fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
 make_fallback(aten.exponential.default, warn=False)
-
-# ROCm specific fallback, perf issues are observed when registered
-make_fallback(aten.miopen_batch_norm, warn=False)
 
 
 # Register with type_promotion_kind None.
@@ -4142,7 +4140,7 @@ def pow(a, b):
     elif isinstance(b, float) and b == 0.5:
         return sqrt(a)
     elif isinstance(b, int) and b == 1:
-        return a
+        return clone(a)
 
     # Type promotion ensures all tensor arguments have the same type
     dtype = next(x.get_dtype() for x in (a, b) if isinstance(x, ir.TensorBox))
@@ -4442,12 +4440,12 @@ logical_xor = register_pointwise(
 )
 maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
-register_lowering(aten.clamp_min)(maximum)
-register_lowering(aten.clamp_max)(minimum)
+clamp_min = register_lowering(aten.clamp_min)(maximum)
+clamp_max = register_lowering(aten.clamp_max)(minimum)
 neg = register_pointwise(aten.neg)
 reciprocal = register_pointwise_numeric(aten.reciprocal)
 register_pointwise(aten.remainder)
-register_pointwise(aten.sign, override_fn_when_input_bool="identity")
+sign = register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 
@@ -4489,6 +4487,18 @@ register_foreach_pointwise(aten._foreach_sqrt, sqrt)
 register_foreach_pointwise(aten._foreach_maximum.List, maximum)
 register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
+register_foreach_pointwise(aten._foreach_sign, sign)
+
+
+def _clamp_impl(v, min=None, max=None):
+    if min is not None:
+        v = clamp_min(v, min)
+    if max is not None:
+        v = clamp_max(v, max)
+    return v
+
+
+register_foreach_pointwise(aten._foreach_clamp, _clamp_impl)
 
 
 def register_inplace(aten_op, outplace_op):
@@ -4531,6 +4541,14 @@ register_inplace(aten.__ilshift__, aten.__lshift__)
 register_inplace(aten.__ior__, aten.__or__)
 register_inplace(aten.__irshift__, aten.__rshift__)
 register_inplace(aten.__ixor__, aten.__xor__)
+
+
+@register_lowering(aten.sym_constrain_range)
+def sym_constrain_range(a, min, max):
+    tracing_context = torch._guards.TracingContext.get()
+    assert tracing_context is not None
+    assert a in tracing_context.fake_mode.shape_env.var_to_range
+    return a
 
 
 @register_lowering(aten.sym_size)
