@@ -13,7 +13,6 @@ import torch.library
 from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
 from torch._prims.debug_prims import register_debug_prims
-from torch._prims.nvfuser_prims import register_nvprims
 from torch._prims.rng_prims import register_rng_prims
 from torch._prims_common import (
     Dim,
@@ -2031,6 +2030,7 @@ convert_element_type = _make_prim(
     impl_aten=_convert_element_type_aten,
     return_type=RETURN_TYPE.NEW,
     doc=_convert_element_type_doc,
+    tags=(torch.Tag.pointwise,),
 )
 
 
@@ -2964,6 +2964,5 @@ fft_c2r = _make_prim(
     doc=_fft_c2r_doc,
 )
 
-register_nvprims()
 register_rng_prims()
 register_debug_prims()
