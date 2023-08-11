@@ -22,7 +22,6 @@ from ..codecache import code_hash, get_path
 from ..dependencies import MemoryDep, StarDep
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
-from ..scheduler import BaseScheduling
 from ..triton_heuristics import AutotuneHint
 from ..utils import (
     DeferredLineBase,
@@ -38,6 +37,7 @@ from ..utils import (
 )
 from ..virtualized import ops, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
+
 from .common import (
     CSEVariable,
     DeferredLine,
@@ -49,7 +49,7 @@ from .common import (
     PythonPrinter,
     SizeArg,
 )
-from .triton_utils import config_of, signature_of
+from .triton_utils import config_of, signature_of, signature_to_meta
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -1766,9 +1766,8 @@ class TritonKernel(Kernel):
         mutated_args = sorted(mutated_args)
 
         triton_meta = {
-            "signature": dict(enumerate(map(signature_of, signature))),
+            "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
             "device": V.graph.scheduler.current_device.index,
-            "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
             "mutated_arg_names": mutated_args,
             "autotune_hints": set(self.autotune_hints),
@@ -1778,7 +1777,9 @@ class TritonKernel(Kernel):
             if tree.prefix != "r" or self.inside_reduction:
                 sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
                 signature.append(sizearg)
-                triton_meta["signature"][len(argdefs)] = signature_of(sizearg)
+                triton_meta["signature"][len(argdefs)] = signature_of(
+                    sizearg, size_dtype=self.index_dtype
+                )
                 argdefs.append(f"{tree.prefix}numel")
                 # constexpr version causes issues, see
                 # https://github.com/pytorch/torchdynamo/pull/1362
@@ -1992,7 +1993,7 @@ class TritonKernel(Kernel):
         return TritonCSEVariable(*args, **kwargs)
 
 
-class TritonScheduling(BaseScheduling):
+class TritonScheduling:
     def __init__(self, scheduler):
         self.scheduler = scheduler
 

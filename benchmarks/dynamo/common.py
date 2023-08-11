@@ -307,6 +307,10 @@ CI_SKIP_OPTIMIZER = {
 
 CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "sam",
+    # See https://github.com/mindee/doctr/blob/f2114758d529ed8d3d0030581638f0520b6b98d8/doctr/models/detection/core.py#L89
+    # It iterates over the batch, which is dynamic, and dynamo chokes
+    # We should be able to graphbreak there.
+    "doctr_det_predictor",
 }
 
 
@@ -1132,14 +1136,9 @@ class AOTInductorModelCache:
                 example_args, example_kwargs
             )
 
-            exported = torch._export.export(model, example_args, example_kwargs)
-            param_buffer_values = list(exported.state_dict.values())
-            flat_example_inputs = fx_pytree.tree_flatten_spec(
-                example_inputs, exported.call_spec.in_spec
+            so_path, exported = torch._export.aot_compile(
+                model, example_args, example_kwargs
             )
-            all_args = (*param_buffer_values, *flat_example_inputs)
-            # AOT compile into a .so
-            so_path = torch._inductor.aot_compile(exported.graph_module, all_args)
 
             output_node = list(exported.graph.nodes)[-1]
             output_tensors = [
