@@ -2462,6 +2462,11 @@ ALLGATHER = 4
 
 
 class WorkHookTest(MultiProcessTestCase):
+
+    @property
+    def world_size(self):
+        return 2
+
     def setUp(self):
         super().setUp()
         # set NCCL_ENABLE_TIMING to enable timing for CUDAEvents
