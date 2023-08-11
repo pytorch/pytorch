@@ -112,12 +112,14 @@ class CheckPoints:
             if "all_graphs" not in self.checkpoints:
                 self.checkpoints["all_graphs"] = []
             self.checkpoints["all_graphs"].append(self.graph_name)
+            print("No graph in checkpoints, start from {}".format(self.graph_name))
         else:
             next_graph = None
             if "all_graphs" not in self.checkpoints:
                 self.checkpoints["all_graphs"] = []
-            self.checkpoints["all_graphs"].append(self.graph_name)
-            self.checkpoints["all_graphs"] = list(set(self.checkpoints["all_graphs"]))
+            if self.graph_name not in self.checkpoints["all_graphs"]:
+                self.checkpoints[self.graph_name] = {}
+                self.checkpoints["all_graphs"].append(self.graph_name)
             # check if all graphs are done
             for tmp_graph_name in self.checkpoints['all_graphs']:
                 if 'done' not in self.checkpoints[tmp_graph_name]:
@@ -248,19 +250,31 @@ class CheckPoints:
             elif len(cur_node.predecessors) == 1:
                 predecessor = list(cur_node.predecessors.values())[0]
                 if len(predecessor.successors) == 1:
-                    assert self.checkpoints[self.graph_name]["stream_assignment"][cur_node.name] == self.checkpoints[self.graph_name]["stream_assignment"][predecessor.name], f"stream_id of {cur_node.name} is not equal to its predecessor {predecessor.name}."
-                    cur_node.stream_id = self.checkpoints[self.graph_name]["stream_assignment"][cur_node.name]
-                    self.ss_graph.stream_pool[cur_node.stream_id]+=1
-                else:
-                    if assign_all:
+                    if "stream_assignment" in self.checkpoints[self.graph_name]:
+                        assert self.checkpoints[self.graph_name]["stream_assignment"][cur_node.name] == self.checkpoints[self.graph_name]["stream_assignment"][predecessor.name], f"stream_id of {cur_node.name} is not equal to its predecessor {predecessor.name}."
                         cur_node.stream_id = self.checkpoints[self.graph_name]["stream_assignment"][cur_node.name]
                         self.ss_graph.stream_pool[cur_node.stream_id]+=1
                     else:
                         cur_node.stream_id = 0
+                        assert self.checkpoints["cur_graph"] != self.graph_name, f"stream_assignment of {self.graph_name} is not found."
+                else:
+                    if assign_all:
+                        if "stream_assignment" in self.checkpoints[self.graph_name]:
+                            cur_node.stream_id = self.checkpoints[self.graph_name]["stream_assignment"][cur_node.name]
+                            self.ss_graph.stream_pool[cur_node.stream_id]+=1
+                        else:
+                            cur_node.stream_id = 0
+                            assert self.checkpoints["cur_graph"] != self.graph_name, f"stream_assignment of {self.graph_name} is not found."
+                    else:
+                        cur_node.stream_id = 0
             else:
                 if assign_all:
-                    cur_node.stream_id = self.checkpoints[self.graph_name]["stream_assignment"][cur_node.name]
-                    self.ss_graph.stream_pool[cur_node.stream_id]+=1
+                    if "stream_assignment" in self.checkpoints[self.graph_name]:
+                        cur_node.stream_id = self.checkpoints[self.graph_name]["stream_assignment"][cur_node.name]
+                        self.ss_graph.stream_pool[cur_node.stream_id]+=1
+                    else:
+                        cur_node.stream_id = 0
+                        assert self.checkpoints["cur_graph"] != self.graph_name, f"stream_assignment of {self.graph_name} is not found."
                 else:
                     cur_node.stream_id = 0
         for successor in cur_node.successors.values():
