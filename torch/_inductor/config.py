@@ -52,7 +52,7 @@ split_cat_fx_passes = True
 group_fusion = False
 
 # enable pattern match with batch fusion (using torch op)
-batch_fusion = False
+batch_fusion = True
 
 # enable reordering pass
 reordering = True
