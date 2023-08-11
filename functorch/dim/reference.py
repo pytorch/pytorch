@@ -492,8 +492,8 @@ def t__getitem__(self, input):
                 dims_seen.record(idx)
                 view_sizes.append(sz)
             elif isinstance(idx, (tuple, list)) and idx and isinstance(idx[0], Dim):
-                for d in idx:
-                    dims_seen.record(d)
+                for d in idx:  # noqa: B007
+                    dims_seen.record(idx)
                 _bind_dims_to_size(sz, idx, f"offset {i}")
                 view_sizes.extend(d.size for d in idx)
                 requires_view = True

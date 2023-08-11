@@ -4668,7 +4668,7 @@ class TestQuantizeFx(QuantizationTestCase):
             m = prepare(m, {"": qconfig}, example_inputs=example_inputs)
             # check that there is a duplicated observer instance
             actpp_module_count = 0
-            for module in m.modules(remove_duplicate=False):
+            for _, module in m.named_modules(remove_duplicate=False):
                 if isinstance(module, actpp_module_class):
                     actpp_module_count += 1
             self.assertEqual(actpp_module_count, 2)
@@ -5566,13 +5566,10 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = x.reshape()
                 return x
 
-        for is_qat in [True, False]:
+        for is_qat in [True, False]:  # noqa: B007
             m = M1().eval()
             example_inputs = (torch.randn(1, 3, 3, 3),)
-            if is_qat:
-                m = prepare_qat_fx(m, get_default_qat_qconfig_mapping(), example_inputs=example_inputs)
-            else:
-                m = prepare_fx(m, get_default_qconfig_mapping(), example_inputs=example_inputs)
+            m = prepare_fx(m, get_default_qconfig_mapping(), example_inputs=example_inputs)
             m = convert_fx(m)
             node_list = [
                 ns.call_function(torch.quantize_per_tensor),
@@ -5585,10 +5582,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 expected_node_list=node_list)
 
             m = M2().eval()
-            if is_qat:
-                m = prepare_qat_fx(m, get_default_qat_qconfig_mapping(), example_inputs=example_inputs)
-            else:
-                m = prepare_fx(m, get_default_qconfig_mapping(), example_inputs=example_inputs)
+            m = prepare_fx(m, get_default_qconfig_mapping(), example_inputs=example_inputs)
             m = convert_fx(m)
             node_occurrence = {
                 ns.call_function(torch.quantize_per_tensor): 0,

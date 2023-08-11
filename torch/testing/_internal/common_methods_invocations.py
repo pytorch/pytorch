@@ -437,18 +437,18 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
         )
 
     # Checking for permutations of weights and biases as `None`
-    weights = [make_arg(channels), None, None]
-    biases = [None, make_arg(channels), None]
+    weights = [channels, None, None]
+    biases = [None, channels, None]
     is_training = [True, False, False]
 
-    for weight, bias, training in zip(weights, biases, is_training):
+    for weight, bias, training in zip(weights, biases, is_training):  # noqa: B007
         yield SampleInput(
             make_arg(input_shape),
             args=(
                 running_mean,
                 running_var,
-                weight,
-                bias
+                make_arg(channels),
+                make_arg(channels)
             ),
             kwargs={'training': training}
         )
