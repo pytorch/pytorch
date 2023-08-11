@@ -6,7 +6,7 @@ import sys
 import typing
 import weakref
 
-from torchgen.model import FunctionSchema, OperatorName, SchemaKind
+from torchgen.model import FunctionSchema, OperatorName, SchemaKind, BaseType, ListType, BaseTy
 
 import torch
 import torch._C as _C
@@ -452,11 +452,26 @@ class CustomOp:
         if not schema.returns:
             error("operator with no returns")
 
-        is_non_mutating_view = len(rets) > 0 and any(
+        assert len(rets) > 0
+        is_non_mutating_view = any(
             r.annotation is not None and not r.annotation.is_write for r in rets
         )
         if is_non_mutating_view:
             error("operator that returns views")
+
+        # We make assumptions about the schema's return types.
+        allowed_return_types = {
+            BaseType(BaseTy.int): "int",
+            BaseType(BaseTy.SymInt): "SymInt",
+            BaseType(BaseTy.bool): "bool",
+            BaseType(BaseTy.float): "float",
+            BaseType(BaseTy.Tensor): "Tensor",
+            ListType(BaseType(BaseTy.Tensor), None): "List[Tensor]",
+        }
+        for ret in schema.returns:
+            if ret.type in allowed_return_types:
+                continue
+            error(f"operator with return not in {list(allowed_return_types.values())} (got {ret.type})")
 
     def _check_doesnt_have_library_autograd_impl(self):
         if self._registered_autograd_kernel_indirection:

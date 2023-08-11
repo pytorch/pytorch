@@ -61,6 +61,7 @@ def mark_non_differentiable(ctx, output, output_differentiability):
     # - Tensor
     # - Tensor[]
     # - int, bool, Scalar, float
+    # See _check_can_register_backward
     if output_differentiability is not None:
         if not isinstance(output, tuple):
             tuple_output = (output,)
@@ -81,8 +82,8 @@ def mark_non_differentiable(ctx, output, output_differentiability):
                 raise RuntimeError(
                     f"With output_differentiability={output_differentiability}. "
                     f"At idx {idx}, we received an object of type {type(out)} that "
-                    f"is not a Tensor, so it cannot have output_differentiability=True."
-                    f"Please change output_differentiability.")
+                    f"is not a Tensor, so it cannot have be marked as differentiable in "
+                    f"output_differentiability.")
         if non_differentiable_tensors:
             ctx.mark_non_differentiable(*non_differentiable_tensors)
 
