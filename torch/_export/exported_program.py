@@ -343,12 +343,16 @@ class ExportedProgram:
                     f"{received_spec}"
                 )
 
-        param_buffer_values = tuple(value for _, value in self.state_dict.items())
-        self._check_input_constraints(*param_buffer_values, *args)
+        ordered_params = tuple(self.state_dict[name] for name in self.graph_signature.parameters)
+        ordered_buffers = tuple(self.state_dict[name] for name in self.graph_signature.buffers)
+        self._check_input_constraints(*ordered_params, *ordered_buffers, *args)
 
         with torch.no_grad():
+            # NOTE: calling convention is first params, then buffers, then args as user supplied them.
+            # See: torch/_functorch/aot_autograd.py#L1034
             res = torch.fx.Interpreter(self.graph_module).run(
-                *param_buffer_values,
+                *ordered_params,
+                *ordered_buffers,
                 *args,
                 enable_io_processing=False
             )
