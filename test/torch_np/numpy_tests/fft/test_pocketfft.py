@@ -347,7 +347,7 @@ class TestFFTThreadSafe:
 
         [x.join() for x in t]
         # Make sure all threads returned the correct value
-        for i in range(self.threads):
+        for _ in range(self.threads):
             assert_array_equal(
                 q.get(timeout=5),
                 expected,

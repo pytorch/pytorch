@@ -615,7 +615,7 @@ class TestSeterr:
             np.isnan(np.array([6]))
             # same with the default, lots of times to get rid of possible
             # pre-existing stack in the code
-            for i in range(10000):
+            for _ in range(10000):
                 np.seterrobj([umath.UFUNC_BUFSIZE_DEFAULT, umath.ERR_DEFAULT, None])
             np.isnan(np.array([6]))
         finally:

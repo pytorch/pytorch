@@ -277,7 +277,7 @@ class TestConcatenate:
         a = np.ones((1, 2, 3))
         b = np.ones((2, 2, 3))
         axis = list(range(3))
-        for i in range(3):
+        for _ in range(3):
             np.concatenate((a, b), axis=axis[0])  # OK
             #            assert_raises_regex(
             assert_raises(

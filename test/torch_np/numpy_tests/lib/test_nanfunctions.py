@@ -782,7 +782,7 @@ class TestNanFunctions_MeanVarStd(SharedNanFunctionsTestsMixin):
         nanfuncs = [np.nanvar, np.nanstd]
         stdfuncs = [np.var, np.std]
         dsize = [len(d) for d in _rdat]
-        for nf, rf in zip(nanfuncs, stdfuncs):
+        for nf, _rf in zip(nanfuncs, stdfuncs):
             for ddof in range(5):
                 with suppress_warnings() as sup:
                     sup.record(RuntimeWarning)

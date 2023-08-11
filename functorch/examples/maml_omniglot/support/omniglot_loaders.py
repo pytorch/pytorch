@@ -120,7 +120,7 @@ class Omniglot(data.Dataset):
 
 def find_classes(root_dir):
     retour = []
-    for root, dirs, files in os.walk(root_dir):
+    for root, _, files in os.walk(root_dir):
         for f in files:
             if f.endswith("png"):
                 r = root.split("/")
@@ -180,9 +180,8 @@ class OmniglotNShot:
 
             self.x = []
             for (
-                label,
-                imgs,
-            ) in temp.items():  # labels info deserted , each label contains 20imgs
+                imgs
+            ) in temp.values():  # labels info deserted , each label contains 20imgs
                 self.x.append(np.array(imgs))
 
             # as different class may have different number of imgs
@@ -259,9 +258,9 @@ class OmniglotNShot:
         data_cache = []
 
         # print('preload next 50 caches of batchsz of batch.')
-        for sample in range(10):  # num of episodes
+        for _sample in range(10):  # num of episodes
             x_spts, y_spts, x_qrys, y_qrys = [], [], [], []
-            for i in range(self.batchsz):  # one batch means one set
+            for _ in range(self.batchsz):  # one batch means one set
                 x_spt, y_spt, x_qry, y_qry = [], [], [], []
                 selected_cls = np.random.choice(data_pack.shape[0], self.n_way, False)
 

@@ -107,7 +107,7 @@ t_y = t_A * torch.sin(t_x + t_b)
 opt.zero_grad()
 
 t_params = params
-for k in range(5):
+for _ in range(5):
     t_f = net(t_params, t_x)
     t_loss = F.l1_loss(t_f, t_y)
 

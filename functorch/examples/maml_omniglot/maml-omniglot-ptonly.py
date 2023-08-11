@@ -200,7 +200,7 @@ def test(db, net, device, epoch, log):
     qry_losses = []
     qry_accs = []
 
-    for batch_idx in range(n_test_iter):
+    for _batch_idx in range(n_test_iter):
         x_spt, y_spt, x_qry, y_qry = db.next("test")
         task_num, setsz, c_, h, w = x_spt.size()
 
