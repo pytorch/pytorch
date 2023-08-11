@@ -51,6 +51,7 @@ from .utils import (
     _get_module,
     _is_custom_module_lstm,
     _is_custom_module_mha,
+    assert_and_get_unique_device,
     get_custom_module_class_keys,
     create_getattr_from_value,
     collect_producer_nodes,
@@ -733,6 +734,9 @@ def convert_weighted_module(
         is_ptq = weight_post_process is None
         if is_ptq:
             weight_post_process = qconfig.weight()  # type: ignore[union-attr, operator]
+            device = assert_and_get_unique_device(float_module)
+            if device:
+                weight_post_process.to(device)
 
         # Call weight observer/fake_quant at least once to ensure the scales and zero points
         # have the right shapes. Note: there are two cases where we don't have to do this:

@@ -558,7 +558,8 @@ class CudaReproTests(TestCase):
                 start = math.log2(0.5)
                 end = math.log2(1 / (2**8))
 
-                self.scales = nn.Buffer(
+                self.register_buffer(
+                    "scales",
                     2
                     ** torch.arange(
                         start,
@@ -828,7 +829,7 @@ class CudaReproTests(TestCase):
         """
 
         def fn(values, offsets):
-            return torch.ops.prims._inductor_bucketize(values, offsets)
+            return torch.bucketize(values, offsets)
 
         values = torch.rand((64, 64), device="cuda")
         offsets = torch.tensor([0.05, 0.1, 0.5, 0.8, 0.85, 0.95], device="cuda")

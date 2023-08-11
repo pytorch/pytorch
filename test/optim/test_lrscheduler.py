@@ -1987,8 +1987,8 @@ class TestLRScheduler(TestCase):
             target = [[t[epoch] for t in targets]] * len(schedulers)
             for t, r in zip(target, result):
                 self.assertEqual(
-                    target,
-                    result,
+                    t,
+                    r,
                     msg=f"LR is wrong in epoch {epoch}: expected {t}, got {r}",
                     atol=1e-5,
                     rtol=0,

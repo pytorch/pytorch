@@ -1137,7 +1137,7 @@ class FlatParamHandle:
             # sharded tensor on the compute device to be all-gathered (for
             # sharded strategies) or directly used (for `NO_SHARD`) for
             # computation.
-            flat_param._mp_shard = torch.zeros_like(
+            flat_param._mp_shard = torch.empty_like(
                 flat_param._local_shard,
                 device=self.device,
                 dtype=self._fwd_bwd_param_dtype,
@@ -1152,7 +1152,7 @@ class FlatParamHandle:
                 else flat_param.dtype
             )  # use low precision if parameter mixed precision is enabled
             padded_unsharded_numel = flat_param.numel() * self.world_size
-            flat_param._full_param_padded = torch.zeros(
+            flat_param._full_param_padded = torch.empty(
                 padded_unsharded_numel,
                 device=self.device,
                 dtype=unsharded_param_dtype,
@@ -1163,7 +1163,7 @@ class FlatParamHandle:
             if self._uses_param_mixed_precision:
                 # For parameter mixed precision, we maintain a full precision
                 # padded unsharded tensor for when we force full precision.
-                flat_param._full_prec_full_param_padded = torch.zeros(
+                flat_param._full_prec_full_param_padded = torch.empty(
                     padded_unsharded_numel,
                     device=self.device,
                     dtype=flat_param.dtype,  # full precision
@@ -1293,6 +1293,14 @@ class FlatParamHandle:
                 unsharded_flat_param.dtype != self._fwd_bwd_param_dtype,
                 f"Expects full precision but got {self._fwd_bwd_param_dtype}",
             )
+            # For no-reshard-after-forward strategies, `_full_param_padded` may
+            # still be allocated from a previous forward. As we are forcing
+            # full precision here, the full-precision unsharded copy may be
+            # modified, invalidating the existing low-precision unsharded copy,
+            # so we should free it here to ensure a new all-gather for the next
+            # forward/backward computation to persist the modifications.
+            if flat_param._full_param_padded.untyped_storage().size() > 0:
+                _free_storage(flat_param._full_param_padded)
         else:
             unsharded_flat_param = flat_param._full_param_padded  # type: ignore[attr-defined]
         return unsharded_flat_param

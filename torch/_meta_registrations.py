@@ -309,6 +309,32 @@ def meta_unsqueeze_(self, dim):
     return self
 
 
+@register_meta(aten.index_reduce.default)
+def meta_index_reduce(
+    self: Tensor,
+    dim: int,
+    index: Tensor,
+    source: torch.Tensor,
+    reduce: str,
+    *,
+    include_self: bool = True,
+) -> Tensor:
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
+
+
+@register_meta(aten.index_reduce_.default)
+def meta_index_reduce_(
+    self: Tensor,
+    dim: int,
+    index: Tensor,
+    source: torch.Tensor,
+    reduce: str,
+    *,
+    include_self: bool = True,
+) -> Tensor:
+    return self
+
+
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
 @register_meta(aten.index_select.default)
 def meta_index_select(self, dim, index):
@@ -397,12 +423,12 @@ def make_dep_token(
 
 
 @register_meta(aten.sym_constrain_range.default)
-def sym_constrain_range(size, min, max):
+def sym_constrain_range(size, min=None, max=None):
     constrain_range(size, min=min, max=max)
 
 
 @register_meta(aten._functional_sym_constrain_range.default)
-def functional_sym_constrain_range(size, min, max, dep_token):
+def functional_sym_constrain_range(size, min=None, max=None, dep_token=None):
     aten.sym_constrain_range(size, min=min, max=max)
     return dep_token
 
@@ -1134,6 +1160,54 @@ def linalg_solve_triangular_meta(
             out.resize_(B_.transpose(-2, -1).shape)
             out.transpose_(-2, -1)
     return out  # type: ignore[return-value]
+
+
+@register_meta(aten.triangular_solve)
+@out_wrapper("solution", "cloned_coefficient")
+def triangular_solve_meta(
+    self: Tensor,
+    A: Tensor,
+    upper: bool = True,
+    transpose: bool = False,
+    unitriangular: bool = False,
+) -> Tuple[Tensor, Tensor]:
+    torch._check(
+        self.ndim >= 2,
+        lambda: (
+            f"torch.triangular_solve: Expected b to have at least 2 dimensions, "
+            f"but it has {self.ndim} dimensions instead"
+        ),
+    )
+    torch._check(
+        A.ndim >= 2,
+        lambda: (
+            f"torch.triangular_solve: Expected A to have at least 2 dimensions, "
+            f"but it has {A.ndim} dimensions instead"
+        ),
+    )
+
+    linearSolveCheckInputs(self, A, "triangular_solve")
+
+    if A.layout == torch.strided:
+        self_broadcast_size, A_broadcast_size = _linalg_broadcast_batch_dims(self, A)
+        solution = torch.empty_strided(
+            size=self_broadcast_size,
+            stride=make_contiguous_strides_for(self_broadcast_size, row_major=False),
+            dtype=self.dtype,
+            device=self.device,
+        )
+        cloned_coefficient = torch.empty_strided(
+            size=A_broadcast_size,
+            stride=make_contiguous_strides_for(A_broadcast_size, row_major=False),
+            dtype=A.dtype,
+            device=A.device,
+        )
+    elif A.layout == torch.sparse_csr or A.layout == torch.sparse_bsr:
+        solution = torch.empty_like(self)
+        cloned_coefficient = self.new_empty([0])
+    else:
+        torch._check(False, lambda: "triangular_solve: Got an unexpected layout.")
+    return solution, cloned_coefficient
 
 
 # From aten/src/ATen/native/LinearAlgebra.cpp
@@ -2882,6 +2956,29 @@ def meta__foreach_addcop_tensor(self, tensor1, tensor2, scalars):
     )
 
 
+@register_meta([aten._foreach_clamp.default])
+def meta__foreach_clamp(self, min, max):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"self must be a tensor list but got {type(self)}",
+    )
+    torch._check(
+        min is not None or max is not None, lambda: "`min` or `max` must be specified"
+    )
+    return [torch.empty_like(t) for t in self]
+
+
+@register_meta([aten._foreach_clamp_.default])
+def meta__foreach_clamp_(self, min, max):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"self must be a tensor list but got {type(self)}",
+    )
+    torch._check(
+        min is not None or max is not None, lambda: "`min` or `max` must be specified"
+    )
+
+
 @register_meta([aten._fused_adam_.default])
 def meta__fused_adam_(
     self,
@@ -3002,6 +3099,25 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     output_shape = list(torch.broadcast_shapes(batch_tensor1, batch_tensor2))
     output_shape.extend([r1, r2])
     return x1.new_empty(output_shape)
+
+
+@register_meta(aten._cdist_backward)
+@out_wrapper()
+def meta_cdist_backward(grad, x1, x2, p, cdist):
+    c1 = x1.shape[-1]
+    r1 = x1.shape[-2]
+    r2 = x2.shape[-2]
+    batch_tensor1 = x1.shape[:-2]
+    batch_tensor2 = x2.shape[:-2]
+    expand_batch_portion = list(torch.broadcast_shapes(batch_tensor1, batch_tensor2))
+    tensor1_expand_size = expand_batch_portion[:]
+    tensor1_expand_size.extend([r1, c1])
+    batch_product = math.prod(expand_batch_portion)
+    if r1 == 0 or r2 == 0 or c1 == 0 or batch_product == 0:
+        return torch.zeros_like(x1)
+    if tensor1_expand_size != list(x1.shape):
+        x1 = x1.expand(tensor1_expand_size)
+    return torch.empty_like(x1, memory_format=torch.contiguous_format)
 
 
 # NB: This meta function accepts non-meta arguments!  When this behavior
@@ -5366,6 +5482,17 @@ def meta_searchsorted(
         return torch.empty_like(self, dtype=dtype).contiguous()
     else:  # Scalar
         return torch.empty((), dtype=dtype, device=sorted_sequence.device)
+
+
+@register_meta(aten.polygamma)
+@out_wrapper()
+def meta_polygamma(n: int, self: Tensor) -> Tensor:
+    torch._check(n >= 0, lambda: "polygamma(n, x) does not support negative n.")
+    _, result_dtype = elementwise_dtypes(
+        self,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+    return torch.empty_like(self, dtype=result_dtype)
 
 
 # We must also trigger meta registrations from PrimTorch ref

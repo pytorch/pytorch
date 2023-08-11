@@ -48,7 +48,7 @@ from torch.testing._internal.common_utils import skipIfNoLapack
 MIN_ONNX_OPSET_VERSION = 9
 # The max onnx opset version to test for
 MAX_ONNX_OPSET_VERSION = (
-    _constants.ONNX_MAX_OPSET - 1
+    _constants.ONNX_MAX_OPSET - 2
 )  # TODO: ORT does not support opset 18 yet
 
 
@@ -299,7 +299,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 self,
             ):
                 super().__init__()
-                self.weight = torch.nn.Buffer(torch.ones(5))
+                self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
                 scale_1 = self.weight.reshape(1, -1, 1, 1)
@@ -4308,7 +4308,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class GatherModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.weight = torch.nn.Buffer(torch.ones(5))
+                self.register_buffer("weight", torch.ones(5))
                 # torch.nn.Embedding is converted to ONNX::Gather.
                 # Constant folding will be triggerred for constant inputs.
                 # This pattern is common for constant mask inputs in transformer models.
@@ -4327,7 +4327,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class GatherModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.weight = torch.nn.Buffer(torch.ones(2))
+                self.register_buffer("weight", torch.ones(2))
 
             def forward(self, x):
                 # shape is of rank 0
@@ -4342,7 +4342,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class GatherModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.rb = torch.nn.Buffer(torch.randn(1, 1, 3, 1, 1))
+                self.register_buffer("rb", torch.randn(1, 1, 3, 1, 1))
 
             def forward(self, x):
                 x += self.rb[0]
@@ -9488,7 +9488,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class ShapeModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.weight = torch.nn.Buffer(torch.ones(5))
+                self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
                 shape = self.weight.shape[0]
@@ -10989,7 +10989,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self, embedding_dim):
                 super().__init__()
                 self.weights = InnerModule2.get_embedding(embedding_dim)
-                self._float_tensor = torch.nn.Buffer(torch.FloatTensor(1))
+                self.register_buffer("_float_tensor", torch.FloatTensor(1))
                 self.const = 2
 
             @staticmethod
@@ -11051,7 +11051,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 self.embedding_dim = embedding_dim
                 self.const = 2.5
                 self.weights = InnerModule.get_embedding(self.embedding_dim)
-                self._float_tensor = torch.nn.Buffer(torch.FloatTensor(1))
+                self.register_buffer("_float_tensor", torch.FloatTensor(1))
 
             @staticmethod
             def get_embedding(embedding_dim: int):

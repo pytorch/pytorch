@@ -429,7 +429,7 @@ def distribute_tensor(
     # TODO: the value assignment to global variable is not the ideal solution
     # we can replace it in future.
     if is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
-        random._rng_tracker = OffsetBasedRNGTracker()
+        random._rng_tracker = OffsetBasedRNGTracker(device_mesh.device_type)
 
     if not tensor.is_leaf:
         raise RuntimeError(
