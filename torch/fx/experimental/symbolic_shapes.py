@@ -32,8 +32,9 @@ from torch import (  # noqa: F401
     SymFloat,
     SymInt,
 )
-from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
+from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._sympy.functions import FloorDiv, LShift, Mod, RShift
+from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._traceback import format_frame
 from torch._utils_internal import signpost_event
@@ -303,13 +304,57 @@ def guard_scalar(a):
     else:
         raise AssertionError(f"unrecognized scalar {a}")
 
-def _constrain_symbol_range(shape_env, s: sympy.Symbol, min: int, max: int):
+def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compiler_max: int, runtime_min: int, runtime_max: int):
     if r := shape_env.var_to_range.get(s, None):
         shape_env.var_to_range[s] = ValueRanges(
-            builtins.max(r.lower, min), builtins.min(r.upper, max)
+            builtins.max(r.lower, compiler_min), builtins.min(r.upper, compiler_max)
         )
     else:
-        shape_env.var_to_range[s] = ValueRanges(min, max)
+        shape_env.var_to_range[s] = ValueRanges(compiler_min, compiler_max)
+
+    if r := shape_env.runtime_var_to_range.get(s, None):
+        shape_env.runtime_var_to_range[s] = ValueRanges(
+            builtins.max(r.lower, runtime_min), builtins.min(r.upper, runtime_max)
+        )
+    else:
+        shape_env.runtime_var_to_range[s] = ValueRanges(runtime_min, runtime_max)
+
+def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] = None):
+    """
+    This function is NOT INTENDED to be used by itself.
+    """
+
+    if isinstance(a, (SymFloat, SymBool)):
+        raise ValueError("Constraining SymFloat/SymBool is nyi")
+
+    assert isinstance(a, SymInt)
+    assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+
+    if min is None:
+        min = 0
+    if max is None:
+        max = sympy.oo
+
+    if max <= 2:
+        raise ValueError(f"Maximum value to constrain_as_size must be greater than 2, but was {max}")
+
+    if max < min:
+        raise ValueError(
+            "Maximum value to constrain_as_size can't be less than the specified min value, "
+            "received min={min} and max={max}"
+        )
+
+    compiler_min = 2 if min < 2 else min
+
+    _constrain_symbol_range(
+        a.node.shape_env,
+        a.node.expr,
+        compiler_min=compiler_min,
+        compiler_max=max,
+        runtime_min=min,
+        runtime_max=max
+    )
+
 
 # inclusive both ways
 def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
@@ -349,8 +394,16 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
         min = -sympy.oo
     if max is None:
         max = sympy.oo
-    if not isinstance(a, SymInt):
-        constrain_range_int(a, min=min, max=max)
+
+    if max < min:
+        raise ValueError(
+            "Maximum value to constrain_as_size can't be less than the specified min value, "
+            "received min={min} and max={max}"
+        )
+
+    if isinstance(a, int):
+        if not (min <= a <= max):
+            raise ValueError(f"Invalid value {a} for range [{min}:{max}]")
         return
 
     if isinstance(a.node.expr, sympy.Integer):
@@ -363,31 +416,15 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     # semantics that this is an "unchecked" assert (but it this actually
     # something useful?  Might be better to restrict only for unbacked
     # SymInt).
-    _constrain_symbol_range(a.node.shape_env, a.node.expr, min, max)
+    _constrain_symbol_range(
+        a.node.shape_env,
+        a.node.expr,
+        compiler_min=min,
+        compiler_max=max,
+        runtime_min=min,
+        runtime_max=max
+    )
 
-def constrain_range_int(a, *, min, max):
-    """
-    Constrain range on concrete int value.
-    This can happens for the following scenarios:
-    - Eager mode execution and real int value is provided.
-    - During tracing the traced symbol is resolved as a static integer (see
-      PR #101655 for more details).
-    """
-
-    assert not isinstance(a, SymInt)
-    if not (min <= a <= max):
-        raise ValueRangeError(f"Invalid value {a} for range [{min}:{max}]")
-
-    if (
-        (fake_mode := detect_fake_mode()) is not None and
-        getattr(fake_mode, "shape_env", None) is not None
-    ):
-        # If we are tracing with a fake mode then add this integer to the
-        # shape_env's var_to_range
-        sym_integer = sympy.Integer(a)
-        shape_env = fake_mode.shape_env
-        _constrain_symbol_range(shape_env, sym_integer, min, max)
-        shape_env.var_to_stack[sym_integer] = TracingContext(fake_mode).extract_stack()
 
 def constrain_unify(a, b):
     """
@@ -1933,6 +1970,10 @@ class ShapeEnv:
         # range may contain ints which may not actually appear in
         # practice
         self.var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
+        # Maps symbolic ints to their min/max range for runtime checks.
+        # This is because we assume a graph generated with N=2 is general enough
+        # for N < 2. Therefore, it will be too strict to assert N=2 at runtime.
+        self.runtime_var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
         self.var_to_sources: Dict[sympy.Symbol, List[Source]] = {}
         self.var_to_stack: Dict[sympy.Symbol, traceback.StackSummary] = {}
         # Maps symbolic ints to the guards that refine their lower/upper
@@ -2011,39 +2052,8 @@ class ShapeEnv:
             self.validator.add_assertion(expr)
 
     def _check_translation_validate(self) -> None:
-        if not _translation_validation_enabled():
-            return
-
-        result = self.validator.validate()
-
-        if result.success:
-            return
-
-        if result.model is None:
-            reason = "no answer"
-            source_exprs = self.validator._source_exprs
-            failed = ""
-        else:
-            assert result.failed_source_expr is not None
-            reason = "model: %s" % {sym: result.model[sym] for sym in result.model}
-            source_exprs = result.failed_source_expr
-            failed = "Failed "
-
-        def exprs_to_str(exprs):
-            return "\n".join(f"==> {e}" for e in exprs)
-
-        assertions = self.validator._assertions
-        target_exprs = self.validator._target_exprs
-
-        raise RuntimeError(f"""translation validation failed with {reason}.
-Assertions:
-{exprs_to_str(assertions)}
-
-Target Guards:
-{exprs_to_str(target_exprs)}
-
-{failed}Source Guards:
-{exprs_to_str(source_exprs)}""")
+        if _translation_validation_enabled():
+            self.validator.validate()
 
     def create_fx_call_function(
             self,
@@ -2930,7 +2940,10 @@ Target Guards:
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
             # SymInt
-            if vr.lower == -sympy.oo or (unbacked_only and k in self.var_to_val):
+            if (
+                vr.lower < (-sys.maxsize - 1) // 2 or
+                (unbacked_only and k in self.var_to_val)
+            ):
                 new_range_env[k] = vr
                 continue
             # Positive means >= 1
@@ -2989,62 +3002,6 @@ Target Guards:
         self.divisible = new_divisible
 
     @_lru_cache
-    def try_isolate_symbol_lhs(self, expr: "sympy.Expr") -> "sympy.Expr":
-        def get_added_const(expr):
-            """
-            Returns an integer constant being added at the top-level of this expression.
-            """
-            if isinstance(expr, sympy.Add):
-                for a in expr.args:
-                    if isinstance(a, sympy.Integer):
-                        return a
-            return None
-
-        # Move any constants in the left-hand side to the right-hand side.
-        if isinstance(expr, sympy.Rel):
-            lhs_const = get_added_const(expr.lhs)
-            if lhs_const is not None:
-                expr = type(expr)(expr.lhs - lhs_const, expr.rhs - lhs_const)  # type: ignore[arg-type]
-
-        # a // b == expr
-        # => a >= (b * expr) and a < ((b + 1) * expr)
-        if isinstance(expr, sympy.Eq) and isinstance(expr.lhs, FloorDiv):
-            numerator, denominator = expr.lhs.args
-            expr = sympy.And(
-                sympy.Ge(numerator, (expr.rhs * denominator)),  # type: ignore[arg-type]
-                sympy.Lt(numerator, ((expr.rhs + 1) * denominator))  # type: ignore[arg-type]
-            )
-        # a // b != expr
-        # => a < (b * expr) or a >= ((b + 1) * expr)
-        if isinstance(expr, sympy.Ne) and isinstance(expr.lhs, FloorDiv):
-            numerator, denominator = expr.lhs.args
-            expr = sympy.Or(
-                sympy.Lt(numerator, (expr.rhs * denominator)),  # type: ignore[arg-type]
-                sympy.Ge(numerator, ((expr.rhs + 1) * denominator))  # type: ignore[arg-type]
-            )
-
-        # The transformations below only work if b is positive.
-        # Note: we only have this information for constants.
-        def is_floordiv_with_positive_denominator(e) -> bool:
-            if not isinstance(e, FloorDiv):
-                return False
-            number = e.args[1]
-            return isinstance(number, sympy.Integer) and bool(number > 0)
-
-        # a // b > expr  => a >= (b + 1) * expr
-        # a // b >= expr => a >= b * expr
-        if isinstance(expr, (sympy.Gt, sympy.Ge)) and is_floordiv_with_positive_denominator(expr.lhs):
-            quotient = expr.rhs if isinstance(expr, sympy.Ge) else (expr.rhs + 1)  # type: ignore[arg-type]
-            expr = sympy.Ge(expr.lhs.args[0], (quotient * expr.lhs.args[1]))  # type: ignore[arg-type]
-        # a // b < expr  => a < b * expr
-        # a // b <= expr => a < (b + 1) * expr
-        if isinstance(expr, (sympy.Lt, sympy.Le)) and is_floordiv_with_positive_denominator(expr.lhs):
-            quotient = expr.rhs if isinstance(expr, sympy.Lt) else (expr.rhs + 1)  # type: ignore[arg-type]
-            expr = sympy.Lt(expr.lhs.args[0], (quotient * expr.lhs.args[1]))  # type: ignore[arg-type]
-
-        return expr
-
-    @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
         expr = self.replace(expr)
         # TODO it would seem that this pass is not necessary given the
@@ -3060,8 +3017,8 @@ Target Guards:
                 base, divisor = atom.args
                 if isinstance(divisor, FloorDiv):
                     base1, divisor1 = divisor.args
-                    if self.replace(base % divisor) in self.divisible and \
-                            base == base1 and self.replace(base1 % divisor1) in self.divisible:
+                    if self.replace(Mod(base, divisor)) in self.divisible and \
+                            base == base1 and self.replace(Mod(base1, divisor1)) in self.divisible:
                         div_replacements[atom] = divisor1
             expr = expr.xreplace(div_replacements)
             expr = safe_expand(expr)
@@ -3071,7 +3028,7 @@ Target Guards:
             rationals = expr.atoms(sympy.Rational).difference(expr.atoms(sympy.Integer))
             for fd in expr.atoms(FloorDiv):
                 base, divisor = fd.args
-                if self.replace(base % divisor) in self.divisible:
+                if self.replace(Mod(base, divisor)) in self.divisible:
                     div_replacements[fd] = base / divisor
             new_expr = expr.xreplace(div_replacements)
             new_expr = safe_expand(new_expr)
@@ -3186,12 +3143,9 @@ Target Guards:
                 floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
                 if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
                     raise NotImplementedError
-                solutions = sympy.solve(lhs - rhs, free[0], dict=True)
-                if len(solutions) != 1:
-                    return
-                solution = solutions[0][free[0]]
-                if all(t.is_integer for t in sympy.preorder_traversal(solution)):
-                    new_var = self._find(solution)
+                r = try_solve(expr, free[0], floordiv_inequality=False)
+                if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
+                    new_var = self._find(r[1])
                     self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
             except NotImplementedError:
                 pass
@@ -3201,8 +3155,8 @@ Target Guards:
         if expr.has(Mod):
             mod_expr = tuple(expr.atoms(Mod))[0]
             try:
-                solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
-                if len(solutions) == 1 and solutions[0][mod_expr] == 0:
+                r = try_solve(expr, mod_expr, floordiv_inequality=False)
+                if r is not None and r[1] == 0:
                     self.divisible.add(mod_expr)
             except NotImplementedError:
                 pass
@@ -3377,62 +3331,25 @@ Target Guards:
     #   2. Compute the value range of the right-hand side
     #   3. Update the value range of the variable, if better
     def refine_ranges(self, guard: ShapeGuard) -> None:
-        def simplify(expr: sympy.Expr) -> sympy.Expr:
-            """
-            Simplification specialized for range refinement.
-            """
-            return self.try_isolate_symbol_lhs(self.simplify(expr))
+        expr = self.simplify(guard.expr)
 
-        def simplify_until(expr: sympy.Expr, max_iterations: int = 10) -> sympy.Expr:
-            """
-            Calls 'simplify' either until it does not change or until it reaches the
-            maximum number of iterations.
-            """
-            for _ in range(max_iterations):
-                previous, expr = expr, simplify(expr)
-                if expr == previous:
-                    break
-            return expr
+        for symbol in expr.free_symbols:
+            assert isinstance(symbol, sympy.Symbol)
 
-        RELOP_MIRROR = {
-            sympy.Ge: sympy.Le,
-            sympy.Gt: sympy.Lt,
-            sympy.Le: sympy.Ge,
-            sympy.Lt: sympy.Gt,
-        }
+            r = try_solve(expr, symbol)
 
-        # List of expressions to be processed.
-        # Here, we try considering both LHS and RHS by mirroring the
-        # original expression: a < b ==> b > a
-        exprs = [guard.expr]
-
-        if type(guard.expr) in RELOP_MIRROR:
-            exprs.append(RELOP_MIRROR[type(guard.expr)](guard.expr.rhs, guard.expr.lhs))  # type: ignore[arg-type]
-
-        for expr in exprs:
-            # First, try to simplify the left-hand side.
-            expr = simplify_until(expr)
-
-            # Filter the guards that are not:
-            #   1. are relational operations
-            #   2. have a symbol as the left-hand side
-            #   3. already have a range
-            if not (
-                isinstance(expr, sympy.Rel)
-                and isinstance(expr.lhs, sympy.Symbol)
-                and expr.lhs in self.var_to_range
-            ):
+            if r is None or not (symbol.is_integer and r[1].is_integer):
+                # Range refinement only supports integer symbols for now.
+                # There are lots of SymPy bugs when it comes to comparing
+                # reals and integers, so we skip that for now.
                 continue
 
-            # Update the value range of the left-hand side, if the
-            # right-hand side provides a better range.
-            symbol = expr.lhs
-
+            r_expr, rhs = r
             vr = self.var_to_range[symbol]
             lower, upper = vr.lower, vr.upper
 
-            rhs_vr = bound_sympy(expr.rhs, self.var_to_range)
-            _assert_bound_is_rational(expr.rhs, rhs_vr)
+            rhs_vr = bound_sympy(rhs, self.var_to_range)
+            _assert_bound_is_rational(rhs, rhs_vr)
             lower_guard, upper_guard = self.var_to_guards.get(symbol, (None, None))
 
             # Let's suppose that we have a preexisting range for x [0, 100].
@@ -3444,13 +3361,13 @@ Target Guards:
             # sympy.Eq may update both lower and upper bounds.
             # sympy.G{t,e} may update the lower bound, only.
             # sympy.L{t,e} may update the upper bound, only.
-            if lower < rhs_vr.lower and isinstance(expr, (sympy.Eq, sympy.Ge, sympy.Gt)):
+            if lower < rhs_vr.lower and isinstance(r_expr, (sympy.Eq, sympy.Ge, sympy.Gt)):
                 # Strictly greater relations allow us to refine a bit more, since
                 # x < y implies that the lower bound for x is: y + 1.
-                lower = rhs_vr.lower + int(isinstance(expr, sympy.Gt))
+                lower = rhs_vr.lower + int(isinstance(r_expr, sympy.Gt))
                 lower_guard = guard
-            if upper > rhs_vr.upper and isinstance(expr, (sympy.Eq, sympy.Le, sympy.Lt)):
-                upper = rhs_vr.upper - int(isinstance(expr, sympy.Lt))
+            if upper > rhs_vr.upper and isinstance(r_expr, (sympy.Eq, sympy.Le, sympy.Lt)):
+                upper = rhs_vr.upper - int(isinstance(r_expr, sympy.Lt))
                 upper_guard = guard
 
             # Do nothing if the new value range is no better than what we already have.

@@ -379,6 +379,9 @@ class Loops(IRNode):
         ]
 
     @cache_on_self
+    def inner_fn_str_len(self):
+        return len(self.inner_fn_str())
+
     def inner_fn_str(self):
         index = self._index(self.ranges)
         return V.KernelFormatterHandler.ir_to_string(self.inner_fn, index)
@@ -386,7 +389,6 @@ class Loops(IRNode):
     def is_zero_elements(self):
         return any(r == 0 for r in self.ranges)
 
-    @cache_on_self
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.get_reduction_type():
@@ -555,7 +557,6 @@ class Reduction(Loops):
     def index_length(self):
         return len(self.ranges) + len(self.reduction_ranges)
 
-    @cache_on_self
     def inner_fn_str(self):
         index = self._index(self.ranges)
         rindex = self._index(self.reduction_ranges, "r")
@@ -594,6 +595,9 @@ class Reduction(Loops):
         def _is_static(x):
             return isinstance(x, (int, sympy.Integer))
 
+        reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel)
+        numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
+
         should_split = (
             is_triton(device)
             and reduction_type
@@ -603,9 +607,9 @@ class Reduction(Loops):
                 "var_unnormalized",
             }
             and config.split_reductions
-            and all(_is_static(r) for r in ranges)
-            and all(_is_static(r) for r in reduction_ranges)
-            and _is_static(reduction_numel)
+            # We don't support unbacked symints
+            and _is_static(reduction_numel_hint)
+            and _is_static(numel_hint)
         )
         if not should_split:
             return ReductionHint.DEFAULT, 1
@@ -688,8 +692,6 @@ class Reduction(Loops):
                 rvals_per_thread * split_size
             )
 
-        reduction_numel_hint = V.graph.sizevars.size_hint(reduction_numel)
-        numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
         # easy cases
         if numel_hint == 1:
             return ReductionHint.INNER, inner_reduction_splits(
@@ -993,24 +995,14 @@ class Reduction(Loops):
         """
         reduction_numel = sympy_product(reduction_ranges)
 
-        # TODO(jansel): convert this to dynamic shapes
-        # TODO(jansel): realize the reduction so we can do dynamic indexing
-        reduction_ranges = [
-            sympy.Integer(V.graph.sizevars.evaluate_static_shape(s))
-            for s in reduction_ranges
-        ]
-        reduction_numel = sympy.Integer(
-            V.graph.sizevars.evaluate_static_shape(reduction_numel)
+        need_mask = not V.graph.sizevars.is_expr_static_and_true(
+            sympy.Eq(reduction_numel % split, 0)
         )
-
-        if V.graph.sizevars.size_hint(reduction_numel) % split == 0:
-            need_mask = False
-        else:
-            need_mask = True
 
         split = sympy.Integer(split)
         block_size = FloorDiv(reduction_numel + (split - 1), split)
 
+        # TODO(jansel): realize the reduction so we can do dynamic indexing
         reindex = View.dynamic_reshape_indexer(reduction_ranges, [reduction_numel])
 
         def wrapper_fn(index, reduction_index):
@@ -1193,7 +1185,6 @@ class BaseView(IRNode):
     def is_extern(self):
         return self.data.is_extern()
 
-    @cache_on_self
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
@@ -2123,7 +2114,6 @@ class Buffer(IRNode):
             return [self.layout.target.get_name()]
         return ()
 
-    @cache_on_self
     def get_read_writes(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
@@ -2182,6 +2172,9 @@ class ComputedBuffer(Buffer):
     data: Loops
 
     @cache_on_self
+    def num_reads(self):
+        return len(self.get_read_writes().reads)
+
     def get_read_writes(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.data.get_reduction_type():
@@ -2201,7 +2194,7 @@ class ComputedBuffer(Buffer):
         can_inline = (
             hasattr(self.data, "make_loader")
             and self.name not in V.graph.mutated_buffers
-            and len(self.get_read_writes().reads) == 0
+            and self.num_reads() == 0
         )
         if can_inline:
             return self.data.make_loader()
@@ -2432,7 +2425,6 @@ class TemplateBuffer(Buffer):
     def get_read_writes(self):
         return self.normalized_read_writes()
 
-    @cache_on_self
     def normalized_read_writes(self):
         name = self.get_name()
         indexer = self.layout.make_indexer()
@@ -4509,7 +4501,7 @@ class StorageBox(MutableBox):
     def has_exceeded_max_reads(self):
         return isinstance(self.data, Pointwise) and (
             self.num_reads() > config.realize_acc_reads_threshold
-            or len(self.inner_fn_str()) > config.realize_bytes_threshold
+            or self.inner_fn_str_len() > config.realize_bytes_threshold
         )
 
     def mark_reuse(self, users):
