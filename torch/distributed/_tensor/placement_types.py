@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass
-from typing import cast, List, Optional, Sequence, Tuple
+from typing import cast, List, Optional, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -370,7 +370,7 @@ class _Partial(Placement):
 @dataclass
 class DTensorSpec:
     mesh: DeviceMesh
-    placements: Sequence[Placement]
+    placements: Tuple[Placement]
 
     # tensor meta will only be set during sharding propagation
     tensor_meta: Optional[TensorMetadata] = None
@@ -381,22 +381,25 @@ class DTensorSpec:
         # Caveat: we need to keep this in mind and sync hash and eq if we add more
         # fields to them,
         if self.tensor_meta is not None:
-            return hash((self.mesh, tuple(self.placements), self.tensor_meta.shape))
+            return hash(((self.mesh, self.placements), self.tensor_meta.shape))
         else:
-            return hash((self.mesh, tuple(self.placements)))
+            return hash((self.mesh, self.placements))
 
     def __eq__(self, __o: object) -> bool:
-        return (
+        if not (
             isinstance(__o, DTensorSpec)
             and self.mesh == __o.mesh
             and self.placements == __o.placements
-            # perf hack to avoid redistribute due to memory_format to be None.
-            and self.tensor_meta.shape == __o.tensor_meta.shape
-            and self.tensor_meta.dtype == __o.tensor_meta.dtype
-            and self.tensor_meta.requires_grad == __o.tensor_meta.requires_grad
-            and self.tensor_meta.stride == __o.tensor_meta.stride
-            and self.tensor_meta.is_quantized == __o.tensor_meta.is_quantized
-            and self.tensor_meta.qparams == __o.tensor_meta.qparams
+        ):
+            return False
+        if self.tensor_meta is None or __o.tensor_meta is None:
+            return self.tensor_meta == __o.tensor_meta
+
+        # perf hack to avoid redistribute due to memory_format to be None.
+        return (
+            self.tensor_meta.shape == __o.tensor_meta.shape  # type: ignore[union-attr]
+            and self.tensor_meta.dtype == __o.tensor_meta.dtype  # type: ignore[union-attr]
+            and self.tensor_meta.stride == __o.tensor_meta.stride  # type: ignore[union-attr]
         )
 
     @property
@@ -512,4 +515,4 @@ class DTensorSpec:
                     )
                 placements[m] = Shard(i)
 
-        return cls(mesh, placements, tensor_meta=tensor_meta)
+        return cls(mesh, tuple(placements), tensor_meta=tensor_meta)  # type: ignore[arg-type]
