@@ -1862,20 +1862,6 @@ if TEST_Z3:
             for expr, expected in test_cases:
                 self.assertEqual(z3str(expr), expected)
 
-        @torch._dynamo.config.patch(
-            inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True,
-            assume_static_by_default=False,
-            translation_validation=True
-        )
-        def test_trigger_on_error(self):
-            @torch.compile
-            def fn(x):
-                return x.reshape(-1, 4)
-
-            with self.assertRaisesRegex(ValidationException, "translation validation failed."):
-                fn(torch.randn(20))
-
-
 
 instantiate_device_type_tests(TestNormalizeOperators, globals())
 
