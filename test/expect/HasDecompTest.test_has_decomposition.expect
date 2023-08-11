@@ -161,6 +161,9 @@ aten::_foreach_atan_
 aten::_foreach_ceil
 aten::_foreach_ceil.out
 aten::_foreach_ceil_
+aten::_foreach_clamp
+aten::_foreach_clamp.out
+aten::_foreach_clamp_
 aten::_foreach_clamp_max.List
 aten::_foreach_clamp_max.List_out
 aten::_foreach_clamp_max.Scalar
@@ -257,9 +260,12 @@ aten::_foreach_mul.Scalar
 aten::_foreach_mul.ScalarList
 aten::_foreach_mul.ScalarList_out
 aten::_foreach_mul.Scalar_out
+aten::_foreach_mul.Tensor
+aten::_foreach_mul.Tensor_out
 aten::_foreach_mul_.List
 aten::_foreach_mul_.Scalar
 aten::_foreach_mul_.ScalarList
+aten::_foreach_mul_.Tensor
 aten::_foreach_neg
 aten::_foreach_neg.out
 aten::_foreach_neg_
@@ -543,7 +549,6 @@ aten::_unique
 aten::_unique.out
 aten::_unique2
 aten::_unique2.out
-aten::_unsafe_index.Tensor
 aten::_unsafe_index_put
 aten::_upsample_bicubic2d_aa
 aten::_upsample_bicubic2d_aa.out
@@ -589,8 +594,6 @@ aten::adaptive_max_pool3d_backward.grad_input
 aten::addbmm
 aten::addbmm.out
 aten::addr_
-aten::affine_grid_generator
-aten::affine_grid_generator.out
 aten::alias_copy
 aten::alias_copy.out
 aten::allclose
@@ -1109,9 +1112,6 @@ aten::round.out
 aten::row_indices
 aten::row_indices_copy
 aten::row_indices_copy.out
-aten::rrelu_with_noise
-aten::rrelu_with_noise.out
-aten::rrelu_with_noise_
 aten::rsub.Scalar_out
 aten::rsub.Tensor_out
 aten::scalar_tensor
