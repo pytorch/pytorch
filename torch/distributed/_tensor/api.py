@@ -85,7 +85,7 @@ class _FromTorchTensor(torch.autograd.Function):
         ctx,  # pyre-ignore[2]: Parameter must be annotated.
         input: torch.Tensor,
         device_mesh: DeviceMesh,
-        placements: Sequence[Placement],
+        placements: Tuple[Placement],
         run_check: bool,
     ) -> "DTensor":
         ctx.previous_placement = placements
@@ -160,7 +160,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         cls,
         local_tensor: torch.Tensor,
         device_mesh: DeviceMesh,
-        placements: Sequence[Placement],
+        placements: Tuple[Placement],
         *,
         shape: torch.Size,
         dtype: torch.dtype,
@@ -201,9 +201,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             shape, dtype, requires_grad, stride, None, False, {}
         )
         # deepcopy and set spec
-        r._spec = DTensorSpec(
-            device_mesh, placements, tensor_meta=tensor_meta  # type: ignore[arg-type]
-        )
+        r._spec = DTensorSpec(device_mesh, placements, tensor_meta=tensor_meta)
         r._local_tensor = local_tensor
         return r
 
@@ -490,7 +488,7 @@ def distribute_tensor(
     return DTensor(
         local_tensor.detach(),
         device_mesh,
-        placements,
+        tuple(placements),  # type: ignore[arg-type]
         shape=tensor.size(),
         dtype=tensor.dtype,
         requires_grad=tensor.requires_grad,
