@@ -711,7 +711,7 @@ def triton_config(
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_reduction(size_hints, x, r, num_stages=1) -> Config:
+def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
@@ -733,7 +733,9 @@ def triton_config_reduction(size_hints, x, r, num_stages=1) -> Config:
         r *= 2
 
     cfg = {"XBLOCK": x, "RBLOCK": r}
-    num_warps = next_power_of_2(min(max(conditional_product(x, r) // 128, 2), 8))
+    if num_warps is None:
+        num_warps = conditional_product(x, r) // 128
+    num_warps = next_power_of_2(min(max(num_warps, 2), 8))
     check_config(cfg, xnumel=size_hints[0])
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
@@ -910,6 +912,10 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 tiny_config,
                 triton_config_reduction(size_hints, 64, 64),
                 triton_config_reduction(size_hints, 8, 512),
+                # halve the XBLOCK/RBLOCK compared to outer_config
+                # TODO: this may only be beneficial when each iteration of the reduciton
+                # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
+                triton_config_reduction(size_hints, 64, 4, num_warps=8),
             ],
             meta=meta,
             filename=filename,
