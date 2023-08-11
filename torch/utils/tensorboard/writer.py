@@ -3,43 +3,39 @@ consumed by TensorBoard for visualization."""
 
 import os
 import time
+
 import torch
 
 from tensorboard.compat import tf
-from tensorboard.compat.proto.event_pb2 import SessionLog
-from tensorboard.compat.proto.event_pb2 import Event
 from tensorboard.compat.proto import event_pb2
+from tensorboard.compat.proto.event_pb2 import Event, SessionLog
 from tensorboard.plugins.projector.projector_config_pb2 import ProjectorConfig
 from tensorboard.summary.writer.event_file_writer import EventFileWriter
 
 from ._convert_np import make_np
-from ._embedding import (
-    make_mat,
-    make_sprite,
-    make_tsv,
-    write_pbtxt,
-    get_embedding_info,
-)
+from ._embedding import get_embedding_info, make_mat, make_sprite, make_tsv, write_pbtxt
 from ._onnx_graph import load_onnx_graph
 from ._pytorch_graph import graph
 from ._utils import figure_to_image
 from .summary import (
-    scalar,
+    audio,
+    custom_scalars,
     histogram,
     histogram_raw,
+    hparams,
     image,
-    audio,
-    text,
-    pr_curve,
-    pr_curve_raw,
-    video,
-    custom_scalars,
     image_boxes,
     mesh,
-    hparams,
+    pr_curve,
+    pr_curve_raw,
+    scalar,
+    tensor_proto,
+    text,
+    video,
 )
 
-__all__ = ['FileWriter', 'SummaryWriter']
+__all__ = ["FileWriter", "SummaryWriter"]
+
 
 class FileWriter:
     """Writes protocol buffers to event files to be consumed by TensorBoard.
@@ -437,6 +433,42 @@ class SummaryWriter:
 
                 scalar_value = workspace.FetchBlob(scalar_value)
             fw.add_summary(scalar(main_tag, scalar_value), global_step, walltime)
+
+    def add_tensor(
+        self,
+        tag,
+        tensor,
+        global_step=None,
+        walltime=None,
+    ):
+        """Add tensor data to summary.
+
+        Args:
+            tag (str): Data identifier
+            tensor (torch.Tensor): tensor to save
+            global_step (int): Global step value to record
+        Examples::
+
+            from torch.utils.tensorboard import SummaryWriter
+            writer = SummaryWriter()
+            x = torch.tensor([1,2,3])
+            writer.add_scalar('x', x)
+            writer.close()
+
+        Expected result:
+            Summary::tensor::float_val [1,2,3]
+                   ::tensor::shape [3]
+                   ::tag 'x'
+
+        """
+        torch._C._log_api_usage_once("tensorboard.logging.add_tensor")
+        if self._check_caffe2_blob(tensor):
+            from caffe2.python import workspace
+
+            tensor = torch.tensor(workspace.FetchBlob(tensor))
+
+        summary = tensor_proto(tag, tensor)
+        self._get_file_writer().add_summary(summary, global_step, walltime)
 
     def add_histogram(
         self,
@@ -844,6 +876,7 @@ class SummaryWriter:
             # Caffe2 models do not have the 'forward' method
             from caffe2.proto import caffe2_pb2
             from caffe2.python import core
+
             from ._caffe2_graph import (
                 model_to_graph_def,
                 nets_to_graph_def,
@@ -865,8 +898,8 @@ class SummaryWriter:
     def _encode(rawstr):
         # I'd use urllib but, I'm unsure about the differences from python3 to python2, etc.
         retval = rawstr
-        retval = retval.replace("%", "%%%02x" % (ord("%")))
-        retval = retval.replace("/", "%%%02x" % (ord("/")))
+        retval = retval.replace("%", f"%{ord('%'):02x}")
+        retval = retval.replace("/", f"%{ord('/'):02x}")
         retval = retval.replace("\\", "%%%02x" % (ord("\\")))
         return retval
 
@@ -920,7 +953,7 @@ class SummaryWriter:
 
         # Maybe we should encode the tag so slashes don't trip us up?
         # I don't think this will mess us up, but better safe than sorry.
-        subdir = "%s/%s" % (str(global_step).zfill(5), self._encode(tag))
+        subdir = f"{str(global_step).zfill(5)}/{self._encode(tag)}"
         save_path = os.path.join(self._get_file_writer().get_logdir(), subdir)
 
         fs = tf.io.gfile
@@ -931,7 +964,7 @@ class SummaryWriter:
                 )
             else:
                 raise Exception(
-                    "Path: `%s` exists, but is a file. Cannot proceed." % save_path
+                    f"Path: `{save_path}` exists, but is a file. Cannot proceed."
                 )
         else:
             fs.makedirs(save_path)
