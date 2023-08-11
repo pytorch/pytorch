@@ -427,6 +427,8 @@ def _compile(
         try:
             with tracing(tracer.output.tracing_context):
                 tracer.run()
+        except (exc.RestartAnalysis, exc.SkipFrame):
+            raise
         except Exception:
             if translation_validation_enabled():
                 fakes = tracer.output.tracked_fakes
