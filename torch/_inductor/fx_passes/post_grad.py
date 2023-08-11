@@ -2,6 +2,9 @@ import functools
 import itertools
 import logging
 import operator
+from typing import List, Optional, Union
+
+from sympy import Expr
 
 import torch
 import torch._inductor as inductor
@@ -16,7 +19,6 @@ from ..pattern_matcher import (
     filter_nodes,
     get_arg_value,
     Ignored,
-    inference_graph,
     init_once_fakemode,
     KeywordArg,
     ListOf,
@@ -24,7 +26,6 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
-    register_replacement,
     remove_extra_clones,
     stable_topological_sort,
 )
@@ -149,7 +150,7 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
     )
 )
 def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
-    return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
+    return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)  # type: ignore[attr-defined]
 
 
 @register_graph_pattern(
@@ -225,7 +226,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
     assert dim in (0, 1)
     notdim = 1 - dim
 
-    new_size = None
+    new_size: Optional[Union[List[Expr], List[int]]] = None
     offsets_start = []
     offsets_end = []
 
@@ -242,6 +243,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
         offsets_start.append(new_size[dim] - shape[dim])
         offsets_end.append(new_size[dim])
 
+    assert new_size is not None
     dtype = functools.reduce(
         torch.promote_types, [x.get_dtype() for x in itertools.chain(*inputs)]
     )
@@ -355,70 +357,6 @@ def addmm(match, mat1, mat2, inp):
         return L[aten.addmm](inp, mat1, mat2)
     else:
         return L[aten.add](inp, L[aten.mm](mat1, mat2))
-
-
-def addmm_relu_pattern(input, mat1, mat2):
-    output = aten.addmm(input, mat1, mat2)
-    return aten.relu(output)
-
-
-def addmm_relu_replacement(input, mat1, mat2):
-    return aten._addmm_activation(input, mat1, mat2, use_gelu=False)
-
-
-def addmm_gelu_pattern(input, mat1, mat2):
-    output = aten.addmm(input, mat1, mat2)
-    return aten.gelu(output)
-
-
-def addmm_gelu_replacement(input, mat1, mat2):
-    return aten._addmm_activation(input, mat1, mat2, use_gelu=True)
-
-
-def should_replace_addmm_activation(match):
-    if config.max_autotune_gemm:
-        # keep addmm for tuning
-        return False
-
-    input = match.kwargs["input"].meta["val"]
-    # conditions of epilogue fusion in _addmm_activation
-    return input.is_cuda and input.dim() == 1 and input.is_contiguous()
-
-
-def register_addmm_activation_replacement():
-    if torch.cuda.is_available():
-        # workaround https://github.com/pytorch/pytorch/issues/97894
-        device = "cuda"
-    else:
-        device = "cpu"
-
-    # sizes/values dont actually matter for initial trace
-    # once we get a possible match we re-trace with the actual values and verify the match still holds
-
-    inp = functools.partial(torch.empty, (5,), device=device)
-    mat1 = functools.partial(torch.empty, (3, 4), device=device)
-    mat2 = functools.partial(torch.empty, (4, 5), device=device)
-
-    for pattern, replacement, args in [
-        (
-            addmm_relu_pattern,
-            addmm_relu_replacement,
-            [inp(), mat1(), mat2()],
-        ),
-        (
-            addmm_gelu_pattern,
-            addmm_gelu_replacement,
-            [inp(), mat1(), mat2()],
-        ),
-    ]:
-        register_replacement(
-            pattern,
-            replacement,
-            args,
-            inference_graph,
-            inference_patterns,
-            extra_check=should_replace_addmm_activation,
-        )
 
 
 def is_valid_splitwithsizes_cat(match):

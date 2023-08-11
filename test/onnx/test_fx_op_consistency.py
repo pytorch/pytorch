@@ -355,6 +355,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
     ),
     xfail(
+        "nn.functional.adaptive_avg_pool1d",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten::div.Tensor_mode needs type promotion"),
+    ),
+    xfail(
         "nn.functional.adaptive_avg_pool2d",
         reason=onnx_test_common.reason_onnx_script_does_not_support("RecursionError: \
             maximum recursion depth exceeded while calling a Python object"),
@@ -488,9 +492,10 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: sample.input[0].equal(torch.tensor([])),
         reason="core dump - cat does not support zero-dim tensors yet",
     ),
-    skip(
+    xfail(
         "div",
-        matcher=lambda sample: sample.kwargs.get("rounding_mode") is not None,
+        matcher=lambda sample: sample.kwargs.get("rounding_mode") is not None
+        and sample.input.dtype in onnx_test_common.INT_TYPES,
         reason="rounding_mode is not yet supported",
     ),
     xfail(

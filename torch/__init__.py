@@ -1633,7 +1633,7 @@ def compile(model: Optional[Callable] = None, *,
           There are other circumstances where CUDA graphs are not applicable; use TORCH_LOG=perf_hints
           to debug.
 
-        - "max-autotune" is a mode that that leverages Triton based matrix multiplications and convolutions
+        - "max-autotune" is a mode that leverages Triton based matrix multiplications and convolutions
           It enables CUDA graphs by default.
 
         - "max-autotune-no-cudagraphs" is a mode similar to "max-autotune" but without CUDA graphs

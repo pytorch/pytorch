@@ -319,13 +319,17 @@ def check_model(
 
     correct_flat, correct_spec = tree_flatten(correct)
     actual_flat, _ = tree_flatten(actual)
-    if reference_in_float:
-        correct_flat = tuple(
+
+    def reference_to_expect(actual_flat, correct_flat):
+        return tuple(
             y.to(x.dtype)
             if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
             else y
             for x, y in zip(actual_flat, correct_flat)
         )
+
+    if reference_in_float:
+        correct_flat = reference_to_expect(actual_flat, correct_flat)
         correct = tree_unflatten(correct_flat, correct_spec)
 
     if assert_equal:
@@ -368,8 +372,7 @@ def check_model(
             g /= g.norm()
 
         correct_grad = compute_grads(ref_inputs, ref_kwargs, correct, grads)
-        flat_grads, _ = tree_flatten(correct_grad)
-        all_none_grads = all(x is None for x in flat_grads)
+        all_none_grads = all(x is None for x in correct_grad)
         if all_none_grads:
             # See Note [Detaching inputs that never need gradients]
             # There are a handful of ops that can return None gradients, into of zero gradients.
@@ -386,9 +389,15 @@ def check_model(
             self.assertEqual(len(results_that_require_grad), 0)
         else:
             actual_grad = compute_grads(example_inputs, kwargs, actual, grads)
+
+            if reference_in_float:
+                expect_grad = reference_to_expect(actual_grad, correct_grad)
+            else:
+                expect_grad = correct_grad
+
             self.assertEqual(
                 actual_grad,
-                correct_grad,
+                expect_grad,
                 atol=atol,
                 rtol=rtol,
                 equal_nan=True,
@@ -920,6 +929,15 @@ class CommonTemplate:
             return torch.mean(a)
 
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float16),)))
+
+    def test_multilayer_prime_size(self):
+        def fn(a):
+            return torch.max(a), torch.sum(a)
+
+        # Requires masked loading for the intermediate reduction
+        sample = torch.full((3999971,), 0, dtype=torch.int64)
+        sample[-1] = 1
+        self.common(fn, (sample,))
 
     def test_expanded_reduction(self):
         if self.device == "cpu":
@@ -1713,7 +1731,12 @@ class CommonTemplate:
             torch.nn.Linear(8, 8),
             torch.nn.ReLU(),
         )
-        self.common(mod, (torch.randn(2, 8),), atol=1e-3, rtol=0.01,)
+        self.common(
+            mod,
+            (torch.randn(2, 8),),
+            atol=1e-3,
+            rtol=0.01,
+        )
 
     def test_bmm1(self):
         def fn(a, b):
