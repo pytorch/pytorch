@@ -1956,7 +1956,7 @@ def gen_per_operator_headers(
         dispatch_namespace = dispatch_key.lower()
         dispatch_names = []
 
-        for name, functions in functions_by_root_name.items():
+        for name in functions_by_root_name:
             grouped_functions = grouped_functions_by_root_name.get(name, [])
             declarations = list(
                 concatMap(

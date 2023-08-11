@@ -922,7 +922,7 @@ def gen_pyi(
         return hint
 
     function_hints = []
-    for name, hints in sorted(unsorted_function_hints.items()):
+    for _, hints in sorted(unsorted_function_hints.items()):
         hints = [replace_special_case(h) for h in hints]
         if len(hints) > 1:
             hints = ["@overload\n" + h for h in hints]
@@ -1147,7 +1147,7 @@ def gen_pyi(
         unsorted_tensor_method_hints[name] += sig_for_ops(name)
 
     tensor_method_hints = []
-    for name, hints in sorted(unsorted_tensor_method_hints.items()):
+    for _, hints in sorted(unsorted_tensor_method_hints.items()):
         if len(hints) > 1:
             hints = ["@overload\n" + h for h in hints]
         tensor_method_hints += hints

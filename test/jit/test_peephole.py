@@ -89,7 +89,7 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x, y, z):
             li = [x, y, z]
-            for i in range(len(x)):
+            for _ in range(len(x)):
                 li.append(x)
             return len([x, y, z])
 
@@ -116,7 +116,7 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x, y, z):
             li = [x, y, z]
-            for i in range(len(x)):
+            for _ in range(len(x)):
                 li.append(x)
             return li[-2]
 

@@ -2093,7 +2093,7 @@ class TestQuantizedOps(TestCase):
         X = torch.from_numpy(X)
         new_shape = np.array(X.shape)
         new_shape[dim] = 0
-        for idx in range(num):
+        for _ in range(num):
             tensors_q.append(torch.quantize_per_tensor(X, scale, zero_point,
                                                        torch_type))
             tensors_ref.append(X)
@@ -5296,7 +5296,7 @@ class TestQuantizedConv(TestCase):
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 schedule=my_schedule,
                 on_trace_ready=trace_handler) as prof:
-            for i in range(30):
+            for _ in range(30):
                 conv_op(input, weight, None, stride, padding, dilation, groups)
                 prof.step()
 
@@ -5311,7 +5311,7 @@ class TestQuantizedConv(TestCase):
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 schedule=my_schedule,
                 on_trace_ready=trace_handler) as prof:
-            for i in range(30):
+            for _ in range(30):
                 conv_op(input_fp16, weight_fp16, None, stride, padding, dilation, groups)
                 prof.step()
 
@@ -5328,7 +5328,7 @@ class TestQuantizedConv(TestCase):
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 schedule=my_schedule,
                 on_trace_ready=trace_handler) as prof:
-            for i in range(30):
+            for _ in range(30):
                 conv_op(input_int8, weight_prepacked, scale, zero_point)
                 prof.step()
 

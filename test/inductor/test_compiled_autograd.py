@@ -329,7 +329,7 @@ class TestCompiledAutograd(TestCase):
             dtype=input_tensor.dtype, device=DEVICE
         )
 
-        for iteration in range(10):
+        for _ in range(10):
             for param in model_parameters:
                 param.grad = None
             output_tensor = model(

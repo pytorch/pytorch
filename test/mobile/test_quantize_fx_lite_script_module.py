@@ -45,7 +45,7 @@ class TestLiteFuseFx(QuantizationLiteTestCase):
             (default_qconfig, ns.call_module(nn.Embedding)),
         ]
 
-        for qconfig, node in configs:
+        for qconfig, _ in configs:
             qconfig_dict = {"": qconfig}
             m = prepare_fx(
                 model,

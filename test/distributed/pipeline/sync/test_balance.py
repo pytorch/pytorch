@@ -83,7 +83,7 @@ def test_balance_by_size_latent():
             self.times = times
 
         def forward(self, x):
-            for i in range(self.times):
+            for _ in range(self.times):
                 x = x + torch.rand_like(x, requires_grad=True)
             return x
 
@@ -120,7 +120,7 @@ def test_balance_by_size_param_scale():
             self.latent_size = latent_size
 
         def forward(self, x):
-            for i in range(self.latent_size):
+            for _ in range(self.latent_size):
                 x = x + torch.rand_like(x, requires_grad=True)
             return x
 

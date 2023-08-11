@@ -26,7 +26,7 @@ def find_csv_files(path, perf_compare):
             return f.endswith("_performance.csv")
 
     csv_files = []
-    for root, dirs, files in os.walk(path):
+    for root, _, files in os.walk(path):
         for file in files:
             if is_csv(file):
                 csv_files.append(os.path.join(root, file))

@@ -1636,7 +1636,7 @@ class TestFSDPOptimState(FSDPTest):
         )
 
         # Make optim1 has a different state.
-        for i in range(5):
+        for _ in range(5):
             batch = torch.rand(5, 8).cuda()
             loss = models[1](batch).sum()
             loss.backward()

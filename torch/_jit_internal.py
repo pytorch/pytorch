@@ -900,7 +900,7 @@ def get_class_name_lineno(method) -> Tuple[str, int]:
     current_frame = inspect.currentframe()
 
     # one for the get_class_name call, one for _overload_method call
-    for i in range(2):
+    for _ in range(2):
         assert (
             current_frame is not None
         )  # assert current frame is not an Optional[FrameType]

@@ -738,7 +738,7 @@ def attrs_with_prefix(module, prefix):
 def warmup_backward(f, *args):
     profiling_count = 3
     results = []
-    for i in range(profiling_count):
+    for _ in range(profiling_count):
         if len(args) > 0:
             r = torch.autograd.grad(f, *args)
             results.append(r)

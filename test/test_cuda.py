@@ -940,7 +940,7 @@ except RuntimeError as e:
                                                                   stream if x_first_use_on_ambient else model.stream0))
                     for p in model.parameters():
                         self.assertTrue(p.grad is None)
-                    for i in range(iters):
+                    for _ in range(iters):
                         loss = model(x, x_first_use_on_ambient).sum()
                         if out_of_place:
                             x_grad = torch.autograd.grad((loss,), (x,))[0]
@@ -1576,7 +1576,7 @@ torch.cuda.synchronize()
             # Line up threads to increase likelihood of race conditions.
             barrier.wait()
             with torch.cuda.stream(my_stream):
-                for i in range(test_iters):
+                for _ in range(test_iters):
                     # If all threads are sharing the same cublas handle,
                     # the following sequence may occur:
                     # thread 0 calls cublasSetStream()
@@ -1685,7 +1685,7 @@ torch.cuda.synchronize()
             # Line up threads to increase likelihood of race conditions.
             barrier.wait()
             with torch.cuda.stream(my_stream):
-                for i in range(test_iters):
+                for _ in range(test_iters):
                     # If all threads are sharing the same cublas handle,
                     # the following sequence may occur:
                     # thread 0 calls cublasSetStream()
@@ -2230,7 +2230,7 @@ exit(2)
         free_bytes_before, total_bytes = torch.cuda.mem_get_info()
         used_gb_before = (total_bytes - free_bytes_before) / 1e9
 
-        for i in range(100):
+        for _ in range(100):
             torch_graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(torch_graph):
                 torch.mm(a, b)
@@ -3628,7 +3628,7 @@ class TestCudaMallocAsync(TestCase):
                 total -= x.numel()
 
             choices = [alloc, free, torch.cuda.memory.empty_cache]
-            for i in range(N):
+            for _ in range(N):
                 while total >= 1024 * 1024 * 1024 / 4:
                     free()
                 action, = random.choices(choices, weights=[1, 1 if mem else 0, .1])

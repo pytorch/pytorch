@@ -59,7 +59,7 @@ def _generate_input(shape, dtype, device, with_extremal):
 # TODO: replace with make_tensor
 def _rand_shape(dim, min_size, max_size):
     shape = []
-    for i in range(dim):
+    for _ in range(dim):
         shape.append(random.randint(min_size, max_size))
     return tuple(shape)
 

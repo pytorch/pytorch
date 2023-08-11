@@ -68,13 +68,13 @@ def get_approximate_basis(
     A_H = _utils.transjugate(A)
     if M is None:
         Q = torch.linalg.qr(matmul(A, R)).Q
-        for i in range(niter):
+        for _ in range(niter):
             Q = torch.linalg.qr(matmul(A_H, Q)).Q
             Q = torch.linalg.qr(matmul(A, Q)).Q
     else:
         M_H = _utils.transjugate(M)
         Q = torch.linalg.qr(matmul(A, R) - matmul(M, R)).Q
-        for i in range(niter):
+        for _ in range(niter):
             Q = torch.linalg.qr(matmul(A_H, Q) - matmul(M_H, Q)).Q
             Q = torch.linalg.qr(matmul(A, Q) - matmul(M, Q)).Q
 

@@ -26,7 +26,7 @@ def partition_model(
     balanced_pipe = []
     for num_layers in balance:
         layers = []
-        for i in range(num_layers):
+        for _ in range(num_layers):
             layers.append(module[pipe_idx])
             pipe_idx += 1
         device = device_idx if devices is None else devices[device_idx]

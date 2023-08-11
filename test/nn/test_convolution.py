@@ -248,11 +248,11 @@ class TestConvolutionNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_thnn_conv_strided_padded_dilated(self):
-        for convfn, dims, transposed in (
-                (torch.nn.functional.conv2d, 2, False),
-                (torch.nn.functional.conv_transpose2d, 2, True),
-                (torch.nn.functional.conv3d, 3, False),
-                (torch.nn.functional.conv_transpose3d, 3, True)):
+        for convfn, dims in (
+                (torch.nn.functional.conv2d, 2),
+                (torch.nn.functional.conv_transpose2d, 2),
+                (torch.nn.functional.conv3d, 3),
+                (torch.nn.functional.conv_transpose3d, 3)):
             for stride, padding, dilation in (
                     (2, 0, 1), (1, 1, 1), (2, 1, 1), (1, 0, 2)):
                 kwargs = {"stride": stride, "padding": padding, "dilation": dilation}

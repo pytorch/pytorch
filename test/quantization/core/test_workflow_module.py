@@ -1106,7 +1106,7 @@ class TestFusedObsFakeQuantModule(TestCase):
         torch.ao.quantization.enable_observer(mod_ref)
         mod_ref.to(device)
 
-        for i in range(10):
+        for _ in range(10):
             x = torch.randn(5, 5, device=device)
             out = mod(x)
             out_ref = mod_ref(x)
@@ -1242,7 +1242,7 @@ class TestFusedObsFakeQuantModule(TestCase):
 
                 count_fake_quant = 0
                 count_activation_postproc = 0
-                for name, mod in quant_model.named_modules():
+                for name, _ in quant_model.named_modules():
                     if name.endswith('weight_fake_quant'):
                         count_fake_quant += 1
                     if name.count('activation_post_process') == 1 and 'weight_fake_quant' not in name:

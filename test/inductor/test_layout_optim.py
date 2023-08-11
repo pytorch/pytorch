@@ -71,7 +71,7 @@ class TestLayoutOptim(TestCase):
                     x.sum().backward()
 
                     grads = []
-                    for name, param in m.named_parameters():
+                    for param in m.parameters():
                         grad = param.grad
                         if param.grad is None:
                             grad = torch.zeros_like(param)

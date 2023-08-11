@@ -1135,10 +1135,10 @@ class CommonTemplate:
             self.common(fn2, (torch.randn(size1), torch.randn(size2)))
 
     def test_views2(self):
-        def fn1(x):
+        def fn1(x, size2):
             return (x.view(size2) + 1,)
 
-        def fn2(x):
+        def fn2(x, size2):
             return ((x * 2).view(size2) + 1,)
 
         for size1, size2 in [
@@ -1146,8 +1146,8 @@ class CommonTemplate:
             ([10, 1, 10, 1, 10], [-1, 100]),
             ([10 * 5, 20], [10, -1, 20]),
         ]:
-            self.common(fn1, (torch.randn(size1),))
-            self.common(fn2, (torch.randn(size1),))
+            self.common(fn1, (torch.randn(size1), size2))
+            self.common(fn2, (torch.randn(size1), size2))
 
     def test_views3(self):
         # example taken from hf_BigBird

@@ -4740,7 +4740,7 @@ class DistributedTest:
             # Hook not registered yet, so should be empty
             self.assertEqual(ddp_logging_data.get("comm_hook"), None)
             # After second forward pass, hook should still be empty string
-            for i in range(2):
+            for _ in range(2):
                 inp = torch.ones(1, 1, device=self.rank)
                 loss = ddp_model(inp).sum()
                 loss.backward()
@@ -4841,7 +4841,7 @@ class DistributedTest:
                     )
 
                     # Run optimizer with hook model.
-                    for i in range(6):
+                    for _ in range(6):
                         ddp_model_with_optimizer_hook.zero_grad()
                         out = ddp_model_with_optimizer_hook(inp)
                         loss = out.sum()
@@ -4850,7 +4850,7 @@ class DistributedTest:
                     dist.barrier()
 
                     # Run regular model.
-                    for i in range(6):
+                    for _ in range(6):
                         ddp_model_with_no_hook.zero_grad()
                         out = ddp_model_with_no_hook(inp)
                         loss = out.sum()
@@ -5221,7 +5221,7 @@ class DistributedTest:
                 self.assertEqual(mp_config.param_dtype, p._mp_param.dtype)
                 self.assertEqual(torch.float32, p._fp_param.dtype)
 
-            for i in range(6):
+            for _ in range(6):
                 loss = net(inp).sum()
                 loss.backward()
                 # Verify gradient synchronization and params and grads are fp32.
@@ -6286,7 +6286,7 @@ class DistributedTest:
                 dim=1,
             ).cuda(rank)
 
-            for i in range(100):
+            for _ in range(100):
                 y = model(input_var[rank].cuda(rank))
                 y.mean().backward()
 
@@ -7093,7 +7093,7 @@ class DistributedTest:
             profiler_ctx_copy = copy.deepcopy(profiler_ctx)
 
             with profiler_ctx as prof:
-                for i in range(num_iters):
+                for _ in range(num_iters):
                     loss = net(inp).sum()
                     loss.backward()
 
@@ -7121,7 +7121,7 @@ class DistributedTest:
                 device_ids=[self.rank],
                 find_unused_parameters=True,
             )
-            for i in range(3):
+            for _ in range(3):
                 loss = net(inp).sum()
                 loss.backward()
             # Now enable the profiler.
@@ -7195,7 +7195,7 @@ class DistributedTest:
                 model.parameters(), lr=learning_rate * dist.get_world_size()
             )
             with net.join():
-                for i in range(num_iters):
+                for _ in range(num_iters):
                     ddp_optim.zero_grad()
                     out = net(inp)
                     loss = out.sum()
@@ -7365,7 +7365,7 @@ class DistributedTest:
                 n = 0
                 with exception_ctx:
                     with model.join(throw_on_early_termination=True):
-                        for i in range(num_iters):
+                        for _ in range(num_iters):
                             loss = model(model_input).sum()
                             loss.backward()
                             self._model_step(model)
@@ -7787,7 +7787,7 @@ class DistributedTest:
                 local_model = copy.deepcopy(ddp.module).cuda(self.rank)
 
                 inp = torch.ones(1, dtype=torch.float).to(device_id) * (self.rank + 1)
-                for i in range(6):
+                for _ in range(6):
                     ddp(inp).sum().backward()
 
                     local_model(inp).sum().backward()
@@ -7901,7 +7901,7 @@ class DistributedTest:
                     static_graph=static,
                 )
                 inp = torch.randn(20, 10, device=self.rank)
-                for i in range(6):
+                for _ in range(6):
                     loss = ddp_model(inp)
                     # To test https://github.com/pytorch/pytorch/issues/61982
                     loss /= 10
@@ -8727,7 +8727,7 @@ class DistributedTest:
                 static_graph=static_graph,
             )
             random_input = torch.randn(20, 10, device=self.rank)
-            for i in range(10):
+            for _ in range(10):
                 out = ddp_model(random_input)
                 loss = out.sum()
                 loss.backward()
@@ -9054,7 +9054,7 @@ class DistributedTest:
             if ignore_sparse:
                 for module_name, module in model.named_modules():
                     if module == model.sub_module.embedding_net.embedding:
-                        for parameter_name, param in module.named_parameters(
+                        for parameter_name, _ in module.named_parameters(
                             recurse=False
                         ):
                             fqn = f"{module_name}.{parameter_name}"
@@ -9077,7 +9077,7 @@ class DistributedTest:
             fqn_to_param_index = {}
             index = 0
             for module_name, module in model.named_modules():
-                for parameter_name, param in module.named_parameters(recurse=False):
+                for parameter_name, _ in module.named_parameters(recurse=False):
                     fqn = f"{module_name}.{parameter_name}"
                     fqn_to_param_index[fqn] = index
                     if fqn not in sparse_embedding_fqns:
@@ -9211,7 +9211,7 @@ class DistributedTest:
             model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
             # Test sync occurs in training mode.
             with torch.autograd.profiler.profile() as prof:
-                for i in range(6):
+                for _ in range(6):
                     inp = torch.randn(10, 2, 4, 4).cuda(rank)
                     out = model(inp)
                     loss = out.sum()
@@ -9231,7 +9231,7 @@ class DistributedTest:
             if self.rank == 0:
                 model_inference.eval()
                 with torch.autograd.profiler.profile() as prof:
-                    for i in range(6):
+                    for _ in range(6):
                         inp = torch.randn(10, 2, 4, 4).cuda(rank)
                         out = model_inference(inp)
                         loss = out.sum()
@@ -9338,7 +9338,7 @@ class DistributedTest:
                 "dict": dict,
             }
             for output_type in type_mapping.keys():
-                for i in range(6):
+                for _ in range(6):
                     out = model(inp, output_type=output_type)
                     loss = get_loss(out)
                     loss.backward()
@@ -9387,7 +9387,7 @@ class DistributedTest:
                     find_unused_parameters=find_unused,
                     static_graph=static_graph,
                 )
-                for i in range(6):
+                for _ in range(6):
                     out = ddp(inp)
                     self.assertFalse(out[0].requires_grad)
                     o = (out[0] + out[1]).sum()
@@ -9553,7 +9553,7 @@ class DistributedTest:
                     broadcast_buffers=False,
                 )
                 inp = torch.randn(2, 10, device=rank)
-                for i in range(2):
+                for _ in range(2):
                     loss_hook = model_ddp(inp).sum()
                     # Since buffer reduction is done pre-forward, simulate it for
                     # no hook case here.
@@ -9633,7 +9633,7 @@ class DistributedTest:
                 device_ids=[self.rank],
             )
             inp = torch.randn(2, 10, device=rank)
-            for i in range(2):
+            for _ in range(2):
                 loss_hook = model_ddp(inp).sum()
                 loss_no_hook = model_ddp_no_hook(inp).sum()
                 self._verify_buffers_equal(model_ddp, model_ddp_no_hook)
@@ -9813,7 +9813,7 @@ class DistributedTest:
                 device_ids=[self.rank],
             )
             inp = torch.randn(2, 10, device=rank)
-            for i in range(2):
+            for _ in range(2):
                 if rank == 0:
                     model_ddp.module.buffer = model_ddp.module.buffer + 1
                 loss = model_ddp(inp).sum()

@@ -290,7 +290,7 @@ class DynamicShape:
     # pre-compute inputs so the creations of random tensors
     # do not add to the compute time
     def load_inputs(self):
-        for i in range(self.SAMPLE_SIZE - 1):
+        for _ in range(self.SAMPLE_SIZE - 1):
             self.instantiate_input()
 
     # returns a randomized shape

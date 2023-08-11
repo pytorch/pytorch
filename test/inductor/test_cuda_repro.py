@@ -268,7 +268,7 @@ class CudaReproTests(TestCase):
 
         input = torch.randn(10, 10, device="cuda", requires_grad=True)
 
-        for i in range(2):
+        for _ in range(2):
             output_ref = model_ref(input)
             output_res = model_opt(input)
             output_ref.sum().backward()

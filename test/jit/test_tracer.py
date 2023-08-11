@@ -1872,7 +1872,7 @@ class TestTracer(JitTestCase):
         module = torch.jit.trace_module(n, inputs)
 
         check_inputs = []
-        for i in range(2):
+        for _ in range(2):
             check_weight = torch.rand(1, 1, 3, 3)
             check_forward_input = torch.rand(1, 1, 3, 3)
             check_inputs.append({'forward' : check_forward_input, 'weighted_kernel_sum' : check_weight})

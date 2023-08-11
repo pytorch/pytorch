@@ -152,7 +152,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             input0 = torch.randn((2,), requires_grad=True)
             input1 = torch.randn((2,))
             output_ref = func(input0, input1)
-            for i in range(2):
+            for _ in range(2):
                 output = jit_f(input0, input1)
                 assert(output_ref[0].requires_grad == output[0].requires_grad)
                 assert(output_ref[1][0].requires_grad == output[1][0].requires_grad)
@@ -214,7 +214,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         NUM_PROFILED_RUNS = 1
         with num_profiled_runs(NUM_PROFILED_RUNS):
             WARMUP = 3    # 2 runs to reach backward + 1 to optimize it
-            for x in range(WARMUP):
+            for _ in range(WARMUP):
                 o = t(input, bias)
                 o.sum().backward()
 

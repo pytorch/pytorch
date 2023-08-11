@@ -124,7 +124,7 @@ class TestSparsityUtilFunctions(TestCase):
             list_of_modules = [m for _, m in model.named_modules()] + [model]
             for module in list_of_modules:
                 module_fqn = module_to_fqn(model, module)
-                for tensor_name, tensor in module.named_parameters(recurse=False):
+                for tensor_name, _ in module.named_parameters(recurse=False):
                     tensor_fqn = (
                         module_fqn + ("." if module_fqn != "" else "") + tensor_name
                     )

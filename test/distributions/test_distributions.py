@@ -2922,7 +2922,7 @@ class TestDistributions(DistributionsTestCase):
         for dim in range(2, 5):
             log_probs = []
             lkj = LKJCholesky(dim, concentration=1., validate_args=True)
-            for i in range(2):
+            for _ in range(2):
                 sample = lkj.sample()
                 sample_tril = tril_matrix_to_vec(sample, diag=-1)
                 log_prob = lkj.log_prob(sample)

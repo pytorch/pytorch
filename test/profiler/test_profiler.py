@@ -93,7 +93,7 @@ class TestProfilerCUDA(TestCase):
         t = torch.rand(1, 1).cuda()
         p = psutil.Process()
         last_rss = collections.deque(maxlen=5)
-        for outer_idx in range(10):
+        for _ in range(10):
             with _profile(use_cuda=True):
                 for _ in range(1024):
                     t = torch.mm(t, t)
@@ -1201,7 +1201,7 @@ class TestProfiler(TestCase):
                 active=2),
             on_trace_ready=trace_handler
         ) as p:
-            for idx in range(8):
+            for _ in range(8):
                 self.payload(use_cuda=use_cuda)
                 p.step()
 
@@ -1270,7 +1270,7 @@ class TestProfiler(TestCase):
             # See https://github.com/pytorch/pytorch/issues/88446
             optimizer_step()
 
-        for idx in range(niters):
+        for _ in range(niters):
             run_batch()
 
         with profile(
@@ -1280,7 +1280,7 @@ class TestProfiler(TestCase):
                 warmup=1,
                 active=2),
         ) as p:
-            for idx in range(niters):
+            for _ in range(niters):
                 run_batch()
                 p.step()
 
@@ -1556,7 +1556,7 @@ class TestProfiler(TestCase):
         )
         inputs = torch.randn(40, 16, 18, 260)
         uint32_max = 2**32 - 1
-        for i in range(5):
+        for _ in range(5):
             with profile() as prof:
                 model(inputs)
             for event in prof.profiler.kineto_results.events():

@@ -169,7 +169,7 @@ class TimeoutTest(TestCase):
                 threads.append(t)
                 t.start()
 
-            for i, thread in enumerate(threads):
+            for thread in threads:
                 thread.join()
 
             # we expect the world_size-1 threads to have failed

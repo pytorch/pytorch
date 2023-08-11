@@ -675,7 +675,7 @@ def create_differentiability_info(
         )
 
     diffinfo_dict = {}
-    for key, defn in defn_dict["dispatch"].items():
+    for key, defn in defn_dict["dispatch"].items():  # noqa: B007
         if key != "Default" and key not in _VALID_AUTOGRAD_KEYS:
             raise RuntimeError(
                 f"Invalid dispatch key {key} in derivatives.yaml for {specification},"

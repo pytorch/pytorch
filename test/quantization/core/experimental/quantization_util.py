@@ -133,7 +133,7 @@ def training_loop(model, criterion, data_loader):
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     train_loss, correct, total = 0, 0, 0
     model.train()
-    for i in range(10):
+    for _ in range(10):
         for data, target in data_loader:
             optimizer.zero_grad()
             output = model(data)

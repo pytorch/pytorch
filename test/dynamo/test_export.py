@@ -36,9 +36,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             lc_key = state[0]
             lc_val = state[1]
             bar = []
-            for i in range(0, 4):
+            for _ in range(0, 4):
                 bar2 = []
-                for j in range(0, 3):
+                for _ in range(0, 3):
                     bar2.append(
                         lc_key + lc_val + torch.tensor([0.1, 0.25, 0.4, 0.5, 0.1])
                     )
@@ -559,9 +559,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             lc_key = state[0]
             lc_val = state[1]
             bar = []
-            for i in range(0, 4):
+            for _ in range(4):
                 bar2 = []
-                for j in range(0, 3):
+                for _ in range(3):
                     bar2.append(
                         lc_key + lc_val + torch.tensor([0.1, 0.25, 0.4, 0.5, 0.1])
                     )

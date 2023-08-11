@@ -472,7 +472,7 @@ def _profile_to_snapshot(profile):
 
 
     # create the device trace
-    for time, action, (tensor_key, version), size in memory_profile.timeline:
+    for _, action, (tensor_key, version), size in memory_profile.timeline:
         if not isinstance(tensor_key, TensorKey):
             continue
         if action == Action.CREATE:

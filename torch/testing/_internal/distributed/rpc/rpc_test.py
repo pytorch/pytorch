@@ -1560,7 +1560,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_future_wait_twice(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         futs = []
-        for i in range(20):
+        for _ in range(20):
             futs.append(rpc.rpc_async(dst, raise_func))
 
         with self.assertRaisesRegex(ValueError, "Expected error"):
@@ -2837,7 +2837,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         ret_rref = rref_forward_chain(dst_rank, self.world_size, rref, ttl)
 
-        for i in range(ttl):
+        for _ in range(ttl):
             self.assertEqual(len(ret_rref), 1)
             ret_rref = ret_rref[0].to_here()
 

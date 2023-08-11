@@ -183,7 +183,7 @@ def main():
         n = len(trials)
         with multiprocessing.dummy.Pool(workers) as pool:
             start_time = time.time()
-            for i, r in enumerate(pool.imap(run_subprocess, trials)):
+            for i, _ in enumerate(pool.imap(run_subprocess, trials)):
                 n_trials_done = i + 1
                 time_per_result = (time.time() - start_time) / n_trials_done
                 eta = int((n - n_trials_done) * time_per_result)

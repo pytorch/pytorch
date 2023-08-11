@@ -110,7 +110,7 @@ if not (IS_WINDOWS or IS_MACOS):
             num_clients = 10
             num_requests_per_client = 10
             processes = []
-            for i in range(num_clients):
+            for _ in range(num_clients):
                 p = mp.Process(target=func, args=(num_requests_per_client, self.file_path))
                 processes.append(p)
                 p.start()
@@ -143,7 +143,7 @@ if not (IS_WINDOWS or IS_MACOS):
         """
         client = timer.FileTimerClient(file_path)
         sem.release()
-        for i in range(0, n):
+        for _ in range(n):
             client.acquire("test_scope", 0)
             time.sleep(interval)
 

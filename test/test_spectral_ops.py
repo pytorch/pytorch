@@ -1244,7 +1244,7 @@ class TestFFT(TestCase):
             istft_kwargs = stft_kwargs.copy()
             del istft_kwargs['pad_mode']
             for sizes in data_sizes:
-                for i in range(num_trials):
+                for _ in range(num_trials):
                     original = torch.randn(*sizes, dtype=dtype, device=device)
                     stft = torch.stft(original, return_complex=True, **stft_kwargs)
                     inversed = torch.istft(stft, length=original.size(1), **istft_kwargs)
@@ -1299,7 +1299,7 @@ class TestFFT(TestCase):
                 'onesided': True,
             },
         ]
-        for i, pattern in enumerate(patterns):
+        for pattern in patterns:
             _test_istft_is_inverse_of_stft(pattern)
 
     @onlyNativeDeviceTypes
@@ -1315,7 +1315,7 @@ class TestFFT(TestCase):
             del stft_kwargs['size']
             istft_kwargs = stft_kwargs.copy()
             del istft_kwargs['pad_mode']
-            for i in range(num_trials):
+            for _ in range(num_trials):
                 original = torch.randn(*sizes, dtype=dtype, device=device)
                 stft = torch.stft(original, return_complex=True, **stft_kwargs)
                 with self.assertWarnsOnceRegex(UserWarning, "The length of signal is shorter than the length parameter."):
@@ -1366,7 +1366,7 @@ class TestFFT(TestCase):
                 'onesided': True,
             },
         ]
-        for i, pattern in enumerate(patterns):
+        for pattern in patterns:
             _test_istft_is_inverse_of_stft_with_padding(pattern)
 
     @onlyNativeDeviceTypes
@@ -1429,7 +1429,7 @@ class TestFFT(TestCase):
         complex_dtype = corresponding_complex_dtype(dtype)
 
         def _test(data_size, kwargs):
-            for i in range(num_trials):
+            for _ in range(num_trials):
                 tensor1 = torch.randn(data_size, device=device, dtype=complex_dtype)
                 tensor2 = torch.randn(data_size, device=device, dtype=complex_dtype)
                 a, b = torch.rand(2, dtype=dtype, device=device)

@@ -115,7 +115,7 @@ class TestPythonJiterator(TestCase):
     @parametrize("num_inputs", [1, 5, 8])
     def test_various_num_inputs(self, num_inputs):
         inputs = []
-        for i in range(num_inputs):
+        for _ in range(num_inputs):
             inputs.append(torch.rand(3, device='cuda').mul(10))
 
         input_string = ",".join([f"T i{i}" for i in range(num_inputs)])

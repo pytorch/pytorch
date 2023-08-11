@@ -486,7 +486,7 @@ def reinplace(gm, *sample_args):
 
     # inplace-ify functional ops, subject to the constraints written below.
     all_later_view_inverse_nodes_to_delete = set()
-    for idx, node in enumerate(gm.graph.nodes):
+    for node in gm.graph.nodes:
         if node.op == 'call_function':
 
             # Today, the re-inplace pass on directly acts on:

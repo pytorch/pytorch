@@ -540,7 +540,7 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
             break
 
     fw_rng_state_outputs = []
-    for base_node, node_pair in recomputable_rng_ops_map.items():
+    for node_pair in recomputable_rng_ops_map.values():
         # Step 2 - Modify the fwd pass such that
         fw_node = node_pair["fwd"]
         bw_node = node_pair["bwd"]

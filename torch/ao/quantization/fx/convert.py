@@ -239,7 +239,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
         with graph.inserting_before(node):
             input_node = node.args[0]
             choose_qparams_op_inputs = [node.args[0]]
-            for key, value in qparams.items():
+            for value in qparams.values():
                 # we have quant_min, quant_max and dtype, all should be stored
                 # as literals
                 choose_qparams_op_inputs.append(value)
@@ -405,7 +405,7 @@ def _replace_observer_with_quantize_dequantize_node(
         with graph.inserting_before(node):
             input_node = node.args[0]
             quantize_op_inputs = [input_node]
-            for key, value in qparams.items():
+            for value in qparams.values():
                 quantize_op_inputs.append(value)
 
             quantized_node = graph.create_node(node_type, quantize_op, tuple(quantize_op_inputs), {})
@@ -419,7 +419,7 @@ def _replace_observer_with_quantize_dequantize_node(
         with graph.inserting_before(node):
             input_node = node.args[0]
             quantize_op_inputs = [input_node]
-            for key, value in qparams.items():
+            for value in qparams.values():
                 # TODO: we can add the information of whether a value needs to
                 # be registered as an attribute in qparams dict itself
                 quantize_op_inputs.append(value)

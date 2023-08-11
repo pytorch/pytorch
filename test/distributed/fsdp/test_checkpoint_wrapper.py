@@ -158,7 +158,7 @@ class CheckpointWrapperTest(TestCase):
                     if use_reentrant
                     else CheckpointImpl.NO_REENTRANT,
                 )
-                for i in range(self.n):
+                for _ in range(self.n):
                     l = nn.Sequential(
                         nn.Linear(256, 256), nn.Linear(256, 256), nn.Linear(256, 256)
                     )
@@ -297,7 +297,7 @@ class CheckpointWrapperTest(TestCase):
                     )
 
                 inp = torch.randn(4, 10, requires_grad=True)
-                for i in range(6):
+                for _ in range(6):
                     # Kwarg input
                     loss = model(x=inp).sum()
                     self.assertTrue(loss.requires_grad)

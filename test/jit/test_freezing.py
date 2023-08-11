@@ -2274,9 +2274,8 @@ class TestFrozenOptimizations(JitTestCase):
     def test_linear_bn_folding_autocast_scenario_cuda(self):
         module_pairs = [(nn.Linear, nn.BatchNorm1d), (nn.Linear, nn.BatchNorm2d), (nn.Linear, nn.BatchNorm3d)]
         use_tracing = [True, False]
-        bn_running_stats = [True, False]
 
-        for modules, tracing, track_stats in product(module_pairs, use_tracing, bn_running_stats):
+        for modules, tracing in product(module_pairs, use_tracing):
             class LinearBN(torch.nn.Module):
                 def __init__(self, in_features, out_features):
                     super().__init__()

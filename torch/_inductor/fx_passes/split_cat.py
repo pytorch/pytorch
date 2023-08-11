@@ -438,7 +438,7 @@ class SplitCatSimplifier:
         user_inputs_list: List[List[Union[torch.fx.Node, Tuple[int, int]]]],
     ) -> List[Tuple[int, int]]:
         ranges = set()
-        for user_node, user_inputs in zip(next_users, user_inputs_list):
+        for _, user_inputs in zip(next_users, user_inputs_list):
             ranges |= {
                 user_input
                 for user_input in user_inputs

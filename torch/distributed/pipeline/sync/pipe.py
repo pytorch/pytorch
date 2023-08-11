@@ -194,7 +194,7 @@ def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[tor
 
     current_partition = []
     current_device = None
-    for name, module in modules.named_children():
+    for module in modules.children():
         if isinstance(module, WithDevice):
             # Process device override and move module to appropriate device.
             device = module.device

@@ -170,7 +170,7 @@ class TestForeach(TestCase):
     @parametrize("is_fastpath", (True, False))
     def test_binary_op(self, device, dtype, op, is_fastpath):
         scalar_self_arg_test_complete = False
-        for i, sample in enumerate(op.sample_inputs(device, dtype, noncontiguous=not is_fastpath)):
+        for sample in op.sample_inputs(device, dtype, noncontiguous=not is_fastpath):
             (rhs_arg,) = sample.args
             zero_size = sample.kwargs.pop("zero_size")
             kwargs = {} or sample.kwargs

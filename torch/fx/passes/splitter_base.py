@@ -865,7 +865,7 @@ class _SplitterBase:
     def generate_split_results(self) -> SplitResult:
         split_module = self()
         submodule_names = []
-        for name, mod in split_module.named_children():
+        for name, _ in split_module.named_children():
             submodule_names.append(name)
         submodule_inputs = generate_inputs_for_submodules(split_module, self.sample_input, submodule_names)
         return SplitResult(split_module, submodule_inputs, self.non_acc_submodule_name)

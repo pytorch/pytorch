@@ -928,10 +928,10 @@ class FlatParamHandle:
         sharded_flat_param_numel = unsharded_end_idx - unsharded_start_idx + 1
         # `unsharded_param_start_idx` and `unsharded_param_end_idx` are indices
         # into the unsharded flat parameter (inclusive) of the given parameter
-        for i, (
+        for (
             (unsharded_param_start_idx, unsharded_param_end_idx),
             is_padding,
-        ) in enumerate(zip(flat_param_offsets, self.flat_param._is_padding_mask)):
+        ) in zip(flat_param_offsets, self.flat_param._is_padding_mask):
             if is_padding:
                 continue
             in_sharded_flat_param = (
@@ -1893,14 +1893,14 @@ class FlatParamHandle:
                 param.grad.data = view
             else:
                 param.grad = view
-        for i, (
+        for (
             param_name,
             module,
             module_name,
             prim_param_name,
             prim_module,
             _,
-        ) in enumerate(self.flat_param._shared_param_infos):
+        ) in self.flat_param._shared_param_infos:
             _p_assert(
                 hasattr(module, param_name),
                 f"{module_name + '.' + param_name if module_name else param_name} is missing",
@@ -1975,12 +1975,10 @@ class FlatParamHandle:
                 numel_in_shard = shard_param_info.numel_in_shard
                 param.data = flat_param[offset : offset + numel_in_shard]
         assert self.flat_param._shared_params is not None
-        for i, (
+        for (
             param,
             (param_name, module, _, prim_param_name, prim_module, _),
-        ) in enumerate(
-            zip(self.flat_param._shared_params, self.flat_param._shared_param_infos)
-        ):
+        ) in zip(self.flat_param._shared_params, self.flat_param._shared_param_infos):
             self._setattr_param(module, param_name, param)
             prim_param = getattr(prim_module, prim_param_name)
             param.data = prim_param  # could be both empty and non-empty
@@ -2039,8 +2037,8 @@ class FlatParamHandle:
                 else:
                     param.grad = None
         assert flat_param._shared_params is not None
-        for i, (param, (_, _, _, prim_param_name, prim_module, _)) in enumerate(
-            zip(flat_param._shared_params, flat_param._shared_param_infos)
+        for param, (_, _, _, prim_param_name, prim_module, _) in zip(
+            flat_param._shared_params, flat_param._shared_param_infos
         ):
             in_sharded_flat_param = hasattr(prim_module, prim_param_name)
             if in_sharded_flat_param and param.requires_grad:
@@ -2196,14 +2194,14 @@ class FlatParamHandle:
                     )
         # TODO: If we want to handle shared parameters, we need to re-generate
         # the shared parameter data structures in case sharedness changed.
-        for i, (
+        for (
             param_name,
             module,
             _,
             prim_param_name,
             prim_module,
             _,
-        ) in enumerate(flat_param._shared_param_infos):
+        ) in flat_param._shared_param_infos:
             if getattr(module, param_name) is not getattr(prim_module, prim_param_name):
                 raise NotImplementedError(
                     "Changing shared parameters is not supported yet"

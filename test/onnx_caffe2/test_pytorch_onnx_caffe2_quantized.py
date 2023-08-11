@@ -342,7 +342,7 @@ class TestQuantizedOps(pytorch_test_common.ExportTestCase):
                 self.conv1 = nn.Conv2d(3, 3, 1)
                 self.relu1 = nn.ReLU(inplace=False)
                 layers = []
-                for i in range(3):
+                for _ in range(3):
                     layers.append(ConvBNReLUModule())
                 self.features = nn.Sequential(*layers)
                 head = [nn.Linear(300, 10), nn.ReLU(inplace=False)]

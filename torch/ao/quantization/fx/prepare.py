@@ -1654,7 +1654,7 @@ def _run_prepare_fx_on_standalone_modules(
     not modify the graph, it just replaces the unobserved modules with
     their observed versions.
     """
-    for (root_node, _, pattern, qhandler, qconfig) in node_name_to_match_result_with_qconfig.values():
+    for (root_node, _, _, qhandler, qconfig) in node_name_to_match_result_with_qconfig.values():
         if qhandler is None:
             continue
         elif not qhandler.is_standalone_module():

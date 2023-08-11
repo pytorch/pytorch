@@ -337,7 +337,7 @@ class TestPublicBindings(TestCase):
                 for elem in all_api:
                     if not elem.startswith('_'):
                         check_one_element(elem, modname, mod, is_public=True, is_all=False)
-        for _, modname, ispkg in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
+        for _, modname, _ in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
             test_module(modname)
 
         test_module('torch')

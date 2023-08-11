@@ -82,7 +82,7 @@ def normalize_suite_filename(suite_name):
 
 def download_artifacts_and_extract_csvs(urls):
     dataframes = {}
-    for (suite, shard), url in urls.items():
+    for (suite, _), url in urls.items():
         try:
             resp = urlopen(url)
             subsuite = normalize_suite_filename(suite)

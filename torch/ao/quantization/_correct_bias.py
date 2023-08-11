@@ -131,6 +131,6 @@ def bias_correction(float_model, quantized_model, img_data, target_modules=_supp
             bias.data = updated_bias
 
             # Resets the data contained in the loggers
-            for name, submodule in quantized_model.named_modules():
+            for submodule in quantized_model.modules():
                 if isinstance(submodule, MeanShadowLogger):
                     submodule.clear()

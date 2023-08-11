@@ -890,7 +890,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
             else:
                 loss = loss.sum()
             # Run backward in a loop multiple times.
-            for i in range(1000):
+            for _ in range(1000):
                 dist_autograd.backward(context_id, [loss], retain_graph=True)
 
     # For current context, this rank sends t1 and t2 tensors to dst_rank,
@@ -1279,7 +1279,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         )
 
         context_ids = []
-        for i in range(200):
+        for _ in range(200):
             with dist_autograd.context() as context_id:
                 self.assertEqual(
                     context_id,
@@ -2019,7 +2019,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         self.assertEqual(self.world_size - 1, len(known_context_ids))
 
         t1 = torch.rand((3, 3), requires_grad=True)
-        for i in range(0, 100):
+        for _ in range(100):
             dst = self._next_rank()
             t1 = rpc.rpc_sync(worker_name(dst), torch.add, args=(t1, t1))
 
@@ -2172,7 +2172,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         if self.rank != 0:
             # All other ranks schedule work on rank 0.
             threads = []
-            for i in range(20):
+            for _ in range(20):
                 t = threading.Thread(target=DistAutogradTest._workload_thread)
                 t.start()
                 threads.append(t)
@@ -2399,7 +2399,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             self.assertTrue(p_a == p_g)
 
             # Run backwards multiple times.
-            for i in range(10):
+            for _ in range(10):
                 dist_autograd.backward(context_id, [loss], retain_graph=True)
 
         # non-contiguous indices and value, we should trigger a copy.
@@ -2418,7 +2418,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             self.assertFalse(p_b == p_g)
 
             # Run backwards multiple times to verify accumulation.
-            for i in range(10):
+            for _ in range(10):
                 dist_autograd.backward(context_id, [loss], retain_graph=True)
 
     @dist_init
@@ -2550,7 +2550,7 @@ class CudaDistAutogradTest(CommonDistAutogradTest):
         t1 = torch.rand(3, 3, requires_grad=True, device="cuda:0")
         t2 = torch.rand(3, 3, requires_grad=True)
         # Run a few iterations.
-        for i in range(3):
+        for _ in range(3):
             t1.grad = None
             t2.grad = None
             # Root is CPU
@@ -2574,7 +2574,7 @@ class CudaDistAutogradTest(CommonDistAutogradTest):
         t1 = torch.rand(3, 3, requires_grad=True, device="cuda:0")
         t2 = torch.rand(3, 3, requires_grad=True)
         # Run a few iterations.
-        for i in range(3):
+        for _ in range(3):
             t1.grad = None
             t2.grad = None
             # Root is CPU

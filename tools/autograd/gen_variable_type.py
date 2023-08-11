@@ -1237,10 +1237,9 @@ def emit_body(
             derivative_var_name = derivative.var_names[0]
             for edge_off, a in enumerate(args_with_derivatives):
                 if a.name == derivative_var_name:
-                    break
+                    return f"grad_fn->should_compute_output({edge_off})"
             else:
                 raise AssertionError()
-            return f"grad_fn->should_compute_output({edge_off})"
 
         if is_inplace_foreach:
             save_input_stmts = save_variables(info.all_saved_inputs, False, guard_for)

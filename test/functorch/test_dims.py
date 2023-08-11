@@ -197,7 +197,7 @@ class TestMin(TestCase):
             ci, co = dims()
         # python 3.11 adapts bytecode after a number of iterations
         # check that we still match names correctly
-        for i in range(10):
+        for _ in range(10):
             f()
 
     @skipIf(not TEST_CUDA, "no CUDA")

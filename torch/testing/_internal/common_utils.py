@@ -1784,7 +1784,7 @@ class CudaMemoryLeakCheck:
             discrepancy_detected = True
 
             # Query memory multiple items to ensure leak was not transient
-            for n in range(3):
+            for _ in range(3):
                 caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
                 bytes_free, bytes_total = torch.cuda.mem_get_info(i)
                 driver_mem_allocated = bytes_total - bytes_free

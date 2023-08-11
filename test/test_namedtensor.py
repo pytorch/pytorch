@@ -997,7 +997,7 @@ class TestNamedTensor(TestCase):
         def test_ops(op):
             for device in get_all_device_types():
                 names = ('N', 'D')
-                tensor = torch.rand(2, 3, names=names)
+                tensor = torch.rand(2, 3, device=device, names=names)
                 result = op(tensor, 0)
                 self.assertEqual(result[0].names, names)
                 self.assertEqual(result[1].names, names)
@@ -1007,15 +1007,15 @@ class TestNamedTensor(TestCase):
     def test_logcumsumexp(self):
         for device in get_all_device_types():
             names = ('N', 'D')
-            tensor = torch.rand(2, 3, names=names)
+            tensor = torch.rand(2, 3, device=device, names=names)
             result = torch.logcumsumexp(tensor, 'D')
             self.assertEqual(result.names, names)
 
     def test_bitwise_not(self):
         for device in get_all_device_types():
             names = ('N', 'D')
-            tensor = torch.zeros(2, 3, names=names, dtype=torch.bool)
-            result = torch.empty(0, dtype=torch.bool)
+            tensor = torch.zeros(2, 3, device=device, names=names, dtype=torch.bool)
+            result = torch.empty(0, device=device, dtype=torch.bool)
 
             self.assertEqual(tensor.bitwise_not().names, names)
             self.assertEqual(torch.bitwise_not(tensor, out=result).names, names)
@@ -1024,8 +1024,8 @@ class TestNamedTensor(TestCase):
     def test_logical_not(self):
         for device in get_all_device_types():
             names = ('N', 'D')
-            tensor = torch.zeros(2, 3, names=names, dtype=torch.bool)
-            result = torch.empty(0, dtype=torch.bool)
+            tensor = torch.zeros(2, 3, device=device, names=names, dtype=torch.bool)
+            result = torch.empty(0, device=device, dtype=torch.bool)
 
             self.assertEqual(tensor.logical_not().names, names)
             self.assertEqual(torch.logical_not(tensor, out=result).names, names)
@@ -1034,8 +1034,8 @@ class TestNamedTensor(TestCase):
     def test_bernoulli(self):
         for device in get_all_device_types():
             names = ('N', 'D')
-            tensor = torch.rand(2, 3, names=names)
-            result = torch.empty(0)
+            tensor = torch.rand(2, 3, device=device, names=names)
+            result = torch.empty(0, device=device)
             self.assertEqual(tensor.bernoulli().names, names)
 
             torch.bernoulli(tensor, out=result)

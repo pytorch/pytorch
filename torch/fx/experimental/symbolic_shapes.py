@@ -1392,7 +1392,7 @@ def _make_user_magic(method, user_type):
         if method in reflectable_magic_methods:
             setattr(user_type, f"__r{method}__", rbinary_magic_impl)
 
-for method, func in magic_methods.items():
+for method in magic_methods:
     if method in bool_magic_methods:
         _make_user_magic(method, SymBool)
     else:

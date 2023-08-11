@@ -2966,7 +2966,7 @@ class TestSparseCSR(TestCase):
             }[layout]
             if n_dense > 0:
                 # expect all transpose to throw
-                for (name0, dim0), (name1, dim1) in itertools.product(named0, named1):
+                for (_, dim0), (_, dim1) in itertools.product(named0, named1):
                     msg = r"transpose\(\): hybrid sparse compressed tensors with dense dimensions are not supported"
                     if (dim0 is not None) and (dim1 is not None):
                         with self.assertRaisesRegex(RuntimeError, msg):

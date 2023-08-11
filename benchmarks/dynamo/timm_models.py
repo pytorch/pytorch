@@ -158,7 +158,7 @@ def refresh_model_names():
     for value in docs_models_family.values():
         chosen_models.add(value[0])
 
-    for key, value in all_models_family.items():
+    for value in all_models_family.values():
         chosen_models.add(value[0])
 
     filename = "timm_models_list.txt"

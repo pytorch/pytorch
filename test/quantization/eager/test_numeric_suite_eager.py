@@ -150,7 +150,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             self.assertEqual(len(weight_dict), 1)
             for v in weight_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
-                for i, val in enumerate(v["quantized"]):
+                for i in range(len(v["quantized"])):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         model_list = [SingleLayerLinearDynamicModel(qengine)]
@@ -174,7 +174,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             self.assertEqual(len(weight_dict), 1)
             for v in weight_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
-                for i, val in enumerate(v["quantized"]):
+                for i in range(len(v["quantized"])):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         model_list = [LSTMwithHiddenDynamicModel(qengine)]
@@ -196,7 +196,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             self.assertEqual(len(ob_dict), 1)
             for v in ob_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
-                for i, val in enumerate(v["quantized"]):
+                for i in range(len(v["quantized"])):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         model_list = [AnnotatedConvModel(qengine),
@@ -223,7 +223,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             self.assertEqual(len(ob_dict), 1)
             for v in ob_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
-                for i, val in enumerate(v["quantized"]):
+                for i in range(len(v["quantized"])):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         linear_data = self.calib_data[0][0]
@@ -248,7 +248,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             self.assertEqual(len(ob_dict), 1)
             for v in ob_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
-                for i, val in enumerate(v["quantized"]):
+                for i in range(len(v["quantized"])):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         linear_data = self.calib_data[0][0]
@@ -303,7 +303,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
         self.assertTrue(isinstance(q_model.my_scalar_mul, Shadow))
         for v in ob_dict.values():
             self.assertTrue(len(v["float"]) == len(v["quantized"]))
-            for i, val in enumerate(v["quantized"]):
+            for i in range(len(v["quantized"])):
                 self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
     @override_qengines
@@ -317,7 +317,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             self.assertEqual(len(ob_dict), 1)
             for v in ob_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
-                for i, val in enumerate(v["quantized"]):
+                for i in range(len(v["quantized"])):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         linear_data = self.calib_data[0][0]
@@ -346,7 +346,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             self.assertEqual(len(ob_dict), 1)
             for v in ob_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
-                for i, val in enumerate(v["quantized"]):
+                for i in range(len(v["quantized"])):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         lstm_input = torch.rand((1, 1, 2))
@@ -400,7 +400,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
             for v in act_compare_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
-                for i, val in enumerate(v["quantized"]):
+                for i in range(len(v["quantized"])):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         linear_data = self.calib_data[0][0]
@@ -436,7 +436,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
         self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
         for v in act_compare_dict.values():
             self.assertTrue(len(v["float"]) == len(v["quantized"]))
-            for i, val in enumerate(v["quantized"]):
+            for i in range(len(v["quantized"])):
                 self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
     @override_qengines
@@ -453,7 +453,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
             for v in act_compare_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
-                for i, val in enumerate(v["quantized"]):
+                for i in range(len(v["quantized"])):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         linear_data = self.calib_data[0][0]
@@ -482,7 +482,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
             for v in act_compare_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
-                for i, val in enumerate(v["quantized"]):
+                for i in range(len(v["quantized"])):
                     self.assertTrue(len(v["float"][i]) == len(v["quantized"][i]))
                     if i == 0:
                         self.assertTrue(v["float"][i][0].shape == v["quantized"][i][0].shape)

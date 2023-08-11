@@ -63,7 +63,7 @@ def model_training_evaluation(
     else:
         # Support backends: eager, aot_eager, aot_nvfuser and inductor
         opt_training_iter_fn = torch._dynamo.optimize(backend)(training_iter_fn)
-    for epoch in range(num_epochs):
+    for _ in range(num_epochs):
         running_loss = 0.0
         for i, batch in enumerate(train_dataloader, 0):
             batch = {k: v.to(device) for k, v in batch.items()}

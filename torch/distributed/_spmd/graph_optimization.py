@@ -536,7 +536,7 @@ def schedule_comm_wait(gm: IterGraphModule) -> None:
         # Move wait nodes and all the subsequent output nodes before the
         # earliest user.
         wait_idx = -1
-        for wait_idx, node in enumerate(allreduce.node_list):
+        for wait_idx, node in enumerate(allreduce.node_list):  # noqa: B007
             if node == allreduce.wait_nodes[0]:
                 break
         assert wait_idx >= 0

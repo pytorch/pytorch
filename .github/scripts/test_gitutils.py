@@ -29,7 +29,7 @@ class TestPeekableIterator(TestCase):
 
     def test_peek(self, input_: str = "abcdef") -> None:
         iter_ = PeekableIterator(input_)
-        for idx, c in enumerate(iter_):
+        for idx, _ in enumerate(iter_):
             if idx + 1 < len(input_):
                 self.assertEqual(iter_.peek(), input_[idx + 1])
             else:

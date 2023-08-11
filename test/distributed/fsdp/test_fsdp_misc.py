@@ -171,7 +171,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         )
         x = torch.randn(10, 10, device="cuda")
         y = torch.randn(10, 10, device="cuda")
-        for i in range(4):
+        for _ in range(4):
             if use_second_layer:
                 a, b = fsdp(x, y)
             else:
@@ -364,7 +364,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
 
                 # Verify parameters are different than prev iteration
                 with FSDP.summon_full_params(fsdp_overlap, with_grads=True):
-                    for (n, p), (n_prev, p_prev) in zip(
+                    for (_n, p), (n_prev, p_prev) in zip(
                         fsdp_overlap.named_parameters(), fsdp_overlap_prev_params
                     ):
                         self.assertNotEqual(

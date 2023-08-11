@@ -713,7 +713,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 i += 1
 
         # Copy functorch extension
-        for i, ext in enumerate(self.extensions):
+        for ext in self.extensions:
             if ext.name != "functorch._C":
                 continue
             fullname = self.get_ext_fullname(ext.name)
@@ -729,7 +729,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 self.copy_file(src, dst)
 
         # Copy nvfuser extension
-        for i, ext in enumerate(self.extensions):
+        for ext in self.extensions:
             if ext.name != "nvfuser._C":
                 continue
             fullname = self.get_ext_fullname(ext.name)

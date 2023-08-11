@@ -532,7 +532,7 @@ def _extract_logger_info_one_model(
     logger_cls: Callable,
 ) -> None:
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx._extract_logger_info_one_model")
-    for gm_name, mod in model.named_modules():
+    for mod in model.modules():
         # TODO(future PR): better check when scripted
         is_logger = (
             isinstance(mod, logger_cls)  # type: ignore[arg-type]
@@ -966,7 +966,7 @@ def loggers_set_enabled(model: torch.nn.Module, enabled: bool) -> None:
     """
     Sets the `enabled` setting on a `model`'s loggers
     """
-    for name, child in model.named_modules():
+    for child in model.modules():
         if isinstance(child, OutputLogger):
             child.enabled = enabled
 
@@ -979,7 +979,7 @@ def loggers_set_save_activations(
     """
     Sets the `save_activations` setting on a `model`'s loggers
     """
-    for name, child in model.named_modules():
+    for child in model.modules():
         if isinstance(child, OutputLogger):
             child.save_activations = save_activations
 

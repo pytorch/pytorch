@@ -344,7 +344,7 @@ def make_graphed_callables(
     # Capture backward graphs in reverse order
     per_callable_static_grad_outputs = []
     per_callable_static_grad_inputs = []
-    for static_input_surface, static_outputs, bwd_graph, module_params in zip(
+    for static_input_surface, static_outputs, bwd_graph, _ in zip(
         reversed(per_callable_static_input_surfaces),
         reversed(per_callable_static_outputs),
         reversed(bwd_graphs),

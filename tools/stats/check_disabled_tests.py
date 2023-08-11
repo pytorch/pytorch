@@ -208,7 +208,7 @@ def save_results(
 
     # Log the results
     print(f"The following {len(should_be_enabled_tests)} tests should be re-enabled:")
-    for test_id, stats in should_be_enabled_tests.items():
+    for test_id in should_be_enabled_tests:
         disabled_test_name, name, classname, filename = get_disabled_test_name(test_id)
         print(f"  {disabled_test_name} from {filename}")
 

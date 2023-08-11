@@ -129,7 +129,7 @@ class CatBenchmark(op_bench.TorchBenchmarkBase):
         if type(sizes) == list and N == -1:
             gen_sizes = sizes
         else:
-            for i in range(N):
+            for _ in range(N):
                 gen_sizes.append(
                     [
                         old_size() if callable(old_size) else old_size

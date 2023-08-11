@@ -64,7 +64,7 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
 
         @torch._dynamo.optimize("cudagraphs")
         def fn(x, y):
-            for i in range(N_ITERS):
+            for _ in range(N_ITERS):
                 loss = model(x, y).sum()
                 loss.backward()
 
@@ -81,7 +81,7 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
 
         @torch._dynamo.optimize("cudagraphs")
         def fn(x, y):
-            for i in range(N_ITERS):
+            for _ in range(N_ITERS):
                 loss = model(x, y).sum()
                 loss.backward()
 
@@ -97,7 +97,7 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
 
         @torch._dynamo.optimize("cudagraphs")
         def fn(x, y):
-            for i in range(N_ITERS):
+            for _ in range(N_ITERS):
                 loss = model(x, y).sum()
                 loss.backward()
 

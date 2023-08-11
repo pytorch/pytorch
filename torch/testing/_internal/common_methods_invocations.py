@@ -437,8 +437,8 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
         )
 
     # Checking for permutations of weights and biases as `None`
-    weights = [channels, None, None]
-    biases = [None, channels, None]
+    weights = [make_arg(channels), None, None]
+    biases = [None, make_arg(channels), None]
     is_training = [True, False, False]
 
     for weight, bias, training in zip(weights, biases, is_training):
@@ -447,8 +447,8 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
             args=(
                 running_mean,
                 running_var,
-                make_arg(channels),
-                make_arg(channels)
+                weight,
+                bias
             ),
             kwargs={'training': training}
         )
@@ -716,7 +716,7 @@ def sample_inputs_jiterator(op, device, dtype, requires_grad, **kwargs):
         lhs = make_arg(shape_lhs)
 
         args = []
-        for i in range(num_inputs - 1):
+        for _ in range(num_inputs - 1):
             args.append(make_arg(shape_rhs))
         broadcasts_input = (shape_lhs != torch.broadcast_shapes(shape_lhs, shape_rhs))
 

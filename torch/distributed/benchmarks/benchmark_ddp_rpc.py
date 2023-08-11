@@ -82,7 +82,7 @@ def _retrieve_embedding_parameters(emb_rref):
 def _print_header():
     _print_cont("\n")
     _print_cont("%10s" % "")
-    for p in [50, 75, 90, 95]:
+    for _p in [50, 75, 90, 95]:
         _print_cont("%14s%10s" % ("sec/epoch", "epoch/sec"))
     _print_cont("\n")
 
@@ -168,7 +168,7 @@ def _run_trainer(emb_rref_list, rank):
 
     measurements = []
     # Include warm-up cycles during training
-    for epoch in range(100 + WARMUP_CYCLES):
+    for _ in range(100 + WARMUP_CYCLES):
         start = time.time()
         batch_size = 0
 

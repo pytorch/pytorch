@@ -725,8 +725,7 @@ class TestDataParallel(TestCase):
                             named_msg = layer_name + ".weight " + iter_msg
                             self.assertTrue(m_child.weight.grad.is_contiguous(memory_format=formats[i]), named_msg)
                             self.assertTrue(m_dp_child.weight.grad.is_contiguous(memory_format=formats[i]), named_msg)
-                            for j, ((param_name, p), p_dp) in enumerate(zip(m_child.named_parameters(),
-                                                                            m_dp_child.parameters())):
+                            for (param_name, p), p_dp in zip(m_child.named_parameters(), m_dp_child.parameters()):
                                 named_msg = layer_name + "." + param_name + " " + iter_msg
                                 self.assertEqual(p.grad, p_dp.grad, rtol=tol, atol=tol)
                         opt.step()

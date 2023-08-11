@@ -44,7 +44,7 @@ LLGA_FUSION_GROUP = 'prim::oneDNNFusionGroup'
 LLGA_NOT_ENABLED = not torch.backends.mkldnn.is_available() or IS_WINDOWS or IS_MACOS
 
 def warmup_forward(f, *args, profiling_count=3):
-    for i in range(profiling_count):
+    for _ in range(profiling_count):
         results = f(*args)
 
     return results
@@ -486,34 +486,38 @@ class TestFusionPattern(JitLlgaTestCase):
     @dtypes(torch.float32, torch.bfloat16)
     def test_conv2d_clamp(self, dtype):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self, eltwise_fn):
                 super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.conv2 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.conv3 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.conv4 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.conv5 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
+                self.eltwise_fn = eltwise_fn
 
             def forward(self, x):
                 x = self.conv1(x)
-                x = torch.clamp(x, min=float('-inf'))
+                x = self.eltwise_fn(x, min=float('-inf'))
                 x = self.conv2(x)
-                x = torch.clamp(x, min=-5)
+                x = self.eltwise_fn(x, min=-5)
                 x = self.conv3(x)
-                x = torch.clamp(x, min=0, max=float('inf'))
+                x = self.eltwise_fn(x, min=0, max=float('inf'))
                 x = self.conv4(x)
-                x = torch.clamp(x, min=1, max=5)
+                x = self.eltwise_fn(x, min=1, max=5)
                 x = self.conv5(x)
-                x = torch.clamp(x, max=2)
+                x = self.eltwise_fn(x, max=2)
                 return x
 
         for inplace in [False, True]:
             for memory_format in [torch.contiguous_format, torch.channels_last]:
                 x = torch.rand(1, 32, 28, 28).to(memory_format=memory_format)
-                m = M()
+                eltwise_fn_name = 'clamp_' if inplace else 'clamp'
+                eltwise_fn = get_eltwise_fn(eltwise_fn_name)
+                m = M(eltwise_fn)
                 _, graph = self.checkTrace(m, [x], dtype)
                 self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 5)
-                self.assertFused(graph, ['aten::_convolution', "aten::clamp"])
+                clamp_op = "aten::clamp_" if inplace else "aten::clamp"
+                self.assertFused(graph, ['aten::_convolution', clamp_op])
 
     @onlyCPU
     @dtypes(torch.float32, torch.bfloat16)

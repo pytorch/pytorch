@@ -466,7 +466,7 @@ def fill_output(output: Dict[str, object], options: object):
     # to True, since it indicates that this operator list came from something
     # other than a traced operator list.
     include_all_non_op_selectives = False
-    for op_name, op_info in operators.items():
+    for op_info in operators.values():
         include_all_non_op_selectives = (
             include_all_non_op_selectives or op_info.include_all_overloads
         )

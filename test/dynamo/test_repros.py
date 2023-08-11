@@ -220,7 +220,7 @@ class _ReversibleFunction(torch.autograd.Function):
         # split duplicated tensor
         hidden_states, attn_output = torch.chunk(hidden_states, 2, dim=-1)
 
-        for layer_id, (layer, layer_head_mask) in enumerate(zip(layers, head_mask)):
+        for layer, _ in zip(layers, head_mask):
             if output_hidden_states is True:
                 all_hidden_states.append(hidden_states)
 
@@ -1908,7 +1908,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         class Mod(torch.nn.Module):
             def forward(self, listy):
                 x = listy[3:5]
-                for i in range(10):
+                for _ in range(10):
                     z = torch.abs(torch.randn(10)) + 1
                     x[0] = z
                 return x
@@ -2179,7 +2179,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
             def forward(self, inp):
                 res = 0
-                for name, buffer in self.named_buffers():
+                for _, buffer in self.named_buffers():
                     res += buffer.sum()
 
                 return inp.cos() + res
@@ -2278,7 +2278,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
             def forward(self, inp):
                 res = torch.zeros(3, 3)
-                for mod in self.modules():
+                for _ in self.modules():
                     res += self.fc(inp)
                 return res
 
@@ -2543,7 +2543,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # Repro of huggingface graph break inside loop in `get_parameter_dtype`.
         # Skip only the inner frame that has loop that contains graph break.
         def inner(x):
-            for i in range(3):
+            for _ in range(3):
                 x += 1
                 torch._dynamo.graph_break()
             return x

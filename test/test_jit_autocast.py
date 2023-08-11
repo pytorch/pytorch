@@ -604,7 +604,7 @@ class TestAutocast(JitTestCase):
         t1 = torch.randn(5, 5, device="cuda", dtype=torch.float32).requires_grad_()
 
         # run optimization
-        for i in range(5):
+        for _ in range(5):
             with torch.autocast("cuda", torch.float16):
                 jit_o = jit_t(t0, t1)
             jit_o.sum().backward()

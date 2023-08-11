@@ -56,7 +56,7 @@ def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     orig_params = tuple(mod.parameters())
     # Remove all the parameters in the model
     names = []
-    for name, p in list(mod.named_parameters()):
+    for name, _ in list(mod.named_parameters()):
         _del_nested_attr(mod, name.split("."))
         names.append(name)
 

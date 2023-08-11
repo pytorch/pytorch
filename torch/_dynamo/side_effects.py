@@ -312,7 +312,7 @@ class SideEffects:
             if not isinstance(var.mutable_local, AttributeMutationNew):
                 VariableTracker.apply(visit, var)
 
-        for skip_obj, setattrs in self.store_attr_mutations.items():
+        for skip_obj, setattrs in self.store_attr_mutations.items():  # noqa: B007
             VariableTracker.apply(visit, setattrs)
 
         self.id_to_variable = collections.OrderedDict(

@@ -1119,7 +1119,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             tar.extract('storages', path=tmpdir)
             with open(os.path.join(tmpdir, 'storages'), 'rb', 0) as f:
                 num_storages = pickle_module.load(f, **pickle_load_args)
-                for i in range(num_storages):
+                for _ in range(num_storages):
                     args = pickle_module.load(f, **pickle_load_args)
                     key, location, storage_type = args
                     dtype = storage_type._dtype

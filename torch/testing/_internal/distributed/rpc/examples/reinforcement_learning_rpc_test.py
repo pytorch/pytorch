@@ -108,7 +108,7 @@ class Observer:
             n_steps (int): number of steps in this episode
         """
         state, ep_reward = self.env.reset(), 0
-        for step in range(n_steps):
+        for _ in range(n_steps):
             # send the state to the agent to get an action
             action = _remote_method(Agent.select_action, agent_rref, self.id, state)
 
@@ -220,7 +220,7 @@ class Agent:
 
 
 def run_agent(agent, n_steps):
-    for i_episode in count(1):
+    for _episode in count(1):
         agent.run_episode(n_steps=n_steps)
         last_reward = agent.finish_episode()
 

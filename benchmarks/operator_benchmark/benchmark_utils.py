@@ -278,7 +278,7 @@ def random_sample_configs(**configs):
 
     configs_attrs_list = []
     randomsample = RandomSample(configs)
-    for i in range(configs["total_samples"]):
+    for _ in range(configs["total_samples"]):
         tmp_attr_list = randomsample.get_one_set_of_inputs()
         tmp_attr_list.append({"tags": "_".join(configs["tags"])})
         configs_attrs_list.append(tmp_attr_list)

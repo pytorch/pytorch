@@ -1044,7 +1044,7 @@ def baselines(models, model_iter_fn, example_inputs, args):
     timings = np.zeros((args.repeat, len(models)), np.float64)
     timings.fill(1.0e10)
     for rep in range(args.repeat):
-        for idx, (name, model) in enumerate(models):
+        for idx, (_, model) in enumerate(models):
             if model is not None:
                 try:
                     timings[rep, idx] = timed(model, model_iter_fn, example_inputs)
@@ -1056,18 +1056,18 @@ def baselines(models, model_iter_fn, example_inputs, args):
     ]
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1:]
-    for idx, (name, model) in enumerate(models[1:]):
+    for idx, (_, model) in enumerate(models[1:]):
         if model is None:
             speedup[idx] = 0.0
     result = " ".join(
         [
             format_speedup(s, p, m is not None)
-            for s, p, m in zip(speedup, pvalue, [m for n, m in models[1:]])
+            for s, p, m in zip(speedup, pvalue, [m for _, m in models[1:]])
         ]
     )
     output_csv(
         output_filename,
-        ("dev", "name", "batch_size") + tuple(n for n, m in models[1:]),
+        ("dev", "name", "batch_size") + tuple(n for n, _ in models[1:]),
         [current_device, current_name, current_batch_size]
         + [f"{x:.4f}" for x in speedup],
     )

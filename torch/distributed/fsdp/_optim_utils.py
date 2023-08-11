@@ -499,7 +499,7 @@ def _flatten_optim_state_dict(
             for fqn in fqns:
                 if not unflat_osd_state[fqn]:
                     continue
-                for state_name, param_state in list(unflat_osd_state[fqn].items()):
+                for state_name, _ in list(unflat_osd_state[fqn].items()):
                     if fsdp_state.rank > 0:
                         # Deference the tensor so that PyTorch can collect the memory.
                         del unflat_osd_state[fqn][state_name]

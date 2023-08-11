@@ -227,7 +227,7 @@ class ConstLoop(torch.nn.Module):
         self.count = 3
 
     def forward(self, x):
-        for i in range(self.count):
+        for _ in range(self.count):
             x = torch.sigmoid(self.linear1(x))
         return x
 
@@ -474,7 +474,7 @@ class CfgModule(torch.nn.Module):
         self.layer = torch.nn.Linear(10, 10)
 
     def forward(self, x):
-        for i in range(self.cfg.count):
+        for _ in range(self.cfg.count):
             x = self.layer(x + self.cfg.val)
         return x
 
@@ -711,7 +711,7 @@ class EnumValues(torch.nn.ModuleDict):
 
     def forward(self, init_features):
         features = [init_features]
-        for idx, layer in enumerate(self.values()):
+        for layer in self.values():
             new_features = layer(features)
             features.append(new_features)
         return torch.cat(features, 1)
@@ -1810,7 +1810,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         model = torch.compile(model, backend="aot_eager")
 
-        for i in range(2):
+        for _ in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
             activations.clear()
@@ -1857,12 +1857,12 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         def save_activations(mod, inp, out):
             activations.append(inp)
 
-        for name, module in model.named_modules():
+        for _, module in model.named_modules():
             module.register_forward_hook(save_activations)
 
         cnt = torch._dynamo.testing.CompileCounter()
         model = torch._dynamo.optimize(cnt, nopython=True)(model)
-        for i in range(2):
+        for _ in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
             activations.clear()
@@ -1985,7 +1985,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         model = torch.compile(model, backend="aot_eager")
 
-        for i in range(2):
+        for _ in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
             x = torch.randn((20, 10))

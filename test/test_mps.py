@@ -868,7 +868,7 @@ class MpsMemoryLeakCheck:
 
         discrepancy_detected = True
         # Query memory multiple items to ensure leak was not transient
-        for n in range(3):
+        for _ in range(3):
             caching_allocator_mem_allocated = torch.mps.current_allocated_memory()
             driver_mem_allocated = torch.mps.driver_allocated_memory()
 
@@ -1303,7 +1303,7 @@ class TestMPS(TestCaseMPS):
         # Test to detect issues in cdist gradient calculation
         # When the distances are 0
         sizex = (1, 27, 32)
-        for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+        for _ in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
             x = torch.randn(sizex, device=device, dtype=torch.float)
             dist_grad = torch.randn((1, 27, 27), device=device, dtype=torch.float)
             y = x.clone()
@@ -4922,7 +4922,7 @@ class TestNLLLoss(TestCaseMPS):
             input_xs.append(torch.ones(prod, dtype=torch.int).reshape(shape).bool())
             input_xs.append(torch.zeros(prod, dtype=torch.int).reshape(shape).bool())
 
-            for i, cpu_x in enumerate(input_xs):
+            for cpu_x in input_xs:
                 x = cpu_x.detach().clone().to('mps')
                 y = torch.any(x)
                 ref_y = torch.any(cpu_x)
@@ -4997,7 +4997,7 @@ class TestNLLLoss(TestCaseMPS):
             input_xs.append(torch.ones(prod, dtype=torch.int).reshape(shape).bool())
             input_xs.append(torch.zeros(prod, dtype=torch.int).reshape(shape).bool())
 
-            for i, cpu_x in enumerate(input_xs):
+            for cpu_x in input_xs:
                 x = cpu_x.detach().clone().to('mps')
                 y = torch.all(x)
                 ref_y = torch.all(cpu_x)
@@ -8089,10 +8089,10 @@ class TestLinalgMPS(TestCaseMPS):
                     return m
                 return m.t().clone(memory_format=torch.contiguous_format).t()
 
-        M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
-        m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
-        m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
-        self._test_addmm_addmv(torch.addmm, M, m1, m2, transpose_out=t4)
+            M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
+            m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
+            m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
+            self._test_addmm_addmv(torch.addmm, M, m1, m2, transpose_out=t4)
 
     def _test_addr(self, f, t, m, v, alpha=None, beta=None):
         dtype = t.dtype

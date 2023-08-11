@@ -760,7 +760,7 @@ def run_functionalized_fw_and_collect_metadata(
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
-        for (i, (arg, f_arg)) in enumerate(zip(flat_args, flat_f_args)):
+        for (arg, f_arg) in zip(flat_args, flat_f_args):
             if not isinstance(arg, Tensor):
                 new_arg = arg
             else:
@@ -1210,7 +1210,7 @@ def fn_prepped_for_autograd(
         ]
 
         intermediate_bases = []
-        for i, (o, info) in enumerate(zip(outs, meta.output_info)):
+        for (o, info) in zip(outs, meta.output_info):
             if info.output_type == OutputType.alias_of_intermediate_save_as_output:
                 intermediate_bases.append(o._base)
 
@@ -1246,7 +1246,7 @@ def fn_prepped_for_autograd(
         # This is annoying: our joint function needs to be aware of functionalization
         # (syncing mutated inputs before calling autograd.grad())
         # In theory, we could make the autograd engine do this automatically, although that probably isn't any cleaner.
-        for i, arg in enumerate(args_maybe_cloned):
+        for arg in args_maybe_cloned:
             if not isinstance(arg, Tensor):
                 continue
             torch._sync(arg)
@@ -3756,7 +3756,7 @@ def aot_module_simplified(
 
     if hasattr(mod, "graph"):
         # Non dynamo entrypoints can get to here...
-        for i, node in enumerate(mod.graph.nodes):
+        for node in mod.graph.nodes:
             if node.op == "placeholder":
                 if hasattr(node, "_dynamo_source"):
                     # ... but not here!
@@ -3957,7 +3957,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             fw_outs, gradients = fx_g(args, fake_tangents)
             assert len(gradients) == len(args)
             output_gradients = []
-            for i, (a, grad) in enumerate(zip(args, gradients)):
+            for (a, grad) in zip(args, gradients):
                 if isinstance(a, torch.Tensor) and a.requires_grad:
                     assert grad is not None, """\
 Found a parameter that did not receive a gradient.

@@ -1090,7 +1090,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             grads=grads,
         ):
             for _ in range(NUM_EPOCHS):
-                for input in inputs:
+                for _ in inputs:
                     # Notify join context that this process has not joined
                     Join.notify_join_context(gradient_setter)
                     # Set gradients manually
