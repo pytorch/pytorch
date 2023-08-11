@@ -183,25 +183,25 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "ubuntu-20.04-16x" },
         ]}
 
-  linux-vulkan-focal-py3_11-clang9-build:
-    name: linux-vulkan-focal-py3.11-clang9
+  linux-vulkan-focal-py3_11-clang10-build:
+    name: linux-vulkan-focal-py3.11-clang10
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-vulkan-focal-py3.11-clang9
-      docker-image-name: pytorch-linux-focal-py3.11-clang9
+      build-environment: linux-vulkan-focal-py3.11-clang10
+      docker-image-name: pytorch-linux-focal-py3.11-clang10
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  linux-vulkan-focal-py3_11-clang9-test:
-    name: linux-vulkan-focal-py3.11-clang9
+  linux-vulkan-focal-py3_11-clang10-test:
+    name: linux-vulkan-focal-py3.11-clang10
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-vulkan-focal-py3_11-clang9-build
+    needs: linux-vulkan-focal-py3_11-clang10-build
     with:
-      build-environment: linux-vulkan-focal-py3.11-clang9
-      docker-image: ${{ needs.linux-vulkan-focal-py3_11-clang9-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-vulkan-focal-py3_11-clang9-build.outputs.test-matrix }}
+      build-environment: linux-vulkan-focal-py3.11-clang10
+      docker-image: ${{ needs.linux-vulkan-focal-py3_11-clang10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-vulkan-focal-py3_11-clang10-build.outputs.test-matrix }}
 
   linux-focal-rocm5_6-py3_8-build:
     name: linux-focal-rocm5.6-py3.8
