@@ -7881,7 +7881,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         y = torch.empty(2 ** 20, device='meta')
         z = x + y
         self.assertEqual(z.size(), (2 ** 20, 2 ** 20))
-        self.assertTrue(isinstance(z[0][0].item(), float))
+        self.assertRaises(RuntimeError, lambda: z[0][0].item())
 
     @skipIfTorchDynamo("Fails after Triton update, see https://github.com/pytorch/pytorch/issues/94687")
     def test_format_scalar_meta(self):

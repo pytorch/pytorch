@@ -5266,12 +5266,12 @@ def activate_meta():
             # have CompositeImplicitAutograd kernels.
             # Instead, we should be letting those decompositions run, and writing meta kernels
             # only for the base operators.
-            # if op_overload in global_decomposition_table["meta"]:
-            #    raise RuntimeError(
-            #        f"{op_overload} is a CompositeImplicitAutograd op, we shouldn't "
-            #        "register meta function for it. Instead, we should let the decomposition run and write "
-            #        "meta kernels for the base operators."
-            #    )
+            if op_overload in global_decomposition_table["meta"]:
+                raise RuntimeError(
+                   f"{op_overload} is a CompositeImplicitAutograd op, we shouldn't "
+                    "register meta function for it. Instead, we should let the decomposition run and write "
+                    "meta kernels for the base operators."
+                )
             pass
         elif op_overload.is_view:
             # Attempting to register a python meta kernel for a view operator.
