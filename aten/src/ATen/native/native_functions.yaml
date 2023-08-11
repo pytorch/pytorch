@@ -3280,6 +3280,8 @@
 
 - func: linspace.Tensor_out(Tensor start, Tensor end, int steps, *, Tensor(a!) out) -> Tensor(a!)
   category_override: factory
+  dispatch:
+    CompositeExplicitAutograd: linspace_out
 
 - func: log(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -3473,6 +3475,8 @@
 
 - func: logspace.Tensor_out(Tensor start, Tensor end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
   category_override: factory
+  dispatch:
+    CompositeExplicitAutograd: logspace_out
 
 # log_softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
@@ -7374,7 +7378,6 @@
     CPU: _local_scalar_dense_cpu
     CUDA: _local_scalar_dense_cuda
     MPS: _local_scalar_dense_mps
-    Meta: _local_scalar_dense_meta
   variants: function
 
 # MPS LSTM implementation
