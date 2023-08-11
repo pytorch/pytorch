@@ -14,9 +14,6 @@ jobs:
     with:
       repo-name: xla
       branch: master
-    secrets:
-      UPDATEBOT_TOKEN: ${{ secrets.UPDATEBOT_TOKEN }}
-      PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
   update-triton-commit-hash:
     uses: ./.github/workflows/_update-commit-hash.yml
@@ -25,6 +22,3 @@ jobs:
       repo-name: triton
       branch: main
       pin-folder: .ci/docker/ci_commit_pins
-    secrets:
-      UPDATEBOT_TOKEN: ${{ secrets.UPDATEBOT_TOKEN }}
-      PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
