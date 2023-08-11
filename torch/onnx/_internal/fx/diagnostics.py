@@ -211,13 +211,14 @@ class Diagnostic(infra.Diagnostic):
     logger: logging.Logger = dataclasses.field(init=False, default=diagnostic_logger)
 
     def log(self, level: int, message: str, *args, **kwargs) -> None:
-        if is_onnx_diagnostics_log_artifact_enabled():
-            # Only log to terminal if artifact is not enabled.
-            # See [NOTE: `dynamo_export` diagnostics logging] for details.
-            self.logger.log(level, message, *args, **kwargs)
         if self.logger.isEnabledFor(level):
-            self.additional_messages.append(message % args)
-            self.additional_messages.append("\n")
+            formatted_message = message % args
+            if is_onnx_diagnostics_log_artifact_enabled():
+                # Only log to terminal if artifact is not enabled.
+                # See [NOTE: `dynamo_export` diagnostics logging] for details.
+                self.logger.log(level, message, **kwargs)
+
+            self.additional_messages.append(message)
 
 
 @dataclasses.dataclass

@@ -332,6 +332,7 @@ class TestTorchScriptOnnxDiagnostics(common_utils.TestCase):
         )
 
 
+@common_utils.instantiate_parametrized_tests
 class TestDiagnosticsInfra(common_utils.TestCase):
     """Test cases for diagnostics infra."""
 
@@ -432,6 +433,43 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                 )
             )
 
+    @common_utils.parametrize(
+        "log_api, log_level",
+        [
+            ("debug", logging.DEBUG),
+            ("info", logging.INFO),
+            ("warning", logging.WARNING),
+            ("error", logging.ERROR),
+        ],
+    )
+    def test_diagnostic_log_is_emitted_according_to_api_level_and_diagnostic_options_verbosity_level(
+        self, log_api: str, log_level: int
+    ):
+        verbosity_level = logging.INFO
+        self.context.options.verbosity_level = verbosity_level
+        with self.context:
+            diagnostic = infra.Diagnostic(
+                self.rules.rule_without_message_args, infra.Level.NOTE
+            )
+
+            message = "log message"
+            with self.assertLogs(
+                diagnostic.logger, level=verbosity_level
+            ) as assert_log_context:
+                getattr(diagnostic, log_api)(message)
+                # NOTE: self.assertNoLogs only exist >= Python 3.10
+                # Add this dummy log such that we can pass self.assertLogs, and inspect
+                # assert_log_context.records to check if the log level is correct.
+                diagnostic.log(logging.ERROR, "dummy message")
+
+            for record in assert_log_context.records:
+                self.assertGreaterEqual(record.levelno, logging.INFO)
+
+            if log_level >= verbosity_level:
+                self.assertIn(message, diagnostic.additional_messages)
+            else:
+                self.assertNotIn(message, diagnostic.additional_messages)
+
     def test_diagnostic_log_lazy_string_is_not_evaluated_when_level_less_than_diagnostic_options_verbosity_level(
         self,
     ):
@@ -451,14 +489,79 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                 return f"expensive formatting {reference_val}"
 
             # `expensive_formatting_function` should NOT be evaluated.
-            diagnostic.log(
-                logging.DEBUG, "%s", formatter.LazyString(expensive_formatting_function)
-            )
+            diagnostic.debug("%s", formatter.LazyString(expensive_formatting_function))
             self.assertEqual(
                 reference_val,
                 0,
                 "expensive_formatting_function should not be evaluated after being wrapped under LazyString",
             )
+
+    def test_diagnostic_log_lazy_string_is_evaluated_once_when_level_not_less_than_diagnostic_options_verbosity_level(
+        self,
+    ):
+        verbosity_level = logging.INFO
+        self.context.options.verbosity_level = verbosity_level
+        with self.context:
+            diagnostic = infra.Diagnostic(
+                self.rules.rule_without_message_args, infra.Level.NOTE
+            )
+
+            reference_val = 0
+
+            def expensive_formatting_function() -> str:
+                # Modify the reference_val to reflect this function is evaluated
+                nonlocal reference_val
+                reference_val += 1
+                return f"expensive formatting {reference_val}"
+
+            # `expensive_formatting_function` should NOT be evaluated.
+            diagnostic.info("%s", formatter.LazyString(expensive_formatting_function))
+            self.assertEqual(
+                reference_val,
+                1,
+                "expensive_formatting_function should only be evaluated once after being wrapped under LazyString",
+            )
+
+    def test_diagnostic_nested_log_section_emits_messages_with_correct_section_title_indentation(
+        self,
+    ):
+        verbosity_level = logging.INFO
+        self.context.options.verbosity_level = verbosity_level
+        with self.context:
+            diagnostic = infra.Diagnostic(
+                self.rules.rule_without_message_args, infra.Level.NOTE
+            )
+
+            with diagnostic.log_section(logging.INFO, "My Section"):
+                diagnostic.log(logging.INFO, "My Message")
+                with diagnostic.log_section(logging.INFO, "My Subsection"):
+                    diagnostic.log(logging.INFO, "My Submessage")
+
+            with diagnostic.log_section(logging.INFO, "My Section 2"):
+                diagnostic.log(logging.INFO, "My Message 2")
+
+            self.assertIn("## My Section", diagnostic.additional_messages)
+            self.assertIn("### My Subsection", diagnostic.additional_messages)
+            self.assertIn("## My Section 2", diagnostic.additional_messages)
+
+    def test_diagnostic_log_source_exception_emits_exception_traceback_and_error_message(
+        self,
+    ):
+        verbosity_level = logging.INFO
+        self.context.options.verbosity_level = verbosity_level
+        with self.context:
+            try:
+                raise ValueError("original exception")
+            except ValueError as e:
+                diagnostic = infra.Diagnostic(
+                    self.rules.rule_without_message_args, infra.Level.NOTE
+                )
+                diagnostic.log_source_exception(logging.ERROR, e)
+
+            diagnostic_message = "\n".join(diagnostic.additional_messages)
+
+            self.assertIn("ValueError: original exception", diagnostic_message)
+            self.assertIn("Traceback (most recent call last):", diagnostic_message)
 
     def test_diagnostic_context_raises_if_diagnostic_is_error(self):
         with self.assertRaises(infra.RuntimeErrorWithDiagnostic):
@@ -478,7 +581,7 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                 diagnostic = infra.Diagnostic(
                     self.rules.rule_without_message_args, infra.Level.ERROR
                 )
-                diagnostic = diagnostic.with_source_exception(e)
+                diagnostic.log_source_exception(logging.ERROR, e)
                 self.context.log_and_raise_if_error(diagnostic)
 
     def test_diagnostic_context_raises_if_diagnostic_is_warning_and_warnings_as_errors_is_true(
