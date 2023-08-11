@@ -37,7 +37,7 @@ from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
-                                                  IS_MACOS)
+                                                  IS_MACOS, IS_LINUX)
 
 
 try:
@@ -1494,6 +1494,39 @@ except RuntimeError as e:
         for batch in dataloader:
             seeds.add(batch[0])
         self.assertEqual(len(seeds), num_workers)
+
+    @unittest.skipIf(not IS_LINUX, "Only linux supports fork()-ing Generators.")
+    def test_worker_generator_seed(self):
+        # Tests for the RNG seeding behaviour within _worker_loop.
+        torch.manual_seed(0)
+        g1 = torch.Generator().manual_seed(1)
+        g2 = torch.Generator().manual_seed(2)
+
+        class MyDataset(SynchronizedDataset):
+            def __getitem__(self, idx):
+                self.sync_once()
+                HIGH = 100_000
+                from_global = torch.randint(0, HIGH, size=(1,)).item()
+                from_g1 = torch.randint(0, HIGH, size=(1,), generator=g1).item()
+                from_g2 = torch.randint(0, HIGH, size=(1,), generator=g2).item()
+
+                return from_global, from_g1, from_g2
+
+
+        num_workers = 2
+        dataset = MyDataset(size=10, num_workers=num_workers, batch_size=1)
+        dl = DataLoader(dataset, num_workers=num_workers)
+
+        for from_global, from_g1, from_g2 in dl:
+            # Assert RNG of all Generators are different within a given worker (each "batch" comes from a single worker)
+            assert len(set([from_global, from_g1, from_g2])) == 3
+
+        # Make sure that the Generators' RNG is different across workers.
+        # We check that by making sure all the samples of a given Generator are different across Dataloader entry.
+        # If Generators weren't re-seeded in the workers loop, we would see values being duplicated `num_workers` times.
+        all_from_global, all_from_g1, all_from_g2 = zip(*dl)
+        for all_from_generator in (all_from_global, all_from_g1, all_from_g2):
+            assert len(set(all_from_generator)) == len(dataset)
 
     def test_worker_seed_reproducibility(self):
         def get_dataloader():

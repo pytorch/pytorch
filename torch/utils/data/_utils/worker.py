@@ -217,6 +217,14 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
         seed = base_seed + worker_id
         random.seed(seed)
         torch.manual_seed(seed)
+        for generator in torch.random._generator_registry:
+            # We have to reseed non-global Generators as well (TODO: explain why, will do if PR is likely to be merged)
+            # Note that we can't use generator.manual_seed(seed) here, otherwise the RNG of the generator
+            # would be the same as the global one.
+            # We also need to create a generator_seed that depends on the current generator state, otherwise
+            # all Generator instances within a given worker would have the same RNG.
+            generator_seed = torch.empty((), dtype=torch.int64).random_(generator=generator).item() + seed
+            generator.manual_seed(generator_seed)
         if HAS_NUMPY:
             np_seed = _generate_state(base_seed, worker_id)
             import numpy as np

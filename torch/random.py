@@ -1,6 +1,7 @@
 import contextlib
 from typing import Generator
 import warnings
+import weakref
 
 from torch._C import default_generator
 import torch
@@ -127,3 +128,8 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
         torch.set_rng_state(cpu_rng_state)
         for device, gpu_rng_state in zip(devices, gpu_rng_states):
             torch.cuda.set_rng_state(gpu_rng_state, device)
+
+
+# We keep track of all Generator instances (except the default one) via a registry of weak references.
+# The Generators that have no strong references to them are automatically discarded from the registry.
+_generator_registry = weakref.WeakSet()
