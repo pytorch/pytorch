@@ -273,26 +273,32 @@ inline static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   return PyUnicode_AsUTF8(frame->f_code->co_name);
 }
 
+typedef PyObject FrameState;
+/*
+Our cache resides on the extra scratch space of the code object. The structure
+of the the cache is as follows:
 
-static inline PyObject* call_callback(
-    PyObject* callable,
-    THP_EVAL_API_FRAME_OBJECT* _frame,
-    long cache_len,
-    PyObject* frame_state) {
+-> ExtraState
+  -> CompileUnit
+    -> CacheEntry
+      -> check_fn
+      -> optimized_code
+      -> next
+    -> FrameState
+  -> ... (will have more items in future)
 
-#if IS_PYTHON_3_11_PLUS
-  THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
-  if (frame == NULL) {
-    return NULL;
-  }
-#else
-  PyObject* frame = Py_NewRef(_frame);
-#endif
-  PyObject* res = PyObject_CallFunction(callable, "OlO", frame, cache_len, frame_state);
-  Py_DECREF(frame);
-  return res;
-}
+CacheEntry is a linked list, with each node containing the check_fn for guards
+and the optimized code.
 
+The frame_state is a PyDict that enables sharing between different frames. This
+is used to detect dynamism in automatic dynamic shapes.
+
+These two are encapsulated into a CompileUnit. This CompileUnit is introduced as
+a prep for a future patch that will allow for easier cache changes.
+*/
+
+// Linked list of cache entries, where each cache entry stores
+// the check_fn and the torch.compile optimized python bytecode.
 typedef struct cache_entry {
   // check the guards: lambda: <locals of user function>: bool
   PyObject* check_fn;
@@ -302,16 +308,23 @@ typedef struct cache_entry {
   struct cache_entry* next;
 } CacheEntry;
 
-// An abstraction to encapsulate all the information to be saved on the extra
-// scratch space of the code object. This enables us to reuse the same co_extra
-// field, saving extra allocations.
+// CompileUnit encasulates CacheEntry and FrameState.
 typedef struct {
   // Cache entry for the code object
   CacheEntry* cache_entry;
   // Frame state to detect dynamic shape dims
-  PyObject* frame_state;
+  FrameState* frame_state;
+} CompileUnit;
+
+// ExtraState is the highest level of abstraction of what is stored on the extra
+// code object. Previously, we saved different parts on different extra indexes.
+// We prefer this way because of cleaner abstraction and faster SetExtra access.
+typedef struct {
+  // CompileUnit for the code object
+  CompileUnit* compile_unit;
 } ExtraState;
 
+/* CacheEntry helper functions begins */
 
 static CacheEntry* create_cache_entry(
     CacheEntry* next,
@@ -336,16 +349,43 @@ static void destroy_cache_entry(CacheEntry* e) {
   free(e);
 }
 
-static ExtraState* create_extra_state(
-    CacheEntry* cache_entry,
-    PyObject* frame_state) {
-  // Creates a new extra state with the given cache_entry and frame_state.
-  ExtraState* e = (ExtraState*)malloc(sizeof(ExtraState));
-  DEBUG_NULL_CHECK(e);
-  e->cache_entry = cache_entry;
-  e->frame_state = frame_state;
-  return e;
+/* CacheEntry helper functions ends */
+
+/* Extractions helper functions begins. They help with NULL and SKIP_CODE corner cases */
+
+inline static CompileUnit* extract_compile_unit(ExtraState* extra) {
+  if (extra == NULL || extra == SKIP_CODE) {
+    return NULL;
+  }
+  return extra->compile_unit;
 }
+
+inline static CacheEntry* extract_cache_entry(CompileUnit* compile_unit) {
+  // Helper to extra the cache_entry from the extra state.
+  if (compile_unit == NULL) {
+    return NULL;
+  }
+  return compile_unit->cache_entry;
+}
+
+
+inline static FrameState* extract_frame_state(CompileUnit* compile_unit) {
+  // Returns either the previously stored frame state or an empty dict.
+  if (compile_unit == NULL) {
+    return PyDict_New();
+  }
+
+  FrameState* frame_state = compile_unit->frame_state;
+  if (frame_state == NULL) {
+    frame_state = PyDict_New();
+  }
+  return frame_state;
+}
+
+/* Extractions helper functions ends */
+
+
+/* Extra state helper functions begins */
 
 inline static ExtraState* get_extra_state(PyCodeObject* code) {
   ExtraState* extra = NULL;
@@ -353,42 +393,72 @@ inline static ExtraState* get_extra_state(PyCodeObject* code) {
   return extra;
 }
 
-
 inline static void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
   // Sets the extra state on the extra scrach space of the code object.
   _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
 }
 
-inline static CacheEntry* extract_cache_entry(ExtraState* extra) {
-  // Helper to extra the cache_entry from the extra state.
-  if (extra == NULL) {
-    return NULL;
-  }
-  return extra->cache_entry;
+static ExtraState* create_extra_state(
+    CacheEntry* cache_entry,
+    FrameState* frame_state) {
+  // Creates a new extra state with the given cache_entry and frame_state.
+  // It steals the reference ofr both cache_entry and frame_state. These are
+  // freed in destroy_extra_state.
+  CompileUnit* compile_unit = (CompileUnit*)malloc(sizeof(CompileUnit));
+  DEBUG_NULL_CHECK(compile_unit);
+  compile_unit->cache_entry = cache_entry;
+  compile_unit->frame_state = frame_state;
+  ExtraState* extra_state = (ExtraState*)malloc(sizeof(ExtraState));
+  DEBUG_NULL_CHECK(extra_state);
+  extra_state->compile_unit = compile_unit;
+  return extra_state;
 }
+
 
 inline static void create_and_set_extra_state(
     PyCodeObject* code,
     CacheEntry* cache_entry,
-    PyObject* frame_state) {
+    FrameState* frame_state) {
   // Creates a new extra state and put it on the extra scrach space of the code
   // object.
   ExtraState* extra_state = create_extra_state(cache_entry, frame_state);
   set_extra_state(code, extra_state);
 }
 
+inline static void override_cache_entry_on_extra(
+    PyCodeObject* code,
+    ExtraState* extra,
+    CacheEntry* new_cache_entry) {
+  // Overrides the cache entry on the already read extra state, and then stores
+  // it on the extra scratch space.
+  NULL_CHECK(extra);
+  CompileUnit* compile_unit = extra->compile_unit;
+  NULL_CHECK(compile_unit);
+  compile_unit->cache_entry = new_cache_entry;
+  set_extra_state(code, extra);
+}
+
+
 inline static void destroy_extra_state(PyCodeObject* code) {
   // Destroys the extra state by deleting cache_entry, frame state and finally
   // freeing the constructed extra state.
   ExtraState* extra = get_extra_state(code);
   if (extra != NULL && extra != SKIP_CODE) {
-    destroy_cache_entry(extract_cache_entry(extra));
-    PyObject* frame_state = extra->frame_state;
+    CompileUnit* compile_unit = extract_compile_unit(extra);
+    CacheEntry* cache_entry = extract_cache_entry(compile_unit);
+    FrameState* frame_state = extract_frame_state(compile_unit);
+    destroy_cache_entry(cache_entry);
     Py_XDECREF(frame_state);
     free(extra);
   }
   set_extra_state(code, NULL);
 }
+
+/* Extra state helper functions ends */
+
+/*
+Debugger helper functions.
+*/
 
 PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
   PyObject* object;
@@ -401,7 +471,14 @@ PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
   }
   PyCodeObject* code = (PyCodeObject*)object;
 
-  CacheEntry* current_node = extract_cache_entry(get_extra_state(code));
+  ExtraState* extra = get_extra_state(code);
+  CompileUnit* compile_unit = extract_compile_unit(extra);
+  CacheEntry* current_node = extract_cache_entry(compile_unit);
+
+  if (extra != NULL && extra!= SKIP_CODE) {
+    CompileUnit* compile_unit = extract_compile_unit(extra);
+    current_node = extract_cache_entry(compile_unit);
+  }
 
   PyObject* outer_list = PyList_New(0);
   if (!outer_list) {
@@ -422,6 +499,25 @@ PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
   }
   // Return the outer list
   return outer_list;
+}
+
+static inline PyObject* call_callback(
+    PyObject* callable,
+    THP_EVAL_API_FRAME_OBJECT* _frame,
+    long cache_len,
+    FrameState* frame_state) {
+
+#if IS_PYTHON_3_11_PLUS
+  THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
+  if (frame == NULL) {
+    return NULL;
+  }
+#else
+  PyObject* frame = Py_NewRef(_frame);
+#endif
+  PyObject* res = PyObject_CallFunction(callable, "OlO", frame, cache_len, frame_state);
+  Py_DECREF(frame);
+  return res;
 }
 
 static PyObject* call_guard_fail_hook(
@@ -485,13 +581,14 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     // move it to the head
     if (prev != NULL) {
         ExtraState* extra = get_extra_state(frame->f_code);
-        CacheEntry* old_cache_entry = extract_cache_entry(extra);
+        CompileUnit* compile_unit = extract_compile_unit(extra);
+        CacheEntry* old_cache_entry = extract_cache_entry(compile_unit);
+
         prev->next = e->next;
         e->next = old_cache_entry;
 
-        // Update the extra state to reflect the updated cache
-        extra->cache_entry = e;
-        set_extra_state(frame->f_code, extra);
+        // Override the extra state to reflect the updated cache line.
+        override_cache_entry_on_extra(frame->f_code, extra, e);
     }
     return (PyObject*)e->code;
   }
@@ -718,7 +815,9 @@ static PyObject* _custom_eval_frame(
     DEBUG_TRACE("skip %s", get_frame_name(frame));
     return eval_frame_default(tstate, frame, throw_flag);
   }
-  CacheEntry* cache_entry = extract_cache_entry(extra);
+  CompileUnit* compile_unit = extract_compile_unit(extra);
+  CacheEntry* cache_entry = extract_cache_entry(compile_unit);
+  FrameState* frame_state = extract_frame_state(compile_unit);
 
   // TODO(jansel): investigate directly using the "fast" representation
   // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
@@ -774,15 +873,6 @@ static PyObject* _custom_eval_frame(
     return eval_custom_code(tstate, frame, cached_code, throw_flag);
   }
   // cache miss
-
-  PyObject *frame_state = NULL;
-  if (extra != NULL) {
-    frame_state = extra->frame_state;
-  }
-  if (frame_state == NULL) {
-    // TODO(voz): Replace this dict with a real FrameState object.
-    frame_state = PyDict_New();
-  }
   // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
   // that gets re-interpreted as a PyObject (which it is NOT!)
   PyObject* result =
@@ -800,13 +890,24 @@ static PyObject* _custom_eval_frame(
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
     CacheEntry* new_cache_entry = create_cache_entry(cache_entry, result);
     Py_DECREF(result);
-    create_and_set_extra_state(frame->f_code, new_cache_entry, frame_state);
+    if (extra == NULL) {
+      // Create a new extra state as this is the first time we see this code object.
+      create_and_set_extra_state(frame->f_code, new_cache_entry, frame_state);
+    } else {
+      // Update the existing cache_entry on the extra scratch space.
+      override_cache_entry_on_extra(frame->f_code, extra, new_cache_entry);
+    }
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     return eval_custom_code(tstate, frame, new_cache_entry->code, throw_flag);
   } else {
     DEBUG_TRACE("create skip %s", get_frame_name(frame));
     Py_DECREF(result);
+    if (extra == NULL) {
+      // frame_state is PyDict if extra is NULL, so clean it up. If the extra is
+      // not None, then destroy_extra_state will take care of it.
+      Py_DECREF(frame_state);
+    }
     destroy_extra_state(frame->f_code);
     set_extra_state(frame->f_code, SKIP_CODE);
     // Re-enable custom behavior
