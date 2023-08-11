@@ -309,6 +309,32 @@ def meta_unsqueeze_(self, dim):
     return self
 
 
+@register_meta(aten.index_reduce.default)
+def meta_index_reduce(
+    self: Tensor,
+    dim: int,
+    index: Tensor,
+    source: torch.Tensor,
+    reduce: str,
+    *,
+    include_self: bool = True,
+) -> Tensor:
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
+
+
+@register_meta(aten.index_reduce_.default)
+def meta_index_reduce_(
+    self: Tensor,
+    dim: int,
+    index: Tensor,
+    source: torch.Tensor,
+    reduce: str,
+    *,
+    include_self: bool = True,
+) -> Tensor:
+    return self
+
+
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
 @register_meta(aten.index_select.default)
 def meta_index_select(self, dim, index):
@@ -2927,29 +2953,6 @@ def meta__foreach_addcop_tensor(self, tensor1, tensor2, scalars):
     torch._check(
         len(self) == len(tensor1) and len(self) == len(tensor2),
         lambda: "All input tensor lists must have the same length",
-    )
-
-
-@register_meta([aten._foreach_clamp.default])
-def meta__foreach_clamp(self, min, max):
-    torch._check(
-        isinstance(self, List),
-        lambda: f"self must be a tensor list but got {type(self)}",
-    )
-    torch._check(
-        min is not None or max is not None, lambda: "`min` or `max` must be specified"
-    )
-    return [torch.empty_like(t) for t in self]
-
-
-@register_meta([aten._foreach_clamp_.default])
-def meta__foreach_clamp_(self, min, max):
-    torch._check(
-        isinstance(self, List),
-        lambda: f"self must be a tensor list but got {type(self)}",
-    )
-    torch._check(
-        min is not None or max is not None, lambda: "`min` or `max` must be specified"
     )
 
 
