@@ -138,9 +138,9 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         def f(x):
             return torch.sin(x)
 
-        #f_out = f(x)
-        #self.assertEqual(cnt.frame_count, 1)
-        #self.assertEqual(cnt.op_count, 1)
+        f_out = f(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
 
         ff = torch.func.functionalize(f)
         ff_out = ff(x)
@@ -148,7 +148,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
 
-        # self.assertEqual(f_out, ff_out)
+        self.assertEqual(f_out, ff_out)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
