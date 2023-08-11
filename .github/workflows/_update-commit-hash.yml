@@ -35,6 +35,7 @@ env:
 jobs:
   update-commit-hash:
     runs-on: ubuntu-latest
+    environment: update-commit-hash
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3

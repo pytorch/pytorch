@@ -39,6 +39,7 @@ jobs:
   update-vision-commit-hash:
     uses: ./.github/workflows/_update-commit-hash.yml
     if: ${{ github.event_name == 'schedule' }}
+    environment: update-commit-hash
     with:
       repo-name: vision
       branch: main
