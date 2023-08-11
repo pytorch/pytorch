@@ -1615,19 +1615,18 @@ def main():
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
-    prioritized_tests = []
-    general_tests = selected_tests
+    metrics_dict = {}
     if IS_CI and HAVE_TEST_SELECTION_TOOLS:
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
-        test_prioritization = get_test_prioritizations(general_tests)
+        test_prioritization = get_test_prioritizations(selected_tests)
 
-    metrics_dict = {
-        "highly_relevant_tests": test_prioritization.highly_relevant,
-        "probably_relevant_tests": test_prioritization.probably_relevant,
-        "unranked_relevance_tests": test_prioritization.unranked_relevance,
-        "cpp": options.cpp,
-    }
+        metrics_dict = {
+            "highly_relevant_tests": test_prioritization.highly_relevant,
+            "probably_relevant_tests": test_prioritization.probably_relevant,
+            "unranked_relevance_tests": test_prioritization.unranked_relevance,
+            "cpp": options.cpp,
+        }
 
     test_times_dict = download_test_times(TEST_TIMES_FILE)
     test_batches: List[TestBatch] = []
