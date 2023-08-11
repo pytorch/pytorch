@@ -191,9 +191,11 @@ class MemoryPlanningLine:
 class AllocateLine(MemoryPlanningLine):
     node: ir.Buffer
 
-    def add_user_stream(self, stream_id):
-        # is it possible that this buffer is used by multiple streams immediately?
+    def set_user_stream(self, stream_id):
         self.user_streams = [stream_id, ]
+
+    def add_user_stream(self, stream_id):
+        self.user_streams.append(stream_id)
 
     def plan(self, state: MemoryPlanningState):
         if self.node.get_name() in V.graph.removed_buffers:
@@ -215,7 +217,9 @@ class AllocateLine(MemoryPlanningLine):
         if hasattr(self, "user_streams"):
             need_cuda_event = False
             if len(self.user_streams) > 1:
+                # TODO: need to double check. saw this print in some models.
                 print(f"findhao-> buffer {self.node.get_name()} is used by multiple streams")
+                pass
             elif len(self.user_streams) == 1:
                 if self.user_streams[0] != 0:
                     if V.graph.cpp_wrapper:
@@ -473,23 +477,34 @@ class WrapperCodeGen(CodeGen):
         return
 
     def cuda_event_dependency(self, node_name, kernel_IndentedBuffer):
+        """
+        Yueming: is it better to move the dependency detection to streamscheduler?
+        """
         ssnode = V.graph.stream_graph.name_mapping[node_name]
         def update_event_dependency(tmp_ssnode):
+            dependent_buffers = set()
             for name in tmp_ssnode.predecessors:
                 predecessor = tmp_ssnode.predecessors[name]
                 if predecessor.is_nop_node:
                     for prepredecessor in predecessor.predecessors.values():
                         if prepredecessor.stream_id != tmp_ssnode.stream_id and not prepredecessor.is_nop_node:
-                            if V.graph.cpp_wrapper:
-                                kernel_IndentedBuffer.writeline(f"cudaStreamWaitEvent(stream{tmp_ssnode.stream_id}, event_{prepredecessor.get_name()}, 0);")
-                            else:
-                                kernel_IndentedBuffer.writeline(f"stream{tmp_ssnode.stream_id}_raw.wait_event(event_{prepredecessor.get_name()})")
+                            dependent_buffers.add(prepredecessor)
                 else:
                     if predecessor.stream_id != tmp_ssnode.stream_id and not predecessor.is_nop_node:
-                        if V.graph.cpp_wrapper:
-                            kernel_IndentedBuffer.writeline(f"cudaStreamWaitEvent(stream{tmp_ssnode.stream_id}, event_{predecessor.get_name()}, 0);")
-                        else:
-                            kernel_IndentedBuffer.writeline(f"stream{tmp_ssnode.stream_id}_raw.wait_event(event_{predecessor.get_name()})")
+                        dependent_buffers.add(predecessor)
+            # for nodes directly point to nop node, need to add event dependency too
+            for name in tmp_ssnode.successors:
+                successor = tmp_ssnode.successors[name]
+                if successor.is_nop_node:
+                    for prepredecessor in successor.predecessors.values():
+                        if prepredecessor.stream_id != successor.stream_id:
+                            # add the dependency of the nop node
+                            dependent_buffers.add(successor)
+            for buffer in dependent_buffers:
+                if V.graph.cpp_wrapper:
+                    kernel_IndentedBuffer.writeline(f"cudaStreamWaitEvent(stream{tmp_ssnode.stream_id}, event_{buffer.get_name()}, 0);")
+                else:
+                    kernel_IndentedBuffer.writeline(f"stream{tmp_ssnode.stream_id}_raw.wait_event(event_{buffer.get_name()})")
         update_event_dependency(ssnode)
         for predecessor in ssnode.predecessors.values():
             if predecessor.is_nop_node:
@@ -1008,7 +1023,15 @@ class WrapperCodeGen(CodeGen):
         new_allocateline = AllocateLine(self, buffer)
         if config.multiple_streams:
             ssnode = V.graph.stream_graph.name_mapping[buffer.get_name()]
-            new_allocateline.add_user_stream(ssnode.stream_id)
+            new_allocateline.set_user_stream(ssnode.stream_id)
+            user_streams = set()
+            if ssnode.is_nop_node:
+                for predecessor in ssnode.predecessors.values():
+                    if predecessor.stream_id != ssnode.stream_id:
+                        user_streams.add(predecessor.stream_id)
+                for user_stream in user_streams:
+                    new_allocateline.add_user_stream(user_stream)
+            
         self.writeline(new_allocateline)
 
     def codegen_free(self, buffer):
