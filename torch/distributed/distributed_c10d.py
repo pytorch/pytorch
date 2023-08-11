@@ -1381,7 +1381,8 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         raise RuntimeError("Invalid process group specified")
 
     # prevent Python Interpreter to exit before all hooks are fired
-    pg._wait_for_pending_works()
+    if pg.name().lower() == "nccl":
+        pg._wait_for_pending_works()
 
     if group is None or group == GroupMember.WORLD:
         _update_default_pg(None)
