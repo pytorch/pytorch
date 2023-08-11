@@ -545,6 +545,7 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
     ):
         counters["frames"]["total"] += 1
         try:
+            breakpoint()
             result = inner_convert(frame, cache_size, hooks, frame_state)
             counters["frames"]["ok"] += 1
             return result
@@ -563,6 +564,7 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
             # need to make these exceptions not get wrapped
             soft_fail = isinstance(e, Unsupported)
             if not config.suppress_errors and not soft_fail:
+                breakpoint()
                 raise
 
             # Suppress the error.  NB: It's very important to do the

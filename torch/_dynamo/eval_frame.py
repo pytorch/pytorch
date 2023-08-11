@@ -330,7 +330,18 @@ class _TorchDynamoContext:
             dynamic_ctx = enable_dynamic(self.dynamic, self.export)
             dynamic_ctx.__enter__()
             try:
+                # breakpoint()
                 return fn(*args, **kwargs)
+            except Exception as e:
+                print("Failed to compile - checking eager...")
+                torch._dynamo.decorators.disable(fn)
+                try:
+                    fn(*args, **kwargs)
+                except Exception as ee:
+                    print("Failed in compile AND eager, check your program!")
+                    raise ee
+                print("Eager ran successfully, compiler issue")
+                raise e
             finally:
                 set_eval_frame(prior)
                 dynamic_ctx.__exit__(None, None, None)
