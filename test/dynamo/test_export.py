@@ -18,6 +18,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
+from torch._dynamo.exc import UserError
 from torch._export import dynamic_dim
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -191,7 +192,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return y[0] + y[1]
 
         inp = [torch.tensor([1.3, 3.77, 0.1]), torch.tensor([8.7, 6.23, 9.9])]
-        gm, _ = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(inp)
+        gm = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(
+            inp
+        ).graph_module
         self.assertTrue(torch._dynamo.utils.same(gm(inp), f(inp)))
 
     def test_export_with_shallow_list_copy_with_side_effects(self):
@@ -202,7 +205,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return x[0] + x[1], y[0] + y[1], y[2]
 
         inp = [torch.tensor([1.3, 3.77, 0.1]), torch.tensor([8.7, 6.23, 9.9])]
-        gm, _ = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(inp)
+        gm = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(
+            inp
+        ).graph_module
         res = gm(inp)
         ref = f(inp)
         self.assertTrue(torch._dynamo.utils.same(res, ref))
@@ -3008,47 +3013,136 @@ def forward(self, x):
                     + str(aten_graph),
                 )
 
-    def test_capture_symbolic_tracing(self) -> None:
-        from torch._dynamo.output_graph import config
-        from torch._subclasses import fake_tensor
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+    def test_invalid_input_global(self) -> None:
+        global bulbous_bouffant
+        bulbous_bouffant = torch.randn(3)
 
+        def f(y):
+            return bulbous_bouffant + y
+
+        self.assertExpectedInlineMunged(
+            UserError,
+            lambda: torch._dynamo.export(f)(torch.randn(3)),
+            """\
+G['bulbous_bouffant'], accessed at:
+  File "test_export.py", line N, in f
+    return bulbous_bouffant + y
+""",
+        )
+
+    def test_invalid_input_global_multiple_access(self) -> None:
+        global macademia
+        macademia = torch.randn(3)
+
+        def g(y):
+            global macademia
+            y = macademia + y
+            return y
+
+        def f(y):
+            global macademia
+            y = g(y)
+            return macademia + y
+
+        # NB: This doesn't actually work (it only reports the first usage),
+        # but I'm leaving the test here in case we fix it later
+        self.assertExpectedInlineMunged(
+            UserError,
+            lambda: torch._dynamo.export(f)(torch.randn(3)),
+            """\
+G['macademia'], accessed at:
+  File "test_export.py", line N, in f
+    y = g(y)
+  File "test_export.py", line N, in g
+    y = macademia + y
+""",
+        )
+
+    def test_invalid_input_nonlocal(self) -> None:
+        arglebargle = torch.randn(3)
+
+        def f(y):
+            return arglebargle + y
+
+        self.assertExpectedInlineMunged(
+            UserError,
+            lambda: torch._dynamo.export(f)(torch.randn(3)),
+            """L['arglebargle'], a closed over free variable""",
+        )
+
+    def test_invalid_input_unused_nonlocal_ok(self) -> None:
+        arglebargle = torch.randn(3)
+
+        def f(y):
+            x = arglebargle
+            return y
+
+        torch._dynamo.export(f)(torch.randn(3))
+
+    def test_symbolic_tracing_within_fake_mode_with_constraints(self):
+        from torch._subclasses import fake_tensor
+
+        fake_mode = fake_tensor.FakeTensorMode()
+
+        class DynamicShapeSimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b, c) -> torch.Tensor:
+                d = (torch.matmul(a, b) + c) / 2
+                d_s0 = d.shape[0]
+                d_s1 = d.shape[1]
+                d_s3 = d_s0 * d_s1
+                e = d.view(d_s3)
+                return torch.cat([e, e])
+
+        with fake_mode:
+            model = DynamicShapeSimpleModel()
+            inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
+            constraints = [
+                dynamic_dim(inputs[0], 0),
+                dynamic_dim(inputs[2], 0),
+                dynamic_dim(inputs[2], 0) == dynamic_dim(inputs[0], 0),
+            ]
+            for aten_graph in [True, False]:
+                gm = torch._dynamo.export(
+                    model,
+                    constraints=constraints,
+                    aten_graph=aten_graph,
+                )(*inputs).graph_module
+
+        # Since there are no parameters we can do this
+        inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
+        self.assertEqual(model(*inputs), gm(*inputs))
+
+    def test_symbolic_tracing_within_fake_mode_with_constraints_with_parameters(self):
+        from torch._subclasses import fake_tensor
+
+        fake_mode = fake_tensor.FakeTensorMode()
+
+        # TODO: Seems to choke if you don't make a fresh model and
+        # just try to export Linear directly...
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
-                self.linear2 = torch.nn.Linear(2, 2)
 
             def forward(self, x):
                 out = self.linear(x)
-                out = self.linear2(out)
                 return out
 
-        # User-instantiated FakeTensorMode
-        fake_mode = fake_tensor.FakeTensorMode(
-            allow_non_fake_inputs=False,
-            allow_fallback_kernels=True,
-            shape_env=ShapeEnv(
-                allow_scalar_outputs=config.capture_scalar_outputs,
-                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                frame_id=0,
-            ),
-        )
-        # Fakefy input+model before exporting it
         with fake_mode:
-            x = torch.rand(5, 2, 2)
             model = Model()
-
-        # Export the model with fake inputs and parameters
-        for aten_graph in [True, False]:
-            graph_module, _ = torch._dynamo.export(
-                model, x, aten_graph=aten_graph, fake_mode=fake_mode
-            )
-
-            self.assertTrue(
-                isinstance(graph_module, torch.fx.GraphModule),
-                msg="test_capture_symbolic_tracing_aten_graph_" + str(aten_graph),
-            )
+            inputs = (torch.randn(10, 2, 2),)
+            constraints = [
+                dynamic_dim(inputs[0], 0),
+            ]
+            for aten_graph in [True, False]:
+                gm = torch._dynamo.export(
+                    model,
+                    constraints=constraints,
+                    aten_graph=aten_graph,
+                )(*inputs).graph_module
 
     def test_capture_symbolic_tracing_within_fake_mode(self):
         from torch._dynamo.output_graph import config
@@ -3288,6 +3382,179 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
     add_2 = add_1 + sin_2;  add_1 = sin_2 = None
     return add_2""",
         )
+
+    def test_retracibility(self):
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x):
+                a, b = x
+                a_conv = self.conv(a)
+                a_linear = self.linear(a_conv)
+                b_conv = self.conv(b)
+                b_linear = self.linear(b_conv)
+                return (
+                    a_linear.cos() + b_linear.sin(),
+                    a_linear.sin() + b_linear.cos(),
+                )
+
+        inp_container = (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100))
+
+        gm, _ = torch._dynamo.export(Foo(), inp_container, aten_graph=True)
+        gm2, _ = torch._dynamo.export(gm, inp_container, aten_graph=True)
+
+        inp_test = (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100))
+
+        self.assertTrue(torch.allclose(gm(inp_test)[0], gm2(inp_test)[0]))
+        self.assertTrue(torch.allclose(gm(inp_test)[1], gm2(inp_test)[1]))
+
+    def test_retracibility_dict_container_inp_out(self):
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x):
+                a1, a2 = x["a"]
+                b = x["b"]
+                a1_conv = self.conv(a1)
+                a1_linear = self.linear(a1_conv)
+                a2_conv = self.conv(a2)
+                a2_linear = self.linear(a2_conv)
+                b_conv = self.conv(b)
+                b_linear = self.linear(b_conv)
+                return {
+                    "a": [
+                        a1_linear.cos() + b_linear.sin(),
+                        a1_linear.cos() + b_linear.sin(),
+                    ],
+                    "b": a2_linear.sin() + b_linear.cos(),
+                }
+
+        inp_container = {
+            "a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),
+            "b": torch.randn(20, 16, 50, 100),
+        }
+
+        gm, _ = torch._dynamo.export(Foo(), inp_container, aten_graph=True)
+        gm2, _ = torch._dynamo.export(gm, inp_container, aten_graph=True)
+
+        inp_test = {
+            "a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),
+            "b": torch.randn(20, 16, 50, 100),
+        }
+
+        self.assertTrue(torch.allclose(gm(inp_test)["a"][0], gm2(inp_test)["a"][0]))
+        self.assertTrue(torch.allclose(gm(inp_test)["a"][1], gm2(inp_test)["a"][1]))
+        self.assertTrue(torch.allclose(gm(inp_test)["b"], gm2(inp_test)["b"]))
+
+    def test_retracibility_nested_list_out(self):
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x):
+                a1, a2 = x["a"]
+                b = x["b"]
+                a1_conv = self.conv(a1)
+                a1_linear = self.linear(a1_conv)
+                a2_conv = self.conv(a2)
+                a2_linear = self.linear(a2_conv)
+                b_conv = self.conv(b)
+                b_linear = self.linear(b_conv)
+                return [
+                    [
+                        a1_linear.cos() + b_linear.sin(),
+                        a1_linear.cos() + b_linear.sin(),
+                    ],
+                    [
+                        a2_linear.sin() + b_linear.cos(),
+                        a2_linear.sin() + b_linear.cos(),
+                    ],
+                ]
+
+        inp_container = {
+            "a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),
+            "b": torch.randn(20, 16, 50, 100),
+        }
+
+        gm, _ = torch._dynamo.export(Foo(), inp_container, aten_graph=True)
+        gm2, _ = torch._dynamo.export(gm, inp_container, aten_graph=True)
+
+        inp_test = {
+            "a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),
+            "b": torch.randn(20, 16, 50, 100),
+        }
+
+        self.assertTrue(torch.allclose(gm(inp_test)[0][0], gm2(inp_test)[0][0]))
+        self.assertTrue(torch.allclose(gm(inp_test)[0][1], gm2(inp_test)[0][1]))
+        self.assertTrue(torch.allclose(gm(inp_test)[1][0], gm2(inp_test)[1][0]))
+        self.assertTrue(torch.allclose(gm(inp_test)[1][1], gm2(inp_test)[1][1]))
+
+    @unittest.expectedFailure
+    def test_fx_pytree(self):
+        def foo(args):
+            flat_args, spec = torch.utils._pytree.tree_flatten(args)
+            flat_args_fx = torch.fx._pytree.tree_flatten_spec(args, spec)
+            return flat_args_fx[0] + flat_args[0]
+
+        inp_container = (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100))
+
+        gm, _ = torch._dynamo.export(foo, inp_container, aten_graph=True)
+
+        self.assertTrue(torch.allclose(foo(inp_container), gm(inp_container)))
+
+    @config.patch(suppress_errors=True)
+    @config.patch(verbose=True)
+    def test_export_with_map_zero_sized_tensor_suppress_errors(self):
+        from functorch.experimental.control_flow import map
+
+        class Module(torch.nn.Module):
+            def forward(self, xs):
+                def body(x):
+                    return x + 1
+
+                return map(body, xs)
+
+        mod = Module()
+        xs = torch.randn(0, 2)
+        with self.assertRaises(
+            torch._dynamo.exc.Unsupported,
+        ):
+            out_graph, _ = torch._dynamo.export(mod, xs)
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
