@@ -176,30 +176,32 @@ class MyModule4(torch.nn.Module):
 @requires_cuda()
 @torch._inductor.config.patch(group_fusion=True, batch_fusion=True)
 class TestGroupBatchFusion(TestCase):
-    def compare_dict_tensors(self, ref_dict, res_dict):
+    def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
             return False
         for key1 in ref_dict.keys():
             key2 = "_orig_mod." + key1
             assert key2 in res_dict, f"{key1} does not exist in traced module"
-            if not torch.allclose(ref_dict[key1], res_dict[key2], rtol=1e-3, atol=1e-3):
+            if not torch.allclose(ref_dict[key1], res_dict[key2], rtol=rtol, atol=atol):
                 return False
         return True
 
-    def compare_pred(self, module, traced, input):
+    def compare_pred(self, module, traced, input, rtol=1e-3, atol=1e-3):
         ref = module(*input)
         res = traced(*input)
-        self.assertEqual(ref, res, rtol=1e-3, atol=1e-3)
+        self.assertEqual(ref, res, rtol=rtol, atol=atol)
 
-    def compare_parameters(self, module, traced):
+    def compare_parameters(self, module, traced, rtol=1e-3, atol=1e-3):
         ref_params = dict(module.named_parameters())
         res_params = dict(traced.named_parameters())
-        self.assertTrue(self.compare_dict_tensors(ref_params, res_params))
+        self.assertTrue(self.compare_dict_tensors(ref_params, res_params, rtol, atol))
 
-    def compare_gradients(self, module, traced):
+    def compare_gradients(self, module, traced, rtol=1e-3, atol=1e-3):
         ref_grad = {key: param.grad for key, param in module.named_parameters()}
         res_grad = {key: param.grad for key, param in traced.named_parameters()}
-        self.assertTrue(self.compare_dict_tensors(ref_grad, res_grad))
+        self.assertTrue(
+            self.compare_dict_tensors(ref_grad, res_grad, rtol=rtol, atol=atol)
+        )
 
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
     def test_group_linear_fusion(self):
@@ -290,8 +292,8 @@ class TestGroupBatchFusion(TestCase):
                 )
                 ref.sum().backward()
                 res.sum().backward()
-                self.compare_parameters(module, traced)
-                self.compare_gradients(module, traced)
+                self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+                self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
                 counters.clear()
 
     def test_batch_linear_lhs_fusion(self):
@@ -315,8 +317,8 @@ class TestGroupBatchFusion(TestCase):
             )
             ref.sum().backward()
             res.sum().backward()
-            self.compare_parameters(module, traced)
-            self.compare_gradients(module, traced)
+            self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
             counters.clear()
 
 
