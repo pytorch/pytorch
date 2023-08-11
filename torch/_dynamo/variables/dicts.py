@@ -159,8 +159,11 @@ class ConstDictVariable(VariableTracker):
                 # missing item, return the supplied default value
                 return args[1].add_options(options)
             else:
-                # missing item, no default value, return None
-                return ConstantVariable(None)
+                if name == "get":
+                    # missing item, no default value, return None
+                    return ConstantVariable(None)
+                else:
+                    unimplemented(f"pop missing key {args[0]}")
         elif (
             name == "pop"
             and args
