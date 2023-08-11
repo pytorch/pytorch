@@ -1099,7 +1099,12 @@ class TritonKernel(Kernel):
         if isinstance(index, sympy.Integer):
             expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
-            return index_str, set(), "None", expand_str
+            if self._load_mask:
+                mask_vars.add(self._load_mask)
+
+            self.filter_masks(mask_vars)
+            mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
+            return index_str, mask_vars, mask_str, expand_str
 
         if need_dense and not have_dense:
             expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
@@ -1283,7 +1288,7 @@ class TritonKernel(Kernel):
         if V.graph.is_unspec_arg(name):
             line = var
         else:
-            if isinstance(original_index, sympy.Integer):
+            if isinstance(original_index, sympy.Integer) and not mask_vars:
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = expand_str
             else:
