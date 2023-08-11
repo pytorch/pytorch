@@ -223,7 +223,7 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        assert len(args) <= 2
+        assert len(args) <= 3
         out = decomp_fn(*args, **kwargs)
         validate_ir(out)
         return out
@@ -1627,8 +1627,8 @@ def inductor_randint(
     )
 
 
-@register_lowering(inductor_prims._bucketize, type_promotion_kind=None)
-def _inductor_bucketize(
+@register_lowering(aten.bucketize, type_promotion_kind=None)
+def bucketize(
     input: TensorBox,
     boundaries: TensorBox,
     *,
@@ -1638,7 +1638,7 @@ def _inductor_bucketize(
     assert len(boundaries.get_size()) == 1
 
     if not (is_triton(input) and is_triton(boundaries)):
-        return fallback_handler(inductor_prims._bucketize, add_to_fallback_set=False)(
+        return fallback_handler(aten.bucketize, add_to_fallback_set=False)(
             input, boundaries, out_int32=out_int32, right=right
         )
 
@@ -4428,8 +4428,8 @@ logical_xor = register_pointwise(
 )
 maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
-register_lowering(aten.clamp_min)(maximum)
-register_lowering(aten.clamp_max)(minimum)
+clamp_min = register_lowering(aten.clamp_min)(maximum)
+clamp_max = register_lowering(aten.clamp_max)(minimum)
 neg = register_pointwise(aten.neg)
 reciprocal = register_pointwise_numeric(aten.reciprocal)
 register_pointwise(aten.remainder)
@@ -4478,6 +4478,17 @@ register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
 
 
+def _clamp_impl(v, min=None, max=None):
+    if min is not None:
+        v = clamp_min(v, min)
+    if max is not None:
+        v = clamp_max(v, max)
+    return v
+
+
+register_foreach_pointwise(aten._foreach_clamp, _clamp_impl)
+
+
 def register_inplace(aten_op, outplace_op):
     @register_lowering(aten_op, type_promotion_kind=None)
     def fn(*args, **kwargs):
@@ -4518,6 +4529,14 @@ register_inplace(aten.__ilshift__, aten.__lshift__)
 register_inplace(aten.__ior__, aten.__or__)
 register_inplace(aten.__irshift__, aten.__rshift__)
 register_inplace(aten.__ixor__, aten.__xor__)
+
+
+@register_lowering(aten.sym_constrain_range)
+def sym_constrain_range(a, min, max):
+    tracing_context = torch._guards.TracingContext.get()
+    assert tracing_context is not None
+    assert a in tracing_context.fake_mode.shape_env.var_to_range
+    return a
 
 
 @register_lowering(aten.sym_size)
