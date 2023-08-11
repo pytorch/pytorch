@@ -110,7 +110,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     # options to tune from
     choices = [aten_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
-    if m * n * k != 0 and use_triton_template(layout):
+    if m * n != 0 and use_triton_template(layout):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
@@ -130,7 +130,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     choices = (
         [aten__int_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
     )
-    if m * n * k != 0 and use_triton_template(layout, enable_int32=True):
+    if m * n != 0 and use_triton_template(layout, enable_int32=True):
         # TODO: Re-enable eager mode implementation once cuBLAS is fixed
         choices = []
         for config in int8_mm_configs(m, n, k):
@@ -148,7 +148,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
 
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
-    if m * n * k == 0 or not use_triton_template(layout):
+    if m * n == 0 or not use_triton_template(layout):
         choices = (
             [
                 aten_addmm.bind(
