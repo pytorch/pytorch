@@ -350,7 +350,8 @@ def _single_tensor_adam(params: List[Tensor],
                         differentiable: bool):
 
     assert grad_scale is None and found_inf is None
-    assert not isinstance(lr, Tensor), "lr should have been coerced to a scalar in _single_tensor_adam"
+    assert not isinstance(lr, Tensor), ("lr should have been coerced to a "
+                                        "scalar before calling _single_tensor_adam")
 
     for i, param in enumerate(params):
 
@@ -456,7 +457,8 @@ def _multi_tensor_adam(params: List[Tensor],
     if len(params) == 0:
         return
 
-    assert not isinstance(lr, Tensor), "lr should have been coerced to a scalar in _multi_tensor_adam"
+    assert not isinstance(lr, Tensor), ("lr should have been coerced to a "
+                                        "scalar before calling _multi_tensor_adam")
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
@@ -589,8 +591,13 @@ def _fused_adam(
         return
     if differentiable:
         raise RuntimeError("_fused_adam is not differentiable")
+
+    assert torch.is_tensor(lr), "lr should have been coerced to a tensor before calling _fused_adam"
+
     grad_scale_dict = {grad_scale.device: grad_scale} if grad_scale is not None else None
     found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
+    lr_dict = {lr.device: lr}
+
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
     for (device, _), ((device_params,
@@ -599,10 +606,6 @@ def _fused_adam(
                        device_exp_avg_sqs,
                        device_max_exp_avg_sqs,
                        device_state_steps,), _) in grouped_tensors.items():
-        if not torch.is_tensor(lr):
-            lr = torch.tensor(lr, device=device, dtype=torch.float)
-        elif lr.device != device:
-            lr = lr.to(device=device)
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
             if device not in grad_scale_dict:
@@ -612,6 +615,9 @@ def _fused_adam(
             if found_inf not in found_inf_dict:
                 found_inf_dict[device] = found_inf.to(device, non_blocking=True)
             device_found_inf = found_inf_dict[device]
+        if device not in lr_dict:
+            lr_dict[device] = lr.to(device=device, non_blocking=True)
+            lr = lr_dict[device]
         torch._foreach_add_(device_state_steps, 1)
         torch._fused_adam_(
             device_params,

@@ -309,6 +309,32 @@ def meta_unsqueeze_(self, dim):
     return self
 
 
+@register_meta(aten.index_reduce.default)
+def meta_index_reduce(
+    self: Tensor,
+    dim: int,
+    index: Tensor,
+    source: torch.Tensor,
+    reduce: str,
+    *,
+    include_self: bool = True,
+) -> Tensor:
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
+
+
+@register_meta(aten.index_reduce_.default)
+def meta_index_reduce_(
+    self: Tensor,
+    dim: int,
+    index: Tensor,
+    source: torch.Tensor,
+    reduce: str,
+    *,
+    include_self: bool = True,
+) -> Tensor:
+    return self
+
+
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
 @register_meta(aten.index_select.default)
 def meta_index_select(self, dim, index):
@@ -397,12 +423,12 @@ def make_dep_token(
 
 
 @register_meta(aten.sym_constrain_range.default)
-def sym_constrain_range(size, min, max):
+def sym_constrain_range(size, min=None, max=None):
     constrain_range(size, min=min, max=max)
 
 
 @register_meta(aten._functional_sym_constrain_range.default)
-def functional_sym_constrain_range(size, min, max, dep_token):
+def functional_sym_constrain_range(size, min=None, max=None, dep_token=None):
     aten.sym_constrain_range(size, min=min, max=max)
     return dep_token
 
@@ -2927,6 +2953,29 @@ def meta__foreach_addcop_tensor(self, tensor1, tensor2, scalars):
     torch._check(
         len(self) == len(tensor1) and len(self) == len(tensor2),
         lambda: "All input tensor lists must have the same length",
+    )
+
+
+@register_meta([aten._foreach_clamp.default])
+def meta__foreach_clamp(self, min, max):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"self must be a tensor list but got {type(self)}",
+    )
+    torch._check(
+        min is not None or max is not None, lambda: "`min` or `max` must be specified"
+    )
+    return [torch.empty_like(t) for t in self]
+
+
+@register_meta([aten._foreach_clamp_.default])
+def meta__foreach_clamp_(self, min, max):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"self must be a tensor list but got {type(self)}",
+    )
+    torch._check(
+        min is not None or max is not None, lambda: "`min` or `max` must be specified"
     )
 
 
