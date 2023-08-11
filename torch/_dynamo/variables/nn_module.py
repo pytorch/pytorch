@@ -386,9 +386,7 @@ class NNModuleVariable(VariableTracker):
             with self.record_nn_module_stack(tx, module):
                 return generic_call_method_helper(name)
 
-        if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
-            inspect.getfile(module.__class__._check_input_dim)
-        ):
+        if name == "_check_input_dim":
             return ConstantVariable(True, **options)
 
         if name == "_get_item_by_idx":

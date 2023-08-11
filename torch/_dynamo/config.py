@@ -124,22 +124,6 @@ print_specializations = False
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
-# If a PyTorch module is in this allowlist, torchdynamo will be allowed
-# to inline objects from it or its children.
-skipfiles_inline_module_allowlist = {
-    torch.nn,
-    torch.distributions,
-    torch.testing,
-    torch.ao.nn,
-    torch._refs,
-    torch._prims,
-    torch._decomp,
-    torch.utils._contextlib,
-    torch.utils._pytree,
-    torch.fx._pytree,
-    torch.sparse,
-}
-
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
 # when creating a list of PyTorch functions that will appear in
@@ -274,8 +258,6 @@ _save_config_ignore = {
     "repro_level",
     # workaround: "cannot pickle PyCapsule"
     "constant_functions",
-    # workaround: "cannot pickle module"
-    "skipfiles_inline_module_allowlist",
 }
 
 capture_autograd_function = True

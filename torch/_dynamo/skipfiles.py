@@ -236,13 +236,6 @@ for _name in (
 _recompile_re()
 
 
-def is_torch_inline_allowed(filename):
-    return any(
-        filename.startswith(_module_dir(mod))
-        for mod in config.skipfiles_inline_module_allowlist
-    )
-
-
 @functools.lru_cache(None)
 def dynamo_dir():
     import torch._dynamo

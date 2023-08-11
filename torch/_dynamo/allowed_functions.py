@@ -110,11 +110,6 @@ def _disallowed_function_ids():
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
     ]
-    if torch.distributed.is_available():
-        from torch.distributed import _functional_collectives
-
-        config.skipfiles_inline_module_allowlist.add(_functional_collectives)
-
     # extract all dtypes from torch
     dtypes = [
         obj for obj in torch.__dict__.values() if isinstance(obj, type(torch.float32))
