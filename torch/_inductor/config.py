@@ -135,7 +135,7 @@ unroll_reductions_threshold = 8
 comment_origin = False
 
 # Convert 1x1 convs into matmuls
-conv_1x1_as_mm = False
+conv_1x1_as_mm = True
 
 # Enable split reductions for better utilization when the dimension
 # being reduced over is large (by splitting it)
