@@ -1859,7 +1859,7 @@ def emit_body(
                         )
                     )
             if derivative.required_original_self_value:
-                input_suffix = "s[i]" if is_input_tensorlist else ""
+                input_suffix = "s[i]" if is_inplace_foreach else ""
                 unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(
                     inp_name="original_self",
                     inp="original_self" + input_suffix,

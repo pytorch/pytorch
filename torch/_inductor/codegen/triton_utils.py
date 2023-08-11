@@ -4,7 +4,7 @@ from ..virtualized import V
 from .common import SizeArg, TensorArg
 
 
-def signature_of(arg):
+def signature_of(arg, *, size_dtype: str):
     from triton.runtime.jit import JITFunction
 
     if isinstance(arg, TensorArg):
@@ -19,8 +19,19 @@ def signature_of(arg):
         else:
             return tye
     if isinstance(arg, SizeArg):
-        return JITFunction._key_of(V.graph.sizevars.size_hint(arg.expr))
+        if size_dtype == "tl.int32":
+            return "i32"
+        elif size_dtype == "tl.int64":
+            return "i64"
+        else:
+            raise NotImplementedError(f"unhandled size_dtype {size_dtype}")
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
+
+
+def signature_to_meta(signature, *, size_dtype: str):
+    return {
+        i: signature_of(arg, size_dtype=size_dtype) for i, arg in enumerate(signature)
+    }
 
 
 def config_of(args):
