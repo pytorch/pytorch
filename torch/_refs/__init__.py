@@ -637,7 +637,13 @@ def floor(a):
     return prims.floor(a)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+# Frac use own implementation due to coupling with torch.sub
+@register_decomposition(aten.frac)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("x"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
 def frac(x: TensorLikeType) -> TensorLikeType:
     trunc_x = torch.mul(torch.floor(torch.abs(x)), torch.sign(x))
     return torch.sub(x, trunc_x)
