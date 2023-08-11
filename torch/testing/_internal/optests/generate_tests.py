@@ -1,4 +1,5 @@
 import functools
+import unittest
 
 import torch
 
@@ -45,12 +46,12 @@ def safe_aot_autograd_check(op, args, kwargs, dynamic):
     return aot_autograd_check(func, args, kwargs, dynamic, check_gradients="auto")
 
 
-# Test requirements
-# - The tests must have signature (op: OpOverload, args, kwargs)
-# - The tests must NOT mutate args, kwargs.
-# - The tests in this list must not be prefixes of each other. For example,
+# Test util requirements
+# - The test util must have signature (op: OpOverload, args, kwargs)
+# - The test util must NOT mutate args, kwargs.
+# - The test utils in this list must not be prefixes of each other. For example,
 #   having both "test_schema" and "test_schema_is_functional" is NOT OK.
-ALL_TESTS = {
+ALL_TEST_UTILS = {
     "test_schema": safe_schema_check,
     "test_autograd_registration": safe_autograd_registration_check,
     "test_faketensor": safe_fake_check,
@@ -66,41 +67,47 @@ ALL_TESTS = {
 
 
 def generate_opcheck_tests(
-    testcase, namespaces, failures_dict, additional_decorators, tests
+    testcase, namespaces, failures_dict, additional_decorators, test_utils
 ):
     """Given an existing TestCase, use the existing tests to generate
     additional validation tests for custom operators.
 
-    For all existing tests in the TestCase, we will generate one new
-    test for:
-    - test_schema: schema correctness
-    - test_autograd_registration: autograd registration
-    - test_faketensor: faketensor rule
-    - test_aot_dispatch_static:
-        AOTDispatch is a component in the PT2 stack
-        (Dynamo -> "AOTDispatch/AOTAutograd" -> Inductor) that traces out
-        a forwards (and optionally a backwards) graph. This tests that
-        component with static shapes.
-    - test_aot_dispatch_dynamic: AOTDispatch test with dynamic shapes.
+    For {all existing tests in the TestCase} x {all test utils},
+    we will generate one new test. The new test runs a TorchFunctionMode
+    that intercepts ``op(*args, **kwargs)`` calls and invokes
+    ``test_util(op, *args, **kwargs)``, where ``op`` is an operator.
 
-    The generated test will have name ``test_<something>__<original name>``.
+    The test_util that we support are in ALL_TEST_UTILS. They are:
+    - test_schema: This runs SchemaCheckMode.
+    - test_autograd_registration: This runs autograd_registration_check.
+    - test_faketensor: This runs CrossRefFakeMode.
+    - test_aot_dispatch_static: This runs aot_autograd_check, which:
+        checks that the outputs (and gradients, if they are computable)
+        are the same under eager-mode PyTorch and using AOTAutograd.
+    - test_aot_dispatch_dynamic: Same as aot_dispatch_static, but
+        runs AOTAutograd using dynamic shapes instead of static shapes.
+
+    The generated test will have name ``{test_util}__{original_name}``.
     For example, if there is a method named ``test_cumsum``, then
     we will generate a ``test_schema__test_cumsum``,
     ``test_faketensor__test_cumsum``, etc.
 
     Args:
         testcase: The testcase we will modify and generate additional tests for.
-        namespaces: The namespaces of the custom operators we will test during the additional tests.
+        namespaces: We will only intercept calls to custom operators with these
+                    namespaces.
         failures_dict: See ``validate_failures_dict`` for more details
         additional_decorators: Pass us some decorators
-        tests: a list of tests to generate. Example: ["test_schema", "test_faketensor"]
+        test_utils: a list of test_utils to generate. Example: ["test_schema", "test_faketensor"]
     """
+    if not issubclass(testcase, unittest.TestCase):
+        raise ValueError(f"Expected testcase to be subclass of unittest.TestCase, got {type(testcase)}")
     test_methods = [
         m
         for m in dir(testcase)
         if m.startswith("test_") and callable(getattr(testcase, m))
     ]
-    validate_failures_dict(failures_dict, tests, testcase)
+    validate_failures_dict(failures_dict, test_utils, testcase)
 
     def construct_method(attr, prefix, tester):
         method = getattr(testcase, attr)
@@ -123,16 +130,16 @@ def generate_opcheck_tests(
             )
         setattr(testcase, new_method_name, new_method)
 
-    tests = {name: ALL_TESTS[name] for name in tests}
+    test_utils = {name: ALL_TEST_UTILS[name] for name in test_utils}
     for attr in test_methods:
-        for prefix, tester in tests.items():
+        for prefix, tester in test_utils.items():
             construct_method(attr, prefix, tester)
 
 
 TEST_OPTIONS = ("xfail", "skip", "success")
 
 
-def validate_failures_dict(failure_dict, tests, testcase):
+def validate_failures_dict(failure_dict, test_utils, testcase):
     """Validates the failures dict.
 
     The failure dict looks something like the following.
@@ -168,11 +175,11 @@ def validate_failures_dict(failure_dict, tests, testcase):
                 raise RuntimeError(
                     f"In failures_dict, got value={test_option} but it needs to be in {TEST_OPTIONS}"
                 )
-            if not any(test_name.startswith(test) for test in tests):
+            if not any(test_name.startswith(test) for test in test_utils):
                 raise RuntimeError(
-                    f"In failures_dict, test name '{test_name}' should begin with one of {tests}"
+                    f"In failures_dict, test name '{test_name}' should begin with one of {test_utils}"
                 )
-            for test in tests:
+            for test in test_utils:
                 if not test_name.startswith(test):
                     continue
                 base_test_name = test_name[len(test) + 2 :]
@@ -198,34 +205,37 @@ class OpCheckMode(TorchFunctionMode):
         # The test utility function. Its signature should be (op, args, kwargs) -> None.
         # Examples of test utilities are: schema_check, make_fx_check
         self.test_util = test_util
-        # Give an name for this test
+        # The name of the test that is running this OpCheckMode.
         self.test_name = test_name
         # Maps qualname -> test_name -> skip/xfail
         # Tells us if we should skip a test or assert that there is a failure.
         self.failures_dict = failures_dict
 
-        # NOTE: [OpCheckMode and expected failures]
-        # We mark (operator, test_name) pairs as expected failure. However, a test
-        # may have multiple invocations of the operator, of which not all
-        # may fail. The semantics of the "expected failure" are if ANY invocation
-        # of the operator in a test fails.
-        #
-        # This is implemented via:
-        # - We use the OpCheckMode for the entire test
-        # - We record which operators we encounter should have an expected failure
-        #   and if any invocation failed
-        # - When the test is done, we call .validate_xfails()
-        self.expecting_failure_on = set({})
-        self.received_failure_on = set({})
+        # OpCheckMode surpresses errors, collects them here, and then raises them on exit.
+        # Maps qualname -> List[exception]
+        self.seen_ops_to_errors = {}
 
-    def validate_xfails(self):
-        diff = self.expecting_failure_on - self.received_failure_on
-        if diff:
-            raise AssertionError(f"Unexpected success for {diff}, {self.test_name}")
+    def maybe_raise_errors_on_exit(self):
+        # Check expected failures first
+        for qualname in self.seen_ops_to_errors.keys():
+            option = retrieve(self.failures_dict, qualname, self.test_name)
+            if len(self.seen_ops_to_errors[qualname]) == 0:
+                if option == "xfail":
+                    raise OpCheckError(f"Unexpected success for operator {qualname} on test {self.test_name}")
+                continue
+        for qualname in self.seen_ops_to_errors.keys():
+            option = retrieve(self.failures_dict, qualname, self.test_name)
+            if option != "success":
+                continue
+            if len(self.seen_ops_to_errors[qualname]) == 0:
+                continue
+            # Raise the first error
+            ex = self.seen_ops_to_errors[qualname][0]
+            raise OpCheckError(f"{self.test_name} failed on operator {qualname}") from ex
 
     def __exit__(self, *args, **kwargs):
         try:
-            self.validate_xfails()
+            self.maybe_raise_errors_on_exit()
         finally:
             result = super().__exit__(*args, **kwargs)
         return result
@@ -256,24 +266,25 @@ class OpCheckMode(TorchFunctionMode):
         if ns not in self.namespaces:
             return func(*args, **kwargs)
 
+        args_c, kwargs_c = deepcopy_tensors(args, kwargs)
+        # Only call test_util(op, *args, **kwargs) if this succeeds.
+        result = func(*args, **kwargs)
+
         option = retrieve(self.failures_dict, qualname, self.test_name)
-        if option == "success":
+        if option == "success" or option == "xfail":
+            # Surpress all errors during execution. Raise them during __exit__.
             try:
-                self.run_test_util(func, args, kwargs)
-            except Exception:
-                # Useful for debugging.
-                identifier = f'("{qualname}", "{self.test_name}")'
-                print(f"FAILED: {identifier}")
-                raise
+                if qualname not in self.seen_ops_to_errors:
+                    self.seen_ops_to_errors[qualname] = []
+                self.run_test_util(func, args_c, kwargs_c)
+            except Exception as ex:
+                self.seen_ops_to_errors[qualname].append(ex)
         elif option == "skip":
             pass
-        elif option == "xfail":
-            self.expecting_failure_on.add(qualname)
-            try:
-                self.run_test_util(func, args, kwargs)
-            except Exception:
-                self.received_failure_on.add(qualname)
-        return func(*args, **kwargs)
+        return result
+
+class OpCheckError(Exception):
+    pass
 
 
 def resolve_unique_overload_or_throw(op: torch._ops.OpOverloadPacket):

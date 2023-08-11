@@ -1535,7 +1535,7 @@ def forward(self, x_1):
 
 
 class MiniOpTest(CustomOpTestCaseBase):
-    test_ns = "MiniOpTest"
+    test_ns = "mini_op_test"
 
     def _op_with_incorrect_schema(self, name):
         lib = self.lib()
@@ -1580,6 +1580,12 @@ class MiniOpTest(CustomOpTestCaseBase):
         result = torch.ops.aten.mm.default(x, y)
         self.assertEqual(result, x @ y)
 
+    def test_mm_errors(self):
+        x = torch.randn(2, 3, requires_grad=True)
+        y = torch.randn(4, 5)
+        with self.assertRaisesRegex(RuntimeError, "cannot be multiplied"):
+            result = torch.ops.aten.mm.default(x, y)
+
     def test_nonzero(self):
         x = torch.tensor([0, 1, 2, 0, 0])
         y = torch.ops.aten.nonzero.default(x)
@@ -1615,22 +1621,22 @@ class MiniOpTest(CustomOpTestCaseBase):
 
 
 mini_op_test_failures_dict = {
-    "MiniOpTest::delayed_error": {
-        "test_aot_dispatch_dynamic__test_delayed_error": "xfail",
-        "test_aot_dispatch_static__test_delayed_error": "xfail",
-    },
-    "MiniOpTest::incorrect_schema": {
-        # "skip" just to test the skip mechanism
-        "test_schema__test_incorrect_schema": "skip",
-    },
-    "MiniOpTest::no_abstract": {
-        "test_aot_dispatch_dynamic__test_no_abstract": "xfail",
-        "test_aot_dispatch_static__test_no_abstract": "xfail",
-        "test_faketensor__test_no_abstract": "xfail",
-    },
     "aten::nonzero": {
         # Nonzero doesn't support static shapes
         "test_aot_dispatch_static__test_nonzero": "xfail",
+    },
+    "mini_op_test::delayed_error": {
+        "test_aot_dispatch_dynamic__test_delayed_error": "xfail",
+        "test_aot_dispatch_static__test_delayed_error": "xfail",
+    },
+    "mini_op_test::incorrect_schema": {
+        # "skip" just to test the skip mechanism
+        "test_schema__test_incorrect_schema": "skip",
+    },
+    "mini_op_test::no_abstract": {
+        "test_aot_dispatch_dynamic__test_no_abstract": "xfail",
+        "test_aot_dispatch_static__test_no_abstract": "xfail",
+        "test_faketensor__test_no_abstract": "xfail",
     },
 }
 
@@ -1663,12 +1669,12 @@ class TestGenerateOpcheckTests(TestCase):
             validate_failures_dict,
         )
 
-        failures = {"MiniOpTest::incorrect_schema": {}, "MiniOpTest::delayed_error": {}}
+        failures = {"mini_op_test::incorrect_schema": {}, "mini_op_test::delayed_error": {}}
         with self.assertRaisesRegex(RuntimeError, "alphabetical"):
             validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
 
         failures = {
-            "MiniOpTest::incorrect_schema": {
+            "mini_op_test::incorrect_schema": {
                 "test_aot_dispatch_static__test_delayed_error": "xfail",
                 "test_aot_dispatch_dynamic__test_delayed_error": "xfail",
             }
@@ -1677,7 +1683,7 @@ class TestGenerateOpcheckTests(TestCase):
             validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
 
         failures = {
-            "MiniOpTest::incorrect_schema": {
+            "mini_op_test::incorrect_schema": {
                 "test_aot_dispatch_static__test_delayed_error": "XFAIL",
             }
         }
@@ -1685,7 +1691,7 @@ class TestGenerateOpcheckTests(TestCase):
             validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
 
         failures = {
-            "MiniOpTest::incorrect_schema": {
+            "mini_op_test::incorrect_schema": {
                 "test_aot_dispatch__test_delayed_error": "xfail",
             }
         }
@@ -1693,7 +1699,7 @@ class TestGenerateOpcheckTests(TestCase):
             validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
 
         failures = {
-            "MiniOpTest::incorrect_schema": {
+            "mini_op_test::incorrect_schema": {
                 "test_aot_dispatch_static__test_delayed_error_nopenopenope": "xfail",
             }
         }
