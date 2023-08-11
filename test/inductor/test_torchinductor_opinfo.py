@@ -331,14 +331,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
 
 if not TEST_WITH_ROCM:
     inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
-else:
-    # aten.miopen_batch_norm is unsupported for lowering
-    inductor_expected_failures_single_sample["cuda"].update(
-        {
-            "nn.functional.batch_norm": {f16, f32},
-            "nn.functional.instance_norm": {f16, f32},
-        }
-    )
 
 if not TEST_MKL:
     inductor_expected_failures_single_sample["cpu"].update(
