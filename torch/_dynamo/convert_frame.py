@@ -497,7 +497,10 @@ def _compile(
             hooks.guard_fail_fn if hooks else None,
         )
 
-        guarded_code = GuardedCode(out_code, check_fn.check_fn)
+        guarded_code = GuardedCode(
+            out_code, check_fn.check_fn, output.guarded_nn_module_var_index
+        )
+        # guarded_code = GuardedCode(out_code, check_fn.check_fn)
 
         if guards_log.isEnabledFor(logging.DEBUG):
             guard_str = "GUARDS:\n"

@@ -326,6 +326,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
         self.torch_function_enabled = torch._C._is_torch_function_enabled()
+        self.guarded_nn_module_var_index = None
 
         # We save the global torch state here to be restored in case of graph
         # breaks. The relevant issue is seen here
@@ -638,6 +639,17 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     f"but were detected in your model and will be silently ignored. {nnmodule_doc_url_msg}",
                 )
 
+            if (
+                isinstance(source, LocalSource)
+                and source.local_name in self.code_options["co_varnames"]
+            ):
+                # We are looking for methods whose self is a guarded nn module variable
+                varnames = self.code_options["co_varnames"]
+                nn_module_index = varnames.index(source.local_name)
+                if self.guarded_nn_module_var_index:
+                    self.guarded_nn_module_var_index = min(nn_module_index, self.guarded_nn_module_var_index)
+                else:
+                    self.guarded_nn_module_var_index = nn_module_index
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
