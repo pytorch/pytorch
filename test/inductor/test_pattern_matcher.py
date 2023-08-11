@@ -90,7 +90,7 @@ class TestPaternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, False)
 
     @inductor_config.patch(force_mixed_mm=True, max_autotune_gemm=True)
-    def test_mixed_mm_epi(self):
+    def test_mixed_mm_epi_works(self):
         def fn(a, b, c, d):
             return torch.mm(a, b.to(a.dtype)) * c + d
 
