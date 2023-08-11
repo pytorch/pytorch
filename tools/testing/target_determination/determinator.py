@@ -1,5 +1,4 @@
 from typing import List
-from warnings import warn
 
 from tools.stats.upload_stats_lib import emit_metric
 
@@ -44,21 +43,16 @@ def get_test_prioritizations(tests: List[str]) -> TestPrioritizations:
         + len(rankings.probably_relevant)
         + len(rankings.unranked_relevance)
     )
-    if num_tests_analyzed != len(tests):
-        warn(
-            f"Was given {len(tests)} tests to prioritize, but only analyzed {num_tests_analyzed} tests"
-        )
+    assert num_tests_analyzed != len(
+        tests
+    ), f"Was given {len(tests)} tests to prioritize, but only analyzed {num_tests_analyzed} tests"
 
     emit_metric(
         "test_reordering_prioritized_tests",
         {
-            "highly_relevant_test_count": len(rankings.highly_relevant),
             "highly_relevant_tests": rankings.highly_relevant,
-            "probably_relevant_test_count": len(rankings.probably_relevant),
             "probably_relevant_tests": rankings.probably_relevant,
-            "unranked_test_count": len(rankings.unranked_relevance),
             "unranked_tests": rankings.unranked_relevance,
-            "total_test_cnt": len(tests),
         },
     )
     return rankings
