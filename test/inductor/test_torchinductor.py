@@ -31,6 +31,7 @@ from torch._dynamo.testing import (
     rand_strided,
     same,
 )
+from torch._export.constraints import constrain_as_size
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.utils import (
     add_scheduler_init_hook,
@@ -319,13 +320,17 @@ def check_model(
 
     correct_flat, correct_spec = tree_flatten(correct)
     actual_flat, _ = tree_flatten(actual)
-    if reference_in_float:
-        correct_flat = tuple(
+
+    def reference_to_expect(actual_flat, correct_flat):
+        return tuple(
             y.to(x.dtype)
             if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
             else y
             for x, y in zip(actual_flat, correct_flat)
         )
+
+    if reference_in_float:
+        correct_flat = reference_to_expect(actual_flat, correct_flat)
         correct = tree_unflatten(correct_flat, correct_spec)
 
     if assert_equal:
@@ -368,8 +373,7 @@ def check_model(
             g /= g.norm()
 
         correct_grad = compute_grads(ref_inputs, ref_kwargs, correct, grads)
-        flat_grads, _ = tree_flatten(correct_grad)
-        all_none_grads = all(x is None for x in flat_grads)
+        all_none_grads = all(x is None for x in correct_grad)
         if all_none_grads:
             # See Note [Detaching inputs that never need gradients]
             # There are a handful of ops that can return None gradients, into of zero gradients.
@@ -386,9 +390,15 @@ def check_model(
             self.assertEqual(len(results_that_require_grad), 0)
         else:
             actual_grad = compute_grads(example_inputs, kwargs, actual, grads)
+
+            if reference_in_float:
+                expect_grad = reference_to_expect(actual_grad, correct_grad)
+            else:
+                expect_grad = correct_grad
+
             self.assertEqual(
                 actual_grad,
-                correct_grad,
+                expect_grad,
                 atol=atol,
                 rtol=rtol,
                 equal_nan=True,
@@ -920,6 +930,15 @@ class CommonTemplate:
             return torch.mean(a)
 
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float16),)))
+
+    def test_multilayer_prime_size(self):
+        def fn(a):
+            return torch.max(a), torch.sum(a)
+
+        # Requires masked loading for the intermediate reduction
+        sample = torch.full((3999971,), 0, dtype=torch.int64)
+        sample[-1] = 1
+        self.common(fn, (sample,))
 
     def test_expanded_reduction(self):
         if self.device == "cpu":
@@ -7020,6 +7039,36 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse("to(tl.int64)" in code)
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_optimize_indexing_dtype_with_constraint(self):
+            def fn1(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+                x = torch.arange(0, b.shape[0], device="cuda")
+                y = ((x + x) / 3).int()
+                return a[y.to(torch.int64)]
+
+            def fn2(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+                constrain_as_size(b.shape[0], 2, 100)
+                return fn1(a, b)
+
+            fn1_opt = torch._dynamo.optimize("inductor")(fn1)
+            fn2_opt = torch._dynamo.optimize("inductor")(fn2)
+
+            a = torch.rand([100, 100], device="cuda")
+            b = torch.rand([100], device="cuda")
+            torch._dynamo.mark_dynamic(b, 0)
+            inps = [a, b]
+
+            code1 = run_and_get_triton_code(fn1_opt, *inps)
+            code2 = run_and_get_triton_code(fn2_opt, *inps)
+
+            # The function with the constrained tensor should be optimized, but
+            # the other should not:
+            self.assertTrue("to(tl.int64)" in code1)
+            self.assertTrue("to(tl.int32)" in code2)
+            self.assertFalse("to(tl.int64)" in code2)
+
+            self.assertEqual(fn1_opt(*inps), fn1(*inps))
+            self.assertEqual(fn2_opt(*inps), fn1(*inps))
 
         def test_constant_folding_deallocation(self):
             import torch._inductor
