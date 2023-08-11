@@ -670,6 +670,8 @@ Foreach Operations
     _foreach_mul_
     _foreach_div
     _foreach_div_
+    _foreach_clamp
+    _foreach_clamp_
     _foreach_clamp_min
     _foreach_clamp_min_
     _foreach_clamp_max
