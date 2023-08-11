@@ -10,11 +10,7 @@
 #include <array>
 #include <mutex>
 
-namespace torch {
-
-namespace cuda {
-
-namespace CUDAPluggableAllocator {
+namespace torch::cuda::CUDAPluggableAllocator {
 
 #if defined(TORCH_HIP_VERSION)
 using streamType = c10::hip::HIPStream;
@@ -144,6 +140,4 @@ struct CUDAPluggableAllocator
 
   bool initialized_ = false;
 };
-} // namespace CUDAPluggableAllocator
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda::CUDAPluggableAllocator
