@@ -1256,9 +1256,10 @@ def wrap_fx_proxy_cls(
             }
             assert "source" in options and options["source"] is not None
             kwargs["source"] = options["source"]
-            example_value = wrap_to_fake_tensor_and_record(
-                example_value, tx=tx, **kwargs
-            )
+            example_value = replace_leaf_with_fake_tensor_and_record(example_value, tx=tx, **kwargs)
+            # example_value = wrap_to_fake_tensor_and_record(
+            #     example_value, tx=tx, **kwargs
+            # )
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
@@ -1512,6 +1513,17 @@ def _automatic_dynamic(e, tx, name, static_shapes):
 
     return dynamic_dims, constraint_dims
 
+def replace_leaf_with_fake_tensor_and_record(e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool):
+    if torch._is_functional_tensor(e):
+        from torch._C._functorch import _wrap_functional_tensor, _unwrap_functional_tensor, current_level
+
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+        unwrap_e = _unwrap_functional_tensor(e, reapply_views)
+        replaced_e = replace_leaf_with_fake_tensor_and_record(unwrap_e, tx, ignore_subclass, source=source, is_tensor=is_tensor)
+        assert torch._is_functional_tensor(replaced_e) and isinstance(replaced_e, FakeTensor)
+        return replaced_e
+    else:
+        return wrap_to_fake_tensor_and_record(e, tx, ignore_subclass, source=source, is_tensor=is_tensor)
 
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
@@ -1553,6 +1565,7 @@ def wrap_to_fake_tensor_and_record(
             "size": fake_e.size(),
             "stride": fake_e.stride(),
         }
+        print("after wrapping", fake_e)
         return fake_e
     else:
         return e
