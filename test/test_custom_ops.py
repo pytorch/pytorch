@@ -1615,6 +1615,76 @@ def forward(self, x_1):
             result = op(x)
             self.assertEqual(result.shape, ())
 
+    def _test_backward_impl_raises(self, qualname, err_regex):
+        with self.assertRaisesRegex(RuntimeError, err_regex):
+
+            @custom_ops.impl_save_for_backward(qualname)
+            def foo2(x):
+                return
+
+        with self.assertRaisesRegex(RuntimeError, err_regex):
+
+            @custom_ops.impl_backward(qualname)
+            def foo3(x):
+                return
+
+    def test_backward_impl_on_existing_op_incorrect_schema_views(self):
+        lib = self.lib()
+        lib.define("foo(Tensor(a) x) -> Tensor(a)")
+        qualname = f"{self.test_ns}::foo"
+        self._test_backward_impl_raises(qualname, "operator that returns views")
+
+    def test_backward_impl_on_existing_op_incorrect_schema_mutable(self):
+        lib = self.lib()
+        lib.define("foo(Tensor(a!) x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+        self._test_backward_impl_raises(qualname, "non-functional")
+
+    def test_backward_impl_on_existing_op_incorrect_schema_no_output(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> ()")
+        qualname = f"{self.test_ns}::foo"
+        self._test_backward_impl_raises(qualname, "no returns")
+
+    def test_backward_impl_on_existing_op_CompositeImplicitAutograd(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+        lib.impl("foo", lambda x: x.sin().cos(), "CompositeImplicitAutograd")
+        self._test_backward_impl_raises(qualname, "CompositeImplicitAutograd")
+
+    @parametrize("key", ["Autograd", "AutogradCPU", "AutogradCUDA"])
+    def test_backward_impl_on_existing_op_with_key(self, key):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+        lib.impl("foo", lambda x: x.sin().cos(), key)
+        self._test_backward_impl_raises(qualname, key)
+
+    def test_backward_impl_on_existing_op(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        @custom_ops.impl(qualname)
+        def foo_impl(x):
+            with torch.no_grad():
+                return x.sin()
+
+        @custom_ops.impl_save_for_backward(qualname)
+        def foo_save_for_backward(inputs, output):
+            return inputs.x
+
+        @custom_ops.impl_backward(qualname)
+        def foo_backward(ctx, saved, grad_out):
+            return {"x": grad_out * saved.cos()}
+
+        op = self.get_op(qualname)
+        x = torch.randn([], requires_grad=True)
+        y = op(x)
+        (gx,) = torch.autograd.grad(y, x)
+        self.assertEqual(gx, x.cos())
+
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestCustomOpTesting, globals(), only_for=only_for)

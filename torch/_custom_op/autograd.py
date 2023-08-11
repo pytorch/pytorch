@@ -61,6 +61,7 @@ def mark_non_differentiable(ctx, output, output_differentiability):
     # - Tensor
     # - Tensor[]
     # - int, bool, Scalar, float
+    # See _check_can_register_backward
     if output_differentiability is not None:
         if not isinstance(output, tuple):
             tuple_output = (output,)
@@ -90,7 +91,8 @@ def mark_non_differentiable(ctx, output, output_differentiability):
 def construct_autograd_kernel(
         schema,
         output_differentiability,
-        forward_op,
+        custom_op,
+        op_overload,
         save_for_backward_fn,
         backward_fn):
 
@@ -102,7 +104,7 @@ def construct_autograd_kernel(
             ctx.set_materialize_grads(True)
             args = pytree.tree_unflatten(list(flat_args), spec)
             with torch._C._AutoDispatchBelowAutograd():
-                output = forward_op(*args)
+                output = op_overload(*args)
 
             # We use the info about args to give better error messages in backward
             args_info = namedtuple_args(
@@ -131,11 +133,11 @@ def construct_autograd_kernel(
 
             # Massage the grad_inputs_dict to a form acceptable by
             # autograd.Function.
-            validate_grad_inputs_dict(grad_inputs_dict, forward_op, args_info)
+            validate_grad_inputs_dict(grad_inputs_dict, custom_op, args_info)
             return grad_inputs_dict_to_flat_tuple(grad_inputs_dict, args_info)
 
         generated_cls = gen_autograd_function(
-            forward_op._opname + '_customop', forward, backward)
+            custom_op._opname + '_customop', forward, backward)
 
         flat_output = generated_cls.apply(*flat_args)
         assert out_spec is not None
