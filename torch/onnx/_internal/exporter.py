@@ -284,7 +284,7 @@ class ExportOptions:
     """Whether to export the model with op-level debug information by evaluating
     ops through ONNX Runtime."""
 
-    diagnostic_options: diagnostics.DiagnosticOptions
+    diagnostic_options: DiagnosticOptions
     """The diagnostic options for the exporter."""
 
     fake_context: Optional[ONNXFakeContext] = None
@@ -302,13 +302,13 @@ class ExportOptions:
         op_level_debug: Optional[bool] = None,
         fake_context: Optional[ONNXFakeContext] = None,
         onnx_registry: Optional[OnnxRegistry] = None,
-        diagnostic_options: Optional[diagnostics.DiagnosticOptions] = None,
+        diagnostic_options: Optional[DiagnosticOptions] = None,
     ):
         self.dynamic_shapes = dynamic_shapes
         self.op_level_debug = op_level_debug
         self.fake_context = fake_context
         self.onnx_registry = onnx_registry
-        self.diagnostic_options = diagnostic_options or diagnostics.DiagnosticOptions()
+        self.diagnostic_options = diagnostic_options or DiagnosticOptions()
 
 
 class ResolvedExportOptions(ExportOptions):
@@ -320,7 +320,7 @@ class ResolvedExportOptions(ExportOptions):
     # Public attributes MUST be redefined below without ``Optional[]`` from ``ExportOptions``
     dynamic_shapes: bool
     op_level_debug: bool
-    diagnostic_options: diagnostics.DiagnosticOptions
+    diagnostic_options: DiagnosticOptions
     fake_context: ONNXFakeContext
     onnx_registry: OnnxRegistry
 
@@ -373,7 +373,7 @@ class ResolvedExportOptions(ExportOptions):
             )
 
             self.diagnostic_options = resolve(
-                options.diagnostic_options, diagnostics.DiagnosticOptions()
+                options.diagnostic_options, DiagnosticOptions()
             )
 
             self.fx_tracer = dynamo_graph_extractor.DynamoExport()
