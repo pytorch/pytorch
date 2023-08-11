@@ -843,6 +843,7 @@ class VariableBuilder:
 
         if (
             source.guard_source().is_nn_module()
+            or hasattr(value, "_specialize")
             and not source.guard_source().is_fsdp_module()
         ):
             return self.tx.output.register_attr_or_module(
