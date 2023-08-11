@@ -42,7 +42,10 @@ try:
     sys.path.insert(0, str(REPO_ROOT))
     from tools.stats.export_test_times import TEST_TIMES_FILE
     from tools.stats.upload_stats_lib import emit_metric
-    from tools.testing.target_determination.determinator import get_test_prioritizations
+    from tools.testing.target_determination.determinator import (
+        get_test_prioritizations,
+        TestPrioritizations,
+    )
     from tools.testing.test_selections import (
         calculate_shards,
         get_test_case_configs,
@@ -1615,6 +1618,8 @@ def main():
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
+    test_prioritization: TestPrioritizations = TestPrioritizations()
+    test_prioritization.unranked_relevance = selected_tests
     metrics_dict = {}
     if IS_CI and HAVE_TEST_SELECTION_TOOLS:
         # downloading test cases configuration to local environment
