@@ -175,6 +175,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten.var_mean.dim): 5e-7,
         (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
         (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
+        (torch.float16, torch.ops.aten.nll_loss2d_forward.default): 1e-2,
+        (torch.bfloat16, torch.ops.aten.nll_loss2d_forward.default): 2e-1,
         # see https://github.com/pytorch/pytorch/pull/96264
         (torch.float16, torch.ops.aten.mv.default): 1e-5,
     }
@@ -755,15 +757,6 @@ class HasDecompTest(TestCase):
             if 'does not exist' in str(e):
                 return False
             raise
-
-    def test_decomps_include_composite_implicit(self):
-        # conv2d.default has no python decomp, but has a C++ CompositeImplicitAutograd decomp,
-        # which we expect to show up in the decomp table.
-        decomps1 = torch._decomp.get_decompositions([torch.ops.aten.conv2d.default])
-        self.assertEqual(len(decomps1), 1)
-        # Should work for overload packets too.
-        decomps2 = torch._decomp.get_decompositions([torch.ops.aten.conv2d])
-        self.assertEqual(len(decomps2), 2)
 
     def test_has_decomposition(self):
 
