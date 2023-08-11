@@ -1,7 +1,8 @@
 from typing import List
+
 from tools.testing.target_determination.heuristics.interface import (
-    HeuristicInterface,
-    TestPrioritizations,
+    HeuristicInterface as HeuristicInterface,
+    TestPrioritizations as TestPrioritizations,
 )
 
 # Heuristics
