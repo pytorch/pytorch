@@ -42,6 +42,3 @@ jobs:
     with:
       repo-name: vision
       branch: main
-    secrets:
-      UPDATEBOT_TOKEN: ${{ secrets.UPDATEBOT_TOKEN }}
-      PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
