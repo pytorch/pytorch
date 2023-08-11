@@ -7,6 +7,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._functorch.config
 import torch.utils.checkpoint
+from torch._subclasses.fake_tensor import FakeTensorMode
 
 
 class MockSubclass(torch.Tensor):
@@ -103,6 +104,26 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         res = fn(input)
         self.assertIsInstance(res, LocalSubclass)
+
+    def test_compile_with_fake_tensor(self):
+        x = torch.randn([3, 4])
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f(x):
+            return torch.sin(x)
+
+        f(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+        with torch._subclasses.fake_tensor.FakeTensorMode() as fake_mode:
+            fake_tensor = fake_mode.from_tensor(x)
+            f(fake_tensor)
+
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 2)
+
 
 
 if __name__ == "__main__":
