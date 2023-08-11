@@ -16,11 +16,13 @@ from torch._dynamo.utils import dynamo_timed
 from . import config, dependencies, ir, metrics
 from .codegen.common import get_scheduling_for_device
 from .dependencies import StarDep, WeakDep
+from .ir import ComputedBuffer
 from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
     cmp,
     free_symbol_has,
+    get_device_flops,
     get_dtype_size,
     has_triton,
     sympy_product,
@@ -399,21 +401,27 @@ class BaseSchedulerNode:
 
     def get_estimated_runtime(self) -> float:
         layout = None
+        dtype = None
         if not self.node:
             assert self.snodes
             layout = self.snodes[0].node.get_layout()
+            dtype = self.snodes[0].node.get_dtype()
         else:
             layout = self.node.get_layout()
+            dtype = self.node.get_dtype()
 
         if "cuda" != layout.device.type:
             # default to no reordering based on runtime
             return 0
 
-        from .ir import CollectiveKernel, ComputedBuffer
+        from triton.testing import get_dram_gbps
 
-        # TODO(xmfan): figure out how to get hardware specs, use A100 for now
-        gpu_memory_bandwidth = 1555 * 2**30  # 1555 GBps
-        gpu_flops = 312**12  # 312 TFLOPS
+        # TODO(xmfan): figure out how to get hardware specs
+        try:
+            gpu_memory_bandwidth = get_dram_gbps()
+            gpu_flops = get_device_flops()
+        except Exception:
+            return 0
 
         def handle_extern_kernel(snode: ExternKernelSchedulerNode):
             from torch.utils.flop_counter import (
