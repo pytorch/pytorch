@@ -3,6 +3,7 @@
 PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_export_persist_assert)
 """
+import copy
 import functools
 import inspect
 import math
@@ -3555,6 +3556,67 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
             torch._dynamo.exc.Unsupported,
         ):
             out_graph, _ = torch._dynamo.export(mod, xs)
+
+    def test_reexport_preserves_fx_node_metadata(self):
+        class Module1(torch.nn.Module):
+            def forward(self, x):
+                return torch.sin(x)
+
+        class Module2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod1 = Module1()
+
+            def forward(self, x):
+                x = torch.cos(x)
+                x = self.mod1(x)
+                x = torch.relu(x)
+                return x
+
+        def fn(x):
+            return torch.abs(x)
+
+        mod = Module2()
+        inp = torch.randn(3, 3)
+
+        gm, _ = torch._dynamo.export(mod, inp)
+
+        # replace relu with fn
+        gm_edit = copy.deepcopy(gm)
+        for nd in gm_edit.graph.nodes:
+            if nd.target == torch.relu:
+                nd.target = fn
+                nd.meta.clear()
+                break
+        gm_edit.recompile()
+
+        gm2, _ = torch._dynamo.export(gm_edit, inp)
+
+        # check for source code
+        gm_code = gm.print_readable(print_output=False)
+        gm_edit_code = gm_edit.print_readable(print_output=False)
+        gm2_code = gm2.print_readable(print_output=False)
+        for code in (gm_code, gm_edit_code, gm2_code):
+            self.assertIn("x = torch.cos(x)", code)
+            self.assertIn("return torch.sin(x)", code)
+        self.assertIn("x = torch.relu(x)", gm_code)
+        self.assertNotIn("x = torch.relu(x)", gm_edit_code)
+        self.assertNotIn("x = torch.relu(x)", gm2_code)
+        self.assertIn("return torch.abs(x)", gm2_code)
+
+        # check for other metadata
+        for op in (torch.sin, torch.cos):
+            nd1 = next(filter(lambda nd: nd.target == op, gm.graph.nodes))
+            nd2 = next(filter(lambda nd: nd.target == op, gm2.graph.nodes))
+            self.assertTrue(
+                ("nn_module_stack" in nd1.meta) == ("nn_module_stack" in nd2.meta)
+            )
+            if "nn_module_stack" in nd1.meta:
+                self.assertEqual(
+                    nd1.meta["nn_module_stack"], nd2.meta["nn_module_stack"]
+                )
+            self.assertEqual(nd1.meta["source_fn"], nd2.meta["source_fn"])
+            self.assertEqual(nd1.meta["stack_trace"], nd2.meta["stack_trace"])
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)

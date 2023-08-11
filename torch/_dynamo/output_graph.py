@@ -1217,6 +1217,21 @@ class SubgraphTracer(fx.Tracer):
                 trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
                 self.prev_inst = cur_inst
 
+        # preserve original meta if it is available
+        if (
+            tx._fx_node_meta_context is not None
+            and tx._fx_node_meta_context.counter_name in tx.symbolic_locals
+        ):
+            meta = tx._fx_node_meta_context.meta[
+                tx.symbolic_locals[
+                    tx._fx_node_meta_context.counter_name
+                ].as_python_constant()
+            ]
+            for key in ("nn_module_stack", "source_fn", "stack_trace"):
+                if key in meta:
+                    rv.node.meta[key] = meta[key]
+            return rv
+
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()

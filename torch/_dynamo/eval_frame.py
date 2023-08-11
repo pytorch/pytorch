@@ -60,9 +60,10 @@ else:
             continue
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
-from . import config, convert_frame, external_utils, skipfiles, utils
+from . import config, convert_frame, external_utils, skipfiles, symbolic_convert, utils
 from .exc import CondOpArgsMismatchError, ResetRequired, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
+from .symbolic_convert import FXNodeMetaContext
 from .types import DynamoCallback
 from .utils import compile_times
 
@@ -125,6 +126,13 @@ class OptimizedModule(torch.nn.Module):
         self._initialize()
 
     def _initialize(self):
+        fx_node_meta_context = None
+        if isinstance(self._orig_mod, torch.fx.GraphModule):
+            if self._orig_mod._counter_name is not None:
+                fx_node_meta_context = FXNodeMetaContext(
+                    [node.meta for node in self._orig_mod.graph.nodes],
+                    self._orig_mod._counter_name,
+                )
         # Do this stuff in constructor to lower overhead slightly
         if isinstance(self._orig_mod.forward, types.MethodType) and skipfiles.check(
             inspect.getsourcefile(self._orig_mod.forward)
@@ -132,10 +140,15 @@ class OptimizedModule(torch.nn.Module):
             # This may be a torch.nn.* instance in skipfiles.py which
             # won't trigger a frame evaluation workaround to add an extra
             # frame we can capture
-            self.forward = self.dynamo_ctx(external_utils.wrap_inline(self._orig_mod))
+            self.forward = self.dynamo_ctx(
+                external_utils.wrap_inline(self._orig_mod),
+                fx_node_meta_context=fx_node_meta_context,
+            )
         else:
             # Invoke hooks outside of dynamo then pickup the inner frame
-            self.forward = self.dynamo_ctx(self._orig_mod.__call__)
+            self.forward = self.dynamo_ctx(
+                self._orig_mod.__call__, fx_node_meta_context=fx_node_meta_context
+            )
 
         if hasattr(self._orig_mod, "_initialize_hook"):
             self._forward = self.forward
@@ -269,12 +282,13 @@ class _TorchDynamoContext:
         self.dynamic_ctx.__exit__(exc_type, exc_val, exc_tb)
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
 
-    def __call__(self, fn):
+    def __call__(self, fn, fx_node_meta_context=None):
         # public api for compiler config/options
         def get_compiler_config():
             return self.compiler_config
 
         fn = innermost_fn(fn)
+        symbolic_convert._fx_node_meta_context = fx_node_meta_context
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
             mod = fn

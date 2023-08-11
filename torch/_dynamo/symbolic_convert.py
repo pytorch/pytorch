@@ -119,6 +119,15 @@ def _step_logger():
 
 
 @dataclasses.dataclass
+class FXNodeMetaContext:
+    meta: List[Any]
+    counter_name: str
+
+
+_fx_node_meta_context = None
+
+
+@dataclasses.dataclass
 class BlockStackEntry:
     target: Instruction
     stack_index: Optional[int] = None
@@ -500,6 +509,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     accept_prefix_inst: bool
     prefix_insts: List[Instruction]
     inline_depth: int
+    _fx_node_meta_context: Optional[FXNodeMetaContext]
 
     checkpoint: Optional[Tuple[Instruction, InstructionTranslatorGraphState]]
     random_calls: List[
@@ -1933,6 +1943,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.random_calls = []
 
         self.strict_checks_enabled = False
+
+        self._fx_node_meta_context = copy.copy(_fx_node_meta_context)
 
         if sys.version_info >= (3, 10):
             from .resume_execution import (
