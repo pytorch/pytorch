@@ -65,6 +65,7 @@ __all__ = [
 
 Tensor = torch.Tensor
 aten = torch._ops.ops.aten
+DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
 
 def _dropout_helper(
@@ -445,7 +446,7 @@ def softplus(
     return torch.where(scaled_input > threshold, a, rhs)
 
 
-@register_decomposition(aten.hardshrink)
+@aten.hardshrink.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
 def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     # Formula for reference,
