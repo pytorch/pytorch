@@ -3588,7 +3588,7 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
                 nd.target = fn
                 nd.meta.clear()
                 break
-        gm_edit.recompile()
+        gm_edit.recompile(emit_counter=True)
 
         gm2, _ = torch._dynamo.export(gm_edit, inp)
 
