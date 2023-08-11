@@ -75,8 +75,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         if is_inference:
             inference_patterns.apply(gm.graph)
 
-        group_batch_fusion_post_grad_passes(gm.graph)
-
     reinplace_scatters(gm.graph)
 
     stable_topological_sort(gm.graph)
