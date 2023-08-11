@@ -322,10 +322,19 @@ def adamw(
         raise RuntimeError("torch.jit.script not supported with fused optimizers")
 
     if fused and not torch.jit.is_scripting():
+        # lr needs to be a tensor
+        if not isinstance(lr, Tensor):
+            lr = torch.tensor(lr, dtype=torch.float)
         func = _fused_adamw
     elif foreach and not torch.jit.is_scripting():
+        # lr should not be a tensor
+        if isinstance(lr, Tensor):
+            lr = lr.item()
         func = _multi_tensor_adamw
     else:
+        # lr should not be a tensor
+        if isinstance(lr, Tensor):
+            lr = float(lr.item())
         func = _single_tensor_adamw
 
     func(
@@ -362,7 +371,7 @@ def _single_tensor_adamw(
     amsgrad: bool,
     beta1: float,
     beta2: float,
-    lr: float,
+    lr: Union[Tensor, float],
     weight_decay: float,
     eps: float,
     maximize: bool,
@@ -371,6 +380,7 @@ def _single_tensor_adamw(
 ):
 
     assert grad_scale is None and found_inf is None
+    assert not isinstance(lr, Tensor), "lr should have been coerced to a scalar in _single_tensor_adam"
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
@@ -473,7 +483,7 @@ def _multi_tensor_adamw(
     amsgrad: bool,
     beta1: float,
     beta2: float,
-    lr: float,
+    lr: Union[Tensor, float],
     weight_decay: float,
     eps: float,
     maximize: bool,
@@ -482,6 +492,8 @@ def _multi_tensor_adamw(
 ):
     if len(params) == 0:
         return
+
+    assert not isinstance(lr, Tensor), "lr should have been coerced to a scalar in _multi_tensor_adam"
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
