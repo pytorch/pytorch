@@ -7,7 +7,6 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._functorch.config
 import torch.utils.checkpoint
-from torch._subclasses.fake_tensor import FakeTensorMode
 
 
 class MockSubclass(torch.Tensor):
@@ -123,7 +122,6 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
-
 
 
 if __name__ == "__main__":
