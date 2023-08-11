@@ -33,7 +33,6 @@ from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
     format_error_msg,
-    format_error_msg_verbose,
     InternalTorchDynamoError,
     TorchRuntimeError,
     unimplemented,
@@ -215,6 +214,12 @@ def exception_handler(e, code, frame=None, export=False):
     augment_exc_message(e, export=export)
 
 
+def is_recompilation(cache_size):
+    # cache_size here refers to the number of total cached entries on the code
+    # object.
+    return cache_size >= 1
+
+
 FRAME_COUNTER = 0
 
 
@@ -238,7 +243,7 @@ def convert_frame_assert(
 
         code = frame.f_code
 
-        if code in input_codes and (
+        if is_recompilation(cache_size) and (
             recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
         ):
             if is_guard_failure_reporting_enabled():
@@ -566,17 +571,7 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
             # possible to accidentally not log at all.
             record_filename = getattr(e, "record_filename", None)
             code = frame.f_code
-            if config.is_fbcode():
-                from torch._dynamo.fb.logging import (  # type: ignore[import]
-                    log_dynamo_suppress_errors,
-                )
-
-                error_msg = format_error_msg_verbose(e, code, record_filename, frame)
-                log_dynamo_suppress_errors(
-                    code.co_name, code.co_filename, code.co_firstlineno, error_msg
-                )
-            else:
-                error_msg = format_error_msg(e, code, record_filename, frame)
+            error_msg = format_error_msg(e, code, record_filename, frame)
 
             if soft_fail:
                 log.info(error_msg, exc_info=True)
