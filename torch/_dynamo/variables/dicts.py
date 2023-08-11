@@ -200,6 +200,13 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable(
                 ConstDictVariable.get_key(args[0]) in self.items, **options
             )
+        elif name == "copy":
+            assert not (args or kwargs)
+            return ConstDictVariable(
+                {k: v for k, v in val.items()},
+                dict,
+                **options,
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
