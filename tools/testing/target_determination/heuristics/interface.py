@@ -12,9 +12,8 @@ class TestPrioritizations:
 
     highly_relevant: List[str]
     probably_relevant: List[str]
-    unranked_relevance: List[
-        str
-    ]  # When we don't know if the test is relevant to the PR or not
+    # For when we don't know if the test is relevant to the PR or not
+    unranked_relevance: List[str]
     # future cateories could include 'definitely not relevant' and 'probably not relevant'
 
     def __init__(self) -> None:
@@ -45,10 +44,6 @@ class TestPrioritizations:
         Assumes tests are only shuffled around beteen the lists, with no tests added or removed.
         """
         # only add new tests to the list, while preserving the sorting
-        self.highly_relevant.extend(
-            [test for test in other.highly_relevant if test not in self.highly_relevant]
-        )
-
         self.highly_relevant = TestPrioritizations._merge_tests(
             self.highly_relevant, other.highly_relevant, exclude_tests=[]
         )
