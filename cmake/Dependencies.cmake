@@ -1904,7 +1904,15 @@ if(USE_KINETO)
       set(CUPTI_LIB_NAME "cupti.lib")
     endif()
 
-    set(NVPERF_HOST_LIB_NAME "libnvperf_host.so")
+    if(NOT MSVC)
+      if(USE_CUPTI_SO)
+        set(NVPERF_HOST_LIB_NAME "libnvperf_host.so")
+      else()
+        set(NVPERF_HOST_LIB_NAME "libnvperf_host_static.a")
+      endif()
+    else()
+      set(NVPERF_HOST_LIB_NAME "nvperf_host.lib")
+    endif()
 
     find_library(CUPTI_LIBRARY_PATH ${CUPTI_LIB_NAME} PATHS
         ${CUDA_SOURCE_DIR}
