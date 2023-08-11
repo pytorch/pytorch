@@ -83,6 +83,18 @@ Tensor quantize_per_tensor(
   return convert_quantized(v_output);
 }
 
+Tensor quantize_per_tensor_tensor_qparams(
+    const at::Tensor& input_arg,
+    const at::Tensor& scale,
+    const at::Tensor& zero_point,
+    const c10::ScalarType dtype) {
+  TORCH_CHECK(
+      (scale.numel() == 1 && zero_point.numel() == 1),
+      "Only 1 element expected in scale and zero_point");
+  return quantize_per_tensor(
+      input_arg, scale.item().toDouble(), zero_point.item().toLong(), dtype);
+}
+
 // helper for dequantize function to use scale and zero_point
 Tensor dequantize_helper(
     const at::Tensor& input_arg,
@@ -154,6 +166,9 @@ Tensor dequantize(const Tensor& self) {
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("aten::quantize_per_tensor"), quantize_per_tensor);
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::quantize_per_tensor.tensor_qparams"),
+      quantize_per_tensor_tensor_qparams);
   m.impl(TORCH_SELECTIVE_NAME("aten::dequantize.self"), dequantize);
 }
 

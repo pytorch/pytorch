@@ -49,7 +49,7 @@ from torch.utils._pytree import tree_map
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
 _sharded_tensor_current_id = 0
-_sharded_tensor_map: Dict[int, 'weakref.ReferenceType[ShardedTensor]'] = {}
+_sharded_tensor_map: Dict[int, weakref.ReferenceType[ShardedTensor]] = {}
 
 # Default sharded ops
 _SHARDED_OPS: Dict[Callable, Callable] = {}
@@ -136,7 +136,7 @@ class ShardedTensorBase(torch.Tensor):
         local_shards: List[Shard],
         sharded_tensor_metadata: ShardedTensorMetadata,
         sharding_spec=None,
-    ) -> "ShardedTensorBase":
+    ) -> ShardedTensorBase:
         """
         Initialize a ShardedTensorBase with local shards and a global
         ShardedTensorMetadata built on each rank.
@@ -234,7 +234,7 @@ class ShardedTensor(ShardedTensorBase):
 
     """
     def __new__(cls, sharding_spec: shard_spec.ShardingSpec, *size, **kwargs):
-        self = super(ShardedTensor, cls).__new__(cls, sharding_spec, *size, **kwargs)
+        self = super().__new__(cls, sharding_spec, *size, **kwargs)
         return self
 
     def __init__(
@@ -732,9 +732,9 @@ class ShardedTensor(ShardedTensorBase):
         local_tensor: torch.Tensor,
         sharding_spec: shard_spec.ShardingSpec,
         *global_size: Sequence[int],
-        process_group: dist.ProcessGroup = None,
+        process_group: Optional[dist.ProcessGroup] = None,
         init_rrefs=False,
-    ) -> "ShardedTensor":
+    ) -> ShardedTensor:
         """
         Initialize a ShardedTensor given only one local tensor, global sharded tensor
         size and sharding spec on each rank.
@@ -839,7 +839,7 @@ class ShardedTensor(ShardedTensorBase):
         process_group=None,
         init_rrefs=False,
         sharding_spec=None,
-    ) -> "ShardedTensor":
+    ) -> ShardedTensor:
         """
         Initialize a ShardedTensor with local shards and a global
         ShardedTensorMetadata built on each rank.
