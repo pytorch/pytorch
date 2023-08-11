@@ -822,7 +822,7 @@ class ExportOutput:
         import onnx
 
         return ExportOutput(
-            onnx.ModelProto(),
+            onnx.ModelProto(),  # type: ignore[attr-defined]
             io_adapter.InputAdapter(),
             io_adapter.OutputAdapter(),
             diagnostic_context,
