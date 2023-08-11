@@ -11,6 +11,8 @@ import re
 import types
 from typing import List, NamedTuple, Optional, Union
 
+import numpy as np
+
 import torch
 
 from torch import SymInt
@@ -38,6 +40,7 @@ from ..source import (
     GlobalWeakRefSource,
     is_constant_source,
     LocalSource,
+    NumpyTensorSource,
     RandomValueSource,
     Source,
     TupleIteratorGetItemSource,
@@ -48,12 +51,10 @@ from ..utils import (
     get_fake_value,
     getfile,
     global_key_name,
-    HAS_NUMPY,
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
     istype,
-    np,
     odict_values,
     preserve_rng_state,
     tensor_always_has_static_shape,
@@ -290,8 +291,7 @@ class VariableBuilder:
                 cls.wrap_literal,
             ),
         ]
-        if config.numpy_ndarray_as_tensor:
-            entries.append((np.ndarray, cls.wrap_numpy_ndarray))
+        entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
         result = {}
         for ts, fn in entries:
@@ -535,7 +535,7 @@ class VariableBuilder:
                 ),
                 "apply",
             )
-        elif HAS_NUMPY and isinstance(value, np.number):
+        elif isinstance(value, np.number):
             return self.wrap_unspecialized_primitive(value)
         elif DataClassVariable.is_matching_object(value):
             return DataClassVariable.wrap(self, value).add_guards(
@@ -936,7 +936,14 @@ class VariableBuilder:
             tx=self.tx,
             proxy=tensor_proxy,
             example_value=value,
-            guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
+            guards=self.make_guards(
+                functools.partial(
+                    GuardBuilder.TENSOR_MATCH,
+                    value=value
+                    if isinstance(source, NumpyTensorSource)
+                    else TensorWeakRef(value),
+                )
+            ),
             should_specialize=self.tensor_should_specialize(),
             ignore_subclass=ignore_subclass,
             source=source,
@@ -973,13 +980,17 @@ class VariableBuilder:
     def wrap_numpy_ndarray(self, value):
         assert isinstance(value, np.ndarray)
 
-        source = self.get_source()
+        source = NumpyTensorSource(self.get_source())
         tensor_value = torch.as_tensor(value)
-
+        # We do this because we want the full behavior of guarding the numpy ndarray as if it were
+        # a tensor. It's a little annoying to make a VT to throw out, but there's so many side effects here
+        # that there's not another great way to do this atm.
+        # This creates the right graphargs, as well as registration for guards in tensor names and shape env.
+        tensor_vt = VariableBuilder(self.tx, source)(tensor_value)
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(tensor_value), source=source
         )
-        options = {"source": source}
+        options = {"source": source, "guards": tensor_vt.guards}
         numpy_ndarray_variable = wrap_fx_proxy_cls(
             target_cls=NumpyNdarrayVariable,
             tx=self.tx,
