@@ -9,6 +9,7 @@ CPUINFO_SOURCES = {
         "init.c",
         "api.c",
         "cache.c",
+        "log.c",
     ],
     "defined(__linux__)": [
         "linux/multiline.c",
@@ -63,7 +64,7 @@ CPUINFO_SOURCES = {
     "(defined(__arm__) || defined(__aarch64__)) && defined(__ANDROID__)": [
         "arm/android/properties.c",
     ],
-    "(defined(__arm__) || defined(__aarch64__)) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE": [
+    "(defined(__arm__) || defined(__aarch64__)) && defined(TARGET_OS_MAC) && TARGET_OS_MAC": [
         "arm/mach/init.c",
     ],
 }
