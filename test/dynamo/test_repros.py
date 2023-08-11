@@ -2924,7 +2924,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             d1 = dict(other1=5)
             d2 = dict(other2=4)
             text_cond = {**d1, **d2}
-            return forward_with_cond_scale(x, 1, cond_scale=2, self_cond=3, **text_cond)
+            return {
+                "forward": forward_with_cond_scale(x, 1, cond_scale=2, self_cond=3, **text_cond),
+                "addition": d2.get("other2") + d1.get("does_not_exist", 1)
+            }
 
         self.assertTrue(same(fn(torch.ones(4)), torch.ones(4).sin() + 15))
 

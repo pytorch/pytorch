@@ -153,10 +153,14 @@ class ConstDictVariable(VariableTracker):
             and args
             and ConstDictVariable.is_valid_key(args[0])
             and ConstDictVariable.get_key(args[0]) not in self.items
-            and len(args) == 2
+            and len(args) in (1, 2)
         ):
-            # missing item, return the default value
-            return args[1].add_options(options)
+            if len(args) == 2:
+                # missing item, return the supplied default value
+                return args[1].add_options(options)
+            else:
+                # missing item, no default value, return None
+                return ConstantVariable(None)
         elif (
             name == "pop"
             and args
