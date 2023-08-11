@@ -14,7 +14,6 @@ import torch
 from torch._dynamo.utils import dynamo_timed
 
 from . import config, dependencies, ir, metrics
-from .codegen.common import get_scheduling_for_device
 from .dependencies import StarDep, WeakDep
 from .sizevars import SimplifyIndexing
 from .utils import cache_on_self, cmp, free_symbol_has, has_triton
@@ -73,7 +72,7 @@ class BaseSchedulerNode:
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
 
-    def debug_str(self):
+    def debug_str(self) -> str:
         """Longer form printout for trace logs"""
         name = self.get_name()
         lines = [
@@ -89,9 +88,10 @@ class BaseSchedulerNode:
             ]
         except Exception:
             log.warning("Ignoring error in debug_str()", exc_info=True)
+
         return "\n".join(lines).rstrip()
 
-    def debug_str_extra(self):
+    def debug_str_extra(self) -> str:
         return ""
 
     def log_details(self):
@@ -362,7 +362,7 @@ class BaseSchedulerNode:
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
-    def debug_str_extra(self):
+    def debug_str_extra(self) -> str:
         return f"{self.get_name()}.node.kernel = {getattr(self.node, 'kernel', None)}"
 
     def is_extern(self):
@@ -416,7 +416,7 @@ class SchedulerNode(BaseSchedulerNode):
                 )
             )
 
-    def debug_str_extra(self):
+    def debug_str_extra(self) -> str:
         name = self.get_name()
         lines = [
             f"{name}.group.device = {self.group[0]}",
@@ -537,10 +537,12 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def get_names(self) -> Set[str]:
         return set.union(*[x.get_names() for x in self.snodes])
 
-    def debug_str_extra(self):
-        return (
-            f"{self.get_name()}.snodes = {pformat([x.get_name() for x in self.snodes])}"
-        )
+    def debug_str_extra(self) -> str:
+        lines = [
+            f"{self.get_name()}.snodes[{i}] =\n{node.debug_str()}"
+            for i, node in enumerate(self.snodes)
+        ]
+        return textwrap.indent("\n".join(lines).rstrip(), "    ")
 
     def set_last_usage(
         self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
@@ -886,6 +888,8 @@ class Scheduler:
         # fx graph node to the position it appears in the graph
         # for debug attribution
         self.origin_to_index = {}
+
+        log.info("Number of scheduler nodes after fusion %d", len(self.nodes))
 
     def debug_draw_graph(self):
         """Generate an image of the graph for debugging"""
@@ -1471,22 +1475,26 @@ class Scheduler:
         V.graph.device_types.add(device.type)
         V.graph.add_device_idx(device.index)
 
-        device_scheduling = get_scheduling_for_device(device.type)
-        if device_scheduling is None:
+        if device.type == "cpu":
+            from .codegen.cpp import CppScheduling
+
+            return CppScheduling(self)
+        elif device.type == "cuda":
+            if not has_triton():
+                device_props = torch.cuda.get_device_properties(device)
+                if device_props.major < 7:
+                    raise RuntimeError(
+                        f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
+                    )
+                else:
+                    raise RuntimeError(
+                        "Cannot find a working triton installation. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
+                    )
+            from .codegen.triton import TritonScheduling
+
+            return TritonScheduling(self)
+        else:
             raise RuntimeError(f"Unsupported device type: {device.type}")
-
-        if device.type == "cuda" and not has_triton():
-            device_props = torch.cuda.get_device_properties(device)
-            if device_props.major < 7:
-                raise RuntimeError(
-                    f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
-                )
-            else:
-                raise RuntimeError(
-                    "Cannot find a working triton installation. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
-                )
-
-        return device_scheduling(self)
 
     def get_backend(self, device: torch.device):
         if device not in self.backends:
@@ -1521,11 +1529,13 @@ class Scheduler:
                 if device != self.current_device:
                     if device.type == "cuda":
                         if self.current_device and self.current_device.type == "cuda":
-                            V.graph.wrapper_code.codegen_device_guard_exit()
+                            V.graph.wrapper_code.codegen_cuda_device_guard_exit()
                         assert device.index is not None, "device should have an index"
-                        V.graph.wrapper_code.codegen_device_guard_enter(device.index)
+                        V.graph.wrapper_code.codegen_cuda_device_guard_enter(
+                            device.index
+                        )
                     elif self.current_device and self.current_device.type == "cuda":
-                        V.graph.wrapper_code.codegen_device_guard_exit()
+                        V.graph.wrapper_code.codegen_cuda_device_guard_exit()
                     self.current_device = device
 
             self.buffer_names_to_free.update(node.last_usage)
@@ -1549,52 +1559,3 @@ class Scheduler:
             self.available_buffer_names.update(node.get_names())
 
         self.flush()
-
-
-class BaseScheduling:
-    def can_fuse_vertical(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
-        """
-        Check whether node1 and node2 can be vertically fused or not.
-        """
-        raise NotImplementedError()
-
-    def can_fuse_horizontal(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
-        """
-        Check whether node1 and node2 can be horizontally fused or not.
-        """
-        raise NotImplementedError()
-
-    def group_fn(self, sizes):
-        """
-        Process the iteration sizes in case a transformation needs to be applied.
-        """
-        raise NotImplementedError()
-
-    def codegen_template(
-        self, template_node: BaseSchedulerNode, epilogue_nodes: List[BaseSchedulerNode]
-    ):
-        """
-        Given a template node, generate a kernel.
-
-        This function is only available for triton now. If the third-party backend behaves as a sub-class
-        of TritonScheduling, it can override it or reuse it.
-        """
-        raise NotImplementedError()
-
-    def codegen_nodes(self, nodes: List[BaseSchedulerNode]):
-        """
-        Generate a kernel given a list of pre-fused nodes.
-        """
-        raise NotImplementedError()
-
-    def codegen_sync(self):
-        """
-        Generate synchronization code for the kernel. This method depends on the hardware characteristics.
-        """
-        raise NotImplementedError()
-
-    def flush(self):
-        """
-        Flush the generated kernel and python wrapper code to the source code file.
-        """
-        raise NotImplementedError()

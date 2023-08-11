@@ -79,6 +79,8 @@ SKIP = {
     "tacotron2",
     "hf_Bert",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
     "hf_Bert_large",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
+    # takes too long, extreme slowdown (< .001)
+    "maml",
 }
 
 SKIP_FOR_CPU = {
@@ -87,6 +89,7 @@ SKIP_FOR_CPU = {
     "nanogpt_generate",  # timeout
     "sam",  # timeout
     "llama_v2_7b_16h",  # model is CUDA only
+    "stable_diffusion",  # flaky
 }
 
 SKIP_FOR_CUDA = {
@@ -203,6 +206,7 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "timm_vision_transformer_large",
     "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
     "llama_v2_7b_16h",
+    "Background_Matting",
 }
 
 SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
@@ -302,8 +306,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             try:
                 module = importlib.import_module(c)
                 break
-            except ModuleNotFoundError:
-                pass
+            except ModuleNotFoundError as e:
+                if e.name != c:
+                    raise
         else:
             raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)
