@@ -6573,6 +6573,27 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
 
+    def test_yield_send_to_subgenerator_graph_break(self):
+        def subgenerator(tensor):
+            multiplier = yield
+            yield tensor * multiplier
+
+        def main_generator(t_list):
+            for tensor in t_list:
+                subgen = subgenerator(tensor)
+                next(subgen)
+                yield from subgen.send(torch.tensor([10]))
+
+        t_list = [torch.tensor([i]) for i in range(5)]
+        eager = list(main_generator(t_list))
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(main_generator)
+        compiled = list(compiled_fn(t_list))
+
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 0)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
