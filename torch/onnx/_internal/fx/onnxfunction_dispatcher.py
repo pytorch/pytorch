@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import operator
 from typing import (
     Any,
@@ -260,7 +262,7 @@ class OnnxFunctionDispatcher:
             diagnostic_context.log(diagnostic)
             raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
 
-        diagnostic.with_additional_message(
+        diagnostic.warning(
             "### Exact match is not found!\n"
             "Cannot find a perfect match of symbolic overload, "
             "a nearest match is found. Please check the ONNX output carefully. \n",
@@ -398,7 +400,7 @@ class OnnxFunctionDispatcher:
             if function_group is not None:
                 op_full_name = internal_opname.qualified_name()
                 diagnostic = diagnostic_context.inflight_diagnostic()
-                diagnostic.with_additional_message(
+                diagnostic.warning(
                     "### The operator overload is not found in onnx registry!\n"
                     "Cannot find the operator overload in onnx registry, but "
                     "the default overload is found. Please check the ONNX output carefully. \n",
@@ -614,77 +616,96 @@ class _OnnxSchemaChecker:
             kwargs,
             fill_defaults=True,  # fill defaults for optional arguments to match
         )
-        diagnostic.with_additional_message("### Checking perfect match...\n")
-        diagnostic.with_additional_message(
-            f"{diagnostics.format_argument(self.onnxfunction)}"
-        )
-        # NOTE: 1. Check if the input number and attribute names match the
-        # OpSchema. If it's not, we know the function is not eligible to be a perfect
-        # match, nor a nearest match.
-        # We use is_perfect_match to postpone the return value to the end
-        # of the function, as we want to log all the mismatch info.
-        is_perfect_match = True
-        if len(function_inputs) != len(self.op_schema.inputs):
-            diagnostic.with_additional_message(
-                f"#### Failed: input number mismatch! \n"
-                f"Actual {len(function_inputs)} vs expected {len(self.op_schema.inputs)}\n"
+        with diagnostic.log_section(logging.INFO, "Checking perfect match..."):
+            diagnostic.info(
+                "%s",
+                diagnostics.LazyString(diagnostics.format_argument, self.onnxfunction),
             )
-            diagnostic.with_additional_message(
-                "The function is not a nearest match candidate.\n"
-            )
-            is_perfect_match = False
+            # NOTE: 1. Check if the input number and attribute names match the
+            # OpSchema. If it's not, we know the function is not eligible to be a perfect
+            # match, nor a nearest match.
+            # We use is_perfect_match to postpone the return value to the end
+            # of the function, as we want to log all the mismatch info.
+            is_perfect_match = True
+            if len(function_inputs) != len(self.op_schema.inputs):
+                with diagnostic.log_section(
+                    logging.INFO, "Failed: input number mismatch!"
+                ):
+                    diagnostic.info(
+                        "Actual %d vs expected %d",
+                        len(function_inputs),
+                        len(self.op_schema.inputs),
+                    )
+                diagnostic.info("The function is not a nearest match candidate.")
+                is_perfect_match = False
 
-        if set(function_attributes) != set(self.attributes):
-            diagnostic.with_additional_message(
-                f"#### Failed: attribute mismatch! \n"
-                f"Actual {set(function_attributes)} vs\n"
-                f"expected {set(self.attributes)}\n"
-            )
-            diagnostic.with_additional_message(
-                "The function is not a nearest match candidate.\n"
-            )
-            is_perfect_match = False
+            if set(function_attributes) != set(self.attributes):
+                with diagnostic.log_section(
+                    logging.INFO, "Failed: attribute mismatch!"
+                ):
+                    diagnostic.info(
+                        "%s",
+                        diagnostics.LazyString(
+                            lambda: f"Actual {set(function_attributes)} vs expected {set(self.attributes)}",
+                        ),
+                    )
+                diagnostic.info("The function is not a nearest match candidate.")
+                is_perfect_match = False
 
-        # If it's already not a perfect match, we can return False directly. Further
-        # checking is only for the functions that are eligible for nearest match.
-        if not is_perfect_match:
-            return False
+            # If it's already not a perfect match, we can return False directly. Further
+            # checking is only for the functions that are eligible for nearest match.
+            if not is_perfect_match:
+                return False
 
-        # NOTE: 2. The dtypes of inputs and attributes should be in the
-        # type constraints of the OpSchema. If they are not, we know the function is not
-        # eligible to be a perfect match, but can be a nearest match candidate.
-        for schema_input, torch_input in zip(self.op_schema.inputs, function_inputs):
-            torch_input_compatible_types = _find_onnx_data_type(torch_input)
-            allowed_types = self.type_constraints[schema_input.type_str]
-            if not allowed_types.intersection(torch_input_compatible_types) and not any(
-                fx_type_utils.is_optional_onnx_dtype_str(onnx_type_str)
-                for onnx_type_str in allowed_types
+            # NOTE: 2. The dtypes of inputs and attributes should be in the
+            # type constraints of the OpSchema. If they are not, we know the function is not
+            # eligible to be a perfect match, but can be a nearest match candidate.
+            for schema_input, torch_input in zip(
+                self.op_schema.inputs, function_inputs
             ):
-                # If torch_input_compatible_types isn't in allowed_types
-                # of this input defined in the OpSchema, we know the function
-                # and the input are not compatible
-                diagnostic.with_additional_message(
-                    f"#### Failed: input type mismatch for input '{schema_input.name}'! \n"
-                    f"Actual {torch_input_compatible_types} vs\n"
-                    f"expected {allowed_types}\n"
-                )
-                is_perfect_match = False
+                torch_input_compatible_types = _find_onnx_data_type(torch_input)
+                allowed_types = self.type_constraints[schema_input.type_str]
+                if not allowed_types.intersection(
+                    torch_input_compatible_types
+                ) and not any(
+                    fx_type_utils.is_optional_onnx_dtype_str(onnx_type_str)
+                    for onnx_type_str in allowed_types
+                ):
+                    # If torch_input_compatible_types isn't in allowed_types
+                    # of this input defined in the OpSchema, we know the function
+                    # and the input are not compatible
+                    with diagnostic.log_section(
+                        logging.INFO,
+                        "Failed: input type mismatch for input '%s'!",
+                        schema_input.name,
+                    ):
+                        diagnostic.info(
+                            "Actual %s vs\nExpected %s",
+                            torch_input_compatible_types,
+                            allowed_types,
+                        )
+                    is_perfect_match = False
 
-        for attribute_name, attribute in function_attributes.items():
-            if not self._match_onnx_attribute_type(attribute_name, attribute):
-                # If the attribute type of the OpSchema and the attribute type don't match,
-                # we know the function and the input are not compatible
-                diagnostic.with_additional_message(
-                    f"#### Failed: attribute '{attribute_name}' type mismatch! \n"
-                    f"Actual {type(attribute)} vs\n"
-                    f"expected {self.attributes[attribute_name].type}\n"
-                )
-                is_perfect_match = False
+            for attribute_name, attribute in function_attributes.items():
+                if not self._match_onnx_attribute_type(attribute_name, attribute):
+                    # If the attribute type of the OpSchema and the attribute type don't match,
+                    # we know the function and the input are not compatible
+                    with diagnostic.log_section(
+                        logging.INFO,
+                        "Failed: attribute '%s' type mismatch!",
+                        attribute_name,
+                    ):
+                        diagnostic.info(
+                            "Actual %s vs\nExpected %s",
+                            type(attribute),
+                            self.attributes[attribute_name].type,
+                        )
+                    is_perfect_match = False
 
-        # NOTE: This is still a candidate for nearest match, as it only mismatches attributes on dtype.
-        self._record_matching_score(function_inputs, function_attributes)
-        diagnostic.with_additional_message(f"match score: {self.match_score}\n")
-        return is_perfect_match
+            # NOTE: This is still a candidate for nearest match, as it only mismatches attributes on dtype.
+            self._record_matching_score(function_inputs, function_attributes)
+            diagnostic.info("match score: %d", self.match_score)
+            return is_perfect_match
 
     @_beartype.beartype
     def _match_onnx_attribute_type(
