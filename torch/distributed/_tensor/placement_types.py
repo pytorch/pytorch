@@ -370,7 +370,7 @@ class _Partial(Placement):
 @dataclass
 class DTensorSpec:
     mesh: DeviceMesh
-    placements: Tuple[Placement]
+    placements: Tuple[Placement, ...]
 
     # tensor meta will only be set during sharding propagation
     tensor_meta: Optional[TensorMetadata] = None
@@ -381,7 +381,7 @@ class DTensorSpec:
         # Caveat: we need to keep this in mind and sync hash and eq if we add more
         # fields to them,
         if self.tensor_meta is not None:
-            return hash(((self.mesh, self.placements), self.tensor_meta.shape))
+            return hash((self.mesh, self.placements, self.tensor_meta.shape))
         else:
             return hash((self.mesh, self.placements))
 

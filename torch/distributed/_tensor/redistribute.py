@@ -169,7 +169,7 @@ def _redistribute_with_local_tensor(
 def redistribute_dtensor(
     input: "dtensor.DTensor",
     device_mesh: DeviceMesh,
-    placements: Tuple[Placement],
+    placements: Tuple[Placement, ...],
 ) -> "dtensor.DTensor":
     if input.device_mesh != device_mesh:
         # TODO: alltoall reshuffling to change device_mesh if they are not the same
@@ -206,9 +206,7 @@ class Redistribute(torch.autograd.Function):
     ):
         ctx.previous_placement = input.placements
         ctx.previous_device_mesh = input.device_mesh
-        return redistribute_dtensor(
-            input, device_mesh, tuple(placements)  # type: ignore[arg-type]
-        )
+        return redistribute_dtensor(input, device_mesh, tuple(placements))
 
     @staticmethod
     def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]
@@ -235,7 +233,7 @@ class Redistribute(torch.autograd.Function):
 
         return (
             redistribute_dtensor(
-                grad_output, previous_device_mesh, tuple(target_placements)  # type: ignore[arg-type]
+                grad_output, previous_device_mesh, tuple(target_placements)
             ),
             None,
             None,

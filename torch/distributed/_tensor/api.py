@@ -160,7 +160,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         cls,
         local_tensor: torch.Tensor,
         device_mesh: DeviceMesh,
-        placements: Tuple[Placement],
+        placements: Tuple[Placement, ...],
         *,
         shape: torch.Size,
         dtype: torch.dtype,
