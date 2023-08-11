@@ -1325,7 +1325,7 @@ def script(
             obj, torch.jit._recursive.infer_methods_to_compile
         )
     else:
-        obj = obj.__prepare_scriptable__() if hasattr(obj, '__prepare_scriptable__') else obj  # type: ignore[operator]
+        obj = obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj  # type: ignore[operator]
 
     if isinstance(obj, dict):
         return create_script_dict(obj)
