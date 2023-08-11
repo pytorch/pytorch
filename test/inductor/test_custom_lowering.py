@@ -89,7 +89,8 @@ class TestCustomLowering(TorchTestCase):
         cls.impl_meta.impl("jagged_to_padded_dense", j2pd_meta)
         cls.impl_cuda.impl("jagged_to_padded_dense", j2pd_cuda)
 
-    def test_jagged_to_padded_dense_sanity(self):
+    @unittest.skipIf(not "HAS_CUDA", "CUDA needed")
+    def test_jagged_to_padded_dense_sanity_cuda(self):
         def fn(inp, offsets, max_seq_len):
             return torch.ops.test_inductor_ops.jagged_to_padded_dense(
                 inp, offsets, max_seq_len, 60.0
@@ -113,6 +114,7 @@ class TestCustomLowering(TorchTestCase):
             fn(inp, offsets, max_seq_len), fn_opt(inp, offsets, max_seq_len)
         )
 
+    @unittest.skipIf(not "HAS_CUDA", "CUDA needed")
     def test_jagged_to_padded_dense_zero_size(self):
         # Previously, the masking was being completely stripped for the
         # masked load of the input value. That would lead to an IMA
@@ -138,4 +140,4 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
     if HAS_CPU or HAS_CUDA:
-        run_tests("sympy")
+        run_tests(needs="filelock")
