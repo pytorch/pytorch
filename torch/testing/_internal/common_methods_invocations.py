@@ -15621,10 +15621,6 @@ op_db: List[OpInfo] = [
     OpInfo('index_reduce',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            supports_out=True,
-           skips=(
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            sample_inputs_func=sample_inputs_index_reduce),
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
