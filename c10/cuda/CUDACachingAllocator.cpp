@@ -2353,8 +2353,8 @@ class DeviceCachingAllocator {
           block->requested_size,
           block->stream,
           block->context_when_allocated);
-      block->context_when_allocated = nullptr;
     }
+    block->context_when_allocated = nullptr;
     size_t original_block_size = block->size;
     size_t requested_size = block->requested_size;
 
@@ -3163,13 +3163,13 @@ class NativeCachingAllocator : public CUDAAllocator {
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
       bool alloc_trace_record_context) override {
-    int device = 0;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    device_allocator[device]->recordHistory(
-        enabled,
-        context_recorder,
-        alloc_trace_max_entries,
-        alloc_trace_record_context);
+    for (auto& allocator : device_allocator) {
+      allocator->recordHistory(
+          enabled,
+          context_recorder,
+          alloc_trace_max_entries,
+          alloc_trace_record_context);
+    }
   }
 
   bool isHistoryEnabled() override {

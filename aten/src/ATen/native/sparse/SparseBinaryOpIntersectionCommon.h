@@ -276,7 +276,7 @@ void _sparse_binary_op_intersection_kernel_impl(
       KernelLauncher::launch(iter,
           // NOTE: capture by value required by CUDA
           [=] FUNCAPI (index_t nnz_idx) -> int64_t {
-          const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
+          const auto* RESTRICT ptr_indices_dim = ptr_indices ? ptr_indices + nnz_idx * indices_nnz_stride : nullptr;
           int64_t hash = 0;
           for (int64_t dim = 0; dim < sparse_dim; ++dim) {
             const auto dim_hash_coeff = hash_coeffs[dim];
@@ -299,8 +299,7 @@ void _sparse_binary_op_intersection_kernel_impl(
       // NOTE: argsort.dtype == nnz_arange.dtype
       const auto argsort = nnz_arange.narrow(-1, 0, probably_coalesced._nnz());
       return std::make_tuple(probably_coalesced_indices_hash, argsort);
-    }
-    else {
+    } else {
       // NOTE: we want argsort.dtype == nnz_arange.dtype,
       // but sort() produces indices of type int64_t,
       // so we convert to nnz_arange.dtype to avoid issues
@@ -360,12 +359,12 @@ void _sparse_binary_op_intersection_kernel_impl(
       KernelLauncher::launch(iter,
           // NOTE: capture by value required by CUDA
           [=] FUNCAPI (index_t nnz_idx) -> index_t {
-          // Compute hash value
-          const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
           int64_t hash = 0;
           if (hash_ptr) {
             hash = hash_ptr[nnz_idx];
-          } else {
+          } else if (sparse_dim) {
+            // Compute hash value
+            const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
             for (int64_t dim = 0; dim < sparse_dim; ++dim) {
               const auto dim_hash_coeff = hash_coeffs[dim];
               const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];

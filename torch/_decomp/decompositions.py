@@ -1509,7 +1509,6 @@ def native_batch_norm(
 # In two weeks or so, we should remove this decomposition and phase out the current native_batch_norm
 # to be _native_batch_norm_legit and have the right schema (stating that there are input mutations).
 @aten.native_batch_norm.default.py_impl(DispatchKey.Autograd)
-@aten.native_batch_norm.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 def native_batch_norm_decomposition(
     input: Tensor,
     weight: Optional[Tensor],
@@ -2156,6 +2155,7 @@ def _compute_upsample_nearest_indices(input, output_size, scales):
     # to produce the upsampled output.
     indices = []
     num_spatial_dims = len(output_size)
+    input_dtype = torch.float if input.dtype == torch.uint8 else input.dtype
     for d in range(num_spatial_dims):
         # Math matches aten/src/ATen/native/cpu/UpSampleKernel.cpp
         # Indices are computed as following:
@@ -2163,7 +2163,7 @@ def _compute_upsample_nearest_indices(input, output_size, scales):
         # input_index = floor(output_index * scale)
         # Same as OpenCV INTER_NEAREST
         osize = output_size[d]
-        output_indices = torch.arange(osize, dtype=input.dtype, device=input.device)
+        output_indices = torch.arange(osize, dtype=input_dtype, device=input.device)
         isize = input.shape[-num_spatial_dims + d]
         scale = isize / (isize * scales[d]) if scales[d] is not None else isize / osize
         input_indices = (output_indices * scale).to(torch.int64)
@@ -2995,6 +2995,59 @@ def _reshape_alias(x, shape, *args):
     return aten.view(x, shape)
 
 
+def _nll_loss_forward(
+    self: Tensor,
+    target: Tensor,
+    weight: Optional[Tensor],
+    reduction: int,
+    ignore_index: int,
+) -> Tuple[Tensor, Tensor]:
+    # self can be [N, C] or [C]
+    # target can be [N] or []
+
+    n_dims = self.dim()
+    channel_dim = 1
+    if n_dims < 2:
+        channel_dim = 0
+
+    if weight is not None:
+        if n_dims > 1:
+            shape = [
+                1,
+            ] * n_dims
+            shape[channel_dim] = weight.shape[0]
+            w = weight.view(shape)
+        else:
+            w = weight
+        self = self * w
+    safe_target = torch.where(target != ignore_index, target, 0)
+    safe_target_ = safe_target.unsqueeze(channel_dim)
+    # target can be [N, 1] or [1]
+
+    result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
+
+    result = torch.where(target != ignore_index, result, 0)
+
+    if reduction == Reduction.NONE.value and n_dims > 1:
+        total_weight = self.new_full((), 0.0)
+        return result, total_weight
+
+    if weight is not None:
+        w = w.expand(self.shape)
+        wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
+        wsum = torch.where(target != ignore_index, wsum, 0)
+        total_weight = wsum.sum()
+    else:
+        total_weight = (target != ignore_index).sum().to(self)
+
+    if reduction == Reduction.SUM.value:
+        result = result.sum()
+    elif reduction == Reduction.MEAN.value:
+        result = result.sum() / total_weight
+
+    return result, total_weight
+
+
 @register_decomposition(aten.nll_loss_forward)
 def nll_loss_forward(
     self: Tensor,
@@ -3019,43 +3072,18 @@ def nll_loss_forward(
         weight.dim() == 1 and weight.numel() == n_classes
     ), f"weight tensor should be defined either for all {n_classes} classes or no classes but got weight tensor of shape: {weight.shape}"  # noqa: B950
 
-    # self can be [N, C] or [C]
-    # target can be [N] or []
+    return _nll_loss_forward(self, target, weight, reduction, ignore_index)
 
-    n_dims = self.dim()
-    channel_dim = 1
-    if n_dims < 2:
-        channel_dim = 0
 
-    if weight is not None:
-        w = weight.unsqueeze(0) if n_dims > 1 else weight
-        self = self * w
-    safe_target = torch.where(target != ignore_index, target, 0)
-    safe_target_ = safe_target.unsqueeze(channel_dim)
-    # target can be [N, 1] or [1]
-
-    result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
-
-    result = torch.where(target != ignore_index, result, 0)
-
-    if reduction == Reduction.NONE.value and n_dims > 1:
-        total_weight = self.new_full((), 0.0)
-        return result, total_weight
-
-    if weight is not None:
-        w = weight.unsqueeze(0).expand(self.shape) if n_dims > 1 else weight
-        wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
-        wsum = torch.where(target != ignore_index, wsum, 0)
-        total_weight = wsum.sum()
-    else:
-        total_weight = (target != ignore_index).sum().to(self)
-
-    if reduction == Reduction.SUM.value:
-        result = result.sum()
-    elif reduction == Reduction.MEAN.value:
-        result = result.sum() / total_weight
-
-    return result, total_weight
+@register_decomposition(aten.nll_loss2d_forward)
+def nll_loss2d_forward(
+    self: Tensor,
+    target: Tensor,
+    weight: Optional[Tensor],
+    reduction: int,
+    ignore_index: int,
+) -> Tuple[Tensor, Tensor]:
+    return _nll_loss_forward(self, target, weight, reduction, ignore_index)
 
 
 # These are adapted from aten/src/ATen/native/UpSample.h, wich is based on

@@ -72,7 +72,7 @@ class BaseSchedulerNode:
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
 
-    def debug_str(self):
+    def debug_str(self) -> str:
         """Longer form printout for trace logs"""
         name = self.get_name()
         lines = [
@@ -88,9 +88,10 @@ class BaseSchedulerNode:
             ]
         except Exception:
             log.warning("Ignoring error in debug_str()", exc_info=True)
+
         return "\n".join(lines).rstrip()
 
-    def debug_str_extra(self):
+    def debug_str_extra(self) -> str:
         return ""
 
     def log_details(self):
@@ -335,7 +336,10 @@ class BaseSchedulerNode:
             out_lines.append("")
             # TODO(voz): Should the pragma be constant somewhere?
             out_lines.append("#pragma CMT ORIGIN:")
-            out_lines.append(f"#pragma CMT {o.op} {o.target}")
+            op_info_str = f"#pragma CMT {o.op} {o.target}"
+            if "seq_nr" in o.meta:
+                op_info_str = op_info_str + f" seq_nr:{o.meta['seq_nr']}"
+            out_lines.append(op_info_str)
             if "stack_trace" in o.meta:
                 stack_trace = f"{o.meta['stack_trace']}"
                 stack_trace_last_line = stack_trace.split("|")[-1]
@@ -358,7 +362,7 @@ class BaseSchedulerNode:
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
-    def debug_str_extra(self):
+    def debug_str_extra(self) -> str:
         return f"{self.get_name()}.node.kernel = {getattr(self.node, 'kernel', None)}"
 
     def is_extern(self):
@@ -412,7 +416,7 @@ class SchedulerNode(BaseSchedulerNode):
                 )
             )
 
-    def debug_str_extra(self):
+    def debug_str_extra(self) -> str:
         name = self.get_name()
         lines = [
             f"{name}.group.device = {self.group[0]}",
@@ -533,10 +537,12 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def get_names(self) -> Set[str]:
         return set.union(*[x.get_names() for x in self.snodes])
 
-    def debug_str_extra(self):
-        return (
-            f"{self.get_name()}.snodes = {pformat([x.get_name() for x in self.snodes])}"
-        )
+    def debug_str_extra(self) -> str:
+        lines = [
+            f"{self.get_name()}.snodes[{i}] =\n{node.debug_str()}"
+            for i, node in enumerate(self.snodes)
+        ]
+        return textwrap.indent("\n".join(lines).rstrip(), "    ")
 
     def set_last_usage(
         self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
@@ -882,6 +888,8 @@ class Scheduler:
         # fx graph node to the position it appears in the graph
         # for debug attribution
         self.origin_to_index = {}
+
+        log.info("Number of scheduler nodes after fusion %d", len(self.nodes))
 
     def debug_draw_graph(self):
         """Generate an image of the graph for debugging"""

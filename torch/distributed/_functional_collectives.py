@@ -6,7 +6,7 @@ import torch.distributed.distributed_c10d as c10d
 from typing import Tuple, Union, List, cast, TYPE_CHECKING
 from torch.utils._pytree import tree_map_only
 from . import _functional_collectives_impl as fun_col_impl
-from ._functional_collectives_impl import _register_wrapper_tensor
+from ._functional_collectives_impl import _register_wait_tensor
 from torch.fx.experimental.proxy_tensor import (
     get_innermost_proxy_mode,
 )
@@ -447,7 +447,7 @@ def _maybe_wrap_tensor(self) -> torch.Tensor:
     if _are_we_tracing():
         return wait_tensor(self)
     res = AsyncCollectiveTensor(self)
-    _register_wrapper_tensor(res, self)
+    _register_wait_tensor(self)
     return cast(torch.Tensor, res)
 
 def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):
