@@ -11,10 +11,11 @@ from torch.utils._pytree import (
     pytree_to_str,
     str_to_pytree,
 )
+import unittest
 from torch.utils._pytree import _broadcast_to_and_flatten, tree_map_only, tree_all
 from torch.utils._pytree import tree_any, tree_all_only, tree_any_only
 from collections import namedtuple, OrderedDict
-from torch.testing._internal.common_utils import parametrize, subtest, instantiate_parametrized_tests
+from torch.testing._internal.common_utils import parametrize, subtest, instantiate_parametrized_tests, TEST_WITH_TORCHDYNAMO
 
 class TestPytree(TestCase):
     def test_treespec_equality(self):
@@ -206,16 +207,30 @@ class TestPytree(TestCase):
         self.assertFalse(tree_any_only(int, lambda x: x % 2, [0, 2, "a"]))
 
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo test in test_treespec_repr_dynamo.")
     def test_treespec_repr(self):
         # Check that it looks sane
         pytree = (0, [0, 0, [0]])
         _, spec = tree_flatten(pytree)
         self.assertEqual(repr(spec), ("TreeSpec(tuple, None, [*,\n"
-                                      "                       TreeSpec(list, None, [*,\n"
-                                      "                                             *,\n"
-                                      "                                             TreeSpec(list, None, [*])])])"))
+                                      "  TreeSpec(list, None, [*,\n"
+                                      "    *,\n"
+                                      "    TreeSpec(list, None, [*])])])"))
+
+    @unittest.skipIf(not TEST_WITH_TORCHDYNAMO, "Eager test in test_treespec_repr.")
+    def test_treespec_repr_dynamo(self):
+        # Check that it looks sane
+        pytree = (0, [0, 0, [0]])
+        _, spec = tree_flatten(pytree)
+        self.assertExpectedInline(repr(spec),
+                                  """\
+TreeSpec(TupleVariable, None, [*,
+  TreeSpec(ListVariable, None, [*,
+    *,
+    TreeSpec(ListVariable, None, [*])])])""")
 
     def test_broadcast_to_and_flatten(self):
+
         cases = [
             (1, (), []),
 
@@ -260,6 +275,9 @@ class TestPytree(TestCase):
             self.assertEqual(result, expected, msg=str([pytree, to_spec, expected]))
 
     @parametrize("spec, str_spec", [
+        (TreeSpec(list, None, []), "L()"),
+        (TreeSpec(tuple, None, []), "T()"),
+        (TreeSpec(dict, [], []), "D()"),
         (TreeSpec(list, None, [LeafSpec()]), "L(*)"),
         (TreeSpec(list, None, [LeafSpec(), LeafSpec()]), "L(*,*)"),
         (TreeSpec(tuple, None, [LeafSpec(), LeafSpec(), LeafSpec()]), "T(*,*,*)"),

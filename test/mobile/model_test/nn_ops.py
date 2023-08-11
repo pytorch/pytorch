@@ -60,7 +60,7 @@ class NNPoolingModule(torch.nn.Module):
                 nn.FractionalMaxPool2d(3, output_ratio=(0.5, 0.5)),
                 nn.LPPool2d(2, 3, stride=(2, 1)),
                 nn.AdaptiveMaxPool2d((5, 7)),
-                nn.AdaptiveAvgPool2d((7)),
+                nn.AdaptiveAvgPool2d(7),
             ]
         )
 

@@ -294,10 +294,8 @@ class NNModuleVariable(VariableTracker):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
                 ):
-                    unimplemented(
-                        f"Forward/backward hooks aren't yet supported on 'allowed' modules (e.g. {mod.__class__}), "
-                        "which don't get traced through by dynamo. Graph-breaking to run hooks without compile."
-                    )
+                    # End of fn, this bubbles up and restarts tracing.
+                    self.convert_to_unspecialized(tx)
 
                 from .builder import wrap_fx_proxy
 
@@ -536,6 +534,7 @@ class NNModuleVariable(VariableTracker):
             builtin_supported = (
                 torch.nn.ModuleDict.__getitem__,
                 torch.nn.ModuleList.__getitem__,
+                torch.nn.ParameterDict.__getitem__,
                 torch.nn.ParameterList.__getitem__,
                 torch.nn.Sequential.__getitem__,
             )

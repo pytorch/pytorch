@@ -71,12 +71,21 @@ def _gather_state_dict(
             else:
                 tensor = output_tensor
         elif isinstance(tensor, DTensor):
+            if tensor.device != tensor.device_mesh.device_type:
+                tensor = tensor.to(tensor.device_mesh.device_type)
             tensor = tensor.redistribute(
                 device_mesh=tensor.device_mesh, placements=[Replicate()]
             )
             tensor = tensor.to_local()
         new_state_dict[key] = tensor
     return new_state_dict
+
+
+def _get_remove_device_str(rank, device_type, num_devices_per_node):
+    if device_type.lower() == "cpu":
+        return f"rank:{rank}/{device_type}"
+    else:
+        return f"rank:{rank}/{device_type}:{rank % num_devices_per_node}"
 
 
 def _create_chunk_sharded_tensor(
@@ -108,7 +117,7 @@ def _create_chunk_sharded_tensor(
     chunk_offsets = [[d0] + offsets for d0 in dim0_offsets]
     device_type = distributed_c10d._get_pg_default_device(pg).type
     placements = [
-        f"rank:{r}/{device_type}:{r % num_devices_per_node}"
+        _get_remove_device_str(r, device_type, num_devices_per_node)
         for r in range(len(chunk_sizes))
     ]
     assert len(chunk_sizes) == len(chunk_offsets) == len(placements)
@@ -142,10 +151,14 @@ def _create_chunk_dtensor(
     corresponding chunk as the local tensor to create a DTensor.
     """
     shard_placement = DShard(0)
-    tensor_padded_list, _ = shard_placement._split_tensor(
+    tensor_list, _ = shard_placement._split_tensor(
         tensor,
         device_mesh.size(dim=0),
         with_padding=False,
         contiguous=True,
     )
-    return DTensor.from_local(tensor_padded_list[rank], device_mesh, [shard_placement])
+    # We need to explicitly call .clone() here as tensor.chunks() splits a tensor into the specified number of chunks.
+    # Each chunk is a view of the input tensor. If the original tensor change, the view will also be changed.
+    # We need to explicitly call .detach() to return a new tensor detached from the current graph.
+    local_tensor = tensor_list[rank].clone().detach()
+    return DTensor.from_local(local_tensor, device_mesh, [shard_placement])

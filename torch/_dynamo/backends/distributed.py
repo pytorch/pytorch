@@ -52,7 +52,7 @@ def bucket_has_external_output(bucket: Bucket) -> bool:
     return False
 
 
-def pretty_print_buckets(buckets: List[Bucket]):
+def pretty_print_buckets(buckets: List[Bucket], bucket_bytes_cap: int):
     headers = ("Index", "Size (b)", "Param Names")
     rows = []
     extended_buckets = []
@@ -71,6 +71,21 @@ def pretty_print_buckets(buckets: List[Bucket]):
             )
 
     if len(rows):
+        log.info(
+            "\nDDPOptimizer used bucket cap %s and created %d buckets. Enable debug logs for detailed bucket info.",
+            bucket_bytes_cap,
+            len(buckets),
+        )
+
+        if len(extended_buckets):
+            log.warning(
+                "Some buckets were extended beyond their requested parameter capacities"
+                " in order to ensure each subgraph has an output node, required for fx graph partitioning."
+                " This can be the case when a subgraph would have only contained nodes performing inplace mutation,"
+                " and returning no logical outputs. This should not be a problem, unless it results in too few graph"
+                " partitions for optimal DDP performance."
+            )
+
         try:
             from tabulate import tabulate
 
@@ -81,23 +96,29 @@ def pretty_print_buckets(buckets: List[Bucket]):
 
             if len(extended_buckets):
                 log.warning(
-                    "These buckets were extended beyond their requested parameter capacities"
-                    " in order to ensure each subgraph has"
-                    " an output node, required for fx graph partitioning. This can be the case when a subgraph would have"
-                    " only contained nodes performing inplace mutation, and returning no logical outputs. This should not"
-                    " be a problem, unless it results in too few graph partitions for optimal DDP performance."
-                    "\n%s",
+                    "DDPOptimizer extended these buckets to ensure per-subgraph output nodes:\n%s",
                     tabulate(
                         extended_buckets,
                         headers=("Index", "Extra Ops", "Extra Param Size (b)"),
+                        tablefmt="simple_grid",
                     ),
                 )
         except ImportError:
-            log.info(
-                "Please `pip install tabulate` in order to pretty-print ddp bucket sizes"
+            log.debug(
+                "Please `pip install tabulate` in order to display ddp bucket sizes and diagnostic information."
             )
     else:
         log.debug("DDPOptimizer captured no parameters and did not split this graph.")
+
+
+def has_higher_order_op(gm):
+    # Check if there is a higher order op in the graph
+    for node in gm.graph.nodes:
+        if node.op == "get_attr":
+            maybe_param = getattr(gm, node.target)
+            if isinstance(maybe_param, torch.fx.GraphModule):
+                return True
+    return False
 
 
 class DDPOptimizer:
@@ -196,6 +217,23 @@ class DDPOptimizer:
         if fake_mode is None:
             fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
 
+        if has_higher_order_op(gm):
+            # This indicates presence of a higher order op. For now, we
+            # have no way to break the higher order op into two buckets.
+            # Allowing higher order ops in the graph also requires
+            # changes in the split_module, becuase graph splitter
+            # currently assumes that all the args of all ops are
+            # tensors, but in the case of higher order ops, it could be
+            # a graph module. As a workaround, we are shortcircuiting
+            raise NotImplementedError(
+                "DDPOptimizer backend: Found a higher order op in the graph. "
+                "This is not supported. Please turn off DDP optimizer using "
+                "torch._dynamo.config.optimize_ddp=False. Note that this can "
+                "cause performance degradation because there will be one bucket "
+                "for the entire Dynamo graph. Please refer to this issue - "
+                "https://github.com/pytorch/pytorch/issues/104674."
+            )
+
         # 1: compute the partition map according to DDP bucket logic
         buckets = [Bucket()]  # (size, param_names)
         for node in reversed(gm.graph.nodes):
@@ -246,11 +284,7 @@ class DDPOptimizer:
 
         # stash buckets for testing/debugging purposes
         self.buckets = buckets
-        log.info(
-            "DDPOptimizer used bucket cap %s and produced the following buckets:",
-            self.bucket_bytes_cap,
-        )
-        pretty_print_buckets(buckets)
+        pretty_print_buckets(buckets, self.bucket_bytes_cap)
 
         if len(buckets) == 1:
             # bypass split/fuse logic if there is only one bucket

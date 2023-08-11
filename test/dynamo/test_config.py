@@ -8,8 +8,6 @@ from torch._dynamo.utils import disable_cache_limit
 # NB: do NOT include this test class in test_dynamic_shapes.py
 
 
-# TODO: delete this when dynamic_shapes enabled by default
-@torch._dynamo.config.patch(dynamic_shapes=True)
 class ConfigTests(torch._dynamo.test_case.TestCase):
     @disable_cache_limit()
     def test_no_automatic_dynamic(self):

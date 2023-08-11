@@ -888,7 +888,7 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
     // Selecting sparse dimension
     TORCH_CHECK(
         n_batch == 0,
-        select_name, ": selecting sparse dimensions is not implemented for batched sparse compressed tensors.")
+        select_name, ": selecting sparse dimensions is not supported for batched sparse compressed tensors.")
     TORCH_INTERNAL_ASSERT(dim == 0 || dim == 1);
 
     DimVector blocksize{1, 1};

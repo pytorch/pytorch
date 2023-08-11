@@ -37,6 +37,11 @@ on:
         required: false
         type: string
         default: ""
+    secrets:
+      HUGGING_FACE_HUB_TOKEN:
+        required: false
+        description: |
+          HF Auth token to avoid rate limits when downloading models or datasets from hub
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -68,10 +73,9 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: ./.github/actions/calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ${{ inputs.docker-image }}
-          xla: ${{ contains(inputs.build-environment, 'xla') }}
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
@@ -108,10 +112,10 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
-      - name: Check for keep-going label
+      - name: Check for keep-going label and re-enabled test issues
         # This uses the filter-test-configs action because it conviniently
-        # checks for labels.  It does not actually do any filtering.  All
-        # filtering is done in the build step.
+        # checks for labels and re-enabled test issues.  It does not actually do
+        # any filtering.  All filtering is done in the build step.
         id: keep-going
         uses: ./.github/actions/filter-test-configs
         with:
@@ -153,7 +157,7 @@ jobs:
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-          PR_BODY: ${{ github.event.pull_request.body }}
+          REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
@@ -164,6 +168,8 @@ jobs:
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+
         run: |
           set -x
 
@@ -174,20 +180,6 @@ jobs:
           else
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
-
-          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-main}")
-
-          # sanitize the input commit message and PR body here:
-          #
-          # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
-          # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
-          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
-          PR_BODY="${PR_BODY//[$'\n\r']}"
-
-          # then trim all special characters like single and double quotes to avoid unescaped inputs to
-          # wreak havoc internally
-          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
-          export PR_BODY="${PR_BODY//[\'\"]}"
 
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
@@ -212,8 +204,7 @@ jobs:
             -e SHARD_NUMBER \
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
-            -e PR_BODY \
-            -e COMMIT_MESSAGES \
+            -e REENABLED_ISSUES \
             -e CONTINUE_THROUGH_ERROR \
             -e PYTORCH_RETRY_TEST_CASES \
             -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
@@ -226,6 +217,7 @@ jobs:
             -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
+            -e HUGGING_FACE_HUB_TOKEN \
             -e DASHBOARD_TAG \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \

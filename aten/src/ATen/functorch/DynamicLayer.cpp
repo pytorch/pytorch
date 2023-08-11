@@ -99,6 +99,12 @@ class FuncTorchTLS : public FuncTorchTLSBase {
     return 0;
   }
 
+  void checkSupportsCppAutogradFunction() const override {
+    TORCH_CHECK(
+        dynamicLayerStack.empty(),
+        "cannot use C++ torch::autograd::Function with functorch transforms (vmap, grad, vjp, etc)");
+  }
+
   void checkSupportsInplaceRequiresGrad() const override {
     TORCH_CHECK(dynamicLayerStack.empty() || allow_inplace_requires_grad_,
         "You are attempting to call Tensor.requires_grad_() (or perhaps using ",

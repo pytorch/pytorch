@@ -168,8 +168,16 @@ class ComputeCodegenUnboxedKernels:
         kernel_key: Union[ETKernelKey, List[ETKernelKey]] = unbox_kernel_entry[1][0]
         kernel_meta: BackendMetadata = unbox_kernel_entry[1][1]
 
-        # TODO: Update to use Kernel Selector
-        if not self.selector.is_root_operator(f"{f.namespace}::{f.func.name}"):
+        op_name = f"{f.namespace}::{f.func.name}"
+        if not self.selector.is_root_operator(op_name):
+            return ""
+
+        if not isinstance(kernel_key, list):
+            kernel_key = [kernel_key]
+        used_kernel_keys = self.selector.et_get_selected_kernels(
+            op_name, [k.to_native_string() for k in kernel_key]
+        )
+        if not used_kernel_keys:
             return ""
         sig: Union[CppSignature, ExecutorchCppSignature]
         argument_type_gen: Callable[..., NamedCType]
@@ -217,15 +225,12 @@ class ComputeCodegenUnboxedKernels:
                 return_assignment = ""
                 ret_prefix = ""
 
-        if not isinstance(kernel_key, list):
-            kernel_key = [kernel_key]
-
         newline = "\n    "
         return "\n".join(
             [
                 f"""
 Kernel(
-    "{f.namespace}::{f.func.name}",{newline + '"' + (k.to_native_string() + '",') if k.to_native_string() != 'default' else ''}
+    "{f.namespace}::{f.func.name}",{newline + '"' + (k + '",') if k != 'default' else ''}
     []({contextArg.defn()}, EValue** stack) {{
         {code_connector.join(code_list)}
 
@@ -236,7 +241,7 @@ Kernel(
     }}
 ),
 """
-                for k in kernel_key
+                for k in used_kernel_keys
             ]
         )
 
@@ -570,7 +575,7 @@ def translate_native_yaml(
         None
     """
     if use_aten_lib:
-        with open(aten_yaml_path, "r") as aten_yaml:
+        with open(aten_yaml_path) as aten_yaml:
             out_file.writelines(aten_yaml.readlines())
         return
 
@@ -599,7 +604,7 @@ def translate_native_yaml(
         or os.stat(native_yaml_path).st_size == 0
     ):
         return
-    with open(native_yaml_path, "r") as native_yaml:
+    with open(native_yaml_path) as native_yaml:
         native_es = yaml.load(native_yaml, Loader=LineLoader)
         if not native_es:
             return
@@ -636,7 +641,7 @@ def parse_yaml(
     Union[Dict[DispatchKey, Dict[OperatorName, BackendMetadata]], ETKernelIndex],
 ]:
     if path and os.path.exists(path) and os.stat(path).st_size > 0:
-        with open(path, "r") as f:
+        with open(path) as f:
             es = yaml.load(f, Loader=LineLoader)
 
         # Check for kernel index structure

@@ -12,7 +12,7 @@ namespace onednn {
 
 using opkind = dnnl::graph::op::kind;
 
-void fixConvOptionalBias(Node* node) {
+static void fixConvOptionalBias(Node* node) {
   if (node->namedInput("bias")->mustNotBeNone() == false) {
     // Replace non-existent optional bias with const None
     auto g = node->owningGraph();
@@ -22,7 +22,7 @@ void fixConvOptionalBias(Node* node) {
   }
 }
 
-c10::optional<size_t> getDimensions(Value* v) {
+static c10::optional<size_t> getDimensions(Value* v) {
   if (v->type()->isSubtypeOf(TensorType::get())) {
     return v->type()->cast<TensorType>()->sizes().size();
   } else {
@@ -36,7 +36,7 @@ c10::optional<size_t> getDimensions(Value* v) {
 // no need to check beforehand whether the op is supported by oneDNN Graph or
 // not oneDNN Graph ops separated by wildcards don't end up in the same
 // partition.
-Operator makeWildcardOp(Node* node) {
+static Operator makeWildcardOp(Node* node) {
   auto o = Operator(node, opkind::Wildcard);
   // wildcard op contains only topology info
   for (size_t i = 0; i < node->inputs().size(); i++) {
@@ -307,7 +307,7 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
   return makeWildcardOp(node);
 }
 
-DeviceType inferDeviceFromValue(Value* v) {
+static DeviceType inferDeviceFromValue(Value* v) {
   auto tt = v->type()->cast<TensorType>();
   if (!tt) {
     return at::kCPU;
@@ -319,7 +319,7 @@ DeviceType inferDeviceFromValue(Value* v) {
   return device->type();
 }
 
-DeviceType inferDevice(const std::shared_ptr<Graph>& graph) {
+static DeviceType inferDevice(const std::shared_ptr<Graph>& graph) {
   auto dt = inferDeviceFromValue(graph->inputs()[0]);
   TORCH_CHECK(
       std::all_of(
@@ -330,7 +330,7 @@ DeviceType inferDevice(const std::shared_ptr<Graph>& graph) {
   return dt;
 }
 
-dnnl::graph::engine::kind getLlgaEngineKind(DeviceType type) {
+static dnnl::graph::engine::kind getLlgaEngineKind(DeviceType type) {
   switch (type) {
     case DeviceType::CPU:
       return dnnl::graph::engine::kind::cpu;
@@ -339,7 +339,7 @@ dnnl::graph::engine::kind getLlgaEngineKind(DeviceType type) {
   }
 }
 
-void mayAddListConstructIntoConcatPartition(
+static void mayAddListConstructIntoConcatPartition(
     Node* n,
     OpPartitionMap& opToOwningPartition) {
   // Since prim::ListConstruct is not visible to the LLGA,
@@ -360,7 +360,7 @@ void mayAddListConstructIntoConcatPartition(
 // Scalars would be converted to 1-D tensors later anyway,
 // but they shouldn't be complex-double
 // If this check fails, convert op to wildcard
-bool checkInputCompatibility(Node* node) {
+static bool checkInputCompatibility(Node* node) {
   auto allInputs = node->inputs();
   for (auto input : allInputs) {
     c10::IValue inputIValue = toIValue(input);
@@ -465,7 +465,7 @@ bool LlgaGraphHelper::shouldMerge(Node* toMerge, Node* subgraph) {
 // only use single-op partitions for ops unsupported by NNC, or ops
 // that oneDNN executes faster. prim::ListConstruct is an exception, since
 // we simply want to fuse it with cat.
-bool isBetterSuitedForLLGA(NodeKind kindOfOp) {
+static bool isBetterSuitedForLLGA(NodeKind kindOfOp) {
   return (
       (kindOfOp == aten::layer_norm) || (kindOfOp == aten::avg_pool2d) ||
       (kindOfOp == aten::matmul) || (kindOfOp == aten::max_pool2d) ||
