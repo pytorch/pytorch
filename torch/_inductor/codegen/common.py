@@ -578,9 +578,7 @@ class KernelArgs:
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"const {cpp_dtype}*")
         for outer, inner in self.output_buffers.items():
-            if outer in self.inplace_buffers or self._buffer_is_marked_removed(
-                inner
-            ):
+            if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
                 continue
             dtype = buffer_types[outer]
             cpp_dtype = DTYPE_TO_CPP[dtype]
@@ -612,9 +610,7 @@ class KernelArgs:
         for outer, inner in chain(
             self.input_buffers.items(), self.output_buffers.items()
         ):
-            if outer in self.inplace_buffers or self._buffer_is_marked_removed(
-                inner
-            ):
+            if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
                 continue
             arg_defs.append(inner)
             call_args.append(outer)
@@ -640,9 +636,7 @@ class KernelArgs:
 
     def is_removed(self, name):
         def _is_removed(name, buffers):
-            return name not in buffers or self._buffer_is_marked_removed(
-                buffers[name]
-            )
+            return name not in buffers or self._buffer_is_marked_removed(buffers[name])
 
         return _is_removed(name, self.output_buffers) and _is_removed(
             name, self.inplace_buffers
@@ -658,9 +652,7 @@ class KernelArgs:
                 continue
             live_outs.add(inplaced.other_names[-1])
         for outer, inner in self.output_buffers.items():
-            if outer in self.inplace_buffers or self._buffer_is_marked_removed(
-                inner
-            ):
+            if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
                 continue
             live_outs.add(outer)
         return live_outs
