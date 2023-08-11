@@ -65,7 +65,7 @@ class TestBackwardPrefetch(FSDPTest):
         tgt = torch.randn((20, 1, 1024), device="cuda")
 
         # monkey patch
-        none_handle_count = 0
+        non_none_handle_count = 0
         func_call_count = 0
 
         def patched_get_handle_to_prefetch(*args, **kwargs):
@@ -84,10 +84,10 @@ class TestBackwardPrefetch(FSDPTest):
                 training_state == HandleTrainingState.BACKWARD_POST
                 and state.backward_prefetch == BackwardPrefetch.BACKWARD_POST
             ):
-                nonlocal none_handle_count
+                nonlocal non_none_handle_count
                 nonlocal func_call_count
                 if handle is not None:
-                    none_handle_count += 1
+                    non_none_handle_count += 1
                 func_call_count += 1
             return handle
 
@@ -111,8 +111,8 @@ class TestBackwardPrefetch(FSDPTest):
             BackwardPrefetch.BACKWARD_POST,
         ]:
             self.assertTrue(
-                func_call_count > 0 and none_handle_count > 0,
-                f"_get_handle_to_prefetch: {func_call_count} non-None handles: {none_handle_count}",
+                func_call_count > 0 and non_none_handle_count > 0,
+                f"_get_handle_to_prefetch: {func_call_count} non-None handles: {non_none_handle_count}",
             )
 
     @skip_if_lt_x_gpu(2)
