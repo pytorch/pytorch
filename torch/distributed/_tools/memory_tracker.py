@@ -260,6 +260,12 @@ class MemoryTracker:
             inputs: Sequence[torch.Tensor],
             outputs: Sequence[torch.Tensor],
         ) -> None:
+            if self._cur_module_name == f"{name}.forward":
+                # This module is done. We need to get the parent module name.
+                # We assume that the name before the last '.' is the parent module name.
+                parent_module_name = ".".join(name.split(".")[:-1])
+                self._cur_module_name = f"{parent_module_name}.forward"
+
             if (
                 hasattr(module, "_memory_tracker_is_root")
                 and module._memory_tracker_is_root
