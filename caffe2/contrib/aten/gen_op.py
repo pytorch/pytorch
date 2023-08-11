@@ -153,6 +153,11 @@ def supports(o, factory_methods):
             print("Skipping {} Because of Arg: {} ({}) ".format(
                   o['name'], arg['type'], arg['dynamic_type']))
             return False
+
+    # skip _foreach_clamp(Tensor[], Scalar?, Scalar?)
+    if o['name'] in {"_foreach_clamp"}:
+        print(f"Skipping {o['name']} because it has multiple scalar arguments with default values.")
+        return False
     return True
 
 
@@ -327,4 +332,5 @@ if __name__ == '__main__':
         top_env['implementations'].append(IMPLEMENTATION_TEMPLATE.substitute(env))
         top_env['cases'].append(CASE_TEMPLATE.substitute(env))
         key += 1
+
     write(os.path.join(args.install_dir, args.output_prefix + "aten_op.h"), OP_TEMPLATE.substitute(top_env))
