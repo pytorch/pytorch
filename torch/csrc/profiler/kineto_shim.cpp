@@ -1,3 +1,4 @@
+#include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 
 #include <type_traits>
@@ -235,6 +236,10 @@ void prepareTrace(
   }
   if (activities.count(torch::autograd::profiler::ActivityType::CUDA)) {
     k_activities.insert(kCudaTypes.begin(), kCudaTypes.end());
+    if (config.enable_cuda_sync_events || get_cuda_sync_enabled()) {
+      LOG(INFO) << "Enabling CUDA Sync Events";
+      k_activities.insert(libkineto::ActivityType::CUDA_SYNC);
+    }
   }
 
   ExperimentalConfigWrapper configWrap(config);
@@ -320,6 +325,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::GPU_MEMCPY:
     case libkineto::ActivityType::GPU_MEMSET:
     case libkineto::ActivityType::CONCURRENT_KERNEL:
+    case libkineto::ActivityType::CUDA_SYNC:
     case libkineto::ActivityType::GPU_USER_ANNOTATION:
     case libkineto::ActivityType::CUDA_PROFILER_RANGE:
     // TODO: T151322015

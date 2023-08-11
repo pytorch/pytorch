@@ -2150,7 +2150,7 @@ const auto hermite_polynomial_h_string = jiterator_stringify(
 
         T p = T(1.0);
         T q = x + x;
-        T r;
+        T r = T(0.0);
 
         for (int64_t k = 2; k < n + n; k += 2) {
             r = (x + x) * q - k * p;

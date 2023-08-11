@@ -1,9 +1,10 @@
 import logging
+from collections import defaultdict
 from typing import Tuple, Dict, Optional, List
 
 import torch
 from torch._export import export
-from torch._export.pass_base import ExportPassBase
+from torch._export.pass_base import _ExportPassBase
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
 from torch._subclasses import FakeTensor
@@ -26,6 +27,24 @@ def get_target_version(versioned_upgrader_name: str) -> int:
         raise RuntimeError(f"Upgrader name {versioned_upgrader_name} is invalid")
 
     return int(versioned_upgrader_name.split('_')[-1]) + 1
+
+
+def get_upgraders() -> Dict[str, Tuple[str, str]]:
+    """Getting upgraders entry map and operator version map and merge them into one dict."""
+    upgraders = torch._C._get_upgraders_entry_map()
+    op_version_map = torch._C._get_operator_version_map()
+    output: Dict[str, Tuple[str, str]] = defaultdict(tuple)  # type: ignore[arg-type]
+    for opname, entry_list in op_version_map.items():
+        if not entry_list:
+            raise RuntimeError(f"Op version map has an empty entry for opname {opname}")
+        entry = entry_list[0]
+        old_schema = entry.old_schema
+        upgrader_name = entry.upgrader_name
+        upgrader_str = upgraders.get(upgrader_name, None)
+        if not upgrader_str:
+            raise RuntimeError(f"Can't find upgrader for op {opname} and upgrader name {upgrader_name}")
+        output[upgrader_name] = (old_schema, upgrader_str)
+    return output
 
 
 class GraphModuleOpUpgrader:
@@ -55,7 +74,7 @@ class GraphModuleOpUpgrader:
     original TorchScript upgrader).
     """
 
-    class UpgraderPass(ExportPassBase):
+    class UpgraderPass(_ExportPassBase):
         def __init__(self, old_target: Target, new_target: Target):
             super().__init__()
             self.old_target = old_target
@@ -77,12 +96,12 @@ class GraphModuleOpUpgrader:
             compiler_opset_version: Optional[Dict[str, int]] = None,
             model_opset_version: Optional[Dict[str, int]] = None,
             op_upgraders: Optional[Dict[str, Tuple[str, str]]] = None,
-            # TODO(larryliu): can add a new TS API: torch._C._get_upgraders_entry_map()
     ):
+        self.op_upgraders: Dict[str, Tuple[str, str]] = get_upgraders() if not op_upgraders else op_upgraders
         self.compiler_opset_version = compiler_opset_version if compiler_opset_version else {}
         self.model_opset_version = model_opset_version if model_opset_version else {}
         self.upgrader_passes: List[GraphModuleOpUpgrader.UpgraderPass] = GraphModuleOpUpgrader._populate_passes(
-            self._parse_upgraders(op_upgraders))
+            self._parse_upgraders(self.op_upgraders))
 
     def _parse_upgraders(self, op_upgraders: Optional[Dict[str, Tuple[str, str]]] = None) -> List[Tuple[str, str]]:
         """Reorder op_upgraders by version number, return an ordered list of tuples, containing old op schema as well
@@ -170,13 +189,13 @@ class GraphModuleOpUpgrader:
         args = [n.meta.get("val", None) for n in exported_program.graph.nodes if n.op == "placeholder"]
         args_real_tensors = [torch.ones(tuple(arg.size()), dtype=arg.dtype) if isinstance(arg, FakeTensor) else arg for
                              arg in args]
+        assert exported_program.call_spec.in_spec is not None
         inputs = tree_unflatten(args_real_tensors, exported_program.call_spec.in_spec)
 
         for _pass in self.upgrader_passes:
             upgraded_program = exported_program.transform(_pass)
-            # NB: we have to retrace the graph_module instead of ep because of some failure. Also, we need to turn of
-            # _add_runtime_assertions because dynamo is not happy with sym_size.int.
-            exported_program = export(upgraded_program.graph_module, inputs, [], _add_runtime_assertions=False)
-            exported_program.call_spec = upgraded_program.call_spec
+            # NB: we have to retrace the graph_module instead of ep because of some failure.
+            exported_program = export(upgraded_program.module(), inputs, {})
+            exported_program._call_spec = upgraded_program.call_spec
 
         return exported_program

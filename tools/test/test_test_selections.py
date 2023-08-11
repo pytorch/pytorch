@@ -394,28 +394,24 @@ class TestParsePrevTests(unittest.TestCase):
         "tools.testing.test_selections._get_modified_tests",
         return_value={"test2", "test4"},
     )
+    @mock.patch(
+        "tools.testing.test_selections._get_file_rating_tests", return_value=["test1"]
+    )
     def test_get_reordered_tests(
-        self, mock_get_prev_failing_tests: Any, mock_get_modified_tests: Any
+        self,
+        mock_get_prev_failing_tests: Any,
+        mock_get_modified_tests: Any,
+        mock_get_file_rating_tests: Any,
     ) -> None:
-        tests = [
-            ShardedTest(name="test1", shard=1, num_shards=2, time=600.0),
-            ShardedTest(name="test2", shard=1, num_shards=2, time=500.0),
-            ShardedTest(name="test3", shard=1, num_shards=2, time=400.0),
-            ShardedTest(name="test4", shard=1, num_shards=2, time=300.0),
-            ShardedTest(name="test5", shard=1, num_shards=2, time=200.0),
-        ]
+        tests = ["test1", "test2", "test3", "test4", "test5"]
 
-        expected_prioritized_tests = {"test4", "test2"}
-        expected_remaining_tests = {"test1", "test3", "test5"}
+        expected_prioritized_tests = ["test4", "test2", "test1"]
+        expected_remaining_tests = {"test3", "test5"}
 
         prioritized_tests, remaining_tests = get_reordered_tests(tests)
 
-        # Just want to check the names of the tests
-        prioritized_tests_name = {test.name for test in prioritized_tests}
-        remaining_tests_name = {test.name for test in remaining_tests}
-
-        self.assertSetEqual(expected_prioritized_tests, prioritized_tests_name)
-        self.assertSetEqual(expected_remaining_tests, remaining_tests_name)
+        self.assertListEqual(expected_prioritized_tests, prioritized_tests)
+        self.assertSetEqual(expected_remaining_tests, set(remaining_tests))
 
     def test_compute_prioritization_time_savings_with_multiple_threads(self) -> None:
         tests = [

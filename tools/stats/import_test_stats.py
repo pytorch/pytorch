@@ -19,6 +19,8 @@ IGNORE_DISABLED_ISSUES: List[str] = get_disabled_issues()
 
 SLOW_TESTS_FILE = ".pytorch-slow-tests.json"
 DISABLED_TESTS_FILE = ".pytorch-disabled-tests.json"
+TEST_FILE_RATINGS_FILE = ".pytorch-test-file-ratings.json"
+
 
 FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
 
@@ -46,7 +48,7 @@ def fetch_and_cache(
 
     if os.path.exists(path) and is_cached_file_valid():
         # Another test process already download the file, so don't re-do it
-        with open(path, "r") as f:
+        with open(path) as f:
             return cast(Dict[str, Any], json.load(f))
 
     for _ in range(3):
@@ -115,4 +117,15 @@ def get_disabled_tests(
         return fetch_and_cache(dirpath, filename, url, process_disabled_test)
     except Exception:
         print("Couldn't download test skip set, leaving all tests enabled...")
+        return {}
+
+
+def get_test_file_ratings(
+    dirpath: str, filename: str = TEST_FILE_RATINGS_FILE
+) -> Optional[Dict[str, Any]]:
+    url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/file_test_rating.json"
+    try:
+        return fetch_and_cache(dirpath, filename, url, lambda x: x)
+    except Exception:
+        print("Couldn't download test file ratings file, not reordering...")
         return {}
