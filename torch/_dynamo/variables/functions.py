@@ -362,6 +362,8 @@ def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
 
 
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
+    _nonvar_fields = ["f_globals"]
+
     def __init__(
         self,
         fn_name,

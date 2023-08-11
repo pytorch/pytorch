@@ -1034,7 +1034,7 @@ class BuiltinVariable(VariableTracker):
             TorchVariable,
             UserFunctionVariable,
         )
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
 
         options = VariableTracker.propagate(self, obj, name_var)
         guards = options["guards"]
@@ -1106,7 +1106,10 @@ class BuiltinVariable(VariableTracker):
             elif ConstantVariable.is_literal(member):
                 return ConstantVariable(member, **options)
             else:
-                return VariableBuilder(tx, source)(member).add_guards(guards)
+                if source:
+                    return VariableBuilder(tx, source)(member).add_guards(guards)
+                else:
+                    return SourcelessBuilder()(tx, member).add_guards(guards)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
             member = obj.value.__dict__[name]
 

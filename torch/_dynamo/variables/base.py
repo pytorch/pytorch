@@ -6,7 +6,7 @@ from .. import variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
 from ..source import AttrSource, Source
-from ..utils import dict_values, identity, istype, odict_values
+from ..utils import dict_values, identity, odict_values
 
 
 class MutableLocalSource(Enum):
@@ -151,48 +151,68 @@ class VariableTracker(metaclass=HasPostInit):
         Walk this object and call fn on all the VariableTracker
         instances to produce a new VariableTracker with the results.
         """
-        if cache is None:
-            cache = dict()
+        cache = cache if cache else {}
+        stack = [
+            (value, False)
+        ]  # The boolean indicates if the value has been processed
+        results = {}
 
-        idx = id(value)
-        if idx in cache:
-            return cache[idx][0]
+        iterations = 0
+        while stack:
+            if iterations > 1000:
+                raise RuntimeError(f"DEBUGGING ASSERT ONLY WILL REMOVE FOR LAND - Failed! {value}")
+            iterations += 1
+            curr_val, processed = stack.pop()
 
-        if isinstance(value, VariableTracker):
-            if not skip_fn(value):
-                updated_dict = dict(value.__dict__)
-                for key in updated_dict.keys():
-                    if key not in value._nonvar_fields:
-                        updated_dict[key] = cls.apply(
-                            fn, updated_dict[key], cache, skip_fn
-                        )
-                result = fn(value.clone(**updated_dict))
-                if update_contains is False:
-                    result._update_contains()
+            idx = id(curr_val)
+            if idx in cache:
+                results[idx] = cache[idx][0]
+                continue
+
+            if processed:
+                if isinstance(curr_val, VariableTracker):
+                    if not skip_fn(curr_val):
+                        updated_dict = dict(curr_val.__dict__)
+                        for key in updated_dict.keys():
+                            if key not in curr_val._nonvar_fields:
+                                updated_dict[key] = results[id(updated_dict[key])]
+                        result = fn(curr_val.clone(**updated_dict))
+                        if update_contains is False:
+                            result._update_contains()
+                    else:
+                        result = fn(curr_val)
+
+                elif isinstance(curr_val, (list, tuple)):
+                    result = type(curr_val)(results[id(v)] for v in curr_val)
+
+                elif isinstance(curr_val, (dict, collections.OrderedDict)):
+                    result = type(curr_val)(
+                        (k, results[id(v)]) for k, v in curr_val.items()
+                    )
+
+                else:
+                    result = curr_val
+
+                cache[idx] = (result, curr_val)
+                results[idx] = result
+
             else:
-                result = fn(value)
+                stack.append((curr_val, True))
 
-        elif istype(value, list):
-            result = [cls.apply(fn, v, cache, skip_fn, update_contains) for v in value]
-        elif istype(value, tuple):
-            result = tuple(
-                cls.apply(fn, v, cache, skip_fn, update_contains) for v in value
-            )
-        elif istype(value, collections.OrderedDict):
-            result = collections.OrderedDict(
-                cls.apply(fn, v, cache, skip_fn, update_contains) for v in value.items()
-            )
-        elif istype(value, dict):
-            result = {
-                k: cls.apply(fn, v, cache, skip_fn, update_contains)
-                for k, v in list(value.items())
-            }
-        else:
-            result = value
+                if isinstance(curr_val, VariableTracker) and not skip_fn(curr_val):
+                    for key, val in curr_val.__dict__.items():
+                        if key not in curr_val._nonvar_fields:
+                            stack.append((val, False))
 
-        # save `value` to keep it alive and ensure id() isn't reused
-        cache[idx] = (result, value)
-        return result
+                elif isinstance(curr_val, (list, tuple, dict, collections.OrderedDict)):
+                    for v in (
+                        curr_val.values()
+                        if isinstance(curr_val, (dict, collections.OrderedDict))
+                        else curr_val
+                    ):
+                        stack.append((v, False))
+
+        return results[id(value)]
 
     def add_guard(self, guard):
         return self.clone(guards=set.union(self.guards, {guard}))
