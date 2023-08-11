@@ -9,6 +9,7 @@ import torch._inductor
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
     TEST_WITH_ROCM,
     TestCase,
@@ -36,7 +37,7 @@ bin_ops_under_test = [
     torch._foreach_div,
     torch._foreach_maximum,
 ]
-un_ops_under_test = [torch._foreach_reciprocal, torch._foreach_neg]
+un_ops_under_test = [torch._foreach_reciprocal, torch._foreach_neg, torch._foreach_sign]
 compose_ops = [torch._foreach_addcdiv, torch._foreach_addcmul]
 all_ops = parametrize(
     "op", bin_ops_under_test + un_ops_under_test, name_fn=lambda f: f.__name__
@@ -280,9 +281,10 @@ class ForeachTests(TestCase):
                 torch.rand(20, 20, device="cuda:0"),
             ),
             reference_in_float=False,
+            check_lowp=False,
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     @all_ops
@@ -304,7 +306,7 @@ class ForeachTests(TestCase):
             gen_args(op),
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     @bin_ops
@@ -321,7 +323,7 @@ class ForeachTests(TestCase):
             ),
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     @all_ops
@@ -330,7 +332,7 @@ class ForeachTests(TestCase):
 
             def fn(a0, a1):
                 c0 = torch.add(a0, a0)
-                c1 = torch.mul(a1, a1)
+                c1 = torch.add(a1, a1)
                 return op([c0, c1])
 
         else:
@@ -341,12 +343,10 @@ class ForeachTests(TestCase):
                 return op([a0, a1], [c0, c1])
 
         self.check_model_cuda(
-            fn,
-            gen_args(op),
-            reference_in_float=False,
+            fn, gen_args(op), reference_in_float=False, check_lowp=False
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     @bin_ops
@@ -366,7 +366,7 @@ class ForeachTests(TestCase):
             ),
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     @all_ops
@@ -395,9 +395,10 @@ class ForeachTests(TestCase):
             fn,
             gen_args(op),
             reference_in_float=False,
+            check_lowp=False,
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     @bin_ops
@@ -419,13 +420,13 @@ class ForeachTests(TestCase):
                 torch.rand(20, 20, device="cuda:0"),
             ),
             reference_in_float=False,
+            check_lowp=False,
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     @bin_ops
-    @torch._dynamo.config.patch("dynamic_shapes", True)
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_dynamic_shapes_fallback(self, op):
@@ -443,6 +444,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @unittest.skipIf(IS_FBCODE, "cpp compile not supported in fbcode")
     @bin_ops
     def test_cpu_cpp_fallback(self, op):
         def fn(a0, a1, b0, b1):

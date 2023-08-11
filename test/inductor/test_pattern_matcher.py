@@ -3,13 +3,13 @@ import copy
 import unittest
 
 import torch
-import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -76,6 +76,7 @@ class TestPaternMatcher(TestCase):
             (4, torch.randn(16, 16, device="cuda"), torch.randn(16, 16, device="cuda")),
         ]
         for args in args_list:
+            torch._dynamo.reset()
             counters.clear()
             e1, e2 = fn(*args)
             a1, a2 = torch.compile(fn)(*args)
@@ -83,6 +84,54 @@ class TestPaternMatcher(TestCase):
             torch.testing.assert_close(a2, e2)
             self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
             self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+
+    def test_addmm_activation(self):
+        def fn_addmm_relu(input, mat1, mat2):
+            return torch.nn.functional.relu(torch.addmm(input, mat1, mat2))
+
+        def fn_addmm_gelu(input, mat1, mat2):
+            return torch.nn.functional.gelu(torch.addmm(input, mat1, mat2))
+
+        args = [
+            torch.randn(20, device="cuda"),  # input
+            torch.randn(10, 15, device="cuda"),  # mat1
+            torch.randn(15, 20, device="cuda"),  # mat2
+        ]
+
+        for fn, atol in (
+            (fn_addmm_relu, 1e-8),
+            # higher tolerance due to the "tanh" approximation
+            # in fused GELU epilogue vs. "none" without fusion
+            (fn_addmm_gelu, 1e-3),
+        ):
+            expected = fn(*args)
+            actual, (code,) = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(actual, expected, atol=atol, rtol=0)
+            self.assertTrue("_addmm_activation" in code)
+
+        for fn in (fn_addmm_relu, fn_addmm_gelu):
+            counters.clear()
+            torch.compile(
+                fn,
+                # replacement disabled on max_autotune_gemm
+                options={"max_autotune_gemm": True},
+            )(*args)
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
+
+        args_not_replaced = [
+            # addmm + activation with a rank-2 input
+            # is not fusable, hence not replaced
+            torch.randn(10, 20, device="cuda"),  # input
+            torch.randn(10, 15, device="cuda"),  # mat1
+            torch.randn(15, 20, device="cuda"),  # mat2
+        ]
+
+        for fn in (fn_addmm_relu, fn_addmm_gelu):
+            counters.clear()
+            torch.compile(fn)(*args_not_replaced)
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
 
     def test_cat_mm(self):
         def fn(a, b, c):
@@ -103,8 +152,8 @@ class TestPaternMatcher(TestCase):
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 5)
 
     def test_cat_addmm(self):
         def fn(a, b, c):
@@ -125,14 +174,15 @@ class TestPaternMatcher(TestCase):
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 5)
 
+    @expectedFailureDynamicWrapper
     def test_cat_slice_cat(self):
         def check_counter(counter, expected):
             if not inductor_config.cpp_wrapper:
                 self.assertEqual(counter, expected)
-            elif not dynamo_config.dynamic_shapes:
+            else:
                 # cpp_wrapper for the CUDA backend runs two passes
                 self.assertEqual(counter, 2 * expected)
 
@@ -364,7 +414,17 @@ class TestPaternMatcher(TestCase):
                 self.assertEqual(counter, int(fn is fn0))
                 torch.testing.assert_close(actual, expected)
 
+    def test_remove_pointless_clones(self):
+        @torch.compile(fullgraph=True)
+        def fn(a, b):
+            return torch.mm(a, b).clone()
+
+        result, (code) = run_and_get_code(fn, torch.randn(8, 8), torch.randn(8, 8))
+        # clone would create a buf1
+        self.assertIn("return (buf0, )", code[0])
+        self.assertNotIn("async_compile.cpp", code[0])
+
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA and not TEST_WITH_ROCM:
+    if IS_LINUX and HAS_CUDA:
         run_tests()

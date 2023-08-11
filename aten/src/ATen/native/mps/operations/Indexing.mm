@@ -7,6 +7,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ceil_div.h>
+#include <ATen/core/TensorBody.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/IndexKernel.h>
@@ -25,11 +26,19 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/count_nonzero.h>
+#include <ATen/ops/count_nonzero_native.h>
+#include <ATen/ops/embedding_dense_backward_native.h>
+#include <ATen/ops/flip_native.h>
 #include <ATen/ops/index.h>
 #include <ATen/ops/index_add_native.h>
+#include <ATen/ops/index_fill_native.h>
 #include <ATen/ops/index_put.h>
 #include <ATen/ops/index_select_native.h>
+#include <ATen/ops/masked_fill_native.h>
+#include <ATen/ops/masked_scatter_native.h>
+#include <ATen/ops/masked_select_native.h>
 #include <ATen/ops/nonzero.h>
+#include <ATen/ops/nonzero_native.h>
 #endif
 
 #ifdef __OBJC__
@@ -38,6 +47,29 @@
 
 namespace at::native {
 namespace mps {
+static std::string getBitSizeString(ScalarType scalar_type) {
+  size_t scalarBitSize = c10::elementSize(scalar_type) * 8;
+  TORCH_CHECK(scalarBitSize <= 64, "Unsupported data type: ", getMPSTypeString(scalar_type));
+  return std::to_string(scalarBitSize) + "bit";
+}
+static std::string getIndexFunctionName(ScalarType scalar_type,
+                                        bool index_select,
+                                        bool accumulate,
+                                        bool serial = false) {
+  std::string indexFunction = index_select     ? "index_select_"
+      : (accumulate && (scalar_type != kBool)) ? "index_put_accumulate_"
+                                               : (serial ? "index_put_serial_" : "index_put_");
+
+  indexFunction += getBitSizeString(scalar_type);
+  if (accumulate) {
+    TORCH_CHECK(scalar_type == ScalarType::Float || scalar_type == ScalarType::Int,
+                "Unsupported data type for accumulate case: ",
+                getMPSTypeString(scalar_type));
+    string dtypeString = (scalar_type == ScalarType::Float) ? "_float" : "_int";
+    indexFunction += dtypeString;
+  }
+  return indexFunction;
+}
 static bool dispatchIndexKernel(TensorIteratorBase& iter,
                                 IntArrayRef index_size,
                                 IntArrayRef index_stride,
@@ -86,8 +118,6 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
           MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offsets");
       id<MTLBuffer> kernelDataOffsets =
           (id<MTLBuffer>)getIMPSAllocator()->allocate(numThreads * sizeof(simd_uint3)).get();
-      TORCH_CHECK(
-          kernelDataOffsetsPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
 
       [computeEncoder setComputePipelineState:kernelDataOffsetsPSO];
       [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
@@ -230,14 +260,17 @@ static Tensor& masked_select_out_mps_impl(Tensor& result, const Tensor& self, co
   return result;
 }
 
-void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+static void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   @autoreleasepool {
     validateInputData(iter, index_size, index_stride, "index.Tensor_out", /*accumulate=*/false);
     dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/true, /*accumulate=*/false);
   }
 }
 
-void index_put_kernel_mps(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
+static void index_put_kernel_mps(TensorIterator& iter,
+                                 IntArrayRef index_size,
+                                 IntArrayRef index_stride,
+                                 bool accumulate) {
   @autoreleasepool {
     validateInputData(iter, index_size, index_stride, "index_put_impl", accumulate);
     dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/false, accumulate);

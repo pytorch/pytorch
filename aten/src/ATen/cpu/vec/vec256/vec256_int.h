@@ -680,6 +680,16 @@ public:
   static Vectorized<T> loadu(const void* ptr) {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
+  static Vectorized<T> loadu_one_fourth(const void* ptr) {
+      // Fast path if only load element number of 8.
+      // Note: We didn't merge it as fast path of loadu(const void* ptr, T count),
+      // Because loadu(const void* ptr, T count) requires zero initialization for upper 128 bits.
+      // However, by using _mm256_castsi128_si256, the upper 128 bits of the result are undefined.
+      // TODO<leslie> We can use _mm256_zextsi128_si256 in the furture,
+      // since gcc 9.3 doesn't support it now.
+      __m128i input_128 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ptr));
+      return _mm256_castsi128_si256(input_128);
+  }
   static Vectorized<T> loadu(const void* ptr, T count) {
     __at_align__ T tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
@@ -697,9 +707,14 @@ public:
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align__ T tmp_values[size()];
-      _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(T));
+      if (count == 8) {
+        // Fast path if only store element number of 8
+        _mm_storel_epi64(reinterpret_cast<__m128i*>(ptr), _mm256_castsi256_si128(values));
+      } else {
+        __at_align__ T tmp_values[size()];
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
+        std::memcpy(ptr, tmp_values, count * sizeof(T));
+      }
     }
   }
   const T& operator[](int idx) const  = delete;

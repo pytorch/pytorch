@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import enum
 import typing
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Dict, Literal, Optional, Union
 
 import torch
 from torch._C import _onnx as _C_onnx
@@ -31,6 +31,8 @@ ScalarName = Literal[
     "QUInt8",
     "QInt32",
     "BFloat16",
+    "Float8E5M2",
+    "Float8E4M3FN",
     "Undefined",
 ]
 
@@ -51,6 +53,8 @@ TorchName = Literal[
     "quint8",
     "qint32",
     "bfloat16",
+    "float8_e5m2",
+    "float8_e4m3fn",
 ]
 
 
@@ -90,7 +94,9 @@ class JitScalarType(enum.IntEnum):
     QUINT8 = enum.auto()  # 13
     QINT32 = enum.auto()  # 14
     BFLOAT16 = enum.auto()  # 15
-    UNDEFINED = enum.auto()  # 16
+    FLOAT8E5M2 = enum.auto()  # 16
+    FLOAT8E4M3FN = enum.auto()  # 17
+    UNDEFINED = enum.auto()  # 18
 
     @classmethod
     @_beartype.beartype
@@ -184,6 +190,14 @@ class JitScalarType(enum.IntEnum):
                 return cls.from_dtype(value.type().getElementType().dtype())
             except RuntimeError:
                 return cls._from_name(str(value.type().getElementType()))
+        if isinstance(value.type(), torch._C.OptionalType):
+            if value.type().getElementType().dtype() is None:
+                if isinstance(default, JitScalarType):
+                    return default
+                raise errors.OnnxExporterError(
+                    "default value must be a JitScalarType object."
+                )
+            return cls.from_dtype(value.type().getElementType().dtype())
 
         scalar_type = None
         if value.node().kind() != "prim::Constant" or not isinstance(
@@ -268,6 +282,8 @@ _SCALAR_TYPE_TO_NAME: Dict[JitScalarType, ScalarName] = {
     JitScalarType.QUINT8: "QUInt8",
     JitScalarType.QINT32: "QInt32",
     JitScalarType.BFLOAT16: "BFloat16",
+    JitScalarType.FLOAT8E5M2: "Float8E5M2",
+    JitScalarType.FLOAT8E4M3FN: "Float8E4M3FN",
     JitScalarType.UNDEFINED: "Undefined",
 }
 
@@ -292,6 +308,8 @@ _SCALAR_TYPE_TO_TORCH_NAME: Dict[JitScalarType, TorchName] = {
     JitScalarType.QUINT8: "quint8",
     JitScalarType.QINT32: "qint32",
     JitScalarType.BFLOAT16: "bfloat16",
+    JitScalarType.FLOAT8E5M2: "float8_e5m2",
+    JitScalarType.FLOAT8E4M3FN: "float8_e4m3fn",
 }
 
 _TORCH_NAME_TO_SCALAR_TYPE: Dict[TorchName, JitScalarType] = {
@@ -316,6 +334,8 @@ _SCALAR_TYPE_TO_ONNX = {
     JitScalarType.QINT8: _C_onnx.TensorProtoDataType.INT8,
     JitScalarType.QUINT8: _C_onnx.TensorProtoDataType.UINT8,
     JitScalarType.QINT32: _C_onnx.TensorProtoDataType.INT32,
+    JitScalarType.FLOAT8E5M2: _C_onnx.TensorProtoDataType.FLOAT8E5M2,
+    JitScalarType.FLOAT8E4M3FN: _C_onnx.TensorProtoDataType.FLOAT8E4M3FN,
 }
 
 # source of truth is
@@ -337,51 +357,8 @@ _SCALAR_TYPE_TO_DTYPE = {
     JitScalarType.QUINT8: torch.quint8,
     JitScalarType.QINT32: torch.qint32,
     JitScalarType.BFLOAT16: torch.bfloat16,
+    JitScalarType.FLOAT8E5M2: torch.float8_e5m2,
+    JitScalarType.FLOAT8E4M3FN: torch.float8_e4m3fn,
 }
 
 _DTYPE_TO_SCALAR_TYPE = {v: k for k, v in _SCALAR_TYPE_TO_DTYPE.items()}
-
-# NOTE: this is a mapping from torch dtype to a set of compatible onnx types
-# It's used in dispatcher to find the best match overload for the input dtypes
-TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS = {
-    torch.bfloat16: {"tensor(bfloat16)"},
-    torch.bool: {"tensor(bool)"},
-    torch.float64: {"tensor(double)"},
-    torch.float32: {"tensor(float)"},
-    torch.float16: {"tensor(float16)"},
-    torch.int16: {"tensor(int16)"},
-    torch.int32: {"tensor(int32)"},
-    torch.int64: {"tensor(int64)"},
-    torch.int8: {"tensor(int8)"},
-    torch.uint8: {"tensor(uint8)"},
-    str: {"tensor(string)"},
-    int: {"tensor(int16)", "tensor(int32)", "tensor(int64)"},
-    float: {"tensor(float16)", "tensor(float)", "tensor(double)"},
-    bool: {"tensor(int32)", "tensor(int64)", "tensor(bool)"},
-}
-
-# NOTE: Belows are from torch/fx/node.py
-BaseArgumentTypes = Union[
-    str,
-    int,
-    float,
-    bool,
-    complex,
-    torch.dtype,
-    torch.Tensor,
-    torch.device,
-    torch.memory_format,
-    torch.layout,
-    torch._ops.OpOverload,
-]
-Argument = Optional[
-    Union[
-        Tuple[Any, ...],  # actually Argument, but mypy can't represent recursive types
-        List[Any],  # actually Argument
-        Dict[str, Any],  # actually Argument
-        slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
-        range,
-        "torch.fx.Node",
-        BaseArgumentTypes,
-    ]
-]

@@ -299,7 +299,7 @@ class BatchNorm1d(_BatchNorm):
     def _check_input_dim(self, input):
         if input.dim() != 2 and input.dim() != 3:
             raise ValueError(
-                "expected 2D or 3D input (got {}D input)".format(input.dim())
+                f"expected 2D or 3D input (got {input.dim()}D input)"
             )
 
 
@@ -334,7 +334,7 @@ class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
     def _check_input_dim(self, input):
         if input.dim() != 2 and input.dim() != 3:
             raise ValueError(
-                "expected 2D or 3D input (got {}D input)".format(input.dim())
+                f"expected 2D or 3D input (got {input.dim()}D input)"
             )
 
 
@@ -410,7 +410,7 @@ class BatchNorm2d(_BatchNorm):
 
     def _check_input_dim(self, input):
         if input.dim() != 4:
-            raise ValueError("expected 4D input (got {}D input)".format(input.dim()))
+            raise ValueError(f"expected 4D input (got {input.dim()}D input)")
 
 
 class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
@@ -443,7 +443,7 @@ class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
 
     def _check_input_dim(self, input):
         if input.dim() != 4:
-            raise ValueError("expected 4D input (got {}D input)".format(input.dim()))
+            raise ValueError(f"expected 4D input (got {input.dim()}D input)")
 
 
 class BatchNorm3d(_BatchNorm):
@@ -516,7 +516,7 @@ class BatchNorm3d(_BatchNorm):
 
     def _check_input_dim(self, input):
         if input.dim() != 5:
-            raise ValueError("expected 5D input (got {}D input)".format(input.dim()))
+            raise ValueError(f"expected 5D input (got {input.dim()}D input)")
 
 
 class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
@@ -549,7 +549,7 @@ class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
 
     def _check_input_dim(self, input):
         if input.dim() != 5:
-            raise ValueError("expected 5D input (got {}D input)".format(input.dim()))
+            raise ValueError(f"expected 5D input (got {input.dim()}D input)")
 
 
 class SyncBatchNorm(_BatchNorm):
@@ -674,7 +674,7 @@ class SyncBatchNorm(_BatchNorm):
     def _check_input_dim(self, input):
         if input.dim() < 2:
             raise ValueError(
-                "expected at least 2D input (got {}D input)".format(input.dim())
+                f"expected at least 2D input (got {input.dim()}D input)"
             )
 
     def _check_non_zero_input_channels(self, input):
@@ -729,9 +729,10 @@ class SyncBatchNorm(_BatchNorm):
         need_sync = (bn_training and self.training and
                      torch.distributed.is_available() and torch.distributed.is_initialized())
         if need_sync:
-            # currently only GPU input is supported
-            if not input.is_cuda:
-                raise ValueError("SyncBatchNorm expected input tensor to be on GPU")
+            # currently only GPU/PrivateUse1 input is supported
+            if input.device.type not in ["cuda", torch._C._get_privateuse1_backend_name()]:
+                raise ValueError("SyncBatchNorm expected input tensor to be on GPU or "
+                                 f"{torch._C._get_privateuse1_backend_name()}")
 
             process_group = torch.distributed.group.WORLD
             if self.process_group:

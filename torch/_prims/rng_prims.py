@@ -1,10 +1,10 @@
-from functools import partial
 from typing import Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
 from torch import _prims
 from torch._C import DispatchKey
+from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._ops import HigherOrderOperator
 
 from torch._prims_common import CUDARngStateHelper, make_contiguous_strides_for
@@ -14,7 +14,6 @@ from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
-    unwrap_proxy,
 )
 from torch.types import _device, _dtype
 from torch.utils._python_dispatch import (
@@ -144,7 +143,7 @@ def register_philox_rand():
         impl_aten=_philox_rand,
         impl_meta=_philox_rand_meta,
         doc="Philox based stateless rand operator",
-        tags=(torch.Tag.nondeterministic_seeded,),  # type: ignore[attr-defined]
+        tags=(torch.Tag.nondeterministic_seeded,),
     )
 
 
@@ -170,10 +169,9 @@ def register_run_and_save_rng_state_op():
     run_and_save_rng_state.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
     run_and_save_rng_state.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
 
-    @run_and_save_rng_state.py_impl(DispatchKey.Autograd)
-    def impl_autograd(op, *args, **kwargs):
-        with torch._C._AutoDispatchBelowAutograd():
-            return run_and_save_rng_state(op, *args, **kwargs)
+    run_and_save_rng_state.py_impl(DispatchKey.Autograd)(
+        autograd_not_implemented(run_and_save_rng_state, deferred_error=True)
+    )
 
     @run_and_save_rng_state.py_impl(DispatchKey.CUDA)
     def impl_cuda(op, *args, **kwargs):
@@ -203,8 +201,8 @@ def register_run_and_save_rng_state_op():
         with _pop_mode_temporarily() as mode:
             if mode.enable_tracing:
                 out = impl_fake_tensor_mode(op, *args, **kwargs)
-                proxy_args = pytree.tree_map(partial(unwrap_proxy, mode), (op, *args))
-                proxy_kwargs = pytree.tree_map(partial(unwrap_proxy, mode), kwargs)
+                proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, (op, *args))
+                proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
                 out_proxy = mode.tracer.create_proxy(
                     "call_function", run_and_save_rng_state, proxy_args, proxy_kwargs
                 )
@@ -224,10 +222,9 @@ def register_run_with_rng_state_op():
     run_with_rng_state.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
     run_with_rng_state.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
 
-    @run_with_rng_state.py_impl(DispatchKey.Autograd)
-    def impl_autograd(rng_state, op, *args, **kwargs):
-        with torch._C._AutoDispatchBelowAutograd():
-            return run_with_rng_state(rng_state, op, *args, **kwargs)
+    run_with_rng_state.py_impl(DispatchKey.Autograd)(
+        autograd_not_implemented(run_with_rng_state, deferred_error=True)
+    )
 
     @run_with_rng_state.py_impl(DispatchKey.CUDA)
     def impl_cuda(rng_state, op, *args, **kwargs):
@@ -254,9 +251,9 @@ def register_run_with_rng_state_op():
                 with disable_proxy_modes_tracing():
                     out = run_with_rng_state(rng_state, op, *args, **kwargs)
                 proxy_args = pytree.tree_map(
-                    partial(unwrap_proxy, mode), (rng_state, op, *args)
+                    mode.tracer.unwrap_proxy, (rng_state, op, *args)
                 )
-                proxy_kwargs = pytree.tree_map(partial(unwrap_proxy, mode), kwargs)
+                proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
                 out_proxy = mode.tracer.create_proxy(
                     "call_function", run_with_rng_state, proxy_args, proxy_kwargs
                 )

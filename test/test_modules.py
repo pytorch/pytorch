@@ -1,16 +1,18 @@
 # Owner(s): ["module: nn"]
 
-from itertools import product
+from itertools import chain, product
 from inspect import signature, isgenerator
 from copy import deepcopy
 import tempfile
 from operator import methodcaller
 
 import torch
+
+from torch._subclasses.meta_utils import assert_metadata_eq
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol, skipMeta)
-from torch.testing._internal.common_modules import module_db, modules, TrainEvalMode
+    instantiate_device_type_tests, onlyCPU, onlyCUDA, toleranceOverride, tol, skipMeta)
+from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
     gradgradcheck)
@@ -456,10 +458,6 @@ class TestModule(TestCase):
                 else:
                     other_kwargs[name] = obj
 
-            grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
-
-            flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
-
             def fn_to_gradcheck(*flat_input_and_params):
                 input_and_params = torch.utils._pytree.tree_unflatten(flat_input_and_params, flat_spec)
                 new_input_args = input_and_params[:len(input_args)]
@@ -471,7 +469,34 @@ class TestModule(TestCase):
                     output_flattened, _ = torch.utils._pytree.tree_flatten(output)
                     return output_flattened
 
+            # check total derivative
+            grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
+            flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
+
             self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+
+            # check partial derivatives
+            old_params_requires_grad = [p.requires_grad for p in params]
+            for p in params:
+                p.requires_grad = False
+
+            old_kwargs_requires_grad = [obj.requires_grad for (_, obj) in kwarg_tensors]
+            for (_, obj) in kwarg_tensors:
+                obj.requires_grad = False
+
+            for p, old in zip(params, old_params_requires_grad):
+                p.requires_grad = old
+                grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
+                flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
+                self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+                p.requires_grad = False
+
+            for (_, obj), old in zip(kwarg_tensors, old_kwargs_requires_grad):
+                obj.requires_grad = old
+                grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
+                flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
+                self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+                obj.requires_grad = False
 
     @modules(module_db, allowed_dtypes=[torch.double])
     def test_grad(self, device, dtype, module_info, training):
@@ -709,6 +734,56 @@ class TestModule(TestCase):
                                     "for this ModuleInfo entry.")
                 else:
                     raise e
+
+
+    @onlyCPU
+    @modules(module_db)
+    def test_device_ctx_init(self, device, dtype, module_info, training):
+        module_cls = module_info.module_cls
+        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
+                                                       requires_grad=False, training=training)
+        with torch.device('meta'):
+            module_inputs_meta = module_info.module_inputs_func(module_info, device=None, dtype=dtype,
+                                                                requires_grad=False, training=training)
+
+        for module_input, module_input_meta in zip(module_inputs, module_inputs_meta):
+            c_args, c_kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            fw_args, fw_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+
+            c_args_meta, c_kwargs_meta = module_input_meta.constructor_input.args, module_input_meta.constructor_input.kwargs
+            fw_args_meta, fw_kwargs_meta = module_input_meta.forward_input.args, module_input_meta.forward_input.kwargs
+
+            m_cpu = module_cls(*c_args, **c_kwargs)
+
+            with torch.device('meta'):
+                m = module_cls(*c_args_meta, **c_kwargs_meta)
+
+            for (p_meta, p_cpu) in chain(zip(m.parameters(), m_cpu.parameters()),
+                                         zip(m.buffers(), m_cpu.buffers())):
+                if torch.nn.parameter.is_lazy(p_meta):
+                    continue
+                self.assertTrue(p_meta.is_meta)
+                assert_metadata_eq(self.assertEqual, p_meta, p_cpu)
+
+
+    @modules([module for module in module_db if module.module_error_inputs_func is not None])
+    def test_errors(self, device, dtype, module_info, training):
+        module_cls = module_info.module_cls
+        error_inputs = module_info.module_error_inputs_func(module_info, device=device, dtype=dtype,
+                                                            requires_grad=False, training=training)
+        for error_input in error_inputs:
+            module_input = error_input.module_error_input
+            c_args, c_kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            if error_input.error_on == ModuleErrorEnum.CONSTRUCTION_ERROR:
+                with self.assertRaisesRegex(error_input.error_type, error_input.error_regex):
+                    m = module_cls(*c_args, **c_kwargs)
+            elif error_input.error_on == ModuleErrorEnum.FORWARD_ERROR:
+                m = module_cls(*c_args, **c_kwargs)
+                fw_args, fw_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+                with self.assertRaisesRegex(error_input.error_type, error_input.error_regex):
+                    m(*fw_args, **fw_kwargs)
+            else:
+                raise NotImplementedError(f"Unknown error type {error_input.error_on}")
 
 
 instantiate_device_type_tests(TestModule, globals(), allow_mps=True)

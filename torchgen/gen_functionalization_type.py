@@ -59,6 +59,8 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
         # See Note [resize_ in Functionalization]
         "resize_",
         "resize_as_",
+        # This function is used as for testing purposes only.
+        "_fill_mem_eff_dropout_mask_",
     ]
 )
 
@@ -687,22 +689,8 @@ def gen_functionalization_registration(
 ) -> List[str]:
     @with_native_function
     def emit_registration_helper(f: NativeFunction) -> str:
-        if f.has_composite_implicit_autograd_kernel:
-            metadata = composite_implicit_autograd_index.get_kernel(f)
-            assert metadata is not None
-            native_api_name = metadata.kernel
-            sig = NativeSignature(f.func, symint=metadata.supports_symint())
-            # Note [Composite view ops in the functionalization pass]
-            # We don't need to worry about implemententing functionalization kernels for views with
-            # CompositeImplicitAutograd kernels, because we can just decompose them into their base operators.
-            # We can't just opt the entire Functionalization dispatch key into the composite keyset though,
-            # because we don't want to decompose non-view ops that are composite, like `at::ones`.
-            registration_str = (
-                f"static_cast<{sig.ptr_type()}>(at::native::{native_api_name})"
-            )
-        else:
-            # non-composite view ops (and inplace ops) get a normal registration.
-            registration_str = f"TORCH_FN(functionalization::{wrapper_name(f.func)})"
+        assert not f.has_composite_implicit_autograd_kernel
+        registration_str = f"TORCH_FN(functionalization::{wrapper_name(f.func)})"
         return f'm.impl("{f.func.name}", {registration_str});'
 
     # Don't generate kernels in mobile build
@@ -714,8 +702,13 @@ def gen_functionalization_registration(
         # See Note [Functionalization <> torch.Tensor constructor]
         if str(g.view.func.name) == "lift_fresh":
             return []
-        view_str = [emit_registration_helper(g.view)]
-        if g.view_inplace is not None:
+        view_str = []
+        if not g.view.has_composite_implicit_autograd_kernel:
+            view_str.append(emit_registration_helper(g.view))
+        if (
+            g.view_inplace is not None
+            and not g.view_inplace.has_composite_implicit_autograd_kernel
+        ):
             assert g.view_inplace.is_view_op
             view_str.append(emit_registration_helper(g.view_inplace))
         return view_str
@@ -729,6 +722,8 @@ def gen_functionalization_registration(
 
     registrations = []
     for f in fns:
+        if f.has_composite_implicit_autograd_kernel:
+            continue
         if str(f.func.name) == "lift":
             # See Note [Functionalization <> torch.Tensor constructor]
             return []
@@ -739,7 +734,7 @@ def gen_functionalization_registration(
         # functionalization needs to generate and register kernals for inplace ops.
         # We *also* need to directly register CompositeImplicitAUtograd kernels
         # so that they decompose properly before functioanlization.
-        if modifies_arguments(f) or f.has_composite_implicit_autograd_kernel:
+        if modifies_arguments(f):
             registrations.append(emit_registration_helper(f))
     return registrations
 

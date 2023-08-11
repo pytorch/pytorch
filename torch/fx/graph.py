@@ -612,9 +612,9 @@ class _PyTreeCodeGen(CodeGen):
         return flat_args
 
     def process_outputs(self, out: Any) -> Any:
-        if self.pytree_info is None:
+        if self.pytree_info is None or self.pytree_info.out_spec is None:
             return out
-        if not isinstance(out, list):
+        if not isinstance(out, (list, tuple)):
             out = [out]
         assert(self.pytree_info.out_spec is not None)
         return pytree.tree_unflatten(out, self.pytree_info.out_spec)
@@ -665,7 +665,7 @@ class _PyTreeCodeGen(CodeGen):
         return fn_definition
 
     def generate_output(self, output_args):
-        if self.pytree_info:
+        if self.pytree_info and self.pytree_info.out_spec:
             return f'return pytree.tree_unflatten({repr(output_args)}, self._out_spec)'
         else:
             return super().generate_output(output_args)
@@ -704,12 +704,12 @@ class Graph:
     .. code-block:: text
 
         graph(x):
-            %linear_weight : [#users=1] = self.linear.weight
-            %add_1 : [#users=1] = call_function[target=operator.add](args = (%x, %linear_weight), kwargs = {})
-            %linear_1 : [#users=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
-            %relu_1 : [#users=1] = call_method[target=relu](args = (%linear_1,), kwargs = {})
-            %sum_1 : [#users=1] = call_function[target=torch.sum](args = (%relu_1,), kwargs = {dim: -1})
-            %topk_1 : [#users=1] = call_function[target=torch.topk](args = (%sum_1, 3), kwargs = {})
+            %linear_weight : [num_users=1] = self.linear.weight
+            %add_1 : [num_users=1] = call_function[target=operator.add](args = (%x, %linear_weight), kwargs = {})
+            %linear_1 : [num_users=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
+            %relu_1 : [num_users=1] = call_method[target=relu](args = (%linear_1,), kwargs = {})
+            %sum_1 : [num_users=1] = call_function[target=torch.sum](args = (%relu_1,), kwargs = {dim: -1})
+            %topk_1 : [num_users=1] = call_function[target=torch.topk](args = (%sum_1, 3), kwargs = {})
             return topk_1
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
@@ -730,6 +730,7 @@ class Graph:
         self._tracer_cls = tracer_cls
         self._tracer_extras = tracer_extras
         self._codegen = CodeGen()
+        self._co_fields : Dict[str, Any] = {}
 
     @property
     def owning_module(self):
@@ -1299,6 +1300,8 @@ class Graph:
             print("`print_tabular` relies on the library `tabulate`, "
                   "which could not be found on this machine. Run `pip "
                   "install tabulate` to install the library.")
+            raise
+
         node_specs = [[n.op, n.name, n.target, n.args, n.kwargs]
                       for n in self.nodes]
         print(tabulate(node_specs,

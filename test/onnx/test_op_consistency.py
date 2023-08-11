@@ -56,10 +56,14 @@ TESTED_OPS: frozenset[str] = frozenset(
     [
         "atan",
         "atan2",
+        # "atleast_1d",  # How to support list input?
+        # "atleast_2d",  # How to support list input?
+        # "atleast_3d",  # How to support list input?
         "broadcast_to",
         "ceil",
         "expand",
         "flatten",
+        "hstack",
         "logical_not",
         # "logit",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
         "nn.functional.scaled_dot_product_attention",
@@ -71,6 +75,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "t",
         "tile",
         "unflatten",
+        "vstack",
     ]
 )
 
@@ -99,6 +104,8 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "ceil", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Ceil")
     ),
+    skip("hstack", opsets=[onnx_test_common.opsets_before(11)],
+         reason=onnx_test_common.reason_onnx_does_not_support("ConcatFromSequence")),
     xfail(
         "logit",
         dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
@@ -151,6 +158,8 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
           reason=onnx_test_common.reason_onnx_runtime_does_not_support("STFT", "Regression on ORT=1.15 4 percent difference")),
     skip("tile", opsets=[onnx_test_common.opsets_before(13)], reason=onnx_test_common.reason_onnx_does_not_support("Tile")),
     xfail("unflatten", opsets=[onnx_test_common.opsets_before(13)], reason="Helper function is needed to support legacy ops."),
+    skip("vstack", opsets=[onnx_test_common.opsets_before(11)],
+         reason=onnx_test_common.reason_onnx_does_not_support("ConcatFromSequence")),
 )
 # fmt: on
 
@@ -237,7 +246,7 @@ def _get_test_class_name(cls, num, params_dict) -> str:
             "name": f"TestOnnxModelOutputConsistency_opset{opset}",
             "opset_version": opset,
         }
-        for opset in onnx_test_common.TESTED_OPSETS
+        for opset in onnx_test_common.ONNXRT_SUPPORTED_OPSETS
     ],
     class_name_func=_get_test_class_name,
 )
@@ -298,7 +307,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
                     self.run_test(model, inputs, rtol=rtol, atol=atol)
 
 
-for opset in onnx_test_common.TESTED_OPSETS:
+for opset in onnx_test_common.ONNXRT_SUPPORTED_OPSETS:
     # The name needs to match the parameterized_class name.
     test_class_name = f"TestOnnxModelOutputConsistency_opset{opset}"
     onnx_test_common.add_decorate_info(

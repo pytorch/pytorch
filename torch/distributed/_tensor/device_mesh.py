@@ -9,7 +9,6 @@ from torch.distributed.distributed_c10d import (
     _find_pg_by_ranks_and_tag,
     _get_default_group,
     _get_group_tag,
-    all_gather,
     all_to_all,
     broadcast,
     get_global_rank,
@@ -20,7 +19,6 @@ from torch.distributed.distributed_c10d import (
     is_initialized,
     new_group,
     ProcessGroup,
-    ReduceOp,
     scatter,
     Work,
 )
@@ -38,7 +36,7 @@ if TYPE_CHECKING:
         )
 
 
-class _MeshEnv(object):
+class _MeshEnv:
     def __init__(self) -> None:
         self.mesh_stack: List[DeviceMesh] = []
 
@@ -61,7 +59,7 @@ def _get_device_handle(device_type: str = "cuda"):
     return getattr(torch, device_type, None) if device_type != "cpu" else None
 
 
-class DeviceMesh(object):
+class DeviceMesh:
     """
     DeviceMesh represents a mesh of devices, where layout of devices could be
     represented as a n-d dimension array, and each value of the n-d dimensional
@@ -111,6 +109,7 @@ class DeviceMesh(object):
         mesh: Union[torch.Tensor, "ArrayLike"],
         *,
         _init_process_groups: bool = True,
+        _validate_mesh: bool = True,
     ) -> None:
         self.device_type = device_type
         self.mesh = (
@@ -123,7 +122,7 @@ class DeviceMesh(object):
         # process (we need to know if the current global rank is in the mesh or not)
         self._get_or_create_default_group()
         if _init_process_groups:
-            self._init_process_groups()
+            self._init_process_groups(_validate_mesh)
 
     def _get_or_create_default_group(self):
         default_initialized = is_initialized()
@@ -148,11 +147,6 @@ class DeviceMesh(object):
                     f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
                 )
             device_handle.set_device(get_rank() % num_devices_per_host)
-        # TODO (xilunwu): to perform DTensor random ops, we need to ensure all ranks in mesh is initialized
-        # with the same random seed. The seed to use will be the current seed on rank 0. We store this seed
-        # as an attribute of device mesh for future use. However, the detail is still TBD how we gonna use
-        # this attribute, so we will implement this logic once we figure out the answer.
-        self._seed = torch.initial_seed()
 
         # calculate the coordinates of the current global rank on the mesh
         rank_coords = (self.mesh == get_rank()).nonzero()
@@ -162,18 +156,21 @@ class DeviceMesh(object):
         )
         return _get_default_group()
 
-    def _init_process_groups(self):
+    def _validate_mesh(self):
         # check mesh tensor validity
         unique_mesh_values = self.mesh.unique(sorted=True)
         if unique_mesh_values.numel() != self.mesh.numel():
             raise RuntimeError(
                 f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
             )
+
         # validate that all calling ranks pass in the same `mesh` argument.
         self_mesh = self.mesh.to(self.device_type)
-        mesh_list = [self_mesh.clone() for _ in range(get_world_size())]
-        all_gather(mesh_list, self_mesh)
-        for other_rank, other_mesh in enumerate(mesh_list):
+        mesh_tensor = funcol.all_gather_tensor(
+            self_mesh, gather_dim=0, group=_get_default_group()
+        )
+        mesh_tensor_chunked = torch.chunk(mesh_tensor, get_world_size())
+        for other_rank, other_mesh in enumerate(mesh_tensor_chunked):
             if not torch.equal(self_mesh, other_mesh):
                 raise RuntimeError(
                     f"DeviceMesh initialization does not allow different mesh argument:"
@@ -181,11 +178,15 @@ class DeviceMesh(object):
                     f"has mesh {other_mesh}!"
                 )
 
+    def _init_process_groups(self, _validate_mesh):
+        if _validate_mesh:
+            self._validate_mesh()
+
         # group tag/ranks associated with each mesh dimension, each mesh dimension should
         # have one sub-group per rank
         dim_group_infos: List[Tuple[str, List[int]]] = []
 
-        if self.mesh.ndim == 1 and len(unique_mesh_values) == get_world_size():
+        if self.mesh.ndim == 1 and self.mesh.numel() == get_world_size():
             # if the mesh is the same as world_pg, we just append the default
             # pg to the first dim groups, as new_group cannot have the exact
             # same ranks as world
@@ -368,99 +369,6 @@ class DeviceMesh(object):
             src_for_dim = get_global_rank(dim_group, 0)
 
         return broadcast(tensor, src=src_for_dim, group=dim_group, async_op=async_op)
-
-    def all_gather(
-        self,
-        tensor: torch.Tensor,
-        mesh_dim: int = 0,
-        gather_dim: int = 0,
-    ) -> torch.Tensor:
-        """
-        all_gather the tensor on each rank to a bigger tensor on a
-        device mesh dimension.
-
-        Args:
-            tensor (torch.Tensor): tensor to be gathered on each rank.
-            mesh_dim (int, optional): indicate which mesh dimension we want
-                to scatter on, we by default choose the first rank on the
-                mesh dimension as source of truth.
-            gather_dim (int, optional): Dimension to concatenate the resulting tensor.
-
-        Returns:
-            A :class:`AsyncCollectiveTensor` object
-        """
-        dim_group = self.get_dim_groups(mesh_dim)
-        assert isinstance(dim_group, ProcessGroup)
-        return funcol.all_gather_tensor(tensor, gather_dim=gather_dim, group=dim_group)
-
-    def all_reduce(
-        self,
-        tensor: torch.Tensor,
-        op: ReduceOp.RedOpType = ReduceOp.SUM,
-        mesh_dim: int = 0,
-    ) -> torch.Tensor:
-        """
-        all_reduce the tensor on each rank on a device mesh dimension, and
-        return an output tensor on each rank after all_reduce.
-
-        Args:
-            tensor (torch.Tensor): tensor to be all_reduced on each rank.
-            op (:class:`torch.distributed.distributed_c10d.ReduceOp, optional):
-                the reduction op of all_reduce (i.e. ReduceOp.SUM)
-            mesh_dim (int, optional): indicate which mesh dimension we want
-                to reduce on.
-
-        Returns:
-            A :class:`AsyncCollectiveTensor` object
-        """
-        return funcol.all_reduce(tensor, reduceOp=op.name, group=(self, mesh_dim))
-
-    def reduce_scatter(
-        self,
-        input: torch.Tensor,
-        op: ReduceOp.RedOpType = ReduceOp.SUM,
-        mesh_dim: int = 0,
-        scatter_dim: int = 0,
-    ) -> torch.Tensor:
-        """
-        reduce the input on each rank on a device mesh dimension, and scatter
-        the results as output tensor on each rank.
-
-        Args:
-            input (torch.Tensor): tensor to be reduced and scattered
-                and scattered on each rank.
-            op (:class:`torch.distributed.distributed_c10d.ReduceOp, optional):
-                the reduction op of reduce_scatter (i.e. ReduceOp.SUM)
-            mesh_dim (int, optional): indicate which mesh dimension we want
-                to scatter on.
-
-        Returns:
-            A :class:`torch.Tensor` object
-        """
-
-        dim_group = self.get_dim_groups(mesh_dim)
-        assert isinstance(dim_group, ProcessGroup)
-        if self.device_type == "cpu":
-            # cpu::gloo backend does not have reduce_scatter we fallback to do all_reduce
-            # + local chunk
-            logger.warning(
-                "ProcessGroupGloo does not support reduce_scatter, falling back with all reduce!"
-            )
-            group_size = get_world_size(dim_group)
-            group_rank = get_rank(dim_group)
-            if scatter_dim != 0:
-                tensor_list = torch.chunk(input, group_size, dim=scatter_dim)
-                input = torch.cat(tensor_list)
-
-            flat_tensor = funcol.all_reduce(input, reduceOp=op.name, group=dim_group)
-            chunks = flat_tensor.chunk(group_size, dim=0)
-            scatter_tensor = chunks[group_rank]
-        else:
-            scatter_tensor = funcol.reduce_scatter_tensor(
-                input, reduceOp=op.name, scatter_dim=scatter_dim, group=dim_group
-            )
-
-        return scatter_tensor
 
     # TODO: test uneven split on GLOO and NCCL
     def all_to_all(

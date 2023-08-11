@@ -1,3 +1,5 @@
+import math
+
 import torch
 from torch._inductor.cuda_properties import get_device_capability
 
@@ -49,12 +51,12 @@ def check_mm_compatible_shapes(f_name, lhs, rhs):
     )
 
 
-def check_dtype(f_name, t, dtype):
+def check_dtype(f_name, t, dtype, *additional_dtypes):
     check(
         t.dtype == dtype
-        and t.dtype in (torch.half, torch.bfloat16, torch.float),
+        and t.dtype in ((torch.half, torch.bfloat16, torch.float) + tuple(*additional_dtypes)),
         f"{f_name}(): all inputs are expected to be of the same dtype "
-        "and one of (half, bfloat16, float32), "
+        f"and one of (half, bfloat16, float32) or {additional_dtypes}, "
         f"but got dtype == {t.dtype}.",
     )
 
@@ -563,18 +565,26 @@ if _has_triton():
     ):
         f_name = "sampled_addmm"
 
+        check_bsr_layout(f_name, input)
         input_broadcasted = broadcast_batch_dims_bsr(f_name, input, mat1, mat2)
 
         if not skip_checks:
-            check_bsr_layout(f_name, input)
             check_device(f_name, mat1, input.device)
             check_device(f_name, mat2, input.device)
-            check_dtype(f_name, mat1, input.dtype)
-            check_dtype(f_name, mat2, input.dtype)
+            if beta != 0.0 and input.dtype is torch.bool:
+                check(
+                    False,
+                    f"{f_name}(): having beta == {beta} not equal to 0.0 with boolean mask is not allowed."
+                )
+            if input.dtype is not torch.bool:
+                check_dtype(f_name, mat1, input.dtype)
+                check_dtype(f_name, mat2, input.dtype)
+            else:
+                check_dtype(f_name, mat1, mat2.dtype)
             check_mm_compatible_shapes(f_name, mat1, mat2)
             if out is not None:
                 check_bsr_layout(f_name, out)
-                check_device(f_name, out, input.device)
+                check_device(f_name, out, mat1.device)
                 check_dtype(f_name, out, input.dtype)
                 check(
                     out.shape == input_broadcasted.shape
@@ -585,7 +595,7 @@ if _has_triton():
                 )
 
         if out is None:
-            out = input_broadcasted.clone()
+            out = input_broadcasted.to(mat1.dtype, copy=True)
         else:
             out.copy_(input_broadcasted)
 
@@ -703,6 +713,190 @@ if _has_triton():
         _run_dense_rowspace_kernel(blocksize, values, crow_indices, col_indices, dense, out, max_grid)
 
         return out_backup
+
+
+    @triton.jit
+    def _bsr_softmax_kernel(
+        crow_indices_ptr,
+        crow_indices_batch_stride,
+        crow_indices_stride,
+        values_ptr,
+        values_batch_stride,
+        values_row_block_stride,
+        values_nnz_col_block_stride,
+        row_block, col_block,
+        MAX_ROW_NNZ: tl.constexpr,
+        TILE: tl.constexpr
+    ):
+        batch_pid = tl.program_id(axis=2)
+        row_block_offset_pid = tl.program_id(axis=1)
+        row_block_pid = tl.program_id(axis=0)
+
+        crow_indices_offset_ptr = (
+            crow_indices_ptr
+            + crow_indices_batch_stride * batch_pid
+            + crow_indices_stride * row_block_pid
+        )
+        nnz_offset = tl.load(crow_indices_offset_ptr)
+        nnz_offset_next = tl.load(crow_indices_offset_ptr + crow_indices_stride)
+
+        # Compute nnz for the row with number row_block_pid.
+        # If it is zero, skip the row.
+        row_nnz = nnz_offset_next - nnz_offset
+        if row_nnz == 0:
+            return
+
+        row_arange = tl.arange(0, TILE)
+        mask = row_arange < row_nnz * col_block
+
+        curr_row_values_ptrs = (
+            values_ptr
+            + values_batch_stride * batch_pid
+            + values_row_block_stride * row_block_offset_pid
+            + nnz_offset * col_block
+        )
+
+        # find max in the row
+        row_tile = tl.load(curr_row_values_ptrs + row_arange, mask=mask, other=-float('inf')).to(tl.float32)
+        max_row_value = tl.max(row_tile, axis=0)
+        for _ in range(TILE, MAX_ROW_NNZ, TILE):
+            row_arange += TILE
+            mask = row_arange < row_nnz * col_block
+            row_tile = tl.load(curr_row_values_ptrs + row_arange, mask=mask, other=-float('inf')).to(tl.float32)
+            curr_max_row_value = tl.max(row_tile, axis=0)
+            max_row_value = tl.where(max_row_value > curr_max_row_value, max_row_value, curr_max_row_value)
+
+        # find denominator for stable softmax
+        num = tl.exp(row_tile - max_row_value)
+        denom = tl.sum(num, axis=0)
+        for _ in range(TILE, MAX_ROW_NNZ, TILE):
+            row_arange -= TILE
+            mask = row_arange < row_nnz * col_block
+            row_tile = tl.load(curr_row_values_ptrs + row_arange, mask=mask, other=-float('inf')).to(tl.float32)
+            num = tl.exp(row_tile - max_row_value)
+            denom += tl.sum(num, axis=0)
+
+        # populate output
+        tl.store(curr_row_values_ptrs + row_arange, (num / denom).to(values_ptr.dtype.element_ty), mask=mask)
+        for _ in range(TILE, MAX_ROW_NNZ, TILE):
+            row_arange += TILE
+            mask = row_arange < row_nnz * col_block
+            row_tile = tl.load(curr_row_values_ptrs + row_arange, mask=mask, other=-float('inf')).to(tl.float32)
+            num = tl.exp(row_tile - max_row_value)
+            tl.store(curr_row_values_ptrs + row_arange, (num / denom).to(values_ptr.dtype.element_ty), mask=mask)
+
+
+    def bsr_softmax(input, max_row_nnz=None):
+        f_name = "bsr_softmax"
+
+        check_bsr_layout(f_name, input)
+        check_dtype(f_name, input, input.dtype)
+
+        if input._nnz() == 0 or input.numel() == 0:
+            return input.clone()
+
+        m, n = input.shape[-2:]
+        nnz = input._nnz()
+        row_block, col_block = input.values().shape[-2:]
+
+        if max_row_nnz is None:
+            max_row_nnz = triton.next_power_of_2(n)
+        else:
+            max_row_nnz = triton.next_power_of_2(max_row_nnz)
+
+        crow_indices = input.crow_indices().unsqueeze(0).flatten(0, -2)
+        # reshape values from
+        # (b1, ..., bn, nnz, row_block, col_block) to
+        # (b1 * ... * bn, row_block, nnz * col_block).
+        # This simplifies batch dim manipulation and unlocks
+        # the possibility to access all nnzs in any given row.
+        if input.values().transpose(-3, -2).is_contiguous():
+            # Need to clone to avoid `contiguous` returning a view.
+            values = input.values().clone()
+        else:
+            values = input.values()
+        values = values.transpose(-3, -2).contiguous().unsqueeze(0).flatten(0, -4).reshape(-1, row_block, nnz * col_block)
+        full_grid = (values.shape[0], row_block, m // row_block)
+        grid_blocks = None
+        tensor_dims_map = {
+            # We span nnz number of blocks, not nnz + 1,
+            # hence crow_indices[..., :-1]
+            crow_indices[..., :-1]: (0, None, -1),
+            values: (0, None, None),
+        }
+
+        def kernel(grid, *sliced_tensors):
+            _bsr_softmax_kernel[grid](
+                *ptr_stride_extractor(*sliced_tensors),
+                row_block, col_block,
+                max_row_nnz,
+                # Triton's max numel is bounded by 2 ** 17.
+                min(2 ** 17, max_row_nnz)
+            )
+
+        launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
+
+        values = values.reshape(-1, row_block, nnz, col_block).transpose(-3, -2).reshape(*input.values().shape)
+
+        return torch.sparse_compressed_tensor(
+            input.crow_indices().clone(),
+            input.col_indices().clone(),
+            values,
+            size=input.shape,
+            layout=input.layout
+        )
+
+    def _scaled_dot_product_attention(
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_mask: Optional[torch.Tensor],
+        dropout_p: float = 0.0,
+        is_causal: bool = False,
+        scale: Optional[float] = None
+    ):
+        f_name = "_scaled_dot_product_attention"
+        check(
+            not is_causal,
+            f"{f_name}(): is_causal == True is not supported."
+        )
+        check(
+            attn_mask is not None,
+            f"{f_name}(): attn_mask == None is not supported."
+        )
+        assert attn_mask is not None
+
+        check(
+            attn_mask.layout == torch.sparse_bsr,
+            f"{f_name}(): "
+            f"attn_mask.layout must be {torch.sparse_bsr}, but got "
+            f"attn_mask.layout == {attn_mask.layout}."
+        )
+
+        check_device(f_name, key, query.device)
+        check_device(f_name, value, query.device)
+        check_device(f_name, attn_mask, query.device)
+
+        check_dtype(f_name, key, query.dtype)
+        check_dtype(f_name, value, query.dtype)
+        if attn_mask.dtype is not torch.bool:
+            check_dtype(f_name, attn_mask, query.dtype)
+
+        sdpa = sampled_addmm(attn_mask, query, key.transpose(-2, -1), beta=0.0, skip_checks=False)
+        if scale is None and query.size(-1) == 0 or scale == 0.0:
+            check(
+                False,
+                f"{f_name}(): current value of scale == {scale} "
+                "results in division by zero."
+            )
+        scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+        sdpa.values().mul_(scale_factor)
+        sdpa = bsr_softmax(sdpa)
+        torch.nn.functional.dropout(sdpa.values(), p=dropout_p, inplace=True)
+        sdpa = bsr_dense_mm(sdpa, value)
+        return sdpa
 else:
+    bsr_softmax = None  # type: ignore[assignment]
     bsr_dense_mm = None  # type: ignore[assignment]
     sampled_addmm = None  # type: ignore[assignment]
+    _scaled_dot_product_attention = None  # type: ignore[assignment]
