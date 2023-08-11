@@ -44,7 +44,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res2 = opt_fn(x, y, z)
-        self.assertEqual(res1, res2)
+        self.assertTrue(same(res1, res2))
 
     def test_no_recompilations(self):
         # no recompilations if passing on different numpy int values
