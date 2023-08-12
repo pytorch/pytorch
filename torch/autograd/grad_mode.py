@@ -1,8 +1,8 @@
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import torch
 
-from torch.utils._contextlib import _DecoratorContextManager
+from torch.utils._contextlib import _DecoratorContextManager, F
 
 __all__ = [
     "no_grad",
@@ -65,6 +65,9 @@ class no_grad(_DecoratorContextManager):
         if not torch._jit_internal.is_scripting():
             super().__init__()
         self.prev = False
+
+    def __new__(cls, orig_func: Optional[F] = None) -> Union[F, "no_grad"]:
+        return no_grad()(orig_func) if orig_func else super().__new__(cls)
 
     def __enter__(self) -> None:
         self.prev = torch.is_grad_enabled()
