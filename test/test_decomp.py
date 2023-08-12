@@ -332,6 +332,8 @@ CROSS_REF_EXCLUDE_SET = {
     # This decomp runs before autograd.
     (None, None, "nn.functional.rrelu"),
     (None, None, "meshgrid"),
+    # Decomposition registered as Autograd
+    (None, None, "nn.functional.hardshrink"),
     # diag was not decomposed (it just registers a decomp for diag_out, torch.diag is CompImplicit)
     (None, None, "diag"),
     # _softmax_backward_data's CPU kernel for bfloat16 always return the grad_input as float32
