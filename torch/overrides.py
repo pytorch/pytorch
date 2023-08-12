@@ -186,7 +186,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.sym_min,
         torch.sym_not,
         torch.sym_constrain_range,
-        torch.sym_constrain_range_for_size,
         torch.tril_indices,
         torch.triu_indices,
         torch.vander,
