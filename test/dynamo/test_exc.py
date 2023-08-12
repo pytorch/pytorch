@@ -10,7 +10,7 @@ import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
 from torch.testing._internal.common_device_type import skipIf
-from torch.testing._internal.common_utils import TEST_Z3, munge_exc
+from torch.testing._internal.common_utils import munge_exc, TEST_Z3
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -195,7 +195,7 @@ ReluCompileError:""",
         inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True,
         assume_static_by_default=False,
         translation_validation=True,
-        suppress_errors=False
+        suppress_errors=False,
     )
     def test_trigger_on_error(self):
         from torch.fx.experimental.validator import ValidationException
@@ -234,7 +234,7 @@ Target Expressions:
   ==> (== 4 s0)
 
 Failed Source Expressions:
-  ==> (!= 4 L['x'].size()[0])"""
+  ==> (!= 4 L['x'].size()[0])""",
         )
 
 
