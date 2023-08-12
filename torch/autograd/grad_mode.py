@@ -29,7 +29,7 @@ class no_grad(_DecoratorContextManager):
     This context manager is thread local; it will not affect computation
     in other threads.
 
-    Also functions as a decorator. (Make sure to instantiate with parenthesis.)
+    Also functions as a decorator.
 
     .. note::
         No-grad is one of several mechanisms that can enable or
@@ -52,6 +52,12 @@ class no_grad(_DecoratorContextManager):
         ... def doubler(x):
         ...     return x * 2
         >>> z = doubler(x)
+        >>> z.requires_grad
+        False
+        >>> @torch.no_grad
+        ... def tripler(x):
+        ...     return x * 3
+        >>> z = tripler(x)
         >>> z.requires_grad
         False
         >>> # factory function exception
