@@ -1099,17 +1099,18 @@ class TritonKernel(Kernel):
 
         expand_str = None
 
-        if not isinstance(index, sympy.Integer):
-            # If index is a sympy.Integer, we'll "broadcast" it with tl.full later.
-            if need_dense and not have_dense:
-                expand_str = (
-                    f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
-                )
-                index_str = f"tl.broadcast_to({index_str}, {expand_str})"
-                mask_vars = dense_mask_vars
-            elif not have_loop_vars and copy_shape:
-                index_str = f"tl.broadcast_to({index_str}, {copy_shape}.shape)"
-                mask_vars = dense_mask_vars
+        if isinstance(index, sympy.Integer):
+            expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
+            index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
+            return index_str, set(), "None", expand_str
+
+        if need_dense and not have_dense:
+            expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
+            index_str = f"tl.broadcast_to({index_str}, {expand_str})"
+            mask_vars = dense_mask_vars
+        elif not have_loop_vars and copy_shape:
+            index_str = f"tl.broadcast_to({index_str}, {copy_shape}.shape)"
+            mask_vars = dense_mask_vars
 
         if override_mask:
             mask_vars = {override_mask}
@@ -1120,12 +1121,6 @@ class TritonKernel(Kernel):
         self.filter_masks(mask_vars)
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
-
-        if isinstance(index, sympy.Integer):
-            expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
-            index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
-            return index_str, mask_vars, mask_str, expand_str
-
         return index_str, mask_vars, mask_str, expand_str
 
     def filter_masks(self, mask_vars):
@@ -1291,10 +1286,7 @@ class TritonKernel(Kernel):
         if V.graph.is_unspec_arg(name):
             line = var
         else:
-            # Triton has better performance if you can provide a scalar index
-            # instead of a broadcasted index tensor, but we can only do this
-            # when there is no masking required.
-            if isinstance(original_index, sympy.Integer) and not mask_vars:
+            if isinstance(original_index, sympy.Integer):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = expand_str
             else:
