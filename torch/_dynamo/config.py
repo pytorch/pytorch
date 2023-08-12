@@ -31,8 +31,11 @@ minimum_call_count = 1
 dead_code_elimination = True
 
 # disable (for a function) when cache reaches this size
+# TODO - The values are kept same to ensure that we do not regress from the
+# current state. Once we are certain that the change is stable, we can decrease
+# the specialized_instance_cache_size_limit to a smaller value like 8.
 cache_size_limit = 64
-specialized_instance_cache_size_limit = 16  # TODO - kept too high conservatively
+specialized_instance_cache_size_limit = 64
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int

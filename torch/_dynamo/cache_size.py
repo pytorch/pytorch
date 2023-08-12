@@ -115,7 +115,6 @@ def update_cache_size(guarded_nn_modules, input_code):
         )
 
     # Update the keys
-    print("Adding a cache entry", format_func_info(input_code), cache_key)
     tracker.total_cache_size += 1
     tracker.specialized_instance_cache_size[cache_key] += 1
 
@@ -132,7 +131,6 @@ def is_recompilation(guarded_nn_modules, input_code):
     cache_key = compute_specialized_instance_cache_key(guarded_nn_modules)
 
     # cache_key already present in the tracker means we are recompiling
-    print("Search for cache_key", format_func_info(input_code), cache_key)
     return cache_key in tracker.specialized_instance_cache_size
 
 
