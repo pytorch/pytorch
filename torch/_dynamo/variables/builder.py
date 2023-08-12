@@ -87,6 +87,7 @@ from .functions import (
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import (
     BaseListVariable,
+    DequeVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
@@ -248,6 +249,7 @@ class VariableBuilder:
             odict_values: ListVariable,
             torch.nn.ParameterList: ListVariable,
             torch.nn.ModuleList: ListVariable,
+            collections.deque: DequeVariable,
         }[type(value)]
 
     def get_source(self):
@@ -274,7 +276,7 @@ class VariableBuilder:
                 (torch.Tensor, torch.nn.Parameter, torch._subclasses.FakeTensor),
                 cls.wrap_tensor,
             ),
-            ((tuple, list, odict_values), cls.wrap_listlike),
+            ((tuple, list, odict_values, collections.deque), cls.wrap_listlike),
             (tuple_iterator, cls.wrap_tuple_iterator),
             ((slice, range), cls.wrap_slice_range),
             (
