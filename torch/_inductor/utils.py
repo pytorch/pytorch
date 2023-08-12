@@ -25,6 +25,7 @@ from typing import (
     Set,
     TypeVar,
     Union,
+    ValuesView,
 )
 from unittest import mock
 
@@ -121,7 +122,7 @@ def sympy_dot(seq1, seq2):
     return sympy.expand(sum(a * b for a, b in zip(seq1, seq2)))
 
 
-def unique(it: Iterable[_T]) -> Iterable[_T]:
+def unique(it: Iterable[_T]) -> ValuesView[_T]:
     return {id(x): x for x in it}.values()
 
 
