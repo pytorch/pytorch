@@ -28,12 +28,12 @@ import numpy as np
 import pandas as pd
 import psutil
 import torch
-
 import torch._dynamo
 import torch._dynamo.utils
 import torch._export
 import torch.distributed
 import torch.fx._pytree as fx_pytree
+import torch.multiprocessing as mp
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
@@ -1679,9 +1679,7 @@ def maybe_fresh_cache(fn, is_cold_start):
 
 
 @contextmanager
-def maybe_init_distributed(should_init_distributed, port="6789", rank=0, world_size=1):
-    # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
-    # Just manually implement the most important part of the dynamo behavior to reset/clear.
+def maybe_init_distributed(should_init_distributed, rank, world_size, port="6789"):
     try:
         if should_init_distributed:
             torch.cuda.set_device(rank)
@@ -1924,6 +1922,60 @@ class BenchmarkRunner:
         )
         return start, end
 
+    def deepcopy_and_maybe_ddp(self, model):
+        model = self.deepcopy_model(model)
+        if self.args.ddp:
+            assert (
+                torch.distributed.is_available()
+            ), "Can't use DDP without a distributed enabled build"
+            from torch.nn.parallel import DistributedDataParallel as DDP
+
+            model = DDP(model, find_unused_parameters=True)
+        elif self.args.fsdp:
+            assert (
+                torch.distributed.is_available()
+            ), "Can't use FSDP without a distributed enabled build"
+            from torch.distributed.fsdp import (
+                FullyShardedDataParallel as FSDP,
+                MixedPrecision,
+            )
+
+            from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
+
+            if self.args.float16:
+                dtype = torch.float16
+            elif self.args.bfloat16:
+                dtype = torch.bfloat16
+            else:
+                dtype = torch.float32
+
+            mp_policy = MixedPrecision(
+                param_dtype=dtype,
+                # Gradient communication precision.
+                reduce_dtype=dtype,
+                # Buffer precision.
+                buffer_dtype=dtype,
+            )
+
+            my_auto_wrap_policy = functools.partial(
+                size_based_auto_wrap_policy, recurse=True, min_num_params=int(1e5)
+            )
+
+            model = FSDP(
+                model,
+                use_orig_params=True,
+                device_id=torch.cuda.current_device()
+                if self.args.devices[-1] == "cuda"
+                else None,
+                mixed_precision=mp_policy,
+                limit_all_gathers=True,
+                auto_wrap_policy=my_auto_wrap_policy,
+            )
+            if torch._inductor.config.triton.cudagraphs:
+                log.warning("Disabling cudagraphs for FSDP compatibility")
+                torch._inductor.config.triton.cudagraphs = False
+        return model
+
     def check_accuracy(
         self, name, model, example_inputs, optimize_ctx, experiment, tag
     ):
@@ -1965,32 +2017,11 @@ class BenchmarkRunner:
         if name in self.skip_accuracy_checks_large_models_dashboard:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
-        def deepcopy_and_maybe_ddp(model):
-            model = self.deepcopy_model(model)
-            if self.args.ddp:
-                assert (
-                    torch.distributed.is_available()
-                ), "Can't use DDP without a distributed enabled build"
-                from torch.nn.parallel import DistributedDataParallel as DDP
-
-                model = DDP(model, find_unused_parameters=True)
-            elif self.args.fsdp:
-                assert (
-                    torch.distributed.is_available()
-                ), "Can't use FSDP without a distributed enabled build"
-                from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-
-                model = FSDP(model, use_orig_params=True)
-                if torch._inductor.config.triton.cudagraphs:
-                    log.warning("Disabling cudagraphs for FSDP compatibility")
-                    torch._inductor.config.triton.cudagraphs = False
-            return model
-
         # Collect the fp64 reference outputs to be used later for accuracy checking.
         fp64_outputs = None
         try:
             model_fp64, inputs_fp64 = cast_to_fp64(
-                deepcopy_and_maybe_ddp(model),
+                self.deepcopy_and_maybe_ddp(model),
                 clone_inputs(example_inputs),
             )
             self.init_optimizer(name, current_device, model_fp64.parameters())
@@ -2015,7 +2046,7 @@ class BenchmarkRunner:
             # Get results of native pytorch
             reset_rng_state()
             try:
-                model_copy = deepcopy_and_maybe_ddp(model)
+                model_copy = self.deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 correct_result = self.run_n_iterations(
                     model_copy, clone_inputs(example_inputs)
@@ -2032,7 +2063,7 @@ class BenchmarkRunner:
             # Rerun native pytorch
             reset_rng_state()
             try:
-                model_copy = deepcopy_and_maybe_ddp(model)
+                model_copy = self.deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 correct_rerun_result = self.run_n_iterations(
                     model_copy, clone_inputs(example_inputs)
@@ -2074,7 +2105,7 @@ class BenchmarkRunner:
             reset_rng_state()
             torch._dynamo.reset()
             try:
-                model_copy = deepcopy_and_maybe_ddp(model)
+                model_copy = self.deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 if self.args.export:
                     # TB and TIMM use list example_inputs
@@ -2270,6 +2301,10 @@ class BenchmarkRunner:
 
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
+
+        # Use distributed wrapping as necessary
+        model = self.deepcopy_and_maybe_ddp(model)
+
         self.init_optimizer(name, current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
@@ -2589,6 +2624,11 @@ def parse_args(args=None):
                 return (torch.randn(2, 10),)
         ```
     """,
+    )
+    parser.add_argument(
+        "--multiprocess",
+        action="store_true",
+        help="Create n processes based on the number of devices (distributed use case).",
     )
     parser.add_argument(
         "--ddp",
@@ -2935,6 +2975,19 @@ def parse_args(args=None):
     return parser.parse_args(args)
 
 
+def process_entry(rank, runner, original_dir, args):
+    args.rank = rank
+    with maybe_init_distributed(
+        args.use_distributed,
+        rank=rank,
+        world_size=args.world_size,
+        port=args.distributed_master_port,
+    ):
+        return maybe_fresh_cache(
+            run, (args.cold_start_latency and args.only) or args.ci
+        )(runner, args, original_dir)
+
+
 def main(runner, original_dir=None):
     if original_dir:
         os.chdir(original_dir)
@@ -2957,12 +3010,20 @@ def main(runner, original_dir=None):
                 f"--diff-branch: current branch is same as {args.diff_branch} branch, what are you diffing?"
             )
 
-    with maybe_init_distributed(
-        (args.ddp or args.fsdp) and args.only, port=args.distributed_master_port
-    ):
-        return maybe_fresh_cache(
-            run, (args.cold_start_latency and args.only) or args.ci
-        )(runner, args, original_dir)
+    device_count = torch.cuda.device_count()
+    args.use_distributed = (args.ddp or args.fsdp) and args.only
+    if args.multiprocess:
+        if device_count <= 1:
+            log.warning(
+                "The use multiprocess flag is set but there are <= 1 devices available."
+            )
+        # multiprocess path
+        args.world_size = device_count
+        mp.spawn(process_entry, args=(runner, original_dir, args), nprocs=device_count)
+    else:
+        # single process path just uses the main process
+        args.world_size = 1
+        process_entry(0, runner, original_dir, args)
 
 
 def run(runner, args, original_dir=None):
@@ -3344,15 +3405,28 @@ def run(runner, args, original_dir=None):
                                 part=args.part,
                             )
                         else:
-                            (
-                                device,
-                                name,
-                                model,
-                                example_inputs,
-                                batch_size,
-                            ) = runner.load_model(
-                                device, model_name, batch_size=batch_size
-                            )
+                            if args.fsdp:
+                                # Always load model on cpu for fsdp
+                                # When initializing FSDP, we will use the cuda device if args.cuda is set
+                                (
+                                    _,
+                                    name,
+                                    model,
+                                    example_inputs,
+                                    batch_size,
+                                ) = runner.load_model(
+                                    "cpu", model_name, batch_size=batch_size
+                                )
+                            else:
+                                (
+                                    device,
+                                    name,
+                                    model,
+                                    example_inputs,
+                                    batch_size,
+                                ) = runner.load_model(
+                                    device, model_name, batch_size=batch_size
+                                )
                 except NotImplementedError as e:
                     print(e)
                     import traceback
