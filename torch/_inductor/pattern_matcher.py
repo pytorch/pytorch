@@ -342,21 +342,45 @@ class _TargetArgsExpr(_TargetExpr):
         return f"{self.__class__.__name__}({', '.join(args)})"
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext):
-        if (
-            not self._match_fns(node)
-            or len(node.args) != len(self.args)
-            or len(node.kwargs) != len(self.kwargs)
-        ):
+        if not self._match_fns(node):
             return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
 
         if not self._match_users(node, ctx):
             return FailedMatch(f"multiple_users {node}")
 
-        node_items, node_spec = self.flatten(node.args, node.kwargs)
-        self_items, self_spec = self.flat_args_kwargs
-        if node_spec != self_spec:
-            return FailedMatch(f"args_structure {node_spec} {self_spec}")
-        assert len(node_items) == len(self_items)
+        self_items = None
+        node_items = None
+
+        def match_inner(args, kwargs):
+            nonlocal self_items
+            nonlocal node_items
+            if len(args) != len(self.args) or len(kwargs) != len(self.kwargs):
+                return False
+            node_items, node_spec = self.flatten(args, kwargs)
+            self_items, self_spec = self.flat_args_kwargs
+            if node_spec != self_spec:
+                return False
+            assert len(node_items) == len(self_items)
+            return True
+
+        if not match_inner(node.args, node.kwargs):
+            from torch.fx.operator_schemas import normalize_function
+
+            arg_types = [type(node.args[i]) for i in range(len(node.args))]
+            kwarg_types = {k: type(node.kwargs[k]) for k in node.kwargs.keys()}
+            normalized_args_and_kwargs = normalize_function(
+                node.target, node.args, node.kwargs, arg_types, kwarg_types
+            )
+
+            if normalized_args_and_kwargs is None:
+                return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
+            else:
+                normalized_args, normalized_kwargs = normalized_args_and_kwargs
+
+                if not match_inner(normalized_args, normalized_kwargs):
+                    return FailedMatch(
+                        f"function_mismatch: node={node}, pattern={self}"
+                    )
 
         m = Match(self)
         for i, pattern, child_node in zip(itertools.count(), self_items, node_items):
