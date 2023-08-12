@@ -1,4 +1,5 @@
 #include <c10/core/SymNodeImpl.h>
+#include <c10/util/variant.h>
 
 namespace c10 {
 
@@ -34,39 +35,39 @@ class ConstantSymNodeImpl : public SymNodeImpl {
   }
   int64_t int_() override {
     TORCH_CHECK(is_int(), "not an int");
-    return std::get<int64_t>(value_);
+    return c10::get<int64_t>(value_);
   }
   bool bool_() override {
     TORCH_CHECK(is_bool(), "not a bool");
-    return std::get<bool>(value_);
+    return c10::get<bool>(value_);
   }
   bool has_hint() override {
     return true;
   }
   std::string str() override {
     if (is_int()) {
-      return std::to_string(std::get<int64_t>(value_));
+      return std::to_string(c10::get<int64_t>(value_));
     } else {
-      return std::get<bool>(value_) ? "true" : "false";
+      return c10::get<bool>(value_) ? "true" : "false";
     }
   }
   c10::optional<int64_t> constant_int() override {
     if (is_int()) {
-      return std::get<int64_t>(value_);
+      return c10::get<int64_t>(value_);
     } else {
       return c10::nullopt;
     }
   }
   c10::optional<bool> constant_bool() override {
     if (is_bool()) {
-      return std::get<bool>(value_);
+      return c10::get<bool>(value_);
     } else {
       return c10::nullopt;
     }
   }
 
  private:
-  std::variant<int64_t, bool> value_;
+  c10::variant<int64_t, bool> value_;
 };
 
 } // namespace c10

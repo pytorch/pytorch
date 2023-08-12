@@ -14,13 +14,13 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
+#include <c10/core/SingletonSymNodeImpl.h>
 #include <c10/util/flat_hash_map.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
-#include <c10/core/SingletonSymNodeImpl.h>
 
 #include <iostream>
 #include <utility>
@@ -741,7 +741,8 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def("get_singleton_int", [](int64_t data) {
-    return c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(data)));
+    return c10::SymInt(
+        c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(data)));
   });
 }
 

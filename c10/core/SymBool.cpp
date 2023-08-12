@@ -25,23 +25,23 @@ SymNode SymBool::wrap_node(const SymNode& base) const {
 }
 
 // See SymInt.cpp's DEFINE_BINARY for a small note
-#define DEFINE_BINARY(API, OP, METHOD, RET)                               \
-  RET SymBool::API(const SymBool& sci) const {                            \
-    if (auto ma = maybe_as_bool()) {                                      \
-      if (auto mb = sci.maybe_as_bool()) {                                \
-        return RET(OP(*ma, *mb));                                         \
-      } else {                                                            \
-        auto b = sci.toSymNodeImpl();                                     \
-        return RET(b->METHOD(b->wrap_bool(*ma)));                         \
-      }                                                                   \
-    } else {                                                              \
-      if (auto mb = sci.maybe_as_bool()) {                                \
-        auto a = toSymNodeImplUnowned();                                  \
-        return RET(a->METHOD(a->wrap_bool(*mb)));                         \
-      } else {                                                            \
-        return RET(toSymNodeImplUnowned()->METHOD(sci.toSymNodeImpl()));  \
-      }                                                                   \
-    }                                                                     \
+#define DEFINE_BINARY(API, OP, METHOD, RET)                              \
+  RET SymBool::API(const SymBool& sci) const {                           \
+    if (auto ma = maybe_as_bool()) {                                     \
+      if (auto mb = sci.maybe_as_bool()) {                               \
+        return RET(OP(*ma, *mb));                                        \
+      } else {                                                           \
+        auto b = sci.toSymNodeImpl();                                    \
+        return RET(b->METHOD(b->wrap_bool(*ma)));                        \
+      }                                                                  \
+    } else {                                                             \
+      if (auto mb = sci.maybe_as_bool()) {                               \
+        auto a = toSymNodeImplUnowned();                                 \
+        return RET(a->METHOD(a->wrap_bool(*mb)));                        \
+      } else {                                                           \
+        return RET(toSymNodeImplUnowned()->METHOD(sci.toSymNodeImpl())); \
+      }                                                                  \
+    }                                                                    \
   }
 
 // clang-format off

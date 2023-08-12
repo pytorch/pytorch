@@ -1,6 +1,6 @@
 #include <c10/core/ConstantSymNodeImpl.h>
-#include <c10/core/SymNodeImpl.h>
 #include <c10/core/SymBool.h>
+#include <c10/core/SymNodeImpl.h>
 #include <iostream>
 
 namespace c10 {
@@ -53,27 +53,34 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   }
 
   std::string str() override {
-    // TODO: A better str?
-    return "* (" + std::to_string(val_) + ")";
+    return "j" + std::to_string(val_);
   }
 
   c10::SymNode eq(const c10::SymNode& other) override {
-    std::cout << "SingletonSymNodeImpl::eq" << std::endl;
     c10::optional<int64_t> c = other->singleton_int();
-    TORCH_CHECK(c,
+    TORCH_CHECK(
+        c,
         "SingletonSymNode can only be compared with SingletonSymNode, but got ",
         other->str());
     return SymBool(val_ == *c).promoteToConstantSymNode();
+  }
+
+  c10::SymNode ne(const c10::SymNode& other) override {
+    c10::optional<int64_t> c = other->singleton_int();
+    TORCH_CHECK(
+        c,
+        "SingletonSymNode can only be compared with SingletonSymNode, but got ",
+        other->str());
+    return SymBool(val_ != *c).promoteToConstantSymNode();
   }
 
   c10::optional<int64_t> singleton_int() override {
     return val_;
   }
 
-
-#define DEFINE_BINARY_NOT_SUPPORTED(name) \
-  c10::SymNode name(const c10::SymNode& other) override { \
-    TORCH_CHECK(false, #name "not supported by SingletonSymNode"); \
+#define DEFINE_BINARY_NOT_SUPPORTED(name)                           \
+  c10::SymNode name(const c10::SymNode& other) override {           \
+    TORCH_CHECK(false, #name " not supported by SingletonSymNode"); \
   }
 
   DEFINE_BINARY_NOT_SUPPORTED(add)
@@ -83,7 +90,6 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   DEFINE_BINARY_NOT_SUPPORTED(pow)
   DEFINE_BINARY_NOT_SUPPORTED(floordiv)
   DEFINE_BINARY_NOT_SUPPORTED(mod)
-  DEFINE_BINARY_NOT_SUPPORTED(ne)
   DEFINE_BINARY_NOT_SUPPORTED(gt)
   DEFINE_BINARY_NOT_SUPPORTED(lt)
   DEFINE_BINARY_NOT_SUPPORTED(ge)
@@ -94,9 +100,9 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
 
 #undef DEFINE_BINARY_NOT_SUPPORTED
 
-#define DEFINE_NOT_SUPPORTED(name) \
-  c10::SymNode name() override {    \
-    TORCH_CHECK(false, #name "is not supported by SingletonSymNode"); \
+#define DEFINE_NOT_SUPPORTED(name)                                     \
+  c10::SymNode name() override {                                       \
+    TORCH_CHECK(false, #name " is not supported by SingletonSymNode"); \
   }
 
   DEFINE_NOT_SUPPORTED(sym_not)
