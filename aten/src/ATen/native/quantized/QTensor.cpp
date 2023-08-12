@@ -173,7 +173,8 @@ Tensor& set_storage_quantized_(
     Storage storage,
     int64_t storage_offset,
     IntArrayRef sizes,
-    IntArrayRef strides) {
+    IntArrayRef strides,
+    bool cross_device) {
   auto* self_ = self.unsafeGetTensorImpl();
   self_->set_storage_keep_dtype(std::move(storage));
   self_->set_storage_offset(storage_offset);

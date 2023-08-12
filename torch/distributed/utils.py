@@ -156,12 +156,11 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
         storage was already allocated.
     """
     with torch.no_grad():
-        already_allocated = tensor._typed_storage()._size() == size.numel()
+        already_allocated = torch._same_storage_size(tensor, size.numel())
         if not already_allocated:
-            tensor_storage_size = tensor._typed_storage()._size()
             _p_assert(
-                tensor_storage_size == 0,
-                f"Tensor storage should have been resized to be 0 but got {tensor_storage_size}",
+                not torch._data_ptr_allocated(tensor),
+                f"Tensor storage should have been resized to be 0 but got PLACEHOLDEr",
             )
             tensor._typed_storage()._resize_(size.numel())
 
@@ -176,13 +175,13 @@ def _free_storage(tensor: torch.Tensor) -> None:
         storage was already freed.
     """
     with torch.no_grad():
-        already_freed = tensor._typed_storage()._size() == 0
+        already_freed = not torch._storage_size_allocated(tensor)
         if not already_freed:
             _p_assert(
                 tensor.storage_offset() == 0,
                 "Freeing a tensor's storage is unsafe when it is not the sole occupant\n"
                 f"storage offset: {tensor.storage_offset()}\n"
-                f"storage size: {tensor._typed_storage()._size()}\n"
+                f"storage size: PLACEHOLDER\n"
                 f"tensor shape: {tensor.shape}",
             )
             tensor._typed_storage()._resize_(0)

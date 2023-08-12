@@ -3,6 +3,7 @@
 #include <vector>
 #include <ATen/core/TensorBody.h>
 #include <c10/util/OptionalArrayRef.h>
+#include <ATen/native/Resize.h>
 
 namespace at {
 

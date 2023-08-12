@@ -187,6 +187,15 @@
 
 - func: _set_data(Tensor(a!) self, Tensor new_data) -> Tensor
 
+
+- func: _same_storage(Tensor(a!) self, Tensor b) -> bool
+
+- func: _data_ptr_allocated(Tensor(a!) self) -> bool
+
+- func: _same_storage_size(Tensor(a!) self, int size) -> bool
+
+- func: _storage_size_allocated(Tensor(a!) self) -> bool
+
 - func: sym_constrain_range_for_size(Scalar size, *, int? min=None, int? max=None) -> ()
   dispatch:
     CompositeExplicitAutograd: sym_constrain_range_for_size
@@ -7619,7 +7628,7 @@
     CPU, CUDA, Meta, MPS: set_
   autogen: set.source_Storage, set.source_Storage_out
 
-- func: set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, SymInt storage_offset, SymInt[] size, SymInt[] stride=[]) -> Tensor(a!)
+- func: set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, SymInt storage_offset, SymInt[] size, SymInt[] stride=[], bool cross_device=False) -> Tensor(a!)
   variants: method
   device_check: NoCheck
   device_guard: False
