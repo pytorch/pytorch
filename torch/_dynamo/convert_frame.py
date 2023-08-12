@@ -5,12 +5,12 @@ import os
 import random
 import types
 import weakref
-from typing import Dict, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 import torch
 import torch._logging
 from torch._guards import tracing
-from torch._utils_internal import signpost_event
+from torch._utils_internal import log_compilation_event, signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
@@ -24,6 +24,7 @@ from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
+    Instruction,
     is_generator,
     propagate_inst_exn_table_entries,
     transform_code_object,
@@ -45,9 +46,11 @@ from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
 from .utils import (
     CleanupManager,
+    CompilationMetrics,
     counters,
     dynamo_timed,
     format_bytecode,
+    frame_phase_timing,
     gen_record_file_name,
     guard_failures,
     increment_frame,
@@ -374,6 +377,7 @@ def convert_frame_assert(
             export,
             export_constraints,
             hooks,
+            cache_size,
             frame,
             frame_state=frame_state,
         )
@@ -382,7 +386,6 @@ def convert_frame_assert(
     return wrap_convert_context(_convert_frame_assert)
 
 
-@dynamo_timed(phase_name="entire_frame_compile")
 def _compile(
     code: types.CodeType,
     globals: Dict[str, object],
@@ -393,14 +396,14 @@ def _compile(
     export: bool,
     export_constraints,
     hooks: Hooks,
+    cache_size: int,
     frame: Optional[types.FrameType] = None,
     frame_state=None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
-
-    # from .utils import print_once;  print_once(code.co_filename)
+    fail_reason: Optional[str] = None
 
     def transform(instructions, code_options):
         nonlocal output
@@ -431,7 +434,14 @@ def _compile(
             check_inst_exn_tab_entries_valid(instructions)
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
-    try:
+    @dynamo_timed(phase_name="entire_frame_compile")
+    def compile_inner(
+        code: types.CodeType,
+        one_graph: bool,
+        hooks: Hooks,
+        transform: Callable[[List[Instruction], Dict[str, Any]], Any],
+    ) -> Optional[GuardedCode]:
+        nonlocal output
         for attempt in itertools.count():
             try:
                 out_code = transform_code_object(code, transform)
@@ -521,6 +531,10 @@ def _compile(
 
         output.local_scope.clear()
         return guarded_code
+
+    try:
+        guarded_code = compile_inner(code, one_graph, hooks, transform)
+        return guarded_code
     except (
         Unsupported,
         TorchRuntimeError,
@@ -529,11 +543,54 @@ def _compile(
         ConstraintViolationError,
         GuardOnDataDependentSymNode,
     ) as e:
+        fail_reason = str(e)
         exception_handler(e, code, frame, export=export)
         raise
     except Exception as e:
+        fail_reason = str(e)
         exception_handler(e, code, frame, export=export)
         raise InternalTorchDynamoError(str(e)).with_traceback(e.__traceback__) from None
+    finally:
+        from .utils import curr_frame
+
+        frame_key = str(curr_frame)
+        if (
+            fail_reason is None
+            and output is not None
+            and frame_key in frame_phase_timing
+        ):
+            guard_count = len(output.guards)
+            graph_op_count = output.count_calls()
+            graph_node_count = len(output.graph.nodes)
+            graph_input_count = len(output.placeholders)
+            entire_frame_compile_time = frame_phase_timing[frame_key].get(
+                "entire_frame_compile", None
+            )
+            backend_compile_time = frame_phase_timing[frame_key].get(
+                "backend_compile", None
+            )
+        else:
+            guard_count = None
+            graph_op_count = None
+            graph_node_count = None
+            graph_input_count = None
+            entire_frame_compile_time = None
+            backend_compile_time = None
+        metrics = CompilationMetrics(
+            frame_key,
+            code.co_name,
+            code.co_filename,
+            code.co_firstlineno,
+            cache_size,
+            guard_count,
+            graph_op_count,
+            graph_node_count,
+            graph_input_count,
+            entire_frame_compile_time,
+            backend_compile_time,
+            fail_reason,
+        )
+        log_compilation_event(metrics)
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
@@ -602,7 +659,9 @@ def replay(filename):
             compiler_fn=eager,
             one_graph=False,
             export=False,
+            export_constraints=None,
             hooks=Hooks(),
+            cache_size=0,
             frame=None,
         )
     except Exception:
