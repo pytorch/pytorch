@@ -405,7 +405,7 @@ class Loops(IRNode):
 
 
 def nop_loader_fn(idx, *, dtype):
-    if dtype in {torch.float16, torch.float32, torch.float64}:
+    if dtype.is_floating_point:
         return ops.constant(float("nan"), dtype)
     else:
         return ops.constant(0, dtype)
