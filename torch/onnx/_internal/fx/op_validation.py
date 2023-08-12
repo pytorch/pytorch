@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from typing import Any, Callable, Dict, List, Sequence, Tuple, Union
 
 import onnxscript  # type: ignore[import]
@@ -75,10 +77,10 @@ def validate_op_between_ort_torch(
         )
     except ValueError as value_error:
         diagnostic = diagnostic_context.inflight_diagnostic()
-        diagnostic.with_additional_message(
-            f"### Op level debug fails due to unsupported input types\n"
-            f"{diagnostics.decorator.format_exception_in_markdown(value_error)}"
-        )
+        with diagnostic.log_section(
+            logging.WARNING, "Op level debug fails due to unsupported input types"
+        ):
+            diagnostic.log_source_exception(logging.WARNING, value_error)
         diagnostic.level = diagnostics.levels.WARNING
         return
 
@@ -89,21 +91,17 @@ def validate_op_between_ort_torch(
         except IndexError as index_error:
             # TODO(titaiwang): How to bound indices/dim: INT64
             diagnostic = diagnostic_context.inflight_diagnostic()
-            diagnostic.with_additional_message(
-                f"### Op level debug is bypassed\n"
-                f"{diagnostics.decorator.format_exception_in_markdown(index_error)}"
-            )
-            diagnostic.with_source_exception(index_error)
+            with diagnostic.log_section(logging.WARNING, "Op level debug is bypassed"):
+                diagnostic.log_source_exception(logging.WARNING, index_error)
             diagnostic.level = diagnostics.levels.WARNING
             return
         # NOTE: Error in torch ops with random inputs generated from FakTensors
         except RuntimeError as runtime_error:
             diagnostic = diagnostic_context.inflight_diagnostic()
-            diagnostic.with_additional_message(
-                f"### Op level debug fails on PyTorch\n"
-                f"{diagnostics.decorator.format_exception_in_markdown(runtime_error)}"
-            )
-            diagnostic.with_source_exception(runtime_error)
+            with diagnostic.log_section(
+                logging.WARNING, "Op level debug fails on PyTorch"
+            ):
+                diagnostic.log_source_exception(logging.WARNING, runtime_error)
             diagnostic.level = diagnostics.levels.WARNING
             return
 
@@ -126,11 +124,8 @@ def validate_op_between_ort_torch(
         # NOTE: Imcompatible kwargs or missing required args
         except TypeError as type_error:
             diagnostic = diagnostic_context.inflight_diagnostic()
-            diagnostic.with_additional_message(
-                f"### Op level debug is bypassed\n"
-                f"{diagnostics.decorator.format_exception_in_markdown(type_error)}"
-            )
-            diagnostic.with_source_exception(type_error)
+            with diagnostic.log_section(logging.WARNING, "Op level debug is bypassed"):
+                diagnostic.log_source_exception(logging.WARNING, type_error)
             diagnostic.level = diagnostics.levels.WARNING
             return
         try:
@@ -140,11 +135,10 @@ def validate_op_between_ort_torch(
         # NOTE: Error in ONNX Runtime with random inputs generated from FakTensors
         except RuntimeError as runtime_error:
             diagnostic = diagnostic_context.inflight_diagnostic()
-            diagnostic.with_additional_message(
-                f"### Op level debug fails on ONNXRUNTIME:\n"
-                f"{diagnostics.decorator.format_exception_in_markdown(runtime_error)}"
-            )
-            diagnostic.with_source_exception(runtime_error)
+            with diagnostic.log_section(
+                logging.WARNING, "Op level debug fails on ONNXRUNTIME"
+            ):
+                diagnostic.log_source_exception(logging.WARNING, runtime_error)
             diagnostic.level = diagnostics.levels.WARNING
             return
 
@@ -172,11 +166,8 @@ def validate_op_between_ort_torch(
                 )
             except AssertionError as e:
                 diagnostic = diagnostic_context.inflight_diagnostic()
-                diagnostic.with_additional_message(
-                    f"### Validation failed\n"
-                    f"{diagnostics.decorator.format_exception_in_markdown(e)}"
-                )
-                diagnostic.with_source_exception(e)
+                with diagnostic.log_section(logging.WARNING, "Validation failed"):
+                    diagnostic.log_source_exception(logging.WARNING, e)
                 diagnostic.level = diagnostics.levels.WARNING
 
 
