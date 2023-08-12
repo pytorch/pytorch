@@ -801,15 +801,15 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
 
         # equivalent to
         # np.logical_or(stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]).all()
-        a_first = all(
+        a_first = sum(
             sl_b == 0 or sl_a < sl_b for sl_a, sl_b in zip(stride_len_a, stride_len_b)
         )
-        b_first = all(
+        b_first = sum(
             sl_a == 0 or sl_b < sl_a for sl_a, sl_b in zip(stride_len_a, stride_len_b)
         )
-        if a_first and not b_first:
+        if a_first > b_first:
             return -1
-        if b_first and not a_first:
+        if b_first > a_first:
             return 1
 
         # otherwise contiguous
@@ -1159,10 +1159,8 @@ class Scheduler:
 
                     if self.can_fuse(node1, node2):
                         possible_fusions.append(key)
-                    elif (
-                        node2.is_template()
-                        or node2.is_foreach()
-                        and self.can_fuse(node2, node1)
+                    elif (node2.is_template() or node2.is_foreach()) and self.can_fuse(
+                        node2, node1
                     ):
                         # foreach fusions and epilogue fusions are order dependent
                         possible_fusions.append((node2, node1))
