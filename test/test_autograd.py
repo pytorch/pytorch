@@ -1972,18 +1972,20 @@ class TestAutograd(TestCase):
         with torch.no_grad():
             w = x + y
 
-        @torch.no_grad()
         def adder(x, y):
             return x + y
 
-        z = adder(x, y)
+        adders = [torch.no_grad()(adder), torch.no_grad(adder)]
 
-        self.assertFalse(w.requires_grad)
-        self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
-        self.assertIsNone(w.grad_fn)
-        self.assertFalse(z.requires_grad)
-        self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
-        self.assertIsNone(z.grad_fn)
+        for adder in adders:
+            z = adder(x, y)
+
+            self.assertFalse(w.requires_grad)
+            self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
+            self.assertIsNone(w.grad_fn)
+            self.assertFalse(z.requires_grad)
+            self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
+            self.assertIsNone(z.grad_fn)
 
         # test nested decorator and with-statement on no_grad
         with torch.no_grad():
@@ -10171,6 +10173,17 @@ class TestAutogradInferenceMode(TestCase):
                 d = func(c)
                 self.assertTrue(not mode or torch.is_inference(d))
                 self.assertEqual(d.requires_grad, requires_grad and not mode)
+
+        @torch.inference_mode
+        def func(x):
+            self.assertEqual(torch.is_inference_mode_enabled(), mode)
+            return x * x
+
+        for requires_grad in (True, False):
+            c = torch.ones(1, 2, 3, requires_grad=requires_grad)
+            d = func(c)
+            self.assertTrue(torch.is_inference(d))
+            self.assertEqual(d.requires_grad, False)
 
     def test_inference_mode_tensor_creation(self):
         with torch.inference_mode():
