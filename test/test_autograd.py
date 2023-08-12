@@ -1993,6 +1993,17 @@ class TestAutograd(TestCase):
             w = adder(x, y)
             self.assertFalse(torch.is_grad_enabled())
 
+    def test_enable_grad_decorator_no_paren(self):
+        x = torch.ones(1, requires_grad=True)
+
+        @torch.enable_grad
+        def doubler(x):
+            return x * 2
+
+        with torch.no_grad():
+            z = doubler(x)
+        self.assertTrue(z.requires_grad)
+
     def test_set_grad_generator_functions(self):
         @torch.no_grad()
         def gen_no_grad():
