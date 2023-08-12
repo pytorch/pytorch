@@ -1000,7 +1000,7 @@ class TestLinalg(TestCase):
         out = torch.linalg.eigh(a)
 
         ref = torch.linalg.eigh(a.cpu().double())
-        self.assertEqual(out, ref)
+        self.assertEqual(out.double(), ref)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
