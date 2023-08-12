@@ -396,6 +396,7 @@ class DTensorSpec:
             return self.tensor_meta == __o.tensor_meta
 
         # perf hack to avoid redistribute due to memory_format to be None.
+        # and we only care about shape, dtype and stride for now.
         return (
             self.tensor_meta.shape == __o.tensor_meta.shape  # type: ignore[union-attr]
             and self.tensor_meta.dtype == __o.tensor_meta.dtype  # type: ignore[union-attr]

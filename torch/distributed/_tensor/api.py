@@ -454,7 +454,7 @@ def distribute_tensor(
                 f"Cannot distribute a DTensor with device mesh {tensor.device_mesh} "
                 f"to a different device mesh {device_mesh}."
             )
-        if tensor.placements != placements:
+        if tensor.placements != tuple(placements):
             raise ValueError(
                 f"Cannot distribute a DTensor with placements {tensor.placements} "
                 f"to a different placements {placements}. do you want to call "

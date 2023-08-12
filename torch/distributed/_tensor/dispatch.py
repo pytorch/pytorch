@@ -144,7 +144,7 @@ def _operator_dispatch(
 
     # unwrap the args/kwargs schema
     op_schema = sharding_propagator.prepare_op_schema(op_call, args, kwargs)
-    op_schema_str = str(op_schema)
+    op_schema_hash = hash(op_schema)
 
     output_sharding = sharding_propagator.propagate(op_call, op_schema)
 
@@ -161,7 +161,7 @@ def _operator_dispatch(
     # tensors before calling the local op
     assert output_sharding.schema_suggestions is not None
     suggested_input_schema = output_sharding.schema_suggestions[0]
-    needs_redistribute = str(suggested_input_schema) != op_schema_str
+    needs_redistribute = hash(suggested_input_schema) != op_schema_hash
 
     if mesh is not None and mesh.get_coordinate() is None:
         # For a non-participating device, we do:
