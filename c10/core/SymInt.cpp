@@ -1,4 +1,4 @@
-#include <c10/core/LargeNegativeIntSymNodeImpl.h>
+#include <c10/core/ConstantSymNodeImpl.h>
 #include <c10/core/SymFloat.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
@@ -13,7 +13,7 @@ namespace c10 {
 // Postcondition: invariants on SymInt are fixed
 void SymInt::promote_to_negative() {
   auto s =
-      SymInt(SymNode(c10::make_intrusive<LargeNegativeIntSymNodeImpl>(data_)));
+      SymInt(SymNode(c10::make_intrusive<ConstantSymNodeImpl<int64_t>>(data_)));
   // Similar to move operator=, but do NOT release data_
   data_ = s.data_;
   s.data_ = 0;
@@ -39,6 +39,10 @@ bool SymInt::has_hint() const {
   return toSymNodeImplUnowned()->has_hint();
 }
 
+// It is important that we do a->METHOD(a->wrap_int(*mb)) instead of
+// a->wrap_int(*mb)->METHOD(a). The latter will not work in the case of
+// SingletonSymNodeImpl because a->wrap_int(*mb) produces a ConstantSymNodeImpl
+// which doesn't implement any operations.
 #define DEFINE_BINARY(API, OP, METHOD, RET)                          \
   RET SymInt::API(const SymInt& sci) const {                         \
     if (auto ma = maybe_as_int()) {                                  \
@@ -46,7 +50,7 @@ bool SymInt::has_hint() const {
         return RET(OP(*ma, *mb));                                    \
       } else {                                                       \
         auto b = sci.toSymNode();                                    \
-        return RET(b->wrap_int(*ma)->METHOD(b));                     \
+        return RET(b->METHOD(b->wrap_int(*ma)));                     \
       }                                                              \
     } else {                                                         \
       if (auto mb = sci.maybe_as_int()) {                            \

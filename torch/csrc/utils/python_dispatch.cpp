@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
+#include <c10/core/SingletonSymNodeImpl.h>
 
 #include <iostream>
 
@@ -725,6 +726,10 @@ void initDispatchBindings(PyObject* module) {
     return (
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerFrontMode) ||
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode));
+  });
+
+  m.def("get_singleton_int", [](int64_t data) {
+    return c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(data)));
   });
 }
 
