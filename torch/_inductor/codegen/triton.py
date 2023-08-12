@@ -476,6 +476,7 @@ class TritonOverrides(OpOverrides):
     def sign(x):
         def to_int(s):
             return f"{s}.to(tl.int8)"
+
         left = to_int(ops.lt("0", x))
         right = to_int(ops.lt(x, "0"))
         sub = ops.sub(left, right)
