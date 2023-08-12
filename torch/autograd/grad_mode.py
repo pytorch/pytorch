@@ -252,7 +252,9 @@ class inference_mode(_DecoratorContextManager):
 
     def __new__(cls, mode_or_func: Union[bool, F] = True) -> Union["inference_mode", F]:
         if isinstance(mode_or_func, bool):
-            return super().__new__(cls, mode_or_func)
+            obj = super().__new__(cls)
+            obj.__init__(mode_or_func)
+            return obj
         return cls()(mode_or_func)
 
     def __enter__(self) -> None:
