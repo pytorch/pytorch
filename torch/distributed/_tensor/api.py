@@ -8,6 +8,7 @@ import torch
 import torch.distributed._tensor.dispatch as op_dispatch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
+from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
 from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
 from torch.distributed._tensor.placement_types import (
@@ -112,7 +113,7 @@ class _FromTorchTensor(torch.autograd.Function):
                     # broadcast rank 0 tensor to all ranks
                     # only broadcast if run_check is True
                     input = input.contiguous()
-                    device_mesh.broadcast(input, mesh_dim=idx)
+                    mesh_broadcast(input, device_mesh, mesh_dim=idx)
 
         # We want a fresh Tensor object that shares memory with the input tensor
         dist_tensor = DTensor(
