@@ -3,6 +3,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/Optional.h>
 
@@ -171,6 +172,9 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
     return c10::nullopt;
   }
   virtual c10::optional<bool> constant_bool() {
+    return c10::nullopt;
+  }
+  virtual c10::optional<int64_t> maybe_as_int() {
     return c10::nullopt;
   }
   std::ostream& operator<<(std::ostream& os) {

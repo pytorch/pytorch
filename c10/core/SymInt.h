@@ -208,7 +208,11 @@ class C10_API SymInt {
     if (!is_heap_allocated()) {
       return c10::make_optional(data_);
     }
-    return toSymNodeImplUnowned()->constant_int();
+    auto* node = toSymNodeImplUnowned();
+    if (auto c = node->constant_int()) {
+      return c;
+    }
+    return node->maybe_as_int();
   }
 
   // Return whether the integer is directly coercible to a SymInt
