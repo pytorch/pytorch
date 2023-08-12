@@ -1,11 +1,13 @@
+#ifdef USE_C10D_NCCL
+
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 
 #include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
 
-#ifdef USE_C10D_NCCL
-
 #include <mutex>
+
+#include <fmt/format.h>
 
 namespace c10d {
 
@@ -13,15 +15,15 @@ ncclComm_t NCCLComm::getNcclComm() {
   std::unique_lock<std::mutex> lock(mutex_);
   if (aborted_) {
     auto commFailureMsg = commFailureReason_ != c10::nullopt
-        ? c10::str(" Original reason for failure was: ", *commFailureReason_)
+        ? fmt::format(
+              " Original reason for failure was: {}", *commFailureReason_)
         : "";
     TORCH_CHECK_WITH(
         DistBackendError,
         false,
-        c10::str(
-            "NCCL communicator was aborted on rank ",
+        fmt::format(
+            "NCCL communicator was aborted on rank {}. {}",
             rank_,
-            ". ",
             commFailureMsg));
   }
   return ncclComm_;
