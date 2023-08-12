@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import Callable, Iterator, List, TypedDict
-
-import triton
+from typing import List, TypedDict
 
 import torch
 from .. import config, ir
@@ -46,7 +44,7 @@ def conv_grid(n, c, h, w, meta):
     )
 
 
-conv_configs: Callable[[int, int, int], Iterator[triton.Config]] = functools.partial(
+conv_configs = functools.partial(
     filtered_configs,
     configs=(
         # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
