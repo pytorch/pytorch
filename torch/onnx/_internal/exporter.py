@@ -54,6 +54,17 @@ if TYPE_CHECKING:
         registration as torchlib_registry,
     )
 
+    from torch.onnx._internal.fx import diagnostics
+else:
+    try:
+        # beartype needs this import due to runtime type checking.
+        # This cannot be normally imported at top level due to
+        # https://github.com/pytorch/pytorch/issues/103764
+        from torch.onnx._internal.fx import diagnostics
+    except ImportError:
+        # The error will be handled elsewhere when the exporter is used.
+        pass
+
 _DEFAULT_OPSET_VERSION: Final[int] = 18
 """The default ONNX opset version the exporter will use if one is not specified explicitly
 through ``ExportOptions``. This should NEVER be accessed outside of this module! Users
@@ -318,7 +329,7 @@ class ResolvedExportOptions(ExportOptions):
     fx_tracer: FXGraphExtractor
     """The FXGraphExtractor instance used to extract the FX graph from the model."""
 
-    diagnostic_context: infra.DiagnosticContext
+    diagnostic_context: diagnostics.DiagnosticContext
     """The diagnostics context for the export. Responsible for recording diagnostics,
     logging diagnostics, and generating the SARIF log."""
 
@@ -350,7 +361,10 @@ class ResolvedExportOptions(ExportOptions):
                 return fallback
 
             self.dynamic_shapes = resolve(options.dynamic_shapes, False)
-            import torch.onnx._internal.fx.dynamo_graph_extractor as dynamo_graph_extractor  # TODO: Prevent circular dep
+            from torch.onnx._internal.fx import (  # TODO: Prevent circular dep
+                diagnostics,
+                dynamo_graph_extractor,
+            )
 
             self.fx_tracer = dynamo_graph_extractor.DynamoExport()
 
@@ -363,8 +377,9 @@ class ResolvedExportOptions(ExportOptions):
             #   - Add a shim and make it noop if onnxscript is not available.
             #   - Try local import and raise.
             # Similar procedure needs to be done for diagnostics in `torch.onnx.export`.
-            self.diagnostic_context = infra.DiagnosticContext(
-                "torch.onnx.dynamo_export", torch.__version__
+            self.diagnostic_context = diagnostics.DiagnosticContext(
+                "torch.onnx.dynamo_export",
+                torch.__version__,
             )
 
             self.onnx_registry = resolve(options.onnx_registry, OnnxRegistry())
@@ -532,7 +547,7 @@ class ExportOutput:
     _model_proto: Final[onnx.ModelProto]  # type: ignore[name-defined]
     _input_adapter: Final[io_adapter.InputAdapter]
     _output_adapter: Final[io_adapter.OutputAdapter]
-    _diagnostic_context: Final[infra.DiagnosticContext]
+    _diagnostic_context: Final[diagnostics.DiagnosticContext]
     _fake_context: Final[Optional[ONNXFakeContext]]
 
     @_beartype.beartype
@@ -541,7 +556,7 @@ class ExportOutput:
         model_proto: onnx.ModelProto,  # type: ignore[name-defined]
         input_adapter: io_adapter.InputAdapter,
         output_adapter: io_adapter.OutputAdapter,
-        diagnostic_context: infra.DiagnosticContext,
+        diagnostic_context: diagnostics.DiagnosticContext,
         fake_context: Optional[ONNXFakeContext] = None,
     ):
         self._model_proto = model_proto
@@ -557,7 +572,7 @@ class ExportOutput:
         return self._model_proto
 
     @property
-    def diagnostic_context(self) -> infra.DiagnosticContext:
+    def diagnostic_context(self) -> diagnostics.DiagnosticContext:
         """The diagnostic context associated with the export."""
 
         return self._diagnostic_context
@@ -807,45 +822,46 @@ class Exporter:
         self._assert_fake_tensor_mode()
 
     def export(self) -> ExportOutput:
-        graph_module = self.options.fx_tracer.generate_fx(
-            self.options, self.model, self.model_args, self.model_kwargs
-        )
+        with self.options.diagnostic_context:
+            graph_module = self.options.fx_tracer.generate_fx(
+                self.options, self.model, self.model_args, self.model_kwargs
+            )
 
-        updated_model_args = self.options.fx_tracer.input_adapter.apply(
-            *self.model_args, **self.model_kwargs
-        )
+            updated_model_args = self.options.fx_tracer.input_adapter.apply(
+                *self.model_args, **self.model_kwargs
+            )
 
-        # TODO: Design the passes API
-        graph_module = pre_export_passes(
-            self.options, self.model, graph_module, updated_model_args
-        )
+            # TODO: Design the passes API
+            graph_module = pre_export_passes(
+                self.options, self.model, graph_module, updated_model_args
+            )
 
-        # TODO: Defer `import onnxscript` out of `import torch` path
-        # https://github.com/pytorch/pytorch/issues/103764
-        from torch.onnx._internal.fx import fx_onnx_interpreter
+            # TODO: Defer `import onnxscript` out of `import torch` path
+            # https://github.com/pytorch/pytorch/issues/103764
+            from torch.onnx._internal.fx import fx_onnx_interpreter
 
-        fx_interpreter = fx_onnx_interpreter.FxOnnxInterpreter(
-            diagnostic_context=self.options.diagnostic_context
-        )
-        onnxscript_graph = fx_interpreter.run(
-            fx_graph_module=graph_module,
-            onnxfunction_dispatcher=self.options.onnxfunction_dispatcher,
-            op_level_debug=self.options.op_level_debug,
-        )
+            fx_interpreter = fx_onnx_interpreter.FxOnnxInterpreter(
+                diagnostic_context=self.options.diagnostic_context
+            )
+            onnxscript_graph = fx_interpreter.run(
+                fx_graph_module=graph_module,
+                onnxfunction_dispatcher=self.options.onnxfunction_dispatcher,
+                op_level_debug=self.options.op_level_debug,
+            )
 
-        # Export TorchScript graph to ONNX ModelProto.
-        onnx_model = onnxscript_graph.to_model_proto(
-            self.options.onnx_registry.opset_version,
-            include_initializers=self.options.fake_context is None,
-        )
+            # Export TorchScript graph to ONNX ModelProto.
+            onnx_model = onnxscript_graph.to_model_proto(
+                self.options.onnx_registry.opset_version,
+                include_initializers=self.options.fake_context is None,
+            )
 
-        return torch.onnx.ExportOutput(
-            onnx_model,
-            self.options.fx_tracer.input_adapter,
-            self.options.fx_tracer.output_adapter,
-            self.options.diagnostic_context,
-            self.options.fake_context,
-        )
+            return torch.onnx.ExportOutput(
+                onnx_model,
+                self.options.fx_tracer.input_adapter,
+                self.options.fx_tracer.output_adapter,
+                self.options.diagnostic_context,
+                self.options.fake_context,
+            )
 
     def _assert_fake_tensor_mode(self):
         """Asserts that the model and its input do not contain fake tensors."""
@@ -905,9 +921,9 @@ class UnsatisfiedDependencyError(RuntimeError):
 class OnnxExporterError(RuntimeError):
     """Raised when an ONNX exporter error occurs. Diagnostic context is enclosed."""
 
-    diagnostic_context: Final[infra.DiagnosticContext]
+    diagnostic_context: Final[diagnostics.DiagnosticContext]
 
-    def __init__(self, diagnostic_context: infra.DiagnosticContext, message: str):
+    def __init__(self, diagnostic_context: diagnostics.DiagnosticContext, message: str):
         super().__init__(message)
         self.diagnostic_context = diagnostic_context
 
