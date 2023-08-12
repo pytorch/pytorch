@@ -5705,7 +5705,7 @@ def fn():
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             with self.assertRaises(torch._dynamo.exc.RecompileError):
                 fn(torch.rand(2, 3), torch.rand(2, 3))
-                fn(torch.rand(2, 3), (1, 2, 3))
+                fn(torch.rand(2, 3, 4), torch.rand(2, 3, 4))
 
     @expectedFailureDynamic
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)

@@ -32,6 +32,7 @@ dead_code_elimination = True
 
 # disable (for a function) when cache reaches this size
 cache_size_limit = 64
+specialized_instance_cache_size_limit = 16  # TODO - kept too high conservatively
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int

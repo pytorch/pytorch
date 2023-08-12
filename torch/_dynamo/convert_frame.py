@@ -28,12 +28,14 @@ from .bytecode_transformation import (
     propagate_inst_exn_table_entries,
     transform_code_object,
 )
+from .cache_size import get_cache_size, is_recompilation, update_cache_size
 from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
 from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
     format_error_msg,
     InternalTorchDynamoError,
+    RecompileError,
     TorchRuntimeError,
     unimplemented,
     Unsupported,
@@ -58,7 +60,6 @@ from .utils import (
     orig_code_map,
     reset_graph_break_dup_checker,
     setup_compile_debug,
-    troubleshooting_url,
     write_record_to_file,
 )
 
@@ -214,12 +215,6 @@ def exception_handler(e, code, frame=None, export=False):
     augment_exc_message(e, export=export)
 
 
-def is_recompilation(cache_size):
-    # cache_size here refers to the number of total cached entries on the code
-    # object.
-    return cache_size >= 1
-
-
 FRAME_COUNTER = 0
 
 
@@ -242,26 +237,6 @@ def convert_frame_assert(
             FRAME_COUNTER += 1
 
         code = frame.f_code
-
-        if is_recompilation(cache_size) and (
-            recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
-        ):
-            if is_guard_failure_reporting_enabled():
-                message = (
-                    f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}",
-                    f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
-                )
-            else:
-                message = (
-                    f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}",
-                    "set env var TORCHDYNAMO_REPORT_GUARD_FAILURES=1 to debug further",
-                )
-
-            if recompiles_log.isEnabledFor(logging.DEBUG):
-                recompiles_log.debug(message, stack_info=True)
-
-            if config.error_on_recompile:
-                raise exc.RecompileError(message)
 
         input_codes.add(code)
         if code in output_codes:
@@ -304,40 +279,6 @@ def convert_frame_assert(
 
         if is_generator(code):
             unimplemented("generator")
-        if cache_size >= config.cache_size_limit:
-
-            def format_func_info(code):
-                return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
-
-            def format_guard_failures(code):
-                # For the common case, it's sufficient to see just the most recent failure.
-                # We could add a verbose mode if needed
-                return f"  reasons: {str(guard_failures[code][-1])}\n"
-
-            if config.report_guard_failures:
-                assert code in guard_failures, "TODO(whc) any other recompile reasons?"
-
-                log.warning(
-                    "torch._dynamo hit config.cache_size_limit (%s)\n"
-                    "   function: %s\n"
-                    "   reasons:  %s\n"
-                    "to diagnose recompilation issues, see %s.",
-                    config.cache_size_limit,
-                    format_func_info(code),
-                    format_guard_failures(code),
-                    troubleshooting_url,
-                )
-            else:
-                log.warning(
-                    "torch._dynamo hit config.cache_size_limit (%s)\n"
-                    "   function: %s\n"
-                    "to diagnose recompilation issues, set env variable TORCHDYNAMO_REPORT_GUARD_FAILURES=1"
-                    " and also see %s.",
-                    config.cache_size_limit,
-                    format_func_info(code),
-                    troubleshooting_url,
-                )
-            unimplemented("cache_size_limit reached")
 
         if not has_tensor_in_frame(frame):
             return None
@@ -360,7 +301,7 @@ def convert_frame_assert(
                 "co_name": code.co_name,
                 "co_filename": code.co_filename,
                 "co_firstlineno": code.co_firstlineno,
-                "cache_size": cache_size,
+                "cache_size": get_cache_size(code),
             },
         )
 
@@ -498,6 +439,29 @@ def _compile(
         )
 
         guarded_code = GuardedCode(out_code, check_fn.check_fn)
+        guarded_nn_modules = check_fn.guarded_nn_modules
+
+        if is_recompilation(guarded_nn_modules, code) and (
+            recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
+        ):
+            if is_guard_failure_reporting_enabled():
+                message = (
+                    f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}",
+                    f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
+                )
+            else:
+                message = (
+                    f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}",
+                    "set env var TORCHDYNAMO_REPORT_GUARD_FAILURES=1 to debug further",
+                )
+
+            if recompiles_log.isEnabledFor(logging.DEBUG):
+                recompiles_log.debug(message, stack_info=True)
+
+            if config.error_on_recompile:
+                raise RecompileError(message)
+
+        update_cache_size(guarded_nn_modules, code)
 
         if guards_log.isEnabledFor(logging.DEBUG):
             guard_str = "GUARDS:\n"
@@ -528,6 +492,7 @@ def _compile(
         AssertionError,
         ConstraintViolationError,
         GuardOnDataDependentSymNode,
+        RecompileError,
     ) as e:
         exception_handler(e, code, frame, export=export)
         raise

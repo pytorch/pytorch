@@ -196,6 +196,8 @@ class GuardBuilder(GuardBuilderBase):
         self.tensor_check_examples: List[torch.Tensor] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
+        # Keeps track of the nn modules on which we insert NN_MODULE guard
+        self.guarded_nn_modules: Dict[str, torch.nn.Module] = {}
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -379,6 +381,10 @@ class GuardBuilder(GuardBuilderBase):
         self.ID_MATCH(guard)
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
+
+        # We keep a track of nn modules for which we are inserting NN_MODULE
+        # guards. These will be used later in cache size calculations.
+        self.guarded_nn_modules[ref] = weakref.ref(val)
 
         def setup_guard():
             assert istype(val.training, bool)
@@ -868,6 +874,11 @@ class CheckFunctionManager:
         global_builder = GuardBuilder(
             self.id_ref, source_ref, output_graph.global_scope, self, local=False
         )
+
+        # Keeps track of the nn modules on which we insert NN_MODULE guard. We
+        # use only local_builder because we are only interested in the objects
+        # present in the co_varnames field of f_code object.
+        self.guarded_nn_modules = local_builder.guarded_nn_modules
         # We need to transplant a copy here, because some guards
         # might get a cross ref between local and global, like L['mod_name'][G['some_key']]
         # the inverse is illegal.
