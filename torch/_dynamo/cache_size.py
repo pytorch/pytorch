@@ -2,7 +2,7 @@ import logging
 import types
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import DefaultDict, Dict, Tuple
 
 from . import config
 from .exc import unimplemented
@@ -57,7 +57,7 @@ class CodeObjectCacheSizeTracker:
     """
 
     total_cache_size: int = 0
-    specialized_instance_cache_size: defaultdict[int] = field(
+    specialized_instance_cache_size: DefaultDict[Tuple, int] = field(
         default_factory=lambda: defaultdict(int)
     )
 
@@ -87,7 +87,6 @@ def erase_cache_size_entry(input_code, tracker, cache_key):
     tracker.specialized_instance_cache_size.clear()
     tracker.total_cache_size = 0
     cache_size_tracker.pop(input_code)
-
 
 
 def update_cache_size(guarded_nn_modules, input_code):
