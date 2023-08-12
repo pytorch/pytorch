@@ -2966,7 +2966,11 @@ class ExternKernel(InputsKernel):
         return index, tuple(new_sizes)
 
     def __str__(self):
+        kernel_name = getattr(self, "kernel", None)
         lines = [
+            f"kernel={kernel_name!r}",
+        ]
+        lines += [
             f"{field.name}={getattr(self, field.name)}"
             for field in dataclasses.fields(self)
         ]
