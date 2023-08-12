@@ -314,7 +314,6 @@ ALLOW_LIST = [
     ("aten::_structured_sparse_linear", datetime.date(2023, 12, 31)),
     ("aten::batch_norm_backward_elemt.out", datetime.date(2023, 12, 31)),
     ("aten::batch_norm_backward_elemt", datetime.date(2023, 12, 31)),
-    ("aten::sym_constrain_range", datetime.date(2023, 12, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [
