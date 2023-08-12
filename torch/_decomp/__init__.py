@@ -298,6 +298,8 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.renorm,
             aten.renorm_,
             aten.rot90,
+            aten.rrelu_with_noise,
+            aten.rrelu_with_noise_,
             aten.rsub.Scalar,
             aten.rsub.Tensor,
             aten.select_backward,
