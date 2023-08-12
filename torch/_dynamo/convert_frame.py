@@ -400,6 +400,11 @@ def _compile(
     frame: Optional[types.FrameType] = None,
     frame_state=None,
 ) -> Optional[GuardedCode]:
+    from torch.fx.experimental.validator import (
+        translation_validation_enabled,
+        ValidationException,
+    )
+
     output: Optional[OutputGraph] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
@@ -421,8 +426,21 @@ def _compile(
             mutated_closure_cell_contents,
             frame_state=frame_state,
         )
-        with tracing(tracer.output.tracing_context):
-            tracer.run()
+
+        try:
+            with tracing(tracer.output.tracing_context):
+                tracer.run()
+        except (exc.RestartAnalysis, exc.SkipFrame):
+            raise
+        except Exception:
+            if translation_validation_enabled():
+                fakes = tracer.output.tracked_fakes
+                tracer.output.shape_env.produce_guards(
+                    [a.fake for a in fakes],
+                    [a.source for a in fakes],
+                )
+            raise
+
         output = tracer.output
         assert output is not None
         assert output.output_instructions
@@ -542,6 +560,7 @@ def _compile(
         AssertionError,
         ConstraintViolationError,
         GuardOnDataDependentSymNode,
+        ValidationException,
     ) as e:
         fail_reason = str(e)
         exception_handler(e, code, frame, export=export)
