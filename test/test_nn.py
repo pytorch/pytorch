@@ -11819,7 +11819,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(torch.allclose(loss.cpu(), loss_cpu, rtol=rtol, atol=atol))
         if reduction != "none":
             self.assertTrue(torch.allclose(logits.grad.cpu(), logits_cpu.grad, rtol=rtol, atol=atol))
-
+            
     @parametrize_test("reduction", ("none", "mean", "sum"))
     def test_cross_entropy_dim_parameter(self, device, reduction):
         loss_1 = nn.CrossEntropyLoss(reduction=reduction)
@@ -11830,8 +11830,8 @@ class TestNNDeviceType(NNTestCase):
         if reduction != "none":
             out_1 = loss_1(input_1, target)
             out_2 = loss_2(input_2, target)
-            self.assertEqual(out_1, out_2, atol=1e-1, rtol=0)    
-
+            self.assertEqual(out_1, out_2, atol=1e-1, rtol=0)
+            
     def test_smoothl1loss_backward_zero_beta(self, device):
         input = torch.randn(300, 256, requires_grad=True, device=device)
         target = input.detach()
