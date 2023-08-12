@@ -251,11 +251,7 @@ class inference_mode(_DecoratorContextManager):
         self.mode = mode
 
     def __new__(cls, mode_or_func: Union[bool, F] = True) -> Union["inference_mode", F]:
-        if isinstance(mode_or_func, bool):
-            obj = super().__new__(cls)
-            obj.__init__(mode_or_func)
-            return obj
-        return cls()(mode_or_func)
+        return super().__new__(cls) if isinstance(mode_or_func, bool) else cls()(mode_or_func)
 
     def __enter__(self) -> None:
         self._inference_mode_context = torch._C._InferenceMode(self.mode)
