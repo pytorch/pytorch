@@ -5,7 +5,7 @@ import functools
 import inspect
 import warnings
 import sys
-from typing import Any, Callable, TypeVar, cast
+from typing import Any, Callable, TypeVar, cast, Optional, Union
 
 # Used for annotating the decorator usage of _DecoratorContextManager (e.g.,
 # 'no_grad' and 'enable_grad').
@@ -141,3 +141,10 @@ class _DecoratorContextManager:
     def clone(self):
         # override this method if your children class takes __init__ parameters
         return self.__class__()
+
+
+class _NoParamDecoratorContextManager(_DecoratorContextManager):
+    """Allow a context manager to be used as a decorator without parentheses"""
+
+    def __new__(cls, orig_func: Optional[F] = None) -> Union["_NoParamDecoratorContextManager", F]:
+        return cls()(orig_func) if orig_func else super().__new__(cls)
