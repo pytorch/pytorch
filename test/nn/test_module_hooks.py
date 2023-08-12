@@ -165,7 +165,7 @@ def kwarg_forward_hook(
     return out
 
 
-class DummyContextManager():
+class DummyContextManager:
     def __init__(self, inp):
         self.input = inp
 
