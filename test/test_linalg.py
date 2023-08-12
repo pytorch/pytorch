@@ -997,9 +997,10 @@ class TestLinalg(TestCase):
         a = torch.ones(512, 512, dtype=dtype, device=device)
         a[0, 0] = 1.0e-5
         a[1, 1] = 1.0e5
-        torch.linalg.eigh(a)
-        if torch.device(device).type == 'cuda':
-            torch.cuda.synchronize()
+        out = torch.linalg.eigh(a)
+
+        ref = torch.linalg.eigh(a.cpu().double())
+        self.assertEqual(out, ref)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
