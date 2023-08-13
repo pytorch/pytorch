@@ -358,14 +358,9 @@ inline static CacheEntry* extract_cache_entry(ExtraState* extra_state) {
 inline static FrameState* extract_frame_state(ExtraState* extra_state) {
   // Returns either the previously stored frame state or an empty dict.
   if (extra_state == NULL || extra_state == SKIP_CODE) {
-    return PyDict_New();
+    return NULL;
   }
-
-  FrameState* frame_state = extra_state->frame_state;
-  if (frame_state == NULL) {
-    frame_state = PyDict_New();
-  }
-  return frame_state;
+  return extra_state->frame_state;
 }
 
 /* Extractions helper functions ends */
@@ -790,6 +785,9 @@ static PyObject* _custom_eval_frame(
   }
   CacheEntry* cache_entry = extract_cache_entry(extra);
   FrameState* frame_state = extract_frame_state(extra);
+  if (frame_state == NULL) {
+    frame_state = PyDict_New();
+  }
 
   // TODO(jansel): investigate directly using the "fast" representation
   // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
