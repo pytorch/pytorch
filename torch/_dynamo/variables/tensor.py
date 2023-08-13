@@ -261,7 +261,7 @@ class TensorVariable(VariableTracker):
             return TorchVariable(self.python_type(), **options)
         if name == "_typed_storage":
             return variables.LambdaVariable(
-                lambda *args, **kwargs: TypedStorageVariable(self.as_proxy()._typed_storage(), self.as_proxy().node.meta['example_value']._typed_storage())
+                lambda *args, **kwargs: TypedStorageVariable(self.as_proxy()._typed_storage(), self.as_proxy().node.meta['example_value']._typed_storage(), self)
             ).add_options(self)
 
         # Add a guard for type matching, these guards are checked before tensor guards
@@ -1054,11 +1054,15 @@ class TensorSubclassVariable(VariableTracker):
 
 
 class TypedStorageVariable(VariableTracker):
-    def __init__(self, proxy, value, **kwargs):
+    def __init__(self, proxy, value, original, **kwargs):
         self.proxy = proxy
         self.proxy.node.meta['example_value'] = value
         self.value = value
+        self.original = original
         super().__init__(**kwargs)
+
+    def as_proxy(self):
+        return self.proxy
 
     def call_method(
         self,
@@ -1070,15 +1074,34 @@ class TypedStorageVariable(VariableTracker):
         if name == "_resize_":
             from .builder import wrap_fx_proxy
             assert len(args) == 1
+            # import os
+            # gpu_id = int(os.environ["LOCAL_RANK"])
+            # if gpu_id == 0:
+                # gm.graph.print_tabular()
+                # print("Resizing?", args[0].value)
             self.value._resize_(args[0].value)
             # return ConstantVariable(None)
             # resize_proxy = self.proxy._resize_(args[0].value)
             # resize_proxy.node.meta['example_value'] = None
-            return ConstantVariable(None)
-            return wrap_fx_proxy(
-                    tx=tx,
-                    proxy=resize_proxy,
-                    example_value=None,
-                    # **options,
+            # wrap_fx_proxy(
+            #         tx=tx,
+            #         proxy=resize_proxy,
+            #         example_value=None,
+            #         allow_none=True,
+            #         # **options,
+            # )
+            # return self.original
+            wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_method",
+                    "_resize_",
+                    *proxy_args_kwargs([self] + list(args), {}),
+                ),
+                allow_none=True,
+                example_value=None,
+                # **options,
             )
+            return self.original
+            # return ConstantVariable(None)
         unimplemented(f"typed_storage method call {name} - NYI")

@@ -16,8 +16,28 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
+import inspect
+
+def who_called_me(level=1):
+    frame = inspect.currentframe()
+    try:
+        for _ in range(level + 1):  # +1 because the current frame is also in the count
+            if frame is None:  # Reached the top of the call stack
+                return None
+            frame = frame.f_back
+
+        if frame is None:
+            return None
+
+        return frame.f_code.co_name
+    finally:
+        # Avoid reference cycle. Important for proper garbage collection
+        del frame
+
 _share_memory_lock = threading.Lock()
 _share_memory_map: _Dict[int, threading.RLock] = {}
+
+resize_count_and_loc = {}
 
 T = TypeVar('T', bound='Union[_StorageBase, TypedStorage]')
 class _StorageBase:
@@ -926,6 +946,19 @@ class TypedStorage:
 
     # For internal use only, to avoid deprecation warning
     def _resize_(self, size):
+        import os
+        import traceback
+        gpu_id = int(os.environ["LOCAL_RANK"])
+        if gpu_id == 0:
+            global resize_count_and_loc
+            name = who_called_me(3)
+            if name == 'decorate_context':
+                traceback.print_stack()
+            if (name, size) not in resize_count_and_loc:
+                resize_count_and_loc[(name, size)] = 1
+            else:
+                resize_count_and_loc[(name, size)] += 1
+            print("RC", resize_count_and_loc)
         self._untyped_storage.resize_(size * self._element_size())
 
     @classmethod

@@ -1431,7 +1431,7 @@ def wrap_fx_proxy_cls(
         return value
 
     with preserve_rng_state():
-        if example_value is None:
+        if example_value is None and not allow_none:
             example_value = get_fake_value(proxy.node, tx)
 
         # Handle recursive calls here
