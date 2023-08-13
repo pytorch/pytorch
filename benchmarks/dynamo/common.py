@@ -1128,9 +1128,14 @@ class AOTInductorModelCache:
                 example_args, example_kwargs
             )
 
-            so_path, exported = torch._export.aot_compile(
-                model, example_args, example_kwargs
+            exported = torch._export.export(model, example_args, example_kwargs)
+            param_buffer_values = list(exported.state_dict.values())
+            flat_example_inputs = fx_pytree.tree_flatten_spec(
+                example_inputs, exported.call_spec.in_spec
             )
+            all_args = (*param_buffer_values, *flat_example_inputs)
+            # AOT compile into a .so
+            so_path = torch._inductor.aot_compile(exported.graph_module, all_args)
 
             output_node = list(exported.graph.nodes)[-1]
             output_tensors = [
