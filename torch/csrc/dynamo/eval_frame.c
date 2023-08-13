@@ -279,13 +279,11 @@ Our cache resides on the extra scratch space of the code object. The structure
 of the the cache is as follows:
 
 -> ExtraState
-  -> CompileUnit
-    -> CacheEntry
-      -> check_fn
-      -> optimized_code
-      -> next
-    -> FrameState
-  -> ... (will have more items in future)
+  -> CacheEntry
+    -> check_fn
+    -> optimized_code
+    -> next
+  -> FrameState
 
 CacheEntry is a linked list, with each node containing the check_fn for guards
 and the optimized code.
@@ -293,8 +291,7 @@ and the optimized code.
 The frame_state is a PyDict that enables sharing between different frames. This
 is used to detect dynamism in automatic dynamic shapes.
 
-These two are encapsulated into a CompileUnit. This CompileUnit is introduced as
-a prep for a future patch that will allow for easier cache changes.
+These two are encapsulated into a ExtraState.
 */
 
 // Linked list of cache entries, where each cache entry stores
@@ -308,21 +305,17 @@ typedef struct cache_entry {
   struct cache_entry* next;
 } CacheEntry;
 
-// CompileUnit encasulates CacheEntry and FrameState.
+// ExtraState encasulates CacheEntry and FrameState. ExtraState is the highest
+// level of abstraction of what is stored on the extra code object. Previously,
+// we saved different parts on different extra indexes.  We prefer this way
+// because of cleaner abstraction and faster SetExtra access.
 typedef struct {
   // Cache entry for the code object
   CacheEntry* cache_entry;
   // Frame state to detect dynamic shape dims
   FrameState* frame_state;
-} CompileUnit;
-
-// ExtraState is the highest level of abstraction of what is stored on the extra
-// code object. Previously, we saved different parts on different extra indexes.
-// We prefer this way because of cleaner abstraction and faster SetExtra access.
-typedef struct {
-  // CompileUnit for the code object
-  CompileUnit* compile_unit;
 } ExtraState;
+
 
 /* CacheEntry helper functions begins */
 
@@ -353,29 +346,22 @@ static void destroy_cache_entry(CacheEntry* e) {
 
 /* Extractions helper functions begins. They help with NULL and SKIP_CODE corner cases */
 
-inline static CompileUnit* extract_compile_unit(ExtraState* extra) {
-  if (extra == NULL || extra == SKIP_CODE) {
-    return NULL;
-  }
-  return extra->compile_unit;
-}
-
-inline static CacheEntry* extract_cache_entry(CompileUnit* compile_unit) {
+inline static CacheEntry* extract_cache_entry(ExtraState* extra_state) {
   // Helper to extra the cache_entry from the extra state.
-  if (compile_unit == NULL) {
+  if (extra_state == NULL || extra_state == SKIP_CODE) {
     return NULL;
   }
-  return compile_unit->cache_entry;
+  return extra_state->cache_entry;
 }
 
 
-inline static FrameState* extract_frame_state(CompileUnit* compile_unit) {
+inline static FrameState* extract_frame_state(ExtraState* extra_state) {
   // Returns either the previously stored frame state or an empty dict.
-  if (compile_unit == NULL) {
+  if (extra_state == NULL || extra_state == SKIP_CODE) {
     return PyDict_New();
   }
 
-  FrameState* frame_state = compile_unit->frame_state;
+  FrameState* frame_state = extra_state->frame_state;
   if (frame_state == NULL) {
     frame_state = PyDict_New();
   }
@@ -402,15 +388,12 @@ static ExtraState* create_extra_state(
     CacheEntry* cache_entry,
     FrameState* frame_state) {
   // Creates a new extra state with the given cache_entry and frame_state.
-  // It steals the reference ofr both cache_entry and frame_state. These are
+  // It steals the reference for both cache_entry and frame_state. These are
   // freed in destroy_extra_state.
-  CompileUnit* compile_unit = (CompileUnit*)malloc(sizeof(CompileUnit));
-  DEBUG_NULL_CHECK(compile_unit);
-  compile_unit->cache_entry = cache_entry;
-  compile_unit->frame_state = frame_state;
   ExtraState* extra_state = (ExtraState*)malloc(sizeof(ExtraState));
   DEBUG_NULL_CHECK(extra_state);
-  extra_state->compile_unit = compile_unit;
+  extra_state->cache_entry = cache_entry;
+  extra_state->frame_state = frame_state;
   return extra_state;
 }
 
@@ -432,9 +415,7 @@ inline static void override_cache_entry_on_extra(
   // Overrides the cache entry on the already read extra state, and then stores
   // it on the extra scratch space.
   NULL_CHECK(extra);
-  CompileUnit* compile_unit = extra->compile_unit;
-  NULL_CHECK(compile_unit);
-  compile_unit->cache_entry = new_cache_entry;
+  extra->cache_entry = new_cache_entry;
   set_extra_state(code, extra);
 }
 
@@ -444,9 +425,8 @@ inline static void destroy_extra_state(PyCodeObject* code) {
   // freeing the constructed extra state.
   ExtraState* extra = get_extra_state(code);
   if (extra != NULL && extra != SKIP_CODE) {
-    CompileUnit* compile_unit = extract_compile_unit(extra);
-    CacheEntry* cache_entry = extract_cache_entry(compile_unit);
-    FrameState* frame_state = extract_frame_state(compile_unit);
+    CacheEntry* cache_entry = extract_cache_entry(extra);
+    FrameState* frame_state = extract_frame_state(extra);
     destroy_cache_entry(cache_entry);
     Py_XDECREF(frame_state);
     free(extra);
@@ -472,13 +452,7 @@ PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
   PyCodeObject* code = (PyCodeObject*)object;
 
   ExtraState* extra = get_extra_state(code);
-  CompileUnit* compile_unit = extract_compile_unit(extra);
-  CacheEntry* current_node = extract_cache_entry(compile_unit);
-
-  if (extra != NULL && extra!= SKIP_CODE) {
-    CompileUnit* compile_unit = extract_compile_unit(extra);
-    current_node = extract_cache_entry(compile_unit);
-  }
+  CacheEntry* current_node = extract_cache_entry(extra);
 
   PyObject* outer_list = PyList_New(0);
   if (!outer_list) {
@@ -581,8 +555,7 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     // move it to the head
     if (prev != NULL) {
         ExtraState* extra = get_extra_state(frame->f_code);
-        CompileUnit* compile_unit = extract_compile_unit(extra);
-        CacheEntry* old_cache_entry = extract_cache_entry(compile_unit);
+        CacheEntry* old_cache_entry = extract_cache_entry(extra);
 
         prev->next = e->next;
         e->next = old_cache_entry;
@@ -815,9 +788,8 @@ static PyObject* _custom_eval_frame(
     DEBUG_TRACE("skip %s", get_frame_name(frame));
     return eval_frame_default(tstate, frame, throw_flag);
   }
-  CompileUnit* compile_unit = extract_compile_unit(extra);
-  CacheEntry* cache_entry = extract_cache_entry(compile_unit);
-  FrameState* frame_state = extract_frame_state(compile_unit);
+  CacheEntry* cache_entry = extract_cache_entry(extra);
+  FrameState* frame_state = extract_frame_state(extra);
 
   // TODO(jansel): investigate directly using the "fast" representation
   // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
