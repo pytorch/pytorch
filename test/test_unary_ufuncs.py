@@ -47,7 +47,6 @@ from torch.testing._internal.common_dtype import (
     integral_types_and,
     get_all_math_dtypes,
     complex_types,
-    all_types_and,
     floating_and_complex_types_and,
 )
 
@@ -438,7 +437,7 @@ class TestUnaryUfuncs(TestCase):
 
         self.assertEqual(actual, expected)
 
-    @dtypes(*all_types_and(torch.bool, torch.half))
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half))
     def test_nan_to_num(self, device, dtype):
         for contiguous in [False, True]:
             x = make_tensor((64, 64), low=0.0, high=100.0, dtype=dtype, device=device)
@@ -502,6 +501,24 @@ class TestUnaryUfuncs(TestCase):
             for id1, id2, extremal in zip(torch.randint(0, 2, (3,)), torch.randint(0, 5, (3,)), extremals):
                 x[0, id1, id2, :] = extremal
             test_dtype(func(), x, torch.bfloat16)
+
+    @dtypes(torch.complex64, torch.complex128)
+    def test_nan_to_num_complex(self, device, dtype):
+        value_dtype = torch.tensor([], dtype=dtype).real.dtype
+
+        def gen_tensor(a):
+            return torch.view_as_complex(torch.tensor(a, dtype=value_dtype, device=device))
+
+        for extremal, kwarg_name in zip(['nan', 'inf', '-inf'], ['nan', 'posinf', 'neginf']):
+            a = gen_tensor([123, float(extremal)])
+            res = torch.nan_to_num(a, **{kwarg_name: 12})
+            res_check = gen_tensor([123, 12])
+            self.assertEqual(res, res_check)
+
+            a = gen_tensor([float(extremal), 456])
+            res = torch.nan_to_num(a, **{kwarg_name: 21})
+            res_check = gen_tensor([21, 456])
+            self.assertEqual(res, res_check)
 
     @dtypes(torch.cdouble)
     def test_complex_edge_values(self, device, dtype):

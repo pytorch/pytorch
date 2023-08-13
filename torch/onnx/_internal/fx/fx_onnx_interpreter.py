@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import operator
 import re
 import types
@@ -396,9 +397,8 @@ class FxOnnxInterpreter:
             diagnostic = self.diagnostic_context.inflight_diagnostic(
                 rule=diagnostics.rules.fx_node_to_onnx
             )
-            diagnostic.with_additional_message(
-                f"### PyTorch source information\n```\n{node_stack_trace}\n```"
-            )
+            with diagnostic.log_section(logging.INFO, "PyTorch source information"):
+                diagnostic.info("```\n%s\n```", node_stack_trace)
             location = _location_from_fx_stack_trace(node_stack_trace)
             if location is not None:
                 diagnostic.with_location(location)
@@ -597,7 +597,6 @@ class FxOnnxInterpreter:
 
         # Dispatch to ONNX op through OpShema. The input argument dtypes are compared to
         # function signature in OpSchema, and find the best matched overload.
-        # TODO(titaiwang): diagnostic rules.
         symbolic_fn = onnxfunction_dispatcher.dispatch(
             node=node,
             onnx_args=onnx_args,
