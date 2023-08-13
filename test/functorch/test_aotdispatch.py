@@ -1962,7 +1962,7 @@ def forward(self, tangents_1):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer = torch.nn.Buffer(torch.ones(4, 5))
+                self.register_buffer("buffer", torch.ones(4, 5))
 
             def forward(self, x):
                 y = self.buffer.add_(3)
@@ -2157,7 +2157,7 @@ class <lambda>(torch.nn.Module):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer1 = torch.nn.Buffer(torch.ones(6, 4))
+                self.register_buffer("buffer1", torch.ones(6, 4))
 
             def forward(self, x):
                 x.add_(4)
@@ -2170,7 +2170,7 @@ class <lambda>(torch.nn.Module):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer1 = torch.nn.Buffer(torch.ones(6, 4))
+                self.register_buffer("buffer1", torch.ones(6, 4))
 
             def forward(self, x, y):
                 y.add_(4)
@@ -2754,7 +2754,6 @@ aot_autograd_failures = {
     xfail('quantile'),
     xfail('nanquantile'),
     xfail('narrow'),
-    xfail('index_reduce'),
     xfail('istft'),
     xfail('linalg.eig'),
     xfail('scatter_reduce', 'prod'),
@@ -2823,7 +2822,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
-    xfail('nn.functional.rrelu', ''),  # aten.rrelu_with_noise.default - couldn't find symbolic meta function...
     xfail('normal', 'number_mean'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
@@ -2833,7 +2831,6 @@ symbolic_aot_autograd_failures = {
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/de...
     xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
     decorate('linalg.householder_product', decorator=unittest.skipIf(IS_MACOS and IS_X86, 'flaky')),
 
