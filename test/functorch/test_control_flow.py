@@ -543,7 +543,7 @@ class TestControlFlowTraced(TestCase):
                 try:
                     func_args = pytree.tree_map(to_fun, args)
                     func_kwargs = pytree.tree_map(to_fun, kwargs)
-                    return pytree.tree_map(from_fun, func(*args, **kwargs))
+                    return pytree.tree_map(from_fun, func(*func_args, **func_kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
@@ -1100,8 +1100,11 @@ class TestControlFlowTraced(TestCase):
             return control_flow.cond(x.shape[0] > 4, true_fn, false_fn, [y])
 
         example_inputs = (torch.ones(3, 2, 4, requires_grad=True), torch.ones(4, requires_grad=True))
-        with self.assertRaisesRegex(RuntimeError, "NYI: torch.cond doesn't support autograd"):
+        with self.assertRaisesRegex(RuntimeError, "Autograd not implemented for cond"):
             f(*example_inputs).sum().backward()
+
+        # Ensure no error is thrown when not running backward
+        f(*example_inputs)
 
     def test_map_functionalized_elem_alias(self):
         def map_fn(x):

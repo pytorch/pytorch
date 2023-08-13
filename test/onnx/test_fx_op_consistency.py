@@ -115,6 +115,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "index_put",
         "logit",
         "mean",
+        "native_batch_norm",
         # "new_empty",  non-deterministic
         # "new_empty_strided",  non-deterministic
         "new_full",
@@ -126,6 +127,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.avg_pool1d",
         "nn.functional.avg_pool2d",
         "nn.functional.avg_pool3d",
+        "nn.functional.batch_norm",
         "nn.functional.conv1d",
         # "nn.functional.conv2d",  AssertionError: The values for attribute 'shape' do not match in float32
         # "nn.functional.conv3d",  extra opinfo needed
@@ -140,13 +142,14 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.max_pool3d",
         "nn.functional.nll_loss",
         # "nn.functional.scaled_dot_product_attention"  non-deterministic
+        "nonzero",
         "scatter_add",
         "scatter_reduce",
         "square",
         "stft",
         "sum",
         "unflatten",
-        # "var_mean",  # Segfault during onnx shape inference. Need to bump onnx version.
+        "var_mean",
         "vstack",  # aten::cat is invoked instead
     ]
 )
@@ -352,6 +355,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
     ),
     xfail(
+        "nn.functional.adaptive_avg_pool1d",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten::div.Tensor_mode needs type promotion"),
+    ),
+    xfail(
         "nn.functional.adaptive_avg_pool2d",
         reason=onnx_test_common.reason_onnx_script_does_not_support("RecursionError: \
             maximum recursion depth exceeded while calling a Python object"),
@@ -397,6 +404,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "nn.functional.max_pool2d",
         dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Max_pool2d"),
+    ),
+    xfail(
+        "nonzero",
+        dtypes=(torch.int8, torch.int16),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("NonZero", "int8, int16"),
     ),
     xfail(
         "scatter_add",
@@ -480,9 +492,10 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: sample.input[0].equal(torch.tensor([])),
         reason="core dump - cat does not support zero-dim tensors yet",
     ),
-    skip(
+    xfail(
         "div",
-        matcher=lambda sample: sample.kwargs.get("rounding_mode") is not None,
+        matcher=lambda sample: sample.kwargs.get("rounding_mode") is not None
+        and sample.input.dtype in onnx_test_common.INT_TYPES,
         reason="rounding_mode is not yet supported",
     ),
     xfail(
@@ -492,6 +505,14 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support(
             "https://github.com/pytorch/pytorch/issues/101150"
         ),
+    ),
+    xfail(
+        "native_batch_norm",
+        matcher=lambda sample: sample.args[4]
+        and (
+            isinstance(sample.args[0], torch.Tensor) and sample.args[0].shape == (1,)
+        ),  # Edge case with training=True and mean being 1d tensor of single element.
+        reason="AssertionError: The values for attribute 'shape' do not match: torch.Size([1]) != torch.Size([]).",
     ),
     xfail(
         "nn.functional.avg_pool1d",
@@ -552,6 +573,12 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_script_does_not_support(
             "string in reduction kwarg: https://github.com/microsoft/onnxscript/issues/726"
         ),
+    ),
+    xfail(
+        "nonzero",
+        matcher=lambda sample: len(sample.input.shape) == 0
+        and sample.kwargs.get("as_tuple", False) is False,
+        reason="Output 'shape' do not match: torch.Size([0, 1]) != torch.Size([0, 0]).",
     ),
     xfail(
         "scatter_add",

@@ -8,6 +8,7 @@ import torch
 import torch.distributed._tensor.dispatch as op_dispatch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
+from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
 from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
 from torch.distributed._tensor.placement_types import (
@@ -112,7 +113,7 @@ class _FromTorchTensor(torch.autograd.Function):
                     # broadcast rank 0 tensor to all ranks
                     # only broadcast if run_check is True
                     input = input.contiguous()
-                    device_mesh.broadcast(input, mesh_dim=idx)
+                    mesh_broadcast(input, device_mesh, mesh_dim=idx)
 
         # We want a fresh Tensor object that shares memory with the input tensor
         dist_tensor = DTensor(
@@ -404,7 +405,7 @@ def distribute_tensor(
     Args:
         tensor (torch.Tensor): torch.Tensor to be distributed. Note that if you
             want to shard a tensor on a dimension that is not evenly divisible by
-            the number of devices in that mesh dimension, we use `torch.tensor_split`
+            the number of devices in that mesh dimension, we use `torch.chunk`
             semantic to shard the tensor and scatter the shards.
         device_mesh (:class:`DeviceMesh`, optional): DeviceMesh to distribute the
             tensor, if not specified, must be called under a DeviceMesh context
@@ -429,7 +430,7 @@ def distribute_tensor(
     # TODO: the value assignment to global variable is not the ideal solution
     # we can replace it in future.
     if is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
-        random._rng_tracker = OffsetBasedRNGTracker()
+        random._rng_tracker = OffsetBasedRNGTracker(device_mesh.device_type)
 
     if not tensor.is_leaf:
         raise RuntimeError(
