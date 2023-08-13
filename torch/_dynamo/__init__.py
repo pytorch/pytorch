@@ -10,8 +10,8 @@ from .decorators import (
     forbid_in_graph,
     graph_break,
     mark_dynamic,
-    mark_specialized,
     mark_static,
+    mark_static_input,
     maybe_mark_dynamic,
     run,
 )
@@ -36,7 +36,7 @@ __all__ = [
     "mark_dynamic",
     "maybe_mark_dynamic",
     "mark_static",
-    "mark_specialized",
+    "mark_static_input",
     "optimize",
     "optimize_assert",
     "export",

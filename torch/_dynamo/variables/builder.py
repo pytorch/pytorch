@@ -52,6 +52,7 @@ from ..utils import (
     getfile,
     global_key_name,
     is_namedtuple,
+    is_static_input,
     is_typing,
     is_utils_checkpoint,
     istype,
@@ -845,7 +846,7 @@ class VariableBuilder:
 
         if (
             source.guard_source().is_nn_module()
-            or hasattr(value, "_specialize")
+            or is_static_input(value)
             and not source.guard_source().is_fsdp_module()
         ):
             return self.tx.output.register_attr_or_module(

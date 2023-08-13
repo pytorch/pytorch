@@ -237,14 +237,14 @@ def mark_static(t, index=None):
 
 
 @forbid_in_graph
-def mark_specialized(t):
+def mark_static_input(t):
     """
     Marks an input tensor whose data_ptr will not change across multiple calls
     to a dynamo-compiled function. This indicates to cudagraphs that an extra allocation
     is not needed for this input. The data_ptr will be guarded on.
     """
     if isinstance(t, torch.Tensor):
-        t._specialize = True
+        t._dynamo_static_input = True
 
 
 # Note: it's preferable to not make `import torch` eagerly import other libs.

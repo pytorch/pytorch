@@ -266,6 +266,25 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             "return self.helper(x, self.param) + self.helper_disabled(x, self.param)",
         )
 
+    def test_mark_static_input(self):
+        compiles_with_buffers = 0
+
+        def debug_compiler(gm, _):
+            nonlocal compiles_with_buffers
+            compiles_with_buffers += len(gm._buffers) > 0
+            return gm
+
+        @torch._dynamo.optimize(backend=debug_compiler)
+        def fn(x):
+            return x + 1
+
+        inp = torch.ones(2)
+
+        torch._dynamo.mark_static_input(inp)
+
+        fn(inp)
+        self.assertEqual(compiles_with_buffers, 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

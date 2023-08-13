@@ -2039,3 +2039,7 @@ def is_guard_failure_reporting_enabled():
         config.report_guard_failures
         or torch._logging._internal.log_state.is_artifact_enabled("recompiles")
     )
+
+
+def is_static_input(t):
+    return isinstance(t, torch.Tensor) and hasattr(t, "_dynamo_static_input")
