@@ -346,6 +346,7 @@ FOREACH_UNARY_OP(trunc);
 FOREACH_UNARY_OP(reciprocal);
 FOREACH_UNARY_OP(sigmoid);
 FOREACH_UNARY_OP(sign);
+FOREACH_UNARY_OP(zero);
 
 FOREACH_POINTWISE_OP_SCALAR(addcdiv);
 FOREACH_POINTWISE_OP_SCALAR(addcmul);
@@ -376,14 +377,6 @@ FOREACH_POINTWISE_OP_TENSOR(addcmul);
   }
 
 FOREACH_TERNARY_OP(lerp);
-
-void foreach_tensor_zero_slow_(TensorList tensors) {
-  check_foreach_api_restrictions(tensors);
-
-  for (auto& t : tensors) {
-    t.zero_();
-  }
-}
 
 std::vector<Tensor> foreach_tensor_norm_slow(
     TensorList tensors,

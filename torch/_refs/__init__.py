@@ -1745,6 +1745,8 @@ def addcdiv(
             utils.is_weakly_lesser_type(type(value), python_type),
             lambda: f"value argument of type {type(value)} cannot be safely cast to type {python_type}!",
         )
+    # torch.addcdiv(torch.tensor(2), torch.tensor(3), torch.tensor(4), value=2.6)
+    #  == integer division runtime error
 
     return self + value * tensor1 / tensor2
 
@@ -1772,6 +1774,10 @@ def addcmul(
             utils.is_weakly_lesser_type(type(value), python_type),
             lambda: f"value argument of type {type(value)} cannot be safely cast to type {python_type}!",
         )
+    # torch.addcmul(torch.tensor(2), torch.tensor(3), torch.tensor(4), value=2.6)
+    #   == tensor(26)
+    # In core, this is allowed but might fail later if the value cannot be
+    # safely converted to int64_t without overflow.
 
     return self + value * tensor1 * tensor2
 

@@ -25,7 +25,8 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     OpDTypes,
 )
-from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_methods_invocations import (
+    op_db, foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db, foreach_reduce_op_db, foreach_lerp_op_db)
 from torchgen.yaml_utils import YamlLoader
 from torchgen.model import OperatorName
 
@@ -52,6 +53,16 @@ i32 = torch.int32
 i64 = torch.int64
 b8 = torch.bool
 u8 = torch.uint8
+
+
+# XXX: not used in all meta tests yet
+foreach_op_db = itertools.chain(
+    foreach_unary_op_db,
+    foreach_binary_op_db,
+    foreach_pointwise_op_db,
+    foreach_reduce_op_db,
+    foreach_lerp_op_db,
+)
 
 
 class TestMetaConverter(TestCase):
@@ -686,6 +697,8 @@ meta_function_skips = {
     torch.linalg.vecdot : {bf16, f64, f32, f16},
     torch.empty : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.Tensor.addbmm_: {bf16, c128, c64, f32, f64, i16, i32, i64, i8, u8},
+    torch._foreach_addcmul: {i8, i16, i32, i64, u8, bf16, f16, f32, f64, c64, c128},
+    torch._foreach_norm: {bf16, f16, f32, f64, c64, c128},
 }
 
 
@@ -980,6 +993,17 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
             run_symbolic_meta=self.symbolic_meta,
         )
 
+def _handle_foreach_kwargs(func, args, kwargs):
+    if 'zero_size' in kwargs:
+        kwargs.pop('zero_size')
+    if 'disable_fastpath' in kwargs:
+        kwargs.pop('disable_fastpath')
+    if func in (torch._foreach_addcmul, torch._foreach_addcdiv):
+        if 'values' in kwargs:
+            values = kwargs.pop("values")
+            if values is not None:
+                args.append(values)
+
 # NB: we're running these tests only on CUDA because there are some
 # inconsistencies between CUDA and CPU, and running on CUDA makes it easier
 # to ignore the CPU case when inconsistencies arise.  Ideally we deal
@@ -990,14 +1014,17 @@ class TestMeta(TestCase):
     def _get_safe_inplace(self, inplace_variant):
         @wraps(inplace_variant)
         def _fn(t, *args, **kwargs):
-            return inplace_variant(t.clone(), *args, **kwargs)
+            if isinstance(t, list):
+                return inplace_variant([x.clone() for x in t], *args, **kwargs)
+            else:
+                return inplace_variant(t.clone(), *args, **kwargs)
 
         return _fn
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
-    @ops(op_db)
+    @ops(itertools.chain(op_db, foreach_op_db))
     def test_meta_outplace(self, device, dtype, op):
         # run the OpInfo sample inputs, cross-referencing them with the
         # meta implementation and check the results are the same.  All
@@ -1007,6 +1034,7 @@ class TestMeta(TestCase):
         for sample_input in samples:
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
+            _handle_foreach_kwargs(func, args, kwargs)
             with MetaCrossRefFunctionMode(self, dtype=dtype, device=device, inplace=False):
                 expected = func(*args, **kwargs)
                 if isinstance(expected, torch.Tensor) and op.supports_out:
@@ -1033,11 +1061,10 @@ class TestMeta(TestCase):
                     self.assertEqual(ref, meta)
 
 
-
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
-    @ops(op_db)
+    @ops(itertools.chain(op_db, foreach_op_db))
     def test_meta_inplace(self, device, dtype, op):
         func = op.get_inplace()
         if not func:
@@ -1051,6 +1078,7 @@ class TestMeta(TestCase):
                 continue
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
+            _handle_foreach_kwargs(func, args, kwargs)
             with MetaCrossRefFunctionMode(self, dtype=dtype, device=device, inplace=True):
                 expected = func(*args, **kwargs)
 
