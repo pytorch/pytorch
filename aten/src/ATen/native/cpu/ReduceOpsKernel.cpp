@@ -459,8 +459,8 @@ REGISTER_DISPATCH(max_values_stub, &max_values_kernel_impl);
 REGISTER_DISPATCH(argmax_stub, &argmax_kernel_impl);
 REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl);
 
-ALSO_REGISTER_AVX512_DISPATCH(cumprod_stub, &cumprod_cpu_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(cumsum_stub, &cumsum_cpu_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel);
+REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel);
+REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel);
+REGISTER_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel);
 
 }  // namespace at::native

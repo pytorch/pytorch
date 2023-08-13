@@ -236,8 +236,8 @@ static void mse_backward_cpu_kernel(TensorIterator& iter, const Scalar& value) {
 
 } // anonymous namespace
 
-ALSO_REGISTER_AVX512_DISPATCH(addcmul_stub, &addcmul_cpu_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(addcdiv_stub, &addcdiv_cpu_kernel);
+REGISTER_DISPATCH(addcmul_stub, &addcmul_cpu_kernel);
+REGISTER_DISPATCH(addcdiv_stub, &addcdiv_cpu_kernel);
 REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cpu_kernel);
 REGISTER_DISPATCH(huber_backward_stub, &huber_backward_cpu_kernel);
 REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cpu_kernel);
