@@ -4,9 +4,18 @@ from typing import Dict, Optional, Tuple, Type
 
 import sympy
 
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import _FloorDiv
+from .cached_sympy_impl import _wrap_fn
+
+"""
+Note regarding `.cached_sympy` iterop.  Everything in this file is
+based on real_sympy objects.  We wrap all the public APIs exported
+by this file below so that users see proxy wrappers.
+"""
 
 log = logging.getLogger(__name__)
+
+__all__ = ["try_solve", "mirror_rel_op"]
 
 _MIRROR_REL_OP: Dict[Type[sympy.Basic], Type[sympy.Rel]] = {
     sympy.Eq: sympy.Eq,
@@ -20,8 +29,11 @@ _MIRROR_REL_OP: Dict[Type[sympy.Basic], Type[sympy.Rel]] = {
 INEQUALITY_TYPES = (sympy.Gt, sympy.Ge, sympy.Lt, sympy.Le)
 
 
-def mirror_rel_op(type: Type) -> Optional[Type[sympy.Rel]]:
+def _mirror_rel_op(type: Type) -> Optional[Type[sympy.Rel]]:
     return _MIRROR_REL_OP.get(type, None)
+
+
+mirror_rel_op = _wrap_fn(_mirror_rel_op)
 
 
 # Tries to simplify 'expr', so as to leave only 'thing' in the left-hand side.
@@ -38,13 +50,14 @@ def mirror_rel_op(type: Type) -> Optional[Type[sympy.Rel]]:
 #
 # 'floordiv_inequality': flag to enable conversion of 'FloorDiv' into
 # inequalities.
+@_wrap_fn
 def try_solve(
     expr: sympy.Basic,
     thing: sympy.Basic,
     trials: int = 5,
     floordiv_inequality: bool = True,
 ) -> Optional[Tuple[sympy.Rel, sympy.Basic]]:
-    mirror = mirror_rel_op(type(expr))
+    mirror = _mirror_rel_op(type(expr))
 
     # Ignore unsupported expressions:
     #   - Those that are not relational operations
@@ -123,7 +136,7 @@ def _try_isolate_lhs(
             # If 'e' is an inequality and 'other' is negative, we have to
             # mirror the expression.
             if isinstance(e, INEQUALITY_TYPES) and other.is_negative:
-                op = mirror_rel_op(op)  # type: ignore[assignment]
+                op = _mirror_rel_op(op)  # type: ignore[assignment]
 
             assert op is not None
             e = op(lhs, rhs)
@@ -139,7 +152,7 @@ def _try_isolate_lhs(
     if (
         floordiv_inequality
         and isinstance(e, sympy.Rel)
-        and isinstance(e.lhs, FloorDiv)
+        and isinstance(e.lhs, _FloorDiv)
         and e.lhs.divisor.is_positive
         and e.rhs.is_integer
     ):

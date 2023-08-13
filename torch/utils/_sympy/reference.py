@@ -1,4 +1,4 @@
-import sympy
+import torch.utils._sympy.cached_sympy as sympy
 
 
 # The normal Python interpretation of the operators

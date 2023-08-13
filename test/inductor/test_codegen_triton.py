@@ -1,11 +1,11 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 
-import sympy
-
 import torch
 
 import torch._inductor.config as inductor_config
+
+import torch.utils._sympy.cached_sympy as sympy
 from torch._inductor.codegen import triton_utils
 from torch._inductor.codegen.common import SizeArg
 from torch._inductor.graph import GraphLowering

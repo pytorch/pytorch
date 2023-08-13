@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import cast, Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
-import sympy
+import torch.utils._sympy.cached_sympy as sympy
 
 import torch
 import torch._export.exported_program as ep

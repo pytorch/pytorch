@@ -7,11 +7,11 @@ from collections import defaultdict
 from collections.abc import Iterable
 from typing import Any, List, Optional, Tuple, Union
 
-import sympy
-
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
+
+import torch.utils._sympy.cached_sympy as sympy
 from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,

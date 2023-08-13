@@ -2,7 +2,7 @@ import functools
 import logging
 import math
 import operator
-import sympy
+import torch.utils._sympy.cached_sympy as sympy
 
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Set, Tuple, Type, Union

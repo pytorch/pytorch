@@ -1,8 +1,8 @@
 import math
 
-import sympy
-
 import torch
+
+import torch.utils._sympy.cached_sympy as sympy
 from torch.utils._sympy.value_ranges import ValueRanges
 from .ir import LoopBody
 from .utils import dominated_nodes

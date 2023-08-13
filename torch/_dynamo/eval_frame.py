@@ -74,7 +74,7 @@ always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
 
 
-import sympy
+import torch.utils._sympy.cached_sympy as sympy
 
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,

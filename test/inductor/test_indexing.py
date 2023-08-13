@@ -1,5 +1,5 @@
 # Owner(s): ["module: inductor"]
-import sympy
+import torch.utils._sympy.cached_sympy as sympy
 
 from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.triton import texpr

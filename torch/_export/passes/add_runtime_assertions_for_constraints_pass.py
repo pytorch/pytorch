@@ -7,7 +7,7 @@ from collections import OrderedDict
 from functools import partial
 from typing import Dict, List, NamedTuple, Tuple
 
-import sympy
+import torch.utils._sympy.cached_sympy as sympy
 
 import torch
 import torch.fx

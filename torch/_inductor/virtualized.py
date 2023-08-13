@@ -5,7 +5,7 @@ from threading import local
 from typing import Any
 from unittest.mock import patch
 
-import sympy
+import torch.utils._sympy.cached_sympy as sympy
 
 from torch._inductor.utils import IndentedBuffer
 

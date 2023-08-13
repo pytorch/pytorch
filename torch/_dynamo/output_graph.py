@@ -12,14 +12,14 @@ import weakref
 from dataclasses import dataclass
 from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
 
-import sympy
-
 import torch._guards
 
 import torch._logging
 
 import torch.nn
 import torch.utils._pytree as pytree
+
+import torch.utils._sympy.cached_sympy as sympy
 from torch import fx
 from torch._guards import (
     Checkpointable,

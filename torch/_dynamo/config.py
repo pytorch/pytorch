@@ -139,6 +139,7 @@ allowed_functions_module_string_ignorelist = {
     "torch._refs",
     "torch._prims",
     "torch._decomp",
+    "torch.utils._sympy",
 }
 
 # Debug Flag to try minifier at different stages. Possible values are {None, "aot", "dynamo"}

@@ -48,7 +48,7 @@ log = logging.getLogger(__name__)
 class GuardOnDataDependentSymNode(RuntimeError):
     pass
 
-import sympy
+import torch.utils._sympy.cached_sympy as sympy
 from sympy.printing.str import StrPrinter
 from sympy.printing.precedence import precedence
 
@@ -888,6 +888,11 @@ class SymNode:
     def bool_(self):
         return self.guard_bool("", 0)
 
+
+
+
+
+
 @lru_cache(256)
 def safe_expand(r):
     if hasattr(r, 'expand'):
@@ -1394,8 +1399,9 @@ class ShapeGuardPrinter(StrPrinter):
         self.source_ref = source_ref
         self.var_to_sources = var_to_sources
 
-    def _print_Symbol(self, expr) -> str:
-        assert isinstance(expr, sympy.Symbol), str(type(expr))
+    def _print_Symbol(self, expr_unwrapped) -> str:
+        assert isinstance(expr_unwrapped, sympy.real_sympy.Symbol), str(type(expr_unwrapped))
+        expr = sympy._wrap(expr_unwrapped)
 
         def repr_symbol_to_source():
             return repr({
@@ -1409,6 +1415,9 @@ class ShapeGuardPrinter(StrPrinter):
             "due to the issue described in https://github.com/pytorch/pytorch/pull/90665"
         )
         return self.source_ref(self.symbol_to_source[expr][0])
+
+    def doprint(self, expr):
+        return super().doprint(sympy._unwrap(expr))
 
 
 class LoggingShapeGuardPrinter(ShapeGuardPrinter):
@@ -1431,8 +1440,9 @@ class DynamicDimConstraintPrinter(StrPrinter):
     def print_source(self, source) -> str:
         return f"dynamic_dim({source.base.name()}, {source.idx})"
 
-    def _print_Symbol(self, expr) -> str:
-        assert isinstance(expr, sympy.Symbol), str(type(expr))
+    def _print_Symbol(self, expr_unwrapped) -> str:
+        assert isinstance(expr_unwrapped, sympy.real_sympy.Symbol), str(type(expr_unwrapped))
+        expr = sympy._wrap(expr_unwrapped)
 
         return self.print_source(self.symbol_to_source[expr][0])
 
@@ -1442,6 +1452,9 @@ class DynamicDimConstraintPrinter(StrPrinter):
             expr.rel_op,
             self.parenthesize(expr.rhs, precedence(expr))
         )
+
+    def doprint(self, expr):
+        return super().doprint(sympy._unwrap(expr))
 
 
 class DimConstraints:
@@ -1711,7 +1724,7 @@ class DimConstraints:
         # remaining symbols have only pure inequalities (no equalities)
         for s, exprs in self._univariate_inequalities.items():
             try:
-                solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
+                solution = sympy.solvers.inequalities.reduce_inequalities(tuple(exprs), s)
                 # because this is univariate, the solution is a dynamic (range) constraint
                 if isinstance(solution, sympy.And):
                     for arg in solution.args:

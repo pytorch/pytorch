@@ -9,11 +9,11 @@ from collections import defaultdict
 from contextlib import contextmanager
 from typing import DefaultDict, Dict, List, Optional, Set, Tuple
 
-import sympy
-
 import torch
 import torch._logging
 import torch.fx
+
+import torch.utils._sympy.cached_sympy as sympy
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import (

@@ -8,7 +8,7 @@ import math
 import operator
 import re
 
-import sympy
+import torch.utils._sympy.cached_sympy as sympy
 import torch
 import torch.fx
 import torch.nn.functional as F
@@ -857,7 +857,7 @@ class TestFloorDiv(TestCase):
 
 class TestDimConstraints(TestCase):
     def test_dim_constraints_reduce_congruences_simple(self):
-        from sympy import Symbol
+        from torch.utils._sympy.cached_sympy import Symbol
         from torch.fx.experimental.symbolic_shapes import DimConstraints
 
         s = Symbol("s", positive=True, integer=True)
@@ -873,7 +873,7 @@ class TestDimConstraints(TestCase):
         self.assertEqual(congruences[s], {(s + 32) % 64})
 
     def test_dim_constraints_reduce_inequalities_simple(self):
-        from sympy import Eq, Interval, Ne, Symbol
+        from torch.utils._sympy.cached_sympy import Eq, Interval, Ne, Symbol
         from sympy.solvers.inequalities import reduce_inequalities
 
         s = Symbol("s", positive=True, integer=True)
@@ -897,7 +897,7 @@ class TestDimConstraints(TestCase):
         self.assertEqual(solution, {8})
 
     def test_dim_constraints_solve_full(self):
-        from sympy import Eq, Integer, Ne, Symbol
+        from torch.utils._sympy.cached_sympy import Eq, Integer, Ne, Symbol
         from torch._dynamo.source import LocalSource, TensorProperty, TensorPropertySource
 
         src0 = TensorPropertySource(

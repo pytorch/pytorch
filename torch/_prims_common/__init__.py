@@ -20,9 +20,9 @@ from typing import (
     Union,
 )
 
-import sympy
-
 import torch
+
+import torch.utils._sympy.cached_sympy as sympy
 from torch import sym_float, sym_int, sym_max
 
 try:

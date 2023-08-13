@@ -3,7 +3,7 @@
 import itertools
 import sys
 
-import sympy
+import torch.utils._sympy.cached_sympy as sympy
 from typing import Callable, List, Tuple, Type
 from torch.testing._internal.common_device_type import skipIf
 from torch.testing._internal.common_utils import (
@@ -232,7 +232,7 @@ class TestValueRanges(TestCase):
 
     def test_rational_bounds(self):
         # Repro from https://github.com/pytorch/pytorch/issues/105097
-        from sympy import floor, Eq
+        from torch.utils._sympy.cached_sympy import floor, Eq
         shape_0 = sympy.Symbol('shape_0', positive=True, integer=True)
         new_expr = (
             Eq(30 * floor(4 * ((shape_0 + 1) // 96) *
@@ -292,7 +292,7 @@ class TestSympySolve(TestCase):
         return sympy.symbols("a b c", integer=True)
 
     def test_give_up(self):
-        from sympy import Eq, Ne
+        from torch.utils._sympy.cached_sympy import Eq, Ne
 
         a, b, c = self._create_integer_symbols()
 
@@ -360,7 +360,7 @@ class TestSympySolve(TestCase):
                 self.assertEqual(r_expr, op(thing, expected))
 
     def test_addition(self):
-        from sympy import Eq
+        from torch.utils._sympy.cached_sympy import Eq
 
         a, b, c = self._create_integer_symbols()
 
@@ -416,7 +416,7 @@ class TestSympySolve(TestCase):
 
     @parametrize_relational_types()
     def test_floordiv(self, op):
-        from sympy import Eq, Ne, Gt, Ge, Lt, Le
+        from torch.utils._sympy.cached_sympy import Eq, Ne, Gt, Ge, Lt, Le
 
         a, b, c = sympy.symbols("a b c")
         pos = sympy.Symbol("pos", positive=True)
@@ -459,7 +459,7 @@ class TestSympySolve(TestCase):
         self._test_cases([(special_case[0], None), *cases], a, r_op, floordiv_inequality=False)
 
     def test_floordiv_eq_simplify(self):
-        from sympy import Eq, Lt, Le
+        from torch.utils._sympy.cached_sympy import Eq, Lt, Le
 
         a = sympy.Symbol("a", positive=True, integer=True)
 
@@ -484,7 +484,7 @@ class TestSympySolve(TestCase):
     @skipIf(not TEST_Z3, "Z3 not installed")
     def test_z3_proof_floordiv_eq_simplify(self):
         import z3
-        from sympy import Eq, Lt
+        from torch.utils._sympy.cached_sympy import Eq, Lt
 
         a = sympy.Symbol("a", positive=True, integer=True)
         a_ = z3.Int("a")

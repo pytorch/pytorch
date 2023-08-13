@@ -8,9 +8,9 @@ import pprint
 import textwrap
 from typing import Dict, List, Optional, Set
 
-import sympy
-
 import torch
+
+import torch.utils._sympy.cached_sympy as sympy
 from torch._dynamo.utils import dynamo_timed
 
 from . import config, dependencies, ir, metrics

@@ -10,15 +10,16 @@ from copy import copy, deepcopy
 from typing import Dict, List
 
 import numpy
-import sympy
 
 import torch
 import torch.fx
+import torch.utils._sympy.cached_sympy as sympy
 from torch._inductor import dependencies
 from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
 from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+from ...utils._sympy import cached_sympy_impl
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
@@ -353,7 +354,7 @@ class CppPrinter(ExprPrinter):
             return f"std::max({il})"
 
 
-cexpr = CppPrinter().doprint
+cexpr = cached_sympy_impl._wrap_fn(CppPrinter().doprint)
 
 
 def cexpr_index(index):

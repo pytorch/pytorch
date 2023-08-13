@@ -3,10 +3,10 @@ import operator
 import types
 from typing import Dict, List
 
-import sympy
-
 import torch.fx
 import torch.random
+
+import torch.utils._sympy.cached_sympy as sympy
 
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 

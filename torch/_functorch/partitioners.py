@@ -11,7 +11,7 @@ import torch.utils._pytree as pytree
 import copy
 import os
 import itertools
-import sympy
+import torch.utils._sympy.cached_sympy as sympy
 from collections import defaultdict
 from torch.fx.passes import graph_drawer
 from typing import Tuple

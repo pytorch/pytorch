@@ -25,13 +25,12 @@ from typing import (
 )
 from unittest.mock import patch
 
-import sympy
-from sympy import Expr, Integer
-
 import torch._logging
 
 import torch.fx
 import torch.utils._pytree as pytree
+
+import torch.utils._sympy.cached_sympy as sympy
 from torch._dynamo.utils import identity
 from torch._prims_common import (
     compute_required_storage_length,
@@ -41,6 +40,7 @@ from torch._prims_common import (
     make_contiguous_strides_for,
 )
 from torch.fx.operator_schemas import get_signature_for_torch_op
+from torch.utils._sympy.cached_sympy import Expr, Integer
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config, dependencies

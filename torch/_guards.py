@@ -27,7 +27,7 @@ import torch
 
 log = logging.getLogger(__name__)
 
-import sympy
+import torch.utils._sympy.cached_sympy as sympy
 
 """
 torch._guards is the definitional source of truth for general purpose guard structures.

@@ -10,12 +10,13 @@ of a full handler, see torch.utils._sympy.value_ranges.ValueRangeAnalysis.
 import functools
 from typing import Any, Dict, Union
 
-import sympy
-from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
-
 import torch
+
+import torch.utils._sympy.cached_sympy as sympy
+from torch.utils._sympy.cached_sympy import Boolean as SympyBoolean, BooleanAtom
 from .functions import CleanDiv, FloorDiv, Mod, ModularIndexing
 
+__all__ = ["sympy_interp"]
 
 # TODO: Dedupe this with SYMPY_INTERP
 

@@ -3,10 +3,10 @@ import itertools
 import logging
 from typing import Callable, Dict, List, Tuple, Union
 
-import sympy
-from sympy import Expr
+import torch.utils._sympy.cached_sympy as sympy
 
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.utils._sympy.cached_sympy import Expr
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 from .utils import sympy_subs, sympy_symbol, VarRanges

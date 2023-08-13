@@ -5,7 +5,7 @@ import numbers
 import operator
 import pickle
 import sys
-import sympy
+import torch.utils._sympy.cached_sympy as sympy
 import tempfile
 import unittest
 from types import BuiltinFunctionType

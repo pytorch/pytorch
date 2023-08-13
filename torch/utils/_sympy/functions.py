@@ -1,8 +1,11 @@
+import typing
+
 import sympy
 from sympy import S
 from sympy.core.logic import fuzzy_and, fuzzy_not, fuzzy_or
+from .cached_sympy_impl import _wrap_class
 
-__all__ = ["FloorDiv", "ModularIndexing", "CleanDiv", "CeilDiv", "LShift", "RShift"]
+__all__ = ["FloorDiv", "ModularIndexing", "CleanDiv", "CeilDiv", "LShift", "RShift", "Mod"]
 
 
 class FloorDiv(sympy.Function):
@@ -67,8 +70,8 @@ class FloorDiv(sympy.Function):
             return base // divisor
         if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
             return sympy.floor(base / divisor)
-        if isinstance(base, FloorDiv):
-            return FloorDiv(base.args[0], base.args[1] * divisor)
+        if isinstance(base, _FloorDiv):
+            return _FloorDiv(base.args[0], base.args[1] * divisor)
         if isinstance(divisor, sympy.Rational) and divisor.p == 1:
             return sympy.floor(base * divisor.q)
 
@@ -76,11 +79,11 @@ class FloorDiv(sympy.Function):
             for a in base.args:
                 gcd = sympy.gcd(a, divisor)
                 if gcd == divisor:
-                    return FloorDiv(base - a, divisor) + a / gcd
+                    return _FloorDiv(base - a, divisor) + a / gcd
 
         gcd = sympy.gcd(base, divisor)
         if gcd != 1:
-            return FloorDiv(
+            return _FloorDiv(
                 sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
             )
 
@@ -108,7 +111,7 @@ class ModularIndexing(sympy.Function):
         if divisor != 1:
             gcd = sympy.gcd(base, divisor)
             if gcd != 1:
-                return ModularIndexing(
+                return _ModularIndexing(
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd), modulus
                 )
 
@@ -132,10 +135,10 @@ class ModularIndexing(sympy.Function):
                         new_terms.append(term)
 
             if len(new_terms) != len(base.args) and all_positive:
-                return ModularIndexing(sum(new_terms), divisor, modulus)
+                return _ModularIndexing(sum(new_terms), divisor, modulus)
 
-        if isinstance(base, FloorDiv):
-            return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
+        if isinstance(base, _FloorDiv):
+            return _ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
 
 
 class Mod(sympy.Function):
@@ -214,9 +217,9 @@ class CeilDiv(sympy.Function):
 
     def __new__(cls, base, divisor):
         if sympy.gcd(base, divisor) == divisor:
-            return CleanDiv(base, divisor)
+            return _CleanDiv(base, divisor)
         else:
-            return FloorDiv(base + (divisor - 1), divisor)
+            return _FloorDiv(base + (divisor - 1), divisor)
 
 
 class LShift(sympy.Function):
@@ -233,6 +236,7 @@ class RShift(sympy.Function):
         if shift < 0:
             raise ValueError('negative shift count')
         return base // 2 ** shift
+
 
 # Overloaded to be compatible with regular Python.
 # https://github.com/pytorch/pytorch/issues/90900
@@ -277,9 +281,43 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
         if all(isinstance(a, sympy.Integer) for a in args):
             size_args = args[0:dim]
             stride_args = args[dim:]
-            from torch.fx.experimental.symbolic_shapes import eval_is_non_overlapping_and_dense
-            return eval_is_non_overlapping_and_dense(
+            from torch.fx.experimental.symbolic_shapes import _eval_is_non_overlapping_and_dense
+            # call the version that can't add a guard since this is cached
+            result = _eval_is_non_overlapping_and_dense(
                 [int(a) for a in size_args],
                 [int(a) for a in stride_args]
             )
+            assert isinstance(result, bool)
+            return int(result)
         return None
+
+
+_FloorDiv = FloorDiv
+_ModularIndexing = ModularIndexing
+_CleanDiv = CleanDiv
+_CeilDiv = CeilDiv
+_LShift = LShift
+_RShift = RShift
+_Mod = Mod
+_Pow = Pow
+_TrueDiv = TrueDiv
+_IsNonOverlappingAndDenseIndicator = IsNonOverlappingAndDenseIndicator
+
+# TODO(jansel): we should grep the codebase to ensure sympy.Mod,etc is not used
+
+if not typing.TYPE_CHECKING:
+    """
+    Note regarding `.cached_sympy` iterop.  Everything in this file is
+    based on real_sympy objects.  We wrap all the public APIs exported
+    by this file below so that users see proxy wrappers.
+    """
+    FloorDiv = _wrap_class(_FloorDiv)
+    ModularIndexing = _wrap_class(_ModularIndexing)
+    CleanDiv = _wrap_class(_CleanDiv)
+    CeilDiv = _wrap_class(_CeilDiv)
+    LShift = _wrap_class(_LShift)
+    RShift = _wrap_class(_RShift)
+    Mod = _wrap_class(_Mod)
+    Pow = _wrap_class(_Pow)
+    TrueDiv = _wrap_class(_TrueDiv)
+    IsNonOverlappingAndDenseIndicator = _wrap_class(_IsNonOverlappingAndDenseIndicator)

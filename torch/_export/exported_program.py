@@ -3,7 +3,7 @@ import dataclasses
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import sympy
+import torch.utils._sympy.cached_sympy as sympy
 
 import torch
 import torch.fx

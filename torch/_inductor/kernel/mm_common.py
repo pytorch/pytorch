@@ -2,9 +2,9 @@ import functools
 import logging
 from typing import List, Tuple
 
-import sympy
-
 import torch
+
+import torch.utils._sympy.cached_sympy as sympy
 from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
 from ..utils import ceildiv as cdiv, next_power_of_2

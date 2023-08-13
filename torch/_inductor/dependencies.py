@@ -6,9 +6,9 @@ import re
 import typing
 from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
-import sympy
-
 import torch
+
+import torch.utils._sympy.cached_sympy as sympy
 
 from .codegen.common import index_prevent_reordering
 from .utils import get_dtype_size, sympy_str, sympy_subs, sympy_symbol, VarRanges

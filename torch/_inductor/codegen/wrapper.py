@@ -7,13 +7,14 @@ import re
 from itertools import count
 from typing import Any, Dict, List, Optional, Tuple
 
-import sympy
-from sympy import Expr
-
 import torch
+
+import torch.utils._sympy.cached_sympy as sympy
 from torch._dynamo.utils import counters, dynamo_timed
 from torch.fx.experimental.symbolic_shapes import SymTypes
 from torch.fx.node import _get_qualified_name
+from torch.utils._sympy.cached_sympy import Expr
+from ...utils._sympy import cached_sympy_impl
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
 from ..utils import (
@@ -26,8 +27,14 @@ from ..utils import (
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 
+pexpr_sympy = cached_sympy_impl._wrap_fn(PythonPrinter().doprint)
 
-pexpr = PythonPrinter().doprint
+
+def pexpr(expr):
+    if isinstance(expr, SymbolicCallArg):
+        # TODO(jansel):  we should refactor these into different functions
+        return str(expr)
+    return pexpr_sympy(expr)
 
 
 def buffer_reuse_key(node: ir.Buffer):

@@ -11,7 +11,7 @@ import itertools
 
 from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
 
-import sympy
+import torch.utils._sympy.cached_sympy as sympy
 
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 _REFINEMENT_RULES: Dict[Target, Callable] = {}

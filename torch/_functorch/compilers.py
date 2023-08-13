@@ -6,7 +6,7 @@ import random
 from contextlib import contextmanager
 from functools import partial
 from typing import Callable, Union
-import sympy
+import torch.utils._sympy.cached_sympy as sympy
 
 import torch
 from torch import SymInt

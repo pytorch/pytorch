@@ -23,9 +23,9 @@ import itertools
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
-import sympy
-
 import torch
+
+import torch.utils._sympy.cached_sympy as sympy
 from torch._prims_common import is_boolean_dtype, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 

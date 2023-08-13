@@ -8,15 +8,16 @@ import math
 import operator
 from typing import Dict, Iterable, List, Set
 
-import sympy
-
 import torch
 
 import torch._logging
+
+import torch.utils._sympy.cached_sympy as sympy
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
 from ..._dynamo.utils import counters
+from ...utils._sympy import cached_sympy_impl
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path
 from ..dependencies import MemoryDep, StarDep
@@ -85,8 +86,8 @@ class TritonPrinter(PythonPrinter):
         return f"tl.math.max({a}, {b})"
 
 
-texpr = TritonPrinter().doprint
-pexpr = PythonPrinter().doprint
+texpr = cached_sympy_impl._wrap_fn(TritonPrinter().doprint)
+pexpr = cached_sympy_impl._wrap_fn(PythonPrinter().doprint)
 
 
 def triton_compute_type(dtype):

@@ -5,7 +5,7 @@ import weakref
 from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-import sympy
+import torch.utils._sympy.cached_sympy as sympy
 
 import torch
 import torch._dynamo
