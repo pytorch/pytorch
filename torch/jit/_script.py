@@ -126,7 +126,7 @@ Attribute.__doc__ = """
         del AttributeModule
         del m
 
-    Note: it's now preferred to instead use type annotations instead of `torch.jit.Annotate`:
+    Note: it's now preferred to instead use type annotations instead of `torch.jit.Attribute`:
 
     .. testcode::
 
@@ -733,7 +733,9 @@ if _enabled:
             r"""
             save(f, _extra_files={})
 
-            See :func:`torch.jit.save <torch.jit.save>` for details.
+            See :func:`torch.jit.save <torch.jit.save>` witch accepts a file-like object.
+            This function, torch.save(), converts the object to a string, treating it as a path.
+            DO NOT confuse these two functions when it comes to the 'f' parameter functionality.
             """
             return self._c.save(str(f), **kwargs)
 
@@ -1322,6 +1324,8 @@ def script(
         return torch.jit._recursive.create_script_module(
             obj, torch.jit._recursive.infer_methods_to_compile
         )
+    else:
+        obj = obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj  # type: ignore[operator]
 
     if isinstance(obj, dict):
         return create_script_dict(obj)

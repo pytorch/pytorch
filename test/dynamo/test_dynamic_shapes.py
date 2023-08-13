@@ -1,8 +1,10 @@
 # Owner(s): ["module: dynamo"]
 import unittest
+import warnings
 
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
+from torch.testing._internal.common_utils import TEST_Z3
 
 try:
     from . import (
@@ -42,7 +44,7 @@ def make_dynamic_cls(cls):
         suffix,
         (config, "assume_static_by_default", False),
         (config, "specialize_int", False),
-        (config, "translation_validation", True),
+        (config, "translation_validation", TEST_Z3),
         xfail_prop="_expected_failure_dynamic",
     )
 
@@ -61,6 +63,7 @@ tests = [
     test_export.ExportTests,
     test_subgraphs.SubGraphTests,
     test_higher_order_ops.HigherOrderOpTests,
+    test_higher_order_ops.FuncTorchHigherOrderOpTests,
     test_aot_autograd.AotAutogradFallbackTests,
 ]
 for test in tests:
@@ -74,5 +77,11 @@ unittest.expectedFailure(
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
+
+    if not TEST_Z3:
+        warnings.warn(
+            "translation validation is off. "
+            "Testing with translation validation requires Z3."
+        )
 
     run_tests()

@@ -1,15 +1,17 @@
 # Owner(s): ["module: dynamo"]
+import dataclasses
 import unittest
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._export import export, dynamic_dim
+from torch._export import export, dynamic_dim, DEFAULT_EXPORT_DYNAMO_CONFIG
 from torch._export.utils import register_dataclass_as_pytree_node
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils._pytree import tree_flatten, tree_unflatten, LeafSpec, TreeSpec
 from functorch.experimental.control_flow import map
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 
@@ -108,6 +110,55 @@ class TestExport(TestCase):
 
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
+
+    def test_export_preserve_signature(self):
+        class NestedChild(torch.nn.Module):
+            def forward(self, zx, y):
+                return {"x": y["key"] + zx[1], "w": y["key"] * zx[1]}
+
+        class Child1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nested = NestedChild()
+
+            def forward(self, x, y):
+                z = torch.ones_like(x)
+                xw = self.nested((z, x), y={"key": y})
+                return xw["w"] + z - xw["x"]
+
+        class Child2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x - 1
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = Child1()
+                self.bar = Child2()
+
+            def forward(self, x, y):
+                x = self.foo(x, y)
+                x = self.bar(x)
+                return x
+
+        orig_eager = MyModule()
+        inps = torch.rand(2, 3), torch.rand(2, 3)
+        ep = export(
+            orig_eager,
+            inps,
+            {},
+            preserve_module_call_signature=("foo.nested", "foo"),
+        )
+        ep.validate()
+        self.assertEqual(len(ep.module_call_graph), 2)
+        # TODO(zhxchen17) unflattener
+        # unflattened = unflatten(export_module)
+        # self.compare_outputs(export_module, unflattened, inps)
+        # unflattened.foo.nested = NestedChild()
+        # self.compare_outputs(export_module, unflattened, inps)
 
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         def fn_ddo(x):
@@ -318,6 +369,7 @@ class TestExport(TestCase):
                 self.assertTrue("source_fn" in node.meta)
                 self.assertTrue("nn_module_stack" in node.meta)
 
+
     def test_error_does_not_reference_eager_fallback(self):
         def fn_ddo(x):
             y = x.nonzero()
@@ -419,6 +471,122 @@ class TestExport(TestCase):
         unflat = tree_unflatten(flat, spec)
         self.assertEqual(unflat, inp)
 
+    def test_export_dynamo_config(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(input_size=4, hidden_size=5, num_layers=1)
+
+            def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+                return self.lstm(inputs)
+
+
+        config = DEFAULT_EXPORT_DYNAMO_CONFIG
+        mod = MyModule()
+
+        @contextmanager
+        def _patch_config(kwargs):
+            orig_config_dict = dataclasses.asdict(config)
+
+            try:
+                for k, v in kwargs.items():
+                    setattr(config, k, v)
+                yield
+            finally:
+                for k, v in orig_config_dict.items():
+                    setattr(config, k, v)
+
+        inp = (torch.rand(5, 4), )
+        exported_program = export(mod, inp)
+
+        with _patch_config({"allow_rnn": False}):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "TorchDynamo purposely graph breaks on RNN, GRU, LSTMs"
+            ):
+                _ = export(mod, inp)
+
+    def test_module(self):
+
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x):
+                a, b = x
+                a_conv = self.conv(a)
+                a_linear = self.linear(a_conv)
+                b_conv = self.conv(b)
+                b_linear = self.linear(b_conv)
+                return (a_linear.cos() + b_linear.sin(), a_linear.sin() + b_linear.cos())
+
+        inp_container = ((torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),)
+
+        ep = export(Foo(), inp_container)
+        ep_rexported = export(ep.module(), inp_container)
+
+        inp_test = ((torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),)
+
+        self.assertTrue(torch.allclose(ep(*inp_test)[0], ep_rexported(*inp_test)[0]))
+        self.assertTrue(torch.allclose(ep(*inp_test)[1], ep_rexported(*inp_test)[1]))
+
+    def test_module_with_dict_container_inp_out(self):
+
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x):
+                a1, a2 = x["a"]
+                b = x["b"]
+                a1_conv = self.conv(a1)
+                a1_linear = self.linear(a1_conv)
+                a2_conv = self.conv(a2)
+                a2_linear = self.linear(a2_conv)
+                b_conv = self.conv(b)
+                b_linear = self.linear(b_conv)
+                return {"a": a1_linear.cos() + b_linear.sin(), "b": a2_linear.sin() + b_linear.cos()}
+
+        inp_container = ({"a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)), "b": torch.randn(20, 16, 50, 100)},)
+
+        ep = export(Foo(), inp_container)
+        ep_rexported = export(ep.module(), inp_container)
+
+        inp_test = ({"a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)), "b": torch.randn(20, 16, 50, 100)},)
+
+        self.assertTrue(torch.allclose(ep(*inp_test)["a"], ep_rexported(*inp_test)["a"]))
+        self.assertTrue(torch.allclose(ep(*inp_test)["b"], ep_rexported(*inp_test)["b"]))
+
+    def test_args_type_checked(self):
+        def fn(x):
+            return x + 1
+
+        inp = torch.rand(2, 2)
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "to be a tuple"):
+            # Intentionally not wrapping `inp` in a tuple to trigger the error
+            _ = export(fn, inp)
 
 if __name__ == '__main__':
     run_tests()
