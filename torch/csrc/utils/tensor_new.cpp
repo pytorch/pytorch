@@ -1633,6 +1633,9 @@ Tensor asarray(
   bool force_alias = !copy.value_or(true);
   bool should_warn_numpy_not_writable = false;
 
+  // Used when:
+  // 1. 'obj' implements the buffer protocol and no type is given.
+  // 2. creating a new tensor from a Python sequence.
   auto dtype_unwrapped =
       dtype.value_or(torch::tensors::get_default_scalar_type());
 
