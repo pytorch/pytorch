@@ -1,6 +1,7 @@
 import torch
 from . import allowed_functions, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, register_backend
+from .cache_size import clear_cache_size_tracker
 from .convert_frame import replay
 from .decorators import (
     allow_in_graph,
@@ -74,3 +75,4 @@ def reset() -> None:
     compilation_metrics.clear()
     reset_frame_count()
     torch._C._dynamo.compiled_autograd.clear_cache()
+    clear_cache_size_tracker()

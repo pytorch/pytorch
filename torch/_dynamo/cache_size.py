@@ -139,6 +139,10 @@ def get_cache_size(input_code):
     return 0
 
 
+def clear_cache_size_tracker():
+    cache_size_tracker.clear()
+
+
 def cache_size_limit_reached(code, cache_size_limit_type, cache_size_limit):
     def format_guard_failures(code):
         # For the common case, it's sufficient to see just the most recent failure.
