@@ -1210,9 +1210,9 @@ static void registerCudaPluggableAllocator(PyObject* module) {
           freed_pointer_set.insert((ptr));
         }
         // that block has already been freed,
-        // so even those this will error, so too will the allcoator
+        // so even those this will error, so too will the allocator
         // when the corresponding tensor dies because there is no
-        // live tensor correponding to it
+        // live tensor corresponding to it
         TORCH_CHECK(
             ptr_set.size() >= definite_freed_count,
             "Any stale tensors which are being manually freed"
@@ -1502,8 +1502,7 @@ PyMethodDef* THCPModule_methods() {
   return _THCPModule_methods;
 }
 
-namespace torch {
-namespace cuda {
+namespace torch::cuda {
 
 namespace shared {
 
@@ -1528,5 +1527,4 @@ void initModule(PyObject* module) {
   registerCudaPluggableAllocator(module);
 }
 
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda
