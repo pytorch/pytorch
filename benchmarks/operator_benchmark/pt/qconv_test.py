@@ -1,18 +1,39 @@
 import torch
 import torch.ao.nn.quantized as nnq
 
-from pt import configs
-
 import operator_benchmark as op_bench
 
 """
 Microbenchmarks for qConv operators.
 """
 
+# Configs for conv-1d ops
+conv_1d_configs_short = op_bench.config_list(
+    attr_names=["IC", "OC", "kernel", "stride", "N", "L"],
+    attrs=[
+        [128, 256, 3, 1, 1, 64],
+        [256, 256, 3, 2, 4, 64],
+    ],
+    cross_product_configs={
+        "device": ["cpu"],
+    },
+    tags=["short"],
+)
+
+conv_1d_configs_long = op_bench.cross_product_configs(
+    IC=[128, 512],
+    OC=[128, 512],
+    kernel=[3],
+    stride=[1, 2],
+    N=[8],
+    L=[128],
+    device=["cpu"],
+    tags=["long"],
+)
 
 class QConv1dBenchmark(op_bench.TorchBenchmarkBase):
     # def init(self, N, IC, OC, L, G, kernel, stride, pad):
-    def init(self, IC, OC, kernel, stride, N, L, device):
+    def init(self, IC, OC, kernel, stride, N, L, device, **kwargs):
         G = 1
         pad = 0
         self.scale = 1.0 / 255
@@ -39,9 +60,45 @@ class QConv1dBenchmark(op_bench.TorchBenchmarkBase):
         return self.qconv1d(input)
 
 
+# Configs for Conv2d and ConvTranspose1d
+conv_2d_configs_short = op_bench.config_list(
+    attr_names=[
+        "IC",
+        "OC",
+        "kernel",
+        "stride",
+        "N",
+        "H",
+        "W",
+        "G",
+        "pad",
+    ],
+    attrs=[
+        [256, 256, 3, 1, 1, 16, 16, 1, 0],
+    ],
+    cross_product_configs={
+        "device": ["cpu"],
+    },
+    tags=["short"],
+)
+
+conv_2d_configs_long = op_bench.cross_product_configs(
+    IC=[128, 256],
+    OC=[128, 256],
+    kernel=[3],
+    stride=[1, 2],
+    N=[4],
+    H=[32],
+    W=[32],
+    G=[1],
+    pad=[0],
+    device=["cpu"],
+    tags=["long"],
+)
+
 class QConv2dBenchmark(op_bench.TorchBenchmarkBase):
     # def init(self, N, IC, OC, H, W, G, kernel, stride, pad):
-    def init(self, IC, OC, kernel, stride, N, H, W, G, pad, device):
+    def init(self, IC, OC, kernel, stride, N, H, W, G, pad, device, **kwargs):
         # super().init(N, IC, OC, (H, W), G, (kernel, kernel), stride, pad)
 
         self.scale = 1.0 / 255
@@ -69,11 +126,11 @@ class QConv2dBenchmark(op_bench.TorchBenchmarkBase):
 
 
 op_bench.generate_pt_test(
-    configs.remove_cuda(configs.conv_1d_configs_short + configs.conv_1d_configs_long),
+    conv_1d_configs_short + conv_1d_configs_long,
     QConv1dBenchmark,
 )
 op_bench.generate_pt_test(
-    configs.remove_cuda(configs.conv_2d_configs_short + configs.conv_2d_configs_long),
+    conv_2d_configs_short + conv_2d_configs_long,
     QConv2dBenchmark,
 )
 

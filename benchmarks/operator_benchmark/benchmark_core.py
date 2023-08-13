@@ -370,11 +370,12 @@ class BenchmarkRunner:
             if "linux" not in platform.system().lower():
                 # Only Linux based benchmarks are currently supported for BF16
                 return False
-            if "FractionalMax" in op_test_config.test_name or \
-                "MaxPool3d" in op_test_config.test_name or \
-                "AvgPool3d" in op_test_config.test_name:
+            not_implemented_ops = ["FractionalMax", "MaxPool3d", "AvgPool3d", "erfcx", "bessel_",
+                "special.i1", "log_ndtr", "special.ndtri"]
+            for op in not_implemented_ops:
+                if op in op_test_config.test_name:
                 # BF16 dtype not supported for FractionalMaxPool, MaxPool3D & AvgPool3D with indices
-                return False
+                    return False
             import subprocess
             if "avx512_bf16" not in (subprocess.check_output("lscpu", shell=True).strip()).decode():
                 return False

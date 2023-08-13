@@ -10,6 +10,23 @@ import operator_benchmark as op_bench
 Microbenchmarks for Quantized Linear operators.
 """
 
+linear_configs_short = op_bench.config_list(
+    attr_names=["N", "IN", "OUT"],
+    attrs=[
+        [1, 1, 1],
+        [4, 256, 128],
+        [16, 512, 256],
+    ],
+    cross_product_configs={
+        "device": ["cpu"],
+    },
+    tags=["short"],
+)
+
+
+linear_configs_long = op_bench.cross_product_configs(
+    N=[32, 64], IN=[128, 512], OUT=[64, 128], device=["cpu"], tags=["long"]
+)
 
 class _QLinearBenchmarkBase(op_bench.TorchBenchmarkBase):
     def init(self, N, IN, OUT, linear_under_test):
@@ -48,11 +65,11 @@ class QDynamicLinearBenchmark(_QLinearBenchmarkBase):
 
 
 op_bench.generate_pt_test(
-    configs.remove_cuda(configs.linear_configs_short + configs.linear_configs_long),
+    linear_configs_short + linear_configs_long,
     QLinearBenchmark,
 )
 op_bench.generate_pt_test(
-    configs.remove_cuda(configs.linear_configs_short + configs.linear_configs_long),
+    linear_configs_short + linear_configs_long,
     QDynamicLinearBenchmark,
 )
 

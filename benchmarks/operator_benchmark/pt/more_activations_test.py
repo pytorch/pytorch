@@ -43,6 +43,7 @@ ops_list = op_bench.op_list(
         ['Hardshrink', nn.Hardshrink],
         ['Softshrink', nn.Softshrink],
         ['Hardtanh', nn.Hardtanh],
+        ['LogSigmoid', nn.LogSigmoid],
         ['Hardsigmoid', nn.Hardsigmoid],
         ['ELU', nn.ELU],
         ['GELU', nn.GELU],

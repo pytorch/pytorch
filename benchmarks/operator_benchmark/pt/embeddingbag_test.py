@@ -29,8 +29,8 @@ class EmbeddingBagBenchmark(op_bench.TorchBenchmarkBase):
         numpy.random.seed((1 << 32) - 1)
         offsets = torch.LongTensor([offset], device=device)
         input = torch.tensor(
-            numpy.random.randint(0, embeddingbags, input_size), device=device
-        ).long()
+            numpy.random.randint(0, embeddingbags, input_size), device=device, dtype=torch.long
+        )
         self.inputs = {
             "input": input,
             "offset": torch.cat(
@@ -56,8 +56,8 @@ class EmbeddingBenchmark(op_bench.TorchBenchmarkBase):
         ).to(device=device)
         numpy.random.seed((1 << 32) - 1)
         input = torch.tensor(
-            numpy.random.randint(0, num_embeddings, input_size), device=device
-        ).long()
+            numpy.random.randint(0, num_embeddings, input_size), device=device, dtype=torch.long
+        )
         self.inputs = {"input": input}
         self.set_module_name("embedding")
 
