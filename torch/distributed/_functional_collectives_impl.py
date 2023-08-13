@@ -69,7 +69,7 @@ def _register_tensor_work(tensor_or_list, work_or_list):
 def _wait_reg_dec(ptr, wait_reg):
     wait_reg.decrement_live_tensor(ptr)
 
-def _register_wrapper_tensor(tensor_wrapper, tensor):
+def _register_wait_tensor(tensor):
     global data_ptr_to_work
     # Note: we should NEVER try to trace this, bc it registers runtime stuff during trace.
     # Instead, backends must call this themselves when implementing traced collectives.
@@ -80,7 +80,14 @@ def _register_wrapper_tensor(tensor_wrapper, tensor):
         )
     else:
         # We force the collective to be waited in the case this tensor goes away to reduce the change of deadlocks.
-        weakref.finalize(tensor_wrapper, _wait_reg_dec, tensor.data_ptr(), wait_reg)
+        # NOTE: we register the callback to the inner tensor of ACT, instead of the ACT wrapper
+        # class, for two reasons:
+        # 1. sometimes ACT need to continue propagation by unwrapping, then rewrapping with a new
+        #    ACT instance, if we register the callback to the ACT wrapper class, the callback will
+        #    be called when the ACT wrapper class is garbage collected, which is not what we want.
+        # 2. register callback to the inner tensor of ACT could achieve the same purpose as register
+        #    on the ACT wrapper, as it's the inner tensor who is going to be GCed need to wait.
+        weakref.finalize(tensor, _wait_reg_dec, tensor.data_ptr(), wait_reg)
 
 def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
     global data_ptr_to_work
@@ -89,6 +96,11 @@ def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
     if wait_reg is not None:
         wait_reg.wait()
     return tensor
+
+def _tensor_needs_wait(tensor: torch.Tensor) -> bool:
+    data_ptr = tensor.data_ptr()
+    wait_reg = data_ptr_to_work.get(data_ptr)
+    return wait_reg is not None and wait_reg.work is not None
 
 def _str_to_reduce_op(reduceOp: str) -> dist.ReduceOp:
     reduceOp = reduceOp.upper()
