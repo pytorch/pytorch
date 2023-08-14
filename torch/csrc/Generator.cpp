@@ -231,7 +231,10 @@ static struct PyMemberDef THPGenerator_members[] = {
      nullptr},
     {nullptr}};
 
-static int THPGenerator_traverse(THPGenerator* self, visitproc visit, void* arg) {
+static int THPGenerator_traverse(
+    THPGenerator* self,
+    visitproc visit,
+    void* arg) {
   return 0;
 }
 
@@ -254,7 +257,8 @@ PyTypeObject THPGeneratorType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC, /* tp_flags */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
+        Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */
     (traverseproc)THPGenerator_traverse, /* tp_traverse */
     nullptr, /* tp_clear */

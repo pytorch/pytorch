@@ -1588,7 +1588,7 @@ except RuntimeError as e:
 
         for from_global, from_g1, from_g2 in dl:
             # Assert RNG of all Generators are different within a given worker (each "batch" comes from a single worker)
-            self.assertEqual(len(set([from_global, from_g1, from_g2])), 3)
+            self.assertEqual(len({from_global, from_g1, from_g2}), 3)
 
         # Make sure that the Generators' RNG is different across workers.
         # We check that by making sure all the samples of a given Generator are different across Dataloader entry.
