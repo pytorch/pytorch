@@ -185,7 +185,7 @@ class TestFP8MatmulCuda(TestCase):
                               out_dtype: Optional[torch.dtype] = None,
                               size: int = 16) -> None:
         x_fp8 = torch.rand(size, size, device=device).to(x_dtype)
-        y_fp8 = torch.eye(size, device=device).to(y_dtype).t()
+        y_fp8 = torch.eye(size, device=device, dtype=y_dtype).t()
         out_fp32 = torch.mm(x_fp8.to(torch.float), y_fp8.to(torch.float))
         (out_fp8, amax_fp8) = torch._scaled_mm(x_fp8, y_fp8, out_dtype=out_dtype)
         if out_dtype is not None:
@@ -211,14 +211,23 @@ class TestFP8MatmulCuda(TestCase):
 
     def test_float8_scale(self, device) -> None:
         size = (16, 16)
-        x = torch.full(size, .5, device=device).to(torch.float8_e4m3fn)
-        y = torch.full(size, .5, device=device).to(torch.float8_e5m2).t()
+        x = torch.full(size, .5, device=device, dtype=torch.float8_e4m3fn)
+        y = torch.full(size, .5, device=device, dtype=torch.float8_e5m2).t()
         scale_a = torch.tensor(1.5, device=device)
         scale_b = torch.tensor(0.66, device=device)
         out_fp8, amax_fp8 = torch._scaled_mm(x, y)
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4., device=device))
         out_fp8_s, amax_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
+
+    def test_float8_bias(self, device) -> None:
+        (k, l, m) = (16, 48, 32)
+        x = torch.rand((k, l), device=device).to(torch.float8_e4m3fn)
+        y = torch.full((m, l), .25, device=device, dtype=torch.float8_e4m3fn).t()
+        bias = torch.full((m,), 4.0, device=device, dtype=torch.half)
+        out_fp8, amax_fp8 = torch._scaled_mm(x, y)
+        outb_fp8, amaxb_fp8 = torch._scaled_mm(x, y, bias=bias)
+        self.assertEqual((amaxb_fp8 - amax_fp8).item(), 4.0)
 
 
 instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")

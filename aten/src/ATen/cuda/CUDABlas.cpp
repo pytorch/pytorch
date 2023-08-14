@@ -890,6 +890,8 @@ void scaled_gemm(
     const void* mat2_scale_ptr,
     int64_t mat2_ld,
     ScalarType mat2_dtype,
+    const void* bias_ptr,
+    ScalarType bias_dtype,
     void* result_ptr,
     const void *result_scale_ptr,
     int64_t result_ld,
@@ -906,9 +908,13 @@ void scaled_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_AMAX_D_POINTER, amax_ptr);
   CuBlasLtMatrixLayout Adesc(ScalarTypeToCudaDataType(mat1_dtype), m, k, mat1_ld, transa == 't');
   CuBlasLtMatrixLayout Bdesc(ScalarTypeToCudaDataType(mat2_dtype), k, n, mat2_ld, transb == 't');
-  const auto out_type = ScalarTypeToCudaDataType(result_dtype);
-  CuBlasLtMatrixLayout Cdesc(isFloat8Type(result_dtype) ? CUDA_R_16F : out_type, m, n, result_ld);
-  CuBlasLtMatrixLayout Ddesc(out_type, m, n, result_ld);
+  CuBlasLtMatrixLayout Cdesc(ScalarTypeToCudaDataType(bias_dtype), m, n, result_ld);
+  CuBlasLtMatrixLayout Ddesc(ScalarTypeToCudaDataType(result_dtype), m, n, result_ld);
+  if (bias_ptr) {
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias_ptr);
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, CUBLASLT_EPILOGUE_RELU_BIAS);
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, ScalarTypeToCudaDataType(bias_dtype));
+  }
   size_t workspaceSize = _getWorkspaceSize();
   auto workspace = at::empty(
       {static_cast<int64_t>(workspaceSize)},

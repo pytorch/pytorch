@@ -115,6 +115,8 @@ void scaled_gemm(
     const void* mat2_scale_ptr,
     int64_t mat2_ld,
     ScalarType mat2_dtype,
+    const void* bias,
+    ScalarType bias_dtype,
     void* result_ptr,
     const void* result_scale_ptr,
     int64_t result_ld,
