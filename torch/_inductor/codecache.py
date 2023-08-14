@@ -768,6 +768,14 @@ def get_include_and_linking_paths(
 
             libs = [] if omp_available else ["omp"]
 
+            # check the `OMP_PREFIX` environment first
+            if not omp_available and os.getenv("OMP_PREFIX") is not None:
+                header_path = os.path.join(os.getenv("OMP_PREFIX"), "include", "omp.h")
+                omp_available = os.path.exists(header_path)
+                if omp_available:
+                    ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))
+                    lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))
+
             # prefer to use openmp from `conda install llvm-openmp`
             if not omp_available and os.getenv("CONDA_PREFIX") is not None:
                 command = "conda list llvm-openmp --json"
@@ -799,10 +807,6 @@ def get_include_and_linking_paths(
                         lpaths.append(os.path.join(libomp_path, "lib"))
                 except subprocess.SubprocessError:
                     pass
-
-            if not omp_available and os.getenv("OMP_PREFIX") is not None:
-                ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))
-                lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))
 
             # if openmp is still not available, we let the compiler to have a try,
             # and raise error together with instructions at compilation error later
