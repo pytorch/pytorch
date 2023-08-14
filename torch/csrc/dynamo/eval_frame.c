@@ -322,6 +322,7 @@ typedef struct {
 static CacheEntry* create_cache_entry(
     CacheEntry* next,
     PyObject* guarded_code) {
+  // Onwership contract - Returns a new reference
   CacheEntry* e = (CacheEntry*)malloc(sizeof(CacheEntry));
   DEBUG_NULL_CHECK(e);
   e->check_fn = PyObject_GetAttrString(guarded_code, "check_fn");
@@ -348,6 +349,12 @@ static void destroy_cache_entry(CacheEntry* e) {
 
 inline static CacheEntry* extract_cache_entry(ExtraState* extra_state) {
   // Helper to extra the cache_entry from the extra state.
+
+  // Ownership contract
+  // args
+  //  - extra_state: Borrowed
+  // return
+  //  - CacheEntry: Borrowed. set_extra_state is the owner.
   if (extra_state == NULL || extra_state == SKIP_CODE) {
     return NULL;
   }
@@ -357,6 +364,12 @@ inline static CacheEntry* extract_cache_entry(ExtraState* extra_state) {
 
 inline static FrameState* extract_frame_state(ExtraState* extra_state) {
   // Returns either the previously stored frame state or an empty dict.
+
+  // Ownership contract
+  // args
+  //  - extra_state: Borrowed
+  // return
+  //  - extra_state->frame_state: Borrowed. set_extra_state is the owner.
   if (extra_state == NULL || extra_state == SKIP_CODE) {
     return NULL;
   }
@@ -365,17 +378,49 @@ inline static FrameState* extract_frame_state(ExtraState* extra_state) {
 
 /* Extractions helper functions ends */
 
-
 /* Extra state helper functions begins */
 
 inline static ExtraState* get_extra_state(PyCodeObject* code) {
+  // Ownership contract
+  // args
+  //  - code: Borrowed
+  // return
+  //  - extra_state: Borrowed. set_extra_state is the owner.
   ExtraState* extra = NULL;
   _PyCode_GetExtra((PyObject*)code, extra_index, (void*)&extra);
   return extra;
 }
 
+inline static void destroy_extra_state(PyCodeObject* code) {
+  // Destroys the extra state by deleting cache_entry, frame state and finally
+  // freeing the constructed extra state.
+
+  // Developer note - You should not call this function directly. This is called
+  // directly inside set_extra_state. If you are in a situation trying to call
+  // this function, consider if set_extra_state should be called.
+  ExtraState* extra = get_extra_state(code);
+  if (extra != NULL && extra != SKIP_CODE) {
+    CacheEntry* cache_entry = extract_cache_entry(extra);
+    FrameState* frame_state = extract_frame_state(extra);
+    destroy_cache_entry(cache_entry);
+    Py_XDECREF(frame_state);
+    free(extra);
+  }
+}
+
 inline static void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
-  // Sets the extra state on the extra scrach space of the code object.
+  // Clears the existing object sitting on the extra scratch spance and sets it
+  // up with the new state.
+
+  // Ownership contract
+  // args
+  //  - extra_state: Stolen
+  // return
+  //  - there is no return, but the extra_state is stolen, so it becomes
+  //  set_extra_state responsibility to clean it up. It will be deleled during
+  //  the reset_code/skip, when the set_extra_state is called with
+  //  NULL/SKIP_CODE.
+  destroy_extra_state(code);
   _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
 }
 
@@ -383,8 +428,14 @@ static ExtraState* create_extra_state(
     CacheEntry* cache_entry,
     FrameState* frame_state) {
   // Creates a new extra state with the given cache_entry and frame_state.
-  // It steals the reference for both cache_entry and frame_state. These are
-  // freed in destroy_extra_state.
+  // It steals the reference for both cache_entry and frame_state.
+
+  // Ownership contract
+  // args
+  //  - cache_entry: Borrowed
+  //  - frame_state: Borrowed
+  // return
+  //  - ExtraState: Transfers ownership of the new object. Owning reference.
   ExtraState* extra_state = (ExtraState*)malloc(sizeof(ExtraState));
   DEBUG_NULL_CHECK(extra_state);
   extra_state->cache_entry = cache_entry;
@@ -399,34 +450,35 @@ inline static void create_and_set_extra_state(
     FrameState* frame_state) {
   // Creates a new extra state and put it on the extra scrach space of the code
   // object.
+
+  // Ownership contract
+  // args
+  //  - cache_entry: Stolen
+  //  - frame_state: Stolen
+  // These references are then further passed to set_extra_state which becomes
+  // the final owner of these references.
+
+  // Invariant - Extra state should not have been set before, therefore it should be NULL.
+  CHECK(get_extra_state(code) == NULL);
   ExtraState* extra_state = create_extra_state(cache_entry, frame_state);
   set_extra_state(code, extra_state);
 }
 
 inline static void override_cache_entry_on_extra(
-    PyCodeObject* code,
     ExtraState* extra,
     CacheEntry* new_cache_entry) {
-  // Overrides the cache entry on the already read extra state, and then stores
-  // it on the extra scratch space.
+  // We dont need to set the extra scratch space again. Extra on the scratch
+  // space contains a pointer to the cache entry, we are just pointing the
+  // cache_entry to the new location.
+
+  // Ownership contract
+  // args
+  //  - extra: Borrowed
+  // return - None - set_extra_state is the owner of extra.
+
+  // Invariant - Extra state should have been set before, therefore it should not be NULL.
   NULL_CHECK(extra);
   extra->cache_entry = new_cache_entry;
-  set_extra_state(code, extra);
-}
-
-
-inline static void destroy_extra_state(PyCodeObject* code) {
-  // Destroys the extra state by deleting cache_entry, frame state and finally
-  // freeing the constructed extra state.
-  ExtraState* extra = get_extra_state(code);
-  if (extra != NULL && extra != SKIP_CODE) {
-    CacheEntry* cache_entry = extract_cache_entry(extra);
-    FrameState* frame_state = extract_frame_state(extra);
-    destroy_cache_entry(cache_entry);
-    Py_XDECREF(frame_state);
-    free(extra);
-  }
-  set_extra_state(code, NULL);
 }
 
 /* Extra state helper functions ends */
@@ -556,7 +608,7 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
         e->next = old_cache_entry;
 
         // Override the extra state to reflect the updated cache line.
-        override_cache_entry_on_extra(frame->f_code, extra, e);
+        override_cache_entry_on_extra(extra, e);
     }
     return (PyObject*)e->code;
   }
@@ -786,6 +838,8 @@ static PyObject* _custom_eval_frame(
   CacheEntry* cache_entry = extract_cache_entry(extra);
   FrameState* frame_state = extract_frame_state(extra);
   if (frame_state == NULL) {
+    // frame_state becomes a new reference. It gets cleaned up by
+    // set_extra_state or skip later.
     frame_state = PyDict_New();
   }
 
@@ -865,7 +919,7 @@ static PyObject* _custom_eval_frame(
       create_and_set_extra_state(frame->f_code, new_cache_entry, frame_state);
     } else {
       // Update the existing cache_entry on the extra scratch space.
-      override_cache_entry_on_extra(frame->f_code, extra, new_cache_entry);
+      override_cache_entry_on_extra(extra, new_cache_entry);
     }
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
@@ -875,10 +929,9 @@ static PyObject* _custom_eval_frame(
     Py_DECREF(result);
     if (extra == NULL) {
       // frame_state is PyDict if extra is NULL, so clean it up. If the extra is
-      // not None, then destroy_extra_state will take care of it.
+      // not None, then set_extra_state will clean it up.
       Py_DECREF(frame_state);
     }
-    destroy_extra_state(frame->f_code);
     set_extra_state(frame->f_code, SKIP_CODE);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
@@ -954,7 +1007,8 @@ static PyObject* reset_code(PyObject* dummy, PyObject* code) {
     return NULL;
   }
 
-  destroy_extra_state((PyCodeObject*)code);
+  // set_extra_state destroys the existing object on extra scratch space.
+  set_extra_state((PyCodeObject*)code, NULL);
   Py_RETURN_NONE;
 }
 
@@ -974,6 +1028,8 @@ static PyObject* skip_code(PyObject* dummy, PyObject* obj) {
     PyErr_SetString(PyExc_TypeError, "expected a code object");
     return NULL;
   }
+
+  // set_extra_state destroys the existing object on extra scratch space.
   set_extra_state((PyCodeObject*)obj, SKIP_CODE);
   Py_RETURN_NONE;
 }
