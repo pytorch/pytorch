@@ -1,8 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
-from typing import List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
 
 import torch
+import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 
 from torch.distributed.distributed_c10d import (
@@ -51,38 +52,6 @@ def _get_device_handle(device_type: str = "cuda"):
     otherwise return the corresponding module.
     """
     return getattr(torch, device_type, None) if device_type != "cpu" else None
-
-
-def init_device_mesh(
-    device_type: str,
-    mesh_dims: List[int],
-    mesh_dim_names: List[str],
-) -> None:
-    """
-    """
-    mesh_world_size = torch.product(torch.tensor(axis_degrees))
-    if mesh_world_size != dist.get_world_size() or mesh_dims.count(-1) != 1:
-        raise RuntimeError(
-            f"The product of `mesh_dims` need to be equal to the world size, but found {mesh_world_size}!"
-
-        )
-
-    # Do we want to enforce this? I feel like we should. Otherwise, users could just init DeviceMesh themselves.
-    if len(mesh_dims) != len(mesh_dim_names):
-        raise RuntimeError(
-            f"Please provide mesh dim names to mesh dims! Found {len(mesh_dims)} instead of {len(mesh_dim_names)}."
-        )
-
-
-    mesh = torch.arange(dist.get_world_size()).view(mesh_dims)
-    device_mesh = DeviceMesh(device_type=device_type, mesh=mesh)
-
-
-
-    return device_mesh
-
-
-
 
 
 class DeviceMesh:
@@ -134,7 +103,7 @@ class DeviceMesh:
         device_type: str,
         mesh: Union[torch.Tensor, "ArrayLike"],
         *,
-        _mesh_dim_names: Optional[List[str]] = None,
+        _mesh_dim_names: Optional[Sequence[str]] = None,
         _init_process_groups: bool = True,
         _validate_mesh: bool = True,
     ) -> None:
@@ -144,19 +113,14 @@ class DeviceMesh:
             if isinstance(mesh, torch.Tensor)
             else torch.tensor(mesh, dtype=torch.int)
         )
-        self._mesh_map = self._create_mesh_map(_mesh_dim_names)
+        self._mesh_dim_names = _mesh_dim_names
+        self._parent_device_mesh = None
         # always try to create default (world) pg, even if it is not initialized
         # already. The world pg is used for device mesh identity (rank) on each
         # process (we need to know if the current global rank is in the mesh or not)
         self._get_or_create_default_group()
         if _init_process_groups:
             self._init_process_groups(_validate_mesh)
-
-    def _create_mesh_map(self, _mesh_dim_names: Optional[List]) -> Dict[str, int]:
-        """
-        Create a map between mesh dimension and mesh dimension names.
-        """
-        self._mesh_map = {mesh_dim_names: mesh_dim for mesh_dim, mesh_dim_names in enumerate(_mesh_dim_names)}
 
     def _get_or_create_default_group(self):
         default_initialized = is_initialized()
@@ -309,3 +273,67 @@ class DeviceMesh:
         dimensions of the mesh. If this rank is not part of the mesh, return None.
         """
         return self._coordinate_on_dim if self._coordinate_on_dim else None
+
+
+def init_device_mesh(
+    device_type: str,
+    mesh_dims: Optional[Sequence[int]] = None,
+    mesh_dim_names: Optional[Sequence[str]] = None,
+) -> DeviceMesh:
+    """
+    Initializes a `DeviceMesh` based on the device_type. If no mesh_dims and mesh_dim_names
+    are provided, a `DeviceMesh` with a single mesh dimension equal to the world size is initialized.
+    If mesh_dims and mesh_dim_names are provided, it will create a `DeviceMesh` with n-d dimensional
+    array as specified in`mesh_dims`, with each mesh_dim named with `mesh_dim_names`.
+
+    Args:
+        device_type (str): device type of the mesh. Currently supports: cpu, cuda/cuda-like.
+
+    Kwargs:
+        mesh_dims: Optional[Sequence[int]]: A sequence describes the dimension of the multi-dimesnion array
+        that describes the layout of devices. If not specified, it defaults to `[dist.get_world_size()]`.
+        mesh_dim_names: Optional[Sequence[str]]: A sequence of mesh dim names to be assigned to each dimension
+        of the multi-dimensional array that describes the layout of devices. Its length must match the length
+        of `mesh_dims`.
+
+    Returns:
+        A :class:`DeviceMesh` object
+
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> default_mesh = init_device_mesh("cuda")
+        >>> two_d_mesh = init_device_mesh("cuda", mesh_dims=[2, 8], mesh_dim_names=["dp", "tp"])
+        >>> two_d_mesh = init_device_mesh("cuda", mesh_dims=[2, -1], mesh_dim_names=["dp", "tp"])
+
+        >>> model_state_dict = my_model.state_dict()
+
+        >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter("/checkpoint/1")
+        >>> torch.distributed.checkpoint.save_state_dict(
+        >>>     state_dict=model_state_dict,
+        >>>     storage_writer=fs_storage_writer,
+        >>> )
+    """
+    if mesh_dims is None and mesh_dim_names is None:
+        return DeviceMesh(
+            device_type=device_type,
+            mesh=torch.arange(dist.get_world_size())
+        )
+
+    mesh_world_size = torch.prod(torch.tensor(mesh_dims))
+    if mesh_world_size != dist.get_world_size() or mesh_dims.count(-1) == 1:
+        raise RuntimeError(
+            f"The product of `mesh_dims` need to be equal to the world size {dist.get_world_size()}, but found {mesh_world_size}!"
+
+        )
+
+    if len(mesh_dims) != len(mesh_dim_names):
+        raise RuntimeError(
+            f"Please provide a mesh_dim_name to each mesh_dim! Found {len(mesh_dim_names)} instead of {len(mesh_dims)}."
+        )
+
+
+    mesh = torch.arange(dist.get_world_size()).view(mesh_dims)
+    device_mesh = DeviceMesh(device_type=device_type, mesh=mesh, _mesh_dim_names=mesh_dim_names)
+
+    return device_mesh
