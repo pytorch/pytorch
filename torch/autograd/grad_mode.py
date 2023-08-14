@@ -2,7 +2,8 @@ from typing import Any, Optional
 
 import torch
 
-from torch.utils._contextlib import _DecoratorContextManager, _NoParamDecoratorContextManager
+from torch.utils._contextlib import (_DecoratorContextManager,
+                                     _NoParamDecoratorContextManager)
 
 __all__ = [
     "no_grad",
@@ -251,7 +252,9 @@ class inference_mode(_DecoratorContextManager):
         self.mode = mode
 
     def __new__(cls, mode_or_func=True):
-        return super().__new__(cls) if isinstance(mode_or_func, bool) else cls()(mode_or_func)
+        if isinstance(mode_or_func, bool):
+            return super().__new__(cls)
+        return cls()(mode_or_func)
 
     def __enter__(self) -> None:
         self._inference_mode_context = torch._C._InferenceMode(self.mode)

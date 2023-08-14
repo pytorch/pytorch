@@ -147,4 +147,6 @@ class _NoParamDecoratorContextManager(_DecoratorContextManager):
     """Allow a context manager to be used as a decorator without parentheses"""
 
     def __new__(cls, orig_func=None):
-        return cls()(orig_func) if orig_func else super().__new__(cls)
+        if orig_func is None:
+            return super().__new__(cls)
+        return cls()(orig_func)
