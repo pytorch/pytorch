@@ -124,27 +124,26 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
   // the strategy here is that each bag x feature is handled by a single thread
 
   using accscalar_t = acc_type<scalar_t, true>;
-  int64_t chunksPerBag = ceil_div(featureSize, (int64_t)blockDim.x);
-  int64_t numChunks = numBags * chunksPerBag;
-  int64_t chunkOffset = blockIdx.x * blockDim.y + threadIdx.y;
-  int64_t chunkStride = gridDim.x * blockDim.y;
+  const int64_t chunksPerBag = ceil_div(featureSize, (int64_t)blockDim.x);
+  const int64_t numChunks = numBags * chunksPerBag;
+  const int64_t chunkOffset = blockIdx.x * blockDim.y + threadIdx.y;
+  const int64_t chunkStride = gridDim.x * blockDim.y;
 
   for (int64_t chunk = chunkOffset; chunk < numChunks; chunk += chunkStride) {
-    int64_t featureDim = (chunk % chunksPerBag) * blockDim.x + threadIdx.x;
+    const int64_t featureDim = (chunk % chunksPerBag) * blockDim.x + threadIdx.x;
     if (featureDim < featureSize) {
-      int64_t bag = chunk / chunksPerBag;
+      const int64_t bag = chunk / chunksPerBag;
       const scalar_t *weightFeat = weight + featureDim * weight_stride1;
-      int64_t begin = bag == 0 ? 0 : offsets[bag]; // forces first offset to be 0 instead of asserting on it
-      int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
-      CUDA_KERNEL_ASSERT2(end >= begin);
+      const int64_t begin = bag == 0 ? 0 : offsets[bag]; // forces first offset to be 0 instead of asserting on it
+      const int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
+      CUDA_KERNEL_ASSERT2(end >= begin && "Offsets must be monotonically increasing, but are not.");
       accscalar_t weightFeatSum = 0;
       int64_t bag_size_ = 0;
       for (int64_t emb = begin; emb < end; emb++) {
-        bool pad = (input[emb] == padding_idx);
+        const bool pad = (input[emb] == padding_idx);
         CUDA_KERNEL_ASSERT(input[emb] < numRows);
         const int64_t weightRow = input[emb] * weight_stride0;
-        scalar_t weightValue = weightFeat[weightRow];
-        weightValue = pad ? static_cast<scalar_t>(0) : weightValue;
+        const scalar_t weightValue = pad ? static_cast<scalar_t>(0) : weightFeat[weightRow];
         if (per_sample_weights) {
           accscalar_t scaleWeightBy = static_cast<accscalar_t>(
               per_sample_weights[emb * per_sample_weights_stride]);
