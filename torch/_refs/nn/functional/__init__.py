@@ -469,6 +469,8 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
         lambd >= 0,
         lambda: f"lambda must be greater or equal to 0, but found to be {lambd}",
     )
+    # We implement this in one torch.where to generate better code in the backward
+    # see https://github.com/pytorch/pytorch/pull/107052#discussion_r1293748211
     return torch.where(torch.abs(a) > lambd, a - torch.sign(a) * lambd, 0)
 
 
