@@ -157,7 +157,9 @@ struct TORCH_API AccumulateGrad : public Node {
             new_grad.options()));
       } else {
         if (new_grad.is_sparse() || new_grad.is_sparse_csr() ||
-            new_grad.is_nested()) {
+            new_grad.is_nested() ||
+            new_grad.unsafeGetTensorImpl()->key_set().has(
+                c10::DispatchKey::AutogradNestedTensor)) {
           update_grad(new_grad.clone());
         } else {
           if (new_grad.is_mkldnn()) {

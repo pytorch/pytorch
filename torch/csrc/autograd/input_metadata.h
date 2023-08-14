@@ -104,7 +104,9 @@ struct InputMetadata {
     TORCH_CHECK(
         grad.is_nested() == is_nested_tensor(),
         "Both grad and InputMetadata need to be either nested or non nested tensors.")
-    return grad.is_nested()
+    return (grad.is_nested() ||
+            grad.unsafeGetTensorImpl()->key_set().has(
+                c10::DispatchKey::AutogradNestedTensor))
         ? false
         : at::is_expandable_to(shape_as_dim_vector(), grad.sym_sizes());
   }

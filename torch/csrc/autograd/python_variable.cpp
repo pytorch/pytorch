@@ -697,8 +697,11 @@ static PyObject* THPVariable_make_wrapper_subclass(
     // We shouldn't need storage
     Storage storage{Storage::use_byte_size_t{}, 0, at::DataPtr{}};
 
+    auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
+    keys = keys.add(c10::DispatchKey::AutogradNestedTensor);
+
     tensor = at::detail::make_tensor<TensorImpl>(
-        std::move(storage), options.computeDispatchKey(), options.dtype());
+        std::move(storage), keys, options.dtype());
 
     auto sym_sizes = r.symintlist(1);
     auto sym_strides = r.symintlist(2);
