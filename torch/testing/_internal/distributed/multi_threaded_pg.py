@@ -167,11 +167,12 @@ class ReduceScatter:
                 dest_tensor_on_rank_i = data[i][0]
                 # Can't handle reduce_scatter with multiple output tensor
                 assert len(dest_tensor_on_rank_i) == 1
+                dst_tensor_device = dest_tensor_on_rank_i[0].device
                 if not start_reduction[i]:
-                    dest_tensor_on_rank_i[0].copy_(to_scatter[i])
+                    dest_tensor_on_rank_i[0].copy_(to_scatter[i].to(dst_tensor_device))
                     start_reduction[i] = True
                 else:
-                    dest_tensor_on_rank_i[0].add_(to_scatter[i])
+                    dest_tensor_on_rank_i[0].add_(to_scatter[i].to(dst_tensor_device))
 
 class Broadcast:
     def __init__(self, src):
