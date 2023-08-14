@@ -1326,16 +1326,20 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 #ifdef __aarch64__
 static inline int64_t get_mkldnn_matmul_min_dim() {
   static auto value = [&] {
+    // Minimum dimension requirement for MKLDNN; derived based on experiments.
+    constexpr int64_t default_min_dim = 8;
     const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_DIM");
-    return ptr != nullptr ? std::atoi(ptr) : 8;
+    return ptr != nullptr ? std::atoi(ptr) : default_min_dim;
   }();
   return value;
 }
 
 static inline int64_t get_mkldnn_matmul_min_size() {
   static auto value = [&] {
+    // Minimum size requirement for MKLDNN; derived based on experiments.
+    constexpr int64_t default_min_size = 8 * 1024;
     const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_SIZE");
-    return ptr != nullptr ? std::atoi(ptr) : 8 * 1024;
+    return ptr != nullptr ? std::atoi(ptr) : default_min_size;
   }();
   return value;
 }
