@@ -13,6 +13,7 @@ from typing import cast, Dict, Optional, Set
 
 try:
     import numpy as np
+
     HAS_NUMPY = True
 except ModuleNotFoundError:
     HAS_NUMPY = False
