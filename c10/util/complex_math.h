@@ -291,15 +291,47 @@ C10_HOST_DEVICE inline c10::complex<T> atanh(const c10::complex<T>& x) {
 
 template <typename T>
 C10_HOST_DEVICE inline c10::complex<T> log1p(const c10::complex<T>& z) {
+#if defined(__APPLE__) || defined(__MACOSX)
+  // For Mac, the new implementation yielded a high relative error. Falling back
+  // to the old version for now.
+  // See https://github.com/numpy/numpy/pull/22611#issuecomment-1667945354
+
+  // log1p(z) = log(1 + z)
+  // Let's define 1 + z = r * e ^ (i * a), then we have
+  // log(r * e ^ (i * a)) = log(r) + i * a
+  // With z = x + iy, the term r can be written as
+  // r = ((1 + x) ^ 2 + y ^ 2) ^ 0.5
+  //   = (1 + x ^ 2 + 2 * x + y ^ 2) ^ 0.5
+  // So, log(r) is
+  // log(r) = 0.5 * log(1 + x ^ 2 + 2 * x + y ^ 2)
+  //        = 0.5 * log1p(x * (x + 2) + y ^ 2)
+  // we need to use the expression only on certain condition to avoid overflow
+  // and underflow from `(x * (x + 2) + y ^ 2)`
+  T x = z.real();
+  T y = z.imag();
+  T zabs = std::abs(z);
+  T theta = std::atan2(y, x + T(1));
+  if (zabs < 0.5) {
+    T r = x * (T(2) + x) + y * y;
+    if (r == 0) { // handle underflow
+      return {x, theta};
+    }
+    return {T(0.5) * std::log1p(r), theta};
+  } else {
+    T z0 = std::hypot(x + 1, y);
+    return {std::log(z0), theta};
+  }
+#else
   // Based on https://github.com/numpy/numpy/pull/22611#issuecomment-1667945354
   c10::complex<T> u = z + T(1);
   if (u == T(1)) {
     return z;
   } else if (u - T(1) == z) {
-    return c10_complex_math::log(u);
+    return log(u);
   } else {
-    return c10_complex_math::log(u) * (z / (u - T(1)));
+    return log(u) * (z / (u - T(1)));
   }
+#endif
 }
 
 template <typename T>
