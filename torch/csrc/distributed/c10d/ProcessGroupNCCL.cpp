@@ -799,11 +799,16 @@ uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
 void ProcessGroupNCCL::registerOnCompletionHook(
     std::function<void(std::shared_ptr<WorkInfo>)>&& hook) {
   TORCH_CHECK(
+      onCompletionHook_ == nullptr,
+      "ProcessGroupNCCL OnCompletion hook already registered");
+
+  TORCH_CHECK(
       enableTiming_,
       "ProcessGroupNCCL OnCompletion hook requires recording start and end "
       "events which require setting NCCL_ENABLE_TIMING environment variable. "
       "This is only available for NCCL version >= 2.4.");
   onCompletionHook_ = std::move(hook);
+  onCompletionHookThread_ = std::thread(&ProcessGroupNCCL::runHookLoop, this);
 }
 
 // must release GIL when calling this method
@@ -821,7 +826,8 @@ void ProcessGroupNCCL::waitForPendingWorks() {
 
   {
     while (hasPendingHooks_.load()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      std::this_thread::sleep_for(
+          std::chrono::milliseconds(kWatchdogThreadSleepMillis));
     }
   }
 }
@@ -869,6 +875,9 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_.join();
 #endif
+
+  if (onCompletionHookThread_.joinable())
+    onCompletionHookThread_.join();
 
   // Abort all NCCL Communicators on Process Group Destruction
   std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
@@ -941,10 +950,11 @@ void ProcessGroupNCCL::workCleanupLoop() {
           std::chrono::milliseconds(kWatchdogThreadSleepMillis),
           [&]() -> bool { return terminateProcessGroup_.load(); });
 
-      hasPendingHooks_.store(onCompletionHook_ && !workMetaList_.empty());
+      hasPendingHooks_.store(
+          onCompletionHook_ != nullptr && !workMetaList_.empty());
 
       for (auto it = workMetaList_.begin(); it != workMetaList_.end();
-           /* no increment*/) {
+           /* no increment */) {
         auto& work = *it;
         work.checkAndSetException();
         bool timedOut = work.checkTimeout();
@@ -993,7 +1003,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
             // onCompletion hook will consume the work, so keep them alive in a
             // separate list for now
             completedWorkList.splice(
-                completedWorkList.begin(), workMetaList_, it++);
+                completedWorkList.end(), workMetaList_, it++);
           } else {
             it = workMetaList_.erase(it);
           }
@@ -1003,17 +1013,39 @@ void ProcessGroupNCCL::workCleanupLoop() {
           ++it;
         }
       }
-      done = workMetaList_.empty();
     }
-    // Python hook will grab GIL. Release workMetaListMutex_ before acquiring
-    // GIL to avoid potential deadlock.
+
+    // Release workMetaListMutex_ before acquiring completedWorkListMutex_ to
+    // avoid potential deadlock.
+
+    {
+      const std::lock_guard<std::mutex> lock(completedWorkListMutex_);
+      completedWorkList_.splice(completedWorkList_.end(), completedWorkList);
+    }
+
+    done = workMetaList_.empty();
+  }
+}
+
+void ProcessGroupNCCL::runHookLoop() {
+  bool done = false;
+  while (!done || !terminateProcessGroup_.load()) {
+    std::unique_lock<std::mutex> lock(completedWorkListMutex_);
+    // We busy-poll the work vector every kWatchdogThreadSleepMillis
+    // milliseconds as long as the atomic is True.
+    completedWorkListCV_.wait_for(
+        lock,
+        std::chrono::milliseconds(kWatchdogThreadSleepMillis),
+        [&]() -> bool { return terminateProcessGroup_.load(); });
+
+    // hasPendingHooks_.store(onCompletionHook_ != nullptr);
 
     try {
-      while (!completedWorkList.empty()) {
-        // The work object will be passed to Python side. Wrap it
-        // with an intrusive_ptr so that pybind can safely pass by copy
-        // and own the ptr lifetime.
-        const WorkNCCL& work = completedWorkList.back();
+      for (auto it = completedWorkList_.begin(); it != completedWorkList_.end();
+           /* no increment */) {
+        const WorkNCCL& work = *it;
+        lock.unlock();
+
         auto timeStarted =
             std::chrono::system_clock::now() +
             std::chrono::duration_cast<std::chrono::system_clock::duration>(
@@ -1025,39 +1057,30 @@ void ProcessGroupNCCL::workCleanupLoop() {
             std::chrono::duration<float, std::milli>(
                 work.getDuration()) // activeDuration
             ));
-        completedWorkList.pop_back();
+
+        lock.lock();
+        it = completedWorkList_.erase(it);
       }
     } catch (std::exception& e) {
       // PythonOnCompletionHook has already extracted Python exception message
       // and wrapped it with a cpp one. So we no longer need to acquire GIL
       // here.
       const auto errorStr = c10::str(
-          "Caught exception while running onCompletion hook for ProcessGroupNCCL: ",
+          "Caught exception on rank ",
+          rank_,
+          " while running onCompletion hook for ProcessGroupNCCL: ",
           e.what(),
-          "Aborting all communicators.");
+          ". Aborting all communicators.");
 
-      if (!completedWorkList.empty()) {
-        // CompletedWorkList is not empty, so it should be the first work in
-        // the queue triggered this exception. Use that work object to handle
-        // the error.
-        completedWorkList.back().setException(
-            std::make_exception_ptr(std::runtime_error(errorStr)));
-        completedWorkList.back().abort();
-        completedWorkList.back().handleException(asyncErrorHandling_);
-      }
+      // No need to call abort() on WorkNCCL here as that collective has already
+      // finished successfully at this point. We just need to abort the process
       // Abort all NCCL Communicators on this ProcessGroupNCCL instance.
-      std::string abortReason = c10::str(
-          "Caught exception while processing onCompletion hook for ProcessGroupNCCL on rank ",
-          rank_);
-      abort(abortReason);
+      abort(errorStr);
     }
 
-    // N.B.: this only guarantees all Work objects inserted before calling
-    // waitForPendingWorks has all been cleaned up. There could be additional
-    // Work items inserted into workMetaList_ while processing hooks. Therefore,
-    // users need to make sure waitForPendingWorks is call after all collectives
-    // they care about has been enqueued.
-    hasPendingHooks_.store(false);
+    // Lock is still acquired at this point
+    done = completedWorkList_.empty();
+    hasPendingHooks_.store(!done);
   }
 }
 

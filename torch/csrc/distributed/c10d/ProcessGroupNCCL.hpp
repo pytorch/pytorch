@@ -604,6 +604,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // timeout.
   void workCleanupLoop();
 
+  void runHookLoop();
+
   // Desync debug helper
   void logWorkStart(WorkNCCL& work);
 
@@ -676,6 +678,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Watchdog thread which looks for errors on the cached NCCL communicators.
   std::thread ncclCommWatchdogThread_;
 
+  std::thread onCompletionHookThread_;
+
   // Whether or not we should terminate the watchdog and workCleanup threads.
   std::atomic<bool> terminateProcessGroup_;
 
@@ -690,6 +694,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Vector to Store WorkNCCL pointers
   std::list<ProcessGroupNCCL::WorkNCCL> workMetaList_;
+
+  // Mutex to Guard workMetaList_
+  std::mutex completedWorkListMutex_;
+
+  // Condition Variable for watchdog thread sleep
+  std::condition_variable completedWorkListCV_;
+
+  std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList_;
 
   // Add Work Pointer to workVector
   void workEnqueue(c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>);
