@@ -137,6 +137,7 @@ class ForeachKernel(Kernel):
             with code.indent():
                 code.splice("pass")
 
+        print(code.getvalue())
         return code.getvalue()
 
     def call_kernel(self, code, name: str):
