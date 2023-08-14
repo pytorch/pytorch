@@ -428,6 +428,7 @@ static int THPVariable_clear(THPVariable* self) {
     return 0;
   }
   Py_CLEAR(self->backward_hooks);
+  Py_CLEAR(self->post_accumulate_grad_hooks);
   const auto& tensor = THPVariable_Unpack(self);
   if (tensor.defined()) {
     // Two situations to consider:
@@ -2081,6 +2082,7 @@ static int THPVariable_subclass_traverse(
 
   // Finally traverse THPVariable special stuff
   Py_VISIT(var->backward_hooks);
+  Py_VISIT(var->post_accumulate_grad_hooks);
   if (!var->cdata.unsafeIsBorrowed()) {
     const auto& tensor = THPVariable_Unpack(var);
     if (tensor.defined()) {

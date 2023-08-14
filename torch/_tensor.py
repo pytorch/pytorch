@@ -159,7 +159,6 @@ class Tensor(torch._C._TensorBase):
                         quantizer_params,
                         self.requires_grad,
                         self._backward_hooks,
-                        self._post_accumulate_grad_hooks,
                     )
                     if type(new_tensor) is not type(self):
                         raise RuntimeError(
@@ -249,7 +248,6 @@ class Tensor(torch._C._TensorBase):
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         backward_hooks: Dict[Any, Any] = OrderedDict()
-        post_accumulate_grad_hooks: Dict[Any, Any] = OrderedDict()
         # Note: Numpy array is chosen to be the rebuild component for XLA, ORT Tensors.
         # We considered a few options:
         # 1. CPU tensor can't be used here.
@@ -328,7 +326,6 @@ class Tensor(torch._C._TensorBase):
                 quantizer_params,
                 self.requires_grad,
                 backward_hooks,
-                post_accumulate_grad_hooks,
             )
             return (torch._utils._rebuild_qtensor, args_qtensor)
         elif self.is_sparse:
@@ -398,8 +395,7 @@ class Tensor(torch._C._TensorBase):
                 self.stride(),
                 self.requires_grad,
                 backward_hooks,
-                post_accumulate_grad_hooks,
-            )  # previously was self._backward_hooks, self._post_accumulate_grad_hooks
+            )  # previously was self._backward_hooks
 
             metadata = torch._utils.get_tensor_metadata(self)
             if metadata:
@@ -421,14 +417,9 @@ class Tensor(torch._C._TensorBase):
             # legacy serialization of Variable
             self.data = state[0]
             state = (state[3], state[4], state[2])
-        # The setting of _backward_hooks, _post_accumulate_grad_hooks is expected to be a no-op.
+        # The setting of _backward_hooks is expected to be a no-op.
         # See Note [Don't serialize hooks]
-        (
-            self.requires_grad,
-            _,
-            self._backward_hooks,
-            self._post_accumulate_grad_hooks,
-        ) = state
+        self.requires_grad, _, self._backward_hooks = state
 
     def __repr__(self, *, tensor_contents=None):
         if has_torch_function_unary(self):
@@ -592,7 +583,7 @@ class Tensor(torch._C._TensorBase):
                 "cannot register a hook on a tensor that " "doesn't require gradient"
             )
         if self._post_accumulate_grad_hooks is None:
-            self._post_accumulate_grad_hooks = OrderedDict()
+            self._post_accumulate_grad_hooks: Dict[Any, Any] = OrderedDict()
         handle = hooks.RemovableHandle(self._post_accumulate_grad_hooks)
         self._post_accumulate_grad_hooks[handle.id] = hook
         return handle
