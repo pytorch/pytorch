@@ -2,7 +2,6 @@ import collections
 import contextlib
 import dataclasses
 import functools
-import hashlib
 import os
 import re
 from itertools import count
@@ -110,12 +109,6 @@ def get_cpp_op_schema(kernel):
         for arg_type, arg_name in zip(arg_types, arg_names)
     ]
     return f"{cpp_return_value}({', '.join(cpp_arg_type)})"
-
-
-SUPPORTED_FALLBACK_CPP_WRAPPER = [
-    "repeat_interleave.Tensor",
-    "convert_element_type.default",  # can appear as a fallback if it has a complex input
-]
 
 
 @dataclasses.dataclass
@@ -286,9 +279,8 @@ class WrapperCodeGen(CodeGen):
         self.write_header()
         self.write_prefix()
 
-        for name, value in V.graph.constants.items():
+        for name, hashed in V.graph.constant_reprs.items():
             # include a hash so our code cache gives different constants different files
-            hashed = hashlib.sha256(repr(value).encode("utf-8")).hexdigest()
             self.write_constant(name, hashed)
 
         self.allocated = set()
@@ -443,6 +435,18 @@ class WrapperCodeGen(CodeGen):
         else:
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
+
+    def generate_scatter_fallback(
+        self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
+    ):
+        line = f"{kernel}({','.join(map(str, inputs))}"
+        if kernel == "aten.scatter_":
+            if reduce:
+                line += f", reduce={repr(reduce)}"
+        else:
+            line += ", ".join([""] + kwargs)
+        line += f"){self.ending}"
+        self.writeline(line)
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
@@ -905,6 +909,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
             )
 
+        self.header.splice(
+            """
+            #include <torch/csrc/inductor/inductor_ops.h>
+            """
+        )
+
     def mark_output_type(self):
         # mark output type to unwrap tensor back to python scalar
         from ..ir import ShapeAsConstantBuffer
@@ -973,6 +983,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
                 c10::optional<at::Scalar> optional_scalar;
                 c10::optional<c10::string_view> optional_string;
+                c10::optional<at::Layout> optional_layout;
                 torch::List<c10::optional<at::Scalar>> optional_list;
                 """
             )
@@ -1060,7 +1071,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         result.writeline("'''\n)")
         # get the hash of the wrapper code to name the extension
-        wrapper_call_hash = codecache.code_hash(self.wrapper_call.getvalue())
+        wrapper_call_hash = codecache.code_hash(result.getvalue())
         result.splice(
             f"""
             module = CppWrapperCodeCache.load(cpp_wrapper_src, '{self.call_func_name}', '{wrapper_call_hash}', {self.cuda})
@@ -1120,6 +1131,24 @@ class CppWrapperCodeGen(WrapperCodeGen):
             args.insert(0, f"{codegen_reference}")
         self.writeline(self.wrap_kernel_call(kernel, args))
 
+    def generate_scatter_fallback(
+        self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
+    ):
+        # TODO: support other overload for cpp wrapper and remove the below assertions
+        line = f"{kernel}({output}, {','.join(map(str, inputs))}"
+        if fn == "aten.scatter_":
+            if src_is_tensor:
+                if reduce:
+                    line += f", {V.graph.wrapper_code.val_to_str(reduce)}"
+            else:
+                assert (
+                    reduce is None
+                ), "Expect reduce to be None for aten.scatter_ with scalar src"
+        else:
+            line += f", {','.join(kwargs)}"
+        line += f"){self.ending}"
+        self.writeline(line)
+
     def add_benchmark_harness(self, output):
         if V.graph.aot_mode:
             return
@@ -1155,14 +1184,18 @@ class CppWrapperCodeGen(WrapperCodeGen):
         from .cpp import DEVICE_TO_ATEN
 
         return (
-            f"at::device(c10::Device({DEVICE_TO_ATEN[device.type]}, {device.index}))"
+            f"c10::Device({DEVICE_TO_ATEN[device.type]}, {device.index})"
             if device.index is not None
-            else f"at::device({DEVICE_TO_ATEN[device.type]})"
+            else f"{DEVICE_TO_ATEN[device.type]}"
         )
 
-    def make_buffer_allocation(self, buffer):
+    def codegen_tensor_option(self, device, dtype):
         from .cpp import DTYPE_TO_ATEN
 
+        cpp_device = self.codegen_device(device)
+        return f"at::TensorOptions({cpp_device}).dtype({DTYPE_TO_ATEN[dtype]}))"
+
+    def make_buffer_allocation(self, buffer):
         output_idx = None
         for idx, output in enumerate(V.graph.graph_outputs):
             if isinstance(output, (ir.NoneAsConstantBuffer, ir.ShapeAsConstantBuffer)):
@@ -1185,8 +1218,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 f"{self.declare}{buffer.get_name()} = {self.namespace}empty_strided("
                 f"{self.codegen_shape_tuple(shape)}, "
                 f"{self.codegen_shape_tuple(stride)}, "
-                f"{self.codegen_device(device)}"
-                f".dtype({DTYPE_TO_ATEN[dtype]})){self.ending}"
+                f"{self.codegen_tensor_option(device, dtype)}{self.ending}"
             )
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
@@ -1200,15 +1232,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
     ):
         if cpp_kernel_key not in self.extern_call_ops:
             self.writeline(
-                f"""
-    static auto op_{cpp_kernel_key} =
-    c10::Dispatcher::singleton()
-        .findSchemaOrThrow(
-            \"{kernel}\",
-            \"{cpp_kernel_overload_name}\")
-        .typed<{cpp_op_schema}>();
-            """
+                f"static auto op_{cpp_kernel_key} = c10::Dispatcher::singleton()"
             )
+            self.writeline(
+                f'\t.findSchemaOrThrow("{kernel}", "{cpp_kernel_overload_name}")'
+            )
+            self.writeline(f"\t.typed<{cpp_op_schema}>();")
             self.extern_call_ops.add(cpp_kernel_key)
 
         self.writeline(
@@ -1255,6 +1284,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self.header.splice(
             """
             #include <ATen/native/BinaryOps.h>
+            #include <ATen/core/dispatch/Dispatcher.h>
             #include <c10/util/Exception.h>
             #include <c10/cuda/CUDAGuard.h>
 

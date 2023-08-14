@@ -732,7 +732,7 @@ class ShardedTensor(ShardedTensorBase):
         local_tensor: torch.Tensor,
         sharding_spec: shard_spec.ShardingSpec,
         *global_size: Sequence[int],
-        process_group: dist.ProcessGroup = None,
+        process_group: Optional[dist.ProcessGroup] = None,
         init_rrefs=False,
     ) -> "ShardedTensor":
         """

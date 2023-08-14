@@ -238,17 +238,19 @@ class DebugContext:
         self._path = None
         self._stack = contextlib.ExitStack()
 
-    def rename(self, new_path: str):
+    def copy(self, new_path: str):
         if not self._path:
             return
         assert new_path.endswith(".debug"), new_path
         if os.path.exists(new_path):
             shutil.rmtree(new_path)
         try:
-            os.rename(self._path, new_path)
+            shutil.copytree(self._path, new_path)
             self._path = new_path
         except OSError:
-            # other OS might have troubling renaming dir with open files
+            log.warning(
+                "Failed to copy debug files from %s to %s", self._path, new_path
+            )
             pass
 
     def fopen(self, filename):

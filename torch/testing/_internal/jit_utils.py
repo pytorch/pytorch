@@ -526,7 +526,7 @@ class JitTestCase(JitCommonTestCase):
     def checkTrace(self, func, reference_tensors, input_tensors=None,
                    drop=None, allow_unused=False, verbose=False,
                    inputs_require_grads=True, check_tolerance=1e-5, export_import=True,
-                   _force_outplace=False):
+                   _force_outplace=False, grad_atol=None, grad_rtol=None):
 
         # TODO: check gradients for parameters, not just inputs
         def allSum(vs):
@@ -587,11 +587,7 @@ class JitTestCase(JitCommonTestCase):
                                            allow_unused=allow_unused)
         self.assertEqual(outputs, outputs_ge)
         if inputs_require_grads:
-            self.assertEqual(grads, grads_ge)
-
-        self.assertEqual(outputs, outputs_ge)
-        if inputs_require_grads:
-            self.assertEqual(grads, grads_ge)
+            self.assertEqual(grads, grads_ge, atol=grad_atol, rtol=grad_rtol)
 
         # test the grad grad case
         outputs = func(*recording_inputs)
@@ -619,7 +615,7 @@ class JitTestCase(JitCommonTestCase):
 
         self.assertEqual(outputs, outputs_ge)
         if inputs_require_grads:
-            self.assertEqual(grads, grads_ge)
+            self.assertEqual(grads, grads_ge, atol=grad_atol, rtol=grad_rtol)
             for g2, g2_ge in zip(grads2, grads2_ge):
                 if g2 is None and g2_ge is None:
                     continue

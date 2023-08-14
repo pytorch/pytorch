@@ -234,14 +234,14 @@ class TestDeserialize(TestCase):
                     node2.meta.get("stack_trace", None),
                 )
 
-            # Check "nn_module_stack" metadata
-            self.assertEqual(
-                node1.meta.get("nn_module_stack", None),
-                node2.meta.get("nn_module_stack", None),
-            )
+            if node1.op != "get_attr" and node1.op != "placeholder":
+                # Check "nn_module_stack" metadata
+                self.assertEqual(
+                    node1.meta.get("nn_module_stack", None),
+                    node2.meta.get("nn_module_stack", None),
+                )
 
-            # Check "source_fn" metadata
-            if node1.op != "get_attr":
+                # Check "source_fn" metadata
                 self.assertEqual(
                     node1.meta.get("source_fn", None),
                     node2.meta.get("source_fn", None),

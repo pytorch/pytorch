@@ -8,7 +8,7 @@ import math
 import operator
 import types
 import warnings
-from typing import Dict, Optional, Set
+from typing import cast, Dict, Optional, Set
 
 import torch
 from torch.fx._symbolic_trace import is_fx_tracing
@@ -243,6 +243,7 @@ def _builtin_function_ids():
     rv.update(
         {id(v): f"functools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
     )
+    rv.update({id(cast): "typing.cast"})
     rv[id(functools.reduce)] = "functools.reduce"
     return rv
 

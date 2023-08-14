@@ -770,7 +770,7 @@ def _im2col_col2im_indices_along_dim(
     # Apply dilation on kernel and find its indices along dim d
     kernel_grid = arange_kw(0, kernel_d * dilation_d, dilation_d).unsqueeze(-1)
 
-    # Broadcast and add kernel staring positions (indices) with
+    # Broadcast and add kernel starting positions (indices) with
     # kernel_grid along dim d, to get block indices along dim d
     return blocks_d_indices + kernel_grid
 
@@ -1189,6 +1189,26 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     return out + beta * self
 
 
+@register_decomposition(aten._addmm_activation)
+@out_wrapper()
+@pw_cast_for_opmath
+def _addmm_activation(
+    self: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    beta: int = 1,
+    alpha: int = 1,
+    use_gelu: bool = False,
+):
+    out = addmm(self, mat1, mat2, beta, alpha)
+    if use_gelu:
+        if self.is_cuda:
+            return aten.gelu(out, approximate="tanh")
+        else:
+            return aten.gelu(out)
+    return aten.relu(out)
+
+
 @register_decomposition(aten.addmv)
 @out_wrapper()
 @pw_cast_for_opmath
@@ -1434,19 +1454,16 @@ def native_batch_norm_helper(
         invstd = _unsqueeze_to_dim(invstd, input.dim() - 1)
         output = (input - mean) * invstd
 
-    if weight is None:
-        weight = input.new_ones(())
-    else:
+    if weight is not None:
         weight = weight.flatten()
+        weight = _unsqueeze_to_dim(weight, input.dim() - 1)
+        output = output * weight
 
-    if bias is None:
-        bias = input.new_zeros(())
-    else:
+    if bias is not None:
         bias = bias.flatten()
+        bias = _unsqueeze_to_dim(bias, input.dim() - 1)
+        output = output + bias
 
-    weight = _unsqueeze_to_dim(weight, input.dim() - 1)
-    bias = _unsqueeze_to_dim(bias, input.dim() - 1)
-    output = output * weight + bias
     if input.device.type == "cpu":
         save_mean = save_mean.to(dtype=input.dtype)
         save_rstd = save_rstd.to(dtype=input.dtype)
@@ -1844,6 +1861,10 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
             lambda: "adaptive_avg_pool2d(): Expected input to have non-zero size for "
             f"non-batch dimensions, but input has shape {tuple(shape)}.",
         )
+
+    # TODO: decompose integer path
+    if input.dtype in [torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64]:
+        return torch.nn.functional.adaptive_avg_pool2d(input, output_size)
 
     # Optimisation (we should also do this in the kernel implementation)
     if shape[-2] % output_size[-2] == 0 and shape[-1] % output_size[-1] == 0:
@@ -3432,6 +3453,53 @@ def arange_start(
     return aten.arange.start_step(
         start, end, 1, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
+
+
+@register_decomposition(aten.multi_margin_loss)
+@aten.multi_margin_loss.default.py_impl(DispatchKey.Autograd)
+@out_wrapper()
+def multi_margin_loss(
+    input: Tensor,
+    target: Tensor,
+    p: NumberType = 1,
+    margin: NumberType = 1,
+    weight: Optional[Tensor] = None,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    input = torch.atleast_2d(input)
+    target = torch.atleast_1d(target)
+    nframe = input.shape[0]
+    dim = input.shape[1]
+    torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
+    torch._check(
+        input.ndim == 2 and dim != 0,
+        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
+    )
+    torch._check(
+        target.ndim == 1 and target.numel() == nframe,
+        lambda: f"inconsistent target size, expected {nframe} but got {target.shape}",
+    )
+    if weight is not None:
+        weight = torch.atleast_1d(weight)
+        torch._check(
+            weight.ndim == 1 and weight.numel() == dim,  # type: ignore[union-attr]
+            lambda: f"inconsistent weight size, expected {dim} but got {weight.shape}",  # type: ignore[union-attr]
+        )
+    target = target.unsqueeze(1)
+    u = torch.gather(input, dim=1, index=target)
+    z = margin - u + input
+    z = z.clamp_min(0)
+    z = z if p == 1 else z * z
+    if weight is not None:
+        z = z * weight[target]
+    idx = torch.arange(dim, device=input.device)
+    z = torch.where(idx != target, z, 0)
+    if reduction == Reduction.MEAN.value:
+        return z.mean()
+    elif reduction == Reduction.SUM.value:
+        return z.sum() / z.shape[1]
+    else:
+        return z.mean(dim=1)
 
 
 def register_inplace(aten_op, outplace_op):
