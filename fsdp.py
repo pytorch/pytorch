@@ -33,19 +33,31 @@ def printing_eager(gm, inputs):
     gm.graph.print_tabular()
     return gm.forward
 
+gpu_id = int(os.environ["LOCAL_RANK"])
 
 def run(model, optim):
     torch.manual_seed(42)
     losses = []
     inp = torch.randn((2, 3), device="cuda")
 
-    for _ in range(3):
+    for _ in range(1):
         optim.zero_grad(set_to_none=True)
         inp = torch.randn((2, 3), device="cuda")
+        torch.storage.resize_count_and_loc = {}
+        if gpu_id == 0:
+            print("FORWARD")
         out = model(inp)
+        if gpu_id == 0:
+            print("END FORWARD")
+        # torch.storage.resize_count_and_loc = {}
         loss = out.sum()
         losses.append(loss)
+        torch.storage.resize_count_and_loc = {}
+        if gpu_id == 0:
+            print("BACKWARD")
         loss.backward()
+        if gpu_id == 0:
+            print("END BACKWARD")
         optim.step()
     return losses
 
@@ -58,7 +70,6 @@ def main(compiled):
     return run(model, optim)
 
 
-gpu_id = int(os.environ["LOCAL_RANK"])
 
 
 if __name__ == "__main__":
@@ -67,8 +78,9 @@ if __name__ == "__main__":
     dist.init_process_group(backend="nccl")
     device = f"cuda:{gpu_id}"
     torch.cuda.set_device(device)
-    eager = main(compiled=False)
-    print("EAGER:", eager)
-    time.sleep(2)
+    # eager = main(compiled=False)
+    # print("EAGER:", eager)
+    # exit(0)
+    # time.sleep(2)
     compiled = main(compiled=True)
     print("COMPILED:", compiled)
