@@ -135,14 +135,19 @@ class PyCodegen:
                 )
 
             for tensor, hook in self.tx.output.side_effects.tensor_hooks:
-                if tensor == value:
-                    self.load_graph_output(graph_outputs[graph_outputs_key].index)
-                    print("Matching tensor to reg hook", graph_outputs_key)
-                    output.extend(
-                        [create_instruction("LOAD_METHOD", argval="register_hook")]
-                    )
-                    self(hook.source)
-                    output.extend([create_instruction("POP_TOP")])
+                # if isinstance(value, TensorVariable):
+                if True:
+                    if tensor == value:
+                        print("Matching tensor to reg hook", graph_outputs_key)
+                        self.extend_output(
+                            [
+                                self.create_load_python_module(torch.Tensor, True),
+                                self.create_load_attr("register_hook"),
+                            ]
+                        )
+                        self.load_graph_output(graph_outputs[graph_outputs_key].index)
+                        self(hook.source)
+                        output.extend([create_instruction("POP_TOP")])    
 
         elif isinstance(value, NNModuleVariable):
             parts = value.module_key.split(".")

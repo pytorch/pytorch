@@ -345,7 +345,9 @@ def _reshard(
     """
     handle.reshard(free_unsharded_flat_param)
     if state.limit_all_gathers and free_unsharded_flat_param:
-        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        if (
+            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
+        ):  
             # We don't run a even queue for freeing under torch compile atm
             # But maybe we need to? TODO(voz): Look into this
             free_event = state._device_handle.Event()
@@ -1422,12 +1424,12 @@ def _register_post_backward_hook(
         "The `grad_fn` is needed to access the `AccumulateGrad` and "
         "register the post-backward hook",
     )
-    acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
-    assert acc_grad is not None
-    hook_handle = acc_grad.register_hook(
-        functools.partial(_post_backward_hook, state, handle)
-    )
-    flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
+    # acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
+    # assert acc_grad is not None
+    # hook_handle = acc_grad.register_hook(
+    #     functools.partial(_post_backward_hook, state, handle)
+    # )
+    # flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
 
 
 def _register_post_backward_reshard_only_hook(

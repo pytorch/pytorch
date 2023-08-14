@@ -1915,6 +1915,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.output.install_global(name, weakref.ref(value))
 
     def store_hook(self, name, value):
+        base = name
+        i = 0
+        while name in self.output.global_scope:
+            name = f"{base}_{i}"
+            i += 1
+
         src = GlobalWeakRefSource(name)
         self.output.guards.add(
            src.make_guard(GuardBuilder.WEAKREF_ALIVE)

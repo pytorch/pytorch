@@ -735,9 +735,9 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
             # print("REGISTERING?", args)
             print("AGV register hook")
             handle = self.value.register_hook(args[0].fn)
-            fn_var.source = tx.store_hook(fn_var.fn.func.__name__, fn_var.fn)
+            args[0].fn.source = tx.store_hook(args[0].fn.func.__name__, args[0].fn)
             
-            tx.output.side_effects.register_hook(self, fn_var)
+            tx.output.side_effects.register_hook(self, args[0].fn)
             # print("Handle is?", handle, self.proxy)
             tx.store_hook_handle("register_hook", handle)
             return RemovableHandleVariableTracker(handle, name, **options)
