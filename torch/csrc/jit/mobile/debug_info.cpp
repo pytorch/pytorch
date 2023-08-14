@@ -118,7 +118,7 @@ MobileDebugTable::MobileDebugTable(
   const std::vector<std::string>& record_names = reader->getAllRecords();
   const c10::string_view suffix(".debug_pkl");
   for (const auto& record_name : record_names) {
-    if (c10::string_view(record_name).ends_with(suffix)) {
+    if (c10::ends_with(c10::string_view(record_name), suffix)) {
       at::DataPtr debug_data;
       size_t debug_size{0};
       std::tie(debug_data, debug_size) = reader->getRecord(record_name);

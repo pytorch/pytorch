@@ -91,7 +91,7 @@ inline constexpr string_view extract(
     string_view suffix,
     string_view str) {
 #if !defined(__CUDA_ARCH__) // CUDA doesn't like std::logic_error in device code
-  return (!str.starts_with(prefix) || !str.ends_with(suffix))
+  return (!starts_with(str, prefix) || !ends_with(str, suffix))
       ? (throw std::logic_error("Invalid pattern"), string_view())
       : str.substr(prefix.size(), str.size() - prefix.size() - suffix.size());
 #else
@@ -100,7 +100,7 @@ inline constexpr string_view extract(
 }
 
 template <typename T>
-inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() {
+inline C10_TYPENAME_CONSTEXPR std::string_view fully_qualified_type_name_impl() {
 #if defined(_MSC_VER) && !defined(__clang__)
 #if defined(__NVCC__)
   return extract(
@@ -115,17 +115,17 @@ inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() 
 #endif
 #elif defined(__clang__)
   return extract(
-      "c10::string_view c10::util::detail::fully_qualified_type_name_impl() [T = ",
+      "std::string_view c10::util::detail::fully_qualified_type_name_impl() [T = ",
       "]",
       __PRETTY_FUNCTION__);
 #elif defined(__GNUC__)
   return extract(
 #if C10_TYPENAME_SUPPORTS_CONSTEXPR
-      "constexpr c10::string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
+      "constexpr std::string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
 #else
-      "c10::string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
+      "std::string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
 #endif
-      "; c10::string_view = c10::basic_string_view<char>]",
+      "; std::string_view = c10::basic_string_view<char>]",
       __PRETTY_FUNCTION__);
 #endif
 }
