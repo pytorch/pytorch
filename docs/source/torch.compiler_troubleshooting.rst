@@ -202,7 +202,7 @@ If the error does not occur with the ``"eager"`` backend, then the
 backend compiler is the source of the error (`example
 error <https://gist.github.com/mlazos/2f13681e3cc6c43b3911f336327032de%5D>`__).
 There are `different choices <./torch.compiler.rst>`__
-for backend compilers for TorchDynamo, with TorchInductor or nvfuser
+for backend compilers for TorchDynamo, with TorchInductor
 fitting the needs of most users. This section focuses on TorchInductor
 as the motivating example, but some tools can also be used with other
 backend compilers.

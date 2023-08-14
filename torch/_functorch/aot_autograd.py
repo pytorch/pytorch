@@ -1660,50 +1660,59 @@ def tensors_definitely_do_not_overlap(x, y):
     # Make x always on the left
     if x.storage_offset() > y.storage_offset():
         x, y = y, x
-
     # Short-circuit in the "obvious" overlapping case: both tensors are contiguous
     if x.is_contiguous() and y.is_contiguous():
-        x_numbytes = x.numel() * x.itemsize
-        if x.storage_offset() + x_numbytes > y.storage_offset():
+        if x.storage_offset() + x.numel() > y.storage_offset():
+            # definitely overlap
             return False
-
-    # expected inputs: two lists of intervals in increasing order. Don't need to have the same length
-    def intervals_intersect(xs, ys):
-        if len(xs) == 0 or len(ys) == 0:
-            return False
-        x_ = xs[0]
-        y_ = ys[0]
-        if max(0, min(x_[1], y_[1]) - max(x_[0], y_[0])) > 0:
-            return True
-        if x_[1] > y_[1]:
-            return intervals_intersect(xs, ys[1:])
         else:
-            return intervals_intersect(xs[1:], ys)
-
-    # This cases is needed for the shampoo optimizer.
-    # We can compute a list of contiguous intervals and check if any of them intersect
-    if x.dim() == 2 and y.dim() == 2 and x.stride()[1] == 1 and y.stride()[1] == 1:
-        # Simple case first: both inputs have the same outer stride
-        if x.stride(0) == y.stride(0):
-            if x.storage_offset() + x.size(0) > y.storage_offset():
-                return True
-            if y.storage_offset() + y.size(0) > x.stride(0):
-                return True
-
-        # Slightly more complicated case, to account for 2d tensors with different outer strides.
-        # This check takes O(outer_stride) for every pair of tensors!
-        # Compute the (start, end) range of contiguous memory of each region of the tensor
-        x_ranges = [
-            (x.data_ptr() + i * x.stride()[1], x.data_ptr() + i * x.stride()[1] + x.shape[1])
-            for i in range(x.shape[0] - 1)
-        ]
-        y_ranges = [
-            (y.data_ptr() + i * y.stride()[1], y.data_ptr() + i * y.stride()[1] + y.shape[1])
-            for i in range(y.shape[0] - 1)
-        ]
-        if not intervals_intersect(x_ranges, y_ranges):
+            # definitely no overlap
             return True
+
+    if x.dim() == 2 and y.dim() == 2 and x.stride(1) == 1 and y.stride(1) == 1:
+        # This cases is needed for the shampoo optimizer.
+        # All tensors are 2d (non-contiguous), have the same outer stride, and have an inner stride of 1
+        # (so rows are contiguous)
+        if x.stride(0) == y.stride(0):
+            offset_delta = y.storage_offset() - x.storage_offset()
+            if offset_delta < x.size(1):
+                # definitely overlaps (row 0 of y overlaps with row 0 of x)
+                # Example:
+                #   x: size=(4, 4), stride=(8, 1), offset=0
+                #   y: size=(4, 4), stride=(8, 1), offset=3
+                return False
+            x_total_elems_covered = x.stride(0) * (x.size(0) - 1) + x.size(1)
+            if x_total_elems_covered <= offset_delta:
+                # definitely does not overlap (last byte of x is before start of y)
+                # Example:
+                #   x: size=(4, 4), stride=(8, 1), offset=0 (last byte is 27)
+                #   y: size=(4, 4), stride=(8, 1), offset=28 (start byte is 28)
+                return True
+            # At this point, we want to check if the 0th row of y
+            # overlaps with **some** row of x.
+            # We can check this by shifting y backward by the shared stride, repeatedly,
+            # until the first row of y is before the first row of x.
+            # Then we can check if these rows overlap.
+            # We can accomplish this by modding our offset by the stride.
+            offset_delta_mod = offset_delta % x.stride(0)
+            # Example:
+            # 0 1 2 3
+            # 9 10 11 12
+            # 18 19 20 21
+            # 27 28 29 30
+            #   x: size=(4, 4), stride=(9, 1), offset=0
+            #   y: size=(4, 4), stride=(9, 1), offset=22 (this would not overlap)
+            #   y: size=(4, 4), stride=(9, 1), offset=23 (this would not overlap)
+            #   y: size=(4, 4), stride=(9, 1), offset=24 (this would overlap)
+            #   y: size=(4, 4), stride=(9, 1), offset=25 (this would overlap)
+            # If the interval [modded_offset, modded_offset + x_size] falls entirely
+            # without
+            if offset_delta_mod + y.size(1) <= x.stride(0):
+                return True
+            else:
+                return False
     return False
+
 
 def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
     actual_aliased_indices = set()
