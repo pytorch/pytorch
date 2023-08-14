@@ -797,7 +797,7 @@ uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
 }
 
 void ProcessGroupNCCL::registerOnCompletionHook(
-    std::function<void(c10::intrusive_ptr<Work>)>&& hook) {
+    std::function<void(std::shared_ptr<WorkInfo>)>&& hook) {
   TORCH_CHECK(
       enableTiming_,
       "ProcessGroupNCCL OnCompletion hook requires recording start and end "
@@ -1013,8 +1013,18 @@ void ProcessGroupNCCL::workCleanupLoop() {
         // The work object will be passed to Python side. Wrap it
         // with an intrusive_ptr so that pybind can safely pass by copy
         // and own the ptr lifetime.
-        onCompletionHook_(
-            c10::make_intrusive<WorkNCCL>(completedWorkList.back()));
+        const WorkNCCL& work = completedWorkList.back();
+        auto timeStarted =
+            std::chrono::system_clock::now() +
+            std::chrono::duration_cast<std::chrono::system_clock::duration>(
+                work.workStartTime_ - std::chrono::steady_clock::now());
+        onCompletionHook_(std::make_shared<WorkInfo>(
+            work.retrieveOpType(), // OpType
+            timeStarted, // timeStarted
+            std::chrono::system_clock::now(), // timeFinished
+            std::chrono::duration<float, std::milli>(
+                work.getDuration()) // activeDuration
+            ));
         completedWorkList.pop_back();
       }
     } catch (std::exception& e) {
@@ -1036,7 +1046,10 @@ void ProcessGroupNCCL::workCleanupLoop() {
         completedWorkList.back().handleException(asyncErrorHandling_);
       }
       // Abort all NCCL Communicators on this ProcessGroupNCCL instance.
-      abort();
+      std::string abortReason = c10::str(
+          "Caught exception while processing onCompletion hook for ProcessGroupNCCL on rank ",
+          rank_);
+      abort(abortReason);
     }
 
     // N.B.: this only guarantees all Work objects inserted before calling

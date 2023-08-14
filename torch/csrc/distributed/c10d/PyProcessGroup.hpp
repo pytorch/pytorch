@@ -1,8 +1,8 @@
 #pragma once
 
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace c10d {
 
@@ -25,19 +25,21 @@ class PyProcessGroup : public ProcessGroup {
     }
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
-        // We cannot use PYBIND11_OVERRIDE because:
-        // 1. We have to >MANUALLY< unwrap the PyFutureWrapper and
-        // 2. The python name is get_future
-        pybind11::gil_scoped_acquire gil;
-        auto override = pybind11::get_override(static_cast<const Work *>(this), "get_future");
+      // We cannot use PYBIND11_OVERRIDE because:
+      // 1. We have to >MANUALLY< unwrap the PyFutureWrapper and
+      // 2. The python name is get_future
+      pybind11::gil_scoped_acquire gil;
+      auto override =
+          pybind11::get_override(static_cast<const Work*>(this), "get_future");
 
-        if (override) {
-            py::object o = override();
-            auto futWrapper = o.cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>();
-            return futWrapper->fut;
-        }
+      if (override) {
+        py::object o = override();
+        auto futWrapper =
+            o.cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>();
+        return futWrapper->fut;
+      }
 
-        return Work::getFuture();
+      return Work::getFuture();
     }
   };
 
@@ -135,7 +137,6 @@ class PyProcessGroup : public ProcessGroup {
   }
 };
 
-
 class TORCH_API PythonOnCompletionHook {
  public:
   // Wraps a py::object hook and acquires Python GIL in dtor before
@@ -151,17 +152,16 @@ class TORCH_API PythonOnCompletionHook {
     hook_.ptr() = nullptr;
   }
 
-  void operator()(c10::intrusive_ptr<Work> work) const {
+  void operator()(std::shared_ptr<WorkInfo> workInfo) const {
     std::exception_ptr eptr;
     {
       py::gil_scoped_acquire acquire;
       try {
-        hook_(work);
+        hook_(workInfo);
       } catch (py::error_already_set& e) {
         // py::error_already_set requires GIL to destruct, take
         // special care.
-        eptr =
-            std::make_exception_ptr(std::runtime_error(e.what()));
+        eptr = std::make_exception_ptr(std::runtime_error(e.what()));
         e.restore();
         PyErr_Clear();
       } catch (std::exception& e) {

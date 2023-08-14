@@ -32,7 +32,6 @@
 
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
-#include <pybind11/embed.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
@@ -1705,8 +1704,8 @@ Arguments:
                 // python-related libs.
                 self->registerOnCompletionHook(
                     [hookWrapper = ::c10d::PythonOnCompletionHook(std::move(
-                         hook))](c10::intrusive_ptr<::c10d::Work> work) {
-                      hookWrapper(work);
+                         hook))](std::shared_ptr<::c10d::WorkInfo> workInfo) {
+                      hookWrapper(workInfo);
                     });
               },
               py::arg("hook"),
@@ -2323,6 +2322,35 @@ Example::
               py::arg("timeout") = kProcessGroupDefaultTimeout,
               py::call_guard<py::gil_scoped_release>());
 #endif
+
+  py::enum_<::c10d::OpType>(module, "OpType")
+      .value("BROADCAST", ::c10d::OpType::BROADCAST)
+      .value("ALLREDUCE", ::c10d::OpType::ALLREDUCE)
+      .value("ALLREDUCE_COALESCED", ::c10d::OpType::ALLREDUCE_COALESCED)
+      .value("REDUCE", ::c10d::OpType::REDUCE)
+      .value("ALLGATHER", ::c10d::OpType::ALLGATHER)
+      .value("_ALLGATHER_BASE", ::c10d::OpType::_ALLGATHER_BASE)
+      .value("ALLGATHER_COALESCED", ::c10d::OpType::ALLGATHER_COALESCED)
+      .value("GATHER", ::c10d::OpType::GATHER)
+      .value("SCATTER", ::c10d::OpType::SCATTER)
+      .value("REDUCE_SCATTER", ::c10d::OpType::REDUCE_SCATTER)
+      .value("ALLTOALL_BASE", ::c10d::OpType::ALLTOALL_BASE)
+      .value("ALLTOALL", ::c10d::OpType::ALLTOALL)
+      .value("SEND", ::c10d::OpType::SEND)
+      .value("RECV", ::c10d::OpType::RECV)
+      .value("RECVANYSOURCE", ::c10d::OpType::RECVANYSOURCE)
+      .value("BARRIER", ::c10d::OpType::BARRIER)
+      .value("_REDUCE_SCATTER_BASE", ::c10d::OpType::_REDUCE_SCATTER_BASE)
+      .value("COALESCED", ::c10d::OpType::COALESCED)
+      .value("_ALLREDUCE_SPARSE", ::c10d::OpType::_ALLREDUCE_SPARSE)
+      .value("UNKNOWN", ::c10d::OpType::UNKNOWN);
+
+  py::class_<::c10d::WorkInfo, std::shared_ptr<::c10d::WorkInfo>>(
+      module, "WorkInfo")
+      .def_readonly("op_type", &::c10d::WorkInfo::opType)
+      .def_readonly("time_started", &::c10d::WorkInfo::timeStarted)
+      .def_readonly("time_finished", &::c10d::WorkInfo::timeFinished)
+      .def_readonly("active_duration", &::c10d::WorkInfo::activeDuration);
 
   py::class_<
       ::c10d::Work,

@@ -109,7 +109,7 @@ class TORCH_API Work : public torch::CustomClassHolder {
 
   virtual float getDuration() const;
 
-  OpType retrieveOpType();
+  OpType retrieveOpType() const;
 
   static c10::intrusive_ptr<Work> create_from_future(
       const c10::intrusive_ptr<c10::ivalue::Future>&);
@@ -137,6 +137,23 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // When profiling, the callback to record end of operation event. This
   // callback needs to be called when collective operation is complete.
   std::function<void()> recordFunctionEndCallback_;
+};
+
+struct TORCH_API WorkInfo {
+  WorkInfo(
+      const OpType& opType,
+      const std::chrono::time_point<std::chrono::system_clock>& timeStarted,
+      const std::chrono::time_point<std::chrono::system_clock>& timeFinished,
+      const std::chrono::duration<float>& activeDuration)
+      : opType(opType),
+        timeStarted(timeStarted),
+        timeFinished(timeFinished),
+        activeDuration(activeDuration) {}
+
+  OpType opType;
+  std::chrono::time_point<std::chrono::system_clock> timeStarted;
+  std::chrono::time_point<std::chrono::system_clock> timeFinished;
+  std::chrono::duration<float> activeDuration;
 };
 
 } // namespace c10d

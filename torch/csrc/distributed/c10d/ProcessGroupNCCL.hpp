@@ -9,8 +9,8 @@
 #include <thread>
 #include <unordered_map>
 
-#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Backend.hpp>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
 
@@ -48,11 +48,17 @@ constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 // NoHandling: do not handle asynchronous NCCL errors
 // TearDown: tear down process upon error, see `WorkNCCL::handleException`
-// CleanUpOnly: just clean up collectives and abort communicators without tearing down process
-// SkipCleanUp: (this is a temporary option and can be removed in future) tear
-// down process without cleaning up NCCL communicators. This should be used as a
-// last resort in case `ncclCommAbort` itself is hanging
-enum ErrorHandlingMode { NoHandling = 0, TearDown = 1, CleanUpOnly = 2, SkipCleanUp = 3 };
+// CleanUpOnly: just clean up collectives and abort communicators without
+// tearing down process SkipCleanUp: (this is a temporary option and can be
+// removed in future) tear down process without cleaning up NCCL communicators.
+// This should be used as a last resort in case `ncclCommAbort` itself is
+// hanging
+enum ErrorHandlingMode {
+  NoHandling = 0,
+  TearDown = 1,
+  CleanUpOnly = 2,
+  SkipCleanUp = 3
+};
 
 #define SHOULD_CLEAN_UP(a) (a != NoHandling && a != SkipCleanUp)
 
@@ -64,7 +70,8 @@ enum ErrorHandlingMode { NoHandling = 0, TearDown = 1, CleanUpOnly = 2, SkipClea
 // Instead, it stashes live references to those tensors until after
 // user-facing streams are synced with comm streams.
 // See stashed_for_allocator_safety_ below.
-constexpr const char* TORCH_NCCL_AVOID_RECORD_STREAMS = "TORCH_NCCL_AVOID_RECORD_STREAMS";
+constexpr const char* TORCH_NCCL_AVOID_RECORD_STREAMS =
+    "TORCH_NCCL_AVOID_RECORD_STREAMS";
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
@@ -103,9 +110,10 @@ constexpr const char* TORCH_NCCL_AVOID_RECORD_STREAMS = "TORCH_NCCL_AVOID_RECORD
 //   // Now continue on other work in the current stream.
 class TORCH_API ProcessGroupNCCL : public Backend {
  public:
-  class WorkNCCL : public Work,
-    public std::enable_shared_from_this<WorkNCCL> {
+  class WorkNCCL : public Work, public std::enable_shared_from_this<WorkNCCL> {
    public:
+    friend class WorkInfo;
+
     // Constructor takes a list of CUDA devices
     WorkNCCL(
         const std::vector<at::Device>& devices,
@@ -164,7 +172,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Helper function that returns True if the WorkNCCL object has timed out
     // and False otherwise.
     // In case of timeout, set exception on the WorkNCCL object.
-    bool checkTimeout(c10::optional<std::chrono::milliseconds> timeout = c10::nullopt);
+    bool checkTimeout(
+        c10::optional<std::chrono::milliseconds> timeout = c10::nullopt);
 
     std::vector<at::Tensor> result() override;
 
@@ -286,8 +295,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   struct Options : Backend::Options {
     // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
     // operations. This is only used when blockingWait_ is enabled.
-    explicit Options(
-        bool is_high_priority_stream = false);
+    explicit Options(bool is_high_priority_stream = false);
 
     // return intrusive_ptr of the object
     static c10::intrusive_ptr<Options> create(
@@ -342,7 +350,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   }
 
   const std::string getBackendName() const override {
-      return std::string(NCCL_BACKEND_NAME);
+    return std::string(NCCL_BACKEND_NAME);
   }
 
   void startCoalescing() override;
@@ -461,7 +469,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& tensors,
       int tag) override;
 
-   // Agrees on an initial sequence number for the whole group by having rank 0
+  // Agrees on an initial sequence number for the whole group by having rank 0
   // create it and broadcast it to other ranks using the store.
   void setSequenceNumberForGroup() override;
 
@@ -470,7 +478,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // may indicate that there is some sort of collective desynchronization.
   uint64_t getSequenceNumberForGroup() override;
 
-  void registerOnCompletionHook(std::function<void(c10::intrusive_ptr<Work>)>&& hook) override;
+  void registerOnCompletionHook(
+      std::function<void(std::shared_ptr<WorkInfo>)>&& hook) override;
   void waitForPendingWorks() override;
 
   // Tests if the UCC fallback path is available
@@ -505,7 +514,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Device> devices,
       int rank,
       OpType opType,
-      const char* profilingTitle=nullptr,
+      const char* profilingTitle = nullptr,
       const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt);
 
   virtual c10::intrusive_ptr<ProcessGroupNCCL::CoalescedWorkNCCL>
@@ -591,7 +600,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void destroyNCCLComms(const std::string& devNCCLCommMapKey);
 
   // Watchdog's inside loop.
-  // Takes care of cleaning up completed work, and aborting upon failure or timeout.
+  // Takes care of cleaning up completed work, and aborting upon failure or
+  // timeout.
   void workCleanupLoop();
 
   // Desync debug helper

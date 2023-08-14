@@ -29,6 +29,7 @@ import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from test_c10d_common import gpus_for_rank, DoubleGpuNet, ConvNet, ModuleForDdpCommHook
 from torch import nn
+from torch._C._distributed_c10d import OpType
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -2454,13 +2455,6 @@ class DistributedDataParallelTest(
         process_group.broadcast([tensor]).wait()
 
 
-# These are internal OpType enum values in Work.hpp, the value is subject to
-# change in future versions.
-BROADCAST = 0
-ALLREDUCE = 1
-ALLGATHER = 4
-
-
 class WorkHookTest(MultiProcessTestCase):
 
     @property
@@ -2476,6 +2470,7 @@ class WorkHookTest(MultiProcessTestCase):
 
     def tearDown(self):
         super().tearDown()
+        del os.environ["NCCL_ENABLE_TIMING"]
         try:
             os.remove(self.file_name)
         except OSError:
@@ -2496,10 +2491,10 @@ class WorkHookTest(MultiProcessTestCase):
         num_hook_fired = 0
         durations: List[float] = []
 
-        def hook(work):
+        def hook(work_info):
             nonlocal num_hook_fired, durations
             num_hook_fired += 1
-            durations.append(work._get_duration())
+            durations.append(work_info.active_duration.total_seconds())
 
         pg._register_on_completion_hook(hook)
         tensor = torch.ones([2, 3]).cuda(self.rank) * self.rank
@@ -2524,10 +2519,10 @@ class WorkHookTest(MultiProcessTestCase):
         num_hook_fired = 0
         durations: List[float] = []
 
-        def hook(work):
+        def hook(work_info):
             nonlocal num_hook_fired, durations
             num_hook_fired += 1
-            durations.append(work._get_duration())
+            durations.append(work_info.active_duration.total_seconds())
 
         pg._register_on_completion_hook(hook)
         tensor = torch.ones([2, 3]).cuda(self.rank)
@@ -2561,16 +2556,16 @@ class WorkHookTest(MultiProcessTestCase):
     def test_on_completion_hook_with_ddp(self):
         pg = self._get_process_group()
         num_hook_fired: Dict[int, int] = {}
-        durations: Dict[int, List[float]] = {}
+        durations: Dict[OpType, List[float]] = {}
 
-        def hook(work):
+        def hook(work_info):
             nonlocal num_hook_fired, durations
-            op_type = work._get_op_type()
+            op_type = work_info.op_type
             if op_type not in num_hook_fired:
                 num_hook_fired[op_type] = 0
                 durations[op_type] = []
             num_hook_fired[op_type] += 1
-            durations[op_type].append(work._get_duration())
+            durations[op_type].append(work_info.active_duration.total_seconds())
 
         pg._register_on_completion_hook(hook)
 
@@ -2591,18 +2586,18 @@ class WorkHookTest(MultiProcessTestCase):
         # DDP is expected to synchronize model parameter by broadcasting
         # from rank0 to other ranks. However, this is DDP's internal implementation,
         # which is subject to change in future versions.
-        self.assertTrue(num_hook_fired[BROADCAST] > 0)
-        ctor_allreduce = num_hook_fired[ALLREDUCE] if ALLREDUCE in num_hook_fired else 0
+        self.assertTrue(num_hook_fired[OpType.BROADCAST] > 0)
+        ctor_allreduce = num_hook_fired[OpType.ALLREDUCE] if OpType.ALLREDUCE in num_hook_fired else 0
 
         x = torch.zeros(2, 1000).cuda(self.rank)
         ddp(x).sum().backward()
 
         c10d.destroy_process_group(pg)
 
-        self.assertTrue(ALLREDUCE in num_hook_fired)
+        self.assertTrue(OpType.ALLREDUCE in num_hook_fired)
         # The number of allreduce ops depend on DDP internal implementation, but
         # there should be at least one allreduce.
-        self.assertTrue(num_hook_fired[ALLREDUCE] - ctor_allreduce > 0)
+        self.assertTrue(num_hook_fired[OpType.ALLREDUCE] - ctor_allreduce > 0)
         self.assertTrue(all(duration > 0 for duration in chain(*(durations.values()))))
 
     # Not testing FSDP due to https://github.com/pytorch/pytorch/issues/90848.
@@ -2615,16 +2610,16 @@ class WorkHookTest(MultiProcessTestCase):
 
         pg = self._get_process_group()
         num_hook_fired: Dict[int, int] = {}
-        durations: Dict[int, List[float]] = {}
+        durations: Dict[OpType, List[float]] = {}
 
-        def hook(work):
+        def hook(work_info):
             nonlocal num_hook_fired, durations
-            op_type = work._get_op_type()
+            op_type = work_info.op_type
             if op_type not in num_hook_fired:
                 num_hook_fired[op_type] = 0
                 durations[op_type] = []
             num_hook_fired[op_type] += 1
-            durations[op_type].append(work._get_duration())
+            durations[op_type].append(work_info.active_duration.total_seconds())
 
         pg._register_on_completion_hook(hook)
 
@@ -2641,11 +2636,11 @@ class WorkHookTest(MultiProcessTestCase):
 
         c10d.destroy_process_group(pg)
 
-        self.assertTrue(ALLGATHER in num_hook_fired)
+        self.assertTrue(OpType.ALLGATHER in num_hook_fired)
         self.assertEqual(len(num_hook_fired), 1)
         # two allgathers, one for size and another for values
-        self.assertEqual(num_hook_fired[ALLGATHER], 2)
-        self.assertTrue(all(duration > 0 for duration in durations[ALLGATHER]))
+        self.assertEqual(num_hook_fired[OpType.ALLGATHER], 2)
+        self.assertTrue(all(duration > 0 for duration in durations[OpType.ALLGATHER]))
 
 
 class NcclErrorHandlingTest(MultiProcessTestCase):
