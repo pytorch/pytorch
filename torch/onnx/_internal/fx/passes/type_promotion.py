@@ -1683,7 +1683,9 @@ class InsertTypePromotion(_pass.Transform):
         fake_mode = self.fake_mode
         assert fake_mode is not None, "Cannot detect fake_mode."
 
-        with fake_mode, fx_traceback.preserve_node_meta():
+        with proxy_tensor.maybe_disable_fake_tensor_mode(), (
+            fake_mode
+        ), fx_traceback.preserve_node_meta():
             self.interpreter.run(*fake_args)
 
         return self.module
