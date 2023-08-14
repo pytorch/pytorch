@@ -187,10 +187,10 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         ref = fn(x, s)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
-        res = opt_fn(x)
+        res = opt_fn(x, s)
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 7)
+        self.assertEqual(cnts.op_count, 8)
 
     def test_autograd_profiler_enabled(self):
         def fn(x):
