@@ -799,6 +799,8 @@ _scaled_dot_product_flash_attention_cpu(
     "scaled_dot_product_attention_flash_attention: Currently do not support dropout > 0");
   TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
     "scaled_dot_product_attention_flash_attention: Q/K/V should have the same head size");
+  TORCH_CHECK(return_debug_mask == false,
+    "scaled_dot_product_attention_flash_attention: Currently do not support 'return_debug_mask'");
 
   at::Tensor output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
   const auto accumulate_dtype = toOpMathType(dtype);
