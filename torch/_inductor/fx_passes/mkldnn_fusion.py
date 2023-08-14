@@ -661,7 +661,7 @@ if torch._C._has_mkldnn:
             )
             if dynamic_shapes:
                 # For dynamic shapes, we are unsafe to compair the shapes for reshape_1 and reshape_2
-                # since the can be changed in runtime
+                # since they can be changed during runtime
                 return
 
             graph = match.graph
