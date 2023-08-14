@@ -482,6 +482,12 @@ void bind_tensor(pybind11::module& m) {
           }))
       .def("get_engine", &tensor::get_engine)
       .def(
+          "from_aten",
+          [](tensor& x, uint64_t data_ptr) {
+            x.set_data_handle(reinterpret_cast<void*>(data_ptr));
+          },
+          pybind11::arg("data_ptr"))
+      .def(
           "from_numpy",
           [](tensor& x, pybind11::buffer b) {
             auto bufinfo = b.request();

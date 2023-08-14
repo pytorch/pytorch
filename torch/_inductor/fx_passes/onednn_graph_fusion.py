@@ -117,6 +117,13 @@ class OnednnGraphPartitionModule(torch.nn.Module):
         self.kernel = None
         self.output_descs = None
 
+        # assume static shape
+        # cache the onednn graph tensors
+        self.input_onednn_tensors = []
+        self.output_onednn_tensors = []
+        # cache the output tensors to avoid reallocation
+        self.output_tensors = []
+
         self.lock = threading.Lock()
 
     def name(self):
@@ -128,6 +135,8 @@ class OnednnGraphPartitionModule(torch.nn.Module):
         input_tensors = [
             args[val] if isinstance(val, int) else val for val in self.input_order_data
         ]
+
+        # TODO: remove detect_fake_mode with an meta impl
         fake_mode = detect_fake_mode(args)
         if fake_mode:
             input_descs = self.onednn_graph.update_input_descs(
@@ -158,30 +167,37 @@ class OnednnGraphPartitionModule(torch.nn.Module):
                     self.kernel, self.partition.get_out_ports()
                 )
 
-        input_onednn_tensors = [
-            llga.tensor(input_desc, self.onednn_graph.engine, input_tensor.data_ptr())
-            for input_desc, input_tensor in zip(self.input_descs, input_tensors)
-        ]
-        with record_function("output_tensor_creation"):
-            output_tensors = [
+        if not self.input_onednn_tensors:
+            self.input_onednn_tensors = [
+                llga.tensor(input_desc, self.onednn_graph.engine, input_tensor.data_ptr())
+                for input_desc, input_tensor in zip(self.input_descs, input_tensors)
+            ]
+        else:
+            for onednn_t, aten_t in zip(self.input_onednn_tensors, input_tensors):
+                onednn_t.from_aten(aten_t.data_ptr())
+
+        if not self.output_tensors:
+            self.output_tensors = [
                 allocate_empty_aten_from_desc(out_desc)
                 for out_desc in self.output_descs
             ]
-        output_onednn_tensors = [
-            llga.tensor(output_desc, self.onednn_graph.engine, output_tensor.data_ptr())
-            for output_desc, output_tensor in zip(self.output_descs, output_tensors)
-        ]
+
+        if not self.output_onednn_tensors:
+            self.output_onednn_tensors = [
+                llga.tensor(output_desc, self.onednn_graph.engine, self.output_tensor.data_ptr())
+                for output_desc, self.output_tensor in zip(self.output_descs, self.output_tensors)
+            ]
 
         assert not any(
-            isinstance(out, torch._subclasses.FakeTensor) for out in output_tensors
+            isinstance(out, torch._subclasses.FakeTensor) for out in self.output_tensors
         ), "unexpected faketensor in output_tensors"
 
         with record_function(f"onednn_fuse_{self.__name__}"):
             self.kernel.execute(
-                self.onednn_graph.stream, input_onednn_tensors, output_onednn_tensors
+                self.onednn_graph.stream, self.input_onednn_tensors, self.output_onednn_tensors
             )
         # TODO: It seems like this fix and also the return statements of def call_function should be handled differently.
-        return output_tensors[0] if len(output_tensors) == 1 else output_tensors
+        return self.output_tensors[0] if len(self.output_tensors) == 1 else self.output_tensors
 
 
 def build_onednn_graph(gm: GraphModule) -> LlgaGraph:
