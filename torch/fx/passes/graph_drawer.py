@@ -220,6 +220,9 @@ if HAS_PYDOT:
 
             tensor_meta = node.meta.get('tensor_meta')
             label += self._tensor_meta_to_label(tensor_meta)
+            stream_id = node.meta.get('stream_id', None)
+            if stream_id is not None:
+                label += f"|stream={stream_id}" + r"\n"
 
             return label + "}"
 

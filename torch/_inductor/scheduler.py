@@ -789,6 +789,7 @@ class Scheduler:
         if config.multiple_streams:
             ss_graph = stream_scheduler.stream_schedule(self.nodes)
             self.nodes = ss_graph.reorder(self.nodes)
+            V.debug.graph_diagram(self.nodes)
         self.compute_last_usage()
         # used during codegen:
         self.current_device = None

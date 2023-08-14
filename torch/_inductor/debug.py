@@ -5,6 +5,7 @@ import functools
 import itertools
 import logging
 import os.path
+import os
 import pstats
 import shutil
 import subprocess
@@ -44,7 +45,7 @@ def has_dot():
         return False
 
 
-def draw_buffers(nodes, print_graph=False, fname=None):
+def draw_buffers(nodes, print_graph=False, fname=None, multi_stream=False):
     """
     Draw a graph in fname.svg.
     nodes is a list of SchedulerNode objects.
@@ -69,12 +70,16 @@ def draw_buffers(nodes, print_graph=False, fname=None):
         dtype = None
         if isinstance(node, ir.ComputedBuffer):
             dtype = node.data.dtype
+        if hasattr(V.graph, "stream_graph") and V.graph.stream_graph is not None:
+            ssnode = V.graph.stream_graph.name_mapping[node.name]
+            node.meta["stream_id"] = ssnode.stream_id
 
         metadata = TensorMetadata(group, dtype, None, None, None, None, None)
         node.meta["tensor_meta"] = metadata
 
     if print_graph:
         print(graph)
+
 
     gm = GraphModule({}, graph)
     legalize_graph(gm)
