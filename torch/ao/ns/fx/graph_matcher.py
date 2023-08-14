@@ -134,7 +134,7 @@ class _NSGraphMatchableSubgraphsIterator:
             for inner_arg in arg:
                 self._recursively_add_node_arg_to_stack(inner_arg)
         elif isinstance(arg, torch.fx.immutable_collections.immutable_dict):
-            for value in arg.values():
+            for key, value in arg.items():
                 self._recursively_add_node_arg_to_stack(value)
 
     def _is_matchable(self, node: Node) -> bool:

@@ -23,7 +23,7 @@ class GuardInstallException(Exception):
 
 
 class OptimizerVariable(UserDefinedObjectVariable):
-    def __init__(self, value, grad_to_source=None, tensor_to_source=None, **kwargs):
+    def __init__(self, value, grad_to_source=None, **kwargs):
         super().__init__(value, **kwargs)
 
         for group in self.value.param_groups:
@@ -32,9 +32,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         if grad_to_source is None:
             self.grad_to_source = {}
-
-        if tensor_to_source is None:
-            self.tensor_to_source = {}
 
     def call_method(
         self,
@@ -48,7 +45,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             try:
                 py_args, py_kwargs = self.get_python_args(*args, **kwargs)
                 self.value._init_group(*py_args, **py_kwargs)
-                self.map_sources_and_install_guards(tx)
+                self.install_guards(tx)
                 self.update_list_args(tx, args, kwargs, py_args, py_kwargs)
                 return ConstantVariable(None)
             except (ArgMappingException, GuardInstallException) as _:
@@ -56,6 +53,18 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 pass
 
         return super().call_method(tx, name, args, kwargs)
+
+    def map_grads_to_sources(self):
+        """Map the optimizer's grads to their sources"""
+        self.grad_to_source = {}
+        for g_ind, group in enumerate(self.value.param_groups):
+            group_source = GetItemSource(AttrSource(self.source, "param_groups"), g_ind)
+            for p_ind, p in enumerate(group["params"]):
+                if p.grad is not None:
+                    self.grad_to_source[p.grad] = AttrSource(
+                        GetItemSource(GetItemSource(group_source, "params"), p_ind),
+                        "grad",
+                    )
 
     def var_getattr(self, tx, name):
         if name == "_init_group":
@@ -86,24 +95,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         return new_args, new_kwargs
 
-    def map_sources_and_install_guards(self, tx):
+    def install_guards(self, tx):
         from .builder import VariableBuilder
-
-        self.grad_to_source = {}
-        self.tensor_to_source = {}
-
-        for g_ind, group in enumerate(self.value.param_groups):
-            group_source = GetItemSource(AttrSource(self.source, "param_groups"), g_ind)
-            for p_ind, p in enumerate(group["params"]):
-                param_source = GetItemSource(
-                    GetItemSource(group_source, "params"), p_ind
-                )
-                self.tensor_to_source[p] = param_source
-                if p.grad is not None:
-                    self.grad_to_source[p.grad] = AttrSource(
-                        param_source,
-                        "grad",
-                    )
 
         # state guards take a long time to generate
         # so we manually generate them here
@@ -112,15 +105,17 @@ class OptimizerVariable(UserDefinedObjectVariable):
         guards.add(state_source.make_guard(GuardBuilder.DICT_KEYS))
         for p, value in self.value.state.items():
             tx.store_dict_key(global_key_name(p), p)
-            p_state_source = GetItemSource(state_source, self.tensor_to_source[p])
+            p_state_source = GetItemSource(
+                state_source, GlobalWeakRefSource(global_key_name(p))
+            )
             guards.add(p_state_source.make_guard(GuardBuilder.DICT_KEYS))
             for k, v in value.items():
-                if (
-                    isinstance(v, torch.Tensor)
-                    and v not in self.grad_to_source
-                    and v not in self.tensor_to_source
-                ):
-                    self.tensor_to_source[v] = GetItemSource(p_state_source, k)
+                if isinstance(v, torch.Tensor):
+                    guards.add(
+                        GetItemSource(p_state_source, k).make_guard(
+                            GuardBuilder.TENSOR_MATCH
+                        )
+                    )
                 elif v is None or isinstance(v, (bool, int, float, str)):
                     guards.add(
                         GetItemSource(p_state_source, k).make_guard(
@@ -141,15 +136,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """Wrap state tensor in a TensorVariable"""
         from .builder import VariableBuilder
 
-        # If we have a source for a tensor already use it,
-        # if we have not seen a tensor before, stash and use a
-        # global weak ref source, since it must be an optimizer tensor
-        # that we have missed
-        if tensor_value in self.tensor_to_source:
-            return VariableBuilder(tx, self.tensor_to_source[tensor_value])(
-                tensor_value
-            )
-        elif tensor_value in self.grad_to_source:
+        # don't add weakref guards for grads, they will possibly change on
+        # each iteration
+        if tensor_value in self.grad_to_source:
             return VariableBuilder(tx, self.grad_to_source[tensor_value])(tensor_value)
         else:
             tx.store_dict_key(global_key_name(tensor_value), tensor_value)
@@ -159,6 +148,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
     def update_list_args(self, tx, args, kwargs, py_args, py_kwargs):
         """Update the args and kwargs to the traced optimizer call"""
+        self.map_grads_to_sources()
         for arg, py_arg in zip(args, py_args):
             if isinstance(arg, ListVariable) and all(
                 isinstance(t, torch.Tensor) for t in py_arg

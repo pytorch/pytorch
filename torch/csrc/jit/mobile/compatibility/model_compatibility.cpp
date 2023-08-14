@@ -43,7 +43,7 @@ c10::IValue readArchive(
 
   std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit =
       std::make_shared<mobile::CompilationUnit>();
-  auto obj_loader = [&](const at::StrongTypePtr& type, IValue input) {
+  auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
     return objLoaderMobile(type, input, *mobile_compilation_unit);
   };
   bool bytecode_tensor_in_constants_archive =

@@ -41,7 +41,8 @@ class TestAutocastCPU(TestCase):
                 output = getattr(module, op)(*args, **add_kwargs)
                 if isinstance(output, torch.Tensor):
                     self.assertTrue(out_type == output.dtype,
-                                    f"autocast for torch.{op} produced {output.dtype}, should produce {out_type}")
+                                    "autocast for torch.{} produced {}, should produce {}"
+                                    .format(op, output.dtype, out_type))
             # Try Tensor.* variant:
             if hasattr(torch.Tensor, op):
                 output_method = getattr(args[0], op)(*args[1:], **add_kwargs)
@@ -51,7 +52,8 @@ class TestAutocastCPU(TestCase):
                                     .format(op, output_method.dtype, out_type))
 
             self.assertTrue((output is not None) or (output_method is not None),
-                            f"{op} not found as an attribute on either Tensor or the requested module {module}")
+                            "{} not found as an attribute on either Tensor or the requested module {}".format(
+                            op, module))
 
             # Accounts for ops that return Tensors, iterables, and other non-Tensors.
             # For example, lstm_cell returns a tuple and equal returns bool.
@@ -81,7 +83,7 @@ class TestAutocastCPU(TestCase):
                     control = getattr(args[0].to(run_as_type), op)(*cast(args[1:], run_as_type), **add_kwargs)
                 self.assertTrue(type(output_to_compare) == type(control))
                 comparison = compare(output_to_compare, control)
-                self.assertTrue(comparison, f"torch.{op} result did not match control")
+                self.assertTrue(comparison, "torch.{} result did not match control".format(op))
             self.assertTrue(torch.is_autocast_cpu_enabled())
         self.assertFalse(torch.is_autocast_cpu_enabled())
 

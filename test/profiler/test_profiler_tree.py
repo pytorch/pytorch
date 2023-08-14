@@ -128,10 +128,6 @@ class ProfilerTree:
         flat_nodes = flatten(profiler.kineto_results.experimental_event_tree())
 
         # Profiler inserts a `cudaDeviceSynchronize` at the end of profiling.
-        # and may also insert 'Context Sync' CUDA synchronization event.
-        if flat_nodes and flat_nodes[-2][1] == "cudaDeviceSynchronize":
-            flat_nodes = flat_nodes[:-2]
-
         if flat_nodes and flat_nodes[-1][1] == "cudaDeviceSynchronize":
             flat_nodes = flat_nodes[:-1]
 

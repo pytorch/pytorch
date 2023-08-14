@@ -3,8 +3,7 @@ from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
 from torch.distributions.distribution import Distribution
 
-__all__ = ["OneHotCategorical", "OneHotCategoricalStraightThrough"]
-
+__all__ = ['OneHotCategorical', 'OneHotCategoricalStraightThrough']
 
 class OneHotCategorical(Distribution):
     r"""
@@ -35,7 +34,8 @@ class OneHotCategorical(Distribution):
         probs (Tensor): event probabilities
         logits (Tensor): event log probabilities (unnormalized)
     """
-    arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
+    arg_constraints = {'probs': constraints.simplex,
+                       'logits': constraints.real_vector}
     support = constraints.one_hot
     has_enumerate_support = True
 
@@ -49,9 +49,7 @@ class OneHotCategorical(Distribution):
         new = self._get_checked_instance(OneHotCategorical, _instance)
         batch_shape = torch.Size(batch_shape)
         new._categorical = self._categorical.expand(batch_shape)
-        super(OneHotCategorical, new).__init__(
-            batch_shape, self.event_shape, validate_args=False
-        )
+        super(OneHotCategorical, new).__init__(batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 
@@ -111,7 +109,6 @@ class OneHotCategorical(Distribution):
         if expand:
             values = values.expand((n,) + self.batch_shape + (n,))
         return values
-
 
 class OneHotCategoricalStraightThrough(OneHotCategorical):
     r"""

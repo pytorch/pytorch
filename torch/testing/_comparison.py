@@ -465,9 +465,9 @@ class BooleanPair(Pair):
         self, actual: Any, expected: Any, *, id: Tuple[Any, ...]
     ) -> Tuple[bool, bool]:
         self._check_inputs_isinstance(actual, expected, cls=self._supported_types)
-        actual, expected = (
+        actual, expected = [
             self._to_bool(bool_like, id=id) for bool_like in (actual, expected)
-        )
+        ]
         return actual, expected
 
     def _to_bool(self, bool_like: Any, *, id: Tuple[Any, ...]) -> bool:
@@ -559,9 +559,9 @@ class NumberPair(Pair):
         self, actual: Any, expected: Any, *, id: Tuple[Any, ...]
     ) -> Tuple[Union[int, float, complex], Union[int, float, complex]]:
         self._check_inputs_isinstance(actual, expected, cls=self._supported_types)
-        actual, expected = (
+        actual, expected = [
             self._to_number(number_like, id=id) for number_like in (actual, expected)
-        )
+        ]
         return actual, expected
 
     def _to_number(
@@ -675,7 +675,7 @@ class TensorLikePair(Pair):
         if not allow_subclasses and type(actual) is not type(expected):
             self._inputs_not_supported()
 
-        actual, expected = (self._to_tensor(input) for input in (actual, expected))
+        actual, expected = [self._to_tensor(input) for input in (actual, expected)]
         for tensor in (actual, expected):
             self._check_supported(tensor, id=id)
         return actual, expected
@@ -1235,16 +1235,7 @@ def not_close_error_metas(
                 "please except the previous error and raise an expressive `ErrorMeta` instead."
             ) from error
 
-    # [ErrorMeta Cycles]
-    # ErrorMeta objects in this list capture
-    # tracebacks that refer to the frame of this function.
-    # The local variable `error_metas` refers to the error meta
-    # objects, creating a reference cycle. Frames in the traceback
-    # would not get freed until cycle collection, leaking cuda memory in tests.
-    # We break the cycle by removing the reference to the error_meta objects
-    # from this frame as it returns.
-    error_metas = [error_metas]
-    return error_metas.pop()
+    return error_metas
 
 
 def assert_close(

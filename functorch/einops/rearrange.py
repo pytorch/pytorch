@@ -4,15 +4,8 @@ import functools
 from typing import Callable, Dict, List, Sequence, Tuple, Union
 
 import torch
-
 from functorch._C import dim as _C
-from ._parsing import (
-    _ellipsis,
-    AnonymousAxis,
-    comma_separate,
-    parse_pattern,
-    validate_rearrange_expressions,
-)
+from ._parsing import AnonymousAxis, _ellipsis, comma_separate, parse_pattern, validate_rearrange_expressions
 
 __all__ = ["rearrange"]
 
@@ -86,12 +79,10 @@ def _create_rearrange_callable(
                 dims_i += 1
         elif dimension == _ellipsis:
             identifier = _ellipsis
-            identifier_dim_map[identifier] = tuple(
-                first_class_dims[dims_i + j] for j in range(n_ellipsis_dims)
-            )
+            identifier_dim_map[identifier] = tuple(first_class_dims[dims_i + j] for j in range(n_ellipsis_dims))
             dims_i += n_ellipsis_dims
         else:
-            raise ValueError(f"Unexpected dimension: {dimension}")
+            raise ValueError(f'Unexpected dimension: {dimension}')
 
     def composition_to_dims(
         composition: Sequence[Union[List[Union[str, AnonymousAxis]], str]]
@@ -101,17 +92,11 @@ def _create_rearrange_callable(
         dim_composition: List[Union[str, Tuple[str, ...]]] = []
         for dimension in composition:
             if isinstance(dimension, list):
-                dim_composition.append(
-                    tuple(
-                        dim
-                        for identifier in dimension
-                        for dim in identifier_dim_map[identifier]
-                    )
-                )
+                dim_composition.append(tuple(dim for identifier in dimension for dim in identifier_dim_map[identifier]))
             elif dimension == _ellipsis:
                 dim_composition.extend(identifier_dim_map[_ellipsis])
             else:
-                raise ValueError(f"Unexpected dimension: {dimension}")
+                raise ValueError(f'Unexpected dimension: {dimension}')
         return dim_composition
 
     left_dims = composition_to_dims(left.composition)
@@ -126,19 +111,15 @@ def _create_rearrange_callable(
         (
             f"def {custom_rearrange_callable_name}(tensor):\n"
             f"    {comma_separate(first_class_dims)} = dims({n_dims})\n"
-        )
-        + (
-            "".join(
-                f"    {dim}.size = {length}\n" for (dim, length) in specified_lengths
+            + (
+                "".join(f"    {dim}.size = {length}\n" for (dim, length) in specified_lengths)
+                if specified_lengths else ""
             )
-            if specified_lengths
-            else ""
-        )
-        + f"    tensor = tensor[{comma_separate(left_dims)}].order({comma_separate(right_dims)})\n"
-        + (
-            f"    return tensor.sum({comma_separate([anon_dims])}, keepdim=False)\n"
-            if anon_dims
-            else "    return tensor\n"
+            + f"    tensor = tensor[{comma_separate(left_dims)}].order({comma_separate(right_dims)})\n"
+            + (
+                f"    return tensor.sum({comma_separate([anon_dims])}, keepdim=False)\n"
+                if anon_dims else "    return tensor\n"
+            )
         )
     )
 
@@ -147,9 +128,7 @@ def _create_rearrange_callable(
 
 
 def rearrange(
-    tensor: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor, ...]],
-    pattern: str,
-    **axes_lengths: int,
+    tensor: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor, ...]], pattern: str, **axes_lengths: int
 ) -> torch.Tensor:
     r"""A native implementation of `einops.rearrange`, a reader-friendly smart element reordering for multidimensional
     tensors. This operation includes functionality of transpose (axes permutation), reshape (view), squeeze, unsqueeze,
@@ -200,8 +179,6 @@ def rearrange(
     if not isinstance(tensor, torch.Tensor):
         tensor = torch.stack(tensor)
 
-    rearrange_callable = _create_rearrange_callable(
-        tensor.ndim, pattern, **axes_lengths
-    )
+    rearrange_callable = _create_rearrange_callable(tensor.ndim, pattern, **axes_lengths)
 
     return rearrange_callable(tensor)

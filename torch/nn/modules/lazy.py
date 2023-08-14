@@ -223,7 +223,7 @@ class LazyModuleMixin:
         This adds an interface to isolate parameter initialization from the
         forward pass when doing parameter shape inference.
         """
-        raise NotImplementedError(f'initialize_parameters is not implemented for {self.__class__.__name__}')
+        raise NotImplementedError('initialize_parameters is not implemented for {}'.format(self.__class__.__name__))
 
     def has_uninitialized_params(self: _LazyProtocol):
         r"""Check if a module has parameters that are not initialized
@@ -249,7 +249,7 @@ class LazyModuleMixin:
         """
         module.initialize_parameters(*input)
         if module.has_uninitialized_params():
-            raise RuntimeError(f'module {self._get_name()} has not been fully initialized')
+            raise RuntimeError('module {} has not been fully initialized'.format(self._get_name()))
         module._initialize_hook.remove()
         module._load_hook.remove()
         delattr(module, '_initialize_hook')

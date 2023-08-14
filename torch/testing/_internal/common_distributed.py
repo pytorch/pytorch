@@ -152,7 +152,7 @@ def import_transformers_or_skip():
         @wraps(func)
         def wrapper(*args, **kwargs):
             try:
-                from transformers import (  # noqa: F401
+                from transformers import (  # noqa: Unused
                     AutoModelForMaskedLM,
                     BertConfig,
                 )
@@ -760,7 +760,7 @@ class MultiProcessTestCase(TestCase):
                 self._check_return_codes(elapsed_time)
         finally:
             # Close all pipes
-            for pipe in self.pid_to_pipe.values():
+            for pid, pipe in self.pid_to_pipe.items():
                 pipe.close()
 
     def _check_no_test_errors(self, elapsed_time) -> None:
@@ -770,7 +770,7 @@ class MultiProcessTestCase(TestCase):
         for i, p in enumerate(self.processes):
             if p.exitcode is None:
                 raise RuntimeError(
-                    f"Process {i} timed out after {elapsed_time} seconds"
+                    "Process {} timed out after {} seconds".format(i, elapsed_time)
                 )
             self.assertNotEqual(self.TEST_ERROR_EXIT_CODE, p.exitcode)
 
@@ -779,11 +779,6 @@ class MultiProcessTestCase(TestCase):
         Checks that the return codes of all spawned processes match, and skips
         tests if they returned a return code indicating a skipping condition.
         """
-        # If no processes are spawned, there is nothing to check.
-        if not self.processes:
-            logger.warning("Note: no subprocesses were spawned, test was likely skipped.")
-            return
-
         first_process = self.processes[0]
         # first, we check if there are errors in actual processes
         # (via TEST_ERROR_EXIT CODE), and raise an exception for those.
@@ -813,7 +808,9 @@ class MultiProcessTestCase(TestCase):
         for i, p in enumerate(self.processes):
             if p.exitcode is None:
                 raise RuntimeError(
-                    f"Process {i} terminated or timed out after {elapsed_time} seconds"
+                    "Process {} terminated or timed out after {} seconds".format(
+                        i, elapsed_time
+                    )
                 )
             self.assertEqual(
                 p.exitcode,
@@ -838,7 +835,9 @@ class MultiProcessTestCase(TestCase):
         self.assertEqual(
             first_process.exitcode,
             0,
-            msg=f"Expected zero exit code but got {first_process.exitcode} for pid: {first_process.pid}",
+            msg="Expected zero exit code but got {} for pid: {}".format(
+                first_process.exitcode, first_process.pid
+            ),
         )
 
     @property
@@ -1092,7 +1091,9 @@ class MultiThreadedTestCase(TestCase):
                 if skip_code < 0:
                     skip_code = TEST_SKIPS["generic"].exit_code
             elif isinstance(exc, TimeoutError):
-                msg = f"Thread {rank} terminated or timed out after {timeout} seconds\n"
+                msg = "Thread {} terminated or timed out after {} seconds\n".format(
+                    rank, timeout
+                )
                 logger.error(msg)
                 raise RuntimeError(msg)
             elif isinstance(exc, Exception):
@@ -1101,7 +1102,7 @@ class MultiThreadedTestCase(TestCase):
                     "Caught exception: \n%s exiting thread %s", msg, rank
                 )
                 error_msg += (
-                    f"Thread {rank} exited with exception:\n{msg}\n"
+                    "Thread {} exited with exception:\n{}\n".format(rank, msg)
                 )
             elif isinstance(exc, SystemExit):
                 if type(exc.code) == int and skip_code < 0:

@@ -21,7 +21,6 @@
   - third_party/onnx
   - caffe2/python/onnx/**
   - benchmarks/dynamo/_onnx/**
-  - torch/_logging/**
   approved_by:
   - BowenBao
   - abock
@@ -416,7 +415,6 @@
   - lezcano
   - Skylion007
   - ngimel
-  - peterbell10
   mandatory_checks_name:
   - EasyCLA
   - Lint

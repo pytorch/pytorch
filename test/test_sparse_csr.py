@@ -19,7 +19,8 @@ from torch.testing._internal.common_methods_invocations import \
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUDA
 from torch.testing._internal.common_dtype import (
     floating_types, all_types_and_complex_and, floating_and_complex_types, floating_types_and,
-    all_types_and_complex, floating_and_complex_types_and)
+    all_types_and_complex, floating_and_complex_types_and
+)
 from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 
@@ -903,14 +904,12 @@ class TestSparseCompressed(TestCase):
 
         def is_view_of(base, other):
             # a shameless copy of TestViewOps.is_view_of
-            if (
-                not other._is_view() or
-                other is base or
-                other._base is not base or
-                base.device != other.device
-            ):
+            if ((not other._is_view() or
+                 other is base or
+                 other._base is not base or
+                 base.device != other.device)):
                 return False
-            if base.device.type in ('cpu', 'cuda'):
+            if base.device.type == 'cpu' or base.device.type == 'cuda':
                 if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
                     return False
             return True
@@ -1816,8 +1815,8 @@ class TestSparseCSR(TestCase):
             yd = xd.transpose(-2, -1)
             zd = torch.rand(0, 0, device=device, dtype=dtype)
 
-            xls, yls, zls = (t.to_sparse(layout=lhs_layout) for t in (xd, yd, zd))
-            xrs, yrs, zrs = (t.to_sparse(layout=rhs_layout) for t in (xd, yd, zd))
+            xls, yls, zls = [t.to_sparse(layout=lhs_layout) for t in (xd, yd, zd)]
+            xrs, yrs, zrs = [t.to_sparse(layout=rhs_layout) for t in (xd, yd, zd)]
 
             for ls, rs, ld, rd in [(xls, yrs, xd, yd), (xls, zrs, xd, zd), (zls, yrs, zd, yd), (zls, zrs, zd, zd)]:
                 res_sparse = ls @ rs
@@ -1980,11 +1979,13 @@ class TestSparseCSR(TestCase):
                                       *[torch.bfloat16] if SM80OrLater else [],
                                       *[torch.half] if SM53OrLater else [],
                                       *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
+    @skipCUDAIf(
+        not _check_cusparse_spgemm_available(),
+        "cuSparse Generic API SpGEMM is not available"
+    )
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     def test_addmm_sizes_all_sparse_csr(self, device, dtype, m, n, k):
-        if (TEST_WITH_ROCM and k != 0 and n != 0 and m != 0):
-            self.skipTest("Skipped on ROCm")
         M = torch.randn(n, m, device=device).to(dtype)
         m1 = torch.randn(n, k, device=device).to(dtype)
         m2 = torch.randn(k, m, device=device).to(dtype)
@@ -2877,6 +2878,7 @@ class TestSparseCSR(TestCase):
             run_test(shape, 0, index_dtype)
             run_test(shape, max(shape), index_dtype)
             run_test(shape, shape[0] * shape[1], index_dtype)
+
 
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))

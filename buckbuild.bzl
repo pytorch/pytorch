@@ -2042,7 +2042,6 @@ def define_buck_targets(
             "aten/src/ATen/EmptyTensor.cpp",
             "aten/src/ATen/Utils.cpp",
             "aten/src/ATen/detail/CUDAHooksInterface.cpp",
-            "aten/src/ATen/detail/PrivateUse1HooksInterface.cpp",
             ":gen_aten[Operators_0.cpp]",
             ":gen_aten[Operators_1.cpp]",
             ":gen_aten[Operators_2.cpp]",

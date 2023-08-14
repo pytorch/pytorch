@@ -1,6 +1,5 @@
-from typing import Tuple
-
 import torch
+from typing import Tuple
 from torch import Tensor
 
 
@@ -9,7 +8,7 @@ def milstm_cell(x, hx, cx, w_ih, w_hh, alpha, beta_i, beta_h, bias):
     Uz = hx.mm(w_hh.t())
 
     # Section 2.1 in https://arxiv.org/pdf/1606.06630.pdf
-    gates = alpha * Wx * Uz + beta_i * Wx + beta_h * Uz + bias
+    gates = (alpha * Wx * Uz + beta_i * Wx + beta_h * Uz + bias)
 
     # Same as LSTMCell after this point
     ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
@@ -25,14 +24,8 @@ def milstm_cell(x, hx, cx, w_ih, w_hh, alpha, beta_i, beta_h, bias):
     return hy, cy
 
 
-def lstm_cell(
-    input: Tensor,
-    hidden: Tuple[Tensor, Tensor],
-    w_ih: Tensor,
-    w_hh: Tensor,
-    b_ih: Tensor,
-    b_hh: Tensor,
-) -> Tuple[Tensor, Tensor]:
+def lstm_cell(input: Tensor, hidden: Tuple[Tensor, Tensor], w_ih: Tensor,
+              w_hh: Tensor, b_ih: Tensor, b_hh: Tensor) -> Tuple[Tensor, Tensor]:
     hx, cx = hidden
     gates = torch.mm(input, w_ih.t()) + torch.mm(hx, w_hh.t()) + b_ih + b_hh
 
@@ -49,15 +42,8 @@ def lstm_cell(
     return hy, cy
 
 
-def flat_lstm_cell(
-    input: Tensor,
-    hx: Tensor,
-    cx: Tensor,
-    w_ih: Tensor,
-    w_hh: Tensor,
-    b_ih: Tensor,
-    b_hh: Tensor,
-) -> Tuple[Tensor, Tensor]:
+def flat_lstm_cell(input: Tensor, hx: Tensor, cx: Tensor, w_ih: Tensor,
+                   w_hh: Tensor, b_ih: Tensor, b_hh: Tensor) -> Tuple[Tensor, Tensor]:
     gates = torch.mm(input, w_ih.t()) + torch.mm(hx, w_hh.t()) + b_ih + b_hh
 
     ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
@@ -73,13 +59,8 @@ def flat_lstm_cell(
     return hy, cy
 
 
-def premul_lstm_cell(
-    igates: Tensor,
-    hidden: Tuple[Tensor, Tensor],
-    w_hh: Tensor,
-    b_ih: Tensor,
-    b_hh: Tensor,
-) -> Tuple[Tensor, Tensor]:
+def premul_lstm_cell(igates: Tensor, hidden: Tuple[Tensor, Tensor], w_hh: Tensor,
+                     b_ih: Tensor, b_hh: Tensor) -> Tuple[Tensor, Tensor]:
     hx, cx = hidden
     gates = igates + torch.mm(hx, w_hh.t()) + b_ih + b_hh
 
@@ -96,9 +77,7 @@ def premul_lstm_cell(
     return hy, cy
 
 
-def premul_lstm_cell_no_bias(
-    igates: Tensor, hidden: Tuple[Tensor, Tensor], w_hh: Tensor, b_hh: Tensor
-) -> Tuple[Tensor, Tensor]:
+def premul_lstm_cell_no_bias(igates: Tensor, hidden: Tuple[Tensor, Tensor], w_hh: Tensor, b_hh: Tensor) -> Tuple[Tensor, Tensor]:
     hx, cx = hidden
     gates = igates + torch.mm(hx, w_hh.t()) + b_hh
 

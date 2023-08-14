@@ -9,4 +9,4 @@ if torch.cuda.is_available():
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 filepath = os.path.join(current_dir, 'test_cuda.py')
-exec(compile(open(filepath).read(), filepath, mode='exec'))
+exec(compile(open(filepath, 'r').read(), filepath, mode='exec'))

@@ -58,7 +58,7 @@ class _WrappedHook:
         self.with_module: bool = False
 
         if module is not None:
-            self.module: weakref.ReferenceType[Module] = weakref.ref(module)
+            self.module: weakref.ReferenceType["Module"] = weakref.ref(module)
             self.with_module = True
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
@@ -529,13 +529,14 @@ class Module:
             raise AttributeError(
                 "cannot assign buffer before Module.__init__() call")
         elif not isinstance(name, str):
-            raise TypeError(f"buffer name should be a string. Got {torch.typename(name)}")
+            raise TypeError("buffer name should be a string. "
+                            "Got {}".format(torch.typename(name)))
         elif '.' in name:
             raise KeyError("buffer name can't contain \".\"")
         elif name == '':
             raise KeyError("buffer name can't be empty string \"\"")
         elif hasattr(self, name) and name not in self._buffers:
-            raise KeyError(f"attribute '{name}' already exists")
+            raise KeyError("attribute '{}' already exists".format(name))
         elif tensor is not None and not isinstance(tensor, torch.Tensor):
             raise TypeError("cannot assign '{}' object to buffer '{}' "
                             "(torch Tensor or None required)"
@@ -569,13 +570,14 @@ class Module:
                 "cannot assign parameter before Module.__init__() call")
 
         elif not isinstance(name, str):
-            raise TypeError(f"parameter name should be a string. Got {torch.typename(name)}")
+            raise TypeError("parameter name should be a string. "
+                            "Got {}".format(torch.typename(name)))
         elif '.' in name:
             raise KeyError("parameter name can't contain \".\"")
         elif name == '':
             raise KeyError("parameter name can't be empty string \"\"")
         elif hasattr(self, name) and name not in self._parameters:
-            raise KeyError(f"attribute '{name}' already exists")
+            raise KeyError("attribute '{}' already exists".format(name))
 
         if param is None:
             self._parameters[name] = None
@@ -607,13 +609,15 @@ class Module:
             module (Module): child module to be added to the module.
         """
         if not isinstance(module, Module) and module is not None:
-            raise TypeError(f"{torch.typename(module)} is not a Module subclass")
+            raise TypeError("{} is not a Module subclass".format(
+                torch.typename(module)))
         elif not isinstance(name, str):
-            raise TypeError(f"module name should be a string. Got {torch.typename(name)}")
+            raise TypeError("module name should be a string. Got {}".format(
+                torch.typename(name)))
         elif hasattr(self, name) and name not in self._modules:
-            raise KeyError(f"attribute '{name}' already exists")
+            raise KeyError("attribute '{}' already exists".format(name))
         elif '.' in name:
-            raise KeyError(f"module name can't contain \".\", got: {name}")
+            raise KeyError("module name can't contain \".\", got: {}".format(name))
         elif name == '':
             raise KeyError("module name can't be empty string \"\"")
         for hook in _global_module_registration_hooks.values():
@@ -1595,7 +1599,7 @@ class Module:
                 var = result
                 while not isinstance(var, torch.Tensor):
                     if isinstance(var, dict):
-                        var = next(v for v in var.values() if isinstance(v, torch.Tensor))
+                        var = next((v for v in var.values() if isinstance(v, torch.Tensor)))
                     else:
                         var = var[0]
                 grad_fn = var.grad_fn
@@ -1692,7 +1696,8 @@ class Module:
             modules = self.__dict__['_modules']
             if name in modules:
                 return modules[name]
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        raise AttributeError("'{}' object has no attribute '{}'".format(
+            type(self).__name__, name))
 
     def __setattr__(self, name: str, value: Union[Tensor, 'Module']) -> None:
         def remove_from(*dicts_or_sets):
@@ -2020,13 +2025,6 @@ class Module:
                                       'the shape in current model is {}.'
                                       .format(key, input_param.shape, param.shape))
                     continue
-
-                if param.is_meta and not input_param.is_meta and not assign_to_params_buffers:
-                    warnings.warn(f'for {key}: copying from a non-meta parameter in the checkpoint to a meta '
-                                  'parameter in the current model, which is a no-op. (Did you mean to '
-                                  'pass `assign=True` to assign items in the state dictionary to their '
-                                  'corresponding key in the module instead of copying them in place?)')
-
                 try:
                     with torch.no_grad():
                         if assign_to_params_buffers:
@@ -2100,7 +2098,7 @@ class Module:
             ``RuntimeError``.
         """
         if not isinstance(state_dict, Mapping):
-            raise TypeError(f"Expected state_dict to be dict-like, got {type(state_dict)}.")
+            raise TypeError("Expected state_dict to be dict-like, got {}.".format(type(state_dict)))
 
         missing_keys: List[str] = []
         unexpected_keys: List[str] = []
@@ -2142,11 +2140,11 @@ class Module:
             if len(unexpected_keys) > 0:
                 error_msgs.insert(
                     0, 'Unexpected key(s) in state_dict: {}. '.format(
-                        ', '.join(f'"{k}"' for k in unexpected_keys)))
+                        ', '.join('"{}"'.format(k) for k in unexpected_keys)))
             if len(missing_keys) > 0:
                 error_msgs.insert(
                     0, 'Missing key(s) in state_dict: {}. '.format(
-                        ', '.join(f'"{k}"' for k in missing_keys)))
+                        ', '.join('"{}"'.format(k) for k in missing_keys)))
 
         if len(error_msgs) > 0:
             raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(

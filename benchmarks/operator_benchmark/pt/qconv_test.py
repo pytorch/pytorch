@@ -1,14 +1,13 @@
+
+import operator_benchmark as op_bench
 import torch
 import torch.ao.nn.quantized as nnq
 
 from pt import configs
 
-import operator_benchmark as op_bench
-
 """
 Microbenchmarks for qConv operators.
 """
-
 
 class QConv1dBenchmark(op_bench.TorchBenchmarkBase):
     # def init(self, N, IC, OC, L, G, kernel, stride, pad):
@@ -23,11 +22,11 @@ class QConv1dBenchmark(op_bench.TorchBenchmarkBase):
         )
         # Convert the tensor to NHWC format
         W = torch.randn(OC, IC // G, kernel, dtype=torch.float32)
-        self.qW = torch.quantize_per_tensor(
-            W, scale=self.scale, zero_point=0, dtype=torch.qint8
-        )
+        self.qW = torch.quantize_per_tensor(W, scale=self.scale, zero_point=0, dtype=torch.qint8)
 
-        self.inputs = {"input": qX}
+        self.inputs = {
+            "input": qX
+        }
 
         self.qconv1d = nnq.Conv1d(IC, OC, kernel, stride=stride, padding=pad, groups=G)
         self.qconv1d.set_weight_bias(self.qW, None)
@@ -52,11 +51,11 @@ class QConv2dBenchmark(op_bench.TorchBenchmarkBase):
         )
         # Convert the tensor to NHWC format
         W = torch.randn(OC, IC // G, kernel, kernel, dtype=torch.float32)
-        self.qW = torch.quantize_per_tensor(
-            W, scale=self.scale, zero_point=0, dtype=torch.qint8
-        )
+        self.qW = torch.quantize_per_tensor(W, scale=self.scale, zero_point=0, dtype=torch.qint8)
 
-        self.inputs = {"input": qX}
+        self.inputs = {
+            "input": qX
+        }
 
         self.qconv2d = nnq.Conv2d(IC, OC, kernel, stride=stride, padding=pad, groups=G)
         self.qconv2d.set_weight_bias(self.qW, None)
@@ -68,14 +67,8 @@ class QConv2dBenchmark(op_bench.TorchBenchmarkBase):
         return self.qconv2d(input)
 
 
-op_bench.generate_pt_test(
-    configs.remove_cuda(configs.conv_1d_configs_short + configs.conv_1d_configs_long),
-    QConv1dBenchmark,
-)
-op_bench.generate_pt_test(
-    configs.remove_cuda(configs.conv_2d_configs_short + configs.conv_2d_configs_long),
-    QConv2dBenchmark,
-)
+op_bench.generate_pt_test(configs.remove_cuda(configs.conv_1d_configs_short + configs.conv_1d_configs_long), QConv1dBenchmark)
+op_bench.generate_pt_test(configs.remove_cuda(configs.conv_2d_configs_short + configs.conv_2d_configs_long), QConv2dBenchmark)
 
 
 if __name__ == "__main__":

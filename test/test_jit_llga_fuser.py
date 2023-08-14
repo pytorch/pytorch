@@ -847,7 +847,7 @@ for model_name, enabled in [
         return test
 
     for dtype in [torch.bfloat16, torch.float32]:
-        setattr(TestModel, 'test_vision_{}_{}'.format(model_name, str(dtype).split("torch.")[1]), _wrapper(model_name, dtype))
+        setattr(TestModel, 'test_vision_%s_%s' % (model_name, str(dtype).split("torch.")[1]), _wrapper(model_name, dtype))
 
 
 instantiate_device_type_tests(TestFusionPattern, globals())

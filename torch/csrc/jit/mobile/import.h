@@ -80,7 +80,7 @@ at::TypePtr resolveTypeNameMobile(
     std::shared_ptr<CompilationUnit> compilation_unit);
 c10::StrongTypePtr typeResolverMobile(
     const c10::QualifiedName& qn,
-    const std::shared_ptr<CompilationUnit>& compilation_unit);
+    std::shared_ptr<CompilationUnit> compilation_unit);
 c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     const at::StrongTypePtr& type,
     const at::IValue& input,

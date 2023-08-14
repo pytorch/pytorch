@@ -8,7 +8,7 @@ import torch.distributed as dist
 
 __all__ = ['JoinHook', 'Joinable', 'Join']
 
-class JoinHook:
+class JoinHook():
     r"""
     This defines a join hook, which provides two entry points in the join
     context manager: a main hook, which is called repeatedly while there exists
@@ -109,7 +109,7 @@ class _JoinConfig(NamedTuple):
 
 
 
-class Join:
+class Join():
     r"""
     This class defines the generic join context manager, which allows custom
     hooks to be called after a process joins. These hooks should shadow the

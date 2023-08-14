@@ -1,14 +1,14 @@
-import math
-from pathlib import Path
-
 import torch
+from pathlib import Path
 from scipy import sparse
+import math
 
 
 def to_coo_scipy(x):
     indices_1 = x._indices().numpy()
     values_1 = x._values().numpy()
-    return sparse.coo_matrix((values_1, (indices_1[0], indices_1[1])), shape=x.shape)
+    return sparse.coo_matrix((values_1, (indices_1[0], indices_1[1])),
+                             shape=x.shape)
 
 
 def sparse_grad_output(a, b):
@@ -21,9 +21,9 @@ def sparse_grad_output(a, b):
 
 
 def read_matrix_params(path):
-    with open(path) as file:
+    with open(path, 'r') as file:
         line = file.readline()
-        nrows, ncols, nnz = (int(el) for el in line.split(", "))
+        nrows, ncols, nnz = (int(el) for el in line.split(', '))
         return (nrows, ncols), nnz
 
 
@@ -38,8 +38,8 @@ def csr_to_coo(indices, indptr, shape):
 
 
 def load_sparse_matrix(path, device):
-    with open(path) as file:
-        nrows, ncols, nnz = (int(el) for el in file.readline().split(", "))
+    with open(path, 'r') as file:
+        nrows, ncols, nnz = (int(el) for el in file.readline().split(', '))
         index_pointers = (int(el) for el in file.readline().split())
         indices = (int(el) for el in file.readline().split())
 
@@ -47,22 +47,20 @@ def load_sparse_matrix(path, device):
     indices = list(indices)
     data = torch.randn(nnz, dtype=torch.double)
     shape = (nrows, ncols)
-    return torch.sparse_coo_tensor(
-        csr_to_coo(indices, index_pointers, shape), data, shape, device=device
-    )
+    return torch.sparse_coo_tensor(csr_to_coo(indices, index_pointers, shape), data, shape, device=device)
 
 
 def gen_vector(path, device):
-    with open(path) as file:
-        nrows, ncols, nnz = (int(el) for el in file.readline().split(", "))
+    with open(path, 'r') as file:
+        nrows, ncols, nnz = (int(el) for el in file.readline().split(', '))
         index_pointers = (int(el) for el in file.readline().split())
         indices = (int(el) for el in file.readline().split())
         return torch.randn(nrows, dtype=torch.double, device=device)
 
 
 def gen_matrix(path, device):
-    with open(path) as file:
-        nrows, ncols, nnz = (int(el) for el in file.readline().split(", "))
+    with open(path, 'r') as file:
+        nrows, ncols, nnz = (int(el) for el in file.readline().split(', '))
         index_pointers = (int(el) for el in file.readline().split())
         indices = (int(el) for el in file.readline().split())
         return torch.randn(nrows, ncols, dtype=torch.double, device=device)
@@ -84,14 +82,14 @@ def load_spmv_dataset(dataset_path, hidden_size, sparsity, device, n_limit=math.
     """
     current_folder_path = f"{dataset_path}/{sparsity}"
     path = Path(current_folder_path)
-    files = path.glob("**/*.smtx")
+    files = path.glob('**/*.smtx')
     print(dataset_path, hidden_size, sparsity)
     index = 0
     x_files, y_files = [], []
     for f in files:
         if index >= n_limit:
             break
-        print(".", end="")
+        print('.', end='')
         size, nnz = read_matrix_params(f.as_posix())
         if size[1] == hidden_size:
             x_files.append(f.as_posix())
@@ -106,9 +104,7 @@ def load_spmv_dataset(dataset_path, hidden_size, sparsity, device, n_limit=math.
         yield (x, y)
 
 
-def load_spmm_dataset(
-    dataset_path, hidden_size, sparsity, spmm_type, device, n_limit=math.inf
-):
+def load_spmm_dataset(dataset_path, hidden_size, sparsity, spmm_type, device, n_limit=math.inf):
     """load_spmm_dataset loads a DLMC dataset for a sparse matrix-matrix multiplication (SPMM) performance test.
     Args:
         dataset_path:
@@ -126,14 +122,14 @@ def load_spmm_dataset(
     """
     current_folder_path = f"{dataset_path}/{sparsity}"
     path = Path(current_folder_path)
-    files = path.glob("**/*.smtx")
+    files = path.glob('**/*.smtx')
     print(dataset_path, hidden_size, sparsity)
     index = 0
     x_files, y_files = [], []
     for f in files:
         if index >= n_limit:
             break
-        print(".", end="")
+        print('.', end='')
         size, nnz = read_matrix_params(f.as_posix())
         if size[1] == hidden_size:
             x_files.append(f.as_posix())
@@ -144,23 +140,11 @@ def load_spmm_dataset(
 
     for fx, fy in zip(x_files, y_files):
         x = load_sparse_matrix(fx, device)
-        y = (
-            gen_matrix(fy, device)
-            if spmm_type == "sparse@dense"
-            else load_sparse_matrix(fy, device)
-        )
+        y = gen_matrix(fy, device) if spmm_type == 'sparse@dense' else load_sparse_matrix(fy, device)
         yield (x, y)
 
 
-def load_dlmc_dataset(
-    dataset_path,
-    operation,
-    hidden_size,
-    sparsity,
-    device,
-    requires_grad,
-    n_limit=math.inf,
-):
+def load_dlmc_dataset(dataset_path, operation, hidden_size, sparsity, device, requires_grad, n_limit=math.inf):
     """load_dlmc_dataset loads a DLMC dataset for a matmul performance test.
     Args:
         dataset_path:
@@ -178,18 +162,14 @@ def load_dlmc_dataset(
         n_limit:
             This value allows a dataset with some limit size.
     """
-    if operation == "sparse@sparse" or operation == "sparse@dense":
-        collection = load_spmm_dataset(
-            dataset_path, hidden_size, sparsity, operation, device, n_limit
-        )
-    elif operation == "sparse@vector":
-        collection = load_spmv_dataset(
-            dataset_path, hidden_size, sparsity, device, n_limit
-        )
+    if operation == 'sparse@sparse' or operation == "sparse@dense":
+        collection = load_spmm_dataset(dataset_path, hidden_size, sparsity, operation, device, n_limit)
+    elif operation == 'sparse@vector':
+        collection = load_spmv_dataset(dataset_path, hidden_size, sparsity, device, n_limit)
     scipy_vars = {}
     backward_vars = {}
     for x, y in collection:
-        if device == "cpu":
+        if device == 'cpu':
             scipy_vars = {
                 "sx": to_coo_scipy(x) if x.is_sparse else x.numpy(),
                 "sy": to_coo_scipy(y) if y.is_sparse else y.numpy(),
@@ -209,4 +189,11 @@ def load_dlmc_dataset(
             dy = y.to_dense().detach() if y.is_sparse else y.clone().detach()
             dx.requires_grad_(True)
             dy.requires_grad_(True)
-        yield {"x": x, "y": y, "dx": dx, "dy": dy, **scipy_vars, **backward_vars}
+        yield {
+            "x": x,
+            "y": y,
+            "dx": dx,
+            "dy": dy,
+            **scipy_vars,
+            **backward_vars
+        }

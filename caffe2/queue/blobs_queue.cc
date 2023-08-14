@@ -62,7 +62,7 @@ bool BlobsQueue::blockingRead(
   Timer readTimer;
   auto keeper = this->shared_from_this();
   C10_UNUSED const auto& name = name_.c_str();
-  TORCH_SDT(queue_read_start, name, (void*)this, SDT_BLOCKING_OP);
+  CAFFE_SDT(queue_read_start, name, (void*)this, SDT_BLOCKING_OP);
   std::unique_lock<std::mutex> g(mutex_);
   auto canRead = [this]() {
     CAFFE_ENFORCE_LE(reader_, writer_);
@@ -81,9 +81,9 @@ bool BlobsQueue::blockingRead(
   if (!canRead()) {
     if (timeout_secs > 0 && !closing_) {
       LOG(ERROR) << "DequeueBlobs timed out in " << timeout_secs << " secs";
-      TORCH_SDT(queue_read_end, name, (void*)this, SDT_TIMEOUT);
+      CAFFE_SDT(queue_read_end, name, (void*)this, SDT_TIMEOUT);
     } else {
-      TORCH_SDT(queue_read_end, name, (void*)this, SDT_CANCEL);
+      CAFFE_SDT(queue_read_end, name, (void*)this, SDT_CANCEL);
     }
     return false;
   }
@@ -96,7 +96,7 @@ bool BlobsQueue::blockingRead(
     using std::swap;
     swap(*(inputs[i]), *(result[i]));
   }
-  TORCH_SDT(queue_read_end, name, (void*)this, writer_ - reader_);
+  CAFFE_SDT(queue_read_end, name, (void*)this, writer_ - reader_);
   CAFFE_EVENT(stats_, queue_dequeued_records);
   ++reader_;
   cv_.notify_all();
@@ -108,10 +108,10 @@ bool BlobsQueue::tryWrite(const std::vector<Blob*>& inputs) {
   Timer writeTimer;
   auto keeper = this->shared_from_this();
   C10_UNUSED const auto& name = name_.c_str();
-  TORCH_SDT(queue_write_start, name, (void*)this, SDT_NONBLOCKING_OP);
+  CAFFE_SDT(queue_write_start, name, (void*)this, SDT_NONBLOCKING_OP);
   std::unique_lock<std::mutex> g(mutex_);
   if (!canWrite()) {
-    TORCH_SDT(queue_write_end, name, (void*)this, SDT_ABORT);
+    CAFFE_SDT(queue_write_end, name, (void*)this, SDT_ABORT);
     return false;
   }
   // Increase queue balance before writing to indicate queue write pressure is
@@ -127,14 +127,14 @@ bool BlobsQueue::blockingWrite(const std::vector<Blob*>& inputs) {
   Timer writeTimer;
   auto keeper = this->shared_from_this();
   C10_UNUSED const auto& name = name_.c_str();
-  TORCH_SDT(queue_write_start, name, (void*)this, SDT_BLOCKING_OP);
+  CAFFE_SDT(queue_write_start, name, (void*)this, SDT_BLOCKING_OP);
   std::unique_lock<std::mutex> g(mutex_);
   // Increase queue balance before writing to indicate queue write pressure is
   // being increased (+ve queue balance indicates more writes than reads)
   CAFFE_EVENT(stats_, queue_balance, 1);
   cv_.wait(g, [this]() { return closing_ || canWrite(); });
   if (!canWrite()) {
-    TORCH_SDT(queue_write_end, name, (void*)this, SDT_ABORT);
+    CAFFE_SDT(queue_write_end, name, (void*)this, SDT_ABORT);
     return false;
   }
   DCHECK(canWrite());
@@ -167,7 +167,7 @@ void BlobsQueue::doWrite(const std::vector<Blob*>& inputs) {
     using std::swap;
     swap(*(inputs[i]), *(result[i]));
   }
-  TORCH_SDT(
+  CAFFE_SDT(
       queue_write_end, name, (void*)this, reader_ + queue_.size() - writer_);
   ++writer_;
   cv_.notify_all();

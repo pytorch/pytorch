@@ -6,7 +6,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
-from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
+from torch._dynamo.testing import same
 
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
@@ -238,7 +238,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        graph, guards = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -263,7 +263,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        graph, _ = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -347,7 +347,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        graph, guards = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -521,7 +521,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        graph, guards = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -547,7 +547,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        graph, guards = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -722,129 +722,6 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             ):
                 continue
             self._graph_break_inlining_autocast_test_helper(device)
-
-    def test_disable_saved_tensors_hooks(self):
-        def fn(z):
-            @torch.autograd.graph.disable_saved_tensors_hooks("This is not supported")
-            def f(x, y):
-                return x + y
-
-            x, y = torch.ones(
-                1,
-            ), torch.zeros(
-                1,
-            )
-            return f(x, y)
-
-        eager = EagerAndRecordGraphs()
-        torch.compile(fn, backend=eager, fullgraph=True)(torch.randn(()))
-
-        graph = eager.graphs[0]
-        actual = normalize_gm(graph.print_readable(False))
-
-        expected = """\
-class GraphModule(torch.nn.Module):
-    def forward(self):
-        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
-
-        ones = torch.ones(1)
-
-        zeros = torch.zeros(1)
-
-        add = ones + zeros;  ones = zeros = None
-
-        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
-        return (add,)
-"""
-        self.assertExpectedInline(actual, expected)
-
-    def test_disable_saved_tensors_hooks_prev_disabled(self):
-        def fn(z):
-            @torch.autograd.graph.disable_saved_tensors_hooks("This is not supported")
-            def f(x, y):
-                return x + y
-
-            x, y = torch.ones(
-                1,
-            ), torch.zeros(
-                1,
-            )
-            return f(x, y)
-
-        eager = EagerAndRecordGraphs()
-        with torch.autograd.graph.disable_saved_tensors_hooks(
-            "Previously disabled message"
-        ):
-            torch.compile(fn, backend=eager, fullgraph=True)(torch.randn(()))
-
-        graph = eager.graphs[0]
-        actual = normalize_gm(graph.print_readable(False))
-
-        expected = """\
-class GraphModule(torch.nn.Module):
-    def forward(self):
-        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
-
-        ones = torch.ones(1)
-
-        zeros = torch.zeros(1)
-
-        add = ones + zeros;  ones = zeros = None
-
-        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message')
-        return (add,)
-"""
-        self.assertExpectedInline(actual, expected)
-
-    def test_disable_saved_tensors_hooks_prev_disabled_nested(self):
-        def fn(z):
-            @torch.autograd.graph.disable_saved_tensors_hooks("This is not supported")
-            def f(x, y):
-                @torch.autograd.graph.disable_saved_tensors_hooks(
-                    "This is not supported inner"
-                )
-                def inner_fn(x, y):
-                    return x + y
-
-                return inner_fn(x, y) + x
-
-            x, y = torch.ones(
-                1,
-            ), torch.zeros(
-                1,
-            )
-            return f(x, y)
-
-        eager = EagerAndRecordGraphs()
-        with torch.autograd.graph.disable_saved_tensors_hooks(
-            "Previously disabled message"
-        ):
-            torch.compile(fn, backend=eager, fullgraph=True)(torch.randn(()))
-
-        graph = eager.graphs[0]
-        actual = normalize_gm(graph.print_readable(False))
-
-        expected = """\
-class GraphModule(torch.nn.Module):
-    def forward(self):
-        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
-
-        ones = torch.ones(1)
-
-        zeros = torch.zeros(1)
-
-        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported inner')
-
-        add = ones + zeros;  zeros = None
-
-        _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
-
-        add_1 = add + ones;  add = ones = None
-
-        _saved_tensors_hooks_disable_3 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message')
-        return (add_1,)
-"""
-        self.assertExpectedInline(actual, expected)
 
 
 if __name__ == "__main__":

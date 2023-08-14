@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from typing import Dict, List
 
 from .glob_group import GlobGroup, GlobPattern

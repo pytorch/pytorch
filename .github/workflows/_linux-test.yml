@@ -37,11 +37,6 @@ on:
         required: false
         type: string
         default: ""
-    secrets:
-      HUGGING_FACE_HUB_TOKEN:
-        required: false
-        description: |
-          HF Auth token to avoid rate limits when downloading models or datasets from hub
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -73,9 +68,10 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: ./.github/actions/calculate-docker-image
         with:
           docker-image-name: ${{ inputs.docker-image }}
+          xla: ${{ contains(inputs.build-environment, 'xla') }}
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
@@ -168,8 +164,6 @@ jobs:
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
-          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
-
         run: |
           set -x
 
@@ -217,7 +211,6 @@ jobs:
             -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
-            -e HUGGING_FACE_HUB_TOKEN \
             -e DASHBOARD_TAG \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \

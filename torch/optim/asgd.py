@@ -28,9 +28,9 @@ class ASGD(Optimizer):
         differentiable: bool = False,
     ):
         if not 0.0 <= lr:
-            raise ValueError(f"Invalid learning rate: {lr}")
+            raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= weight_decay:
-            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
         defaults = dict(
             lr=lr,
@@ -136,7 +136,7 @@ class ASGD(Optimizer):
         return loss
 
 
-ASGD.__doc__ = fr"""Implements Averaged Stochastic Gradient Descent.
+ASGD.__doc__ = r"""Implements Averaged Stochastic Gradient Descent.
 
     It has been proposed in `Acceleration of stochastic approximation by
     averaging`_.
@@ -149,14 +149,14 @@ ASGD.__doc__ = fr"""Implements Averaged Stochastic Gradient Descent.
         alpha (float, optional): power for eta update (default: 0.75)
         t0 (float, optional): point at which to start averaging (default: 1e6)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        {_foreach_doc}
-        {_maximize_doc}
-        {_differentiable_doc}
+        {foreach}
+        {maximize}
+        {differentiable}
 
     .. _Acceleration of stochastic approximation by averaging:
         https://dl.acm.org/citation.cfm?id=131098
 
-    """
+    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
 
 
 def asgd(

@@ -13,7 +13,8 @@ class BaseScheduler:
 
         # Attach sparsifier
         if not isinstance(sparsifier, BaseSparsifier):
-            raise TypeError(f'{type(sparsifier).__name__} is not an instance of torch.ao.pruning.BaseSparsifier')
+            raise TypeError('{} is not an instance of torch.ao.pruning.BaseSparsifier'.format(
+                type(sparsifier).__name__))
         self.sparsifier = sparsifier
 
         # Initialize epoch and base sparsity levels
@@ -96,15 +97,17 @@ class BaseScheduler:
         """
         if is_verbose:
             if epoch is None:
-                print(f'Adjusting sparsity level of group {group} to {sl:.4e}.')
+                print('Adjusting sparsity level'
+                      ' of group {} to {:.4e}.'.format(group, sl))
             else:
-                print(f'Epoch {epoch:5d}: adjusting sparsity level of group {group} to {sl:.4e}.')
+                print('Epoch {:5d}: adjusting sparsity level'
+                      ' of group {} to {:.4e}.'.format(epoch, group, sl))
 
     def __repr__(self):
         format_string = self.__class__.__name__ + ' ('
         format_string += '\n'
-        format_string += f'Sparsifier {self.sparsifier}\n'
-        format_string += f'    base_sl: {self.base_sl}\n'
+        format_string += 'Sparsifier {0}\n'.format(self.sparsifier)
+        format_string += '    {0}: {1}\n'.format('base_sl', self.base_sl)
         format_string += ')'
         return format_string
 
@@ -155,5 +158,7 @@ class BaseScheduler:
             return [var] * n
         else:
             if len(var) != n:
-                raise ValueError(f"Expected variable of length {n}, but got {len(var)}")
+                raise ValueError("Expected variable of length {n}, but got {got}".format(
+                    n=n, got=len(var)
+                ))
             return list(var)  # We want the result to be in a list, not tuple

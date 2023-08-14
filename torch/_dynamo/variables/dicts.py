@@ -5,8 +5,6 @@ import inspect
 from typing import Any, Dict, List, Tuple
 
 import torch
-import torch.fx
-from torch.fx import _pytree as fx_pytree
 
 from torch.utils import _pytree as pytree
 
@@ -494,9 +492,4 @@ def _register_dynamo_dict_to_tree_spec():
         _dictvariable_unflatten,
         pytree._dict_to_str,
         pytree._maybe_str_to_dict,
-    )
-
-    fx_pytree.register_pytree_flatten_spec(
-        ConstDictVariable,
-        _dictvariable_flatten,
     )

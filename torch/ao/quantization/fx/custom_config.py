@@ -197,7 +197,8 @@ class PrepareCustomConfig:
                 return obj
             if isinstance(obj, Dict):
                 return QConfigMapping.from_dict(obj)
-            raise ValueError(f"Expected QConfigMapping in prepare_custom_config_dict[\"{dict_key}\"], got '{type(obj)}'")
+            raise ValueError("Expected QConfigMapping in prepare_custom_config_dict[\"%s\"], got '%s'" %
+                             (dict_key, type(obj)))
 
         def _get_prepare_custom_config(obj: Any, dict_key: str) -> Optional[PrepareCustomConfig]:
             """
@@ -207,7 +208,8 @@ class PrepareCustomConfig:
                 return obj
             if isinstance(obj, Dict):
                 return PrepareCustomConfig.from_dict(obj)
-            raise ValueError(f"Expected PrepareCustomConfig in prepare_custom_config_dict[\"{dict_key}\"], got '{type(obj)}'")
+            raise ValueError("Expected PrepareCustomConfig in prepare_custom_config_dict[\"%s\"], got '%s'" %
+                             (dict_key, type(obj)))
 
         def _get_backend_config(obj: Any, dict_key: str) -> Optional[BackendConfig]:
             """
@@ -217,7 +219,8 @@ class PrepareCustomConfig:
                 return obj
             if isinstance(obj, Dict):
                 return BackendConfig.from_dict(obj)
-            raise ValueError(f"Expected BackendConfig in prepare_custom_config_dict[\"{dict_key}\"], got '{type(obj)}'")
+            raise ValueError("Expected BackendConfig in prepare_custom_config_dict[\"%s\"], got '%s'" %
+                             (dict_key, type(obj)))
 
         conf = cls()
         for (module_name, qconfig_dict, example_inputs, _prepare_custom_config_dict, backend_config_dict) in\

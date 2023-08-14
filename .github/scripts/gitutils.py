@@ -38,7 +38,7 @@ def fuzzy_list_to_dict(items: List[Tuple[str, str]]) -> Dict[str, List[str]]:
     """
     Converts list to dict preserving elements with duplicate keys
     """
-    rc: Dict[str, List[str]] = defaultdict(list)
+    rc: Dict[str, List[str]] = defaultdict(lambda: [])
     for key, val in items:
         rc[key].append(val)
     return dict(rc)
@@ -53,9 +53,6 @@ def _check_output(items: List[str], encoding: str = "utf-8") -> str:
         msg = f"Command `{' '.join(e.cmd)}` returned non-zero exit code {e.returncode}"
         stdout = e.stdout.decode(encoding) if e.stdout is not None else ""
         stderr = e.stderr.decode(encoding) if e.stderr is not None else ""
-        # These get swallowed up, so print them here for debugging
-        print(f"stdout: \n{stdout}")
-        print(f"stderr: \n{stderr}")
         if len(stderr) == 0:
             msg += f"\n```\n{stdout}```"
         else:

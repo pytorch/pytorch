@@ -109,7 +109,7 @@ class ProcessFailure:
         self.error_file_data = _EMPTY_ERROR_DATA
         if os.path.isfile(self.error_file):
             try:
-                with open(self.error_file) as fp:
+                with open(self.error_file, "r") as fp:
                     self.error_file_data = json.load(fp)
                     log.debug(
                         "User process failed with error data: %s", json.dumps(self.error_file_data, indent=2)

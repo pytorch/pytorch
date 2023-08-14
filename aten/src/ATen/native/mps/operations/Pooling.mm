@@ -253,17 +253,21 @@ static void avg_pool2d_template(const Tensor& input,
                     "not supported on MPS backend. ",
                     "Falling back on CPU. This may have performance implications.");
     if (!is_backward_pass) {
-      output.copy_(at::avg_pool2d(
-          input.to("cpu"), kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override));
+      const_cast<Tensor&>(output) =
+          at::avg_pool2d(input.to("cpu"), kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
+              .clone()
+              .to("mps");
     } else {
-      output.copy_(at::avg_pool2d_backward(grad_output.to("cpu"),
-                                           input.to("cpu"),
-                                           kernel_size,
-                                           stride,
-                                           padding,
-                                           ceil_mode,
-                                           count_include_pad,
-                                           divisor_override));
+      const_cast<Tensor&>(output) = at::avg_pool2d_backward(grad_output.to("cpu"),
+                                                            input.to("cpu"),
+                                                            kernel_size,
+                                                            stride,
+                                                            padding,
+                                                            ceil_mode,
+                                                            count_include_pad,
+                                                            divisor_override)
+                                        .clone()
+                                        .to("mps");
     }
     return;
   }

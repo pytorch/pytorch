@@ -366,12 +366,9 @@ Tensor _bincount_cuda(
   c10::MaybeOwned<Tensor> weights_maybe_owned = at::borrow_from_optional_tensor(weights_opt);
   const Tensor& weights = *weights_maybe_owned;
 
-  if (weights_opt.has_value()) {
-    // See Note [Writing Nondeterministic Operations]
-    // Nondeterministic if weights are given, because of floating point
-    // atomicAdd usage
-    globalContext().alertNotDeterministic("_bincount_cuda");
-  }
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("_bincount_cuda");
   return AT_DISPATCH_INTEGRAL_TYPES(self.scalar_type(), "bincount_cuda", [&] {
     const auto scalar = weights.scalar_type();
     if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
