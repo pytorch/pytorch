@@ -1620,7 +1620,7 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
     // Now, batched_cublas does not handle rectangular matrices, so we still dispatch to
     // looped_cusolver even if m != n.
 #ifdef USE_ROCM
-    bool looped_correct = true;
+    constexpr bool looped_correct = true;
 #else
     constexpr bool looped_correct = CUSOLVER_VERSION >= 11100;
 #endif
