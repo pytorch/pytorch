@@ -7,7 +7,6 @@
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPGenerator {
   PyObject_HEAD at::Generator cdata;
-  PyObject* weakreflist;
 };
 
 // Creates a new Python object wrapping the default at::Generator. The reference

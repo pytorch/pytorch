@@ -36,18 +36,15 @@ PyObject* THPGenerator_initDefaultGenerator(at::Generator cdata) {
     throw python_error();
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
   self_->cdata = std::move(cdata);
-  self_->weakreflist = NULL;
   return self.release();
 }
 
 static void THPGenerator_dealloc(PyObject* _self) {
+  PyObject_GC_UnTrack(_self);
   auto self = reinterpret_cast<THPGenerator*>(_self);
   if (self->cdata.defined()) {
     self->cdata.set_pyobj(nullptr);
     self->cdata.~Generator();
-  }
-  if (self->weakreflist != NULL) {
-    PyObject_ClearWeakRefs(_self);
   }
   Py_TYPE(_self)->tp_free(_self);
 }
@@ -83,11 +80,6 @@ static PyObject* THPGenerator_pynew(
         c10::DeviceTypeName(device.type()),
         " is not supported for torch.Generator() api.");
   }
-  self->weakreflist = NULL;
-
-  static py::handle _generator_registry = py::module::import("torch").attr("random").attr("_generator_registry");
-  _generator_registry.attr("add")(py::cast<py::object>((PyObject*)self.get()));
-
   return (PyObject*)self.release();
   END_HANDLE_TH_ERRORS
 }
@@ -239,6 +231,10 @@ static struct PyMemberDef THPGenerator_members[] = {
      nullptr},
     {nullptr}};
 
+static int THPGenerator_traverse(THPGenerator* self, visitproc visit, void* arg) {
+  return 0;
+}
+
 PyTypeObject THPGeneratorType = {
     PyVarObject_HEAD_INIT(nullptr, 0) "torch._C.Generator", /* tp_name */
     sizeof(THPGenerator), /* tp_basicsize */
@@ -258,12 +254,12 @@ PyTypeObject THPGeneratorType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */
-    nullptr, /* tp_traverse */
+    (traverseproc)THPGenerator_traverse, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    offsetof(THPGenerator, weakreflist), /* tp_weaklistoffset */
+    0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THPGenerator_methods, /* tp_methods */
@@ -319,7 +315,6 @@ PyObject* THPGenerator_NewWithVar(PyTypeObject* type, Generator gen) {
   if (obj) {
     auto g = (THPGenerator*)obj;
     new (&g->cdata) Generator(std::move(gen));
-    g->weakreflist = NULL;
     set_pyobj(g->cdata, obj);
   }
   return obj;

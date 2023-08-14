@@ -1582,19 +1582,20 @@ except RuntimeError as e:
 
 
         num_workers = 2
-        dataset = MyDataset(size=10, num_workers=num_workers, batch_size=1)
+        dataset_len = 10
+        dataset = MyDataset(size=dataset_len, num_workers=num_workers, batch_size=1)
         dl = DataLoader(dataset, num_workers=num_workers)
 
         for from_global, from_g1, from_g2 in dl:
             # Assert RNG of all Generators are different within a given worker (each "batch" comes from a single worker)
-            assert len(set([from_global, from_g1, from_g2])) == 3
+            self.assertEqual(len(set([from_global, from_g1, from_g2])), 3)
 
         # Make sure that the Generators' RNG is different across workers.
         # We check that by making sure all the samples of a given Generator are different across Dataloader entry.
         # If Generators weren't re-seeded in the workers loop, we would see values being duplicated `num_workers` times.
         all_from_global, all_from_g1, all_from_g2 = zip(*dl)
         for all_from_generator in (all_from_global, all_from_g1, all_from_g2):
-            assert len(set(all_from_generator)) == len(dataset)
+            self.assertEqual(len(set(all_from_generator)), dataset_len)
 
     def test_worker_init_fn(self):
         dataset = SeedDataset(4)

@@ -6496,35 +6496,6 @@ class TestTorch(TestCase):
         g2_normal = q.normal_(generator=g2)
         self.assertEqual(g1_normal, g2_normal)
 
-    def test_generator_registry(self):
-        registry = torch.random._generator_registry
-
-        # Here, all manually-created Generators should be out of scope and have no strong ref to them
-        # So the registry should be empty.
-        assert not registry
-
-        # We create a Generator but it goes out of scope immediately; the registry is still empty
-        torch.Generator()
-        assert not registry
-
-        g1 = torch.Generator()
-        assert len(registry) == 1
-        g2 = torch.Generator()
-        assert len(registry) == 2
-
-        del g1
-        assert len(registry) == 1
-
-        def f(registry_len_before_call):
-            g = torch.Generator()
-            assert len(registry) == registry_len_before_call + 1
-
-        # We call f and check that the Generator created within f is registered.
-        # When f gets out of scope, so does its Generator, and we check that it's not in the registry anymore
-        registry_len_before_call = len(registry)
-        f(registry_len_before_call)
-        assert len(registry) == registry_len_before_call
-
     def test_invalid_generator_raises(self):
         self.assertRaises(RuntimeError, lambda: torch.Generator('opengl'))
 
