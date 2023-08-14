@@ -442,7 +442,9 @@ def _make_elementwise_unary_reference(
             out = prim(a)
 
             device = None
-            if hasattr(a, "fake_device"):
+            from torch._subclasses.fake_tensor import FakeTensor
+
+            if isinstance(a, FakeTensor):
                 device = a.fake_device
 
             if is_noncontiguous_supported(device) is False:
@@ -637,13 +639,7 @@ def floor(a):
     return prims.floor(a)
 
 
-# Frac use own implementation due to coupling with torch.sub
-@register_decomposition(aten.frac)
-@out_wrapper()
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("x"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def frac(x: TensorLikeType) -> TensorLikeType:
     trunc_x = torch.mul(torch.floor(torch.abs(x)), torch.sign(x))
     return torch.sub(x, trunc_x)
@@ -979,9 +975,11 @@ def _make_elementwise_binary_reference(
             a, b = _maybe_broadcast(a, b)
 
             device = None
-            if hasattr(a, "fake_device"):
+            from torch._subclasses.fake_tensor import FakeTensor
+
+            if isinstance(a, FakeTensor):
                 device = a.fake_device
-            elif hasattr(b, "fake_device"):
+            elif isinstance(b, FakeTensor):
                 device = b.fake_device
 
             out = prim(a, b)
@@ -1712,9 +1710,11 @@ def sub(
 
     out = prims.sub(a, b)
     device = None
-    if hasattr(a, "fake_device"):
+    from torch._subclasses.fake_tensor import FakeTensor
+
+    if isinstance(a, FakeTensor):
         device = a.fake_device
-    elif hasattr(b, "fake_device"):
+    elif isinstance(b, FakeTensor):
         device = b.fake_device
 
     if is_noncontiguous_supported(device) is False:
@@ -4590,8 +4590,10 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
         return prims.copy_strided(output, stride)
 
     device = None
+    from torch._subclasses.fake_tensor import FakeTensor
+
     for t in inputs:
-        if hasattr(t, "fake_device"):
+        if isinstance(t, FakeTensor):
             device = t.fake_device
             break
 
