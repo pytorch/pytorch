@@ -3063,7 +3063,7 @@ def cross_entropy(
         input = input.swapaxes(dim, 1)
     output = torch._C._nn.cross_entropy_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index, label_smoothing)
     if reduction == 'none' and dim is not None:
-        output = output.swapaxes(dim, 1)
+        output = output.swapaxes(dim-1, 1)
     return output
 
 
