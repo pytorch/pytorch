@@ -15,8 +15,6 @@ ARTIFACTS = [
 ARTIFACT_REGEX = re.compile(
     r"test-reports-test-(?P<name>\w+)-\d+-\d+-(?P<runner>[\w\.]+)_(?P<job>\d+).zip"
 )
-# NB: Rockset has an upper limit of 5000 documents in one request
-BATCH_SIZE = 5000
 
 
 def upload_dynamo_perf_stats_to_rockset(
@@ -113,12 +111,8 @@ if __name__ == "__main__":
     perf_stats = upload_dynamo_perf_stats_to_rockset(
         args.repo, args.workflow_run_id, args.workflow_run_attempt, args.head_branch
     )
-
-    index = 0
-    while index < len(perf_stats):
-        upload_to_rockset(
-            collection="torch_dynamo_perf_stats",
-            docs=perf_stats[index : min(index + BATCH_SIZE, len(perf_stats))],
-            workspace="inductor",
-        )
-        index += BATCH_SIZE
+    upload_to_rockset(
+        collection="torch_dynamo_perf_stats",
+        docs=perf_stats,
+        workspace="inductor",
+    )
