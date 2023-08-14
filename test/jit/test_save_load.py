@@ -487,7 +487,6 @@ class TestSaveLoad(JitTestCase):
 
                 self.parameter_b = torch.nn.Parameter(torch.randn(4))
                 self.submodule_b = Submodule()
-                self.buffer_b = torch.nn.Buffer(torch.randn(4))
 
         m = TestModule()
         m_loaded = self.getExportImportCopy(torch.jit.script(m))
@@ -527,7 +526,7 @@ class TestSaveLoad(JitTestCase):
                 super().__init__()
                 self.foo = torch.nn.Linear(2, 3, device="meta")
                 self.bar = torch.nn.Linear(3, 4)
-                self.buffer = torch.nn.Buffer(torch.randn(4, device="meta"))
+                self.register_buffer("buffer", torch.randn(4, device="meta"))
 
             def forward(self, x):
                 x = self.foo(x)
@@ -638,7 +637,7 @@ class TestSaveLoad(JitTestCase):
         # Validate that with no input specified the traced inputs are stored
         traced_module = torch.jit.trace(module, input_tensor)
         traced_inputs = list(traced_module.graph.inputs())
-        self.assertEquals(traced_module._c._retrieve_traced_inputs()['forward'], [input_tensor])
+        self.assertEqual(traced_module._c._retrieve_traced_inputs()['forward'], [input_tensor])
         with TemporaryFileName() as fname:
             path = pathlib.Path(fname)
             traced_module.save(path)
@@ -654,7 +653,7 @@ class TestSaveLoad(JitTestCase):
         # Validate that inputs aren't saved when requested not to
         traced_module = torch.jit.trace(module, input_tensor, _store_inputs=False)
         traced_inputs = list(traced_module.graph.inputs())
-        self.assertEquals(len(traced_module._c._retrieve_traced_inputs()), 0)
+        self.assertEqual(len(traced_module._c._retrieve_traced_inputs()), 0)
 
         with TemporaryFileName() as fname:
             path = pathlib.Path(fname)
@@ -721,7 +720,7 @@ class TestSaveLoad(JitTestCase):
 
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.x = "x" * (2 ** 32 + 1)
 
             def forward(self, i) -> int:
@@ -1151,7 +1150,6 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
                 self.parameter_b = torch.nn.Parameter(torch.randn(4))
                 self.submodule_b = Submodule()
-                self.buffer_b = torch.nn.Buffer(torch.randn(4))
 
         m = TestModule()
         m_loaded = self.getExportImportCopy(torch.jit.script(m))

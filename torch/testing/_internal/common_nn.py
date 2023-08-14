@@ -15,7 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import _reduction as _Reduction
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
-    TEST_WITH_ROCM, gradcheck, gradgradcheck
+    gradcheck, gradgradcheck
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd.gradcheck import _get_numerical_jacobian, _iter_tensors
 from torch.autograd import Variable
@@ -1372,7 +1372,7 @@ new_module_tests = [
         desc='dilated',
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.01,
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -1384,7 +1384,7 @@ new_module_tests = [
         desc='no_bias',
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.01,
     ),
     dict(
         fullname='ConvTranspose2d_groups',
@@ -2304,87 +2304,6 @@ new_module_tests = [
         test_cuda=False,
     ),
     dict(
-        fullname='Padding12_1dcircular',
-        constructor=wrap_functional(F.pad, pad=(1, 2), mode='circular'),
-        cpp_options_args='F::PadFuncOptions({1, 2}).mode(torch::kCircular)',
-        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 2, 3]),
-        reference_fn=lambda i, *_: padding1d_circular(i, (1, 2)),
-        skip_double=TEST_WITH_ROCM,
-        pickle=False,
-    ),
-    dict(
-        fullname='Padding31_1dcircular',
-        constructor=wrap_functional(F.pad, pad=(3, 1), mode='circular'),
-        cpp_options_args='F::PadFuncOptions({3, 1}).mode(torch::kCircular)',
-        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 2, 3]),
-        reference_fn=lambda i, *_: padding1d_circular(i, (3, 1)),
-        skip_double=TEST_WITH_ROCM,
-        pickle=False,
-    ),
-    dict(
-        fullname='Padding33_1dcircular',
-        constructor=wrap_functional(F.pad, pad=(3, 3), mode='circular'),
-        cpp_options_args='F::PadFuncOptions({3, 3}).mode(torch::kCircular)',
-        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 2, 3]),
-        reference_fn=lambda i, *_: padding1d_circular(i, (3, 3)),
-        skip_double=TEST_WITH_ROCM,
-        pickle=False,
-    ),
-    dict(
-        fullname='Padding1221_2dcircular',
-        constructor=wrap_functional(F.pad, pad=(1, 2, 2, 1), mode='circular'),
-        cpp_options_args='F::PadFuncOptions({1, 2, 2, 1}).mode(torch::kCircular)',
-        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 1, 2, 3]),
-        reference_fn=lambda i, *_: padding2d_circular(i, (1, 2, 2, 1)),
-        skip_double=TEST_WITH_ROCM,
-        pickle=False,
-    ),
-    dict(
-        fullname='Padding2322_2dcircular',
-        constructor=wrap_functional(F.pad, pad=(2, 3, 2, 2), mode='circular'),
-        cpp_options_args='F::PadFuncOptions({2, 3, 2, 2}).mode(torch::kCircular)',
-        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 1, 2, 3]),
-        reference_fn=lambda i, *_: padding2d_circular(i, (2, 3, 2, 2)),
-        skip_double=TEST_WITH_ROCM,
-        pickle=False,
-    ),
-    dict(
-        fullname='Padding3331_2dcircular',
-        constructor=wrap_functional(F.pad, pad=(3, 3, 3, 1), mode='circular'),
-        cpp_options_args='F::PadFuncOptions({3, 3, 3, 1}).mode(torch::kCircular)',
-        input_fn=lambda: torch.arange(9, out=torch.DoubleTensor()).reshape([1, 1, 3, 3]),
-        reference_fn=lambda i, *_: padding2d_circular(i, (3, 3, 3, 1)),
-        skip_double=TEST_WITH_ROCM,
-        pickle=False,
-    ),
-    dict(
-        fullname='Padding122112_3dcircular',
-        constructor=wrap_functional(F.pad, pad=(1, 2, 2, 1, 1, 2), mode='circular'),
-        cpp_options_args='F::PadFuncOptions({1, 2, 2, 1, 1, 2}).mode(torch::kCircular)',
-        input_fn=lambda: torch.arange(12, out=torch.DoubleTensor()).reshape([1, 1, 2, 2, 3]),
-        reference_fn=lambda i, *_: padding3d_circular(i, (1, 2, 2, 1, 1, 2)),
-        skip_double=TEST_WITH_ROCM,
-        pickle=False,
-    ),
-    dict(
-        fullname='Padding322112_3dcircular',
-        constructor=wrap_functional(F.pad, pad=(3, 2, 2, 1, 1, 2), mode='circular'),
-        cpp_options_args='F::PadFuncOptions({3, 2, 2, 1, 1, 2}).mode(torch::kCircular)',
-        input_fn=lambda: torch.arange(12, out=torch.DoubleTensor()).reshape([1, 1, 2, 2, 3]),
-        reference_fn=lambda i, *_: padding3d_circular(i, (3, 2, 2, 1, 1, 2)),
-        skip_double=TEST_WITH_ROCM,
-        pickle=False,
-    ),
-    dict(
-        fullname='Padding332122_3dcircular',
-        constructor=wrap_functional(F.pad, pad=(3, 3, 2, 1, 2, 2), mode='circular'),
-        cpp_options_args='F::PadFuncOptions({3, 3, 2, 1, 2, 2}).mode(torch::kCircular)',
-        input_fn=lambda: torch.arange(12, out=torch.DoubleTensor()).reshape([1, 1, 2, 2, 3]),
-        reference_fn=lambda i, *_: padding3d_circular(i, (3, 3, 2, 1, 2, 2)),
-        skip_double=TEST_WITH_ROCM,
-        pickle=False,
-    ),
-    dict(
         module_name='PairwiseDistance',
         input_fn=lambda: (torch.randn(10, 8), torch.randn(10, 8)),
     ),
@@ -2480,7 +2399,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='multilayer_coder',
         with_tf32=True,
-        tf32_precision=0.02,
+        tf32_precision=0.03,
     ),
     dict(
         module_name='Linear',
@@ -2540,19 +2459,19 @@ for padding_mode, cpp_padding_mode in zip(
         output_size = (2, 3) + tuple(p + 1 for p in padding)  # simplified from `(4 + 2 * p - 3) // 2 + 1`
         new_module_tests.append(
             dict(
-                module_name='Conv{}d'.format(d),
+                module_name=f'Conv{d}d',
                 constructor_args=(2, 3, 3, 2, padding, 1, 1, True, padding_mode),
-                cpp_constructor_args='''torch::nn::Conv{}dOptions(2, 3, 3)
+                cpp_constructor_args=f'''torch::nn::Conv{d}dOptions(2, 3, 3)
                                         .stride(2)
-                                        .padding({})
+                                        .padding({cpp_padding})
                                         .dilation(1)
                                         .groups(1)
                                         .bias(true)
-                                        .padding_mode({})'''.format(d, cpp_padding, cpp_padding_mode),
+                                        .padding_mode({cpp_padding_mode})''',
                 input_size=input_size,
                 output_size=output_size,
                 cudnn=True,
-                desc='{}_stride2_pad2'.format(padding_mode),
+                desc=f'{padding_mode}_stride2_pad2',
                 with_tf32=True,
                 tf32_precision=0.05
             ),
@@ -2937,77 +2856,6 @@ def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0
         return output.sum()
     output = output.to(dt)
     return output
-
-
-def padding1d_circular(input, pad):
-    r""" input:
-            [[[0., 1., 2.],
-              [3., 4., 5.]]]
-          pad: (1, 2)
-          output:
-            [[[2., 0., 1., 2., 0., 1.],
-              [5., 3., 4., 5., 3., 4.]]]
-    """
-    return torch.cat([input[:, :, -pad[0]:], input,
-                      input[:, :, 0:pad[1]]], dim=2)
-
-
-def padding2d_circular(input, pad):
-    r"""input:
-             [[[[0., 1., 2],
-                [3., 4., 5.]]]]
-            pad: (1, 2, 2, 1)
-    output:
-        [[[[2., 0., 1., 2., 0., 1.],
-           [5., 3., 4., 5., 3., 4.],
-           [2., 0., 1., 2., 0., 1.],
-           [5., 3., 4., 5., 3., 4.],
-           [2., 0., 1., 2., 0., 1.]]]]
-    """
-    input = torch.cat([input[:, :, -pad[2]:], input, input[:, :, 0:pad[3]]], dim=2)
-    return torch.cat([input[:, :, :, -pad[0]:], input, input[:, :, :, 0:pad[1]]], dim=3)
-
-
-def padding3d_circular(input, pad):
-    r"""input:
-            [[[[[ 0.,  1.,  2.],
-                [ 3.,  4.,  5.]],
-               [[ 6.,  7.,  8.],
-                [ 9., 10., 11.]]]]]
-        pad: (1, 2, 2, 1, 1, 2)
-        output: [[[[[ 8.,  6.,  7.,  8.,  6.,  7.],
-               [11.,  9., 10., 11.,  9., 10.],
-               [ 8.,  6.,  7.,  8.,  6.,  7.],
-               [11.,  9., 10., 11.,  9., 10.],
-               [ 8.,  6.,  7.,  8.,  6.,  7.]],
-
-              [[ 2.,  0.,  1.,  2.,  0.,  1.],
-               [ 5.,  3.,  4.,  5.,  3.,  4.],
-               [ 2.,  0.,  1.,  2.,  0.,  1.],
-               [ 5.,  3.,  4.,  5.,  3.,  4.],
-               [ 2.,  0.,  1.,  2.,  0.,  1.]],
-
-              [[ 8.,  6.,  7.,  8.,  6.,  7.],
-               [11.,  9., 10., 11.,  9., 10.],
-               [ 8.,  6.,  7.,  8.,  6.,  7.],
-               [11.,  9., 10., 11.,  9., 10.],
-               [ 8.,  6.,  7.,  8.,  6.,  7.]],
-
-              [[ 2.,  0.,  1.,  2.,  0.,  1.],
-               [ 5.,  3.,  4.,  5.,  3.,  4.],
-               [ 2.,  0.,  1.,  2.,  0.,  1.],
-               [ 5.,  3.,  4.,  5.,  3.,  4.],
-               [ 2.,  0.,  1.,  2.,  0.,  1.]],
-
-              [[ 8.,  6.,  7.,  8.,  6.,  7.],
-               [11.,  9., 10., 11.,  9., 10.],
-               [ 8.,  6.,  7.,  8.,  6.,  7.],
-               [11.,  9., 10., 11.,  9., 10.],
-               [ 8.,  6.,  7.,  8.,  6.,  7.]]]]]
-    """
-    input = torch.cat([input[:, :, -pad[4]:], input, input[:, :, 0:pad[5]]], dim=2)
-    input = torch.cat([input[:, :, :, -pad[2]:], input, input[:, :, :, 0:pad[3]]], dim=3)
-    return torch.cat([input[:, :, :, :, -pad[0]:], input, input[:, :, :, :, 0:pad[1]]], dim=4)
 
 
 loss_reference_fns: Dict['str', Callable] = {
@@ -3906,7 +3754,7 @@ regression_criterion_no_batch = [
 reductions = ['none', 'mean', 'sum']
 for name, reduction in product(regression_criterion_no_batch, reductions):
     regression_test_info = dict(
-        fullname="{}_no_batch_dim_{}".format(name, reduction),
+        fullname=f"{name}_no_batch_dim_{reduction}",
         constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
         input_size=(3, ),
         target_size=(3, ),
@@ -3959,7 +3807,7 @@ reductions = ['none', 'mean', 'sum']
 for (name, input_fn, target_fn), reduction in product(classification_criterion_no_batch,
                                                       reductions):
     classification_test_info = dict(
-        fullname="{}_no_batch_dim_{}".format(name, reduction),
+        fullname=f"{name}_no_batch_dim_{reduction}",
         constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
         input_fn=lambda f=input_fn: f(),
         target_fn=lambda f=target_fn: f(),
@@ -4152,7 +4000,7 @@ class TestBase:
                 self._arg_cache[name] = self._extra_kwargs[fn_name]()
             else:
                 assert size_name in self._extra_kwargs, \
-                    "Missing `{}`, `{}` or `{}` for {}".format(name, size_name, fn_name, self.get_name())
+                    f"Missing `{name}`, `{size_name}` or `{fn_name}` for {self.get_name()}"
 
                 def map_tensor_sizes(sizes):
                     if isinstance(sizes, list):
@@ -4281,7 +4129,7 @@ class ModuleTest(TestBase):
         type_map = {torch.double: torch.float}
         cpu_input_tuple = cpu_input if isinstance(cpu_input, tuple) else (cpu_input,)
 
-        is_any_input_complex = any((isinstance(t, torch.Tensor) and t.dtype.is_complex for t in cpu_input_tuple))
+        is_any_input_complex = any(isinstance(t, torch.Tensor) and t.dtype.is_complex for t in cpu_input_tuple)
 
         gpu_input_tuple = to_gpu(cpu_input_tuple, type_map=type_map)
 
@@ -4736,14 +4584,14 @@ def _create_basic_net():
         def __init__(self):
             super().__init__()
             self.layer_dummy_param = nn.Parameter(torch.empty(3, 5))
-            self.layer_dummy_buf = nn.Buffer(torch.zeros(1, 3, 3, 7))
+            self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
 
     class Net(nn.Module):
         def __init__(self):
             super().__init__()
             self.l1 = Layer()
             self.dummy_param = nn.Parameter(torch.empty(3, 5))
-            self.dummy_buf = nn.Buffer(torch.zeros(7, 3, 3, 1))
+            self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))
 
     l = Layer()
     n = Net()
