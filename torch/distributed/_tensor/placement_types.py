@@ -351,7 +351,7 @@ class _Partial(Placement):
         return self.reduce_op == other.reduce_op
 
     def __hash__(self) -> int:
-        return hash(self.reduce_op)
+        return 1 + hash(self.reduce_op)
 
     def __repr__(self) -> str:
         """
