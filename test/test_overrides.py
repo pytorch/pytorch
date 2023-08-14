@@ -129,7 +129,7 @@ class DiagonalTensor:
         self._i = value
 
     def __repr__(self):
-        return "DiagonalTensor(N={}, value={})".format(self._N, self._i)
+        return f"DiagonalTensor(N={self._N}, value={self._i})"
 
     def __array__(self):
         return self._i * np.eye(self._N)
@@ -271,7 +271,7 @@ class SubDiagonalTensor(DiagonalTensor):
     handled_functions = HANDLED_FUNCTIONS_SUB_DIAGONAL
 
     def __repr__(self):
-        return "SubDiagonalTensor(N={}, value={})".format(self._N, self._i)
+        return f"SubDiagonalTensor(N={self._N}, value={self._i})"
 
 
 @implements_sub_diagonal(torch.mean)
@@ -336,7 +336,7 @@ def generate_tensor_like_torch_implementations():
     for namespace, funcs in get_overridable_functions().items():
         for func in funcs:
             if func not in testing_overrides and func.__name__ not in testing_ignore:
-                untested_funcs.append("{}.{}".format(namespace, func.__name__))
+                untested_funcs.append(f"{namespace}.{func.__name__}")
     msg = (
         "The following functions are not tested for __torch_function__ "
         "support, please ensure there is an entry in the dict returned by "
@@ -750,7 +750,7 @@ def generate_tensor_like_override_tests(cls):
         if module:
             name = 'test_{}_{}'.format(module.replace('.', '_'), func.__name__)
         else:
-            name = 'test_{}'.format(func.__name__)
+            name = f'test_{func.__name__}'
         test_method.__name__ = name
         setattr(cls, name, test_method)
 
@@ -1094,7 +1094,7 @@ class TestRNN(TestCase):
 class TestDisabledTorchFunction(TestCase):
     # Regression test for gh-64687
     def test_parameter_does_not_prevent_dispatch(self):
-        class MyTensor():
+        class MyTensor:
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
                 return "called"
@@ -1119,7 +1119,7 @@ class TestResolveName(TestCase):
 
 class TestTorchFunctionWarning(TestCase):
     def test_warn_on_invalid_torch_function(self):
-        class Bad1():
+        class Bad1:
             def __torch_function__(self, *args, **kwargs):
                 pass
 
@@ -1526,6 +1526,26 @@ class TestTorchFunctionMode(TestCase):
         s = set()
         s.add(a)
         s.add(DiagTensor(d))
+
+    def test_custom_device_type(self):
+        class CustomDeviceContext(TorchFunctionMode):
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                if func == torch.device:
+                    if args and isinstance(args[0], int):
+                        args = ("xla", args[0])
+                    elif isinstance(kwargs.get('device'), int):
+                        kwargs['device'] = f"xla:{kwargs.get('device')}"
+                return func(*args, **kwargs)
+
+        with CustomDeviceContext():
+            d_args = torch.device(0)
+            self.assertEqual(d_args.type, "xla")
+            self.assertEqual(d_args.index, 0)
+            d_kwargs = torch.device(device=0)
+            self.assertEqual(d_kwargs.type, "xla")
+            self.assertEqual(d_kwargs.index, 0)
 
 
 if __name__ == '__main__':

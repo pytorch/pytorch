@@ -83,6 +83,9 @@ class ScopeContextManager:
         return
 
 
+_COPY_META_FIELDS = ["nn_module_stack", "source_fn", "original_aten", "recompute", "from_node"]
+
+
 @compatibility(is_backward_compatible=True)
 class TracerBase:
     graph: Graph
@@ -138,10 +141,24 @@ class TracerBase:
                 node.stack_trace = stack_trace
             # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
             # If other meta fields are needed, they can be added here
-            copy_meta_fields = ["nn_module_stack", "source_fn", "original_aten", "recompute"]
-            for field in copy_meta_fields:
+            for field in _COPY_META_FIELDS:
                 if field in current_meta:
-                    node.meta[field] = current_meta[field]
+                    node.meta[field] = copy.copy(current_meta[field])
+
+            # Here we decrement to account for the sequence_nr having
+            # just been incremented while tracing this lowered aten op.
+            new_seq_nr = torch.autograd._get_sequence_nr() - 1
+            # The sequence_nr increments every time a new autograd Node
+            # is created. During the FWD pass we store the sequence_nr
+            # corresponding to the last autograd Node created on this fx
+            # node's meta.  A single aten op can create multiple autograd
+            # nodes as is the case with in-place foreach ops. During the
+            # BWD pass we retrieve the sequence_nr stored on the current
+            # executing autograd Node. See NOTE [ Sequence Number ].
+            if current_meta.get("in_bwd", False):
+                new_seq_nr = current_meta["seq_nr"]
+            node.meta["seq_nr"] = new_seq_nr
+
         elif self.module_stack:
             node.meta['nn_module_stack'] = copy.copy(self.module_stack)
         return node
@@ -257,6 +274,9 @@ class TracerBase:
 
         elif isinstance(a, range):
             return range(self.create_arg(a.start), self.create_arg(a.stop), self.create_arg(a.step))
+
+        elif isinstance(a, torch._ops.OpOverload):
+            return a
 
         if isinstance(a, Proxy):
             # base case: we unwrap the Proxy object
