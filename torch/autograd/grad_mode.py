@@ -1,8 +1,8 @@
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
 
-from torch.utils._contextlib import _DecoratorContextManager, _NoParamDecoratorContextManager, F
+from torch.utils._contextlib import _DecoratorContextManager, _NoParamDecoratorContextManager
 
 __all__ = [
     "no_grad",
@@ -250,7 +250,7 @@ class inference_mode(_DecoratorContextManager):
         self._inference_mode_raii_context: Optional[torch._C._InferenceMode] = None
         self.mode = mode
 
-    def __new__(cls, mode_or_func: Union[bool, F] = True) -> Union["inference_mode", F]:
+    def __new__(cls, mode_or_func=True):
         return super().__new__(cls) if isinstance(mode_or_func, bool) else cls()(mode_or_func)
 
     def __enter__(self) -> None:
