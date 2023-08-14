@@ -170,6 +170,9 @@ def is_fake(x):
         any_fake = any(is_fake(x) for x in flattened_tensors)
         assert all_fake == any_fake, "got mixed fake and real tensors!"
         return all_fake
+    if torch._is_functional_tensor(x):
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+        return is_fake(torch._C._functorch._unwrap_functional_tensor(x, reapply_views))
     return False
 
 
@@ -1566,7 +1569,6 @@ class FakeTensorMode(TorchDispatchMode):
                 if not self.allow_non_fake_inputs:
                     if isinstance(x, FakeTensor) and x.fake_mode is not self:
                         raise AssertionError("Mixing fake modes NYI")
-                    breakpoint()
                     raise Exception(
                         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
                         f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
@@ -1701,7 +1703,7 @@ class FakeTensorMode(TorchDispatchMode):
                 dynamic_dims is None
             ), "cannot set both static_shapes and dynamic_dims"
             shape_env = None
-        return self.fake_tensor_converter(
+        ret = self.fake_tensor_converter(
             self,
             tensor,
             shape_env=shape_env,
@@ -1711,6 +1713,7 @@ class FakeTensorMode(TorchDispatchMode):
             constraint_dims=constraint_dims,
             memoized_only=memoized_only,
         )
+        return ret
 
 
 # NB: returns fake tensors

@@ -148,6 +148,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f_out, ff_out)
 
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

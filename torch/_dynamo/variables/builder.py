@@ -166,7 +166,7 @@ class GraphArg:
     def __post_init__(self):
         if isinstance(self._example, torch.Tensor):
             self._example = TensorWeakRef(self._example)
-            # assert is_fake(self.fake_tensor)
+            assert is_fake(self.fake_tensor)
 
     def load(self, tx):
         return self.source.reconstruct(tx)
@@ -1220,9 +1220,9 @@ def wrap_fx_proxy_cls(
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
-            if not isinstance(value, torch._subclasses.fake_tensor.FakeTensor):
+            if not is_fake(value):
                 # NB: ensure strides are preserved
-                return value
+                value = clone_input(value)
 
         return value
 
@@ -1256,8 +1256,9 @@ def wrap_fx_proxy_cls(
             }
             assert "source" in options and options["source"] is not None
             kwargs["source"] = options["source"]
-            example_value = replace_leaf_with_fake_tensor_and_record(example_value, tx=tx, **kwargs)
-            print("after replacing, we got exmaple_value:", example_value)
+            example_value = wrap_to_fake_tensor_and_record(
+                example_value, tx=tx, **kwargs
+            )
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
@@ -1511,56 +1512,31 @@ def _automatic_dynamic(e, tx, name, static_shapes):
 
     return dynamic_dims, constraint_dims
 
-def replace_leaf_with_fake_tensor_and_record(e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool):
-    def replace_leaf_with_fake_tensor(e):
-        if torch._is_functional_tensor(e):
-            from torch._C._functorch import _wrap_functional_tensor, _unwrap_functional_tensor, current_level
 
-            reapply_views = torch._C._functionalization_reapply_views_tls()
-            unwrap_e = _unwrap_functional_tensor(e, reapply_views)
-            with torch._functorch.pyfunctorch.temporarily_pop_interpreter_stack():
-                replaced_e = replace_leaf_with_fake_tensor(unwrap_e)
-            return _wrap_functional_tensor(replaced_e, current_level())
-        else:
-            return wrap_to_fake_tensor(e, tx, ignore_subclass, source=source, dynamic_dims=dynamic_dims, constraint_dims=constraint_dims)
-
-    assert source is not None
-    static_shapes, reason = tensor_always_has_static_shape(
-        e, is_tensor, guard_source=source.guard_source()
-    )
-
-    dynamic_dims, constraint_dims = _automatic_dynamic(
-        e, tx, source.name(), static_shapes
-    )
-
-    log.debug(
-        "wrap_to_fake %s %s %s %s",
-        source.name(),
-        tuple(e.shape),
-        dynamic_dims,
-        constraint_dims,
-    )
-
-    fake_e = replace_leaf_with_fake_tensor(e)
-
-    if is_tensor and not (static_shapes and source.is_nn_module()):
-        tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
-        tx.output.tracked_fakes_id_to_source[id(e)].append(source)
-
-    tx.output.tensor_weakref_to_sizes_strides[WeakIdRef(e)] = {
-        "size": fake_e.size(),
-        "stride": fake_e.stride(),
-    }
-    return fake_e
-
-def wrap_to_fake_tensor(
-    e, tx, ignore_subclass=False, *, source: Optional[Source], dynamic_dims, constraint_dims
+def wrap_to_fake_tensor_and_record(
+    e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
     if (
         type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
         or (ignore_subclass and isinstance(e, torch.Tensor))
         or is_traceable_wrapper_subclass(e)
     ):
+        assert source is not None
+        static_shapes, reason = tensor_always_has_static_shape(
+            e, is_tensor, guard_source=source.guard_source()
+        )
+
+        dynamic_dims, constraint_dims = _automatic_dynamic(
+            e, tx, source.name(), static_shapes
+        )
+
+        log.debug(
+            "wrap_to_fake %s %s %s %s",
+            source.name(),
+            tuple(e.shape),
+            dynamic_dims,
+            constraint_dims,
+        )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
@@ -1570,6 +1546,13 @@ def wrap_to_fake_tensor(
                 constraint_dims=constraint_dims,
             )
         )
+        if is_tensor and not (static_shapes and source.is_nn_module()):
+            tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
+            tx.output.tracked_fakes_id_to_source[id(e)].append(source)
+        tx.output.tensor_weakref_to_sizes_strides[WeakIdRef(e)] = {
+            "size": fake_e.size(),
+            "stride": fake_e.stride(),
+        }
         return fake_e
     else:
         return e

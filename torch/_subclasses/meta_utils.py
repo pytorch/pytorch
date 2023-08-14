@@ -4,7 +4,13 @@ import weakref
 from typing import ContextManager, List, Optional
 
 import torch
+from torch._C._functorch import (
+    _unwrap_functional_tensor,
+    _wrap_functional_tensor,
+    current_level,
+)
 from torch._guards import Source
+
 from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
@@ -504,14 +510,21 @@ class MetaConverter:
             or (ignore_subclass and isinstance(t, torch.Tensor))
             or isinstance(t, FakeTensor)
         ):
-            if t.device.type != "xla" and any(
+            if torch._is_functional_tensor(t):
+                reapply_views = torch._C._functionalization_reapply_views_tls()
+                unwrap_t = _unwrap_functional_tensor(t, reapply_views)
+                with torch._functorch.pyfunctorch.temporarily_pop_interpreter_stack():
+                    fake_t = self.meta_tensor(
+                        unwrap_t, shape_env=shape_env, callback=callback, source=source
+                    )
+                return _wrap_functional_tensor(fake_t, current_level())
+            elif t.device.type != "xla" and any(
                 [
                     t.is_sparse_csr,
                     t.layout in [torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc],
                     t.is_quantized,
                     t.is_nested,
                     t._is_view() and t._base is not None and t._base.is_sparse,
-                    torch._is_functional_tensor(t),
                     t.device.type in ("lazy"),
                     # We need a way to test if a tensor is batched but there
                     # is no official APi to do it
