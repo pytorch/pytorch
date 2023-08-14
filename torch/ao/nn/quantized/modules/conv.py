@@ -106,25 +106,25 @@ class _ConvNd(WeightedQuantizedModule):
             s += ', bias=False'
         return s.format(**self.__dict__)
 
-    # ===== Serialization methods =====
-    # The special consideration here is that we have to unpack the weights into
-    # their regular QTensor form for serialization. Packed weights should not
-    # live outside the process in which they were created, rather they should be
-    # derived from the QTensor weight.
-    #   self
-    #   |--- weight : Tensor
-    #   |--- bias : Tensor
-    #
-    # TODO: maybe change to this when https://github.com/pytorch/pytorch/pull/32958 is landed
-    #   self
-    #   |--- _packed_params : Conv2dPackedParamsBase or Conv3dPackedParamsBase
-    def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super()._save_to_state_dict(destination, prefix, keep_vars)
-        (w, b) = self._weight_bias()
-        destination[prefix + 'weight'] = w
-        destination[prefix + 'bias'] = b
-        destination[prefix + 'scale'] = torch.tensor(self.scale)
-        destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
+        # ===== Serialization methods =====
+        # The special consideration here is that we have to unpack the weights into
+        # their regular QTensor form for serialization. Packed weights should not
+        # live outside the process in which they were created, rather they should be
+        # derived from the QTensor weight.
+        #   self
+        #   |--- weight : Tensor
+        #   |--- bias : Tensor
+        #
+        # TODO: maybe change to this when https://github.com/pytorch/pytorch/pull/32958 is landed
+        #   self
+        #   |--- _packed_params : Conv2dPackedParamsBase or Conv3dPackedParamsBase
+        def _save_to_state_dict(self, destination, prefix, keep_vars):
+            super()._save_to_state_dict(destination, prefix, keep_vars)
+            (w, b) = self._weight_bias()
+            destination[prefix + 'weight'] = w
+            destination[prefix + 'bias'] = b
+            destination[prefix + 'scale'] = torch.tensor(self.scale)
+            destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
 
     @torch.jit.export
     def __getstate__(self):
@@ -191,28 +191,28 @@ class _ConvNd(WeightedQuantizedModule):
     def __copy__(self):
         return self.__deepcopy__({})
 
-    @classmethod
-    def get_qconv(cls, mod, activation_post_process, weight_post_process=None):
-        r"""Creates a qconv object and returns it.
-        """
-        if weight_post_process is None:
-            weight_post_process = mod.qconfig.weight()
-        weight_post_process(mod.weight)
-        assert weight_post_process.dtype == torch.qint8, \
-            'Weight observer must have a dtype of qint8'
-        qweight = _quantize_weight(mod.weight.float(), weight_post_process)
-        # the __init__ call used is the one from derived classes and not the one from _ConvNd
-        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
-                    mod.stride, mod.padding, mod.dilation, mod.groups,
-                    mod.bias is not None, mod.padding_mode)
-        qconv.set_weight_bias(qweight, mod.bias)
-        if activation_post_process is None or activation_post_process.dtype == torch.float:
-            return qconv  # dynamic quantization doesn't need scale/zero_point
-        else:
-            act_scale, act_zp = activation_post_process.calculate_qparams()
-            qconv.scale = float(act_scale)
-            qconv.zero_point = int(act_zp)
-            return qconv
+        @classmethod
+        def get_qconv(cls, mod, activation_post_process, weight_post_process=None):
+            r"""Creates a qconv object and returns it.
+            """
+            if weight_post_process is None:
+                weight_post_process = mod.qconfig.weight()
+            weight_post_process(mod.weight)
+            assert weight_post_process.dtype == torch.qint8, \
+                'Weight observer must have a dtype of qint8'
+            qweight = _quantize_weight(mod.weight.float(), weight_post_process)
+            # the __init__ call used is the one from derived classes and not the one from _ConvNd
+            qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
+                        mod.stride, mod.padding, mod.dilation, mod.groups,
+                        mod.bias is not None, mod.padding_mode)
+            qconv.set_weight_bias(qweight, mod.bias)
+            if activation_post_process is None or activation_post_process.dtype == torch.float:
+                return qconv  # dynamic quantization doesn't need scale/zero_point
+            else:
+                act_scale, act_zp = activation_post_process.calculate_qparams()
+                qconv.scale = float(act_scale)
+                qconv.zero_point = int(act_zp)
+                return qconv
 
     @staticmethod
     def from_float(cls, mod):
@@ -542,7 +542,8 @@ class Conv3d(_ConvNd):
         return 'QuantizedConv3d'
 
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
-        if self.padding_mode == 'zeros':
+        '#if self.padding_mode == 'zeros':
+        if self.padding_mode == 'reflect':
             self._packed_params = torch.ops.quantized.conv3d_prepack(
                 w, b, self.stride, self.padding, self.dilation, self.groups)
         else:
