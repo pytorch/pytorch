@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: quantization"]
 
 # torch
@@ -1692,7 +1691,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
             model = self.checkGraphModeOp(
                 Conv(dim),
                 self.img_data_dict[dim],
-                "quantized::conv{}d".format(dim),
+                f"quantized::conv{dim}d",
                 tracing,
             )
             # make sure there is only one quantize_per_tensor for input
@@ -1701,7 +1700,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 model.graph
             )
 
-            FileCheck().check_not("quantized::conv{}d_prepack".format(dim)).run(
+            FileCheck().check_not(f"quantized::conv{dim}d_prepack").run(
                 model.graph
             )
 
@@ -1743,17 +1742,17 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 ConvNdFunctionalRelu(dim),
                 ConvNdInplaceFunctionalRelu(dim),
             ]:
-                conv_name = "conv{}d".format(dim)
+                conv_name = f"conv{dim}d"
                 m = self.checkGraphModeOp(
                     orig_m,
                     self.img_data_dict[dim],
-                    "quantized::conv{}d_relu(".format(dim),
+                    f"quantized::conv{dim}d_relu(",
                     tracing=tracing,
                 )
 
-                FileCheck().check_not("aten::conv{}d(".format(dim)).check_not(
+                FileCheck().check_not(f"aten::conv{dim}d(").check_not(
                     "aten::relu"
-                ).check_not("quantized::conv{}d(".format(dim)).check_not(
+                ).check_not(f"quantized::conv{dim}d(").check_not(
                     "quantized::relu("
                 ).run(
                     m.graph
@@ -2896,7 +2895,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 self.avg_pool1d = torch.nn.AvgPool1d(3)
                 self.avg_pool2d = torch.nn.AvgPool2d(3)
                 self.avg_pool3d = torch.nn.AvgPool3d(3)
-                self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d((1))
+                self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d(1)
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
                 self.leaky_relu = torch.nn.LeakyReLU()

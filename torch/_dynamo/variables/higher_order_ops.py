@@ -60,6 +60,8 @@ def validate_args_and_maybe_create_graph_inputs(
     from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
     from .builder import wrap_fx_proxy
 
+    assert tracer.parent is not None
+
     args = []
     for a in sub_args:
         assert isinstance(a, VariableTracker)
@@ -235,6 +237,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return MapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "executorch_call_delegate":
             return ExecutorchCallDelegateHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "out_dtype":
+            return OutDtypeHigherOrderVariable(value, source, **kwargs)
         elif value is torch._functorch.eager_transforms.grad_impl:
             return FunctorchGradHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
@@ -310,7 +314,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ):
             raise UserError(
                 UserErrorType.DYNAMIC_CONTROL_FLOW,
-                "Expected a list of tensors but got {actual_args}".format(
+                "Expected a list of tensors but got {actual_args}".format(  # noqa: UP032
                     actual_args=[
                         str(operand.python_type())
                         if isinstance(operand, VariableTracker)
@@ -664,15 +668,37 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # For has_aux=False, Tuple[gradients of inputs indicated by argnums].
         # For has_aux=True, Tuple[Tuple[gradients of inputs indicated by argnums], aux values]
         # NOTE: example_value should match `grad_output`.
-        if isinstance(argnums.value, int):
-            example_value = (
-                args[argnums.value].as_proxy().node.meta["example_value"].contiguous()
-            )
-        else:
-            example_value = tuple(
-                args[idx].as_proxy().node.meta["example_value"].contiguous()
-                for idx in argnums.value
-            )
+        def _from_args(idx):
+            return args[idx].as_proxy().node.meta["example_value"].contiguous()
+
+        def to_python_ints(argnums):
+            if not isinstance(argnums, (ConstantVariable, TupleVariable)):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"argnums is expected to be int or tuple of ints. Got {argnums}.",
+                )
+
+            if isinstance(argnums, ConstantVariable):
+                if not isinstance(argnums.value, (int, tuple)):
+                    raise UserError(
+                        UserErrorType.INVALID_INPUT,
+                        f"argnums is expected to be int or tuple of ints. Got {argnums}.",
+                    )
+                return argnums.value
+            else:
+                const_vars = argnums.unpack_var_sequence(tx)
+                if not all(
+                    isinstance(var, ConstantVariable) and isinstance(var.value, int)
+                    for var in const_vars
+                ):
+                    raise UserError(
+                        UserErrorType.INVALID_INPUT,
+                        f"argnums is expected to contain int only. Got {const_vars}.",
+                    )
+                return tuple(var.value for var in const_vars)
+
+        argnums_v = to_python_ints(argnums)
+        example_value = pytree.tree_map(_from_args, argnums_v)
 
         if has_aux.value:
             # case : has_aux = True
@@ -689,12 +715,12 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Call contiguous on all the computed grads.
         if not has_aux.value:
-            if isinstance(argnums.value, int):
+            if isinstance(argnums_v, int):
                 return fx_proxy.call_method(tx, "contiguous", (), {})
             else:
                 grads = fx_proxy
                 items = []
-                for idx in range(len(argnums.value)):
+                for idx in range(len(argnums_v)):
                     proxy = grads.call_method(
                         tx, "__getitem__", (ConstantVariable(idx),), {}
                     ).call_method(tx, "contiguous", (), {})
@@ -704,11 +730,11 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # fx_proxy -> Tuple(grads, aux)
             grads = fx_proxy.call_method(tx, "__getitem__", (ConstantVariable(0),), {})
             aux = fx_proxy.call_method(tx, "__getitem__", (ConstantVariable(1),), {})
-            if isinstance(argnums.value, int):
+            if isinstance(argnums_v, int):
                 return TupleVariable([grads.call_method(tx, "contiguous", (), {}), aux])
             else:
                 items = []
-                for idx in range(len(argnums.value)):
+                for idx in range(len(argnums_v)):
                     proxy = grads.call_method(
                         tx, "__getitem__", (ConstantVariable(idx),), {}
                     ).call_method(tx, "contiguous", (), {})
@@ -847,6 +873,38 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 self.value,
                 args=tuple(p_args),
                 kwargs=p_kwargs,
+            ),
+            example_value=example_value,
+        )
+
+
+class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
+        if len(kwargs) != 0:
+            unimplemented("out_dtype does not handle kwargs")
+
+        p_args = tuple(arg.as_proxy() for arg in args)
+        op = p_args[0]
+        output_dtype = p_args[1]
+        fake_sub_args = pytree.tree_map_only(
+            torch.fx.Proxy, lambda a: get_fake_value(a.node, tx), p_args[2:]
+        )
+        # This is a simplified implementation of this operator just for tracing.
+        # Actual implementation may also first promote the arguments
+        example_value = op(*fake_sub_args).to(dtype=output_dtype)
+
+        # Store the invocation as a call
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=tuple(p_args),
+                kwargs={},
             ),
             example_value=example_value,
         )
