@@ -6935,6 +6935,9 @@ def sample_inputs_slice_scatter(op_info, device, dtype, requires_grad, **kwargs)
              ((L, L, L), (L, L, L,), (2, 0, L, 1)),
              ((L, L, L), (L, L, L // 2,), (2, L // 2, L, 1)),
              ((L, L, L), (L, L, L // 4,), (2, L // 2, L, 2)),
+             ((L, L, L), (L, L // 2, L), (1, L // 2, L * 2, 1)),  # end > L
+             ((L, L, L), (L, L, L), (-2, 0, L, 1)),  # negative dim
+             ((L, L, L), (L, L, L // 4), (-1, L // 2, L * 2, 2)),  # end > L and negative dim
              )
 
     for input_shape, src_shape, args in cases:
