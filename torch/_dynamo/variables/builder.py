@@ -18,7 +18,7 @@ import torch
 from torch import SymInt
 from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensor, is_fake
+from torch._subclasses.fake_tensor import FakeTensor, is_fake, is_fake_with_fake_mode
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraint,
     DimDynamic,
@@ -948,14 +948,12 @@ class VariableBuilder:
         assert "tensor_dict" not in tensor_proxy.node.meta
         tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
 
-        # TODO: I think the result is guaranteed to be fake with
-        # ignore_subclass changes
-        fake_tensor_value = None
         example_value = tensor_variable.proxy.node.meta["example_value"]
-        if is_fake(example_value):
-            fake_tensor_value = example_value
+        assert is_fake_with_fake_mode(
+            example_value, self.tx.fake_mode
+        ), "Expect example_value to be Fakified by tx.fake_mode."
 
-        grapharg = GraphArg(source, value, False, fake_tensor_value)
+        grapharg = GraphArg(source, value, False, example_value)
         tensor_proxy.node.meta["grapharg"] = grapharg
         self.tx.output.add_symbol_bindings(grapharg)
 
@@ -1119,7 +1117,9 @@ class VariableBuilder:
                     example_value = unspec_var.proxy.node.meta["example_value"]
                 if is_fake(example_value):
                     fake_tensor_value = example_value
-                    assert fake_tensor_value.fake_mode is self.tx.fake_mode, (
+                    assert is_fake_with_fake_mode(
+                        fake_tensor_value, self.tx.fake_mode
+                    ), (
                         f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
                         "({self.tx.fake_mode}) from InstructionTranslator"
                     )
@@ -1274,15 +1274,14 @@ def wrap_fx_proxy_cls(
         example_value = _clone_input(example_value)
         proxy.node.meta["example_value"] = example_value
         specialized_props = target_cls.specialize(example_value)
-        # TODO: not sure about this fake mode test
-        if (
-            isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
-            and example_value.fake_mode is tx.fake_mode
-        ):
-            # NB: This will be wrong for ignore_subclass; fix it up later!
-            specialized_props["class_type"] = (
-                torch.nn.Parameter if is_parameter else type(initial_example_value)
-            )
+        assert is_fake_with_fake_mode(
+            example_value, tx.fake_mode
+        ), "Expect all example_value to fakified by tx.fake_mode by now."
+        # Example value need to preserve the original class type by replacing the leaves
+        # of subclasses with fake_tensor. Otherwise, isinstance() calls will produce wrong results.
+        specialized_props["class_type"] = (
+            torch.nn.Parameter if is_parameter else type(example_value)
+        )
 
         specialized_props["specialized_value"] = specialized_value
 
