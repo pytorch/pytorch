@@ -1339,7 +1339,12 @@ class PReLU(Module):
         factory_kwargs = {'device': device, 'dtype': dtype}
         self.num_parameters = num_parameters
         super().__init__()
-        self.weight = Parameter(torch.empty(num_parameters, **factory_kwargs).fill_(init))
+        self.init = init
+        self.weight = Parameter(torch.empty(num_parameters, **factory_kwargs))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        torch.nn.init.constant_(self.weight, self.init)
 
     def forward(self, input: Tensor) -> Tensor:
         return F.prelu(input, self.weight)
