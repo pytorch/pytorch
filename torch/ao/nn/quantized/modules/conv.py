@@ -525,8 +525,10 @@ class Conv3d(_ConvNd):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
-                 padding_mode='zeros', device=None, dtype=None):
-        assert padding_mode != 'reflect', "Conv3d does not support reflection padding"
+                 #padding_mode='zeros', device=None, dtype=None):
+                 padding_mode='reflect', device=None, dtype=None):
+        #assert padding_mode != 'reflect', "Conv3d does not support reflection padding"
+        assert padding_mode != 'zeros', "Conv3d does not support zeros padding"
         factory_kwargs = {'device': device, 'dtype': dtype}
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
@@ -564,7 +566,8 @@ class Conv3d(_ConvNd):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 5:
             raise ValueError("Input shape must be `(N, C, D, H, W)`!")
-        if self.padding_mode != 'zeros':
+        #if self.padding_mode != 'zeros':
+        if self.padding_mode != 'reflect':
             _reversed_padding_repeated_twice = _reverse_repeat_padding(self.padding)
             input = F.pad(input, _reversed_padding_repeated_twice,
                           mode=self.padding_mode)
