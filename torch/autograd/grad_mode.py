@@ -2,8 +2,10 @@ from typing import Any, Optional
 
 import torch
 
-from torch.utils._contextlib import (_DecoratorContextManager,
-                                     _NoParamDecoratorContextManager)
+from torch.utils._contextlib import (
+    _DecoratorContextManager,
+    _NoParamDecoratorContextManager
+)
 
 __all__ = [
     "no_grad",
