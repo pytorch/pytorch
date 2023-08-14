@@ -32,7 +32,7 @@ from torch import (  # noqa: F401
     SymFloat,
     SymInt,
 )
-from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
+from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._sympy.functions import FloorDiv, LShift, Mod, RShift
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
@@ -304,13 +304,57 @@ def guard_scalar(a):
     else:
         raise AssertionError(f"unrecognized scalar {a}")
 
-def _constrain_symbol_range(shape_env, s: sympy.Symbol, min: int, max: int):
+def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compiler_max: int, runtime_min: int, runtime_max: int):
     if r := shape_env.var_to_range.get(s, None):
         shape_env.var_to_range[s] = ValueRanges(
-            builtins.max(r.lower, min), builtins.min(r.upper, max)
+            builtins.max(r.lower, compiler_min), builtins.min(r.upper, compiler_max)
         )
     else:
-        shape_env.var_to_range[s] = ValueRanges(min, max)
+        shape_env.var_to_range[s] = ValueRanges(compiler_min, compiler_max)
+
+    if r := shape_env.runtime_var_to_range.get(s, None):
+        shape_env.runtime_var_to_range[s] = ValueRanges(
+            builtins.max(r.lower, runtime_min), builtins.min(r.upper, runtime_max)
+        )
+    else:
+        shape_env.runtime_var_to_range[s] = ValueRanges(runtime_min, runtime_max)
+
+def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] = None):
+    """
+    This function is NOT INTENDED to be used by itself.
+    """
+
+    if isinstance(a, (SymFloat, SymBool)):
+        raise ValueError("Constraining SymFloat/SymBool is nyi")
+
+    assert isinstance(a, SymInt)
+    assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+
+    if min is None:
+        min = 0
+    if max is None:
+        max = sympy.oo
+
+    if max <= 2:
+        raise ValueError(f"Maximum value to constrain_as_size must be greater than 2, but was {max}")
+
+    if max < min:
+        raise ValueError(
+            "Maximum value to constrain_as_size can't be less than the specified min value, "
+            "received min={min} and max={max}"
+        )
+
+    compiler_min = 2 if min < 2 else min
+
+    _constrain_symbol_range(
+        a.node.shape_env,
+        a.node.expr,
+        compiler_min=compiler_min,
+        compiler_max=max,
+        runtime_min=min,
+        runtime_max=max
+    )
+
 
 # inclusive both ways
 def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
@@ -350,8 +394,16 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
         min = -sympy.oo
     if max is None:
         max = sympy.oo
-    if not isinstance(a, SymInt):
-        constrain_range_int(a, min=min, max=max)
+
+    if max < min:
+        raise ValueError(
+            "Maximum value to constrain_as_size can't be less than the specified min value, "
+            "received min={min} and max={max}"
+        )
+
+    if isinstance(a, int):
+        if not (min <= a <= max):
+            raise ValueError(f"Invalid value {a} for range [{min}:{max}]")
         return
 
     if isinstance(a.node.expr, sympy.Integer):
@@ -364,35 +416,15 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     # semantics that this is an "unchecked" assert (but it this actually
     # something useful?  Might be better to restrict only for unbacked
     # SymInt).
-    _constrain_symbol_range(a.node.shape_env, a.node.expr, min, max)
+    _constrain_symbol_range(
+        a.node.shape_env,
+        a.node.expr,
+        compiler_min=min,
+        compiler_max=max,
+        runtime_min=min,
+        runtime_max=max
+    )
 
-def constrain_range_int(a, *, min, max):
-    """
-    Constrain range on concrete int value.
-    This can happens for the following scenarios:
-    - Eager mode execution and real int value is provided.
-    - During tracing the traced symbol is resolved as a static integer (see
-      PR #101655 for more details).
-    """
-    if min is None:
-        min = -sympy.oo
-    if max is None:
-        max = sympy.oo
-
-    assert not isinstance(a, SymInt)
-    if not (min <= a <= max):
-        raise ValueRangeError(f"Invalid value {a} for range [{min}:{max}]")
-
-    if (
-        (fake_mode := detect_fake_mode()) is not None and
-        getattr(fake_mode, "shape_env", None) is not None
-    ):
-        # If we are tracing with a fake mode then add this integer to the
-        # shape_env's var_to_range
-        sym_integer = sympy.Integer(a)
-        shape_env = fake_mode.shape_env
-        _constrain_symbol_range(shape_env, sym_integer, min, max)
-        shape_env.var_to_stack[sym_integer] = TracingContext(fake_mode).extract_stack()
 
 def constrain_unify(a, b):
     """
@@ -1938,6 +1970,10 @@ class ShapeEnv:
         # range may contain ints which may not actually appear in
         # practice
         self.var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
+        # Maps symbolic ints to their min/max range for runtime checks.
+        # This is because we assume a graph generated with N=2 is general enough
+        # for N < 2. Therefore, it will be too strict to assert N=2 at runtime.
+        self.runtime_var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
         self.var_to_sources: Dict[sympy.Symbol, List[Source]] = {}
         self.var_to_stack: Dict[sympy.Symbol, traceback.StackSummary] = {}
         # Maps symbolic ints to the guards that refine their lower/upper
