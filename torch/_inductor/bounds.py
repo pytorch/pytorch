@@ -1,4 +1,3 @@
-import math
 from functools import partial
 from typing import Dict, Optional
 
@@ -14,12 +13,16 @@ class BoundVars:
     """
     Performs Value Range Analysis on LoopBody's fx graph by calling BoundVars.run()
     It exposes the ranges of the nodes in the `bounds` variable
+
+    Note. A current limitation of this analysis is that it just works on a per-loop basis.
+    We should be able to propagate the bounds between across the whole graph. This may benefit
+    the case a bounded variable is returned by a kernel and fed into another.
     """
 
     def __init__(self, loop_body: LoopBody):
         self.loop_body = loop_body
         self.replacement_vals = {
-            k: ValueRanges(0, v if not free_symbols(v) else math.inf)
+            k: ValueRanges(0, v - 1) if not free_symbols(v) else bound_sympy(v)
             for k, v in loop_body.var_ranges.items()
         }
         # avoid computing these values, pessimistically assume that they are unbounded
@@ -87,9 +90,10 @@ class BoundVars:
     def get_index(self, name):
         expr = self.loop_body.indexing_exprs[name]
         bound = self.replacement_vals.get(expr)
-        if bound is not None:
-            return bound
-
-        bound = bound_sympy(expr, self.replacement_vals)
+        if bound is None:
+            bound = bound_sympy(expr, self.replacement_vals)
+        # The following assertion is true at the time of this writing
+        # We don't assert is as to not execute bound_sympy when bound is not None
+        # assert bound is None or bound == bound_sympy(expr, self.replacement_vals)
         self.replacement_vals[name] = bound
         return bound
