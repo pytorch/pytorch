@@ -102,7 +102,9 @@ def generate_opcheck_tests(
         test_utils: a list of test_utils to generate. Example: ["test_schema", "test_faketensor"]
     """
     if not issubclass(testcase, unittest.TestCase):
-        raise ValueError(f"Expected testcase to be subclass of unittest.TestCase, got {type(testcase)}")
+        raise ValueError(
+            f"Expected testcase to be subclass of unittest.TestCase, got {type(testcase)}"
+        )
     test_methods = [
         m
         for m in dir(testcase)
@@ -222,7 +224,9 @@ class OpCheckMode(TorchFunctionMode):
             option = retrieve(self.failures_dict, qualname, self.test_name)
             if len(self.seen_ops_to_errors[qualname]) == 0:
                 if option == "xfail":
-                    raise OpCheckError(f"Unexpected success for operator {qualname} on test {self.test_name}")
+                    raise OpCheckError(
+                        f"Unexpected success for operator {qualname} on test {self.test_name}"
+                    )
                 continue
         for qualname in self.seen_ops_to_errors.keys():
             option = retrieve(self.failures_dict, qualname, self.test_name)
@@ -232,7 +236,9 @@ class OpCheckMode(TorchFunctionMode):
                 continue
             # Raise the first error
             ex = self.seen_ops_to_errors[qualname][0]
-            raise OpCheckError(f"{self.test_name} failed on operator {qualname}") from ex
+            raise OpCheckError(
+                f"{self.test_name} failed on operator {qualname}"
+            ) from ex
 
     def __exit__(self, *args, **kwargs):
         try:
@@ -283,6 +289,7 @@ class OpCheckMode(TorchFunctionMode):
         elif option == "skip":
             pass
         return result
+
 
 class OpCheckError(Exception):
     pass
