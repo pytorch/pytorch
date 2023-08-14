@@ -9,24 +9,24 @@ on:
   workflow_dispatch:
 
 jobs:
-  update-xla-commit-hash:
+  update-commit-hash:
     runs-on: ubuntu-latest
     environment: update-commit-hash
-    uses: ./.github/actions/update-commit-hash
-    with:
-      repo-name: xla
-      branch: master
-      updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
-      pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
-
-  update-triton-commit-hash:
-    runs-on: ubuntu-latest
-    environment: update-commit-hash
-    uses: ./.github/actions/update-commit-hash
-    with:
-      repo-owner: openai
-      repo-name: triton
-      branch: main
-      pin-folder: .ci/docker/ci_commit_pins
-      updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
-      pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+    steps:
+      - name: update-xla-commit-hash
+        continue-on-error: true
+        uses: ./.github/actions/update-commit-hash
+        with:
+          repo-name: xla
+          branch: master
+          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
+          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+      - name: update-triton-commit-hash
+        uses: ./.github/actions/update-commit-hash
+        with:
+          repo-owner: openai
+          repo-name: triton
+          branch: main
+          pin-folder: .ci/docker/ci_commit_pins
+          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
+          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
