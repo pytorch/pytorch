@@ -11,7 +11,11 @@ import warnings
 
 from typing import cast, Dict, Optional, Set
 
-import numpy as np
+try:
+    import numpy
+    HAS_NUMPY = True
+except ModuleNotFoundError:
+    HAS_NUMPY = False
 
 import torch
 import torch._functorch.deprecated as deprecated_func
@@ -20,6 +24,7 @@ from torch.fx._symbolic_trace import is_fx_tracing
 from . import config
 from .external_utils import is_compiling
 from .utils import is_safe_constant, NP_SUPPORTED_MODULES
+
 
 """
 A note on allowed functions:
