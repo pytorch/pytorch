@@ -95,8 +95,6 @@ CI_SKIP[CI("eager", training=False)] = [
     "hf_BigBird",  # fail_accuracy
     # TypeError: pad_center() takes 1 positional argument but 2 were given
     "tacotron2",
-    # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
-    "torchrec_dlrm",
     # Huggingface
     "DebertaV2ForQuestionAnswering",  # OOM
 ]
@@ -170,8 +168,6 @@ CI_SKIP[CI("aot_eager", training=True)] = [
 CI_SKIP[CI("inductor", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
-    # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
-    "torchrec_dlrm",
     "demucs",  # OOM
     "detectron2_fasterrcnn_r_101_c4",
     "detectron2_fasterrcnn_r_101_dc5",
@@ -223,8 +219,6 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "pyhpc_turbulent_kinetic_energy",
     "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
     "sage",  # does not work with fp32
-    # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
-    "torchrec_dlrm",
     # Huggingface
     "MBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94793
     "PLBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94794
@@ -239,7 +233,6 @@ CI_SKIP[CI("inductor", training=True)] = [
     *CI_SKIP[CI("inductor", training=False)],
     # TorchBench
     "Background_Matting",  # fp64_OOM
-    "dlrm",  # Fails on CI - unable to repro locally
     "hf_T5_base",  # accuracy
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
@@ -260,7 +253,6 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     "vision_maskrcnn",  # accuracy failure on boxes, after https://github.com/pytorch/pytorch/issues/101093
     # https://github.com/pytorch/pytorch/issues/103760
-    "dlrm",
     "hf_T5_generate",
     "hf_Bert",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
 ]
@@ -269,6 +261,7 @@ CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=True)],
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     "llama",  # AssertionError: cannot compute free_symbols of True
+    "torchrec_dlrm",  # RuntimeError: mat1 and mat2 must have the same dtype, but got Float and BFloat16
 ]
 
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
@@ -296,8 +289,6 @@ CI_SKIP_OPTIMIZER = {
     # TIMM
     "convmixer_768_32",  # accuracy
     "hrnet_w18",  # Stack issue in fx
-    # TorchBench
-    "dlrm",  # symbolic shapes error
     # HF
     "pnasnet5large",  # Stack issue in fx
     "MobileBertForMaskedLM",  # Stack issue in fx
@@ -311,6 +302,7 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     # It iterates over the batch, which is dynamic, and dynamo chokes
     # We should be able to graphbreak there.
     "doctr_det_predictor",
+    "dlrm",
 }
 
 
