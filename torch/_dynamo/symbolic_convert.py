@@ -1915,18 +1915,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.output.install_global(name, weakref.ref(value))
 
     def store_hook(self, name, value):
-        base = name
-        i = 0
-        while name in self.output.global_scope:
-            name = f"{base}_{i}"
-            i += 1
+        name = name + str(id(value))
 
-        src = GlobalWeakRefSource(name)
+        print("Hook store?", name, id(value))
+
+        src = GlobalSource(name)
         self.output.guards.add(
-           src.make_guard(GuardBuilder.WEAKREF_ALIVE)
+           src.make_guard(GuardBuilder.ID_MATCH)
         )
         if name not in self.output.global_scope:
-            self.output.install_global(name, weakref.ref(value))
+            self.output.install_global(name, value)
         return src
 
     @property

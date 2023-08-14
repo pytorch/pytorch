@@ -156,6 +156,7 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
         storage was already allocated.
     """
     with torch.no_grad():
+        # already_allocated = tensor._typed_storage()._size() == size.numel()
         already_allocated = torch._same_storage_size(tensor, size.numel())
         if not already_allocated:
             _p_assert(
@@ -175,6 +176,7 @@ def _free_storage(tensor: torch.Tensor) -> None:
         storage was already freed.
     """
     with torch.no_grad():
+        # already_freed = tensor._typed_storage()._size() == 0
         already_freed = not torch._storage_size_allocated(tensor)
         if not already_freed:
             _p_assert(
@@ -184,6 +186,7 @@ def _free_storage(tensor: torch.Tensor) -> None:
                 f"storage size: PLACEHOLDER\n"
                 f"tensor shape: {tensor.shape}",
             )
+            # torch.resize_storage_(tensor, 0)
             tensor._typed_storage()._resize_(0)
 
 

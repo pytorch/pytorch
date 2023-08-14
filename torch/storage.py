@@ -958,7 +958,7 @@ class TypedStorage:
                 resize_count_and_loc[(name, size)] = 1
             else:
                 resize_count_and_loc[(name, size)] += 1
-            print("RC", resize_count_and_loc)
+            # print("RC", resize_count_and_loc)
         self._untyped_storage.resize_(size * self._element_size())
 
     @classmethod

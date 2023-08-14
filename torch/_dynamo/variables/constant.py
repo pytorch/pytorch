@@ -77,8 +77,8 @@ class ConstantVariable(VariableTracker):
         return self.value
 
     def __str__(self):
-        # return f"ConstantVariable({self.value})"
-        return f"ConstantVariable({type(self.value).__name__})"
+        return f"ConstantVariable({self.value})"
+        # return f"ConstantVariable({type(self.value).__name__})"
 
     def python_type(self):
         return type(self.value)
@@ -219,7 +219,7 @@ class EnumVariable(VariableTracker):
         return self.value
 
     def __str__(self):
-        return f"EnumVariable({type(self.value)})"
+        return f"EnumVariable({type(self.value)}.{self.value})"
 
     def python_type(self):
         return type(self.value)

@@ -1210,6 +1210,8 @@ class BuiltinVariable(VariableTracker):
     def call_setattr(
         self, tx, obj: VariableTracker, name_var: VariableTracker, val: VariableTracker
     ):
+        from .nn_module import FSDPManagedNNModuleVariable
+        
         from .distributed import PlacementVariable
 
         if isinstance(
@@ -1225,6 +1227,8 @@ class BuiltinVariable(VariableTracker):
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
+            if isinstance(obj, FSDPManagedNNModuleVariable):
+                print("Setting on FSDPModule", name_var, val)
             tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
             if isinstance(obj, variables.TensorVariable):
                 from .builder import (
@@ -1250,7 +1254,7 @@ class BuiltinVariable(VariableTracker):
                         ),
                     )
                     tx.replace_all(obj, out)
-
+            
             return val.add_options(self, obj, name_var)
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(

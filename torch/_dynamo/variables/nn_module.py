@@ -850,7 +850,6 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     def as_python_constant(self):
         return self.value
 
-
 def _gen_source(source, name):
     name_split = name.split(".")
     if name_split[0] == "":

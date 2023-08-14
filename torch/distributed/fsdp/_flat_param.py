@@ -1142,7 +1142,7 @@ class FlatParamHandle:
                     device=self.device,
                     dtype=self._fwd_bwd_param_dtype,
                 )
-                flat_param._mp_shard = _free_storage(flat_param._mp_shard)
+                _free_storage(flat_param._mp_shard)
             if self.uses_sharded_strategy:
                 # We maintain a padded unsharded tensor that serves as the
                 # all-gather destination and owns the original parameter storages.
@@ -1158,7 +1158,7 @@ class FlatParamHandle:
                     dtype=unsharded_param_dtype,
                 )
                 flat_param._padded_unsharded_size = flat_param._full_param_padded.size()
-                flat_param._full_param_padded = _free_storage(flat_param._full_param_padded)
+                _free_storage(flat_param._full_param_padded)
 
                 if self._uses_param_mixed_precision:
                     # For parameter mixed precision, we maintain a full precision
@@ -1168,7 +1168,7 @@ class FlatParamHandle:
                         device=self.device,
                         dtype=flat_param.dtype,  # full precision
                     )
-                    flat_param._full_prec_full_param_padded = _free_storage(
+                    _free_storage(
                         flat_param._full_prec_full_param_padded
                     )
 
@@ -1402,7 +1402,7 @@ class FlatParamHandle:
         _no_dispatch_record_stream(
             self.flat_param._mp_shard, self._device_handle.current_stream()  # type: ignore[attr-defined]
         )
-        self.flat_param._mp_shard = _free_storage(self.flat_param._mp_shard)  # type: ignore[attr-defined]
+        _free_storage(self.flat_param._mp_shard)  # type: ignore[attr-defined]
 
     @torch.no_grad()
     def unshard_grad(self):
@@ -1674,7 +1674,7 @@ class FlatParamHandle:
         _no_dispatch_record_stream(
             unsharded_flat_param, self._device_handle.current_stream()
         )
-        unsharded_flat_param = _free_storage(unsharded_flat_param)
+        _free_storage(unsharded_flat_param)
 
     def _use_sharded_flat_param(self) -> None:
         """Switches to using the sharded flat parameter."""
