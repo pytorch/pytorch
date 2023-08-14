@@ -1678,8 +1678,11 @@ def tensors_definitely_do_not_overlap(x, y):
             if offset_delta < x.size(1):
                 # definitely overlaps (row 0 of y overlaps with row 0 of x)
                 # Example:
-                #   x: size=(4, 4), stride=(8, 1), offset=0
-                #   y: size=(4, 4), stride=(8, 1), offset=3
+                #   base = torch.arange(32).reshape(4, 8)
+                #   x = base.narrow(1, 0, 4)
+                #     x: size=(4, 4), stride=(8, 1), offset=0
+                #   y = base.narrow(1, 3, 4)
+                #     y: size=(4, 4), stride=(8, 1), offset=3
                 return False
             x_total_elems_covered = x.stride(0) * (x.size(0) - 1) + x.size(1)
             if x_total_elems_covered <= offset_delta:
