@@ -28,7 +28,7 @@ pip_install \
 # Using 1.15dev branch for the following not yet released features and fixes.
 # - Segfault fix for shape inference.
 # - Inliner to workaround ORT segfault.
-pip_install onnx-weekly==1.15.0.dev20230717
+pip_install -i https://test.pypi.org/simple/ onnx==1.14.1rc2
 
 # TODO: change this when onnx-script is on testPypi
 # pip_install onnxscript-preview==0.1.0.dev20230809 --no-deps
