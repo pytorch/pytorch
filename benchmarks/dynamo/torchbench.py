@@ -55,6 +55,7 @@ USE_SMALL_BATCH_SIZE = {
     "hf_Reformer": 4,
     "hf_T5_base": 4,
     "timm_efficientdet": 1,
+    "llama_v2_7b_16h": 1,
 }
 
 DETECTRON2_MODELS = {
@@ -76,6 +77,10 @@ SKIP = {
     "fambench_xlmr",
     # TIMEOUT, https://github.com/pytorch/pytorch/issues/98467
     "tacotron2",
+    "hf_Bert",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
+    "hf_Bert_large",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
+    # takes too long, extreme slowdown (< .001)
+    "maml",
 }
 
 SKIP_FOR_CPU = {
@@ -83,6 +88,8 @@ SKIP_FOR_CPU = {
     "cm3leon_generate",  # model is CUDA only
     "nanogpt_generate",  # timeout
     "sam",  # timeout
+    "llama_v2_7b_16h",  # model is CUDA only
+    "stable_diffusion",  # flaky
 }
 
 SKIP_FOR_CUDA = {
@@ -99,6 +106,7 @@ SKIP_TRAIN = {
     "pyhpc_turbulent_kinetic_energy",
     "maml",
     "llama",
+    "llama_v2_7b_16h",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -197,6 +205,7 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "hf_T5_large",
     "timm_vision_transformer_large",
     "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "llama_v2_7b_16h",
 }
 
 SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
@@ -296,8 +305,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             try:
                 module = importlib.import_module(c)
                 break
-            except ModuleNotFoundError:
-                pass
+            except ModuleNotFoundError as e:
+                if e.name != c:
+                    raise
         else:
             raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)
@@ -334,7 +344,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             benchmark = benchmark_cls(
                 test="train",
                 device=device,
-                jit=False,
                 batch_size=batch_size,
                 extra_args=extra_args,
                 model_kwargs=model_kwargs,
@@ -343,7 +352,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             benchmark = benchmark_cls(
                 test="train",
                 device=device,
-                jit=False,
                 batch_size=batch_size,
                 extra_args=extra_args,
             )
@@ -351,7 +359,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             benchmark = benchmark_cls(
                 test="eval",
                 device=device,
-                jit=False,
                 batch_size=batch_size,
                 extra_args=extra_args,
             )
