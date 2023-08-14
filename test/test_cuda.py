@@ -3289,6 +3289,9 @@ class TestCudaMallocAsync(TestCase):
         try:
             torch.cuda.memory.empty_cache()
             torch.cuda.memory._record_memory_history("state", stacks="python")
+            # make x the second block in a segment
+            torch.rand(2 * 311, 411, device='cuda')
+            unused = torch.rand(310, 410, device='cuda')
             x = torch.rand(311, 411, device='cuda')
 
             # create a bunch of tensors that all will tile into the
@@ -3311,6 +3314,7 @@ class TestCudaMallocAsync(TestCase):
                     if b['requested_size'] == 311 * 411 * 4:
                         self.assertTrue('test_cuda' in b['frames'][0]['filename'])
                         found_it = True
+                        self.assertEqual(x.untyped_storage().data_ptr(), b['address'])
             self.assertTrue(found_it)
 
             if not IS_WINDOWS:
@@ -3318,7 +3322,7 @@ class TestCudaMallocAsync(TestCase):
                     torch.cuda.memory._save_segment_usage(f.name)
                     with open(f.name) as f2:
                         self.assertTrue('test_cuda.py' in f2.read())
-
+            del unused
             del x
             torch.cuda.empty_cache()
             ss = torch.cuda.memory._snapshot()
