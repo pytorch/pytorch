@@ -1748,8 +1748,7 @@ Arguments:
           .def(
               "_has_hooks",
               &::c10d::ProcessGroup::hasHooks,
-              py::call_guard<py::gil_scoped_acquire>()
-          );
+              py::call_guard<py::gil_scoped_acquire>());
 
   py::enum_<::c10d::ProcessGroup::BackendType>(processGroup, "BackendType")
       .value("UNDEFINED", ::c10d::ProcessGroup::BackendType::UNDEFINED)

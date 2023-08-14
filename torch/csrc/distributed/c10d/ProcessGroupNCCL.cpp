@@ -813,25 +813,29 @@ void ProcessGroupNCCL::registerOnCompletionHook(
 // must release GIL when calling this method
 void ProcessGroupNCCL::waitForPendingWorks() {
   // Reasoning about hook completion:
-  // 1. waitForPendingWorks should be called after user code has finished calling
-  //    all collectives. This means, when we got here, all of the collectives are
-  //    either in workMetaList_ or has been erased from workMetaList_.
+  // 1. waitForPendingWorks should be called after user code has finished
+  // calling
+  //    all collectives. This means, when we got here, all of the collectives
+  //    are either in workMetaList_ or has been erased from workMetaList_.
   // 2. The watchdog thread grabs both locks to move Work object from the
   //    workMetaList_ to the completedWorkList_, and the hook thread only erases
-  //    a Work object after the hook is returned. Therefore, after user code calls
-  //    a collective, its Work object is either in workMetaList_ or in
+  //    a Work object after the hook is returned. Therefore, after user code
+  //    calls a collective, its Work object is either in workMetaList_ or in
   //    completedWorkList_ before it finishes.
   // 3. We have three threads and two locks.
   //      a. main thread (this function) grabs two locks atomically
-  //      b. watchdog thread (workCleanupLoop function) always grabs workMetaListMutex_
+  //      b. watchdog thread (workCleanupLoop function) always grabs
+  //      workMetaListMutex_
   //         first and then grabs completedWorkListMutex_.
-  //      c. hook thread (runHookLoop function) only grabs completedWorkListMutex_.
-  //      Therefore, locks are always acquired in the same order and hence no deadlocks.
+  //      c. hook thread (runHookLoop function) only grabs
+  //      completedWorkListMutex_. Therefore, locks are always acquired in the
+  //      same order and hence no deadlocks.
   while (true) {
     {
       std::lock(workMetaListMutex_, completedWorkListMutex_);
       std::lock_guard<std::mutex> lockWork(workMetaListMutex_, std::adopt_lock);
-      std::lock_guard<std::mutex> lockHook(completedWorkListMutex_, std::adopt_lock);
+      std::lock_guard<std::mutex> lockHook(
+          completedWorkListMutex_, std::adopt_lock);
 
       if (workMetaList_.empty() && completedWorkList_.empty()) {
         return;
@@ -961,7 +965,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
         [&]() -> bool { return terminateProcessGroup_.load(); });
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
-          /* no increment */) {
+         /* no increment */) {
       auto& work = *it;
       work.checkAndSetException();
       bool timedOut = work.checkTimeout();
@@ -978,12 +982,11 @@ void ProcessGroupNCCL::workCleanupLoop() {
         // Report desync state in case of timeout
         if (desyncDebug_ && timedOut) {
           try {
-            auto desyncMsg =
-                retrieveDesyncReport(store_, "NCCL", rank_, size_);
+            auto desyncMsg = retrieveDesyncReport(store_, "NCCL", rank_, size_);
             LOG(ERROR) << desyncMsg;
           } catch (const std::exception& e) {
             LOG(ERROR) << "Failed to retrieve NCCL_DESYNC_DEBUG report. "
-                        << " Please file an issue. Error: " << e.what();
+                       << " Please file an issue. Error: " << e.what();
           } catch (...) {
             LOG(ERROR)
                 << "Failed to rerieve NCCL_DESYNC_DEBUG report with unknown error."
@@ -1007,10 +1010,12 @@ void ProcessGroupNCCL::workCleanupLoop() {
       // Clean up completed work
       if (work.isCompleted()) {
         if (onCompletionHook_) {
-          // Move Work object to completedWorkList_ to be consumed by the hook thread
+          // Move Work object to completedWorkList_ to be consumed by the hook
+          // thread
           {
             const std::lock_guard<std::mutex> lock(completedWorkListMutex_);
-            completedWorkList_.splice(completedWorkList_.end(), workMetaList_, it++);
+            completedWorkList_.splice(
+                completedWorkList_.end(), workMetaList_, it++);
           }
           completedWorkListCV_.notify_one();
         } else {
@@ -1036,7 +1041,9 @@ void ProcessGroupNCCL::runHookLoop() {
     completedWorkListCV_.wait_for(
         lock,
         std::chrono::milliseconds(kWatchdogThreadSleepMillis),
-        [&]() -> bool { return !completedWorkList_.empty() || terminateProcessGroup_.load(); });
+        [&]() -> bool {
+          return !completedWorkList_.empty() || terminateProcessGroup_.load();
+        });
 
     try {
       for (auto it = completedWorkList_.begin(); it != completedWorkList_.end();
