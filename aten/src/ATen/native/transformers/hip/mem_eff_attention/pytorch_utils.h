@@ -10,8 +10,10 @@
 #include <ATen/core/TensorBody.h>
 #include <c10/util/Exception.h>
 
-#include <cutlass/bfloat16.h>
-#include <cutlass/half.h>
+//#include <cutlass/bfloat16.h>
+//#include <cutlass/half.h>
+
+#include <ck/utility/data_type.hpp>
 
 /**
  * kernels expect 4D bias/bias.grad with shape
@@ -62,8 +64,8 @@ template <typename scalar_t>
 struct CutlassToAtenDtype;
 
 template <>
-struct CutlassToAtenDtype<cutlass::half_t> {
-  using scalar_t = cutlass::half_t;
+struct CutlassToAtenDtype<ck::half_t> {
+  using scalar_t = ck::half_t;
 
   static constexpr __host__ at::ScalarType atScalarType() {
     return at::ScalarType::Half;
@@ -71,8 +73,8 @@ struct CutlassToAtenDtype<cutlass::half_t> {
 };
 
 template <>
-struct CutlassToAtenDtype<cutlass::bfloat16_t> {
-  using scalar_t = cutlass::bfloat16_t;
+struct CutlassToAtenDtype<ck::bhalf_t> {
+  using scalar_t = ck::bhalf_t;
 
   static constexpr __host__ at::ScalarType atScalarType() {
     return at::ScalarType::BFloat16;
