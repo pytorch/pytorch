@@ -67,6 +67,16 @@ def fuse(node1: "BaseSchedulerNode", node2: "BaseSchedulerNode"):
         return FusedSchedulerNode.fuse(node1, node2)
 
 
+# TODO(xmfan): reuse an existing mapping for this if it exists, or formalize this into ir.py:ExternKernel
+kernel_name_to_op = {
+    "extern_kernels.convolution": torch.ops.aten.convolution,
+    "extern_kernels.mm": torch.ops.aten.mm,
+    "extern_kernels.bmm": torch.ops.aten.bmm,
+    "extern_kernels.addmm": torch.ops.aten.addmm,
+    "extern_kernels.baddbmm": torch.ops.aten.baddbmm,
+}
+
+
 class BaseSchedulerNode:
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer):
         self.scheduler: Scheduler = scheduler
@@ -414,61 +424,27 @@ class BaseSchedulerNode:
             # default to no reordering based on runtime
             return 0
 
-        from triton.testing import get_dram_gbps
-
         # TODO(xmfan): figure out how to get hardware specs
         try:
+            from triton.testing import get_dram_gbps
             gpu_memory_bandwidth = get_dram_gbps()
             gpu_flops = get_device_flops(dtype)
         except Exception:
             return 0
 
-        def handle_extern_kernel(snode: ExternKernelSchedulerNode):
-            from torch.utils.flop_counter import (
-                addmm_flop,
-                baddbmm_flop,
-                bmm_flop,
-                conv_flop,
-                mm_flop,
-            )
-
-            inputs = snode.node.inputs
-            input_shapes = [i.get_size() for i in inputs]
-            op = getattr(snode.node, "kernel", "")
-            if op == "extern_kernels.convolution":
-                assert len(inputs) == 2
-
-                return (
-                    1
-                    / gpu_flops
-                    * conv_flop(
-                        x_shape=input_shapes[0],
-                        w_shape=input_shapes[1],
-                        out_shape=snode.node.get_size(),
-                        transposed=snode.node.kwargs.get("transposed", False),
-                        _bias=None,
-                        _stride=None,
-                        _padding=None,
-                        _dilation=None,
-                    )
-                )
-            elif op == "extern_kernels.mm":
-                assert len(inputs) == 2
-                return 1 / gpu_flops * mm_flop(*input_shapes)
-            elif op == "extern_kernels.bmm":
-                assert len(inputs) == 2
-                return 1 / gpu_flops * bmm_flop(*input_shapes)
-            elif op == "extern_kernels.addmm":
-                assert len(inputs) == 3
-                return 1 / gpu_flops * addmm_flop(*input_shapes)
-            elif op == "extern_kernels.baddbmm":
-                assert len(inputs) == 3
-                return 1 / gpu_flops * baddbmm_flop(*input_shapes)
-
-            return 0
-
         if isinstance(self, ExternKernelSchedulerNode):
-            return handle_extern_kernel(self)
+            op = kernel_name_to_op.get(getattr(self.node, "kernel", ""), None)
+
+            # if there is a resolved op, dry-run using fake mode and record flop count
+            if op is not None:
+                from torch.utils.flop_counter import FlopCounterMode
+                with V.graph.fake_mode, FlopCounterMode(display=False) as flop_counter_mode:
+                    from .ir import ir_node_to_tensor
+
+                    fake_inputs = [ir_node_to_tensor(input) for input in self.node.inputs]
+                    cls = self.node.__class__
+                    output, *_ = cls.process_kernel(op, *fake_inputs, **self.node.kwargs)
+                    return flop_counter_mode.get_total_flops() / gpu_flops
         elif isinstance(self, FusedSchedulerNode) or isinstance(
             self.node, ComputedBuffer
         ):
