@@ -457,6 +457,7 @@ def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     return torch.where(torch.abs(a) <= lambd, 0, a)
 
 
+@aten.softshrink.default.py_impl(DispatchKey.Autograd)
 @register_decomposition(aten.softshrink)
 @out_wrapper()
 def softshrink(a: TensorLikeType, lambd: float = 0.5):
@@ -468,8 +469,9 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
         lambd >= 0,
         lambda: f"lambda must be greater or equal to 0, but found to be {lambd}",
     )
-    ret = torch.where(a > lambd, a - lambd, 0)
-    return torch.where(a < -lambd, a + lambd, ret)
+    # We implement this in one torch.where to generate better code in the backward
+    # see https://github.com/pytorch/pytorch/pull/107052#discussion_r1293748211
+    return torch.where(torch.abs(a) > lambd, a - torch.sign(a) * lambd, 0)
 
 
 # Losses
