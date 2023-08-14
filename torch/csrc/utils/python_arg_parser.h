@@ -135,6 +135,8 @@ struct ParsedArgs {
   PyObject* args[N];
 };
 
+// A PythonArgParser contains a list of valid signatures. Instances are
+// typically global variables and should be immutable.
 struct PYBIND11_EXPORT PythonArgParser {
   explicit PythonArgParser(
       const std::vector<std::string>& fmts,
@@ -179,6 +181,9 @@ struct PYBIND11_EXPORT PythonArgParser {
   bool traceable;
 };
 
+// FunctionSignature represents a single valid signature for a Python function.
+// It is immutable once constructed. The contained data can be concurrently
+// accessed by multiple calls.
 struct FunctionSignature {
   explicit FunctionSignature(const std::string& fmt, int index);
 
@@ -203,6 +208,8 @@ struct FunctionSignature {
   bool deprecated;
 };
 
+// PythonArgs contains bound Python arguments for an actual invocation
+// along with references to the matched signature.
 struct PYBIND11_EXPORT PythonArgs {
   PythonArgs(
       bool traceable,
@@ -300,6 +307,8 @@ struct PYBIND11_EXPORT PythonArgs {
   at::Scalar scalar_slow(PyObject* arg);
 };
 
+// FunctionParameter is a single formal parameter of a Python function.
+// It is immutable once constructed.
 struct FunctionParameter {
   FunctionParameter(const std::string& fmt, bool keyword_only);
 
