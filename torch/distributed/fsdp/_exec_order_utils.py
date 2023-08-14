@@ -37,12 +37,8 @@ class _ExecOrderData:
         # Tracks the (static) pre-forward order for execution order validation
         # and forward prefetching
         self.handles_pre_forward_order: List[FlatParamHandle] = []
-        # Maps each handles key to its index in `handles_pre_forward_order`
-        self.handles_to_pre_forward_order_index: Dict[FlatParamHandle, int] = {}
         # Tracks the post-forward order for pre-backward prefetching
-        self.handles_post_forward_order: List[FlatParamHandle] = []
-        # Maps each handles key to its index in `handles_post_forward_order`
-        self.handles_to_post_forward_order_index: Dict[FlatParamHandle, int] = {}
+        self.handles_post_forward_order: List[Optional[FlatParamHandle]] = []
         self._iter = 0
 
         # Gives the max number of backward/forward prefetched all-gathers by a
@@ -58,9 +54,6 @@ class _ExecOrderData:
         self.process_group: Optional[dist.ProcessGroup] = None
         self.world_size: Optional[int] = None
         self.all_handles: List[FlatParamHandle] = []
-        # Maps each handle to its index in `all_handles`, which must be the
-        # same across ranks for the execution order validation to work
-        self.handle_to_handle_index: Dict[FlatParamHandle, int] = {}
         # Names are prefixed from the root module
         self.param_to_fqn: Dict[nn.Parameter, List[str]] = {}
         # Current index in the pre-forward execution order
@@ -85,7 +78,7 @@ class _ExecOrderData:
         for handle in traversal_utils._get_fsdp_handles(root_module):
             index = len(self.all_handles)
             self.all_handles.append(handle)
-            self.handle_to_handle_index[handle] = index
+            handle._handle_index = index
         self.param_to_fqn = _get_param_to_fqns(root_module)
         # TODO (awgu): We can broadcast the metadata of rank 0's `all_handles`
         # to check that all ranks have the same handles in the same order.
@@ -104,9 +97,7 @@ class _ExecOrderData:
         prefetch given the current handles key. If there are no valid handles
         keys to prefetch, then this returns an empty :class:`list`.
         """
-        current_index = self.handles_to_post_forward_order_index.get(
-            current_handle, None
-        )
+        current_index = current_handle._post_forward_index
         if current_index is None:
             return None
         target_index = current_index - 1
@@ -127,9 +118,7 @@ class _ExecOrderData:
         prefetch given the current handles key. If there are no valid handles
         keys to prefetch, then this returns an empty :class:`list`.
         """
-        current_index = self.handles_to_pre_forward_order_index.get(
-            current_handle, None
-        )
+        current_index = current_handle._pre_forward_order_index
         if current_index is None:
             return None
         target_index = current_index + 1
@@ -154,10 +143,11 @@ class _ExecOrderData:
         if not handle:
             return
         # Only record the first usage of a handles key
-        if handle in self.handles_to_post_forward_order_index:
+        if handle._post_forward_index:
+            self.handles_post_forward_order.append(handle)
             return
         index = len(self.handles_post_forward_order)
-        self.handles_to_post_forward_order_index[handle] = index
+        handle._post_forward_index = index
         self.handles_post_forward_order.append(handle)
 
     def record_pre_forward(
@@ -176,10 +166,10 @@ class _ExecOrderData:
         self._check_order(handle, is_training)
         # Fix the order after the first iteration and only record the first
         # usage of a handles key
-        if not self.is_first_iter or handle in self.handles_to_pre_forward_order_index:
+        if not self.is_first_iter or handle._pre_forward_order_index:
             return
         index = len(self.handles_pre_forward_order)
-        self.handles_to_pre_forward_order_index[handle] = index
+        handle._pre_forward_order_index = index
         self.handles_pre_forward_order.append(handle)
 
     def _check_order(self, handle: FlatParamHandle, is_training: bool) -> None:
@@ -227,18 +217,22 @@ class _ExecOrderData:
             # TODO (awgu): Since every module has at most one handle in the
             # current implementation, this should never raise the error.
             assert self.world_size is not None  # mypy
-            for (r1, n1), (r2, n2) in itertools.combinations(
-                (
-                    (rank, world_num_valid_indices[rank])
-                    for rank in range(self.world_size)
-                ),
-                2,
-            ):
-                if n1 != n2:
-                    raise RuntimeError(
-                        f"{msg_prefix} rank {r1} is all-gathering {n1} parameters "
-                        f"while rank {r2} is all-gathering {n2} parameters"
-                    )
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                # TODO(voz): Don't graph break on this - dynamo hates the n1 != n2
+                # tensor comparison control flow.
+                # https://github.com/pytorch/pytorch/issues/107055
+                for (r1, n1), (r2, n2) in itertools.combinations(
+                    (
+                        (rank, world_num_valid_indices[rank])
+                        for rank in range(self.world_size)
+                    ),
+                    2,
+                ):
+                    if n1 != n2:
+                        raise RuntimeError(
+                            f"{msg_prefix} rank {r1} is all-gathering {n1} parameters "
+                            f"while rank {r2} is all-gathering {n2} parameters"
+                        )
             world_indices = torch.zeros(  # type: ignore[call-overload]
                 self.world_size * num_valid_indices, **tensor_kwargs
             )
@@ -249,26 +243,32 @@ class _ExecOrderData:
             # Copy entire tensor from D2H once to avoid per element D2H copies
             world_indices = world_indices.cpu()
             # Check that all ranks plan to all-gather the same index parameters
-            for (r1, i1), (r2, i2) in itertools.combinations(
-                (
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                # TODO(voz): Don't graph break on this - dynamo hates the i1 != i2
+                # tensor comparison control flow.
+                # https://github.com/pytorch/pytorch/issues/107055
+                for (r1, i1), (r2, i2) in itertools.combinations(
                     (
-                        rank,
-                        world_indices[
-                            rank * num_valid_indices : (rank + 1) * num_valid_indices
-                        ],
-                    )
-                    for rank in range(self.world_size)
-                ),
-                2,
-            ):
-                if i1 != i2:
-                    r1_param_names = self._get_names_from_handle_indices(i1)
-                    r2_param_names = self._get_names_from_handle_indices(i2)
-                    raise RuntimeError(
-                        f"{msg_prefix} rank {r1} is all-gathering parameters "
-                        f"for {r1_param_names} while rank {r2} is all-gathering "
-                        f"parameters for {r2_param_names}"
-                    )
+                        (
+                            rank,
+                            world_indices[
+                                rank
+                                * num_valid_indices : (rank + 1)
+                                * num_valid_indices
+                            ],
+                        )
+                        for rank in range(self.world_size)
+                    ),
+                    2,
+                ):
+                    if i1 != i2:
+                        r1_param_names = self._get_names_from_handle_indices(i1)
+                        r2_param_names = self._get_names_from_handle_indices(i2)
+                        raise RuntimeError(
+                            f"{msg_prefix} rank {r1} is all-gathering parameters "
+                            f"for {r1_param_names} while rank {r2} is all-gathering "
+                            f"parameters for {r2_param_names}"
+                        )
         elif self._checking_order:
             # Only issue warnings on the first deviating iteration and stop
             # checking thereafter to avoid flooding the console
@@ -317,10 +317,7 @@ class _ExecOrderData:
         """
         indices: List[Optional[int]] = []
         if handle:
-            if handle not in self.handle_to_handle_index:
-                indices.append(None)
-            else:
-                indices.append(self.handle_to_handle_index[handle])
+            indices.append(handle._handle_index)
         return tuple(indices)
 
     def _get_names_from_handle_indices(
@@ -363,7 +360,6 @@ class _ExecOrderData:
         an iteration.
         """
         self._iter += 1
-        self.handles_to_post_forward_order_index.clear()
         self.handles_post_forward_order.clear()
         if self._checking_order:
             self.current_order_index = 0
