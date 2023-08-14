@@ -11901,7 +11901,7 @@ class TestNNDeviceType(NNTestCase):
             out_2 = loss_2(input_2, target)
             self.assertEqual(out_1, out_2, atol=1e-1, rtol=0)
         else:
-            target = torch.empty(15, 10, 20, dtype=torch.float, device=device).random_(10)
+            target = torch.empty(15, 20, dtype=torch.long, device=device).random_(10)
             out_1 = loss_1(input_1, target)
             out_2 = loss_2(input_2, target)
             self.assertEqual(out_1, out_2, atol=1e-1, rtol=0)
