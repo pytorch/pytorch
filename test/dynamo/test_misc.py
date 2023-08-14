@@ -7338,6 +7338,7 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertTrue(isinstance(compiled, torch.Tensor))
 
+<<<<<<< HEAD
     def test_yield_from(self):
         def yield_from_fn(t_list, k):
             def yield_from_gen(l):
@@ -7922,6 +7923,9 @@ ShapeEnv not equal: field values don't match:
             all("aten.pow" not in code for code in source_code),
             msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
         )
+=======
+    def test_tensor_typed_storage
+>>>>>>> b8a4123f097 (woof)
 
     def test_funcname_cache(self):
         src = """\

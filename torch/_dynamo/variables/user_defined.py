@@ -733,13 +733,16 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
         options = VariableTracker.propagate(self)
         if name == "register_hook":
             # print("REGISTERING?", args)
-            print("AGV register hook")
-            handle = self.value.register_hook(args[0].fn)
-            args[0].fn.source = tx.store_hook(args[0].fn.func.__name__, args[0].fn)
+            pf = args[0].fn
+            print("AGV register hook", id(pf.args[0]), pf.args[0].training_state)
+            handle = self.value.register_hook(pf)
+            name = pf.func.__name__ + str(id(pf.func))
+            pf.source = tx.store_hook(name, pf)
             
-            tx.output.side_effects.register_hook(self, args[0].fn)
+            tx.output.side_effects.register_hook(self, pf)
             # print("Handle is?", handle, self.proxy)
-            tx.store_hook_handle("register_hook", handle)
+            handle.remove()
+            tx.store_hook_handle(name, handle)
             return RemovableHandleVariableTracker(handle, name, **options)
         return super().call_method(tx, name, args, kwargs)
 
