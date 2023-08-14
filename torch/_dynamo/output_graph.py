@@ -352,6 +352,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # back for backend errors.
         self.has_user_defined_allowed_in_graph = False
 
+
         # We save the global torch state here to be restored in case of graph
         # breaks. The relevant issue is seen here
         # https://github.com/pytorch/pytorch/pull/100570#issuecomment-1543427086

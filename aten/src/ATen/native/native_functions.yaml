@@ -196,6 +196,13 @@
 
 - func: _storage_size_allocated(Tensor(a!) self) -> bool
 
+- func: resize_storage_(Tensor(a!) self, int s) -> Tensor(a!)
+  dispatch:
+    CPU: resize_storage_cpu_
+    CUDA: resize_storage_cuda_
+    Meta: resize_storage_meta_
+  autogen: resize_storage, resize_storage.out
+
 - func: sym_constrain_range_for_size(Scalar size, *, int? min=None, int? max=None) -> ()
   dispatch:
     CompositeExplicitAutograd: sym_constrain_range_for_size

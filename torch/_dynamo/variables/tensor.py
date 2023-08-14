@@ -38,7 +38,7 @@ from ..utils import (
     proxy_args_kwargs,
     tensortype_to_dtype,
 )
-from .base import VariableTracker
+from .base import VariableTracker, MutableLocal
 from .constant import ConstantVariable
 from .lists import SizeVariable
 
@@ -683,6 +683,13 @@ class TensorVariable(VariableTracker):
             assert len(args) == 1
             fn_var = args[0]
             self.as_proxy().node.meta["example_value"].register_hook(fn_var.fn)
+            # if self.source:
+            print("Reg register hook", fn_var)
+            fn_var.source = tx.store_hook(fn_var.fn.func.__name__, fn_var.fn)
+            
+            tx.output.side_effects.register_hook(self, fn_var)
+            # else:
+                # print("No source hook")
             return ConstantVariable(None)
         elif name == "redistribute":
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
@@ -1091,17 +1098,19 @@ class TypedStorageVariable(VariableTracker):
             #         # **options,
             # )
             # return self.original
-            wrap_fx_proxy(
+            new_t = wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
-                    "call_method",
-                    "_resize_",
-                    *proxy_args_kwargs([self] + list(args), {}),
+                    "call_function",
+                    torch.resize_storage_,
+                    *proxy_args_kwargs([self.original] + list(args), {}),
                 ),
                 allow_none=True,
-                example_value=None,
+                example_value=self.original.as_proxy().node.meta['example_value'],
                 # **options,
             )
-            return self.original
+            self.original.mutable_local = MutableLocal()
+            return tx.replace_all(self.original, new_t)
+            return new_t
             # return ConstantVariable(None)
         unimplemented(f"typed_storage method call {name} - NYI")

@@ -17,6 +17,7 @@ void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
   TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
   auto allocator = storage->allocator();
   TORCH_CHECK(allocator != nullptr, "Trying to resize storage without an allocator");
+
   auto device = at::cuda::current_device();
   if (size_bytes == 0) {
     storage->set_data_ptr_noswap(at::DataPtr(nullptr, at::Device(at::DeviceType::CUDA, device)));

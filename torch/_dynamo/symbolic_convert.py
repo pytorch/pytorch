@@ -601,7 +601,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             assert isinstance(
                 oldvar.mutable_local,
                 (variables.base.MutableLocal, side_effects.AttributeMutation),
-            )
+            ), f"ML: {oldvar.mutable_local}"
             newvar = newvar.clone(mutable_local=oldvar.mutable_local)
         self.update_locals_and_stack(oldvar, newvar)
         return newvar
@@ -1913,6 +1913,15 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
         if name not in self.output.global_scope:
             self.output.install_global(name, weakref.ref(value))
+
+    def store_hook(self, name, value):
+        src = GlobalWeakRefSource(name)
+        self.output.guards.add(
+           src.make_guard(GuardBuilder.WEAKREF_ALIVE)
+        )
+        if name not in self.output.global_scope:
+            self.output.install_global(name, weakref.ref(value))
+        return src
 
     @property
     def fake_mode(self):

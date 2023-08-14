@@ -952,8 +952,8 @@ class TypedStorage:
         if gpu_id == 0:
             global resize_count_and_loc
             name = who_called_me(3)
-            if name == 'decorate_context':
-                traceback.print_stack()
+            # if name == 'call_function':
+                # traceback.print_stack()
             if (name, size) not in resize_count_and_loc:
                 resize_count_and_loc[(name, size)] = 1
             else:
