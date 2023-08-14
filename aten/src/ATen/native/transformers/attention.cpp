@@ -794,9 +794,11 @@ _scaled_dot_product_flash_attention_cpu(
   TORCH_CHECK(c10::isFloatingType(dtype) && dtype != ScalarType::Half,
     "scaled_dot_product_attention_flash_attention: Expected data type in FP32, FP64, BF16, but got ", dtype, " instead.");
   TORCH_CHECK(query.dim() == 4 && key.dim() == 4 && value.dim() == 4,
-   "scaled_dot_product_attention_flash_attention: Accept only 4 dims inputs shape of {B, H, T, K}");
+    "scaled_dot_product_attention_flash_attention: Accept only 4 dims inputs shape of {B, H, T, K}");
   TORCH_CHECK(dropout_p < 1e-5,
-   "scaled_dot_product_attention_flash_attention: Currently do not support dropout > 0");
+    "scaled_dot_product_attention_flash_attention: Currently do not support dropout > 0");
+  TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
+    "scaled_dot_product_attention_flash_attention: Q/K/V should have the same head size");
 
   at::Tensor output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
   const auto accumulate_dtype = toOpMathType(dtype);
