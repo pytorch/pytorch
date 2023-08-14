@@ -86,12 +86,19 @@ class AllReduce:
     def work(self, data):
         for i in range(len(data[0])):
             tensors = []
+            # use rank0 as the device for sum
+            rank_0_device = data[0][i].device
+            # collect all data to the list and make them
+            # all on rank 0 device
             for src_rank in range(0, len(data)):
-                tensors.append(data[src_rank][i])
+                tensors.append(data[src_rank][i].to(rank_0_device))
+
+            # now mimic reduce across all ranks
             res = _reduce_ops[self.op](tensors)
-            with torch.no_grad():
-                for src_rank in range(len(data)):
-                    data[src_rank][i].copy_(res)
+
+            # copy all the reduced value to each rank
+            for src_rank in range(len(data)):
+                data[src_rank][i].copy_(res.to(data[src_rank][i].device))
 
 
 class AllGather:
