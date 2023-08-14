@@ -282,7 +282,7 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
 
         if get_nvprim_dump_nvtx():
             torch.cuda.nvtx.range_push(
-                "fusion: {}, graph: {}".format(
+                "fusion: {0}, graph: {1}".format(
                     fusion.id(),
                     str(
                         [
@@ -297,7 +297,6 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
                     ),
                 )
             )
-        warn("nvfuser integration in primTorch is deprecated")
         result = tree_unflatten(
             fusion.execute(concrete_fusion_inputs),  # type: ignore[has-type]
             unflatten_spec,  # type: ignore[has-type]
@@ -476,7 +475,9 @@ def maybe_partition_graph(
 class NVTXInterpreter(torch.fx.Interpreter):
     def run_node(self, n):
         torch.cuda.nvtx.range_push(
-            f"name: {n.name}, args: {n.args}, op: {n.op}, kwargs: {n.kwargs}"
+            "name: {0}, args: {1}, op: {2}, kwargs: {3}".format(
+                n.name, n.args, n.op, n.kwargs
+            )
         )
         result = super().run_node(n)
         torch.cuda.nvtx.range_pop()

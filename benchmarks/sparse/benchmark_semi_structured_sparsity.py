@@ -1,12 +1,11 @@
-import argparse
 import random
-
-import pandas as pd
 import torch
 import torch.utils.benchmark as benchmark
 from torch import nn
-from torch.sparse import to_sparse_semi_structured
 from tqdm import tqdm
+import pandas as pd
+import argparse
+from torch.sparse import to_sparse_semi_structured
 
 
 torch.set_printoptions(
@@ -63,11 +62,7 @@ def test_linear(m, k, n, dtype, contiguous, backend):
     dense_output = model(input_tensor)
 
     # sparsify weights
-    model.linear.weight = nn.Parameter(
-        to_sparse_semi_structured(
-            sparse_weight,
-        )
-    )
+    model.linear.weight = nn.Parameter(to_sparse_semi_structured(sparse_weight,))
 
     sparse_output = model(input_tensor)
 

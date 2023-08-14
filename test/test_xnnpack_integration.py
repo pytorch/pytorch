@@ -31,7 +31,7 @@ class TestXNNPACKOps(TestCase):
         input_data = torch.rand(data_shape)
         weight = torch.rand((weight_output_dim, data_shape[-1]))
         if use_bias:
-            bias = torch.rand(weight_output_dim)
+            bias = torch.rand((weight_output_dim))
         else:
             bias = None
         ref_result = F.linear(input_data, weight, bias)
@@ -46,7 +46,7 @@ class TestXNNPACKOps(TestCase):
         input_data = torch.rand(input_size)
         weight = torch.rand((weight_output_dim, input_data.shape[-1]))
         if use_bias:
-            bias = torch.rand(weight_output_dim)
+            bias = torch.rand((weight_output_dim))
         else:
             bias = None
         ref_result = F.linear(input_data, weight, bias)
@@ -102,7 +102,7 @@ class TestXNNPACKOps(TestCase):
         weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
         bias = None
         if use_bias:
-            bias = torch.rand(output_channels)
+            bias = torch.rand((output_channels))
 
         ref_result = F.conv2d(input_data, weight, bias,
                               strides, paddings, dilations, groups)
@@ -166,7 +166,7 @@ class TestXNNPACKOps(TestCase):
         weight = torch.rand((input_channels, output_channels_per_group, kernel_h, kernel_w))
         bias = None
         if use_bias:
-            bias = torch.rand(output_channels)
+            bias = torch.rand((output_channels))
 
         # Note that groups/dilation is in reverse order from conv2d
         ref_result = F.conv_transpose2d(input_data, weight, bias,
@@ -209,7 +209,7 @@ class TestXNNPACKSerDes(TestCase):
         data_shape = [batch_size] + list(data_shape)
         weight = torch.rand((weight_output_dim, data_shape[-1]))
         if use_bias:
-            bias = torch.rand(weight_output_dim)
+            bias = torch.rand((weight_output_dim))
         else:
             bias = None
         scripted_linear = torch.jit.script(Linear(weight, bias))
@@ -304,7 +304,7 @@ class TestXNNPACKSerDes(TestCase):
         weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
         bias = None
         if use_bias:
-            bias = torch.rand(output_channels)
+            bias = torch.rand((output_channels))
 
         scripted_conv2d = torch.jit.script(Conv2D(weight, bias,
                                                   strides, paddings, dilations, groups))
@@ -411,7 +411,7 @@ class TestXNNPACKSerDes(TestCase):
         weight = torch.rand((input_channels, output_channels_per_group, kernel_h, kernel_w))
         bias = None
         if use_bias:
-            bias = torch.rand(output_channels)
+            bias = torch.rand((output_channels))
 
         scripted_conv2d = torch.jit.script(Conv2DT(weight, bias,
                                                    strides, paddings,
@@ -525,7 +525,7 @@ class TestXNNPACKSerDes(TestCase):
         conv_weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
         conv_bias = None
         if use_bias:
-            conv_bias = torch.rand(output_channels)
+            conv_bias = torch.rand((output_channels))
 
         # This is done just to find the output shape of the result
         # so that the shape of weight for the following linear layer
@@ -537,7 +537,7 @@ class TestXNNPACKSerDes(TestCase):
         linear_weight = torch.rand((linear_weight_output_dim, linear_input_shape))
         linear_bias = None
         if use_bias:
-            linear_bias = torch.rand(linear_weight_output_dim)
+            linear_bias = torch.rand((linear_weight_output_dim))
 
         scripted_m = torch.jit.script(M(conv_weight, conv_bias, linear_weight,
                                         linear_bias, strides, paddings, dilations, groups))
@@ -625,7 +625,7 @@ class TestXNNPACKRewritePass(TestCase):
             def __init__(self):
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.rand(weight_shape), requires_grad=False)
-                self.bias = torch.nn.Parameter(torch.rand(weight_output_dim), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.rand((weight_output_dim)), requires_grad=False)
 
             def forward(self, x):
                 return F.linear(x, self.weight, self.bias)
@@ -712,7 +712,7 @@ class TestXNNPACKRewritePass(TestCase):
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         conv_weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
-        conv_bias = torch.rand(output_channels)
+        conv_bias = torch.rand((output_channels))
         result = F.conv2d(input_data, conv_weight, conv_bias,
                           strides, paddings, dilations, groups)
         linear_input_shape = result.shape[1]
@@ -722,9 +722,9 @@ class TestXNNPACKRewritePass(TestCase):
             def __init__(self, activation_fn=F.relu):
                 super().__init__()
                 self.conv_weight = torch.nn.Parameter(torch.rand(conv_weight_shape), requires_grad=False)
-                self.conv_bias = torch.nn.Parameter(torch.rand(conv_bias_shape), requires_grad=False)
+                self.conv_bias = torch.nn.Parameter(torch.rand((conv_bias_shape)), requires_grad=False)
                 self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape), requires_grad=False)
-                self.linear_bias = torch.nn.Parameter(torch.rand(weight_output_dim), requires_grad=False)
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)), requires_grad=False)
                 self.strides = strides
                 self.paddings = paddings
                 self.dilations = dilations
@@ -834,7 +834,7 @@ class TestXNNPACKRewritePass(TestCase):
             def __init__(self):
                 super().__init__()
                 self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape), requires_grad=False)
-                self.linear_bias = torch.nn.Parameter(torch.rand(weight_output_dim), requires_grad=False)
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)), requires_grad=False)
                 self.strides = strides
                 self.paddings = paddings
                 self.dilations = dilations
@@ -862,7 +862,7 @@ class TestXNNPACKRewritePass(TestCase):
             def __init__(self):
                 super().__init__()
                 self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape), requires_grad=False)
-                self.linear_bias = torch.nn.Parameter(torch.rand(weight_output_dim), requires_grad=False)
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)), requires_grad=False)
                 self.strides = strides
                 self.paddings = paddings
                 self.dilations = dilations
@@ -895,7 +895,7 @@ class TestXNNPACKRewritePass(TestCase):
             def __init__(self):
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.rand(weight_shape), requires_grad=False)
-                self.bias = torch.nn.Parameter(torch.rand(weight_output_dim), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.rand((weight_output_dim)), requires_grad=False)
 
             def forward(self, x):
                 weight_t = self.weight.t()
@@ -905,7 +905,7 @@ class TestXNNPACKRewritePass(TestCase):
             def __init__(self):
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.rand(weight_shape), requires_grad=False)
-                self.bias = torch.nn.Parameter(torch.rand(weight_output_dim), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.rand((weight_output_dim)), requires_grad=False)
 
             def forward(self, x):
                 weight_t = self.weight.t()
@@ -917,7 +917,7 @@ class TestXNNPACKRewritePass(TestCase):
             def __init__(self):
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.rand(weight_shape), requires_grad=False)
-                self.bias = torch.nn.Parameter(torch.rand(weight_output_dim), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.rand((weight_output_dim)), requires_grad=False)
 
             def forward(self, x):
                 weight_t = self.weight.t()

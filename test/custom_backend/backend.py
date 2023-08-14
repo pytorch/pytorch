@@ -17,7 +17,7 @@ def get_custom_backend_library_path():
         library_filename = "libcustom_backend.dylib"
     else:
         library_filename = "libcustom_backend.so"
-    path = os.path.abspath(f"build/{library_filename}")
+    path = os.path.abspath("build/{}".format(library_filename))
     assert os.path.exists(path), path
     return path
 

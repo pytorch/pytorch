@@ -22,7 +22,9 @@ def make_np(x):
     if isinstance(x, torch.Tensor):
         return _prepare_pytorch(x)
     raise NotImplementedError(
-        f"Got {type(x)}, but numpy array, torch tensor, or caffe2 blob name are expected."
+        "Got {}, but numpy array, torch tensor, or caffe2 blob name are expected.".format(
+            type(x)
+        )
     )
 
 

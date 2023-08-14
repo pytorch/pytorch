@@ -48,18 +48,6 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
       self.numel() >= MIN_SZ;
 }
 
-#if !defined(C10_MOBILE)
-#define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)                                   \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(                                  \
-            kComplexHalf, kHalf, kBool, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
-            TYPE, NAME, __VA_ARGS__)
-#else
-#define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)     \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(    \
-            kComplexHalf, kHalf, kBool, kBFloat16, \
-            TYPE, NAME, __VA_ARGS__)
-#endif
-
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's trickier
 void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
@@ -77,7 +65,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   // The code below is implemented with the assumption that sizes are equal
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.sizes().equals(src.sizes()));
 
-  _AT_DISPATCH_CP_TYPES(self.scalar_type(), "copy_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kHalf, kBool, kBFloat16, kComplexHalf, self.scalar_type(), "copy_", [&] {
     scalar_t* sp = src.data_ptr<scalar_t>();
     scalar_t* rp = self.data_ptr<scalar_t>();
     scalar_t* bp = buf.data_ptr<scalar_t>();

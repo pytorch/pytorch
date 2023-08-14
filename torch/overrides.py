@@ -1570,7 +1570,7 @@ def handle_torch_function(
         if result is not NotImplemented:
             return result
 
-    func_name = f'{public_api.__module__}.{public_api.__name__}'
+    func_name = '{}.{}'.format(public_api.__module__, public_api.__name__)
     msg = (
         "no implementation found for '{}' on types that implement "
         '__torch_function__: {}'

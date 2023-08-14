@@ -17,7 +17,7 @@ EXPECTED_GROUP = (
 
 
 def should_check(filename: Path) -> bool:
-    with open(filename) as f:
+    with open(filename, "r") as f:
         content = f.read()
 
     data = yaml.safe_load(content)
@@ -37,7 +37,7 @@ if __name__ == "__main__":
     files = [f for f in files if should_check(f)]
     names = set()
     for filename in files:
-        with open(filename) as f:
+        with open(filename, "r") as f:
             data = yaml.safe_load(f)
 
         name = data.get("name")

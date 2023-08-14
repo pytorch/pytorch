@@ -15,7 +15,7 @@ from trymerge import GitHubPR
 
 
 def mock_parse_args() -> object:
-    class Object:
+    class Object(object):
         def __init__(self) -> None:
             self.pr_num = 76123
 

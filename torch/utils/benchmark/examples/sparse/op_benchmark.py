@@ -32,13 +32,13 @@ def run(n, stmt, fuzzer_cls):
         assert_dicts_equal(float_params, int_params)
         assert_dicts_equal(float_tensor_params["x"], int_tensor_params["x"])
 
-        float_measurement, int_measurement = (
+        float_measurement, int_measurement = [
             Timer(
                 stmt,
                 globals=tensors,
             ).blocked_autorange(min_run_time=_MEASURE_TIME)
             for tensors in (float_tensors, int_tensors)
-        )
+        ]
 
         descriptions = []
         for name in float_tensors:

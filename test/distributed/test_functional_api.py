@@ -225,57 +225,25 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         super().setUp()
         self._spawn_threads()
 
-    @parametrize("device", ["cpu", "cuda"])
-    def test_all_reduce_eager(self, device):
-        if device == "cuda":
-            if torch.cuda.device_count() < self.world_size:
-                self.skipTest("Not enough CUDA devices")
-            torch.cuda.set_device(dist.get_rank())
-
-        tensor = torch.ones([4], device=device)
-        mesh = dt.DeviceMesh(device, torch.arange(4))
+    def test_all_reduce_eager(self):
+        tensor = torch.ones([4])
+        mesh = dt.DeviceMesh("cpu", torch.arange(4))
 
         res = ft_c.all_reduce(tensor, "sum", mesh)
         self.assertEqual(res, torch.tensor([4, 4, 4, 4], dtype=torch.float))
 
-        mesh = dt.DeviceMesh(device, torch.arange(4).view(2, 2))
+        mesh = dt.DeviceMesh("cpu", torch.arange(4).view(2, 2))
         res2 = ft_c.all_reduce(tensor, "sum", (mesh, 1))
         self.assertEqual(res2, torch.tensor([2, 2, 2, 2], dtype=torch.float))
 
-    @parametrize("device", ["cpu", "cuda"])
-    def test_all_reduce_coalesced_eager(self, device):
-        if device == "cuda":
-            if torch.cuda.device_count() < self.world_size:
-                self.skipTest("Not enough CUDA devices")
-            torch.cuda.set_device(dist.get_rank())
-
-        t0 = torch.ones([4], device=device)
-        t1 = torch.ones([6], device=device) + 2
-        mesh = dt.DeviceMesh(device, torch.arange(4))
+    def test_all_reduce_coalesced_eager(self):
+        t0 = torch.ones([4], device="cpu")
+        t1 = torch.ones([6], device="cpu") + 2
+        mesh = dt.DeviceMesh("cpu", torch.arange(4))
 
         res = ft_c.all_reduce_coalesced([t0, t1], "sum", mesh)
         self.assertEqual(res[0], t0 * 4)
         self.assertEqual(res[1], t1 * 4)
-
-    @parametrize("device", ["cpu", "cuda"])
-    def test_all_gather_tensor(self, device):
-        if device == "cuda":
-            if torch.cuda.device_count() < self.world_size:
-                self.skipTest("Not enough CUDA devices")
-            torch.cuda.set_device(dist.get_rank())
-
-        # testing 1d/2d mesh
-        mesh_1d = dt.DeviceMesh(device, torch.arange(self.world_size))
-        mesh_2d = dt.DeviceMesh(device, torch.arange(self.world_size).view(2, 2))
-        for mesh in [mesh_1d, mesh_2d]:
-            dims_to_gather = [0, 1, 2]
-            for dim in dims_to_gather:
-                output_size = [3, 3, 3]
-                output_size[dim] *= mesh.size(0)
-                # each rank have its own tensor, all_gather gives a list
-                local_tensor = torch.ones([3, 3, 3], device=device)
-                gathered_tensor = ft_c.all_gather_tensor(local_tensor, gather_dim=dim, group=(mesh, 0))
-                self.assertEqual(gathered_tensor, torch.ones(output_size))
 
     @parametrize("device", ["cpu", "cuda"])
     def test_all_gather_into_tensor_coalesced(self, device):
@@ -291,28 +259,6 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         self.assertEqual(2, len(res))
         self.assertEqual(torch.ones([4 * dist.get_world_size()], device=device), res[0])
         self.assertEqual(torch.ones([4 * dist.get_world_size()], device=device) + 1, res[1])
-
-    @parametrize("device", ["cpu", "cuda"])
-    def test_reduce_scatter_tensor(self, device):
-        if device == "cuda":
-            if torch.cuda.device_count() < self.world_size:
-                self.skipTest("Not enough CUDA devices")
-            torch.cuda.set_device(dist.get_rank())
-
-        # testing 1d/2d mesh
-        mesh_1d = dt.DeviceMesh(device, torch.arange(self.world_size))
-        mesh_2d = dt.DeviceMesh(device, torch.arange(self.world_size).view(2, 2))
-        for mesh in [mesh_1d, mesh_2d]:
-            dims_to_scatter = [0, 1]
-            for dim in dims_to_scatter:
-                group_size = mesh.size(0)
-                input_size = [3, 3]
-                output_size = [3, 3]
-                output_size[dim] *= group_size
-                input_tensor = torch.ones(output_size, device=device)
-                res_num = 1 * group_size
-                rs_tensor = ft_c.reduce_scatter_tensor(input_tensor, "sum", scatter_dim=dim, group=(mesh, 0))
-                self.assertEqual(rs_tensor, torch.ones(input_size) * res_num)
 
     @parametrize("device", ["cpu", "cuda"])
     def test_reduce_scatter_into_tensor_coalesced(self, device):

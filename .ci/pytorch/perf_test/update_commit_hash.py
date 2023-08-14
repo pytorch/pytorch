@@ -1,5 +1,5 @@
-import json
 import sys
+import json
 
 data_file_path = sys.argv[1]
 commit_hash = sys.argv[2]
@@ -7,7 +7,7 @@ commit_hash = sys.argv[2]
 with open(data_file_path) as data_file:
     data = json.load(data_file)
 
-data["commit"] = commit_hash
+data['commit'] = commit_hash
 
-with open(data_file_path, "w") as data_file:
+with open(data_file_path, 'w') as data_file:
     json.dump(data, data_file)

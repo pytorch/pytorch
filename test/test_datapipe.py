@@ -206,7 +206,7 @@ class TestStreamWrapper(TestCase):
             if self.opened:
                 return "".join(self)
             else:
-                raise OSError("Cannot read from un-opened file descriptor")
+                raise IOError("Cannot read from un-opened file descriptor")
 
         def __iter__(self):
             for i in range(5):
@@ -285,7 +285,7 @@ class TestIterableDataPipeBasic(TestCase):
             self.temp_sub_dir.cleanup()
             self.temp_dir.cleanup()
         except Exception as e:
-            warnings.warn(f"TestIterableDatasetBasic was not able to cleanup temp dir due to {str(e)}")
+            warnings.warn("TestIterableDatasetBasic was not able to cleanup temp dir due to {}".format(str(e)))
 
     def test_listdirfiles_iterable_datapipe(self):
         temp_dir = self.temp_dir.name

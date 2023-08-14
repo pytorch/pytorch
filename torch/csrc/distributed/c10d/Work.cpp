@@ -105,7 +105,7 @@ c10::intrusive_ptr<c10::ivalue::Future> Work::getFuture() {
 void Work::finish(std::exception_ptr exception) {
   std::unique_lock<std::mutex> lock(mutex_);
   completed_ = true;
-  exception_ = std::move(exception);
+  exception_ = exception;
   if (recordFunctionEndCallback_) {
     recordFunctionEndCallback_();
     recordFunctionEndCallback_ = nullptr;
@@ -117,7 +117,7 @@ void Work::finish(std::exception_ptr exception) {
 void Work::finishAndThrow(std::exception_ptr exception) {
   std::unique_lock<std::mutex> lock(mutex_);
   completed_ = true;
-  exception_ = std::move(exception);
+  exception_ = exception;
   if (recordFunctionEndCallback_) {
     recordFunctionEndCallback_();
     recordFunctionEndCallback_ = nullptr;
@@ -176,7 +176,7 @@ class FutureWrappingWork : public Work {
 };
 
 c10::intrusive_ptr<Work> Work::create_from_future(
-    const c10::intrusive_ptr<c10::ivalue::Future>& future) {
+    c10::intrusive_ptr<c10::ivalue::Future> future) {
   return c10::make_intrusive<FutureWrappingWork>(future);
 }
 

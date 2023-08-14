@@ -1,10 +1,10 @@
-import re
-from typing import Callable, List
-
 import torch
 from torch import Tensor
+from typing import Callable, List
 
-__all__: List[str] = []
+import re
+
+__all__ : List[str] = []
 
 
 class _CodeParser:
@@ -17,30 +17,20 @@ class _CodeParser:
         function_params = r"(?P<function_params>\(.+\))"
         function_body = r"(?P<function_body>\{.+\})"
 
-        pattern = (
-            optional_ws
-            + "template"
+        pattern = \
+            optional_ws \
+            + "template" \
+            + optional_ws + template_params \
+            + optional_ws + return_type \
+            + required_ws + function_name \
+            + optional_ws + function_params \
+            + optional_ws + function_body \
             + optional_ws
-            + template_params
-            + optional_ws
-            + return_type
-            + required_ws
-            + function_name
-            + optional_ws
-            + function_params
-            + optional_ws
-            + function_body
-            + optional_ws
-        )
 
-        result = re.match(
-            pattern, code_string, re.DOTALL
-        )  # DOTALL for matching multiline
+        result = re.match(pattern, code_string, re.DOTALL)  # DOTALL for matching multiline
 
         if result is None:
-            raise Exception(
-                f"Couldn't parse code, please check correctness:\n {code_string}"
-            )
+            raise Exception(f"Couldn't parse code, please check correctness:\n {code_string}")
 
         self.template_params = result["template_params"]
         self.return_type = result["return_type"]
@@ -50,14 +40,10 @@ class _CodeParser:
 
 
 class _JittedFunction:
-    def __init__(
-        self, code_string: str, return_by_ref: bool, num_outputs: int, **kwargs
-    ):
+    def __init__(self, code_string: str, return_by_ref: bool, num_outputs: int, **kwargs):
         self.code_string = code_string
 
-        assert (
-            return_by_ref or num_outputs == 1
-        ), "Return by value only works for single output. "
+        assert return_by_ref or num_outputs == 1, "Return by value only works for single output. "
         self.return_by_ref = return_by_ref
         self.num_outputs = num_outputs
 
@@ -70,9 +56,7 @@ class _JittedFunction:
     def __call__(self, *tensors: Tensor, **kwargs):
         # Jiterator follow torch.cuda's lazy initialization behavior
         # Defer checking cuda's availability at the function invocation time
-        assert (
-            self.is_cuda_available
-        ), "Jiterator is only supported on CUDA and ROCm GPUs, none are available."
+        assert self.is_cuda_available, "Jiterator is only supported on CUDA and ROCm GPUs, none are available."
 
         assert len(tensors) <= 8, "jiterator only supports up to 8 tensor inputs."
 
@@ -89,8 +73,7 @@ class _JittedFunction:
             self.return_by_ref,
             self.num_outputs,
             tensors,
-            expanded_kwargs,
-        )
+            expanded_kwargs)
 
 
 def _create_jit_fn(code_string: str, **kwargs) -> Callable:
@@ -155,9 +138,7 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
     return _JittedFunction(code_string, return_by_ref=False, num_outputs=1, **kwargs)
 
 
-def _create_multi_output_jit_fn(
-    code_string: str, num_outputs: int, **kwargs
-) -> Callable:
+def _create_multi_output_jit_fn(code_string: str, num_outputs: int, **kwargs) -> Callable:
     """
     Create a jiterator-generated cuda kernel for an elementwise op that supports returning one or more outputs.
 
@@ -182,6 +163,4 @@ def _create_multi_output_jit_fn(
         This API only supports up to 8 inputs and 8 outputs
     """
 
-    return _JittedFunction(
-        code_string, return_by_ref=True, num_outputs=num_outputs, **kwargs
-    )
+    return _JittedFunction(code_string, return_by_ref=True, num_outputs=num_outputs, **kwargs)

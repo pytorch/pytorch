@@ -17,8 +17,8 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data
 import torchvision.transforms as transforms
-from opacus import PrivacyEngine
 from torchvision import models
+from opacus import PrivacyEngine
 from torchvision.datasets import CIFAR10
 from tqdm import tqdm
 
@@ -52,6 +52,7 @@ def train(args, model, train_loader, optimizer, privacy_engine, epoch, device):
     top1_acc = []
 
     for i, (images, target) in enumerate(tqdm(train_loader)):
+
         images = images.to(device)
         target = target.to(device)
 
@@ -278,7 +279,6 @@ def main():
     )
     logger.info(metrics)
 
-
 def parse_args():
     parser = argparse.ArgumentParser(description="PyTorch CIFAR10 DP Training")
     parser.add_argument(
@@ -309,7 +309,7 @@ def parse_args():
         default=256,
         type=int,
         metavar="N",
-        help="mini-batch size for test dataset (default: 256)",
+        help="mini-batch size for test dataset (default: 256)"
     )
     parser.add_argument(
         "--sample-rate",

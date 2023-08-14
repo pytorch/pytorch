@@ -69,7 +69,7 @@ def register_backend(
     """
     global BackendType
     if backend_registered(backend_name):
-        raise RuntimeError(f"RPC backend {backend_name}: already registered")
+        raise RuntimeError("RPC backend {}: already registered".format(backend_name))
     # Create a new enum type, `BackendType`, with extended members.
     existing_enum_dict = {member.name: member.value for member in BackendType}
     extended_enum_dict = dict(
@@ -115,11 +115,13 @@ def _init_process_group(store, rank, world_size):
 
     if (rank != -1) and (rank != group.rank()):
         raise RuntimeError(
-            f"rank argument {rank} doesn't match pg rank {group.rank()}"
+            "rank argument {} doesn't match pg rank {}".format(rank, group.rank())
         )
     if (world_size != -1) and (world_size != group.size()):
         raise RuntimeError(
-            f"world_size argument {world_size} doesn't match pg size {group.size()}"
+            "world_size argument {} doesn't match pg size {}".format(
+                world_size, group.size()
+            )
         )
     return group
 
@@ -304,13 +306,15 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
     from . import TensorPipeAgent
     from . import TensorPipeRpcBackendOptions
     if not isinstance(store, dist.Store):
-        raise TypeError(f"`store` must be a c10d::Store. {store}")
+        raise TypeError("`store` must be a c10d::Store. {}".format(store))
 
     if not isinstance(
         rpc_backend_options, TensorPipeRpcBackendOptions
     ):
         raise TypeError(
-            f"`rpc_backend_options` must be a `TensorPipeRpcBackendOptions`. {rpc_backend_options}"
+            "`rpc_backend_options` must be a `TensorPipeRpcBackendOptions`. {}".format(
+                rpc_backend_options
+            )
         )
 
     device_count = torch.cuda.device_count()

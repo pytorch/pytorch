@@ -728,18 +728,18 @@ class LOBPCG:
 
     def __str__(self):
         lines = ["LOPBCG:"]
-        lines += [f"  iparams={self.iparams}"]
-        lines += [f"  fparams={self.fparams}"]
-        lines += [f"  bparams={self.bparams}"]
-        lines += [f"  ivars={self.ivars}"]
-        lines += [f"  fvars={self.fvars}"]
-        lines += [f"  bvars={self.bvars}"]
-        lines += [f"  tvars={self.tvars}"]
-        lines += [f"  A={self.A}"]
-        lines += [f"  B={self.B}"]
-        lines += [f"  iK={self.iK}"]
-        lines += [f"  X={self.X}"]
-        lines += [f"  E={self.E}"]
+        lines += ["  iparams={}".format(self.iparams)]
+        lines += ["  fparams={}".format(self.fparams)]
+        lines += ["  bparams={}".format(self.bparams)]
+        lines += ["  ivars={}".format(self.ivars)]
+        lines += ["  fvars={}".format(self.fvars)]
+        lines += ["  bvars={}".format(self.bvars)]
+        lines += ["  tvars={}".format(self.tvars)]
+        lines += ["  A={}".format(self.A)]
+        lines += ["  B={}".format(self.B)]
+        lines += ["  iK={}".format(self.iK)]
+        lines += ["  X={}".format(self.X)]
+        lines += ["  E={}".format(self.E)]
         r = ""
         for line in lines:
             r += line + "\n"
@@ -796,9 +796,10 @@ class LOBPCG:
                 # strict ordering of eigenpairs
                 break
             count += 1
-        assert (
-            count >= prev_count
-        ), f"the number of converged eigenpairs (was {prev_count}, got {count}) cannot decrease"
+        assert count >= prev_count, (
+            "the number of converged eigenpairs "
+            "(was {}, got {}) cannot decrease".format(prev_count, count)
+        )
         self.ivars["converged_count"] = count
         self.tvars["rerr"] = rerr
         return count
@@ -1132,7 +1133,7 @@ class LOBPCG:
                 R_norm = torch.norm(R)
                 # https://github.com/pytorch/pytorch/issues/33810 workaround:
                 rerr = float(R_norm) * float(BU_norm * U_norm) ** -1
-                vkey = f"ortho_UBUmI_rerr[{i}, {j}]"
+                vkey = "ortho_UBUmI_rerr[{}, {}]".format(i, j)
                 self.fvars[vkey] = rerr
                 if rerr < tau_ortho:
                     break
@@ -1140,7 +1141,7 @@ class LOBPCG:
             VBU_norm = torch.norm(VBU)
             U_norm = torch.norm(U)
             rerr = float(VBU_norm) * float(BV_norm * U_norm) ** -1
-            vkey = f"ortho_VBU_rerr[{i}]"
+            vkey = "ortho_VBU_rerr[{}]".format(i)
             self.fvars[vkey] = rerr
             if rerr < tau_ortho:
                 break

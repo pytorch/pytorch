@@ -230,11 +230,9 @@ double Unpickler::readFloat() {
       reinterpret_cast<char*>(&little_endian));
 
   return little_endian;
-#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#else /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
   return big_endian;
-#else
-#error Unexpected or undefined __BYTE_ORDER__
-#endif
+#endif /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
 }
 
 void Unpickler::run() {

@@ -545,7 +545,7 @@ class TORCH_API ThreadLocalSubqueue {
     // NB: This is a destructive operation.
     void materialize(
         std::vector<std::shared_ptr<Result>>& out,
-        const std::function<time_t(approx_time_t)>& time_converter,
+        const std::function<time_t(approx_time_t)> time_converter,
         const uint64_t tid,
         const kineto::DeviceAndResource& kineto_info);
 
@@ -636,10 +636,6 @@ TORCH_API void set_record_concrete_inputs_enabled_val(bool);
 TORCH_API bool get_fwd_bwd_enabled();
 TORCH_API void set_fwd_bwd_enabled_fn(std::function<bool()>);
 TORCH_API void set_fwd_bwd_enabled_val(bool);
-
-TORCH_API bool get_cuda_sync_enabled();
-TORCH_API void set_cuda_sync_enabled_fn(std::function<bool()>);
-TORCH_API void set_cuda_sync_enabled_val(bool);
 
 } // namespace impl
 } // namespace profiler

@@ -675,7 +675,7 @@ void GroupNormInputBackward(
       const int64_t g = i % G;
       const T_ACC* ds_ptr = ds + i * D;
       const T_ACC* db_ptr = db + i * D;
-      const PT* gamma_ptr = !gamma_null ? gamma + g * D : nullptr;
+      const PT* gamma_ptr = gamma + g * D;
       CalcDsDb(ds_ptr, db_ptr, gamma_null, gamma_ptr, d, K, ds_arr.data(), db_arr.data());
       T_ACC ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), T_ACC(0));
       T_ACC db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), T_ACC(0));

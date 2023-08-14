@@ -3,7 +3,11 @@ import torch
 
 
 add_configs = op_bench.cross_product_configs(
-    M=[8], N=[8], K=[8], device=["cuda", "cpu"], tags=["short"]
+    M=[8],
+    N=[8],
+    K=[8],
+    device=["cuda", "cpu"],
+    tags=["short"]
 )
 
 

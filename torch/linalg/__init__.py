@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import sys
 
 import torch
@@ -2589,7 +2590,7 @@ Examples::
 
     >>> A = torch.randn(4, 4)
     >>> Atensorinv = torch.linalg.tensorinv(A, ind=1)
-    >>> Ainv = torch.linalg.inv(A)
+    >>> Ainv = torch.linalg.inverse(A)
     >>> torch.allclose(Atensorinv, Ainv)
     True
 """)

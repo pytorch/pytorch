@@ -103,7 +103,7 @@ class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
         if isinstance(activation, nn.Module) or isinstance(weight, nn.Module):
             raise ValueError("QConfig received observer instance, please pass observer class instead. " +
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
-        return super().__new__(cls, activation, weight)
+        return super(QConfig, cls).__new__(cls, activation, weight)
 
 
 class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
@@ -128,7 +128,7 @@ class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
             raise ValueError("QConfigDynamic received observer instance, please pass observer class instead. " +
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
         warnings.warn("QConfigDynamic is going to be deprecated in PyTorch 1.12, please use QConfig instead")
-        return super().__new__(cls, activation, weight)
+        return super(QConfigDynamic, cls).__new__(cls, activation, weight)
 
 
 default_qconfig = QConfig(activation=default_observer,
@@ -236,7 +236,7 @@ def get_default_qconfig(backend='x86', version=0):
     if backend not in supported_backends:
         raise AssertionError(
             "backend: " + str(backend) +
-            f" not supported. backend must be one of {supported_backends}"
+            " not supported. backend must be one of {}".format(supported_backends)
         )
 
     if version == 0:
@@ -326,7 +326,7 @@ def get_default_qat_qconfig(backend='x86', version=1):
     if backend not in supported_backends:
         raise AssertionError(
             "backend: " + str(backend) +
-            f" not supported. backend must be one of {supported_backends}"
+            " not supported. backend must be one of {}".format(supported_backends)
         )
 
     # Histogram observer is too slow for quantization aware training

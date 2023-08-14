@@ -575,7 +575,7 @@ def translate_native_yaml(
         None
     """
     if use_aten_lib:
-        with open(aten_yaml_path) as aten_yaml:
+        with open(aten_yaml_path, "r") as aten_yaml:
             out_file.writelines(aten_yaml.readlines())
         return
 
@@ -604,7 +604,7 @@ def translate_native_yaml(
         or os.stat(native_yaml_path).st_size == 0
     ):
         return
-    with open(native_yaml_path) as native_yaml:
+    with open(native_yaml_path, "r") as native_yaml:
         native_es = yaml.load(native_yaml, Loader=LineLoader)
         if not native_es:
             return
@@ -641,7 +641,7 @@ def parse_yaml(
     Union[Dict[DispatchKey, Dict[OperatorName, BackendMetadata]], ETKernelIndex],
 ]:
     if path and os.path.exists(path) and os.stat(path).st_size > 0:
-        with open(path) as f:
+        with open(path, "r") as f:
             es = yaml.load(f, Loader=LineLoader)
 
         # Check for kernel index structure

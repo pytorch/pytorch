@@ -245,7 +245,7 @@ class TestDataParallel(TestCase):
             if isinstance(device_ids[0], torch.device):
                 expect_device = device_ids[0]
             else:
-                expect_device = torch.device(f"cuda:{device_ids[0]}")
+                expect_device = torch.device("cuda:{}".format(device_ids[0]))
 
             if should_fail:
                 def assert_correct():
@@ -701,7 +701,7 @@ class TestDataParallel(TestCase):
 
         with torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False):
             for formats, dtype_list in product(layer_formats, layer_dtypes):
-                model_msg = f"formats = {formats} dtypes = {dtypes}"
+                model_msg = "formats = {} dtypes = {}".format(formats, dtypes)
                 try:
                     m = ConvNet(formats, dtype_list).cuda(device="cuda:0")
                     m_dp = dp.DataParallel(deepcopy(m), device_ids=device_ids)
@@ -715,7 +715,7 @@ class TestDataParallel(TestCase):
                     raise
                 # 2 iters:  First iter creates grads, second iter tries zeroed grads.
                 for it in range(2):
-                    iter_msg = f"iter = {it} " + model_msg
+                    iter_msg = "iter = {} ".format(it) + model_msg
                     named_msg = iter_msg
                     try:
                         F.mse_loss(m(input).float(), target).backward()

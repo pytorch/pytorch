@@ -110,7 +110,7 @@ class TORCH_API Work : public torch::CustomClassHolder {
   OpType retrieveOpType();
 
   static c10::intrusive_ptr<Work> create_from_future(
-      const c10::intrusive_ptr<c10::ivalue::Future>&);
+      c10::intrusive_ptr<c10::ivalue::Future>);
 
  protected:
   // Completes the work object and optionally sets the exception in a

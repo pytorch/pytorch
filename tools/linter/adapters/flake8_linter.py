@@ -289,7 +289,10 @@ def check_files(
         LintMessage(
             path=match["file"],
             name=match["code"],
-            description=f"{match['message']}\nSee {get_issue_documentation_url(match['code'])}",
+            description="{}\nSee {}".format(
+                match["message"],
+                get_issue_documentation_url(match["code"]),
+            ),
             line=int(match["line"]),
             char=int(match["column"])
             if match["column"] is not None and not match["column"].startswith("-")

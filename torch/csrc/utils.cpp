@@ -16,7 +16,6 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 int THPUtils_getCallable(PyObject* arg, PyObject** result) {
@@ -217,13 +216,13 @@ void THPPointer<THPStorage>::free() {
     Py_DECREF(ptr);
 }
 
-void storage_fill(const at::Storage& self, uint8_t value) {
+void storage_fill(at::Storage self, uint8_t value) {
   auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
   auto self_t = at::empty({0}, {}, options).set_(self);
   self_t.fill_(value);
 }
 
-void storage_set(const at::Storage& self, ptrdiff_t idx, uint8_t value) {
+void storage_set(at::Storage self, ptrdiff_t idx, uint8_t value) {
   TORCH_CHECK(
       (idx >= 0) && (idx < static_cast<ptrdiff_t>(self.nbytes())),
       "out of bounds");
@@ -232,7 +231,7 @@ void storage_set(const at::Storage& self, ptrdiff_t idx, uint8_t value) {
   self_t[idx].fill_(value);
 }
 
-uint8_t storage_get(const at::Storage& self, ptrdiff_t idx) {
+uint8_t storage_get(at::Storage self, ptrdiff_t idx) {
   TORCH_CHECK(
       (idx >= 0) && (idx < static_cast<ptrdiff_t>(self.nbytes())),
       "out of bounds");
@@ -268,7 +267,7 @@ char* tensor_repr(at::Tensor tensor) {
   const char* buf = nullptr;
   char* result = nullptr;
 
-  pytensor = THPVariable_Wrap(at::Tensor(std::move(tensor)));
+  pytensor = THPVariable_Wrap(at::Tensor(tensor));
   if (!pytensor)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     goto error;

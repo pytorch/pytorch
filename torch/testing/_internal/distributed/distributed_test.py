@@ -517,7 +517,7 @@ class Barrier:
             arrived = 0
             with _lock():
                 for f_name in os.listdir(barrier_dir):
-                    with open(os.path.join(barrier_dir, f_name)) as f:
+                    with open(os.path.join(barrier_dir, f_name), "r") as f:
                         data = f.read()
                         if int(data) >= cls.barrier_id:
                             arrived += 1
@@ -552,7 +552,7 @@ class TestDistBackend(MultiProcessTestCase):
 
     @property
     def init_method(self):
-        return f"{FILE_SCHEMA}{self.file_name}"
+        return "{}{file_name}".format(FILE_SCHEMA, file_name=self.file_name)
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
@@ -654,7 +654,10 @@ class DistributedTest:
                 lines = out.getvalue().splitlines()
 
             def format_line(var):
-                return f"env:{var}={os.environ[var] if var in os.environ else 'N/A'}"
+                return "env:%s=%s" % (
+                    var,
+                    os.environ[var] if var in os.environ else "N/A",
+                )
 
             # Check relevant env vars
             vars = [
@@ -689,7 +692,7 @@ class DistributedTest:
 
             all_ranks = set()
             for f_name in os.listdir(test_dir):
-                with open(os.path.join(test_dir, f_name)) as f:
+                with open(os.path.join(test_dir, f_name), "r") as f:
                     all_ranks.add(int(f.read()))
             self.assertEqual(len(all_ranks), num_processes)
 
@@ -4993,7 +4996,6 @@ class DistributedTest:
             self,
             optim_cls,
             optim_kwargs,
-            init_before,
             gradient_as_bucket_view=True,
         ):
             # Need to seed to ensure inputs are unique across rank. Otherwise,
@@ -5017,23 +5019,17 @@ class DistributedTest:
                     gradient_as_bucket_view=gradient_as_bucket_view,
                 )
                 optim = optim_cls(model.parameters(), **optim_kwargs)
-                if init_before:
-                    _apply_optimizer_in_backward(
-                        optimizer_class=optim_cls,
-                        params=model_optim_in_bwd.parameters(),
-                        optimizer_kwargs=optim_kwargs,
-                    )
+                # Note: have to apply_optimizer_in_backward before wrapping with DDP.
+                _apply_optimizer_in_backward(
+                    optimizer_class=optim_cls,
+                    params=model_optim_in_bwd.parameters(),
+                    optimizer_kwargs=optim_kwargs,
+                )
                 model_optim_in_bwd = nn.parallel.DistributedDataParallel(
                     model_optim_in_bwd,
                     device_ids=[self.rank],
                     gradient_as_bucket_view=gradient_as_bucket_view,
                 )
-                if not init_before:
-                    _apply_optimizer_in_backward(
-                        optimizer_class=optim_cls,
-                        params=model_optim_in_bwd.parameters(),
-                        optimizer_kwargs=optim_kwargs,
-                    )
 
                 for p1, p2 in zip(model.parameters(), model_optim_in_bwd.parameters()):
                     self.assertEqual(p1, p2, "Parameters not initially equal!")
@@ -5069,70 +5065,56 @@ class DistributedTest:
 
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward(self):
-            for optim_cls, init_before in itertools.product(
-                [torch.optim.SGD, torch.optim.Adam], [True, False]
-            ):
+            for optim_cls in [torch.optim.SGD, torch.optim.Adam]:
                 with self.subTest(optim_cls=optim_cls):
                     self._test_ddp_apply_optim_in_backward(
-                        optim_cls=optim_cls,
-                        optim_kwargs={"lr": 0.03},
-                        init_before=init_before,
+                        optim_cls=optim_cls, optim_kwargs={"lr": 0.03}
                     )
 
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_grad_as_bucket_view_false(self):
-            for init_before in [True, False]:
-                self._test_ddp_apply_optim_in_backward(
-                    optim_cls=torch.optim.SGD,
-                    optim_kwargs={"lr": 0.03},
-                    init_before=init_before,
-                    gradient_as_bucket_view=False,
-                )
+            self._test_ddp_apply_optim_in_backward(
+                optim_cls=torch.optim.SGD,
+                optim_kwargs={"lr": 0.03},
+                gradient_as_bucket_view=False,
+            )
 
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_ignored_params(self):
             torch.cuda.set_device(self.rank)
-            for init_before in [True, False]:
-                with self.subTest(init_before=init_before):
-                    torch.manual_seed(self.rank)
-                    torch.cuda.manual_seed(self.rank)
-                    model = TwoLinLayerNet()
-                    # Parameters to ignore are in the format {module_name}.{param_name}
-                    params_to_ignore = ["a.weight"]
-                    torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
-                        model, params_to_ignore
-                    )
-                    if init_before:
-                        _apply_optimizer_in_backward(
-                            optimizer_class=torch.optim.SGD,
-                            params=model.parameters(),
-                            optimizer_kwargs={"lr": 0.03},
-                        )
-                    net = torch.nn.parallel.DistributedDataParallel(
-                        model.cuda(self.rank),
-                        device_ids=[self.rank],
-                    )
-                    if not init_before:
-                        _apply_optimizer_in_backward(
-                            optimizer_class=torch.optim.SGD,
-                            params=model.parameters(),
-                            optimizer_kwargs={"lr": 0.03},
-                        )
-                    inp = torch.randn(1, 10)
-                    a, b = net(inp)
-                    (a.transpose(0, 1) @ b).sum().backward()
-                    # a.weight did not go through allreduce, so optimizer acted on local
-                    # gradient, which should be different across ranks. Remaining params
-                    # should be equal.
-                    models = [None for _ in range(dist.get_world_size())]
-                    dist.all_gather_object(models, model)
-                    rank0_model, remainder = models[0], models[1:]
-                    for m in remainder:
-                        self.assertNotEqual(rank0_model.a.weight, m.a.weight)
-                        self.assertEqual(
-                            list(rank0_model.b.parameters()), list(m.b.parameters())
-                        )
-                        self.assertEqual(rank0_model.a.bias, m.a.bias)
+            torch.manual_seed(self.rank)
+            torch.cuda.manual_seed(self.rank)
+            model = TwoLinLayerNet()
+            model_clone = copy.deepcopy(model)
+            # Parameters to ignore are in the format {module_name}.{param_name}
+            params_to_ignore = ["a.weight"]
+            torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+                model, params_to_ignore
+            )
+            _apply_optimizer_in_backward(
+                optimizer_class=torch.optim.SGD,
+                params=model.parameters(),
+                optimizer_kwargs={"lr": 0.03},
+            )
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank),
+                device_ids=[self.rank],
+            )
+            inp = torch.randn(1, 10)
+            a, b = net(inp)
+            (a.transpose(0, 1) @ b).sum().backward()
+            # a.weight did not go through allreduce, so optimizer acted on local
+            # gradient, which should be different across ranks. Remaining params
+            # should be equal.
+            models = [None for _ in range(dist.get_world_size())]
+            dist.all_gather_object(models, model)
+            rank0_model, remainder = models[0], models[1:]
+            for m in remainder:
+                self.assertNotEqual(rank0_model.a.weight, m.a.weight)
+                self.assertEqual(
+                    list(rank0_model.b.parameters()), list(m.b.parameters())
+                )
+                self.assertEqual(rank0_model.a.bias, m.a.bias)
 
         def _get_fp16_config(self) -> _MixedPrecision:
             return _MixedPrecision(
@@ -9658,7 +9640,7 @@ class DistributedTest:
 
             class MyModel(nn.Module):
                 def __init__(self, device):
-                    super().__init__()
+                    super(MyModel, self).__init__()
                     self.error = True
                     self.fc1 = nn.Linear(10, 10).cuda(device)
 
@@ -9701,12 +9683,12 @@ class DistributedTest:
         def test_ddp_has_finalized(self):
 
             @dataclass
-            class MyClass:
+            class MyClass():
                 obj: torch.Tensor
 
             class MyModel(nn.Module):
                 def __init__(self, rank):
-                    super().__init__()
+                    super(MyModel, self).__init__()
                     self.rank = rank
                     self.fc1 = nn.Linear(1024, 1024).cuda(rank)
                     self.fc2 = nn.Linear(1024, 2 * 1024).cuda(rank)

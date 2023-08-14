@@ -115,9 +115,10 @@ class SpectralNorm:
 
     @staticmethod
     def apply(module: Module, name: str, n_power_iterations: int, dim: int, eps: float) -> 'SpectralNorm':
-        for hook in module._forward_pre_hooks.values():
+        for k, hook in module._forward_pre_hooks.items():
             if isinstance(hook, SpectralNorm) and hook.name == name:
-                raise RuntimeError(f"Cannot register two spectral_norm hooks on the same parameter {name}")
+                raise RuntimeError("Cannot register two spectral_norm hooks on "
+                                   "the same parameter {}".format(name))
 
         fn = SpectralNorm(name, n_power_iterations, dim, eps)
         weight = module._parameters[name]
@@ -211,7 +212,7 @@ class SpectralNormStateDictHook:
             local_metadata['spectral_norm'] = {}
         key = self.fn.name + '.version'
         if key in local_metadata['spectral_norm']:
-            raise RuntimeError(f"Unexpected key in metadata['spectral_norm']: {key}")
+            raise RuntimeError("Unexpected key in metadata['spectral_norm']: {}".format(key))
         local_metadata['spectral_norm'][key] = self.fn._version
 
 
@@ -299,7 +300,8 @@ def remove_spectral_norm(module: T_module, name: str = 'weight') -> T_module:
             del module._forward_pre_hooks[k]
             break
     else:
-        raise ValueError(f"spectral_norm of '{name}' not found in {module}")
+        raise ValueError("spectral_norm of '{}' not found in {}".format(
+            name, module))
 
     for k, hook in module._state_dict_hooks.items():
         if isinstance(hook, SpectralNormStateDictHook) and hook.fn.name == name:

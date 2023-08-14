@@ -25,11 +25,9 @@ from ..pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
     register_replacement,
-    remove_extra_clones,
     stable_topological_sort,
 )
 from ..virtualized import V
-from .group_batch_fusion import group_batch_fusion_post_grad_passes
 
 
 log = logging.getLogger(__name__)
@@ -62,9 +60,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
-
-        group_batch_fusion_post_grad_passes(gm.graph)
-        remove_extra_clones(gm.graph)
 
         for patterns in pass_patterns:
             patterns.apply(gm.graph)

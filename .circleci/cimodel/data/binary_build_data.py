@@ -9,9 +9,8 @@ should be "pruned".
 
 from collections import OrderedDict
 
-import cimodel.data.dimensions as dimensions
-
 from cimodel.lib.conf_tree import ConfigNode
+import cimodel.data.dimensions as dimensions
 
 
 LINKING_DIMENSIONS = [
@@ -27,18 +26,12 @@ DEPS_INCLUSION_DIMENSIONS = [
 
 
 def get_processor_arch_name(gpu_version):
-    return (
-        "cpu"
-        if not gpu_version
-        else (
-            "cu" + gpu_version.strip("cuda")
-            if gpu_version.startswith("cuda")
-            else gpu_version
-        )
+    return "cpu" if not gpu_version else (
+        "cu" + gpu_version.strip("cuda") if gpu_version.startswith("cuda") else gpu_version
     )
 
-
-CONFIG_TREE_DATA = OrderedDict()
+CONFIG_TREE_DATA = OrderedDict(
+)
 
 # GCC config variants:
 #
@@ -48,8 +41,8 @@ CONFIG_TREE_DATA = OrderedDict()
 #
 # Libtorch with new gcc ABI is built with gcc 5.4 on Ubuntu 16.04.
 LINUX_GCC_CONFIG_VARIANTS = OrderedDict(
-    manywheel=["devtoolset7"],
-    conda=["devtoolset7"],
+    manywheel=['devtoolset7'],
+    conda=['devtoolset7'],
     libtorch=[
         "devtoolset7",
         "gcc5.4_cxx11-abi",
@@ -70,9 +63,7 @@ class TopLevelNode(ConfigNode):
         self.props["smoke"] = smoke
 
     def get_children(self):
-        return [
-            OSConfigNode(self, x, c, p) for (x, (c, p)) in self.config_tree_data.items()
-        ]
+        return [OSConfigNode(self, x, c, p) for (x, (c, p)) in self.config_tree_data.items()]
 
 
 class OSConfigNode(ConfigNode):
@@ -94,20 +85,12 @@ class PackageFormatConfigNode(ConfigNode):
         self.props["python_versions"] = python_versions
         self.props["package_format"] = package_format
 
+
     def get_children(self):
         if self.find_prop("os_name") == "linux":
-            return [
-                LinuxGccConfigNode(self, v)
-                for v in LINUX_GCC_CONFIG_VARIANTS[self.find_prop("package_format")]
-            ]
-        elif (
-            self.find_prop("os_name") == "windows"
-            and self.find_prop("package_format") == "libtorch"
-        ):
-            return [
-                WindowsLibtorchConfigNode(self, v)
-                for v in WINDOWS_LIBTORCH_CONFIG_VARIANTS
-            ]
+            return [LinuxGccConfigNode(self, v) for v in LINUX_GCC_CONFIG_VARIANTS[self.find_prop("package_format")]]
+        elif self.find_prop("os_name") == "windows" and self.find_prop("package_format") == "libtorch":
+            return [WindowsLibtorchConfigNode(self, v) for v in WINDOWS_LIBTORCH_CONFIG_VARIANTS]
         else:
             return [ArchConfigNode(self, v) for v in self.find_prop("gpu_versions")]
 
@@ -123,29 +106,23 @@ class LinuxGccConfigNode(ConfigNode):
 
         # XXX devtoolset7 on CUDA 9.0 is temporarily disabled
         # see https://github.com/pytorch/pytorch/issues/20066
-        if self.find_prop("gcc_config_variant") == "devtoolset7":
+        if self.find_prop("gcc_config_variant") == 'devtoolset7':
             gpu_versions = filter(lambda x: x != "cuda_90", gpu_versions)
 
         # XXX disabling conda rocm build since docker images are not there
-        if self.find_prop("package_format") == "conda":
-            gpu_versions = filter(
-                lambda x: x not in dimensions.ROCM_VERSION_LABELS, gpu_versions
-            )
+        if self.find_prop("package_format") == 'conda':
+            gpu_versions = filter(lambda x: x not in dimensions.ROCM_VERSION_LABELS, gpu_versions)
 
         # XXX libtorch rocm build  is temporarily disabled
-        if self.find_prop("package_format") == "libtorch":
-            gpu_versions = filter(
-                lambda x: x not in dimensions.ROCM_VERSION_LABELS, gpu_versions
-            )
+        if self.find_prop("package_format") == 'libtorch':
+            gpu_versions = filter(lambda x: x not in dimensions.ROCM_VERSION_LABELS, gpu_versions)
 
         return [ArchConfigNode(self, v) for v in gpu_versions]
 
 
 class WindowsLibtorchConfigNode(ConfigNode):
     def __init__(self, parent, libtorch_config_variant):
-        super().__init__(
-            parent, "LIBTORCH_CONFIG_VARIANT=" + str(libtorch_config_variant)
-        )
+        super().__init__(parent, "LIBTORCH_CONFIG_VARIANT=" + str(libtorch_config_variant))
 
         self.props["libtorch_config_variant"] = libtorch_config_variant
 
@@ -184,15 +161,11 @@ class LinkingVariantConfigNode(ConfigNode):
         super().__init__(parent, linking_variant)
 
     def get_children(self):
-        return [
-            DependencyInclusionConfigNode(self, v) for v in DEPS_INCLUSION_DIMENSIONS
-        ]
+        return [DependencyInclusionConfigNode(self, v) for v in DEPS_INCLUSION_DIMENSIONS]
 
 
 class DependencyInclusionConfigNode(ConfigNode):
     def __init__(self, parent, deps_variant):
         super().__init__(parent, deps_variant)
 
-        self.props["libtorch_variant"] = "-".join(
-            [self.parent.get_label(), self.get_label()]
-        )
+        self.props["libtorch_variant"] = "-".join([self.parent.get_label(), self.get_label()])

@@ -32,13 +32,15 @@ def _faulty_tensorpipe_init_backend_handler(
     from torch.distributed.rpc import api
 
     if not isinstance(store, dist.Store):
-        raise TypeError(f"`store` must be a c10d::Store. {store}")
+        raise TypeError("`store` must be a c10d::Store. {}".format(store))
 
     if not isinstance(
         rpc_backend_options, FaultyTensorPipeRpcBackendOptions
     ):
         raise TypeError(
-            f"`rpc_backend_options` must be a `FaultyTensorPipeRpcBackendOptions`. {rpc_backend_options}"
+            "`rpc_backend_options` must be a `FaultyTensorPipeRpcBackendOptions`. {}".format(
+                rpc_backend_options
+            )
         )
 
     agent = FaultyTensorPipeAgent(

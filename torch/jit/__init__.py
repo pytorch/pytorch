@@ -1,99 +1,93 @@
-import warnings
+import torch._C
 
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Iterator, Any
+import warnings
 
-import torch._C
+from torch.utils import set_module
 
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import (
+    Final,
+    Future,
     _Await,
     _drop,
     _IgnoreContextManager,
-    _isinstance,
     _overload,
     _overload_method,
-    export,
-    Final,
-    Future,
     ignore,
+    _isinstance,
     is_scripting,
+    export,
     unused,
 )
-from torch.jit._async import fork, wait
-from torch.jit._await import _awaitable, _awaitable_nowait, _awaitable_wait
-from torch.jit._decomposition_utils import _register_decomposition
-from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
-from torch.jit._fuser import (
-    fuser,
-    last_executed_optimized_graph,
-    optimized_execution,
-    set_fusion_strategy,
-)
-from torch.jit._ir_utils import _InsertPoint
 from torch.jit._script import (
-    _ScriptProfile,
-    _unwrap_optional,
+    script,
     Attribute,
-    CompilationUnit,
-    interface,
+    ScriptModule,
+    script_method,
     RecursiveScriptClass,
     RecursiveScriptModule,
-    script,
-    script_method,
-    ScriptFunction,
-    ScriptModule,
     ScriptWarning,
-)
-from torch.jit._serialization import (
-    jit_module_from_flatbuffer,
-    load,
-    save,
-    save_jit_module_to_flatbuffer,
+    interface,
+    CompilationUnit,
+    ScriptFunction,
+    _ScriptProfile,
+    _unwrap_optional,
 )
 from torch.jit._trace import (
-    _flatten,
-    _get_trace_graph,
-    _script_if_tracing,
-    _unique_state_dict,
-    is_tracing,
-    ONNXTracedModule,
-    TopLevelTracedModule,
     trace,
     trace_module,
     TracedModule,
     TracerWarning,
     TracingCheckError,
+    is_tracing,
+    ONNXTracedModule,
+    TopLevelTracedModule,
+    _unique_state_dict,
+    _flatten,
+    _script_if_tracing,
+    _get_trace_graph,
 )
-
-from torch.utils import set_module
+from torch.jit._async import fork, wait
+from torch.jit._await import _awaitable, _awaitable_wait, _awaitable_nowait
+from torch.jit._decomposition_utils import _register_decomposition
+from torch.jit._serialization import (
+    save,
+    load,
+    jit_module_from_flatbuffer,
+    save_jit_module_to_flatbuffer,
+)
+from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph, set_fusion_strategy
+from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
+from torch.jit._ir_utils import _InsertPoint
 
 __all__ = [
-    "Attribute",
-    "CompilationUnit",
-    "Error",
-    "Future",
-    "ScriptFunction",
-    "ScriptModule",
-    "annotate",
-    "enable_onednn_fusion",
-    "export_opnames",
-    "fork",
-    "freeze",
-    "ignore",
-    "isinstance",
-    "load",
-    "onednn_fusion_enabled",
-    "optimize_for_inference",
-    "save",
-    "script",
-    "script_if_tracing",
-    "set_fusion_strategy",
-    "strict_fusion",
-    "trace",
-    "trace_module",
-    "unused",
-    "wait",
+    'Attribute',
+    'CompilationUnit',
+    'Error',
+    'Future',
+    'ScriptFunction',
+    'ScriptModule',
+    'annotate',
+    'enable_onednn_fusion',
+    'export_opnames',
+    'fork',
+    'freeze',
+    'ignore',
+    'isinstance',
+    'load',
+    'onednn_fusion_enabled',
+    'optimize_for_inference',
+    'save',
+    'script',
+    'script_if_tracing',
+    'set_fusion_strategy',
+    'strict_fusion',
+    'trace',
+    'trace_module',
+    'unused',
+    'wait'
 ]
 
 # For backwards compatibility
@@ -104,10 +98,10 @@ _set_fusion_strategy = set_fusion_strategy
 
 def export_opnames(m):
     r"""
-    Generates new bytecode for a Script module and returns what the op list
-    would be for a Script Module based off the current code base. If you
-    have a LiteScriptModule and want to get the currently present
-    list of ops call _export_operator_list instead.
+        Generates new bytecode for a Script module and returns what the op list
+        would be for a Script Module based off the current code base. If you
+        have a LiteScriptModule and want to get the currently present
+        list of ops call _export_operator_list instead.
     """
     return torch._C._export_opnames(m._c)
 
@@ -118,7 +112,6 @@ set_module(Error, "torch.jit")
 # This is not perfect but works in common cases
 Error.__name__ = "Error"
 Error.__qualname__ = "Error"
-
 
 # for use in python if using annotate
 def annotate(the_type, the_value):
@@ -231,7 +224,6 @@ def isinstance(obj, target_type):
     """
     return _isinstance(obj, target_type)
 
-
 class strict_fusion:
     """
     This class errors if not all nodes have been fused in
@@ -261,7 +253,6 @@ class strict_fusion:
     def __exit__(self, type: Any, value: Any, tb: Any) -> None:
         pass
 
-
 # Context manager for globally hiding source ranges when printing graphs.
 # Note that these functions are exposed to Python as static members of the
 # Graph class, so mypy checks need to be skipped.
@@ -274,7 +265,6 @@ def _hide_source_ranges() -> Iterator[None]:
     finally:
         torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore[attr-defined]
 
-
 def enable_onednn_fusion(enabled: bool):
     """
     Enables or disables onednn JIT fusion based on the parameter `enabled`.
@@ -282,13 +272,11 @@ def enable_onednn_fusion(enabled: bool):
 
     torch._C._jit_set_llga_enabled(enabled)
 
-
 def onednn_fusion_enabled():
     """
     Returns whether onednn JIT fusion is enabled
     """
     return torch._C._jit_llga_enabled()
-
 
 del Any
 

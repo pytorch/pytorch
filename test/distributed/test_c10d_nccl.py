@@ -151,20 +151,20 @@ class RendezvousEnvTest(TestCase):
 
         with Env(without(vars, "WORLD_SIZE")):
             self.assertEqual(None, os.environ.get("WORLD_SIZE"))
-            gen = c10d.rendezvous(f"env://?world_size={1}")
+            gen = c10d.rendezvous("env://?world_size={}".format(1))
             _, _, size = next(gen)
             self.assertEqual(size, 1)
 
         with Env(without(vars, "RANK")):
             self.assertEqual(None, os.environ.get("RANK"))
-            gen = c10d.rendezvous(f"env://?rank={0}")
+            gen = c10d.rendezvous("env://?rank={}".format(0))
             _, rank, _ = next(gen)
             self.assertEqual(rank, 0)
 
         with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
             self.assertEqual(None, os.environ.get("RANK"))
             self.assertEqual(None, os.environ.get("WORLD_SIZE"))
-            gen = c10d.rendezvous(f"env://?rank={0}&world_size={1}")
+            gen = c10d.rendezvous("env://?rank={}&world_size={}".format(0, 1))
             _, rank, size = next(gen)
             self.assertEqual(rank, 0)
             self.assertEqual(size, 1)
@@ -1906,7 +1906,9 @@ class DistributedDataParallelTest(
             ):
                 with first_bucket_size(bucketsize):
                     model_msg = (
-                        f"rank = {self.rank} formats = {formats} dtypes = {dtypes} bucketsize = {bucketsize} "
+                        "rank = {} formats = {} dtypes = {} bucketsize = {} ".format(
+                            self.rank, formats, dtypes, bucketsize
+                        )
                     )
                     try:
                         m = ConvNet(layer_devs, formats, dtypes)
@@ -1930,7 +1932,7 @@ class DistributedDataParallelTest(
                     # 3 iters:  First iter creates grads, second iter retests after rebucketing,
                     # third iter tries zeroed grads.
                     for it in range(3):
-                        iter_msg = f"iter = {it} " + model_msg
+                        iter_msg = "iter = {} ".format(it) + model_msg
                         named_msg = iter_msg
                         try:
                             F.mse_loss(m(input).float(), target).backward()
@@ -2385,7 +2387,9 @@ class DistributedDataParallelTest(
                         "mismatch at "
                         + name
                         + ".grad for "
-                        + f"set_to_none = {try_set_to_none}, use_bucket_view = {use_bucket_view}",
+                        + "set_to_none = {}, use_bucket_view = {}".format(
+                            try_set_to_none, use_bucket_view
+                        ),
                     )
 
     @requires_nccl()
@@ -2789,7 +2793,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         pg_opts.config.max_ctas = 4
         pg_opts.config.min_ctas = 2
         pg_opts.config.cga_cluster_size = 2
-        pg_opts.config.net_name = "Socket"
         nccl_debug_file = tempfile.NamedTemporaryFile()
         os.environ["NCCL_DEBUG"] = "INFO"
         os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
@@ -2802,11 +2805,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         max_ctas = re.search(rb'Max CTAs.*(\d+)|$', nccl_debug_file_content).group(1)
         min_ctas = re.search(rb'Min CTAs.*(\d+)|$', nccl_debug_file_content).group(1)
         cga_cluster_size = re.search(rb'CGA cluster.*(\d+)|$', nccl_debug_file_content).group(1)
-        net_name = re.search(rb'Using network.([a-zA-z]+)|$', nccl_debug_file_content).group(1)
         self.assertEqual(pg_opts.config.max_ctas, int(max_ctas))
         self.assertEqual(pg_opts.config.min_ctas, int(min_ctas))
         self.assertEqual(pg_opts.config.cga_cluster_size, int(cga_cluster_size))
-        self.assertEqual(pg_opts.config.net_name, net_name.decode())
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
@@ -3058,14 +3059,14 @@ class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
 
 class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
     def setUp(self):
-        super().setUp()
+        super(LargeCommTest, self).setUp()
         # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
         self._spawn_processes()
 
     def tearDown(self):
-        super().tearDown()
+        super(LargeCommTest, self).tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
