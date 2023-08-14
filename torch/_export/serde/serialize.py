@@ -464,9 +464,10 @@ class GraphModuleSerializer:
         return serialized_args
 
     def serialize_inputs(
-        self, target: torch._ops.OpOverload, args, kwargs
+        self, target: torch._ops.OpOverload, args, kwargs=None
     ) -> List[NamedArgument]:
         assert isinstance(target, torch._ops.OpOverload)
+        kwargs = kwargs or {}
         serialized_args = []
         for i, schema_arg in enumerate(target._schema.arguments):
             if schema_arg.name in kwargs:
@@ -534,6 +535,8 @@ class GraphModuleSerializer:
                 return Argument.create(as_ints=list(arg))
             elif all(isinstance(a, float) for a in arg):
                 return Argument.create(as_floats=list(arg))
+            elif all(isinstance(a, str) for a in arg):
+                return Argument.create(as_strings=list(arg))
             elif all(self.is_sym_int_arg(a) for a in arg):
                 # list of sym_ints
                 values = []
