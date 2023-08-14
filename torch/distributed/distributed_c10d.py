@@ -1385,9 +1385,10 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
     # wait for that thread. However, the dtor might finish after the Python
     # Interpreter exits. After that grabbing the GIL for the Python hook will crash.
     # We can either revive the interpreter when running hooks or keep the main one
-    # alive until all works and hooks are done. Therefore, we explicitly call
-    # _wait_for_pending_works() here to wait for the pending hooks to finish.
-    if pg.name().lower() == "nccl":
+    # alive until all works and hooks are done. The current implementation does the
+    # latter. Therefore, we explicitly call _wait_for_pending_works() here to wait
+    # for the pending hooks to finish.
+    if pg.name().lower() == "nccl" and pg._has_hooks():
         pg._wait_for_pending_works()
 
     if group is None or group == GroupMember.WORLD:

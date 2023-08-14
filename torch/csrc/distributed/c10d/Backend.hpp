@@ -342,6 +342,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         " backend.");
   }
 
+  bool hasHooks() const {
+    return onCompletionHook_ != nullptr;
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.

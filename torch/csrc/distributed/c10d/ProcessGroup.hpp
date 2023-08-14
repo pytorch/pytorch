@@ -674,6 +674,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     getDefaultBackend()->waitForPendingWorks();
   }
 
+  bool hasHooks() const {
+    return getDefaultBackend()->hasHooks();
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.

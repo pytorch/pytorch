@@ -1716,8 +1716,16 @@ Arguments:
 Register a hook function which is fired on every ``ProcessGroup::Work`` completion.
 The hook must have the following signature:
 
->>> def hook(work: torch.distributed._Work) -> None:
+>>> def hook(work_info: torch._C._distributed_c10d.WorkInfo) -> None:
 >>>     # custom code
+>>>     # work_info.op_type: type of collective of this work
+>>>     # work_info.time_started: system time when user code called this collective
+>>>     # work_info.time_finished: system time when the watchdog thread detected
+>>>     #     completion of this work. Note that, there can be delays between the
+>>>     #     actual completion time and the detection time.
+>>>     # work_info.active_duration: duration of this collective measured by CUDAEvents
+>>>     #     which can accurately represent the duration between when the collective
+>>>     #     is launched and when the collective completes.
 
 .. warning ::
     This only works for NCCL backend for now. All hooks are fired on the cpp watch dog
@@ -1736,7 +1744,12 @@ Arguments:
           .def(
               "_wait_for_pending_works",
               &::c10d::ProcessGroup::waitForPendingWorks,
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_has_hooks",
+              &::c10d::ProcessGroup::hasHooks,
+              py::call_guard<py::gil_scoped_acquire>()
+          );
 
   py::enum_<::c10d::ProcessGroup::BackendType>(processGroup, "BackendType")
       .value("UNDEFINED", ::c10d::ProcessGroup::BackendType::UNDEFINED)
