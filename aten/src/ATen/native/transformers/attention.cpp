@@ -1,5 +1,4 @@
 #include <type_traits>
-#include <limits>
 #include <c10/core/DeviceType.h>
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
@@ -11,14 +10,13 @@
 #include <ATen/cpu/vec/vec256/vec256.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <type_traits>
 #include <utility>
-#include <c10/util/typeid.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Exception.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
-#include <ATen/TensorSubclassLikeUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -33,6 +31,9 @@ namespace native {
 
 DEFINE_DISPATCH(_fused_sdp_choice_stub);
 REGISTER_NO_CPU_DISPATCH(_fused_sdp_choice_stub);
+
+DEFINE_DISPATCH(efficient_attention_kernel);
+DEFINE_DISPATCH(efficient_attention_backward_kernel);
 
 namespace {
 
@@ -482,6 +483,72 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
   return std::make_tuple(std::move(proj), std::move(qkt));
 }
 
+std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cpu(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    bool compute_logsumexp,
+    double dropout_p,
+    bool is_causal,
+    c10::optional<double> scale) {
+
+  int64_t B = query.size(0);
+  int64_t H = query.size(1);
+  int64_t M = query.size(2);
+  int64_t Kv = value.size(-1);
+
+  auto attn = at::empty({B, M, H, Kv}, query.options());
+  auto lse = at::empty({B, compute_logsumexp ? M : 0, H}, query.options());
+
+  auto q_t = query.transpose(1, 2);
+  auto k_t = key.transpose(1, 2);
+  auto v_t = value.transpose(1, 2);
+
+  efficient_attention_kernel(kCPU, attn, lse, q_t, k_t, v_t, compute_logsumexp, is_causal, scale);
+
+  attn = attn.transpose(1, 2);
+  lse = lse.transpose(1, 2);
+
+  return std::make_tuple(std::move(attn), std::move(lse), Tensor{}, Tensor{});
+}
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_attention_backward_cpu(
+    const at::Tensor& grad_out,
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value,
+    const at::Tensor& out,
+    const at::Tensor& logsumexp,
+    const at::Tensor& philox_seed,
+    const at::Tensor& philox_offset,
+    double dropout_p,
+    bool causal,
+    c10::optional<double> scale){
+
+  if (!grad_out.defined()) {
+    return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
+  }
+
+  auto grad_out_t = grad_out.transpose(1, 2);
+  auto q_t = query.transpose(1, 2);
+  auto k_t = key.transpose(1, 2);
+  auto v_t = value.transpose(1, 2);
+  auto o_t = out.transpose(1, 2);
+  auto lse_t = logsumexp.transpose(1, 2);
+
+  auto grad_q = at::zeros(q_t.sizes(), query.options());
+  auto grad_k = at::zeros(k_t.sizes(), key.options());
+  auto grad_v = at::zeros(v_t.sizes(), value.options());
+
+  efficient_attention_backward_kernel(kCPU, grad_q, grad_k, grad_v, grad_out_t, q_t, k_t, v_t, o_t, lse_t, causal, scale);
+
+  grad_q = grad_q.transpose(1, 2);
+  grad_k = grad_k.transpose(1, 2);
+  grad_v = grad_v.transpose(1, 2);
+
+  return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v));
+}
+
 int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
   return static_cast<int64_t>(sdp::SDPBackend::math);
@@ -511,7 +578,6 @@ int64_t _fused_sdp_choice_meta(
   }
   return static_cast<int64_t>(sdp::SDPBackend::math);
 }
-namespace {
 
 inline void validate_sdpa_input(
     const Tensor& query_,
@@ -538,83 +604,9 @@ inline void validate_sdpa_input(
     TORCH_CHECK(mask_dtype == at::kBool || mask_dtype == query_.dtype(),
       "Expected attn_mask dtype to be bool or to match query dtype, but got attn_mask.dtype: ",
       mask_dtype, " and  query.dtype: ", query_.dtype(), " instead.");
-    TORCH_CHECK(
-      !query_.is_nested() && !key.is_nested(),
-      "Scaled_dot_product_attention: Nested tensors for query / key are not supported "
-      "when an explicit attn_mask is set");
   }
   return;
 }
-// This function is used to produce an attn_mask
-// in a standard format that can be consumed by both
-// the math and memory efficient attn_mask implementation
-//  Args:
-//    attn_mask: attn_mask of shape (B, L, S) or (L, S) or (B, N_heads, L, S)
-c10::optional<Tensor> convert_boolean_attn_mask(const c10::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
-  // Pass through
-  if(!attn_mask.has_value()){
-    return c10::nullopt;
-  }
-  // Convert boolean mask to additive mask; need to invert mask to indicate what
-  // to mask *out*.
-  if (attn_mask->dtype() == at::kBool) {
-    auto new_attn_mask = at::zeros_like(attn_mask.value(), dtype);
-    // TODO Use the max type of the input and output
-    new_attn_mask.masked_fill_(
-        attn_mask->logical_not(), -std::numeric_limits<double>::infinity());
-    return new_attn_mask;
-  }
-  // Otherwise, attn_mask represents an additive attention tensor
-  return attn_mask;
-}
-// Memory Efficient Attention requires a padded attn mask bias
-// This function pads the attn_mask bias to be a multiple of 16
-// Then slices the padded bias to the original size
-// We apply this function to the top level SDPA so that
-// if padding is done it will be tracked for backward automatically
-
-template <int alignment>
-bool is_aligned(const SymInt& size){
-  return size % alignment == 0;
-}
-
-template <int alignment>
-at::Tensor pad_bias(const at::Tensor& attn_bias) {
-  auto last_dim_size = attn_bias.sym_size(-1);
-  auto pad_count = alignment - (last_dim_size % alignment);
-  auto padded_bias = at::pad_symint(attn_bias, {c10::SymInt(0), pad_count});
-  return padded_bias.slice_symint(-1, 0, last_dim_size);
-}
-
-at::Tensor preprocess_mask(
-    const at::Tensor& mask,
-    const at::Tensor& query,
-    const at::Tensor& key,
-    const at::Tensor& value) {
-  constexpr int mem_eff_alignment = 16;
-  // Expand to 4d case
-  at::Tensor attn_mask = mask.expand_symint(
-      {query.sym_size(0),
-       query.sym_size(1),
-       query.sym_size(2),
-       key.sym_size(2)});
-
-  bool aligned_last_dim = is_aligned<mem_eff_alignment>(attn_mask.sym_size(-1));
-  // Apply pad_bias and store the result in attn_mask
-  if (!aligned_last_dim) {
-    return pad_bias<mem_eff_alignment>(attn_mask);
-  }
-  // Check and make the tensor contiguous if needed
-  if (attn_mask.sym_stride(0) % 16 != 0 || attn_mask.sym_stride(1) % 16 != 0 ||
-      attn_mask.sym_stride(2) % 16 != 0) {
-    return attn_mask.contiguous();
-  }
-
-  return attn_mask;
-}
-
-} // namespace
-
 // Computes scaled dot product attention on query, key and value tensors, using
 // an optional attention mask if passed, and applying dropout if a probability
 // greater than 0.0 is specified.
@@ -658,7 +650,6 @@ Tensor scaled_dot_product_attention(
       query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   }
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
-  c10::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
   switch (backend) {
     case sdp::SDPBackend::flash_attention: {
       auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
@@ -669,11 +660,8 @@ Tensor scaled_dot_product_attention(
       bool compute_logsumexp =
           (query_.requires_grad() || key.requires_grad() ||
            value.requires_grad());
-      if (attn_mask.has_value()) {
-        attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);;
-      }
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
-          query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
+          query_, key, value, compute_logsumexp, dropout_p, is_causal, scale);
       return std::get<0>(out_and_lse);
     }
     case sdp::SDPBackend::math:
@@ -681,7 +669,7 @@ Tensor scaled_dot_product_attention(
           query_,
           key,
           value,
-          attn_mask,
+          attn_mask_,
           dropout_p,
           is_causal,
           c10::nullopt, /*dropout_mask*/
@@ -709,10 +697,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     // Naive, composite implementation defined here.
 
     // Scale q, k before matmul for stability see https://tinyurl.com/sudb9s96 for math
-    bool is_negative_scaling = scale.has_value() && scale.value() < 0.0;
-    const auto scaling_factor = sdp::calculate_scale(query_, is_negative_scaling ? std::abs(scale.value()) : scale).sqrt();
-
-    const auto query = query_ * (is_negative_scaling ? c10::SymFloat(0.0) - scaling_factor: scaling_factor);
+    const auto scaling_factor = sdp::calculate_scale(query_, scale).sqrt();
+    const auto query = query_ * scaling_factor;
     if (is_causal) {
         TORCH_CHECK(!attn_mask.has_value(),
                 "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
@@ -722,15 +708,22 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         // Replace attn_mask with causal mask; lower triangular elements take part in attention.
         const auto L = query.sym_size(-2), S = key.sym_size(-2);
         attn_mask = at::ones_symint({L, S}, query.options().dtype(at::kBool)).tril();
-        attn_mask = convert_boolean_attn_mask(attn_mask, query.dtype());
     }
-    auto attn = at::matmul(query, key.transpose(-2, -1) * scaling_factor);
     if (attn_mask.has_value()) {
-      if (at::areAnyTensorSubclassLike({attn, *attn_mask})) {
-        attn = attn.add(*attn_mask);
-      } else {
+        TORCH_CHECK(!query.is_nested() && !key.is_nested(),
+                "_scaled_dot_product_attention: Nested tensors for query / key are not supported "
+                "when an explicit attn_mask is set");
+        // Convert boolean mask to additive mask; need to invert mask to indicate what to mask *out*.
+        if (attn_mask->dtype() == at::kBool){
+          auto new_attn_mask = at::zeros_like(*attn_mask, query.dtype());
+          new_attn_mask.masked_fill_(attn_mask->logical_not(), -std::numeric_limits<double>::infinity());
+          attn_mask = new_attn_mask;
+        }
+        // Otherwise, attn_mask represents an additive attention tensor
+    }
+    auto attn = at::matmul(query, key.transpose(-2, -1)*scaling_factor);
+    if (attn_mask.has_value()) {
         attn.add_(*attn_mask);
-      }
     }
     attn = at::softmax(attn, -1);
     if (dropout_p > 0.0) {

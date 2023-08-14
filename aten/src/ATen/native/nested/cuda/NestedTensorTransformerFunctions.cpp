@@ -743,7 +743,6 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
-    const c10::optional<at::Tensor>&  attn_bias,
     bool compute_log_sumexp,
     double dropout_p,
     bool is_causal,

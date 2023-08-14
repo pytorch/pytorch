@@ -1,11 +1,8 @@
-import itertools
-
-import numpy as np
-import scipy.special
-import torch
-
 from . import benchmark
-
+import itertools
+import numpy as np
+import torch
+import scipy.special
 
 # A template class for elementwise operations.
 # A derived class will override the class instance to customize its behavior.
@@ -21,29 +18,18 @@ class ElementBench(benchmark.Benchmark):
     def __init__(self, mode, device, dtype, N):
         super().__init__(mode, device, dtype)
         self.N = N
-        self.d1 = self.rand(
-            [N], device=device, dtype=dtype, requires_grad=self.requires_grad
-        )
-        self.d2 = self.rand(
-            [N], device=device, dtype=dtype, requires_grad=self.requires_grad
-        )
-        self.d3 = self.rand(
-            [N], device=device, dtype=dtype, requires_grad=self.requires_grad
-        )
-        self.d4 = self.rand(
-            [N], device=device, dtype=dtype, requires_grad=self.requires_grad
-        )
+        self.d1 = self.rand([N], device=device, dtype=dtype, requires_grad=self.requires_grad)
+        self.d2 = self.rand([N], device=device, dtype=dtype, requires_grad=self.requires_grad)
+        self.d3 = self.rand([N], device=device, dtype=dtype, requires_grad=self.requires_grad)
+        self.d4 = self.rand([N], device=device, dtype=dtype, requires_grad=self.requires_grad)
         self.inputs = [self.d1, self.d2, self.d3, self.d4]
         self.deterministic = "rand" not in self.op_str
 
     def _eval(self, d1, d2, d3, d4, binary_op, unary_op):
         if not binary_op:
-
             def binary_op(x, y):
                 return x + y
-
         if not unary_op:
-
             def unary_op(x):
                 return x
 
@@ -178,9 +164,7 @@ class SimpleElementBench(benchmark.Benchmark):
     def __init__(self, mode, device, dtype, N):
         super().__init__(mode, device, dtype)
         self.N = N
-        self.data = self.rand(
-            [N], device=device, dtype=dtype, requires_grad=self.requires_grad
-        )
+        self.data = self.rand([N], device=device, dtype=dtype, requires_grad=self.requires_grad)
         self.inputs = [self.data]
 
     def forward(self, data):
@@ -238,10 +222,8 @@ class DynamicSimpleElementBench(benchmark.DynamicShape, SimpleElementBench):
         return "simple_dynamic_element"
 
     def instantiate_input(self):
-        (N,) = self.rand_shape([self.N])
-        data = self.rand(
-            [N], device=self.device, dtype=self.dtype, requires_grad=self.requires_grad
-        )
+        N, = self.rand_shape([self.N])
+        data = self.rand([N], device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)
         self.inputs = [data]
 
 

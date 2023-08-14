@@ -1,3 +1,6 @@
+import abc
+import dataclasses
+import enum
 import functools
 import inspect
 import itertools
@@ -7,16 +10,11 @@ from typing import Dict, List
 import torch
 
 from .. import variables
+from ..allowed_functions import is_allowed, is_builtin_callable
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented
-from ..source import (
-    AttrSource,
-    ConstantSource,
-    DefaultsSource,
-    GetItemSource,
-    GlobalSource,
-)
-from ..utils import make_cell
+from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
+from ..utils import istensor, istype, make_cell
 from .base import typestr, VariableTracker
 
 
@@ -25,12 +23,48 @@ def wrap_bound_arg(tx, val, options, source=None):
     assert (
         "source" not in options
     ), "Source needs to be separate from options due to recursive calls for lists/dicts"
-    if isinstance(val, VariableTracker):
-        return val
-    elif not source:
-        from torch._dynamo.variables.builder import SourcelessBuilder
 
-        return SourcelessBuilder()(tx, val).add_options(options)
+    if isinstance(val, dict):
+        return variables.ConstDictVariable(
+            {
+                k: wrap_bound_arg(tx, v, options, source=getattr(v, "source", None))
+                for k, v in val.items()
+            },
+            dict,
+            **options,
+        )
+    elif isinstance(val, (tuple, list)):
+        cls = variables.BaseListVariable.cls_for(type(val))
+        return cls(
+            [
+                wrap_bound_arg(tx, x, options, source=getattr(x, "source", None))
+                for x in val
+            ],
+            **options,
+        )
+
+    if source is None and isinstance(val, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
+        return variables.UserDefinedObjectVariable(val)
+    elif variables.ConstantVariable.is_literal(val) or istype(
+        val, (torch.Size, torch.device, torch.dtype)
+    ):
+        return variables.ConstantVariable(val, **options)
+    elif is_builtin_callable(val):
+        return variables.BuiltinVariable(val, source=source, **options)
+    elif is_allowed(val):
+        return variables.TorchVariable(val, source=source, **options)
+    elif isinstance(val, types.FunctionType):
+        return variables.UserFunctionVariable(val, source=source, **options)
+    elif isinstance(val, enum.Enum):
+        return variables.EnumVariable(val, source=source, **options)
+    elif isinstance(val, (type, abc.ABCMeta)):
+        return variables.UserDefinedClassVariable(val, source=source, **options)
+    elif istensor(val):
+        from torch._dynamo.variables.builder import VariableBuilder
+
+        return VariableBuilder(tx, source=source)(val).add_options(options)
+    elif isinstance(val, VariableTracker):
+        return val
     else:
         from torch._dynamo.variables.builder import VariableBuilder
 
@@ -238,11 +272,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     result[name] = out
 
                 else:
-                    from .builder import SourcelessBuilder
-
-                    result[name] = SourcelessBuilder()(
-                        tx, cell.cell_contents
-                    ).add_options(options)
+                    val = cell.cell_contents
+                    if isinstance(val, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
+                        result[name] = variables.UserDefinedObjectVariable(val)
+                    elif is_builtin_callable(val):
+                        result[name] = variables.BuiltinVariable(val)
+                    else:
+                        unimplemented("inline with __closure__")
 
         return result, closure_cells
 
@@ -460,14 +496,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 # InliningInstructionTranslator that traces `func`) handles
                 # the cell correctly - that is, the cell's contents are treated as if they
                 # are local variables, like in UserFunctionVariable's bind_args for freevars.
-                cand = parent
-                while cand and name not in cand.symbolic_locals:
-                    cand = cand.parent
-                if cand is None:
-                    raise RuntimeError(
-                        f"Couldn't find {name} in the symbolic_locals of the inline interpreter stack"
-                    )
-                result[name] = cand.symbolic_locals[name]
+                result[name] = parent.symbolic_locals[name]
             else:
                 closure_cells[name] = self.closure.items[idx]
 
@@ -540,23 +569,6 @@ def _traceable_collective_remaps():
     return {}
 
 
-def _traceable_collectives_source(fn):
-    assert torch.distributed.is_available(), "Illegal invocation."
-    from torch.distributed._functional_collectives import (
-        all_gather_tensor_inplace,
-        reduce_scatter_tensor_inplace,
-    )
-
-    valid_values = {all_gather_tensor_inplace, reduce_scatter_tensor_inplace}
-    assert fn in valid_values
-    inner_name = fn.__name__
-    path_source = AttrSource(
-        base=AttrSource(base=GlobalSource(global_name="torch"), member="distributed"),
-        member="_functional_collectives",
-    )
-    return AttrSource(path_source, inner_name)
-
-
 class CollectiveFunctionRewriteVariable(UserFunctionVariable):
     """
     Some of the torch.distributed.* collective APIs are possible to rewrite to 'traceable' collectives.
@@ -568,10 +580,9 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
     than status-quo as we currently graph-break on all distributed.* collectives.
     """
 
-    def __init__(self, fn, *, orig_fn, orig_source, **kwargs):
+    def __init__(self, fn, *, orig_fn, **kwargs):
         # orig_fn lets us implement any fn-specific args/kwargs restrictions inside call_function
         self.orig_fn = orig_fn
-        self.orig_source = orig_source
 
         # remapped_fn gets stuffed in self.fn and used in super().call_function
         super().__init__(fn, **kwargs)
@@ -584,8 +595,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
     @staticmethod
     def rewrite(fn):
-        new_fn = _traceable_collective_remaps()[fn]
-        return new_fn, _traceable_collectives_source(new_fn)
+        return _traceable_collective_remaps()[fn]
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -594,9 +604,6 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
         # since that's the contract for putting a mapping in `traceable_collective_remaps`
         if kwargs.get("async_op", False):
-            # Put the old source back, this function will always graph break, but this ensures
-            # we produce the correct guards.
-            self.source = self.orig_source
             unimplemented(
                 f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.orig_fn}"
             )

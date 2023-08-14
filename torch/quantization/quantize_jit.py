@@ -8,19 +8,19 @@ here.
 """
 
 from torch.ao.quantization.quantize_jit import (
-    _check_forward_method,
     _check_is_script_module,
-    _convert_jit,
-    _prepare_jit,
-    _prepare_ondevice_dynamic_jit,
-    _quantize_jit,
-    convert_dynamic_jit,
-    convert_jit,
-    fuse_conv_bn_jit,
-    prepare_dynamic_jit,
-    prepare_jit,
-    quantize_dynamic_jit,
-    quantize_jit,
+    _check_forward_method,
     script_qconfig,
     script_qconfig_dict,
+    fuse_conv_bn_jit,
+    _prepare_jit,
+    prepare_jit,
+    prepare_dynamic_jit,
+    _prepare_ondevice_dynamic_jit,
+    _convert_jit,
+    convert_jit,
+    convert_dynamic_jit,
+    _quantize_jit,
+    quantize_jit,
+    quantize_dynamic_jit
 )

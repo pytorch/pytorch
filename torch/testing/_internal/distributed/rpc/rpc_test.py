@@ -264,7 +264,7 @@ def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
     res = list_input[0]
     for t in list_input:
         res += t
-    for v in dict_input.values():
+    for k, v in dict_input.items():
         res += v
     complex_tensors = tensor_class_input.tensors
     return (res, complex_tensors[0], complex_tensors[1], complex_tensors[2])
@@ -914,7 +914,9 @@ class RpcTestCommon:
             self.assertEqual(val, 0)
         tok = time.time()
         print(
-            f"Rank {self.rank} finished testing {repeat} times in {tok - tik} seconds."
+            "Rank {} finished testing {} times in {} seconds.".format(
+                self.rank, repeat, tok - tik
+            )
         )
 
     def _builtin_remote_ret(self, x, y, expected):
@@ -3151,7 +3153,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         rref1 = RRef(self.rank)
         id_class = "GloballyUniqueId"
         self.assertEqual(
-            f"OwnerRRef({id_class}(created_on={self.rank}, local_id=0))", rref1.__str__()
+            "OwnerRRef({}(created_on={}, local_id=0))".format(id_class, self.rank), rref1.__str__()
         )
 
         dst_rank = (self.rank + 1) % self.world_size
@@ -4294,7 +4296,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             return
 
         dst_rank = (self.rank + 1) % self.world_size
-        dst_worker = f"worker{dst_rank}"
+        dst_worker = "worker{}".format(dst_rank)
         # 10 ms timeout
         rref = rpc.remote(dst_worker, my_sleep_func, args=(2, ), timeout=0.01)
         # Future corresponding to the remote creation should time out.

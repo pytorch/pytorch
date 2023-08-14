@@ -1483,7 +1483,7 @@ class TestMakeTensor(TestCase):
     @parametrize("value_types", list(itertools.product([int, float], repeat=2)))
     @supported_dtypes
     def test_low_ge_high(self, dtype, device, low_high, value_types):
-        low, high = (value_type(value) for value, value_type in zip(low_high, value_types))
+        low, high = [value_type(value) for value, value_type in zip(low_high, value_types)]
 
         if low == high and (dtype.is_floating_point or dtype.is_complex):
             with self.assertWarnsRegex(
@@ -1561,7 +1561,7 @@ instantiate_device_type_tests(TestMakeTensor, globals())
 
 def _get_test_names_for_test_class(test_cls):
     """ Convenience function to get all test names for a given test class. """
-    test_names = [f'{test_cls.__name__}.{key}' for key in test_cls.__dict__
+    test_names = ['{}.{}'.format(test_cls.__name__, key) for key in test_cls.__dict__
                   if key.startswith('test_')]
     return sorted(test_names)
 
@@ -1612,7 +1612,7 @@ class TestTestParametrization(TestCase):
             def test_three_things_composition_custom_names(self, x, y, z):
                 pass
 
-            @parametrize("x,y", [(1, 2), (1, 3), (1, 4)], name_fn=lambda x, y: f'{x}__{y}')
+            @parametrize("x,y", [(1, 2), (1, 3), (1, 4)], name_fn=lambda x, y: '{}__{}'.format(x, y))
             def test_two_things_custom_names_alternate(self, x, y):
                 pass
 
@@ -1767,7 +1767,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_device_dtype_specific_{}_float32',
             '{}.test_device_dtype_specific_{}_float64',
@@ -1791,7 +1791,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_bar_{}',
             '{}.test_foo_{}')
@@ -1834,7 +1834,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_default_names_x_0_{}',
             '{}.test_default_names_x_1_{}',
@@ -1862,13 +1862,13 @@ class TestTestParametrizationDeviceType(TestCase):
             def test_three_things_composition_custom_names(self, device, x, y, z):
                 pass
 
-            @parametrize("x,y", [(1, 2), (1, 3), (1, 4)], name_fn=lambda x, y: f'{x}__{y}')
+            @parametrize("x,y", [(1, 2), (1, 3), (1, 4)], name_fn=lambda x, y: '{}__{}'.format(x, y))
             def test_two_things_custom_names_alternate(self, device, x, y):
                 pass
 
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_custom_names_bias_{}',
             '{}.test_custom_names_no_bias_{}',
@@ -1904,7 +1904,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_custom_names_bias_{}',
             '{}.test_custom_names_no_bias_{}',
@@ -1926,7 +1926,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
         expected_test_names = []
         for op in op_db:
             for dtype in op.supported_dtypes(torch.device(device).type):
@@ -1949,7 +1949,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
         expected_test_names = []
         for module_info in module_db:
             for dtype in module_info.dtypes:
@@ -2003,7 +2003,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         device = self.device_type
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
 
         for test_func, name in _get_test_funcs_for_test_class(device_cls):
             should_apply = (name == 'test_op_param_test_op_x_2_cpu_float64' or
@@ -2050,7 +2050,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         device = self.device_type
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
 
         for test_func, name in _get_test_funcs_for_test_class(device_cls):
             should_apply = (name == 'test_module_param_TestModule_x_2_cpu_float64' or
@@ -2071,7 +2071,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_parametrized_x_0_{}_float32',
             '{}.test_parametrized_x_0_{}_float64',
@@ -2226,7 +2226,7 @@ class TestImports(TestCase):
 
 class TestOpInfos(TestCase):
     def test_sample_input(self) -> None:
-        a, b, c, d, e = (object() for _ in range(5))
+        a, b, c, d, e = [object() for _ in range(5)]
 
         # Construction with natural syntax
         s = SampleInput(a, b, c, d=d, e=e)
@@ -2270,7 +2270,7 @@ class TestOpInfos(TestCase):
         assert s.broadcasts_input
 
     def test_sample_input_metadata(self) -> None:
-        a, b = (object() for _ in range(2))
+        a, b = [object() for _ in range(2)]
         s1 = SampleInput(a, b=b)
         self.assertIs(s1.output_process_fn_grad(None), None)
         self.assertFalse(s1.broadcasts_input)

@@ -454,11 +454,6 @@ def export(
             This may allow for better optimizations (e.g. constant folding) by
             backends/runtimes.
 
-            If True, `deduplicate_initializers` pass will not be executed. This means
-            initializers with duplicated values will not be deduplicated and
-            will be treated as distinct inputs to the graph. This allows different
-            input initializers to be supplied at the runtime following export.
-
             If ``opset_version < 9``, initializers MUST be part of graph
             inputs and this argument will be ignored and the behavior will be
             equivalent to setting this argument to True.
@@ -1608,11 +1603,9 @@ def _export(
                     module_typenames_to_export_as_functions,
                     list(params_dict.keys()),
                 )
-
-            if keep_initializers_as_inputs is not True:
-                params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
-                    graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
-                )
+            params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
+                graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
+            )
             _C._jit_pass_onnx_assign_scoped_names_for_node_and_value(graph)
             if export_params:
                 (

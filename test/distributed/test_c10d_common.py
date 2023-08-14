@@ -127,7 +127,7 @@ class AbstractTimeoutTest:
                 # let @retry_on_connect_failures handle the error
                 raise c2p[0]
             else:
-                raise RuntimeError(f"Unexpected type {type(c2p[0])}")
+                raise RuntimeError("Unexpected type {}".format(type(c2p[0])))
 
 
 class TimeoutTest(TestCase):
@@ -348,7 +348,7 @@ class CommonDistributedDataParallelTest:
     ):
         self.assertTrue(
             len(devices) == 2 or len(devices) == 4,
-            f"unexpected devices for ddp tests {devices}",
+            "unexpected devices for ddp tests {}".format(devices),
         )
         if len(devices) == 2:
             model = DoubleGpuNet(devices)
@@ -1337,24 +1337,9 @@ class AbstractCommTest:
         dist.all_gather(tensor_list_c, tensor)
         dist.all_gather(tensor_list_c, tensor_c)
 
-    def _test_bool_tensors(self, backend):
-        store = dist.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            backend,
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-        )
-        device = "cuda" if backend == "nccl" else "cpu"
-        # test alltoall_base
-        tensor = torch.tensor([1, 0, 0, 1], dtype=torch.bool, device=device)
-        zeros = torch.tensor([0, 0, 0, 0], dtype=torch.bool, device=device)
-        outensor = zeros if self.rank > 0 else tensor
-        dist.broadcast(outensor, src=0)
-        self.assertEqual(outensor, tensor)
 
 # Variant of AbstractCommTest that expects world size of 4
-class AbstractLargeCommTest:
+class AbstractLargeCommTest(object):
     @property
     def op_timeout_sec(self):
         return 1

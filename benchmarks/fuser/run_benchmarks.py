@@ -1,10 +1,9 @@
-import inspect
-import itertools
+import click
 import sys
 import time
-
-import click
 import torch
+import inspect
+import itertools
 
 torch.set_num_threads(1)
 torch._C._debug_set_fusion_group_inlining(False)

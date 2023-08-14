@@ -341,7 +341,7 @@ class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):
     def setUp(self):
-        super().setUp()
+        super(DistributedDataParallelTest, self).setUp()
         self._spawn_processes()
 
     def _get_process_group(self):
@@ -410,7 +410,7 @@ class DistributedDataParallelTest(
 
         class GlobalLocalUnusedParamModule(nn.Module):
             def __init__(self):
-                super().__init__()
+                super(GlobalLocalUnusedParamModule, self).__init__()
                 self.t0 = Task()
                 self.t1 = Task()
                 self.task_unused = Task()
@@ -500,7 +500,7 @@ class DistributedDataParallelTest(
 
         class FindUnusedParamModule(nn.Module):
             def __init__(self):
-                super().__init__()
+                super(FindUnusedParamModule, self).__init__()
                 self.t0 = Task()
                 self.t1 = Task()
 
@@ -553,7 +553,7 @@ class DistributedDataParallelTest(
 
         class IgnoredOutput(nn.Module):
             def __init__(self):
-                super().__init__()
+                super(IgnoredOutput, self).__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.relu = nn.ReLU()
@@ -595,7 +595,7 @@ class DistributedDataParallelTest(
 
         class IgnoredOutputWithUnusedParameters(nn.Module):
             def __init__(self):
-                super().__init__()
+                super(IgnoredOutputWithUnusedParameters, self).__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.fc3 = nn.Linear(4, 4, bias=False)
@@ -660,7 +660,7 @@ class DistributedDataParallelTest(
 
         class TestModel(nn.Module):
             def __init__(self):
-                super().__init__()
+                super(TestModel, self).__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.relu = nn.ReLU()
@@ -969,11 +969,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         return "cpu"
 
     def setUp(self):
-        super().setUp()
+        super(CommTest, self).setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super().tearDown()
+        super(CommTest, self).tearDown()
         try:
             os.remove(self.file_name)
         except OSError:

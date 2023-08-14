@@ -1,8 +1,7 @@
 import argparse
-import json
-from os import path
-
 import torch
+from os import path
+import json
 
 # Import all utils so that getattr below can find them
 from torch.utils import bottleneck, checkpoint, model_zoo
@@ -30,7 +29,6 @@ all_submod_list = [
     "utils.model_zoo",
 ]
 
-
 def get_content(submod):
     mod = torch
     if submod:
@@ -40,11 +38,9 @@ def get_content(submod):
     content = dir(mod)
     return content
 
-
 def namespace_filter(data):
     out = {d for d in data if d[0] != "_"}
     return out
-
 
 def run(args, submod):
     print(f"## Processing torch.{submod}")
@@ -91,30 +87,20 @@ def run(args, submod):
             print(prev_content - new_content)
             print("")
 
-
 def main():
-    parser = argparse.ArgumentParser(
-        description="Tool to check namespace content changes"
-    )
+    parser = argparse.ArgumentParser(description='Tool to check namespace content changes')
 
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--prev-version", action="store_true")
-    group.add_argument("--new-version", action="store_true")
-    group.add_argument("--compare", action="store_true")
+    group.add_argument('--prev-version', action='store_true')
+    group.add_argument('--new-version', action='store_true')
+    group.add_argument('--compare', action='store_true')
 
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--submod", default="", help="part of the submodule to check")
-    group.add_argument(
-        "--all-submod",
-        action="store_true",
-        help="collects data for all main submodules",
-    )
+    group.add_argument('--submod', default='', help='part of the submodule to check')
+    group.add_argument('--all-submod', action='store_true', help='collects data for all main submodules')
 
-    parser.add_argument(
-        "--show-all",
-        action="store_true",
-        help="show all the diff, not just public APIs",
-    )
+    parser.add_argument('--show-all', action='store_true', help='show all the diff, not just public APIs')
+
 
     args = parser.parse_args()
 
@@ -127,5 +113,5 @@ def main():
         run(args, mod)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

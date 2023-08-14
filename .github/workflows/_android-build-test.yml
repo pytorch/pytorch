@@ -71,9 +71,10 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: ./.github/actions/calculate-docker-image
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
+          xla: ${{ contains(inputs.build-environment, 'xla') }}
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main

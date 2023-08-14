@@ -1,23 +1,21 @@
 import argparse
 import itertools
+from . import benchmark
 import os
+from . import tensor_engine
 
+from . import attention      # noqa: F401
+from . import broadcast      # noqa: F401
+from . import concat         # noqa: F401
 # from . import conv           # noqa: F401
+from . import elementwise    # noqa: F401
+from . import matmul         # noqa: F401
 # from . import normalization  # noqa: F401
 # from . import pooling        # noqa: F401
-from . import (  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401
-    attention,
-    benchmark,
-    broadcast,
-    concat,
-    elementwise,
-    matmul,
-    reduction,
-    rnn_eltwise,
-    softmax,
-    swish,
-    tensor_engine,
-)
+from . import reduction      # noqa: F401
+from . import softmax        # noqa: F401
+from . import rnn_eltwise    # noqa: F401
+from . import swish          # noqa: F401
 
 
 def main():
@@ -111,31 +109,31 @@ Works only with Python3.\n A few examples:
     )
     parser.add_argument(
         "--print-ir",
-        action="store_true",
+        action='store_true',
         help="Print the IR graph of the Fusion.",
     )
     parser.add_argument(
         "--print-kernel",
-        action="store_true",
+        action='store_true',
         help="Print generated kernel(s).",
     )
     parser.add_argument(
         "--no-dynamic-shape",
-        action="store_true",
+        action='store_true',
         help="Disable shape randomization in dynamic benchmarks.",
     )
     parser.add_argument(
         "--cpu-fusion",
         "--cpu_fusion",
         default=False,
-        action="store_true",
+        action='store_true',
         help="Enable CPU fusion.",
     )
     parser.add_argument(
         "--cat-wo-conditionals",
         "--cat_wo_conditionals",
         default=False,
-        action="store_true",
+        action='store_true',
         help="Enable CAT wo conditionals.",
     )
 
@@ -143,43 +141,36 @@ Works only with Python3.\n A few examples:
 
     if args.cuda_fuser == "te":
         import torch
-
         torch._C._jit_set_profiling_executor(True)
         torch._C._jit_set_texpr_fuser_enabled(True)
         torch._C._jit_override_can_fuse_on_gpu(True)
         torch._C._get_graph_executor_optimize(True)
     elif args.cuda_fuser == "old":
         import torch
-
         torch._C._jit_set_profiling_executor(False)
         torch._C._jit_set_texpr_fuser_enabled(False)
         torch._C._jit_override_can_fuse_on_gpu(True)
     elif args.cuda_fuser == "nvf":
         import torch
-
         torch._C._jit_set_profiling_executor(True)
         torch._C._jit_set_texpr_fuser_enabled(False)
         torch._C._jit_set_nvfuser_enabled(True)
         torch._C._get_graph_executor_optimize(True)
-    else:
-        raise ValueError(f"Undefined fuser: {args.cuda_fuser}")
+    else :
+        raise ValueError("Undefined fuser: {}".format(args.cuda_fuser))
 
     if args.cpu_fusion:
         import torch
-
         torch._C._jit_override_can_fuse_on_cpu(True)
     else:
         import torch
-
         torch._C._jit_override_can_fuse_on_cpu(False)
 
     if args.cat_wo_conditionals:
         import torch
-
         torch._C._jit_cat_wo_conditionals(True)
     else:
         import torch
-
         torch._C._jit_cat_wo_conditionals(False)
 
     def set_global_threads(num_threads):
@@ -215,8 +206,8 @@ Works only with Python3.\n A few examples:
     datatypes = args.dtype.split(",")
     for index, dtype in enumerate(datatypes):
         datatypes[index] = getattr(torch, dtype)
-        if not datatypes[index]:
-            raise AttributeError(f"DataType: {dtype} is not valid!")
+        if not datatypes[index] :
+            raise AttributeError("DataType: {} is not valid!".format(dtype))
 
     tensor_engine.set_engine_mode(args.engine)
 
@@ -232,30 +223,30 @@ Works only with Python3.\n A few examples:
                     continue
                 else:
                     raise ValueError(
-                        f"attempted to run an unsupported benchmark: {bench.desc()}"
+                        "attempted to run an unsupported benchmark: %s" % (bench.desc())
                     )
             bench.run(args)
 
     def run_with_input_iter(bench_cls, input_iter, allow_skip=True):
-        tensor_dim_specs = input_iter.split(",")
-        tensor_dim_specs = [dim.split(":") for dim in tensor_dim_specs]
+        tensor_dim_specs = input_iter.split(',')
+        tensor_dim_specs = [dim.split(':') for dim in tensor_dim_specs]
 
         configs = []
         for start, stop, inc in tensor_dim_specs:
             dim_list = []
-            if inc == "pow2":
+            if inc == 'pow2' :
                 curr = int(start)
-                while curr <= int(stop):
+                while curr <= int(stop) :
                     dim_list.append(curr)
                     curr <<= 1
-            elif inc == "pow2+1":
+            elif inc == 'pow2+1' :
                 curr = int(start)
-                while curr <= int(stop):
+                while curr <= int(stop) :
                     dim_list.append(curr)
                     curr -= 1
                     curr <<= 1
                     curr += 1
-            else:
+            else :
                 dim_list = list(range(int(start), int(stop) + int(inc), int(inc)))
             configs.append(dim_list)
         configs = itertools.product(*configs)
@@ -271,7 +262,7 @@ Works only with Python3.\n A few examples:
                     continue
                 else:
                     raise ValueError(
-                        f"attempted to run an unsupported benchmark: {bench.desc()}"
+                        "attempted to run an unsupported benchmark: %s" % (bench.desc())
                     )
             bench.run(args)
 
@@ -287,13 +278,11 @@ Works only with Python3.\n A few examples:
             for bench_cls in benchmark_classes:
                 if name in bench_cls.module():
                     match_class_name = True
-                    if (args.input_iter is not None) and bench_cls.input_iterable():
+                    if (args.input_iter is not None) and bench_cls.input_iterable() :
                         run_with_input_iter(bench_cls, args.input_iter, allow_skip=True)
-                    else:
-                        if args.input_iter is not None:
-                            print(
-                                f"WARNING: Incompatible benchmark class called with input_iter arg: {name}"
-                            )
+                    else :
+                        if args.input_iter is not None :
+                            print("WARNING: Incompatible benchmark class called with input_iter arg: {}".format(name))
                         run_default_configs(bench_cls, allow_skip=True)
 
             if match_class_name:
@@ -306,15 +295,15 @@ Works only with Python3.\n A few examples:
                 if name.startswith(cls_module):
                     match_class_name = True
                     if name[len(cls_module)] != "_":
-                        raise ValueError(f"invalid name: {name}")
+                        raise ValueError("invalid name: %s" % (name))
                     config_str = name[(len(cls_module) + 1) :]
                     config = config_str.split("_")
                     if len(config) < 2:
-                        raise ValueError(f"invalid config: {config}")
+                        raise ValueError("invalid config: %s" % config)
                     mode, device = config[0:2]
                     # TODO: make sure virtual devices such as 'cpu1' and 'cpu4' are supported.
                     if mode not in ["fwd", "both"]:
-                        raise ValueError(f"invalid mode: {mode}")
+                        raise ValueError("invalid mode: %s" % (mode))
                     for i, entry in enumerate(config):
                         try:
                             value = int(entry)
@@ -332,7 +321,8 @@ Works only with Python3.\n A few examples:
                     [bench_cls.module() for bench_cls in benchmark_classes]
                 )
                 raise ValueError(
-                    f"invalid name: {name}\nAvailable benchmark classes:\n{available_classes}"
+                    "invalid name: %s\nAvailable benchmark classes:\n%s"
+                    % (name, available_classes)
                 )
 
 

@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.fx
-from torch.fx import _pytree as fx_pytree
 from torch.utils import _pytree as pytree
 
 from .. import variables
@@ -15,7 +14,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import make_dupe_guard
 from ..source import GetItemSource
-from ..utils import check_constant_args, get_fake_value, guard_if_dyn, namedtuple_fields
+from ..utils import check_constant_args, guard_if_dyn, namedtuple_fields
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
@@ -96,18 +95,8 @@ class BaseListVariable(VariableTracker):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
-            from .tensor import TensorVariable
-
             assert not kwargs and len(args) == 1
-            if isinstance(args[0], TensorVariable):
-                value = get_fake_value(args[0].as_proxy().node, tx)
-                if value.constant is not None and value.constant.numel() == 1:
-                    value = variables.ConstantVariable(value.constant.item())
-                else:
-                    unimplemented("__getitem__ with non-constant tensor")
-            else:
-                value = args[0]
-            return self.getitem_const(value)
+            return self.getitem_const(args[0])
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
@@ -715,11 +704,6 @@ def _register_dynamo_list_to_tree_spec():
         pytree._maybe_str_to_list,
     )
 
-    fx_pytree.register_pytree_flatten_spec(
-        ListVariable,
-        _listvariable_flatten,
-    )
-
 
 def _tuplevariable_flatten(d: TupleVariable) -> Tuple[List[Any], pytree.Context]:
     return d.items, None
@@ -741,11 +725,6 @@ def _register_dynamo_tuple_to_tree_spec():
         _tuplevariable_unflatten,
         pytree._tuple_to_str,
         pytree._maybe_str_to_tuple,
-    )
-
-    fx_pytree.register_pytree_flatten_spec(
-        TupleVariable,
-        _tuplevariable_flatten,
     )
 
 

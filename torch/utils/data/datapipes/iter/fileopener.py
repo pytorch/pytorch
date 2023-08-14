@@ -51,7 +51,7 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
         self.encoding: Optional[str] = encoding
 
         if self.mode not in ('b', 't', 'rb', 'rt', 'r'):
-            raise ValueError(f"Invalid mode {mode}")
+            raise ValueError("Invalid mode {}".format(mode))
         # TODO: enforce typing for each instance based on mode, otherwise
         #       `argument_validation` with this DataPipe may be potentially broken
 
@@ -68,5 +68,5 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
 
     def __len__(self):
         if self.length == -1:
-            raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
+            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
         return self.length

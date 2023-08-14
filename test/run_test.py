@@ -737,7 +737,9 @@ def test_distributed(test_module, test_directory, options):
                 init_str = "with {} init_method"
                 with_init = init_str.format("file" if with_init_file else "env")
                 print_to_stderr(
-                    f"Running distributed tests for the {backend} backend {with_init}"
+                    "Running distributed tests for the {} backend {}".format(
+                        backend, with_init
+                    )
                 )
             old_environ = dict(os.environ)
             os.environ["TEMP_DIR"] = tmp_dir
@@ -846,7 +848,7 @@ def run_doctests(test_module, test_directory, options):
     if enabled["qengine"] == "auto":
         try:
             # Is there a better check if quantization is enabled?
-            import torch.ao.nn.quantized as nnq  # NOQA: F401
+            import torch.ao.nn.quantized as nnq  # NOQA
 
             torch.backends.quantized.engine = "qnnpack"
             torch.backends.quantized.engine = "fbgemm"
@@ -857,9 +859,9 @@ def run_doctests(test_module, test_directory, options):
 
     if enabled["onnx"] == "auto":
         try:
-            import onnx  # NOQA: F401
-            import onnxruntime  # NOQA: F401
-            import onnxscript  # NOQA: F401
+            import onnx  # NOQA
+            import onnxruntime  # NOQA
+            import onnxscript  # NOQA
         except ImportError:
             exclude_module_list.append("torch.onnx.*")
             enabled["onnx"] = False
@@ -1270,7 +1272,7 @@ def exclude_tests(
                 not exact_match and test.startswith(exclude_test)
             ) or test == exclude_test:
                 if exclude_message is not None:
-                    print_to_stderr(f"Excluding {test} {exclude_message}")
+                    print_to_stderr("Excluding {} {}".format(test, exclude_message))
                 selected_tests.remove(test)
     return selected_tests
 
@@ -1422,7 +1424,7 @@ def get_selected_tests(options) -> List[ShardedTest]:
     # Download previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), TEST_TIMES_FILE)
     if os.path.exists(path):
-        with open(path) as f:
+        with open(path, "r") as f:
             test_file_times = cast(Dict[str, Any], json.load(f))
     else:
         test_file_times = {}

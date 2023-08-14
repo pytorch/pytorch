@@ -37,7 +37,7 @@ class LinearReLU(nnqat.Linear, nni._FusedModule):
 
     @classmethod
     def from_float(cls, mod):
-        return super().from_float(mod)
+        return super(LinearReLU, cls).from_float(mod)
 
     def to_float(self):
         linear = torch.nn.Linear(self.in_features, self.out_features, self.bias is not None)

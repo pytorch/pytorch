@@ -1,13 +1,12 @@
 import torch
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
+from torch.distributions.utils import clamp_probs, broadcast_all
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import ExpTransform
-from torch.distributions.utils import broadcast_all, clamp_probs
 
-__all__ = ["ExpRelaxedCategorical", "RelaxedOneHotCategorical"]
-
+__all__ = ['ExpRelaxedCategorical', 'RelaxedOneHotCategorical']
 
 class ExpRelaxedCategorical(Distribution):
     r"""
@@ -31,10 +30,9 @@ class ExpRelaxedCategorical(Distribution):
     [2] Categorical Reparametrization with Gumbel-Softmax
     (Jang et al, 2017)
     """
-    arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
-    support = (
-        constraints.real_vector
-    )  # The true support is actually a submanifold of this.
+    arg_constraints = {'probs': constraints.simplex,
+                       'logits': constraints.real_vector}
+    support = constraints.real_vector  # The true support is actually a submanifold of this.
     has_rsample = True
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
@@ -49,9 +47,7 @@ class ExpRelaxedCategorical(Distribution):
         batch_shape = torch.Size(batch_shape)
         new.temperature = self.temperature
         new._categorical = self._categorical.expand(batch_shape)
-        super(ExpRelaxedCategorical, new).__init__(
-            batch_shape, self.event_shape, validate_args=False
-        )
+        super(ExpRelaxedCategorical, new).__init__(batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 
@@ -72,9 +68,7 @@ class ExpRelaxedCategorical(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        uniforms = clamp_probs(
-            torch.rand(shape, dtype=self.logits.dtype, device=self.logits.device)
-        )
+        uniforms = clamp_probs(torch.rand(shape, dtype=self.logits.dtype, device=self.logits.device))
         gumbels = -((-(uniforms.log())).log())
         scores = (self.logits + gumbels) / self.temperature
         return scores - scores.logsumexp(dim=-1, keepdim=True)
@@ -84,9 +78,8 @@ class ExpRelaxedCategorical(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
-        log_scale = torch.full_like(
-            self.temperature, float(K)
-        ).lgamma() - self.temperature.log().mul(-(K - 1))
+        log_scale = (torch.full_like(self.temperature, float(K)).lgamma() -
+                     self.temperature.log().mul(-(K - 1)))
         score = logits - value.mul(self.temperature)
         score = (score - score.logsumexp(dim=-1, keepdim=True)).sum(-1)
         return score + log_scale
@@ -112,14 +105,13 @@ class RelaxedOneHotCategorical(TransformedDistribution):
         probs (Tensor): event probabilities
         logits (Tensor): unnormalized log probability for each event
     """
-    arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
+    arg_constraints = {'probs': constraints.simplex,
+                       'logits': constraints.real_vector}
     support = constraints.simplex
     has_rsample = True
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
-        base_dist = ExpRelaxedCategorical(
-            temperature, probs, logits, validate_args=validate_args
-        )
+        base_dist = ExpRelaxedCategorical(temperature, probs, logits, validate_args=validate_args)
         super().__init__(base_dist, ExpTransform(), validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

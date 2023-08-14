@@ -14,8 +14,6 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_types.h>
 
-#include <utility>
-
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #endif
@@ -35,7 +33,7 @@ PyObject* THPGenerator_initDefaultGenerator(at::Generator cdata) {
   if (!self)
     throw python_error();
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
-  self_->cdata = std::move(cdata);
+  self_->cdata = cdata;
   return self.release();
 }
 

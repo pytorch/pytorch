@@ -57,9 +57,6 @@ namespace {
     int64_t out_H = grid.size(2);
     int64_t out_W = grid.size(3);
     auto output = at::empty({N, C, out_D, out_H, out_W}, input.options());
-    if (output.numel() == 0) {
-        return output;
-    }
     int64_t inp_sN = input.stride(0);
     int64_t inp_sC = input.stride(1);
     int64_t inp_sD = input.stride(2);
@@ -222,10 +219,6 @@ namespace {
       }
     })();
     auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    if (grid.numel() == 0 || input.numel() == 0) {
-      grad_grid.zero_();
-      return std::make_tuple(grad_input, grad_grid);
-    }
     // If interpolation mode is Nearest, then grad_grid is not filled in the
     // loop below.
     if (interpolation_mode == GridSamplerInterpolation::Nearest) {
@@ -574,9 +567,6 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
   int64_t out_H = grid.size(1);
   int64_t out_W = grid.size(2);
   auto output = at::empty({N, C, out_H, out_W}, input.options());
-  if (output.numel() == 0) {
-      return output;
-  }
   int64_t inp_sN = input.stride(0);
   int64_t inp_sC = input.stride(1);
   int64_t inp_sH = input.stride(2);
@@ -725,10 +715,6 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
 
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  if (grid.numel() == 0 || input.numel() == 0) {
-    grad_grid.zero_();
-    return std::make_tuple(grad_input, grad_grid);
-  }
   // If interpolation mode is Nearest, then grad_grid is not filled in the
   // loop below.
   if (interpolation_mode == GridSamplerInterpolation::Nearest) {

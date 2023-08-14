@@ -26,22 +26,22 @@ def report_download_progress(
     if file_size != -1:
         percent = min(1, (chunk_number * chunk_size) / file_size)
         bar = "#" * int(64 * percent)
-        sys.stdout.write(f"\r0% |{bar:<64}| {int(percent * 100)}%")
+        sys.stdout.write("\r0% |{:<64}| {}%".format(bar, int(percent * 100)))
 
 
 def download(destination_path: str, resource: str, quiet: bool) -> None:
     if os.path.exists(destination_path):
         if not quiet:
-            print(f"{destination_path} already exists, skipping ...")
+            print("{} already exists, skipping ...".format(destination_path))
     else:
         for mirror in MIRRORS:
             url = mirror + resource
-            print(f"Downloading {url} ...")
+            print("Downloading {} ...".format(url))
             try:
                 hook = None if quiet else report_download_progress
                 urlretrieve(url, destination_path, reporthook=hook)
             except (URLError, ConnectionError) as e:
-                print(f"Failed to download (trying next):\n{e}")
+                print("Failed to download (trying next):\n{}".format(e))
                 continue
             finally:
                 if not quiet:
@@ -56,13 +56,13 @@ def unzip(zipped_path: str, quiet: bool) -> None:
     unzipped_path = os.path.splitext(zipped_path)[0]
     if os.path.exists(unzipped_path):
         if not quiet:
-            print(f"{unzipped_path} already exists, skipping ... ")
+            print("{} already exists, skipping ... ".format(unzipped_path))
         return
     with gzip.open(zipped_path, "rb") as zipped_file:
         with open(unzipped_path, "wb") as unzipped_file:
             unzipped_file.write(zipped_file.read())
             if not quiet:
-                print(f"Unzipped {zipped_path} ...")
+                print("Unzipped {} ...".format(zipped_path))
 
 
 def main() -> None:

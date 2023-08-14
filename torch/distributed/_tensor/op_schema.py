@@ -28,7 +28,7 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
 
 
 @dataclass
-class PlacementStrategy:
+class PlacementStrategy(object):
     """
     A placement strategy describes an acceptable sharding placements of the output
     and the tensor arguments of an operation.
@@ -54,7 +54,7 @@ class PlacementStrategy:
         return f"({input_specs_str}) -> ({output_spec_str}) @ mesh layout: {tuple(self.output_spec.mesh.mesh.shape)}"
 
 
-class StrategyType:
+class StrategyType(object):
     """
     Base class type for op strategy, We have two StrategyType:
         OpStrategy and TupleStrategy
