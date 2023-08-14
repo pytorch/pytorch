@@ -785,13 +785,20 @@ _scaled_dot_product_flash_attention_cpu(
     bool is_causal,
     bool return_debug_mask,
     c10::optional<double> scale) {
+  const auto dtype = query.scalar_type();
   int64_t batchSize = query.size(0);
   int64_t qSize = query.size(2);
   int64_t num_head = query.size(1);
   int64_t headSize = query.size(3);
 
+  TORCH_CHECK(c10::isFloatingType(dtype) && dtype != ScalarType::Half,
+    "scaled_dot_product_attention_flash_attention: Expected data type in FP32, FP64, BF16, but got ", dtype, " instead.");
+  TORCH_CHECK(query.dim() == 4 && key.dim() == 4 && value.dim() == 4,
+   "scaled_dot_product_attention_flash_attention: Accept only 4 dims inputs shape of {B, H, T, K}");
+  TORCH_CHECK(dropout_p < 1e-5,
+   "scaled_dot_product_attention_flash_attention: Currently do not support dropout > 0");
+
   at::Tensor output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
-  const auto dtype = query.scalar_type();
   const auto accumulate_dtype = toOpMathType(dtype);
   at::Tensor logsumexp = at::empty({batchSize, qSize, num_head},
       query.options().dtype(accumulate_dtype));
